@@ -6,6 +6,7 @@
   const FILE_STORE_NAME = "attachments";
   const MAX_FILE_BYTES = 8 * 1024 * 1024;
   const MAX_PENDING_BYTES = 8 * 1024 * 1024;
+  const MAX_ATTACHMENTS_BYTES = 512 * 1024 * 1024;
   const MAX_EXTRACTED_CHARS = 300000;
   const HISTORY_TEXT_CHARS = 3000;
   const FOLLOW_THRESHOLD = 80;
@@ -14,7 +15,8 @@
   const $ = selector => document.querySelector(selector);
   const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const now = () => new Date().toISOString();
-  const defaultStore = { version: 1, settings: { name: "访客", theme: "system", font: "mixed", width: 760, accent: "#9b5540", activeProfileId: "", autoTitle: true, serverProfile: { temperature: .7, maxTokens: DEFAULT_MAX_TOKENS, systemPrompt: "", quota: "", usedTokens: 0 } }, profiles: [], conversations: [], library: [] };
+  const STORE_VERSION = 2;
+  const defaultStore = { version: STORE_VERSION, settings: { name: "访客", theme: "system", font: "mixed", width: 760, accent: "#9b5540", activeProfileId: "", autoTitle: true, serverProfile: { temperature: .7, maxTokens: DEFAULT_MAX_TOKENS, systemPrompt: "", quota: "", usedTokens: 0 } }, profiles: [], conversations: [], library: [] };
   let store = loadStore();
   let bootstrap = { serverProfile: null, configError: "" };
   let apiBase = null;
@@ -32,16 +34,25 @@
   const advancedOpen = new Set();
   const vizCharts = new Set();
   let suppressViz = false;
-  let saveTimer = null;
+  const mermaidSvgCache = new Map();
+  let saveTimer = null, historySearchTimer = null;
   let bridgeRetryAt = 0;
   let followBottom = true, autoScrolling = false;
+  let lastRenderedConvId = null, convergeTimer = null, themeFadeTimer = null;
+  const messageRenderedIds = new Map(), knownStepIds = new Map();
   const thumbCache = new Map();
 
+  // 结构迁移按版本递增：老数据按字段补默认值，不清空；将来调整结构时在 migrateStoreVx 里写迁移
+  function migrateStoreV1(data) { data.version = 2; /* v1 → v2 无结构变化，为后续迁移留位 */ }
   function loadStore() {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (!parsed || parsed.version !== 1) return structuredClone(defaultStore);
-      return { ...structuredClone(defaultStore), ...parsed, settings: { ...defaultStore.settings, ...(parsed.settings || {}) }, profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [], conversations: Array.isArray(parsed.conversations) ? parsed.conversations : [], library: Array.isArray(parsed.library) ? parsed.library : [] };
+      if (!parsed || typeof parsed !== "object") return structuredClone(defaultStore);
+      let data = parsed;
+      if (!Number.isInteger(data.version)) data.version = 1;
+      if (data.version === 1) migrateStoreV1(data);
+      if (data.version > STORE_VERSION) data.version = STORE_VERSION;
+      return { ...structuredClone(defaultStore), ...data, settings: { ...defaultStore.settings, ...(data.settings || {}), serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) } }, profiles: Array.isArray(data.profiles) ? data.profiles : [], conversations: Array.isArray(data.conversations) ? data.conversations : [], library: Array.isArray(data.library) ? data.library : [] };
     } catch { return structuredClone(defaultStore); }
   }
   function saveStore() {
@@ -74,6 +85,14 @@
   function deleteAttachment(id) { thumbCache.delete(id); return id ? fileStoreRequest("readwrite", store => store.delete(id)).catch(() => {}) : Promise.resolve(); }
   function attachmentIds(messages = []) { return messages.flatMap(message => message.attachments || []).map(file => file.id).filter(Boolean); }
   function inLibrary(id) { return store.library.some(file => file.id === id); }
+  // 卷宗与对话附件原件合计占用（按 id 去重，同一原件记住两处只算一次）
+  function usedAttachmentBytes() {
+    const seen = new Map();
+    const count = files => { for (const file of files || []) if (file?.id && !seen.has(file.id)) seen.set(file.id, Number(file.size || 0)); };
+    count(store.library);
+    for (const c of store.conversations) for (const m of c.messages || []) count(m.attachments);
+    return [...seen.values()].reduce((a,b) => a+b, 0);
+  }
   function isReferenced(id) { return pendingAttachments.some(file => file.id === id) || store.conversations.some(c => (c.messages || []).some(m => (m.attachments || []).some(file => file.id === id))); }
   // 已收入卷宗的原件由卷宗管理，删除对话或移除待发附件时不会删掉它
   async function deleteAttachments(ids) { await Promise.all([...new Set(ids)].filter(id => !inLibrary(id)).map(deleteAttachment)); }
@@ -169,25 +188,98 @@
       color: option.color || [cssVar("--accent"), cssVar("--code-green"), cssVar("--code-blue"), "#c9a227", "#8a6f8e", "#5f8ba0"]
     };
   }
+  // 模型给的 JSON 常有小滑头（尾逗号、注释、单引号、裸键名）；逐层尝试修补，实在补不上再抛原始错误
+  const skipTrivia = (text, i) => {
+    while (i < text.length) {
+      const ch = text[i], next = text[i + 1];
+      if (/\s/.test(ch)) i += 1;
+      else if (ch === "/" && next === "/") { while (i < text.length && text[i] !== "\n") i += 1; }
+      else if (ch === "/" && next === "*") { i += 1; while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i += 1; i += 1; }
+      else break;
+    }
+    return i;
+  };
+  function parseVizJson(source) {
+    let error;
+    try { return JSON.parse(source); } catch (err) { error = err; }
+    // 单遍状态机：剥注释与尾逗号，字符串内部原样保留
+    const strip = text => {
+      let out = "", str = "";
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i], next = text[i + 1];
+        if (str) {
+          if (ch === "\\") { out += ch + (next ?? ""); i += 1; }
+          else if (ch === str) str = "";
+          out += ch;
+          continue;
+        }
+        if (ch === '"' || ch === "'") { str = ch; out += ch; continue; }
+        if (ch === "/" && next === "/") { while (i < text.length && text[i] !== "\n") i += 1; out += "\n"; continue; }
+        if (ch === "/" && next === "*") { i += 1; while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i += 1; i += 1; continue; }
+        if (ch === ",") {
+          const j = skipTrivia(text, i + 1);
+          if (text[j] === "}" || text[j] === "]") continue; // 尾逗号（后面即使隔着注释也算）
+        }
+        out += ch;
+      }
+      return out;
+    };
+    let attempt = strip(source);
+    try { return JSON.parse(attempt); } catch {}
+    const single = (source.match(/'/g) || []).length, double = (source.match(/"/g) || []).length;
+    if (single > double) {
+      attempt = attempt.replace(/'([^'\n]*)'/g, (_, body) => '"' + body.replace(/\\'/g, "'").replace(/"/g, '\\"') + '"');
+      try { return JSON.parse(attempt); } catch {}
+    }
+    attempt = attempt.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":');
+    try { return JSON.parse(attempt); } catch {}
+    throw error;
+  }
+  // 渲染过的 mermaid SVG 按 消息+序号+内容哈希 缓存；整列重绘时同步回填，不再等二次渲染闪空白
+  const vizKeyHash = text => { let h = 5381; for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0; return h.toString(36); };
+  function rememberMermaidSvg(key, svg) { mermaidSvgCache.set(key, svg); if (mermaidSvgCache.size > 48) mermaidSvgCache.delete(mermaidSvgCache.keys().next().value); }
   async function renderViz(root) {
     for (const el of root.querySelectorAll(".viz[data-viz]:not([data-rendered])")) {
       el.dataset.rendered = "1";
       const source = el.querySelector(".viz-source")?.textContent || "", canvas = el.querySelector(".viz-canvas");
       try {
-        if (el.dataset.viz === "mermaid") { const { svg } = await mermaid.render(`mmd${uid().replace(/[^a-z0-9]/gi, "")}`, source); canvas.innerHTML = window.DOMPurify ? DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ["foreignObject"], ADD_ATTR: ["dominant-baseline"] }) : ""; }
+        if (el.dataset.viz === "mermaid") {
+          const message = el.closest(".message"), siblings = message ? [...message.querySelectorAll(".viz[data-viz]")] : [el];
+          const key = `${message?.dataset.message || "anon"}:${siblings.indexOf(el)}:${vizKeyHash(source)}`;
+          const cached = mermaidSvgCache.get(key);
+          if (cached) canvas.innerHTML = cached;
+          else { const { svg } = await mermaid.render(`mmd${uid().replace(/[^a-z0-9]/gi, "")}`, source); const clean = window.DOMPurify ? DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ["foreignObject"], ADD_ATTR: ["dominant-baseline"] }) : ""; canvas.innerHTML = clean; rememberMermaidSvg(key, clean); }
+        }
         else if (el.dataset.viz === "echarts") {
-          const option = JSON.parse(source);
+          const option = parseVizJson(source);
           canvas.style.height = `${Math.min(560, Math.max(220, Number(option.height) || 320))}px`;
           const chart = echarts.init(canvas, null, { renderer: "canvas" });
+          canvas.style.width = ""; // 别把宽度钉死在创建时刻，让容器宽度跟随外层布局
+          canvas.dataset.vizWidth = String(canvas.clientWidth);
           chart.setOption(themedEchartsOption(option, canvas));
           vizCharts.add(chart);
+          vizObserver?.observe(canvas);
         }
         el.classList.add("viz-ok");
       } catch (error) { el.classList.add("viz-error"); canvas.innerHTML = `<div class="viz-fail">无法渲染：${escapeHtml(String(error.message || error).split("\n")[0].slice(0, 200))}</div>`; el.querySelector(".viz-source")?.classList.remove("hidden"); }
     }
   }
-  function resizeCharts() { for (const chart of vizCharts) { const dom = chart.getDom(); if (!dom?.isConnected) { chart.dispose(); vizCharts.delete(chart); } else chart.resize(); } }
-  function disposeChartsIn(root) { for (const chart of [...vizCharts]) { const dom = chart.getDom(); if (!dom?.isConnected || root?.contains(dom)) { chart.dispose(); vizCharts.delete(chart); } } }
+  // ECharts 容器宽度跟随布局（收起侧栏、改阅读宽度等），不再只依赖 window resize
+  let vizObserver = null;
+  function setupVizObserver() {
+    if (!("ResizeObserver" in window)) return;
+    vizObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const canvas = entry.target, width = Math.round(entry.contentRect.width);
+        if (Math.abs(width - Number(canvas.dataset.vizWidth || -1)) < 2) continue;
+        canvas.dataset.vizWidth = String(width);
+        if (!canvas.isConnected) continue;
+        for (const chart of vizCharts) if (chart.getDom() === canvas) chart.resize();
+      }
+    });
+  }
+  function disposeOrphanCharts() { for (const chart of [...vizCharts]) { const dom = chart.getDom(); if (!dom?.isConnected) { vizObserver?.unobserve(dom); chart.dispose(); vizCharts.delete(chart); } } }
+  function disposeChartsIn(root) { for (const chart of [...vizCharts]) { const dom = chart.getDom(); if (!dom?.isConnected || root?.contains(dom)) { vizObserver?.unobserve(dom); chart.dispose(); vizCharts.delete(chart); } } }
   function renderMarkdown(source = "") {
     const text = String(source).replace(/^\n+|\n+$/g, ""); if (!text) return "";
     const plain = () => `<p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>`;
@@ -236,7 +328,7 @@
     return connected;
   }
   async function boot() {
-    setupMarkdown(); setupMermaid();
+    setupMarkdown(); setupMermaid(); setupVizObserver();
     const candidates = ["", LOCAL_BRIDGE].filter((value,index,array) => array.indexOf(value) === index);
     await connectBridge(candidates);
     if (apiBase === null) bootstrap.configError = "未检测到本机模型桥接，当前使用浏览器直连。接口若未开放 CORS，请在 VS Code 运行“言下：启动模型桥接”任务。";
@@ -259,7 +351,7 @@
     $("#modelTrigger").onclick = e => { e.stopPropagation(); $("#modelMenu").classList.toggle("hidden"); renderModelMenu(); };
     document.addEventListener("click", () => $("#modelMenu").classList.add("hidden"));
     $("#themeToggle").onclick = () => { store.settings.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; saveStore(); applyAppearance(); renderHeader(); if (view === "chat" && !controller) renderConversation(false); };
-    window.addEventListener("resize", resizeCharts);
+    window.addEventListener("resize", disposeOrphanCharts);
     $("#quotaStatus").onclick = () => openSettings("models");
     document.querySelectorAll(".send-trigger").forEach(button => button.onclick = sendOrStop);
     document.querySelectorAll(".attach-trigger").forEach(button => button.onclick = () => $("#fileInput").click());
@@ -297,7 +389,7 @@
     window.addEventListener("dragleave", event => { if (!hasDraggedFiles(event)) return; dragHideTimer = setTimeout(hideDropVeil, 80); });
     window.addEventListener("drop", event => { if (!hasDraggedFiles(event)) return; event.preventDefault(); hideDropVeil(); void (view === "library" ? addLibraryFiles : addFiles)(event.dataTransfer.files); });
     $("#clearContext").onclick = () => { const c = currentConversation(); if (!c || controller || !c.messages.length || c.messages.at(-1)?.role === "context") return; c.messages.push({ id: uid(), role: "context", timestamp: now() }); c.updatedAt = now(); saveStore(); renderConversation(); toast("后续对话将不再携带此前消息"); };
-    $("#historySearch").addEventListener("input", e => { historyQuery = e.target.value; renderHistory(); });
+    $("#historySearch").addEventListener("input", e => { historyQuery = e.target.value; clearTimeout(historySearchTimer); historySearchTimer = setTimeout(renderHistory, 120); });
     $("#historySearch").addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); toggleHistorySearch(false); } });
     $("#historySearchToggle").onclick = () => toggleHistorySearch();
     $("#historySearchClose").onclick = () => toggleHistorySearch(false);
@@ -345,7 +437,7 @@
   }
 
   function toggleSidebar(force) { const sidebar = $("#sidebar"), collapsed = force ?? !sidebar.classList.contains("collapsed"); sidebar.classList.toggle("collapsed", collapsed); const button = $("#collapseSidebar"); button.textContent = collapsed ? "›" : "‹"; button.title = collapsed ? "展开侧栏" : "收起侧栏"; }
-  function toggleHistorySearch(force) { const wrap = $("#historySearchWrap"), show = force ?? wrap.classList.contains("hidden"); wrap.classList.toggle("hidden", !show); $("#historySearchToggle").classList.toggle("active", show); if (show) setTimeout(() => $("#historySearch").focus(), 0); else if (historyQuery) { historyQuery = ""; $("#historySearch").value = ""; renderHistory(); } }
+  function toggleHistorySearch(force) { const wrap = $("#historySearchWrap"), show = force ?? wrap.classList.contains("hidden"); wrap.classList.toggle("hidden", !show); $("#historySearchToggle").classList.toggle("active", show); if (show) setTimeout(() => $("#historySearch").focus(), 0); else { clearTimeout(historySearchTimer); if (historyQuery) { historyQuery = ""; $("#historySearch").value = ""; renderHistory(); } } }
   function discardPendingAttachments() { const ids = pendingAttachments.map(file => file.id).filter(Boolean); pendingAttachments = []; void deleteAttachments(ids); }
   function newChat() { if (controller) stopGeneration(); discardPendingAttachments(); currentId = null; editingMessageId = null; view = "chat"; render(); setTimeout(() => $("#welcomeInput").focus(), 0); if (isMobile()) toggleSidebar(true); }
   function openConversation(id) { if (id !== currentId) { if (controller) stopGeneration(); discardPendingAttachments(); } currentId = id; editingMessageId = null; view = "chat"; const c = currentConversation(); if (c) { c.unread = false; c.profileId && selectProfile(c.profileId, false); } render(); if (isMobile()) toggleSidebar(true); }
@@ -405,9 +497,18 @@
   function renderConversation(shouldScroll = true) {
     const c = currentConversation(); if (!c) return;
     $("#chatTitle").textContent = c.title; $("#chatMeta").textContent = `${formatDay(c.createdAt)} · ${chineseNumber(c.messages.filter(m => m.role === "user").length, true)}问`;
-    $("#chatScroll").classList.toggle("generating", c.messages.some(message => message.status === "streaming"));
+    const scrollHost = $("#chatScroll");
+    scrollHost.classList.toggle("generating", c.messages.some(message => message.status === "streaming"));
+    // 切换对话时整列淡入（带轻微交错）；流式结束、主题切换等原地重绘则保持安静
+    const converged = c.id !== lastRenderedConvId; lastRenderedConvId = c.id;
+    scrollHost.classList.remove("converge");
     disposeChartsIn($("#messages"));
     $("#messages").innerHTML = c.messages.map(renderMessage).join("") + (c.ended ? `<div class="server-notice" style="margin:4px 0 30px">额度已用尽，本次对话已经结束。请新建对话、切换模型或调整额度。</div>` : "");
+    const dialogs = c.messages.filter(m => m.role !== "context"), articles = scrollHost.querySelectorAll("#messages .message");
+    if (converged) { scrollHost.classList.add("converge"); articles.forEach((el, i) => el.style.setProperty("--converge-delay", `${Math.min(i * 35, 240)}ms`)); clearTimeout(convergeTimer); convergeTimer = setTimeout(() => scrollHost.classList.remove("converge"), 1000); }
+    const seen = messageRenderedIds.get(c.id);
+    if (seen && !converged) for (let i = 0; i < dialogs.length; i += 1) { const el = articles[i]; if (el && !seen.has(dialogs[i].id)) el.classList.add("is-new"); }
+    messageRenderedIds.set(c.id, new Set(dialogs.map(m => m.id))); if (messageRenderedIds.size > 300) messageRenderedIds.clear();
     $("#chatInput").disabled = !!c.ended; $("#chatInput").placeholder = c.ended ? "本次对话已结束" : "继续输入"; $("#clearContext").disabled = !!c.ended;
     renderSendButtons(); void loadThumbnails($("#messages")); void renderViz($("#messages")); if (shouldScroll) { followBottom = true; requestAnimationFrame(scrollBottom); }
   }
@@ -432,16 +533,24 @@
     const stepUrl = safeWebUrl(step.url);
     const body = step.results?.length ? `<ul class="tool-results">${step.results.slice(0, 8).map(r => `<li>${resultLink(r)}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`).join("")}</ul>` : step.url ? `<div class="tool-note">${stepUrl ? `<a href="${escapeHtml(stepUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(stepUrl)}</a>` : escapeHtml(step.url)}</div>` : step.note ? `<div class="tool-note">${escapeHtml(step.note)}</div>` : "";
     const status = step.status || "done", state = status === "running" ? `<span class="tool-state spinning" aria-label="进行中"></span>` : status === "error" ? `<span class="tool-state failed" aria-label="失败">×</span>` : `<span class="tool-state done" aria-label="完成">✓</span>`;
-    return `<div class="tool-step" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
+    return `<div class="tool-step" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
   }
   function refreshSteps(assistant) {
     const block = document.querySelector(`[data-message="${assistant.id}"] .assistant-block`); if (!block) return;
     let stack = block.querySelector(".tool-stack");
     if (!stack) { const anchor = block.querySelector(".reasoning"); if (anchor) anchor.insertAdjacentHTML("afterend", stepsHtml(assistant)); else block.insertAdjacentHTML("afterbegin", stepsHtml(assistant)); stack = block.querySelector(".tool-stack"); }
     if (stack) {
+      stack.classList.add("is-new"); // 整列首次出现时轻浮一次；已存在不重复触发
       stack.querySelector(".tool-stack-label").textContent = toolStackLabel(assistant.steps);
       stack.querySelector(".tool-stack-meta").textContent = toolStackMeta(assistant.steps);
-      stack.querySelector(".tool-steps").innerHTML = (assistant.steps || []).map(stepHtml).join("");
+      const stepsList = stack.querySelector(".tool-steps"); stepsList.innerHTML = (assistant.steps || []).map(stepHtml).join("");
+      // 已出现过的步骤保持静止：逐步淡入上移；结果区首次出现（工具完成）时再单次轻浮，不整列重排
+      let seen = knownStepIds.get(assistant.id); if (!seen) { seen = new Map(); knownStepIds.set(assistant.id, seen); if (knownStepIds.size > 32) { for (const key of knownStepIds.keys()) if (key !== assistant.id) { knownStepIds.delete(key); break; } } }
+      for (const el of stepsList.querySelectorAll(".tool-step")) {
+        const id = el.dataset.stepId, hasBody = el.querySelector(".tool-results, .tool-note") !== null;
+        if (!seen.has(id)) { el.classList.add("is-new"); seen.set(id, hasBody); }
+        else if (hasBody && !seen.get(id)) { el.classList.add("body-new"); seen.set(id, true); }
+      }
       const running = assistant.status === "streaming" && assistant.steps.some(step => step.status === "running");
       if (running) { if (!assistant.toolsTouched) stack.open = true; }
       else if (!assistant.toolsTouched) { stack.open = false; assistant.toolsOpen = false; }
@@ -487,7 +596,11 @@
   function applyAppearance() {
     const { theme, font, width, accent } = store.settings;
     const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    const html = document.documentElement, nextTheme = dark ? "dark" : "light";
+    // 只在明暗实际变化时挂一次颜色过渡，避免初始加载闪一下
+    html.classList.toggle("theme-fade", !!html.dataset.theme && html.dataset.theme !== nextTheme);
+    clearTimeout(themeFadeTimer); if (html.classList.contains("theme-fade")) themeFadeTimer = setTimeout(() => html.classList.remove("theme-fade"), 480);
+    html.dataset.theme = nextTheme;
     if (window.mermaid) setupMermaid();
     document.documentElement.style.setProperty("--read", `${Number(width) || 760}px`);
     document.documentElement.style.setProperty("--accent", accent || "#9b5540");
@@ -506,6 +619,7 @@
       if (pendingAttachments.length >= 10) { toast("一次最多添加 10 个附件"); break; }
       if (file.size > MAX_FILE_BYTES) { toast(`${file.name} 超过 8 MB，未添加`); continue; }
       if (total + file.size > MAX_PENDING_BYTES) { toast("本次附件总大小不能超过 8 MB"); break; }
+      if (usedAttachmentBytes() + total + file.size > MAX_ATTACHMENTS_BYTES) { toast("卷宗与附件原件合计已达 512 MB 上限，请先清理"); break; }
       try { pendingAttachments.push(await ingestFile(file)); total += file.size; added += 1; }
       catch { toast(`${file.name} 读取失败`); }
     }
@@ -540,6 +654,7 @@
     const files = Array.from(fileList || []); let added = 0;
     for (const file of files) {
       if (file.size > MAX_FILE_BYTES) { toast(`${file.name} 超过 8 MB，未收入`); continue; }
+      if (usedAttachmentBytes() + file.size > MAX_ATTACHMENTS_BYTES) { toast("卷宗与附件原件合计已达 512 MB 上限，请先清理"); continue; }
       try { store.library.unshift(libraryEntry(await ingestFile(file))); added += 1; }
       catch { toast(`${file.name} 读取失败`); }
     }
@@ -850,7 +965,7 @@
         const block = document.querySelector(`[data-message="${assistant.id}"] .assistant-block`); if (!block) return;
         if (assistant.reasoning) {
           let details = block.querySelector(".reasoning");
-          if (!details) { block.insertAdjacentHTML("afterbegin", reasoningHtml(assistant)); details = block.querySelector(".reasoning"); }
+          if (!details) { block.insertAdjacentHTML("afterbegin", reasoningHtml(assistant)); details = block.querySelector(".reasoning"); details.classList.add("is-new"); }
           details.querySelector(".reasoning-body").textContent = assistant.reasoning;
           if (assistant.content && !assistant.reasoningTouched && details.open) details.open = false;
         }
@@ -923,12 +1038,14 @@
   function renderSettings() {
     document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === settingsTab));
     const host = $("#settingsContent");
+    const tabChanged = host.dataset.tab !== settingsTab; host.dataset.tab = settingsTab;
     if (settingsTab === "general") host.innerHTML = generalSettingsHtml();
     if (settingsTab === "appearance") host.innerHTML = appearanceSettingsHtml();
     if (settingsTab === "models") host.innerHTML = modelsSettingsHtml();
     bindSettingsEvents();
+    if (tabChanged) { host.classList.remove("tab-fade"); void host.offsetWidth; host.classList.add("tab-fade"); }
   }
-  function generalSettingsHtml() { return `<h2>通用</h2><p class="settings-lead">所有对话与自定义配置都保存在此浏览器。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>用于侧栏中的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后请模型为对话拟一个短标题，会消耗少量额度；手动改过的标题不会被覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · ${storageSize()}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、外观设置和卷宗会保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`; }
+  function generalSettingsHtml() { return `<h2>通用</h2><p class="settings-lead">所有对话与自定义配置都保存在此浏览器。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>用于侧栏中的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后请模型为对话拟一个短标题，会消耗少量额度；手动改过的标题不会被覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、外观设置和卷宗会保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`; }
   function appearanceSettingsHtml() { const s = store.settings; return `<h2>外观</h2><p class="settings-lead">清简为骨，纸墨为意。</p>${segmentRow("主题","随系统或固定明暗","theme",[["light","亮"],["dark","暗"],["system","系统"]],s.theme)}${segmentRow("字体","正文与标题的气质","font",[["sans","无衬线"],["serif","衬线"],["mixed","混排"]],s.font)}${segmentRow("阅读宽度","长文的行宽","width",[[680,"窄"],[760,"适中"],[860,"宽"]],s.width)}<div class="setting-row"><div class="setting-copy"><strong>印色</strong><small>界面中的点睛之色</small></div><div class="segmented">${["#9b5540","#536d62","#5c6386","#75644f"].map(v => `<button data-setting="accent" data-value="${v}" class="${s.accent === v ? "active" : ""}" style="color:${v}">●</button>`).join("")}</div></div>`; }
   function segmentRow(title,desc,key,items,active) { return `<div class="setting-row"><div class="setting-copy"><strong>${title}</strong><small>${desc}</small></div><div class="segmented">${items.map(([v,label]) => `<button data-setting="${key}" data-value="${v}" class="${String(active) === String(v) ? "active" : ""}">${label}</button>`).join("")}</div></div>`; }
   function modelsSettingsHtml() { const transport = apiBase !== null ? `本机桥接已连接${apiBase ? "（VS Code 预览模式）" : ""}，言下联网与模型请求转发均可用。` : "当前由浏览器直连模型；言下联网不可用。直接预览 HTML 时，可先启动“言下：启动模型桥接”，页面会在下次发送时自动重连。"; return `<h2>模型</h2><p class="settings-lead">可添加任意 OpenAI 兼容接口。API Key 只存于当前浏览器。${transport}</p>${bootstrap.configError ? `<div class="server-notice">${escapeHtml(bootstrap.configError)}</div>` : ""}<div id="profileList">${profiles().map(profileCardHtml).join("")}</div><button id="addProfile" class="outline-btn" style="width:100%;margin-top:4px">＋ 添加模型配置</button>`; }
@@ -1035,7 +1152,7 @@
   async function importData(file) {
     try {
       const data = JSON.parse(await readFile(file, "text"));
-      if (!data || data.version !== 1 || !Array.isArray(data.conversations)) throw Error("不是言下的备份文件");
+      if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations)) throw Error("不是言下的备份文件，或版本不兼容");
       const known = new Set(store.conversations.map(c => c.id)); let conversations = 0, added = 0, library = 0, files = 0;
       for (const c of data.conversations) if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) { store.conversations.push(c); conversations += 1; }
       const profileIds = new Set(profiles().map(p => p.id));
