@@ -1,0 +1,13 @@
+{
+  "name": "yan-local-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "简约古风的本地 API 聊天前端",
+  "scripts": {
+    "start": "node server.js --open",
+    "serve": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
