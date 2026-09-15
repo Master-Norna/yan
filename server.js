@@ -34,10 +34,14 @@ function sendJson(res, status, data) {
   res.writeHead(status, { "Content-Type": MIME[".json"], "Content-Length": Buffer.byteLength(body), "Cache-Control": "no-store" });
   res.end(body);
 }
-function securityHeaders(res) {
+function securityHeaders(req, res) {
+  const isPreview = new URL(req.url, `http://${HOST}`).pathname === "/preview.html";
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+  // preview.html 只允许被本站（主页面）嵌入，且只有它需要执行 blob: 脚本；否则任意网站都能把它 iframe 进去并注入脚本读取 localStorage
+  res.setHeader("Content-Security-Policy", isPreview
+    ? "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
 }
 function corsHeaders(req, res) {
   const origin = req.headers.origin;
@@ -184,13 +188,14 @@ async function upstreamError(response) {
   catch { return raw.slice(0,300) || `上游接口返回 ${response.status}`; }
 }
 
+let APP_VERSION = ""; try { APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8")).version || ""; } catch {}
 function handleBootstrap(res) {
   const config = loadServerConfig();
-  if (config.unconfigured) return sendJson(res, 200, { serverProfile: null, configError: "" });
-  if (config.error) return sendJson(res, 200, { serverProfile: null, configError: config.error });
+  if (config.unconfigured) return sendJson(res, 200, { version: APP_VERSION, serverProfile: null, configError: "" });
+  if (config.error) return sendJson(res, 200, { version: APP_VERSION, serverProfile: null, configError: config.error });
   const lower = config.model.toLowerCase();
   const name = lower.includes("qwen") ? "Qwen" : lower.includes("claude") ? "Claude" : lower.includes("gpt") ? "GPT" : "预设模型";
-  sendJson(res, 200, { serverProfile: { id: "server-preset", source: "server", name, model: config.model, baseUrl: config.baseUrl, temperature: .7, maxTokens: 8192, systemPrompt: "" }, configError: "" });
+  sendJson(res, 200, { version: APP_VERSION, serverProfile: { id: "server-preset", source: "server", name, model: config.model, baseUrl: config.baseUrl, temperature: .7, maxTokens: 8192, systemPrompt: "" }, configError: "" });
 }
 async function handleTest(req, res) {
   const started = Date.now();
@@ -244,7 +249,7 @@ function serveStatic(req, res) {
 
 const server = http.createServer(async (req,res) => {
   try {
-    securityHeaders(res);
+    securityHeaders(req, res);
     corsHeaders(req, res);
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
     if (req.method === "GET" && req.url === "/api/bootstrap") return handleBootstrap(res);
