@@ -16,7 +16,7 @@
   const $ = selector => document.querySelector(selector);
   const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const now = () => new Date().toISOString();
-  const STORE_VERSION = 3;
+  const STORE_VERSION = 4;
   const NEW_DRAFT_ID = "__new__";
   const defaultStore = { version: STORE_VERSION, settings: { name: "访客", theme: "system", inkMotion: "on", font: "mixed", width: 760, accent: "#9b5540", activeProfileId: "", autoTitle: true, serverProfile: { temperature: .7, maxTokens: DEFAULT_MAX_TOKENS, systemPrompt: "", quota: "", usedTokens: 0 } }, profiles: [], conversations: [], library: [], drafts: {} };
   let store = loadStore();
@@ -27,7 +27,7 @@
   let editingMessageId = null;
   let renamingId = null;
   let historyQuery = "";
-  let pendingAttachments = [];
+  let pendingAttachments = [], pendingQuote = null;
   const requestJobs = new Map();
   let settingsTab = "general";
   let toastTimer = null;
@@ -42,13 +42,14 @@
   let followBottom = true, autoScrolling = false;
   const scrollPositions = new Map();
   let lastRenderedConvId = null, convergeTimer = null, themeFadeTimer = null;
-  const messageRenderedIds = new Map(), knownStepIds = new Map();
+  const nodeSig = new WeakMap(), knownStepIds = new Map(); let lastVizThemeKey = "";
   const thumbCache = new Map();
   let imageViewerAttachmentId = null, imageViewerReturnFocus = null;
 
   // 结构迁移按版本递增：老数据按字段补默认值，不清空；将来调整结构时在 migrateStoreVx 里写迁移
   function migrateStoreV1(data) { data.version = 2; /* v1 → v2 无结构变化，为后续迁移留位 */ }
   function migrateStoreV2(data) { data.drafts = {}; data.version = 3; }
+  function migrateStoreV3(data) { for (const c of data.conversations || []) c.forks ||= []; data.version = 4; }
   function loadStore() {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -57,8 +58,9 @@
       if (!Number.isInteger(data.version)) data.version = 1;
       if (data.version === 1) migrateStoreV1(data);
       if (data.version === 2) migrateStoreV2(data);
+      if (data.version === 3) migrateStoreV3(data);
       if (data.version > STORE_VERSION) data.version = STORE_VERSION;
-      return { ...structuredClone(defaultStore), ...data, settings: { ...defaultStore.settings, ...(data.settings || {}), serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) } }, profiles: Array.isArray(data.profiles) ? data.profiles : [], conversations: Array.isArray(data.conversations) ? data.conversations : [], library: Array.isArray(data.library) ? data.library : [], drafts: data.drafts && typeof data.drafts === "object" && !Array.isArray(data.drafts) ? data.drafts : {} };
+      return { ...structuredClone(defaultStore), ...data, settings: { ...defaultStore.settings, ...(data.settings || {}), serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) } }, profiles: Array.isArray(data.profiles) ? data.profiles : [], conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(c => ({ ...c, forks: Array.isArray(c.forks) ? c.forks : [] })), library: Array.isArray(data.library) ? data.library : [], drafts: data.drafts && typeof data.drafts === "object" && !Array.isArray(data.drafts) ? data.drafts : {} };
     } catch { return structuredClone(defaultStore); }
   }
   function saveStore() {
@@ -96,10 +98,10 @@
     const seen = new Map();
     const count = files => { for (const file of files || []) if (file?.id && !seen.has(file.id)) seen.set(file.id, Number(file.size || 0)); };
     count(store.library); for (const value of Object.values(store.drafts || {})) count(value?.attachments);
-    for (const c of store.conversations) for (const m of c.messages || []) count(m.attachments);
+    for (const c of store.conversations) for (const m of allMessages(c)) count(m.attachments);
     return [...seen.values()].reduce((a,b) => a+b, 0);
   }
-  function isReferenced(id) { return pendingAttachments.some(file => file.id === id) || draftAttachmentIds().includes(id) || store.conversations.some(c => (c.messages || []).some(m => (m.attachments || []).some(file => file.id === id))); }
+  function isReferenced(id) { return pendingAttachments.some(file => file.id === id) || draftAttachmentIds().includes(id) || store.conversations.some(c => allMessages(c).some(m => (m.attachments || []).some(file => file.id === id))); }
   // 已收入卷宗的原件由卷宗管理，删除对话或移除待发附件时不会删掉它
   async function deleteAttachments(ids) {
     // 调用方通常会在本轮同步代码里紧接着移除消息或草稿；等引用更新完再判断，既不误删共用原件，也不留下孤立数据。
@@ -108,10 +110,41 @@
   }
   async function cleanupAttachmentStore() {
     try {
-      const keep = new Set([...attachmentIds(store.conversations.flatMap(c => c.messages || [])), ...store.library.map(file => file.id), ...draftAttachmentIds()]), keys = await fileStoreRequest("readonly", db => db.getAllKeys());
+      const keep = new Set([...attachmentIds(store.conversations.flatMap(allMessages)), ...store.library.map(file => file.id), ...draftAttachmentIds()]), keys = await fileStoreRequest("readonly", db => db.getAllKeys());
       await deleteAttachments(keys.filter(key => !keep.has(key)));
     } catch {}
   }
+  // 分叉：c.messages 始终是当前走的那条路；编辑或重答时被换下来的尾巴整段收进 c.forks（记下它接在哪条消息之后），随时可以切回来。
+  // 同一位置的几个版本 = 当前这条 + 接在同一位置的 forks，按首条消息的时间排序
+  function allMessages(c) { return [...(c.messages || []), ...(c.forks || []).flatMap(fork => fork.messages || [])]; }
+  function forkTail(c, index) {
+    const tail = c.messages.slice(index); if (!tail.length) return null;
+    c.messages = c.messages.slice(0, index);
+    // 只剩一条报错或空白的消息就不值得留作版本
+    if (tail.length === 1 && !tail[0].content && !tail[0].steps?.length) { void deleteAttachments(attachmentIds(tail)); return null; }
+    const fork = { id: uid(), parentId: c.messages[index - 1]?.id ?? null, messages: tail, createdAt: now() };
+    (c.forks ||= []).push(fork); return fork;
+  }
+  function branchesAt(c, index) {
+    const parentId = c.messages[index - 1]?.id ?? null, current = c.messages[index]; if (!current) return [];
+    const list = [{ forkId: null, first: current }, ...(c.forks || []).filter(fork => fork.parentId === parentId && fork.messages?.length).map(fork => ({ forkId: fork.id, first: fork.messages[0] }))];
+    return list.sort((a, b) => String(a.first.timestamp).localeCompare(String(b.first.timestamp)));
+  }
+  function branchAt(c, index) { const list = branchesAt(c, index); if (list.length < 2) return null; return { at: list.findIndex(item => item.forkId === null) + 1, total: list.length, list }; }
+  function switchBranch(c, index, step) {
+    const branch = branchAt(c, index); if (!branch) return;
+    const target = branch.list[branch.at - 1 + step]; if (!target || target.forkId === null) return;
+    const fork = c.forks.find(item => item.id === target.forkId), tail = c.messages.slice(index), parentId = c.messages[index - 1]?.id ?? null;
+    const anchor = document.querySelector(`#messages [data-message="${CSS.escape(c.messages[index].id)}"]`), host = $("#chatScroll"), keepTop = anchor ? anchor.getBoundingClientRect().top - host.getBoundingClientRect().top : null;
+    c.forks = c.forks.filter(item => item !== fork);
+    if (tail.length) c.forks.push({ id: uid(), parentId, messages: tail, createdAt: now() });
+    c.messages = [...c.messages.slice(0, index), ...fork.messages]; c.updatedAt = now(); editingMessageId = null;
+    saveStore(); renderConversation(false);
+    // 切换后让这一条留在原来的位置，视线不用重新找
+    const next = document.querySelector(`#messages [data-message="${CSS.escape(c.messages[index].id)}"]`);
+    if (next && keepTop !== null) { followBottom = false; host.scrollTop += next.getBoundingClientRect().top - host.getBoundingClientRect().top - keepTop; }
+  }
+  function branchNavHtml(branch) { return branch ? `<span class="branch-nav"><button class="message-action" data-action="branch-prev" title="上一个版本" aria-label="上一个版本" ${branch.at <= 1 ? "disabled" : ""}>‹</button><span>${branch.at}/${branch.total}</span><button class="message-action" data-action="branch-next" title="下一个版本" aria-label="下一个版本" ${branch.at >= branch.total ? "disabled" : ""}>›</button></span>` : ""; }
   function profiles() { return [...(bootstrap.serverProfile ? [bootstrap.serverProfile] : []), ...store.profiles]; }
   function activeProfile() { return profiles().find(p => p.id === store.settings.activeProfileId) || profiles()[0] || null; }
   function currentConversation() { return store.conversations.find(c => c.id === currentId) || null; }
@@ -119,17 +152,17 @@
   function draftRecord(id = currentId) {
     const value = store.drafts?.[draftKey(id)];
     if (typeof value === "string") return { text: value, attachments: [] };
-    return value && typeof value === "object" ? { text: String(value.text || ""), attachments: Array.isArray(value.attachments) ? value.attachments : [] } : { text: "", attachments: [] };
+    return value && typeof value === "object" ? { text: String(value.text || ""), attachments: Array.isArray(value.attachments) ? value.attachments : [], quote: value.quote && typeof value.quote === "object" && value.quote.text ? { text: String(value.quote.text), messageId: String(value.quote.messageId || "") } : null } : { text: "", attachments: [], quote: null };
   }
   function persistDraft() {
     const input = currentConversation() ? $("#chatInput") : $("#welcomeInput"), key = draftKey(), text = input?.value || "", attachments = pendingAttachments.map(file => ({ ...file }));
     store.drafts ||= {};
-    if (text || attachments.length) store.drafts[key] = { text, attachments, updatedAt: now() }; else delete store.drafts[key];
+    if (text || attachments.length || pendingQuote) store.drafts[key] = { text, attachments, quote: pendingQuote, updatedAt: now() }; else delete store.drafts[key];
     saveStoreSoon();
   }
   function restoreDraft() {
     if (view === "library") return;
-    const draft = draftRecord(); pendingAttachments = draft.attachments.map(file => ({ ...file }));
+    const draft = draftRecord(); pendingAttachments = draft.attachments.map(file => ({ ...file })); pendingQuote = currentConversation() ? draft.quote : null; renderQuote();
     const input = currentConversation() ? $("#chatInput") : $("#welcomeInput"); if (!input) return;
     input.value = draft.text; grow(input);
   }
@@ -338,7 +371,9 @@
     return svg.outerHTML;
   }
   async function renderViz(root) {
-    for (const el of root.querySelectorAll(".viz[data-viz]:not([data-rendered])")) {
+    const list = Array.isArray(root) ? root : [...root.querySelectorAll(".viz[data-viz]:not([data-rendered])")];
+    for (const el of list) {
+      if (el.dataset.rendered || !el.isConnected) continue; // 两次渲染请求在 await 间隔里可能点到同一张图，只画一次
       el.dataset.rendered = "1";
       const source = el.querySelector(".viz-source")?.textContent || "", canvas = el.querySelector(".viz-canvas");
       const viewport = followBottom ? null : scrollSnapshot();
@@ -346,7 +381,7 @@
         if (!(await ensureLib(el.dataset.viz))) throw Error("图形库未能加载，请刷新页面重试");
         if (el.dataset.viz === "mermaid") {
           const message = el.closest(".message"), siblings = message ? [...message.querySelectorAll(".viz[data-viz]")] : [el];
-          const key = `${message?.dataset.message || "anon"}:${siblings.indexOf(el)}:${vizKeyHash(source)}`;
+          const key = `${vizThemeKey()}:${message?.dataset.message || "anon"}:${siblings.indexOf(el)}:${vizKeyHash(source)}`;
           const cached = mermaidSvgCache.get(key);
           if (cached) canvas.innerHTML = cached;
           else {
@@ -519,7 +554,7 @@
       button.addEventListener("pointerleave", () => { if (welcomeInput.placeholder === preview) { welcomeInput.placeholder = restPlaceholder; welcomeInput.classList.remove("previewing"); } });
     });
     [$("#welcomeInput"), $("#chatInput")].forEach(input => {
-      input.addEventListener("input", () => { grow(input); persistDraft(); renderSendButtons(); });
+      input.addEventListener("input", () => { grow(input); persistDraft(); renderSendButtons(); if (input.id === "chatInput") syncContextCost(); });
       input.addEventListener("keydown", e => { if (e.isComposing || e.keyCode === 229) return; if (e.key === "Enter" && !e.shiftKey && !touchInput.matches) { e.preventDefault(); sendOrStop(); } });
       input.addEventListener("paste", e => {
         const images = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith("image/")); if (!images.length) return;
@@ -565,6 +600,15 @@
     title.addEventListener("blur", () => { const c = currentConversation(); if (!c) return; const value = title.textContent.replace(/\s+/g, " ").trim(); if (value && value !== c.title) renameConversation(c.id, value); else title.textContent = c.title; });
     $("#modelMenu").addEventListener("click", e => { const item = e.target.closest("[data-profile]"); if (!item) return; selectProfile(item.dataset.profile); });
     $("#messages").addEventListener("click", handleMessageAction);
+    setupQuoteTip();
+    $("#composerQuoteClose").onclick = () => { pendingQuote = null; renderQuote(); persistDraft(); $("#chatInput").focus(); };
+    $("#messages").addEventListener("click", event => {
+      const block = event.target.closest(".user-quote"); if (!block) return;
+      const source = block.dataset.quoteSource && document.querySelector(`#messages [data-message="${CSS.escape(block.dataset.quoteSource)}"]`);
+      if (!source) return toast("出处已不在这一页");
+      followBottom = false; source.scrollIntoView({ block: "center", behavior: reducedMotion.matches ? "instant" : "smooth" });
+      source.classList.remove("flash"); void source.offsetWidth; source.classList.add("flash");
+    });
     $("#messages").addEventListener("click", event => {
       const summary = event.target.closest(".reasoning > summary, .tool-stack > summary"); if (!summary) return;
       event.preventDefault();
@@ -599,7 +643,7 @@
       else if (e.target.matches?.("[data-download-attachment]")) { e.preventDefault(); void downloadAttachment(e.target.dataset.downloadAttachment); }
     });
     document.querySelectorAll(".tab-btn").forEach(button => button.onclick = () => { settingsTab = button.dataset.tab; renderSettings(); });
-    window.addEventListener("keydown", e => { if (e.key !== "Escape") return; if (!$("#imageViewer").classList.contains("hidden")) { closeImageViewer(); return; } const expanded = document.querySelector(".work-expanded"); if (expanded) { closeExpandedWork(); return; } hideWithFade($("#modelMenu")); if (confirmResolve) settleConfirm(false); else if (!$("#settingsModal").classList.contains("hidden")) closeSettings(); else if (editingMessageId) { editingMessageId = null; renderConversation(false); } });
+    window.addEventListener("keydown", e => { if (e.key !== "Escape") return; if (!$("#imageViewer").classList.contains("hidden")) { closeImageViewer(); return; } const expanded = document.querySelector(".work-expanded"); if (expanded) { closeExpandedWork(); return; } hideWithFade($("#modelMenu")); if (confirmResolve) settleConfirm(false); else if (!$("#settingsModal").classList.contains("hidden")) closeSettings(); else if (editingMessageId) { editingMessageId = null; renderConversation(false); } else if (pendingQuote && document.activeElement === $("#chatInput") && !$("#chatInput").value) { pendingQuote = null; renderQuote(); persistDraft(); } });
     $("#chatScroll").addEventListener("scroll", () => { const el = $("#chatScroll"), gap = el.scrollHeight - el.scrollTop - el.clientHeight; if (gap < 8) { followBottom = true; autoScrolling = false; } else if (!autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false; syncJumpBottom(gap); });
     $("#chatScroll").addEventListener("wheel", e => { if (e.deltaY < 0) followBottom = false; }, { passive: true });
     $("#chatScroll").addEventListener("pointerdown", () => { autoScrolling = false; }, { passive: true });
@@ -618,7 +662,7 @@
     $("#sidebarScrim").onclick = () => toggleSidebar(true);
     // 生成时向上翻阅后，给一枚「回到最新」；贴近底部自动隐去
     $("#jumpBottom").onclick = () => { const el = $("#chatScroll"); followBottom = true; el.scrollTo({ top: el.scrollHeight, behavior: reducedMotion.matches ? "instant" : "smooth" }); };
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { if (store.settings.theme === "system") { applyAppearance(); if (view === "chat" && !conversationRunning()) renderConversation(false); } });
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { if (store.settings.theme === "system") { applyAppearance(); if (view === "chat") renderConversation(false); } });
     reducedMotion.addEventListener?.("change", () => { if (store.settings.inkMotion === "system") applyAppearance(); });
   }
 
@@ -627,7 +671,7 @@
   function toggleHistorySearch(force) { const wrap = $("#historySearchWrap"), show = force ?? wrap.classList.contains("hidden"); wrap.classList.toggle("hidden", !show); $("#historySearchToggle").classList.toggle("active", show); if (show) setTimeout(() => $("#historySearch").focus(), 0); else { clearTimeout(historySearchTimer); if (historyQuery) { historyQuery = ""; $("#historySearch").value = ""; renderHistory(); } } }
   function newChat() { persistDraft(); rememberScrollPosition(); pendingAttachments = []; currentId = null; editingMessageId = null; view = "chat"; render(); setTimeout(() => $("#welcomeInput").focus(), 0); if (isMobile()) toggleSidebar(true); }
   function openConversation(id) { if (id !== currentId) { persistDraft(); rememberScrollPosition(); pendingAttachments = []; } currentId = id; editingMessageId = null; view = "chat"; const c = currentConversation(); if (c) { c.unread = false; c.profileId && selectProfile(c.profileId, false); } render(); if (isMobile()) toggleSidebar(true); }
-  async function deleteConversation(id) { const removed = store.conversations.find(c => c.id === id); if (!removed) return; if (!(await askConfirm({ title: "删除这段对话？", body: `「${removed.title}」将连同其附件一起移除，无法撤销。`, ok: "删除" }))) return; if (conversationRunning(id)) stopGeneration(id); const draftFiles = draftRecord(id).attachments.map(file => file.id); clearDraft(id); void deleteAttachments([...attachmentIds(removed.messages), ...draftFiles]); store.conversations = store.conversations.filter(c => c.id !== id); if (currentId === id) { currentId = null; pendingAttachments = []; } saveStore(); render(); toast("对话已删除"); }
+  async function deleteConversation(id) { const removed = store.conversations.find(c => c.id === id); if (!removed) return; if (!(await askConfirm({ title: "删除这段对话？", body: `「${removed.title}」将连同其附件一起移除，无法撤销。`, ok: "删除" }))) return; if (conversationRunning(id)) stopGeneration(id); const draftFiles = draftRecord(id).attachments.map(file => file.id); clearDraft(id); void deleteAttachments([...attachmentIds(allMessages(removed)), ...draftFiles]); store.conversations = store.conversations.filter(c => c.id !== id); if (currentId === id) { currentId = null; pendingAttachments = []; } saveStore(); render(); toast("对话已删除"); }
   function togglePin(id) { const c = store.conversations.find(item => item.id === id); if (!c) return; c.pinned = !c.pinned; saveStore(); renderHistory(); }
   function startRename(id) { renamingId = id; renderHistory(); }
   function commitRename(value) { const id = renamingId; renamingId = null; if (id) renameConversation(id, value); else renderHistory(); }
@@ -636,7 +680,7 @@
     if (c && title && title !== c.title) { c.title = title; c.titleAuto = false; saveStore(); }
     renderHistory(); if (c && currentId === id) { $("#chatTitle").textContent = c.title; syncDocumentTitle(); }
   }
-  function selectProfile(id, shouldRender = true) { if (!profiles().some(p => p.id === id)) return; store.settings.activeProfileId = id; const c = currentConversation(); if (c) c.profileId = id; saveStore(); hideWithFade($("#modelMenu")); if (shouldRender) renderHeader(); }
+  function selectProfile(id, shouldRender = true) { if (!profiles().some(p => p.id === id)) return; store.settings.activeProfileId = id; const c = currentConversation(); if (c) c.profileId = id; saveStore(); hideWithFade($("#modelMenu")); if (shouldRender) { renderHeader(); syncContextCost(); } }
 
   function syncJumpBottom(gap) { const el = $("#chatScroll"); if (gap === undefined) gap = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0; $("#jumpBottom").classList.toggle("hidden", view !== "chat" || !currentId || gap < 260); }
   function syncDocumentTitle() { const c = currentConversation(); document.title = view === "library" ? "卷宗 · 言下" : c ? `${c.title} · 言下` : "言下"; }
@@ -708,29 +752,75 @@
     // 切换对话时整列淡入（带轻微交错）；流式结束、主题切换等原地重绘则保持安静
     const converged = c.id !== lastRenderedConvId; lastRenderedConvId = c.id;
     scrollHost.classList.remove("converge");
-    closeExpandedWork(); disposeChartsIn($("#messages"));
-    $("#messages").innerHTML = c.messages.map(renderMessage).join("") + (c.ended ? `<div class="server-notice" style="margin:4px 0 30px">余墨已尽，这段对话到此为止。翻页新起、换个模型，或调高上限。</div>` : "");
-    const dialogs = c.messages.filter(m => m.role !== "context"), articles = scrollHost.querySelectorAll("#messages .message");
-    if (converged) { scrollHost.classList.add("converge"); articles.forEach((el, i) => el.style.setProperty("--converge-delay", `${Math.min(i * 35, 240)}ms`)); clearTimeout(convergeTimer); convergeTimer = setTimeout(() => scrollHost.classList.remove("converge"), 1000); }
-    const seen = messageRenderedIds.get(c.id);
-    if (seen && !converged) for (let i = 0; i < dialogs.length; i += 1) { const el = articles[i]; if (el && !seen.has(dialogs[i].id)) el.classList.add("is-new"); }
-    messageRenderedIds.set(c.id, new Set(dialogs.map(m => m.id))); if (messageRenderedIds.size > 300) messageRenderedIds.clear();
+    const { added } = syncMessages(c, converged);
+    if (converged) { const articles = scrollHost.querySelectorAll("#messages .message"); scrollHost.classList.add("converge"); articles.forEach((el, i) => el.style.setProperty("--converge-delay", `${Math.min(i * 35, 240)}ms`)); clearTimeout(convergeTimer); convergeTimer = setTimeout(() => scrollHost.classList.remove("converge"), 1000); }
     $("#chatInput").disabled = !!c.ended; $("#chatInput").placeholder = c.ended ? "这段对话已收尾" : "接着说"; $("#clearContext").disabled = !!c.ended;
-    renderSendButtons();
+    renderSendButtons(); syncContextCost();
     if (shouldScroll || !snapshot) { followBottom = true; requestAnimationFrame(scrollBottom); }
     else { restoreScrollPosition(snapshot); requestAnimationFrame(() => restoreScrollPosition(snapshot)); }
-    void loadThumbnails($("#messages")); renderEnhancements($("#messages"));
+    // 主题、朱色或字体变了：留在原地的图表就地换色，不必重画整段
+    const themeKey = vizThemeKey(); if (themeKey !== lastVizThemeKey) { lastVizThemeKey = themeKey; rethemeViz($("#messages")); }
+    for (const node of added) { void loadThumbnails(node); renderEnhancements(node); }
   }
-  function renderMessage(message) {
-    if (message.role === "context") return `<div style="display:flex;align-items:center;gap:10px;margin:8px 0 34px;color:var(--ink-3);font:10px var(--title);letter-spacing:.12em"><span style="height:1px;flex:1;background:var(--line)"></span><span>上下文由此重新开始</span><span style="height:1px;flex:1;background:var(--line)"></span></div>`;
+  // 消息列表按 id 增量同步：没变的节点原样留下（图表、沙箱、展开状态都不动），只插入、替换或移除有变化的那几条。
+  // 正在流式生成的那条由 readSse 就地更新，这里一律不碰。
+  // 只有会改变呈现的字段才算变化；展开/收起这类界面状态用户已经在页面上操作过了，不必因此重画
+  const UI_STATE_FIELDS = new Set(["toolsOpen", "toolsTouched", "reasoningOpen", "reasoningTouched"]);
+  function messageSig(message, branch) { return `${branch ? `${branch.at}/${branch.total}|` : ""}${editingMessageId === message.id ? "e|" : ""}${JSON.stringify(message, (key, value) => UI_STATE_FIELDS.has(key) ? undefined : value)}`; }
+  function syncMessages(c, converged) {
+    const host = $("#messages"), existing = new Map(), added = [], template = document.createElement("template");
+    for (const node of host.children) if (node.dataset.message) existing.set(node.dataset.message, node);
+    const items = c.messages.map((message, index) => ({ key: message.id, message, branch: branchAt(c, index) }));
+    if (c.ended) items.push({ key: "__ended", html: `<div class="server-notice" data-message="__ended" style="margin:4px 0 30px">余墨已尽，这段对话到此为止。翻页新起、换个模型，或调高上限。</div>` });
+    let cursor = host.firstElementChild;
+    for (const item of items) {
+      const node = existing.get(item.key); existing.delete(item.key);
+      let next = node;
+      const streaming = node && item.message?.status === "streaming" && node.dataset.status === "streaming";
+      if (!streaming) {
+        const sig = item.html ?? messageSig(item.message, item.branch);
+        if (!node || nodeSig.get(node) !== sig) {
+          template.innerHTML = item.html ?? renderMessage(item.message, item.branch); next = template.content.firstElementChild; nodeSig.set(next, sig); added.push(next);
+          if (!node && !converged) next.classList.add("is-new");
+        }
+        else node.classList.remove("is-new");
+      }
+      if (node && next !== node) { if (node === cursor) cursor = cursor.nextElementSibling; disposeChartsIn(node); node.remove(); }
+      if (next === cursor) cursor = cursor.nextElementSibling; else host.insertBefore(next, cursor);
+    }
+    // 游标之后全是没被点到名的旧节点（删掉的消息、重生成时截掉的尾巴、旧的收尾提示）
+    while (cursor) { const stale = cursor; cursor = cursor.nextElementSibling; disposeChartsIn(stale); stale.remove(); }
+    if (document.documentElement.classList.contains("work-mode") && !host.querySelector(".work-expanded")) closeExpandedWork();
+    return { added };
+  }
+  function vizThemeKey() { return `${document.documentElement.dataset.theme}|${cssVar("--accent")}|${cssVar("--body")}`; }
+  function rethemeViz(root) {
+    for (const chart of vizCharts) {
+      const canvas = chart.getDom(), el = canvas?.closest('.viz[data-viz="echarts"]'); if (!el || !root.contains(canvas)) continue;
+      try { chart.setOption(themedEchartsOption(parseVizJson(el.querySelector(".viz-source")?.textContent || ""), canvas), true); } catch {}
+    }
+    const stale = [...root.querySelectorAll('.viz[data-viz="mermaid"][data-rendered].viz-ok')];
+    if (stale.length) { for (const el of stale) delete el.dataset.rendered; void renderViz(stale); }
+  }
+  function renderMessage(message, branch = null) {
+    if (message.role === "context") return `<div data-message="${escapeHtml(message.id)}" style="display:flex;align-items:center;gap:10px;margin:8px 0 34px;color:var(--ink-3);font:10px var(--title);letter-spacing:.12em"><span style="height:1px;flex:1;background:var(--line)"></span><span>上下文由此重新开始</span><span style="height:1px;flex:1;background:var(--line)"></span></div>`;
     if (message.role === "user") {
       if (editingMessageId === message.id) return `<article class="message user" data-message="${escapeHtml(message.id)}"><div class="message-editor"><textarea class="message-edit-input">${escapeHtml(message.content)}</textarea><div class="edit-actions"><button class="message-action" data-action="cancel-edit">取消</button><button class="message-action edit-save" data-action="save-edit">保存并重答</button></div></div></article>`;
       const files = message.attachments?.length ? `<div class="sent-attachments">${message.attachments.map(file => attachmentCard(file, null, true)).join("")}</div>` : "";
-      return `<article class="message user" data-message="${escapeHtml(message.id)}">${files}${message.content ? `<div class="user-bubble">${escapeHtml(message.content)}</div>` : ""}<div class="message-actions">${actionIcon("copy","复制消息",icons.copy)}${actionIcon("edit","编辑消息",icons.edit)}</div></article>`;
+      const quote = message.quote?.text ? `<div class="user-quote" data-quote-source="${escapeHtml(message.quote.messageId || "")}" title="点击回到出处">${escapeHtml(message.quote.text)}</div>` : "";
+      return `<article class="message user" data-message="${escapeHtml(message.id)}">${files}${quote}${message.content ? `<div class="user-bubble">${escapeHtml(message.content)}</div>` : ""}<div class="message-actions${branch ? " has-branch" : ""}">${branchNavHtml(branch)}${actionIcon("copy","复制消息",icons.copy)}${actionIcon("edit","编辑消息",icons.edit)}</div></article>`;
     }
-    const actions = assistantActionsHtml(message);
-    return `<article class="message assistant" data-message="${escapeHtml(message.id)}" data-status="${escapeHtml(message.status || "complete")}"><div class="message-meta"><span class="meta-seal" aria-hidden="true">言</span><span>${escapeHtml(message.modelName || "模型")} · ${formatTime(message.timestamp)}</span></div><div class="assistant-block">${reasoningHtml(message)}${stepsHtml(message)}${assistantMainHtml(message)}${sourceCardsHtml(message)}</div>${actions ? `<div class="message-actions">${actions}</div>` : ""}</article>`;
+    const actions = assistantActionsHtml(message) + branchNavHtml(branch);
+    message = inlineThinkView(message);
+    return `<article class="message assistant" data-message="${escapeHtml(message.id)}" data-status="${escapeHtml(message.status || "complete")}"><div class="message-meta"><span class="meta-seal" aria-hidden="true">言</span><span>${escapeHtml(message.modelName || "模型")} · ${formatTime(message.timestamp)}</span></div><div class="assistant-block">${reasoningHtml(message)}${stepsHtml(message)}${assistantMainHtml(message)}${sourceCardsHtml(message)}</div>${actions ? `<div class="message-actions${branch ? " has-branch" : ""}">${actions}</div>` : ""}</article>`;
   }
+  // 正文开头带 <think>…</think> 的旧消息（导入或此前的版本）：渲染时按思考 + 正文拆开看，不改动存下的原文
+  const INLINE_THINK = /^\s*<think>([\s\S]*?)<\/think>\s*/;
+  function inlineThinkView(message) {
+    const match = message.status !== "streaming" && !message.reasoning && typeof message.content === "string" ? message.content.match(INLINE_THINK) : null;
+    return match ? { ...message, reasoning: match[1].trim(), content: message.content.slice(match[0].length) } : message;
+  }
+  function splitInlineThink(message) { const view = inlineThinkView(message); if (view !== message) { message.reasoning = view.reasoning; message.content = view.content; } }
   function assistantNoteHtml(message) { return message.status === "error" ? `<div class="message-error">${escapeHtml(message.error || "请求失败")}</div>` : message.status === "interrupted" ? `<div class="resume-note">连接中断，写下的都还在，可从这里续上。</div>` : ""; }
   function assistantMainHtml(message) {
     if (!message.content && message.status === "streaming") return `<div class="thinking">正在凝神</div>`;
@@ -746,7 +836,7 @@
     if (!block || conversation.ended) return renderConversation(followBottom);
     if (assistant.steps?.length) refreshSteps(assistant);
     block.querySelector(".thinking")?.remove();
-    const reasoning = block.querySelector(".reasoning"); if (reasoning && assistant.reasoning) reasoning.querySelector(".reasoning-body").textContent = assistant.reasoning;
+    const reasoning = block.querySelector(".reasoning"); if (reasoning && assistant.reasoning) reasoning.querySelector(".reasoning-body").textContent = assistant.reasoning; else if (!reasoning && assistant.reasoning) block.insertAdjacentHTML("afterbegin", reasoningHtml(assistant));
     block.querySelectorAll(".message-error, .resume-note, .source-stack").forEach(node => node.remove());
     const markdown = block.querySelector(".markdown");
     if (!assistant.content) { markdown?.remove(); block.insertAdjacentHTML("beforeend", assistantMainHtml(assistant)); }
@@ -759,9 +849,12 @@
     else { markdown?.remove(); block.insertAdjacentHTML("beforeend", assistantMainHtml(assistant)); renderEnhancements(block); }
     block.insertAdjacentHTML("beforeend", sourceCardsHtml(assistant));
     block.querySelectorAll(".message-error, .resume-note, .source-stack").forEach(node => node.classList.add("is-new"));
-    article.querySelector(".message-actions")?.remove(); const actions = assistantActionsHtml(assistant); if (actions) article.insertAdjacentHTML("beforeend", `<div class="message-actions">${actions}</div>`);
+    const branch = branchAt(conversation, conversation.messages.indexOf(assistant));
+    article.querySelector(".message-actions")?.remove(); const actions = assistantActionsHtml(assistant) + branchNavHtml(branch); if (actions) article.insertAdjacentHTML("beforeend", `<div class="message-actions${branch ? " has-branch" : ""}">${actions}</div>`);
     article.dataset.status = assistant.status; if (assistant.status === "complete") article.querySelector(".meta-seal")?.classList.add("stamped");
+    nodeSig.set(article, messageSig(assistant, branch));
     $("#chatScroll").classList.remove("generating");
+    if (conversation.id === currentId) syncContextCost();
     if (followBottom) requestAnimationFrame(scrollBottom);
   }
   const TOOL_LABELS = { search_web: "检索", fetch_page: "翻阅网页", read_document: "翻阅文档" };
@@ -829,8 +922,37 @@
     if (sent && file.id) { const action = file.kind === "image" ? `data-open-image="${escapeHtml(file.id)}" title="查看 ${escapeHtml(title)}"` : `data-download-attachment="${escapeHtml(file.id)}" title="下载 ${escapeHtml(title)}"`; return `<div class="attachment-card sent" role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}${save}</div>`; }
     return `<div class="attachment-card pending" data-kind="${file.kind}" title="${escapeHtml(title)}">${body}${save}${index !== null ? `<button class="attachment-tool attachment-remove" data-remove-attachment="${index}" title="移除 ${escapeHtml(file.name)}" aria-label="移除 ${escapeHtml(file.name)}">×</button>` : ""}</div>`;
   }
-  function renderAttachments() { const html = pendingAttachments.map((file,index) => attachmentCard(file,index)).join(""); [$("#attachments"), $("#welcomeAttachments")].forEach(el => { el.classList.toggle("hidden", !pendingAttachments.length); el.innerHTML = html; void loadThumbnails(el); }); renderSendButtons(); }
-  function composerHasContent() { const input = currentConversation() ? $("#chatInput") : $("#welcomeInput"); return !!(input?.value.trim() || pendingAttachments.length); }
+  function renderAttachments() { const html = pendingAttachments.map((file,index) => attachmentCard(file,index)).join(""); [$("#attachments"), $("#welcomeAttachments")].forEach(el => { el.classList.toggle("hidden", !pendingAttachments.length); el.innerHTML = html; void loadThumbnails(el); }); renderSendButtons(); syncContextCost(); }
+  // 引用追问：在回复或自己的话里划选一段，浮出「引用」；点了就作为引文带进输入框，随下一问送出
+  function renderQuote() {
+    const box = $("#composerQuote"); if (!box) return;
+    box.classList.toggle("hidden", !pendingQuote); box.querySelector(".composer-quote-text").textContent = pendingQuote?.text || "";
+    renderSendButtons(); syncContextCost();
+  }
+  function setupQuoteTip() {
+    const tip = $("#quoteTip"); let current = null, timer = null;
+    const hide = () => { current = null; if (!tip.classList.contains("hidden")) tip.classList.add("hidden"); };
+    const check = () => {
+      const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return hide();
+      const range = selection.getRangeAt(0), text = selection.toString().trim();
+      const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+      const body = host?.closest(".message .markdown, .message .user-bubble"), article = body?.closest("[data-message]");
+      if (!body || !article || text.length < 2 || body.closest(".message-editor")) return hide();
+      const rect = range.getBoundingClientRect(); if (!rect.width && !rect.height) return hide();
+      current = { text: text.slice(0, 1200), messageId: article.dataset.message };
+      tip.style.left = `${Math.min(innerWidth - 40, Math.max(40, rect.left + rect.width / 2))}px`; tip.style.top = `${Math.max(8, rect.top - 34)}px`;
+      tip.classList.remove("hidden");
+    };
+    document.addEventListener("selectionchange", () => { clearTimeout(timer); timer = setTimeout(check, 120); });
+    $("#chatScroll").addEventListener("scroll", hide, { passive: true });
+    tip.addEventListener("pointerdown", event => event.preventDefault()); // 别让点击把划选清掉
+    tip.addEventListener("click", () => {
+      if (!current) return hide();
+      pendingQuote = current; getSelection()?.removeAllRanges(); hide(); renderQuote(); persistDraft();
+      const input = $("#chatInput"); input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+    });
+  }
+  function composerHasContent() { const input = currentConversation() ? $("#chatInput") : $("#welcomeInput"); return !!(input?.value.trim() || pendingAttachments.length || pendingQuote); }
   function renderSendButtons() { const running = conversationRunning(), ended = !!currentConversation()?.ended, empty = !running && !composerHasContent(); document.querySelectorAll(".send-trigger").forEach(b => { b.textContent = running ? "■" : "↑"; b.title = running ? "停止生成" : "发送"; b.classList.toggle("stop-btn", running); b.classList.toggle("empty", empty); b.disabled = !running && ended; }); if ($("#clearContext")) $("#clearContext").disabled = running || ended; }
   // 图片缩略图：原件在 IndexedDB，渲染后异步补上 src；缓存最近 40 张
   async function loadThumbnails(root) {
@@ -872,7 +994,7 @@
   // 明暗切换：新主题像墨一样从右上角侵蚀到左下角（View Transitions）；浏览器不支持或用户减少动态效果时退回颜色渐变
   let suppressThemeFade = false;
   function switchTheme(next, origin) {
-    const apply = () => { store.settings.theme = next; saveStore(); applyAppearance(); renderHeader(); if (view === "chat" && !conversationRunning()) renderConversation(false); };
+    const apply = () => { store.settings.theme = next; saveStore(); applyAppearance(); renderHeader(); if (view === "chat") renderConversation(false); };
     const willDark = next === "dark" || (next === "system" && matchMedia("(prefers-color-scheme: dark)").matches), current = document.documentElement.dataset.theme;
     if (!document.startViewTransition || inkMotionOff() || (willDark ? "dark" : "light") === current) return apply();
     // 动画本身写在 CSS 的 ::view-transition-new(root) 上：新主题的快照套一张参差的对角墨缘遮罩，从右上角向左下角侵蚀
@@ -950,7 +1072,7 @@
   }
   async function saveToLibrary(id) {
     if (inLibrary(id)) return toast("已在卷宗中");
-    const metadata = pendingAttachments.find(file => file.id === id) || store.conversations.flatMap(c => c.messages || []).flatMap(m => m.attachments || []).find(file => file.id === id);
+    const metadata = pendingAttachments.find(file => file.id === id) || store.conversations.flatMap(allMessages).flatMap(m => m.attachments || []).find(file => file.id === id);
     if (!metadata || !(await getAttachment(id))) return toast("附件原件已不在此浏览器中");
     store.library.unshift(libraryEntry(metadata)); saveStore(); renderLibraryCount(); toast(`已将 ${metadata.name} 收入卷宗`);
   }
@@ -1036,9 +1158,10 @@
   }
   // 只有本轮要回答的那条用户消息携带附件原件；更早的消息改为文本摘要，避免每轮重发图片与长文
   function summarize(text, name, label) { const value = String(text || ""); return value.length > HISTORY_TEXT_CHARS ? `\n\n--- 附件：${name}（${label}，摘要）---\n${value.slice(0, HISTORY_TEXT_CHARS)}\n[全文共 ${value.length} 字，此前已完整发送]` : `\n\n--- 附件：${name}（${label}）---\n${value}`; }
+  function quotedText(message) { const quote = message.quote?.text; if (!quote) return message.content; return `${quote.split(/\r?\n/).map(line => `> ${line}`).join("\n")}\n\n${message.content || "请就引用的这段谈谈。"}`; }
   async function messageForApi(message, latest) {
-    if (message.role !== "user" || !message.attachments?.length) return { role: message.role, content: message.content };
-    const content = [{ type: "text", text: message.content || "请查看附件。" }];
+    if (message.role !== "user" || !message.attachments?.length) return { role: message.role, content: message.role === "user" ? quotedText(message) : message.content };
+    const content = [{ type: "text", text: quotedText(message) || "请查看附件。" }];
     for (const metadata of message.attachments) {
       const file = metadata.data !== undefined ? metadata : await getAttachment(metadata.id);
       if (!file) { content[0].text += `\n\n[附件 ${metadata.name} 的原件在此浏览器中已不可用]`; continue; }
@@ -1053,20 +1176,20 @@
   async function sendOrStop() {
     if (conversationRunning()) return stopGeneration();
     const input = currentConversation() ? $("#chatInput") : $("#welcomeInput");
-    const text = input.value.trim(); if (!text && !pendingAttachments.length) return;
+    const text = input.value.trim(); if (!text && !pendingAttachments.length && !pendingQuote) return;
     let profile = activeProfile(); if (!profile) { toast("先添一个模型"); return openSettings("models"); }
     if (profile.tools !== false && apiBase === null) { await ensureLocalBridge(); profile = activeProfile() || profile; }
     if (parseTokenLimit(profile.quota) === null) { toast("先给这个模型定一个用量上限"); openSettings("models"); setTimeout(() => document.querySelector(`[data-profile-card="${profile.id}"] [data-quota-amount]`)?.focus(),0); return; }
     if (quotaExhausted(profile)) { const existing = currentConversation(); if (existing) { existing.ended = true; saveStore(); renderConversation(); } toast("余墨已尽，调高上限或换个模型"); return; }
     const sendingDraftKey = draftKey(); let c = currentConversation();
     if (!c) {
-      c = { id: uid(), title: titleFrom(text, pendingAttachments), createdAt: now(), updatedAt: now(), profileId: profile.id, messages: [] };
+      c = { id: uid(), title: titleFrom(text || pendingQuote?.text || "", pendingAttachments), createdAt: now(), updatedAt: now(), profileId: profile.id, messages: [] };
       store.conversations.unshift(c); currentId = c.id;
     }
-    const user = { id: uid(), role: "user", content: text, timestamp: now(), attachments: pendingAttachments };
+    const user = { id: uid(), role: "user", content: text, timestamp: now(), attachments: pendingAttachments, ...(pendingQuote ? { quote: pendingQuote } : {}) };
     const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
     c.messages.push(user, assistant); c.updatedAt = now(); c.profileId = profile.id;
-    input.value = ""; input.style.height = "auto"; delete store.drafts[sendingDraftKey]; pendingAttachments = []; saveStore(); render(true);
+    input.value = ""; input.style.height = "auto"; delete store.drafts[sendingDraftKey]; pendingAttachments = []; pendingQuote = null; saveStore(); render(true);
     await streamReply(c, assistant, profile);
   }
   function titleFrom(text, attachments) { const value = text || `关于 ${attachments[0]?.name || "附件"}`; return value.replace(/\s+/g," ").slice(0,28) + (value.length > 28 ? "…" : ""); }
@@ -1104,7 +1227,7 @@
         if (!response.ok) { const data = await response.json().catch(() => ({})); throw Error(data.error || `请求失败（${response.status}）`); }
         const type = response.headers.get("content-type") || "";
         if (type.includes("text/event-stream")) await readSse(response, assistant);
-        else { const data = await response.json(), message = data?.choices?.[0]?.message; assistant.content += extractContent(data); assistant.reasoning = normalizeContent(message?.reasoning_content) || assistant.reasoning; assistant.usage = data.usage || null; if (Array.isArray(message?.tool_calls)) assistant.toolCalls = message.tool_calls.map(call => ({ id: call.id, name: call.function?.name || "", arguments: call.function?.arguments || "" })); }
+        else { const data = await response.json(), message = data?.choices?.[0]?.message; assistant.content += extractContent(data); assistant.reasoning = normalizeContent(message?.reasoning_content) || assistant.reasoning; splitInlineThink(assistant); assistant.usage = data.usage || null; if (Array.isArray(message?.tool_calls)) assistant.toolCalls = message.tool_calls.map(call => ({ id: call.id, name: call.function?.name || "", arguments: call.function?.arguments || "" })); }
         if (assistant.usage) { usageKnown = true; for (const key of Object.keys(usage)) usage[key] += Number(assistant.usage[key] || 0); }
         const calls = (assistant.toolCalls || []).filter(call => call.name);
         if (!calls.length || !overrides.tools) break;
@@ -1249,6 +1372,29 @@
     return { ok: true, content: text.length > limit ? `${text.slice(0, limit)}\n\n[文档共 ${text.length} 字${pageCount ? `、${pageCount} 页` : ""}，此处只给出开头；可用 page 或 query 参数读取其余部分]` : text, display: `${Math.min(text.length, limit)} 字` };
   }
   function estimateText(text) { const chinese = (text.match(/[㐀-鿿]/g) || []).length; return chinese + Math.ceil((text.length - chinese) / 4); }
+  // 下一问会带上多少上下文：上次「另起一纸」之后的问答、系统提示与工具说明，再加上正在输入的文字与待发附件。
+  // 与 messageForApi 的取舍一致：历史附件只算摘要长度，本轮附件按全文粗估
+  const CONTEXT_HEAVY = 24000;
+  function contextCostEstimate(c) {
+    const contextIndex = c.messages.map(m => m.role).lastIndexOf("context");
+    const source = c.messages.slice(contextIndex + 1).filter(m => m.status !== "error" && m.status !== "streaming" && ["user","assistant"].includes(m.role));
+    let score = 0;
+    for (const m of source) { score += 4 + estimateText(String(m.content || "")) + estimateText(m.quote?.text || ""); for (const file of m.attachments || []) score += file.kind === "image" ? 30 : Math.ceil(Math.min(HISTORY_TEXT_CHARS, Number(file.size) || 0) / 2); }
+    const profile = activeProfile();
+    if (profile) { const tools = profile.tools !== false ? toolDefinitions(c) : null; score += estimateText(assistantHint(profile, tools)) + (tools ? tools.length * 120 : 0); }
+    score += estimateText($("#chatInput")?.value || "") + estimateText(pendingQuote?.text || "");
+    for (const file of pendingAttachments) score += file.kind === "image" ? 1000 : Math.ceil(Math.min(MAX_EXTRACTED_CHARS, Number(file.size) || 0) / 2);
+    return Math.ceil(score);
+  }
+  function syncContextCost() {
+    const el = $("#contextCost"), c = currentConversation();
+    if (!el) return;
+    if (!c || view !== "chat" || c.ended) { el.classList.add("hidden"); return; }
+    const cost = contextCostEstimate(c), heavy = cost >= CONTEXT_HEAVY;
+    el.textContent = `上下文 ≈ ${formatTokens(cost)}`;
+    el.classList.toggle("heavy", heavy); el.classList.remove("hidden");
+    el.title = `${heavy ? "上下文已经不轻。" : ""}下一问会把这些一并送给模型：约 ${formatTokens(cost)} token，含系统提示、工具说明与正在输入的内容。前文不再需要时，可「另起一纸」`;
+  }
   function estimateTokens(messages) {
     let score = 0;
     for (const message of messages) {
@@ -1277,8 +1423,9 @@
     const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "", scheduled = false;
     // 落墨节奏：正文不按网络分块一坨坨出现，而是每帧按积压量的一定比例匀速写出（积压越多写得越快，最多滞后零点几秒）；新写出的字带短暂渐显，末尾跟一支笔尖光标
     const paced = !inkMotionOff(); let shown = paced ? assistant.content.length : Infinity, freshGroups = [];
+    let closed = false;
     const frame = () => {
-      scheduled = false;
+      scheduled = false; if (closed) return;
       const target = assistant.content.length, at = performance.now();
       const block = document.querySelector(`[data-message="${assistant.id}"] .assistant-block`);
       if (!block) { shown = target; freshGroups = []; return; }
@@ -1310,6 +1457,22 @@
     };
     const schedule = () => { if (scheduled) return; scheduled = true; requestAnimationFrame(frame); };
     const refresh = () => { saveStoreSoon(); schedule(); };
+    // 有些接口或中转站不走 reasoning_content，而是把思考直接写进正文开头的 <think>…</think>；这里把它剥出来，与 reasoning_content 一样归入折叠区。
+    // 标签可能被分块切开：开头先攥着几个字符看清是不是标签，思考期间末尾留 7 个字符等结束标签
+    const think = { mode: assistant.content ? "body" : "probe", held: "" };
+    const ingest = text => {
+      if (think.mode === "body") { assistant.content += text; return; }
+      if (think.mode === "probe") {
+        think.held += text; const lead = think.held.replace(/^\s+/, "");
+        if (lead.startsWith("<think>")) { think.mode = "think"; think.held = ""; ingest(lead.slice(7)); return; }
+        if ("<think>".startsWith(lead)) return;
+        think.mode = "body"; assistant.content += think.held; think.held = ""; return;
+      }
+      think.held += text; const end = think.held.indexOf("</think>");
+      if (end >= 0) { assistant.reasoning = (assistant.reasoning || "") + think.held.slice(0, end); think.mode = "body"; const rest = think.held.slice(end + 8).replace(/^\s+/, ""); think.held = ""; if (rest) assistant.content += rest; return; }
+      const keep = Math.min(think.held.length, 7); assistant.reasoning = (assistant.reasoning || "") + think.held.slice(0, think.held.length - keep); think.held = think.held.slice(think.held.length - keep);
+    };
+    const flushThink = () => { if (!think.held) return; if (think.mode === "think") assistant.reasoning = (assistant.reasoning || "") + think.held; else assistant.content += think.held; think.held = ""; think.mode = "body"; };
     while (true) {
       const { value, done } = await reader.read(); buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       const lines = buffer.split(/\r?\n/); buffer = lines.pop() || "";
@@ -1318,15 +1481,17 @@
         try {
           const json = JSON.parse(data); const delta = json.choices?.[0]?.delta; const text = normalizeContent(delta?.content), reasoning = normalizeContent(delta?.reasoning_content ?? delta?.reasoning);
           if (reasoning) { assistant.reasoning = (assistant.reasoning || "") + reasoning; refresh(); }
-          if (text) { assistant.content += text; refresh(); }
+          if (text) { ingest(text); refresh(); }
           if (Array.isArray(delta?.tool_calls)) for (const call of delta.tool_calls) { const slot = (assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" }; if (call.id) slot.id = call.id; if (call.function?.name) slot.name += call.function.name; if (call.function?.arguments) slot.arguments += call.function.arguments; }
           if (json.usage) assistant.usage = json.usage;
         } catch {}
       }
       if (done) break;
     }
+    flushThink();
     // 流结束后把积压的字写完再返回，收尾和下一轮工具调用都等在这后面；标签页不可见时直接补齐
     while (paced && shown < assistant.content.length) { schedule(); await new Promise(resolve => setTimeout(resolve, 16)); if (document.hidden) shown = assistant.content.length; }
+    closed = true; // 之后迟到的帧一律作废：后台标签页里 rAF 会攒到切回来才跑，那时收尾已把图表画好，再用 suppressViz 重绘会把它们打回占位
   }
   // 把尾段末尾最近写出的字按帧分组包进 .ink-fresh（用负 animation-delay 对齐各自的年龄，重绘也不会重放），并在最后一个字后放一支光标
   function decorateTail(tail, groups) {
@@ -1355,6 +1520,7 @@
     const c = currentConversation(); if (!c) return; const id = button.closest("[data-message]")?.dataset.message, index = c.messages.findIndex(m => m.id === id); if (index < 0) return;
     const message = c.messages[index];
     if (button.dataset.action === "copy") { await copyText(message.content); return toast("已复制"); }
+    if (button.dataset.action === "branch-prev" || button.dataset.action === "branch-next") return switchBranch(c, index, button.dataset.action === "branch-prev" ? -1 : 1);
     if (button.dataset.action === "cancel-edit") { editingMessageId = null; renderConversation(false); return; }
     if (button.dataset.action === "edit") {
       if (c.ended) return toast("这段对话已收尾，不再改动");
@@ -1376,15 +1542,16 @@
     const profile = activeProfile(); if (!profile) return openSettings("models");
     if (parseTokenLimit(profile.quota) === null) return toast("先给这个模型定一个用量上限");
     if (quotaExhausted(profile)) return toast("余墨已尽，调高上限或换个模型");
-    const discarded = c.messages.slice(userIndex + 1); void deleteAttachments(attachmentIds(discarded));
-    c.messages = c.messages.slice(0, userIndex + 1); const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name }; c.messages.push(assistant); saveStore(); renderConversation(true); await streamReply(c, assistant, profile);
+    forkTail(c, userIndex + 1); const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name }; c.messages.push(assistant); saveStore(); renderConversation(true); await streamReply(c, assistant, profile);
   }
   async function saveEditedMessage(conversation, index, value) {
     const text = value.trim(); if (!text) return toast("还没落笔");
     const profile = activeProfile(); if (!profile) return openSettings("models");
     if (parseTokenLimit(profile.quota) === null) return toast("先给这个模型定一个用量上限");
     if (quotaExhausted(profile)) return toast("余墨已尽，调高上限或换个模型");
-    const message = conversation.messages[index], discarded = conversation.messages.slice(index + 1); void deleteAttachments(attachmentIds(discarded)); message.content = text; conversation.messages = conversation.messages.slice(0,index + 1); conversation.updatedAt = now(); conversation.ended = false; if (index === 0 && conversation.titleAuto !== false) { conversation.title = titleFrom(text,message.attachments || []); conversation.titled = false; }
+    const old = conversation.messages[index]; if (text === old.content) { editingMessageId = null; renderConversation(false); return; }
+    // 旧问题连同它后面的回答整段留作一个版本；新问题沿用原来的附件与引文
+    forkTail(conversation, index); const message = { ...old, id: uid(), content: text, timestamp: now() }; conversation.messages.push(message); conversation.updatedAt = now(); conversation.ended = false; if (index === 0 && conversation.titleAuto !== false) { conversation.title = titleFrom(text,message.attachments || []); conversation.titled = false; }
     editingMessageId = null; const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name }; conversation.messages.push(assistant); saveStore(); render(true); await streamReply(conversation, assistant, profile);
   }
   async function copyText(text) { try { await navigator.clipboard.writeText(text); } catch { const t = document.createElement("textarea"); t.value = text; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); } }
@@ -1423,7 +1590,7 @@
       stopAllGenerations();
       const conversationIds = new Set(store.conversations.map(c => c.id)), draftFiles = Object.entries(store.drafts || {}).filter(([key]) => conversationIds.has(key)).flatMap(([,draft]) => Array.isArray(draft?.attachments) ? draft.attachments.map(file => file.id) : []);
       const currentDraftFiles = currentId ? pendingAttachments.map(file => file.id) : [];
-      void deleteAttachments([...attachmentIds(store.conversations.flatMap(c => c.messages || [])), ...draftFiles, ...currentDraftFiles]);
+      void deleteAttachments([...attachmentIds(store.conversations.flatMap(allMessages)), ...draftFiles, ...currentDraftFiles]);
       store.conversations = []; store.drafts = store.drafts?.[NEW_DRAFT_ID] ? { [NEW_DRAFT_ID]: store.drafts[NEW_DRAFT_ID] } : {}; scrollPositions.clear(); currentId = null; pendingAttachments = [];
       saveStore(); render(); renderSettings(); toast("所有对话已清空");
     });
@@ -1518,7 +1685,7 @@
       const data = JSON.parse(await readFile(file, "text"));
       if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations)) throw Error("不是言下的备份文件，或版本不兼容");
       const known = new Set(store.conversations.map(c => c.id)); let conversations = 0, added = 0, library = 0, drafts = 0, files = 0;
-      for (const c of data.conversations) if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) { store.conversations.push(c); conversations += 1; }
+      for (const c of data.conversations) if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) { store.conversations.push({ ...c, forks: Array.isArray(c.forks) ? c.forks : [] }); conversations += 1; }
       const profileIds = new Set(profiles().map(p => p.id));
       for (const p of Array.isArray(data.profiles) ? data.profiles : []) if (p?.id && p.source !== "server" && !profileIds.has(p.id)) { store.profiles.push({ ...p, apiKey: p.apiKey || "" }); added += 1; }
       const libraryIds = new Set(store.library.map(f => f.id));
