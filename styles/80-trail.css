@@ -1,0 +1,397 @@
+.reasoning {
+  margin: -2px 0 9px;
+  padding: 0;
+  border: 0;
+  font-family: var(--body);
+}
+.reasoning summary {
+  display: inline-flex;
+  height: 23px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 5px 0 1px;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--ink-3) 90%, transparent);
+  font:
+    9.5px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  letter-spacing: 0.06em;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.reasoning summary:hover {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+.reasoning summary:before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.reasoning[open] summary:before {
+  content: "";
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.reasoning-body {
+  max-height: 210px;
+  margin: 2px 0 0 3px;
+  padding: 4px 11px 5px 12px;
+  border-left: 1px solid transparent;
+  border-image: linear-gradient(to bottom, transparent, var(--line) 13%, var(--line) 87%, transparent) 1;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.65;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-3) 30%, transparent) transparent;
+}
+.thinking {
+  font: 12px/1.6 var(--body);
+  color: var(--ink-3);
+}
+.tool-stack {
+  margin: -1px 0 9px;
+  font-family: var(--body);
+}
+.tool-stack > summary {
+  display: inline-flex;
+  height: 23px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 5px 0 1px;
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+  color: color-mix(in srgb, var(--ink-3) 90%, transparent);
+  font:
+    9.5px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  letter-spacing: 0.06em;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.tool-stack > summary::-webkit-details-marker {
+  display: none;
+}
+.tool-stack > summary:hover {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+.tool-stack > summary:before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.tool-stack[open] > summary:before {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.tool-stack-meta {
+  color: var(--ink-3);
+  font: 9px var(--body);
+  letter-spacing: 0;
+}
+.tool-stack-body {
+  max-height: 230px;
+  margin: 2px 0 0 3px;
+  padding: 4px 8px 5px 11px;
+  overflow: auto;
+  border-left: 1px solid transparent;
+  border-image: linear-gradient(to bottom, transparent, var(--line) 13%, var(--line) 87%, transparent) 1;
+}
+.tool-steps {
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+}
+.tool-step {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 11.5px;
+}
+.tool-step-head {
+  min-height: 25px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 7px;
+}
+.tool-label {
+  min-width: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--accent);
+  font-size: 9px;
+  text-align: left;
+}
+.tool-title {
+  color: var(--ink-3);
+}
+.tool-meta {
+  font-size: 9.5px;
+}
+.tool-state {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font:
+    12px/1 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.tool-state.spinning {
+  border: 1px solid color-mix(in srgb, var(--ink-3) 22%, transparent);
+  border-top-color: var(--accent);
+  animation: toolSpin 0.72s linear infinite;
+}
+.tool-state.done {
+  color: var(--code-green);
+}
+.tool-state.failed {
+  color: var(--danger);
+}
+.tool-step[data-status="running"] .tool-meta:after {
+  display: none;
+}
+.tool-results {
+  max-height: none;
+  padding: 0 9px 7px 50px;
+  overflow: visible;
+}
+.tool-results li {
+  padding: 4px 0;
+  border-top-color: color-mix(in srgb, var(--line) 72%, transparent);
+}
+.tool-results a {
+  font-size: 11.5px;
+}
+.tool-results span {
+  font-size: 10.5px;
+}
+.tool-note {
+  max-height: none;
+  padding: 0 9px 7px 50px;
+  overflow: visible;
+  font-size: 10.5px;
+}
+/* 差遣：整张卡片衬一层淡金、左侧一道金线，在一串步骤里一眼能认出来（朱留给印章与删减）；帮手的小时间线嵌在里面，做完折成一行，只留回报在外。
+   卡片内一切都不许溢出背景：回报里的宽表格在卡片里横向滚动 */
+.tool-step-delegate {
+  margin: 4px 0;
+  padding-bottom: 2px;
+  min-width: 0;
+  overflow: hidden;
+  border-left: 2px solid color-mix(in srgb, var(--gold) 60%, transparent);
+  border-radius: 0 9px 9px 0;
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
+}
+.tool-step-delegate[data-status="running"] {
+  border-left-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+}
+.tool-step-delegate > .tool-step-head .tool-label {
+  color: var(--gold);
+}
+/* 整张卡片可折叠：点头部一行收起，只留标题与「n 步 · 改 n 个文件」 */
+.tool-step-delegate > .tool-step-head {
+  cursor: pointer;
+  border-radius: 0 7px 7px 0;
+}
+.tool-step-delegate > .tool-step-head:hover {
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+}
+.tool-step-delegate > .tool-step-head .tool-label:before {
+  content: "›";
+  display: inline-block;
+  width: 7px;
+  color: var(--ink-3);
+  font-size: 11px;
+  transform: rotate(90deg);
+  transition: transform 0.18s ease;
+}
+.tool-step-delegate.folded > .tool-step-head .tool-label:before {
+  transform: none;
+}
+.tool-step-delegate.folded > :not(.tool-step-head) {
+  display: none;
+}
+.tool-step-delegate.folded {
+  padding-bottom: 0;
+}
+.tool-step-delegate > .tool-step-head {
+  min-height: 30px;
+}
+.tool-step-delegate > .tool-step-head .tool-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 52px;
+}
+.tool-step-delegate > .tool-step-head .tool-title {
+  color: var(--ink-2);
+  font-family: var(--title);
+  font-size: 12.5px;
+}
+.sub-seal {
+  width: 15px;
+  height: 15px;
+  font-size: 9px;
+  border-color: var(--gold);
+  color: var(--gold);
+  transform: rotate(-4deg);
+}
+.sub-trail {
+  min-width: 0;
+  margin: 0 9px 8px 24px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--gold) 35%, var(--line));
+  overflow-wrap: anywhere;
+}
+.sub-timeline .trail-group {
+  padding: 2px 0 3px;
+}
+.sub-timeline .trail-note {
+  margin: 2px 0 4px 4px;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.sub-timeline .reasoning {
+  margin: 2px 0 3px;
+}
+.sub-timeline .reasoning-body {
+  max-height: 140px;
+  font-size: 11.5px;
+}
+.sub-steps > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.1em;
+}
+.sub-steps > summary::-webkit-details-marker {
+  display: none;
+}
+.sub-steps > summary:before {
+  content: "›";
+  display: inline-block;
+  width: 8px;
+  transition: transform 0.18s ease;
+}
+.sub-steps[open] > summary:before {
+  transform: rotate(90deg);
+}
+.sub-steps > summary:hover {
+  color: var(--ink-2);
+}
+.sub-trail[data-live="true"] .sub-steps > summary span:after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  vertical-align: 1px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.sub-steps .tool-steps {
+  margin-top: 2px;
+}
+.sub-said {
+  margin: 4px 0 2px;
+  color: var(--ink-2);
+  font-family: var(--title);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.sub-said > *:first-child {
+  margin-top: 0;
+}
+.sub-said > *:last-child {
+  margin-bottom: 0;
+}
+.sub-said p {
+  margin: 0 0 4px;
+}
+.sub-said pre {
+  font-size: 11px;
+}
+.sub-idle {
+  color: var(--ink-3);
+  font-style: italic;
+}
+.sub-report {
+  margin-top: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.sub-steps + .sub-report {
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--gold) 40%, var(--line));
+}
+.sub-report h1,
+.sub-report h2,
+.sub-report h3 {
+  margin: 10px 0 4px;
+  font-size: 13.5px;
+}
+/* 帮手的话与回报走 renderMarkdown 却不挂 .markdown（那是正文的标记，引用、旁注落点都认它）：表格、代码块、图片的收边在这里补上 */
+.trail-note table,
+.sub-report table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 11.5px;
+}
+.trail-note th,
+.trail-note td,
+.sub-report th,
+.sub-report td {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.trail-note th,
+.sub-report th {
+  background: var(--paper-2);
+  font-weight: 600;
+}
+.trail-note pre,
+.sub-report pre {
+  max-width: 100%;
+  overflow: auto;
+}
+.trail-note img,
+.sub-report img {
+  max-width: 100%;
+}
+.trail-note code,
+.sub-report code {
+  overflow-wrap: anywhere;
+}

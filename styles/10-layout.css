@@ -1,0 +1,765 @@
+.app {
+  position: relative;
+  height: 100%;
+  display: flex;
+}
+.sidebar {
+  width: 270px;
+  flex: none;
+  overflow: hidden;
+  background: var(--grain), var(--paper-2);
+  transition: width 0.38s cubic-bezier(0.22, 0.72, 0.2, 1);
+}
+.sidebar.collapsed {
+  width: 64px;
+}
+.sidebar-inner {
+  width: 270px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 12px 14px;
+}
+.wide {
+  transition:
+    opacity 0.24s ease 0.14s,
+    transform 0.34s cubic-bezier(0.22, 0.72, 0.2, 1) 0.1s;
+}
+.sidebar.collapsed .wide {
+  opacity: 0;
+  transform: translateX(-10px);
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease,
+    transform 0.3s cubic-bezier(0.22, 0.72, 0.2, 1);
+}
+.brand-row {
+  position: relative;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-left: 9px;
+}
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  font: 500 22px/1 var(--title);
+}
+.brand-name {
+  font: 500 14px var(--title);
+  letter-spacing: 0.18em;
+}
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--ink-3);
+  transition: 0.16s;
+}
+.icon-btn:hover,
+.icon-btn.active {
+  background: var(--paper-3);
+  color: var(--ink);
+}
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.collapse-btn {
+  position: absolute;
+  top: 2px;
+  left: 216px;
+  transition:
+    left 0.38s cubic-bezier(0.22, 0.72, 0.2, 1),
+    background 0.16s;
+}
+.sidebar.collapsed .collapse-btn {
+  left: 5px;
+}
+.rail-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 38px;
+  padding: 0;
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 13.5px;
+  text-align: left;
+  transition:
+    width 0.38s cubic-bezier(0.22, 0.72, 0.2, 1),
+    background 0.16s;
+}
+.rail-btn:hover,
+.rail-btn.active {
+  background: var(--paper-3);
+}
+.sidebar.collapsed .rail-btn {
+  width: 40px;
+}
+.rail-icon {
+  width: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.new-chat {
+  margin: 0 0 4px;
+}
+.new-chat .rail-icon {
+  color: var(--ink-2);
+  font: 300 17px/1 var(--title);
+}
+.library-open {
+  margin-bottom: 6px;
+}
+.rail-btn .count {
+  margin-left: auto;
+  padding-right: 12px;
+  color: var(--ink-3);
+  font:
+    10px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.history-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 2px;
+  padding-left: 12px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+}
+.history-head-line {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.history-head .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.history-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 4px;
+}
+.history-search-wrap:not(.hidden) {
+  animation: rise 0.18s ease-out;
+}
+.history-search {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  outline: 0;
+  background: var(--paper-3);
+  font-size: 12px;
+}
+.history-search:focus {
+  border-color: var(--ink-3);
+}
+.history-search::placeholder {
+  color: var(--ink-3);
+}
+.history {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 2px 0;
+}
+.history-group {
+  margin-bottom: 16px;
+}
+.history-label {
+  padding: 0 9px 6px;
+  color: color-mix(in srgb, var(--ink-2) 70%, var(--ink-3));
+  font: 10.5px var(--title);
+  letter-spacing: 0.16em;
+}
+/* 「工」组：绑了同一目录的对话归在一起，头一行是印 + 目录名 + 件数，点了收起 / 展开，右侧「＋」在此目录另起一纸 */
+.history-repo-group {
+  margin: 2px 0 6px;
+  padding: 3px 0 3px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--paper-3) 40%, transparent);
+}
+.history-repo-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+button.history-repo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  padding: 5px 9px 5px 7px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: color 0.16s;
+}
+button.history-repo:hover {
+  color: var(--accent);
+}
+.repo-seal {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  color: var(--accent);
+  font: 10px var(--title);
+  transform: rotate(-3deg);
+}
+.history-repo-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 12.5px var(--title);
+  color: var(--ink);
+}
+button.history-repo:hover .history-repo-name {
+  color: var(--accent);
+}
+.history-repo small {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 9.5px;
+}
+.repo-caret {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 13px;
+  transform: rotate(90deg);
+  transition: transform 0.18s ease;
+}
+.history-repo-group.collapsed .repo-caret {
+  transform: none;
+}
+.repo-new {
+  flex: none;
+  margin-right: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.history-repo-head:hover .repo-new,
+.history-repo-head:focus-within .repo-new {
+  opacity: 1;
+}
+.history-repo-items {
+  padding: 0 3px 0 6px;
+}
+/* 组内的对话不再各自打「行」印，组头的「工」已说明 */
+.history-repo-items .history-item.is-work .history-open:before {
+  display: none;
+}
+.history-repo-group.collapsed .history-repo-items {
+  padding-top: 0;
+}
+.history-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 9px;
+  margin: 1px 0;
+}
+.history-item.active,
+.history-item:hover {
+  background: var(--paper-3);
+}
+.history-open {
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  padding: 8px 30px 8px 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--ink) 82%, var(--ink-2));
+  font-size: 13px;
+}
+.history-item.active .history-open,
+.history-open:hover {
+  color: var(--ink);
+}
+.history-tools {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  display: flex;
+  gap: 1px;
+  padding-left: 8px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, transparent, var(--paper-3) 10px);
+  opacity: 0;
+}
+.history-item:hover .history-tools,
+.history-item:focus-within .history-tools {
+  opacity: 1;
+}
+.history-tool {
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--ink-3);
+  font: 11px var(--title);
+}
+.history-tool:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.history-more {
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+.history-rename {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--ink-3);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--paper);
+  font-size: 13px;
+}
+.sidebar-footer {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+.settings-open {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border-radius: 10px;
+  transition:
+    width 0.25s ease,
+    background 0.16s;
+}
+.settings-open:hover {
+  background: var(--paper-3);
+}
+.sidebar.collapsed .settings-open {
+  width: 40px;
+}
+.settings-open .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.settings-open .gear {
+  padding-right: 12px;
+  color: var(--ink-3);
+}
+.avatar {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper-3);
+  color: var(--ink-2);
+  font: 12px var(--title);
+}
+.main {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--grain), var(--wash), var(--paper);
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: 16px 0 0 16px;
+  overflow: hidden;
+}
+.main:before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  right: -70px;
+  bottom: -110px;
+  width: 430px;
+  height: 430px;
+  pointer-events: none;
+  opacity: 0.045;
+  background: radial-gradient(ellipse at 50% 65%, transparent 43%, var(--ink) 44% 45%, transparent 46%),
+    radial-gradient(ellipse at 32% 55%, transparent 39%, var(--ink) 40% 41%, transparent 42%);
+  transform: rotate(-12deg);
+}
+.topbar {
+  height: 55px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  position: relative;
+  z-index: 5;
+}
+.model-wrap {
+  position: relative;
+}
+.model-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+.model-trigger:hover {
+  background: var(--paper-2);
+}
+.model-dot,
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.model-menu {
+  position: absolute;
+  bottom: 40px;
+  right: 0;
+  width: min(300px, calc(100vw - 48px));
+  padding: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+  transform-origin: bottom right;
+  animation: menuIn 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.composer-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.model-trigger {
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+  max-width: 260px;
+}
+.model-trigger:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.model-trigger .model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-trigger .model-extra {
+  color: var(--ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.model-trigger .model-extra:empty {
+  display: none;
+}
+.model-caret {
+  font-size: 9px;
+  color: var(--ink-3);
+}
+.menu-section {
+  margin: 4px 0 2px;
+  padding: 8px 10px 6px;
+  border-top: 1px solid var(--line);
+}
+.menu-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.12em;
+}
+.menu-section .segmented {
+  padding: 2px;
+}
+.menu-section .segmented button {
+  min-width: 0;
+  flex: 1;
+  padding: 5px 6px;
+  font-size: 11px;
+}
+.welcome-chips:not(:has(.chip:not(.hidden))) {
+  display: none;
+}
+.composer-left {
+  min-width: 0;
+}
+.composer-left .text-btn {
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .model-trigger {
+    max-width: 130px;
+  }
+  .composer-right {
+    gap: 2px;
+  }
+}
+.model-option {
+  width: 100%;
+  display: block;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 8px;
+}
+.model-option:hover {
+  background: var(--paper-2);
+}
+.model-option strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.model-option small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+/* 顶栏右侧三件同一套笔墨：宋体小字、疏排、墨色三分；件与件之间一道细竖 */
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.top-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 6px;
+  background: color-mix(in srgb, var(--line) 85%, transparent);
+}
+/* 砚：亮色时是一方空砚上悬着一滴墨（点它落墨）；暗色时砚里蓄满了墨，只余一点纸光（点它天光） */
+.theme-toggle {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--ink-3);
+  transition:
+    background 0.16s,
+    color 0.16s;
+}
+.theme-toggle:hover {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+}
+.yan-rim {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+}
+.yan-pool {
+  fill: var(--ink);
+  transform-origin: 10px 10px;
+  transform: scale(0);
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.yan-drop {
+  fill: var(--ink);
+  transform-origin: 12.4px 7.4px;
+  transition:
+    fill 0.3s,
+    transform 0.3s;
+}
+.theme-toggle[data-theme="dark"] .yan-pool {
+  transform: scale(1);
+}
+.theme-toggle[data-theme="dark"] .yan-drop {
+  fill: var(--paper);
+  transform: scale(0.75);
+}
+.theme-toggle:hover .yan-drop {
+  animation: dropWobble 1.1s ease-in-out infinite;
+}
+@keyframes dropWobble {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(1.2px) scale(1.06, 0.94);
+  }
+}
+.theme-toggle[data-theme="dark"]:hover .yan-drop {
+  animation: none;
+  transform: scale(0.95);
+}
+.quota {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.08em;
+  transition: 0.18s;
+}
+.quota:hover {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+.quota-label {
+  white-space: nowrap;
+}
+.quota-text {
+  min-width: 22px;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0;
+}
+.quota.dry {
+  color: var(--danger);
+}
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+  color: var(--ink-3);
+  font: 10.5px var(--title);
+  letter-spacing: 0.14em;
+  transition: color 0.2s;
+}
+/* 静时只是一点未按的印泥；忙时朱色呼吸；断时转赤 */
+.connection .status-dot {
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: transparent;
+  transition:
+    background 0.25s,
+    border-color 0.25s;
+}
+.connection[data-state="idle"] {
+  color: color-mix(in srgb, var(--ink-3) 80%, transparent);
+}
+.connection[data-state="busy"] {
+  color: var(--ink-2);
+}
+.connection[data-state="busy"] .status-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+.connection[data-state="error"] {
+  color: var(--danger);
+}
+.connection[data-state="error"] .status-dot {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+/* 余墨：一笔细细的墨痕，随用量从笔尾往回收；底下是一道极淡的虚痕当刻度。与左边的印泥点、砚台同一分量，不抢正文的戏 */
+.quota {
+  gap: 8px;
+  padding: 5px 7px 6px;
+}
+.quota-label {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+}
+.quota-text {
+  min-width: 26px;
+  color: var(--ink-2);
+  font: 10px var(--title);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.ink-gauge {
+  position: relative;
+  display: block;
+  width: 54px;
+  height: 20px;
+  margin: 0 1px;
+}
+.ink-gauge svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding-top: 4px;
+  overflow: visible;
+}
+.ink-ghost {
+  fill: color-mix(in srgb, var(--ink-3) 13%, transparent);
+}
+.ink-fill {
+  fill: url(#inkGrad);
+  transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.ink-grad-a {
+  stop-color: color-mix(in srgb, var(--accent) 80%, var(--ink));
+  stop-opacity: 0.92;
+}
+.ink-grad-b {
+  stop-color: var(--accent);
+  stop-opacity: 0.8;
+}
+.ink-grad-c {
+  stop-color: var(--accent);
+  stop-opacity: 0.22;
+}
+.ink-streak {
+  display: none;
+}
+.quota.dry .ink-ghost {
+  fill: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.quota.empty .ink-ghost {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 0.5;
+  stroke-dasharray: 2 1.6;
+  opacity: 0.75;
+}
+.quota.empty .quota-text {
+  color: var(--danger);
+}

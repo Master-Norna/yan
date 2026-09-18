@@ -1,0 +1,1142 @@
+.chat {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.chat-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 42px 145px;
+}
+.chat-inner {
+  width: min(100%, var(--read));
+  margin: 0 auto;
+}
+.chat-title {
+  margin: 2px 0 35px;
+}
+.chat-title h1 {
+  margin: 0 -6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  outline: 0;
+  cursor: text;
+  font: 500 25px var(--title);
+  letter-spacing: 0.035em;
+}
+.chat-title h1:focus {
+  background: var(--paper-2);
+}
+.chat-title div {
+  position: relative;
+  margin-top: 8px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.14em;
+}
+.chat-title .chip-pop {
+  top: 22px;
+  font: 12px var(--body);
+  letter-spacing: 0;
+}
+.message {
+  margin-bottom: 36px;
+}
+.message.is-new {
+  animation: rise 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.message.user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.user-bubble {
+  max-width: 80%;
+  padding: 12px 16px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--paper-2);
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.user-quote {
+  max-width: 80%;
+  margin: 0 6px 6px 0;
+  padding: 2px 0 2px 11px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.user-quote:hover {
+  color: var(--ink-2);
+}
+.quote-tip {
+  position: fixed;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  padding: 2px 3px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  box-shadow: 0 6px 20px rgba(61, 49, 32, 0.14);
+  animation: rise 0.16s ease-out;
+  transform: translate(-50%, 0);
+}
+.quote-tip button {
+  padding: 3px 9px;
+  border-radius: 99px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-family: var(--title);
+  letter-spacing: 0.04em;
+}
+.quote-tip button:hover {
+  color: var(--ink);
+  background: var(--paper-2);
+}
+.quote-tip-sep {
+  width: 1px;
+  height: 12px;
+  margin: 0 1px;
+  background: var(--line);
+}
+.side-panel {
+  position: relative;
+  flex: none;
+  width: min(400px, 42vw);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--paper-2);
+  animation: fadeIn 0.18s ease;
+  transition: width 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.side-panel.wide {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 30;
+  width: min(900px, 70vw);
+  box-shadow: var(--shadow);
+  border-radius: 14px 0 0 14px;
+}
+.side-panel.wide .side-scroll {
+  padding: 22px 34px 26px;
+}
+.side-panel.wide .side-messages {
+  width: min(100%, var(--read));
+  margin: 0 auto;
+}
+.side-panel.wide .side-messages .markdown,
+.side-panel.wide .side-messages .user-bubble {
+  font-size: 14px;
+}
+.side-panel.leaving {
+  opacity: 0;
+  transition: opacity 0.17s;
+}
+.side-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 12px 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.side-seal {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+.side-title {
+  flex: 1;
+  min-width: 0;
+}
+.side-title strong {
+  display: block;
+  font: 500 13px var(--title);
+  letter-spacing: 0.08em;
+}
+.side-title small {
+  display: block;
+  color: var(--ink-3);
+  font: 9.5px var(--title);
+  letter-spacing: 0.16em;
+}
+.side-nav {
+  margin-right: 2px;
+}
+.side-anchor {
+  display: -webkit-box;
+  width: 100%;
+  margin: 0;
+  padding: 10px 14px 10px 15px;
+  border-left: 2px solid var(--accent);
+  text-align: left;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--paper) 55%, transparent);
+  transition:
+    color 0.16s,
+    background 0.16s;
+}
+.side-anchor:hover {
+  color: var(--ink);
+  background: var(--paper);
+}
+.side-anchor.lost {
+  border-left-color: var(--ink-3);
+  color: var(--ink-3);
+  cursor: default;
+}
+.side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 14px 18px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-3) 28%, transparent) transparent;
+}
+.side-messages .message {
+  margin-bottom: 22px;
+}
+.side-messages .markdown {
+  font-size: 13px;
+}
+.side-messages .user-bubble {
+  font-size: 13px;
+}
+.side-messages .message-meta {
+  font-size: 10px;
+}
+.side-messages .message-actions {
+  opacity: 0.5;
+}
+.side-empty {
+  padding: 34px 8px;
+  text-align: center;
+  color: var(--ink-3);
+  font: 12px/1.9 var(--title);
+  letter-spacing: 0.06em;
+}
+.side-composer {
+  padding: 10px 12px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.side-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.side-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--ink-3);
+  font: 10.5px var(--title);
+  letter-spacing: 0.06em;
+}
+.side-foot .model-trigger {
+  padding: 3px 6px;
+  font-size: 11px;
+}
+.side-composer textarea {
+  flex: 1;
+  min-height: 38px;
+  max-height: 160px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  resize: none;
+  outline: none;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.side-composer textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.side-composer .send-btn {
+  width: 34px;
+  height: 34px;
+  flex: none;
+}
+mark.note-anchor {
+  background: none;
+  color: inherit;
+  text-decoration: underline dotted color-mix(in srgb, var(--accent) 70%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: text-decoration-color 0.16s;
+}
+mark.note-anchor:hover {
+  text-decoration-style: solid;
+}
+mark.note-anchor.active {
+  text-decoration: underline solid var(--accent);
+  text-decoration-thickness: 1px;
+}
+sup.note-ref {
+  display: inline-block;
+  margin: 0 1px 0 2px;
+  padding: 0 3px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line));
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--accent);
+  font: 9px/12px var(--title);
+  line-height: 12px;
+  vertical-align: super;
+  cursor: pointer;
+  user-select: none;
+  letter-spacing: 0;
+  transition:
+    background 0.16s,
+    color 0.16s;
+}
+sup.note-ref:hover,
+sup.note-ref.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+}
+.note-mark {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--accent);
+  font: 10px/15px var(--title);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transform: rotate(-2deg);
+  opacity: 0.85;
+  transition:
+    opacity 0.16s,
+    transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.note-mark:hover {
+  opacity: 1;
+  transform: rotate(0);
+}
+.message.user .note-mark {
+  margin: 0 6px 6px 0;
+}
+.quote-tip:hover {
+  color: var(--ink);
+  background: var(--paper-2);
+}
+.composer-quote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 2px 10px;
+  padding: 4px 4px 4px 11px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.55;
+  animation: rise 0.2s ease-out;
+}
+.composer-quote-text {
+  flex: 1;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.composer-quote-close {
+  padding: 0 4px;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.6;
+  opacity: 0.7;
+}
+.composer-quote-close:hover {
+  color: var(--ink);
+  opacity: 1;
+}
+.message.flash {
+  animation: quoteFlash 1.2s ease-out;
+}
+@keyframes quoteFlash {
+  0% {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.assistant-block {
+  font-family: var(--title);
+  font-size: 16.5px;
+  line-height: 1.85;
+}
+.message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.12em;
+}
+.message-actions {
+  display: flex;
+  gap: 2px;
+  margin: 9px 0 0 -5px;
+  opacity: 0;
+  transition: 0.16s;
+}
+.message.user .message-actions {
+  margin-right: -5px;
+}
+.message:hover .message-actions {
+  opacity: 1;
+}
+.message.assistant:not([data-status="streaming"]) .message-actions {
+  opacity: 0.62;
+}
+.message.assistant:hover .message-actions {
+  opacity: 1;
+}
+/* 侧栏顶上：牌匾「言」下面一行小字题签，注明当下的态——对谈，或执事。不是开关，只是题签；改态去目录签。
+   对谈时只有两个字，不再把「言」重复一遍；执事时前头多一枚小小的「行」印，字转印色 */
+.mode-seal {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 18px;
+  margin: -3px 0 22px;
+  padding-left: 10px;
+  color: var(--ink-3);
+  font: 11px var(--title);
+  letter-spacing: 0.24em;
+  cursor: default;
+  transition:
+    width 0.25s ease,
+    color 0.2s;
+}
+.mode-seal .rail-icon {
+  display: none;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line));
+  border-radius: 3px;
+  color: var(--accent);
+  font: 500 9px/1 var(--title);
+  letter-spacing: 0;
+  transform: rotate(-2deg);
+}
+.mode-seal .wide {
+  line-height: 1;
+}
+.mode-seal[data-mode="work"] {
+  color: var(--accent);
+}
+.mode-seal[data-mode="work"] .rail-icon {
+  display: grid;
+}
+.history-item.is-work .history-open:before {
+  content: "行";
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 3px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 3px;
+  color: var(--accent);
+  font: 9px/14px var(--title);
+  vertical-align: 1px;
+}
+.work-setup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper-2) 70%, transparent);
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.work-setup label {
+  flex: none;
+  font: 11px var(--title);
+  letter-spacing: 0.12em;
+}
+.work-setup .field {
+  flex: 1;
+  background: transparent;
+  border-color: transparent;
+  padding: 6px 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+.work-setup .field:focus {
+  border-color: var(--line);
+}
+.work-setup small {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.workdir-pick {
+  flex: none;
+  padding: 4px 11px;
+  font-size: 11.5px;
+}
+.tool-title.tool-cmd {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.tool-output {
+  margin: 0 9px 8px 50px;
+  padding: 7px 10px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  color: var(--ink-2);
+  font:
+    10.5px/1.55 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: rise 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) 0.08s backwards;
+}
+.tool-approve {
+  display: flex;
+  gap: 6px;
+  margin: 2px 9px 9px 50px;
+}
+.tool-approve button {
+  padding: 4px 11px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  color: var(--ink-2);
+  font-size: 11px;
+  background: var(--paper);
+}
+.tool-approve button:hover {
+  color: var(--ink);
+  background: var(--paper-2);
+}
+.tool-approve button[data-approve="run"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--accent);
+}
+.tool-state.pending {
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  font-size: 10px;
+}
+.tool-state.skipped {
+  color: var(--ink-3);
+}
+.tool-step[data-status="pending"] {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 7px;
+}
+.text-btn.on {
+  color: var(--accent);
+}
+/* 收起时牌匾隐去，这一行只剩一个字（言 / 行）落在原处 */
+.sidebar.collapsed .mode-seal {
+  width: 40px;
+  height: 24px;
+  margin: 2px 0 16px;
+  padding: 0;
+  justify-content: center;
+  color: var(--accent);
+}
+.sidebar.collapsed .mode-seal .rail-icon {
+  display: grid;
+  width: 40px;
+  height: 24px;
+  border: 0;
+  font-size: 14px;
+  transform: none;
+}
+.sidebar.collapsed .mode-seal .wide {
+  display: none;
+}
+.welcome-chips {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding-left: 2px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 60%, transparent);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  max-width: 260px;
+  transition:
+    background 0.16s,
+    color 0.16s;
+}
+.chip:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chip .chip-glyph {
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.06em;
+}
+.chip .chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip .chip-caret {
+  color: var(--ink-3);
+  font-size: 9px;
+  margin-left: 1px;
+}
+.chip.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.chip-pop {
+  position: absolute;
+  top: 30px;
+  left: 0;
+  z-index: 21;
+  width: min(420px, calc(100vw - 48px));
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  transform-origin: top left;
+  animation: menuIn 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.chip-pop .field {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+.chip-pop-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.chip-pop-row .outline-btn {
+  flex: none;
+  white-space: nowrap;
+  padding: 6px 12px;
+}
+.chip-pop small {
+  display: block;
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-top: 6px;
+}
+.chip-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 180px;
+  overflow: auto;
+}
+.chip-pop-list button {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-pop-list button:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.chip-pop-list .chip-pop-label {
+  padding: 4px 8px 2px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.12em;
+}
+.chip-menu {
+  width: 150px;
+  padding: 5px;
+}
+.chip-menu button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.chip-menu button:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.chip-menu button.active {
+  color: var(--accent);
+}
+.chip-menu button small {
+  color: var(--ink-3);
+  font-size: 10px;
+}
+/* 浮层菜单：附件签「＋」与历史条目「⋯」共用，挂在 body 上按锚点定位 */
+.chip-pop.floating {
+  position: fixed;
+  top: auto;
+  left: auto;
+  width: auto;
+  min-width: 148px;
+  max-width: min(320px, calc(100vw - 20px));
+  z-index: 40;
+}
+.chip-pop.floating.drop-up {
+  transform-origin: bottom left;
+}
+.chip-pop.floating:not(.chip-menu) {
+  width: min(420px, calc(100vw - 20px));
+  max-width: none;
+}
+/* 与模型菜单同一副面孔：同样的内距与圆角、标题字、右上角略收的印角；小注靠右，删除一类另起一段 */
+.chip-pop.floating.chip-menu {
+  padding: 6px;
+}
+.chip-pop.floating.chip-menu button {
+  padding: 8px 10px;
+  border-radius: 6px 10px 10px 10px;
+  color: var(--ink-2);
+  font-family: var(--title);
+  font-size: 12.5px;
+  letter-spacing: 0.025em;
+  transition:
+    background-color 0.16s,
+    color 0.16s;
+}
+.chip-pop.floating.chip-menu button small {
+  margin-left: 18px;
+  font: 10.5px var(--body);
+  letter-spacing: 0;
+}
+.chip-pop.floating.chip-menu button.danger {
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+  color: var(--ink-3);
+}
+.chip-menu button.danger:hover {
+  color: var(--danger);
+}
+.chip-pop.attach-picker {
+  width: min(320px, calc(100vw - 20px));
+  padding: 8px;
+}
+.chip-pop.attach-picker .field {
+  font-family: inherit;
+  margin-bottom: 6px;
+}
+.chip-pop.attach-picker .chip-pop-list {
+  max-height: 240px;
+}
+.chip-pop.attach-picker .chip-pop-list button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-family: inherit;
+}
+.chip-pop.attach-picker .chip-pop-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-pop.attach-picker .chip-pop-list button small {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+.chat-meta-path,
+.chat-meta-bind {
+  padding: 0;
+  color: var(--ink-3);
+  font: inherit;
+  letter-spacing: inherit;
+  overflow-wrap: anywhere;
+}
+.chat-meta-path {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0;
+}
+.chat-meta-path:hover,
+.chat-meta-bind:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.chip-pop-unbind {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  text-align: left;
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+.chip-pop-unbind:hover {
+  background: var(--paper-2);
+  color: var(--accent);
+}
+.chat-meta-notes {
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  letter-spacing: inherit;
+}
+.chat-meta-notes:hover {
+  text-decoration: underline;
+}
+.tool-cmd-preview {
+  max-height: 132px;
+  margin-bottom: 5px;
+  color: var(--ink);
+}
+.tool-diff {
+  margin: 0 9px 8px 50px;
+  display: grid;
+  gap: 3px;
+}
+.tool-diff .tool-output {
+  margin: 0;
+  max-height: 150px;
+  border-left: 2px solid var(--line);
+}
+.diff-del {
+  border-left-color: var(--danger) !important;
+  background: color-mix(in srgb, var(--danger) 7%, transparent) !important;
+  color: color-mix(in srgb, var(--danger) 65%, var(--ink)) !important;
+}
+.diff-ins {
+  border-left-color: var(--code-green) !important;
+  background: color-mix(in srgb, var(--code-green) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--code-green) 70%, var(--ink)) !important;
+}
+.message-actions.has-branch {
+  opacity: 0.72;
+}
+.branch-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin: 0 2px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.branch-nav .message-action {
+  width: 20px;
+  height: 22px;
+  font-size: 13px;
+}
+.branch-nav .message-action:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.branch-nav span {
+  padding: 0 2px;
+  cursor: default;
+}
+.message-action {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--ink-3);
+}
+.message-action svg {
+  width: 15px;
+  height: 15px;
+}
+.message-action:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.message-editor {
+  width: 80%;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--paper-2);
+}
+.message-editor textarea {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  max-height: 70vh;
+  overflow: auto;
+  resize: none;
+  field-sizing: content;
+  white-space: pre-wrap;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  line-height: 1.7;
+}
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.edit-actions button {
+  width: auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.edit-save {
+  background: var(--accent);
+  color: #fff;
+}
+.message-error {
+  padding: 11px 13px;
+  border-left: 2px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--danger);
+  font: 13px/1.6 var(--body);
+}
+.reasoning {
+  margin: 0 0 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+  font-family: var(--body);
+}
+.reasoning summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.12em;
+}
+.reasoning summary::-webkit-details-marker {
+  display: none;
+}
+.reasoning summary:before {
+  content: "▸ ";
+}
+.reasoning[open] summary:before {
+  content: "▾ ";
+}
+.reasoning-body {
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 8px;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.thinking {
+  color: var(--ink-3);
+}
+.thinking:after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 1em;
+  margin-left: 5px;
+  background: var(--accent);
+  vertical-align: -2px;
+  animation: blink 1s steps(1) infinite;
+}
+.markdown p {
+  margin: 0 0 1em;
+}
+.markdown > p:last-child,
+.markdown .md-tail > p:last-child {
+  margin-bottom: 0;
+}
+.markdown .md-stable > p:last-child {
+  margin-bottom: 1em;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-family: var(--title);
+  font-weight: 600;
+  line-height: 1.45;
+  margin: 1.35em 0 0.6em;
+}
+.markdown h1 {
+  font-size: 1.35em;
+}
+.markdown h2 {
+  font-size: 1.22em;
+}
+.markdown h3 {
+  font-size: 1.1em;
+}
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4em;
+  margin: 0.6em 0 1em;
+}
+.markdown li {
+  margin: 0.25em 0;
+}
+.markdown li > ul,
+.markdown li > ol {
+  margin: 0.25em 0;
+}
+.markdown li > p {
+  margin: 0 0 0.4em;
+}
+.markdown li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.3em;
+}
+.markdown input[type="checkbox"] {
+  margin: 0 0.5em 0 0;
+  accent-color: var(--accent);
+  vertical-align: -1px;
+}
+.markdown blockquote {
+  margin: 1em 0;
+  padding: 1px 0 1px 18px;
+  border-left: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.markdown code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--paper-2);
+  font:
+    85% ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.markdown pre {
+  position: relative;
+  overflow: auto;
+  margin: 1em 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-2);
+}
+.markdown pre code {
+  padding: 0;
+  background: none;
+  line-height: 1.65;
+}
+.markdown a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-soft);
+}
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1.5em 0;
+}
+.markdown img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+.markdown del {
+  color: var(--ink-3);
+}
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.92em;
+}
+.markdown th,
+.markdown td {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.markdown th {
+  background: var(--paper-2);
+  font-weight: 600;
+}
+.markdown .math-block {
+  overflow-x: auto;
+  margin: 1em 0;
+  padding: 2px 0;
+  text-align: center;
+}
+.markdown .katex {
+  font-size: 1.05em;
+}

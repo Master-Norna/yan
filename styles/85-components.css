@@ -1,0 +1,460 @@
+.chat-scroll,
+.history,
+.settings-content,
+.library-page,
+.reasoning-body,
+.tool-stack-body {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-3) 28%, transparent) transparent;
+}
+.chat-scroll::-webkit-scrollbar,
+.history::-webkit-scrollbar,
+.settings-content::-webkit-scrollbar,
+.library-page::-webkit-scrollbar,
+.reasoning-body::-webkit-scrollbar,
+.tool-stack-body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track,
+.history::-webkit-scrollbar-track,
+.settings-content::-webkit-scrollbar-track,
+.library-page::-webkit-scrollbar-track,
+.reasoning-body::-webkit-scrollbar-track,
+.tool-stack-body::-webkit-scrollbar-track {
+  background: linear-gradient(
+    to bottom,
+    transparent 0,
+    color-mix(in srgb, var(--line) 44%, transparent) 18%,
+    color-mix(in srgb, var(--line) 44%, transparent) 82%,
+    transparent 100%
+  );
+}
+.chat-scroll::-webkit-scrollbar-thumb,
+.history::-webkit-scrollbar-thumb,
+.settings-content::-webkit-scrollbar-thumb,
+.library-page::-webkit-scrollbar-thumb,
+.reasoning-body::-webkit-scrollbar-thumb,
+.tool-stack-body::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 99px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--ink-3) 7%, transparent),
+    color-mix(in srgb, var(--ink-3) 34%, transparent) 22%,
+    color-mix(in srgb, var(--ink-3) 34%, transparent) 78%,
+    color-mix(in srgb, var(--ink-3) 7%, transparent)
+  );
+  background-clip: padding-box;
+}
+.chat-scroll::-webkit-scrollbar-thumb:hover,
+.reasoning-body::-webkit-scrollbar-thumb:hover,
+.tool-stack-body::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink-3) 42%, transparent);
+  background-clip: padding-box;
+}
+.html-app {
+  margin: 1em 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.html-app .code-head {
+  background: var(--paper-2);
+}
+.html-app .code-head > span:last-child {
+  display: flex;
+  gap: 2px;
+}
+.html-app-stage {
+  height: clamp(320px, 48vh, 520px);
+  background: #fff;
+}
+.html-app-stage > span {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  font: 11px var(--title);
+  letter-spacing: 0.08em;
+}
+.html-app-stage iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+.html-app-source {
+  max-height: 520px;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  background: var(--paper-2);
+  font:
+    85%/1.65 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.html-app-error {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--line));
+}
+.work-expanded {
+  position: fixed !important;
+  inset: 16px !important;
+  z-index: 75 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  margin: 0 !important;
+  border-radius: 14px !important;
+  background: var(--paper) !important;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.35) !important;
+}
+.work-expanded .viz-canvas,
+.work-expanded .html-app-stage {
+  flex: 1;
+  height: auto !important;
+  min-height: 0;
+}
+.work-expanded .viz-source,
+.work-expanded .html-app-source {
+  flex: 1;
+  max-height: none;
+}
+.resume-note {
+  margin-top: 12px;
+  padding: 8px 11px;
+  border-left: 2px solid var(--accent);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font: 11.5px/1.6 var(--body);
+}
+.source-stack {
+  margin: 18px 0 4px;
+  font-family: var(--body);
+}
+.source-stack > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 5px 3px 1px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink-3);
+  font:
+    9.5px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  letter-spacing: 0.06em;
+}
+.source-stack > summary::-webkit-details-marker {
+  display: none;
+}
+.source-stack > summary:before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.source-stack[open] > summary:before {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.source-stack > summary small {
+  font: 9px var(--body);
+  letter-spacing: 0;
+}
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  max-height: 300px;
+  margin-top: 7px;
+  padding: 2px;
+  overflow: auto;
+}
+.source-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper-2);
+  color: inherit !important;
+  text-decoration: none !important;
+  transition: 0.16s;
+}
+.source-card:hover {
+  border-color: var(--ink-3);
+  transform: translateY(-1px);
+}
+.source-index {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--accent);
+  font:
+    9px ui-monospace,
+    monospace;
+}
+.source-copy {
+  min-width: 0;
+  flex: 1;
+}
+button.source-local {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.source-copy strong,
+.source-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-copy strong {
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.source-copy small {
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: 9.5px;
+}
+.source-read {
+  flex: none;
+  color: var(--code-green);
+  font-size: 9px;
+}
+.chat-scroll.generating {
+  padding-bottom: clamp(240px, 34vh, 380px);
+}
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--paper) 91%, transparent);
+  backdrop-filter: blur(12px);
+  animation: fadeIn 0.18s ease;
+}
+.image-viewer-head {
+  height: 54px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+}
+.image-viewer-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font: 12px var(--body);
+}
+.image-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.image-viewer-actions button {
+  padding: 6px 9px;
+  border-radius: 8px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.image-viewer-actions button:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.image-viewer-close {
+  width: 30px !important;
+  height: 30px;
+  padding: 0 !important;
+  font: 20px/1 var(--title) !important;
+}
+.image-viewer-stage {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 26px;
+  cursor: zoom-in;
+}
+.image-viewer-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100dvh - 106px);
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 16px 55px rgba(35, 30, 22, 0.18);
+}
+.image-viewer-stage.actual {
+  display: block;
+  text-align: center;
+  cursor: zoom-out;
+}
+.image-viewer-stage.actual .image-viewer-image {
+  max-width: none;
+  max-height: none;
+  margin: auto;
+}
+
+/* 卷宗文件的悬浮预览：与图片查看器同一张纸，中间按文件类型换内容 */
+.file-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(12px);
+  animation: fadeIn 0.18s ease;
+}
+.file-viewer-head {
+  height: 54px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+.file-viewer-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font: 13px var(--title);
+  letter-spacing: 0.04em;
+}
+.file-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.file-viewer-actions button {
+  padding: 6px 11px;
+  border-radius: 8px;
+  color: var(--ink-3);
+  font: 11.5px var(--title);
+  letter-spacing: 0.08em;
+}
+.file-viewer-actions button:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.file-viewer-close {
+  width: 30px !important;
+  height: 30px;
+  padding: 0 !important;
+  font: 20px/1 var(--title) !important;
+}
+.file-viewer-stage {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  overflow: auto;
+  padding: 24px;
+}
+.file-viewer-image {
+  margin: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 110px);
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 16px 55px rgba(35, 30, 22, 0.18);
+}
+.file-viewer-frame {
+  width: min(100%, 1000px);
+  height: calc(100dvh - 110px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.file-viewer-text {
+  width: min(100%, var(--read));
+  align-self: flex-start;
+  height: fit-content;
+  padding: 26px 30px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.85;
+  box-shadow: 0 10px 40px rgba(35, 30, 22, 0.08);
+}
+.file-viewer-extracted p {
+  margin: 0 0 0.9em;
+}
+.file-viewer-code {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    12.5px/1.75 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  color: var(--ink-2);
+}
+/* 表格按内容收，列少时不必占满一整张纸 */
+.file-viewer-fit {
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
+}
+.file-viewer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.file-viewer-table th,
+.file-viewer-table td {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.file-viewer-table th {
+  background: var(--paper-2);
+  font-weight: 600;
+}
+.file-viewer-note {
+  margin: 12px 0 0;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.file-viewer-empty {
+  margin: auto;
+  color: var(--ink-3);
+  font: 12px/2.2 var(--title);
+  letter-spacing: 0.1em;
+  text-align: center;
+}

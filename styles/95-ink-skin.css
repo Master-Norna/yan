@@ -1,0 +1,150 @@
+/* 纸墨控件：模型签向下舒展；底部空间不足时由脚本翻到上方 */
+@keyframes menuDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes menuRise {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.model-menu {
+  top: calc(100% + 9px);
+  bottom: auto;
+  right: 0;
+  width: min(310px, calc(100vw - 28px));
+  padding: 7px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 5px 12px 12px 12px;
+  background: var(--grain), linear-gradient(145deg, color-mix(in srgb, var(--accent) 3.5%, transparent), transparent 42%), var(--paper);
+  box-shadow: 0 18px 46px rgba(35, 30, 24, 0.16);
+  transform-origin: top right;
+  animation-name: menuDrop;
+}
+.model-menu.drop-up {
+  top: auto;
+  bottom: calc(100% + 9px);
+  border-radius: 12px 12px 5px 12px;
+  transform-origin: bottom right;
+  animation-name: menuRise;
+}
+.model-trigger {
+  border-radius: 6px;
+  font-family: var(--title);
+  letter-spacing: 0.035em;
+}
+.model-trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 5%, var(--paper-2));
+  color: var(--ink);
+}
+.model-caret {
+  display: inline-block;
+  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.model-trigger[aria-expanded="true"] .model-caret {
+  transform: rotate(180deg);
+}
+.model-option {
+  position: relative;
+  border-radius: 6px 10px 10px 10px;
+  color: var(--ink-2);
+  transition:
+    background-color 0.16s,
+    color 0.16s;
+}
+.model-option strong {
+  font-family: var(--title);
+  letter-spacing: 0.025em;
+}
+.model-option .model-dot {
+  opacity: 0;
+  transition: opacity 0.16s;
+}
+.model-option.active {
+  padding-right: 50px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--paper));
+  color: var(--ink);
+}
+.model-option.active .model-dot {
+  opacity: 1;
+}
+.model-option.active:after {
+  content: "当前";
+  position: absolute;
+  top: 10px;
+  right: 11px;
+  color: var(--accent);
+  font: 9px var(--title);
+  letter-spacing: 0.12em;
+}
+.menu-section {
+  margin-top: 6px;
+  padding: 10px 9px 7px;
+  border-top-color: color-mix(in srgb, var(--accent) 16%, var(--line));
+}
+.menu-section-title {
+  margin-bottom: 8px;
+  color: var(--ink-3);
+}
+.menu-section .segmented {
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--paper-2) 45%, transparent);
+  box-shadow: none;
+}
+.menu-section .segmented button {
+  border-radius: 5px;
+  font-family: var(--title);
+}
+.menu-section .segmented button.active {
+  background: color-mix(in srgb, var(--accent) 7%, var(--paper));
+  color: var(--ink);
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.model-manage {
+  border-radius: 0 0 8px 8px;
+  font-family: var(--title);
+  letter-spacing: 0.06em;
+}
+.chip {
+  border-color: color-mix(in srgb, var(--accent) 14%, var(--line));
+  border-radius: 6px 10px 10px 10px;
+  background: color-mix(in srgb, var(--paper-2) 48%, transparent);
+  font-family: var(--title);
+  letter-spacing: 0.025em;
+}
+.chip .chip-glyph {
+  color: var(--accent);
+}
+.suggestion {
+  border-color: color-mix(in srgb, var(--accent) 13%, var(--line));
+  border-radius: 5px 10px 10px 10px;
+  font-family: var(--title);
+  letter-spacing: 0.025em;
+}
+.work-setup {
+  border-color: color-mix(in srgb, var(--accent) 13%, var(--line));
+  border-radius: 7px 12px 12px 12px;
+  background: color-mix(in srgb, var(--paper-2) 58%, transparent);
+}
+.tool-approve button {
+  border-radius: 6px 9px 9px 9px;
+  font-family: var(--title);
+  letter-spacing: 0.025em;
+}
