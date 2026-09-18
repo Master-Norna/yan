@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "言下：启动模型桥接",
+      "label": "言：启动模型桥接",
       "type": "process",
       "command": "node",
       "args": ["server.js"],

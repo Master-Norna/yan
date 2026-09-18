@@ -1,0 +1,861 @@
+// 言 · 桥接连接、启动与全局事件绑定、侧栏
+// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
+// 页面是不是桥接自己开的（http://127.0.0.1:端口）：是的话桥接一定在，探测失败多半只是首次加载时被大文件挤慢了，该多等、多试
+function servedByBridge() {
+  return /^https?:$/.test(location.protocol) && /^(127\.0\.0\.1|localhost)$/i.test(location.hostname);
+}
+async function connectBridge(candidates, timeout = 1400) {
+  for (const candidate of candidates) {
+    // 同源探测：首次打开时浏览器还在拉 vendor 里的几个大文件，引导请求排在后面，1.4 秒不够，给足时间
+    const wait = candidate === "" && servedByBridge() ? Math.max(timeout, 8000) : timeout;
+    try {
+      const response = await fetch(`${candidate}/api/bootstrap`, { signal: AbortSignal.timeout(wait) });
+      if (!response.ok || !(response.headers.get("content-type") || "").includes("application/json")) continue;
+      const next = await response.json();
+      if (next.serverProfile) Object.assign(next.serverProfile, store.settings.serverProfile);
+      bootstrap = next;
+      apiBase = candidate;
+      return true;
+    } catch {}
+  }
+  return false;
+}
+// 桥接开的页面却没探到桥接：不急着下「未检测到」的结论，隔几秒再试几次，接上后各处自会刷新
+function retryBridgeLater(attempt = 0) {
+  if (apiBase !== null || attempt >= 6) return;
+  setTimeout(
+    async () => {
+      if (apiBase !== null) return;
+      bridgeRetryAt = 0;
+      if (!(await ensureLocalBridge())) retryBridgeLater(attempt + 1);
+    },
+    Math.min(2000 * 2 ** attempt, 20000)
+  );
+}
+async function ensureLocalBridge() {
+  if (apiBase !== null) return true;
+  if (Date.now() < bridgeRetryAt) return false;
+  bridgeRetryAt = Date.now() + 5000;
+  // 桥接开的页面先试同源（端口可能不是默认的 8787），再试默认地址
+  const connected = await connectBridge(servedByBridge() ? ["", LOCAL_BRIDGE] : [LOCAL_BRIDGE], 1200);
+  if (connected) {
+    if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+    renderHeader();
+    void refreshArchive();
+    if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
+    toast("本机桥接已接通，联网可用");
+  }
+  return connected;
+}
+function recoverInterruptedMessages() {
+  let changed = false;
+  for (const conversation of store.conversations)
+    for (const message of conversation.messages || [])
+      if (message.status === "streaming") {
+        message.status = "interrupted";
+        message.error = "页面刷新或连接中断，已生成的内容已保留";
+        message.interruptedAt = now();
+        settleSteps(message, "连接中断");
+        changed = true;
+      }
+  for (const conversation of store.conversations)
+    for (const thread of conversation.threads || [])
+      for (const message of thread.messages || [])
+        if (message.status === "streaming") {
+          message.status = message.content ? "stopped" : "error";
+          message.error = "页面刷新或连接中断";
+          changed = true;
+        }
+  if (changed) saveStore();
+}
+async function boot() {
+  setupMarkdown();
+  setupMermaid();
+  setupVizObserver();
+  const candidates = ["", LOCAL_BRIDGE].filter((value, index, array) => array.indexOf(value) === index);
+  await connectBridge(candidates);
+  if (apiBase === null) {
+    bootstrap.configError = servedByBridge()
+      ? "正在连接本机桥接…若始终连不上，请重新运行 start.cmd。"
+      : "未检测到本机桥接，当前为浏览器直连。若接口未开放 CORS，请运行 start.cmd 或 VS Code 任务「言：启动模型桥接」。";
+    if (servedByBridge()) retryBridgeLater();
+  }
+  if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+  recoverInterruptedMessages();
+  applyAppearance();
+  bindEvents();
+  void cleanupAttachmentStore();
+  void refreshArchive();
+  if (isMobile()) toggleSidebar(true);
+  render();
+}
+
+function bindEvents() {
+  $("#collapseSidebar").onclick = () => toggleSidebar();
+  $("#mobileMenu").onclick = () => toggleSidebar(false);
+  $("#newChat").onclick = newChat;
+  $("#openLibrary").onclick = () => (view === "library" ? closeLibrary() : openLibrary());
+  $("#openSettings").onclick = () => openSettings("general");
+  $("#closeSettings").onclick = closeSettings;
+  $("#settingsModal").addEventListener("click", e => {
+    if (e.target === $("#settingsModal")) closeSettings();
+  });
+  document.querySelectorAll(".model-trigger").forEach(button => {
+    button.setAttribute("aria-haspopup", "dialog");
+    button.setAttribute("aria-controls", "modelMenu");
+    button.setAttribute("aria-expanded", "false");
+    button.onclick = e => {
+      e.stopPropagation();
+      const menu = $("#modelMenu"),
+        opening = menu.classList.contains("hidden") || menu.classList.contains("leaving");
+      if (menu.parentElement !== button.parentElement) {
+        menu.classList.add("hidden");
+        menu.classList.remove("leaving", "drop-up");
+        button.parentElement.append(menu);
+      }
+      if (!opening) {
+        closeModelMenu();
+        return;
+      }
+      renderModelMenu();
+      showNow(menu);
+      button.setAttribute("aria-expanded", "true");
+      positionModelMenu(button);
+    };
+  });
+  document.addEventListener("click", closeModelMenu);
+  $("#themeToggle").onclick = e => switchTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", e.currentTarget);
+  window.addEventListener("resize", () => {
+    disposeOrphanCharts();
+    const trigger = document.querySelector('.model-trigger[aria-expanded="true"]');
+    if (trigger) positionModelMenu(trigger);
+  });
+  $("#quotaStatus").onclick = () => openSettings("models");
+  document.querySelectorAll(".send-trigger").forEach(button => (button.onclick = sendOrStop));
+  document.querySelectorAll(".attach-trigger").forEach(
+    button =>
+      (button.onclick = event => {
+        event.stopPropagation();
+        openAttachMenu(button);
+      })
+  );
+  $("#confirmOk").onclick = () => settleConfirm(true);
+  $("#confirmCancel").onclick = () => settleConfirm(false);
+  $("#confirmModal").addEventListener("click", e => {
+    if (e.target === $("#confirmModal")) settleConfirm(false);
+  });
+  $("#confirmModal").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      settleConfirm(true);
+    }
+  });
+  $("#fileViewerClose").onclick = closeFileViewer;
+  $("#fileViewerDownload").onclick = () => viewerPath && downloadArchiveFile(viewerPath);
+  $("#fileViewer").addEventListener("click", e => {
+    if (e.target.closest("[data-viewer-download]")) return viewerPath && downloadArchiveFile(viewerPath);
+    if (e.target === $("#fileViewer") || e.target === $("#fileViewerStage")) closeFileViewer();
+  });
+  $("#imageViewerClose").onclick = closeImageViewer;
+  $("#imageViewerDownload").onclick = () => {
+    if (imageViewerAttachmentId) void downloadAttachment(imageViewerAttachmentId);
+    else if (imageViewerArchivePath) downloadArchiveFile(imageViewerArchivePath);
+  };
+  $("#imageViewerZoom").onclick = toggleImageViewerZoom;
+  $("#imageViewerStage").addEventListener("click", e => {
+    if (e.target === $("#imageViewerImage")) toggleImageViewerZoom();
+    else if (e.target === $("#imageViewerStage")) closeImageViewer();
+  });
+  const welcomeInput = $("#welcomeInput"),
+    restPlaceholder = welcomeInput.placeholder;
+  chatSuggestionsHtml = $("#welcome .suggestions").innerHTML;
+  bindSuggestions = () =>
+    document.querySelectorAll(".suggestion").forEach(button => {
+      const prompt = button.dataset.prompt || button.textContent;
+      button.onclick = () => {
+        welcomeInput.value = prompt;
+        welcomeInput.placeholder = restPlaceholder;
+        welcomeInput.classList.remove("previewing");
+        grow(welcomeInput);
+        persistDraft();
+        welcomeInput.focus();
+        const start = prompt.indexOf("（"),
+          end = start < 0 ? prompt.length : prompt.indexOf("）", start) + 1;
+        welcomeInput.setSelectionRange(start < 0 ? prompt.length : start, end);
+      };
+      // 预览只占一行：取提示词首句并加省略号，不撑高输入框、不推挤按钮
+      const preview = `${prompt.split(/\r?\n/)[0].slice(0, 60)}…`;
+      button.addEventListener("pointerenter", () => {
+        if (welcomeInput.value) return;
+        welcomeInput.placeholder = preview;
+        welcomeInput.classList.add("previewing");
+      });
+      button.addEventListener("pointerleave", () => {
+        if (welcomeInput.placeholder === preview) {
+          welcomeInput.placeholder = restPlaceholder;
+          welcomeInput.classList.remove("previewing");
+        }
+      });
+    });
+  bindSuggestions();
+  [$("#welcomeInput"), $("#chatInput")].forEach(input => {
+    input.addEventListener("input", () => {
+      grow(input);
+      persistDraft();
+      renderSendButtons();
+    });
+    input.addEventListener("keydown", e => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter" && !e.shiftKey && !touchInput.matches) {
+        e.preventDefault();
+        const waiting = input.id === "chatInput" && !input.value.trim() ? pendingApprovalHere() : null;
+        if (waiting) {
+          if (waiting.step.name !== "ask_user") return settleApproval(waiting.step.id, true);
+          const bar = $("#approvalBar"),
+            page = Number(bar.dataset.page || 0),
+            total = bar.querySelectorAll(".ask-q").length;
+          if (page < total - 1) return formPage(bar, page + 1);
+          const answers = collectForm(bar);
+          if (answers?.some(Boolean)) return settleApproval(waiting.step.id, answers);
+          return toast("请先在上方作答");
+        }
+        sendOrStop();
+      }
+    });
+    input.addEventListener("paste", e => {
+      const images = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith("image/"));
+      if (!images.length) return;
+      e.preventDefault();
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "").slice(4);
+      void addFiles(
+        images.map(
+          (file, index) =>
+            new File(
+              [file],
+              `粘贴图片-${stamp}${images.length > 1 ? `-${index + 1}` : ""}.${file.type.split("/")[1]?.replace("jpeg", "jpg") || "png"}`,
+              { type: file.type }
+            )
+        )
+      );
+    });
+  });
+  $("#fileInput").onchange = handleFiles;
+  $("#libraryAdd").onclick = () => $("#libraryFileInput").click();
+  $("#libraryFileInput").onchange = async e => {
+    await addLibraryFiles(e.target.files);
+    e.target.value = "";
+  };
+  $("#librarySearch").addEventListener("input", e => {
+    libraryQuery = e.target.value;
+    renderLibrary();
+  });
+  document.querySelectorAll("[data-library-kind]").forEach(
+    button =>
+      (button.onclick = () => {
+        libraryKind = button.dataset.libraryKind;
+        renderLibrary();
+      })
+  );
+  $("#libraryGrid").addEventListener("click", e => {
+    const disk = e.target.closest("[data-open-disk-image]");
+    if (disk) return openArchiveImage(disk.dataset.openDiskImage, disk);
+    const button = e.target.closest("[data-library-action]");
+    if (!button) return;
+    const path = button.closest("[data-library-disk]")?.dataset.libraryDisk,
+      id = button.closest("[data-library-item]")?.dataset.libraryItem,
+      action = button.dataset.libraryAction;
+    if (path) {
+      if (action === "view") void openFileViewer(path);
+      else if (action === "place") void placeFromArchive(path);
+      else if (action === "download") downloadArchiveFile(path);
+      else if (action === "remove") void removeArchiveFile(path);
+      return;
+    }
+    if (action === "place") placeFromLibrary(id);
+    else if (action === "download") void downloadAttachment(id);
+    else if (action === "remove") void removeFromLibrary(id);
+  });
+  $("#libraryGrid").addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (!e.target.matches?.("[data-open-disk-image]")) return;
+    e.preventDefault();
+    openArchiveImage(e.target.dataset.openDiskImage, e.target);
+  });
+  let dragHideTimer = null;
+  const hasDraggedFiles = event => Array.from(event.dataTransfer?.types || []).includes("Files");
+  const showDropVeil = () => {
+    clearTimeout(dragHideTimer);
+    const toLibrary = view === "library";
+    $("#dropTitle").textContent = toLibrary ? "松手，收入卷宗" : "松手，置于案上";
+    $("#dropHint").textContent = toLibrary
+      ? archiveOnline()
+        ? "任何文件 · 落到本机的卷宗目录"
+        : `图片、文档与代码文件 · 单件不超过 ${limitLabel(MAX_FILE_BYTES)}`
+      : `图片、文档与代码文件 · 单次共 ${limitLabel(MAX_PENDING_BYTES)}`;
+    $("#dropVeil").classList.remove("hidden");
+  };
+  const hideDropVeil = () => {
+    clearTimeout(dragHideTimer);
+    $("#dropVeil").classList.add("hidden");
+  };
+  window.addEventListener("dragenter", event => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    showDropVeil();
+  });
+  window.addEventListener("dragover", event => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    showDropVeil();
+  });
+  window.addEventListener("dragleave", event => {
+    if (!hasDraggedFiles(event)) return;
+    dragHideTimer = setTimeout(hideDropVeil, 80);
+  });
+  window.addEventListener("drop", event => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    hideDropVeil();
+    void (view === "library" ? addLibraryFiles : addFiles)(event.dataTransfer.files);
+  });
+  $("#historySearch").addEventListener("input", e => {
+    historyQuery = e.target.value;
+    clearTimeout(historySearchTimer);
+    historySearchTimer = setTimeout(renderHistory, 120);
+  });
+  $("#historySearch").addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      toggleHistorySearch(false);
+    }
+  });
+  $("#historySearchToggle").onclick = () => toggleHistorySearch();
+  $("#historySearchClose").onclick = () => toggleHistorySearch(false);
+  $("#history").addEventListener("dblclick", e => {
+    const item = e.target.closest("[data-conversation]");
+    if (item && !e.target.closest(".history-rename, [data-history-action]")) startRename(item.dataset.conversation);
+  });
+  $("#history").addEventListener("click", e => {
+    const toggle = e.target.closest("[data-repo-toggle]");
+    if (toggle) {
+      const dir = toggle.dataset.repoToggle,
+        set = new Set(store.settings.collapsedRepos || []);
+      set.has(dir) ? set.delete(dir) : set.add(dir);
+      store.settings.collapsedRepos = [...set];
+      saveStoreSoon();
+      renderHistory();
+      return;
+    }
+    const repo = e.target.closest("[data-history-workdir]");
+    if (repo) {
+      store.settings.pendingWorkdir = repo.dataset.historyWorkdir;
+      saveStore();
+      newChat();
+      return;
+    }
+    const item = e.target.closest("[data-conversation]");
+    if (!item) return;
+    const id = item.dataset.conversation,
+      action = e.target.closest("[data-history-action]")?.dataset.historyAction;
+    if (action === "menu") {
+      e.stopPropagation();
+      openHistoryMenu(id, e.target.closest("[data-history-action]"));
+    } else if (!e.target.closest(".history-rename")) openConversation(id);
+  });
+  $("#history").addEventListener("keydown", e => {
+    const input = e.target.closest(".history-rename");
+    if (!input) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitRename(input.value);
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      renamingId = null;
+      renderHistory();
+    }
+  });
+  $("#history").addEventListener("focusout", e => {
+    const input = e.target.closest(".history-rename");
+    if (input && renamingId) commitRename(input.value);
+  });
+  const title = $("#chatTitle");
+  let titleBefore = "";
+  title.addEventListener("focus", () => {
+    titleBefore = title.textContent;
+  });
+  title.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      title.blur();
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      title.textContent = titleBefore;
+      title.blur();
+    }
+  });
+  title.addEventListener("blur", () => {
+    const c = currentConversation();
+    if (!c) return;
+    const value = title.textContent.replace(/\s+/g, " ").trim();
+    if (value && value !== c.title) renameConversation(c.id, value);
+    else title.textContent = c.title;
+  });
+  $("#modelMenu").addEventListener("click", e => {
+    const level = e.target.closest("[data-reasoning]");
+    if (level) {
+      e.stopPropagation();
+      const c = currentConversation();
+      if (c) c.reasoning = level.dataset.reasoning;
+      else store.settings.reasoning = level.dataset.reasoning;
+      saveStore();
+      renderModelMenu();
+      renderModelTriggers();
+      const trigger = document.querySelector('.model-trigger[aria-expanded="true"]');
+      if (trigger) positionModelMenu(trigger);
+      return;
+    }
+    const item = e.target.closest("[data-profile]");
+    if (!item) return;
+    selectProfile(item.dataset.profile);
+  });
+  $("#messages").addEventListener("click", handleMessageAction);
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || !e.target.classList?.contains("message-edit-input")) return;
+    e.preventDefault();
+    e.target.closest(".message-editor")?.querySelector('[data-action="save-edit"]')?.click();
+  });
+  $("#messages").addEventListener("click", event => {
+    const button = event.target.closest("[data-approve]");
+    if (button) {
+      event.preventDefault();
+      event.stopPropagation();
+      return approveFrom(button);
+    }
+    const head = event.target.closest(".tool-step.foldable > .tool-step-head, .tool-step-delegate > .tool-step-head");
+    if (!head || event.target.closest("a, button")) return;
+    const el = head.parentElement,
+      c = currentConversation(),
+      step =
+        c &&
+        allMessages(c)
+          .flatMap(m => allSteps(m))
+          .find(s => s.id === el.dataset.stepId);
+    // 差遣卡片整张折叠（默认摊开），指令输出默认折起；两者都记在步骤上，重画不丢
+    if (el.classList.contains("tool-step-delegate")) {
+      if (step) step.folded = !step.folded;
+      el.classList.toggle("folded", step ? !!step.folded : !el.classList.contains("folded"));
+      saveStoreSoon();
+      return;
+    }
+    const wasFolded = el.classList.contains("folded");
+    if (step) step.expanded = wasFolded;
+    el.classList.toggle("folded", !wasFolded);
+    head.title = wasFolded ? "收起输出" : "展开输出";
+    saveStoreSoon();
+  });
+  $("#messages").addEventListener("click", event => {
+    const button = event.target.closest("[data-step-more]");
+    if (!button) return;
+    const el = button.closest(".tool-step"),
+      c = currentConversation(),
+      step =
+        c &&
+        allMessages(c)
+          .flatMap(m => allSteps(m))
+          .find(s => s.id === el?.dataset.stepId);
+    if (!step) return;
+    step.full = !step.full;
+    step.expanded = true;
+    saveStoreSoon();
+    el.outerHTML = stepHtml(step);
+  });
+  // 差遣卡片里「帮手 · n 步」的开合记在步骤上，卡片重画时不丢
+  $("#messages").addEventListener("click", event => {
+    const summary = event.target.closest(".sub-steps > summary");
+    if (!summary) return;
+    event.preventDefault();
+    const details = summary.parentElement,
+      id = details.closest(".tool-step-delegate")?.dataset.stepId,
+      c = currentConversation(),
+      step =
+        c &&
+        allMessages(c)
+          .flatMap(m => m.steps || [])
+          .find(s => s.id === id);
+    details.open = !details.open;
+    details.dataset.touched = "1";
+    if (step) step.subOpen = details.open;
+  });
+  $("#approvalBar").addEventListener("click", event => {
+    const bar = $("#approvalBar"),
+      button = event.target.closest("[data-approve]");
+    if (button) {
+      event.preventDefault();
+      return approveFrom(button);
+    }
+    const opt = event.target.closest(".ask-opt");
+    if (opt) {
+      const block = opt.closest(".ask-q"),
+        on = opt.getAttribute("aria-checked") === "true",
+        single = block.dataset.multi !== "true";
+      if (single) {
+        // 单选：选项与「自行填写」二选一——点了选项就清掉填的字，反之亦然（见下面的 input 监听）
+        block.querySelectorAll(".ask-opt").forEach(b => b.setAttribute("aria-checked", "false"));
+        const other = block.querySelector(".ask-other");
+        if (other && !on) other.value = "";
+      }
+      opt.setAttribute("aria-checked", on ? "false" : "true");
+      return;
+    }
+    const form = event.target.closest("[data-form]");
+    if (!form || !bar.dataset.stepId) return;
+    event.preventDefault();
+    if (form.dataset.form === "prev" || form.dataset.form === "next")
+      return formPage(bar, Number(bar.dataset.page || 0) + (form.dataset.form === "next" ? 1 : -1));
+    const answers = form.dataset.form === "submit" ? collectForm(bar) : false;
+    settleApproval(bar.dataset.stepId, answers && answers.some(Boolean) ? answers : false);
+  });
+  $("#messages").addEventListener(
+    "scroll",
+    event => {
+      const body = event.target;
+      if (body?.classList?.contains("reasoning-body")) body._follow = body.scrollTop + body.clientHeight >= body.scrollHeight - 24;
+    },
+    true
+  );
+  $("#approvalBar").addEventListener("input", event => {
+    if (!event.target.classList.contains("ask-other")) return;
+    const block = event.target.closest(".ask-q");
+    if (block?.dataset.multi !== "true" && event.target.value.trim())
+      block.querySelectorAll(".ask-opt").forEach(b => b.setAttribute("aria-checked", "false"));
+  });
+  $("#approvalBar").addEventListener("keydown", event => {
+    if (event.key !== "Enter" || !event.target.classList.contains("ask-other")) return;
+    event.preventDefault();
+    const bar = $("#approvalBar"),
+      page = Number(bar.dataset.page || 0),
+      total = bar.querySelectorAll(".ask-q").length;
+    if (page < total - 1) return formPage(bar, page + 1);
+    const answers = collectForm(bar);
+    if (answers && answers.some(Boolean)) settleApproval(bar.dataset.stepId, answers);
+  });
+  $("#messages").addEventListener("click", event => {
+    const summary = event.target.closest(".change-summary");
+    if (!summary) return;
+    const files = summary.parentElement.querySelector(".change-files"),
+      open = files.classList.toggle("hidden");
+    summary.setAttribute("aria-expanded", String(!open));
+  });
+  $("#helperBar").addEventListener("click", event => {
+    const id = event.target.closest(".helper-row")?.dataset.helper || $("#helperBar").dataset.stepId || "",
+      card = document.querySelector(`#messages .tool-step-delegate[data-step-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+    const stack = card.closest(".tool-stack");
+    if (stack && !stack.open) setProcessDetails(stack, true);
+    scrollChatTo(card, "center");
+  });
+  // 输入框上方多了请示条、帮手条与改动摘要，正文底部留白随之增减，末句不被盖住
+  if ("ResizeObserver" in window)
+    new ResizeObserver(() => {
+      const area = $("#composerArea");
+      if (area && !area.classList.contains("hidden")) {
+        $("#chatScroll").style.paddingBottom = `${area.offsetHeight + 16}px`;
+        document.documentElement.style.setProperty("--composer-h", `${area.offsetHeight}px`);
+      }
+    }).observe($("#composerArea"));
+  $("#workAuto").onclick = () => {
+    const c = currentConversation();
+    if (!c) return;
+    c.workAuto = !c.workAuto;
+    saveStore();
+    renderWorkAuto();
+    if (c.workAuto) for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
+  };
+  setupChips();
+  setupQuoteTip();
+  setupSidePanel();
+  $("#composerQuoteClose").onclick = () => {
+    pendingQuote = null;
+    renderQuote();
+    persistDraft();
+    $("#chatInput").focus();
+  };
+  $("#messages").addEventListener("click", event => {
+    const block = event.target.closest(".user-quote");
+    if (!block) return;
+    const source =
+      block.dataset.quoteSource && document.querySelector(`#messages [data-message="${CSS.escape(block.dataset.quoteSource)}"]`);
+    if (!source) return toast("出处已不在当前页面");
+    followBottom = false;
+    scrollChatTo(source, "center");
+    source.classList.remove("flash");
+    void source.offsetWidth;
+    source.classList.add("flash");
+  });
+  // 思绪与行迹的开合：正文与旁注面板同一套——用户亲手开合的记在消息上，流式期间的自动开合就不再替他动
+  const onProcessToggle = event => {
+    const summary = event.target.closest(".reasoning > summary, .tool-stack > summary");
+    if (!summary) return;
+    event.preventDefault();
+    const details = summary.parentElement,
+      id = details.closest("[data-message]")?.dataset.message,
+      side = !!details.closest("#sideMessages");
+    const message = (side ? currentThread()?.messages : currentConversation()?.messages)?.find(item => item.id === id);
+    if (!message) return;
+    const reasoning = details.classList.contains("reasoning");
+    const nextOpen = details._motionAnimation ? !details._motionTarget : !details.open;
+    // 用户亲手动了，程序排着的那次自动收起作废
+    clearTimeout(details._settleTimer);
+    details._settleTimer = null;
+    // 时间线里各轮的思绪不记在消息上；用户开合过的记一笔，帮手卡片就地更新时不再替它收起
+    if (details.classList.contains("trail-reasoning")) {
+      details.dataset.touched = "1";
+      return setProcessDetails(details, nextOpen);
+    }
+    message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
+    message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
+    saveStoreSoon();
+    setProcessDetails(details, nextOpen);
+  };
+  $("#messages").addEventListener("click", onProcessToggle);
+  $("#sideMessages").addEventListener("click", onProcessToggle);
+  document.addEventListener("click", e => {
+    const copy = e.target.closest("[data-copy-code]");
+    if (copy) {
+      void copyText(copy.closest(".code-block, .viz, .html-app")?.querySelector("code")?.textContent || "");
+      copy.textContent = "已复制";
+      setTimeout(() => (copy.textContent = "复制"), 1200);
+      return;
+    }
+    const vizToggle = e.target.closest("[data-viz-toggle]");
+    if (vizToggle) {
+      const viz = vizToggle.closest(".viz"),
+        source = viz.querySelector(".viz-source"),
+        showSource = source.classList.contains("hidden");
+      source.classList.toggle("hidden", !showSource);
+      viz.querySelector(".viz-canvas").classList.toggle("hidden", showSource);
+      vizToggle.textContent = showSource ? "图形" : "源码";
+      return;
+    }
+    const vizDownload = e.target.closest("[data-viz-download]");
+    if (vizDownload) {
+      downloadVisualization(vizDownload.closest(".viz"));
+      return;
+    }
+    const appToggle = e.target.closest("[data-app-toggle]");
+    if (appToggle) {
+      const app = appToggle.closest(".html-app"),
+        source = app.querySelector(".html-app-source"),
+        showSource = source.classList.contains("hidden");
+      source.classList.toggle("hidden", !showSource);
+      app.querySelector(".html-app-stage").classList.toggle("hidden", showSource);
+      appToggle.textContent = showSource ? "预览" : "源码";
+      return;
+    }
+    const appRestart = e.target.closest("[data-app-restart]");
+    if (appRestart) {
+      mountHtmlApp(appRestart.closest(".html-app"));
+      return;
+    }
+    const appDownload = e.target.closest("[data-app-download]");
+    if (appDownload) {
+      downloadText(htmlAppSource(appDownload.closest(".html-app")), "text/html;charset=utf-8", "言-交互作品.html");
+      return;
+    }
+    const expand = e.target.closest("[data-work-expand]");
+    if (expand) {
+      toggleWorkExpanded(expand.closest(".viz, .html-app"), expand);
+      return;
+    }
+    const remove = e.target.closest("[data-remove-attachment]");
+    if (remove) {
+      const [file] = pendingAttachments.splice(Number(remove.dataset.removeAttachment), 1);
+      persistDraft();
+      void deleteAttachments([file?.id]);
+      renderAttachments();
+      return;
+    }
+    const save = e.target.closest("[data-save-attachment]");
+    if (save) {
+      void saveToLibrary(save.dataset.saveAttachment);
+      return;
+    }
+    const preview = e.target.closest("[data-open-image]");
+    if (preview) {
+      void openImageViewer(preview.dataset.openImage, preview);
+      return;
+    }
+    const download = e.target.closest("[data-download-attachment]");
+    if (download) void downloadAttachment(download.dataset.downloadAttachment);
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (e.target.matches?.("[data-open-image]")) {
+      e.preventDefault();
+      void openImageViewer(e.target.dataset.openImage, e.target);
+    } else if (e.target.matches?.("[data-download-attachment]")) {
+      e.preventDefault();
+      void downloadAttachment(e.target.dataset.downloadAttachment);
+    }
+  });
+  document.querySelectorAll(".tab-btn").forEach(
+    button =>
+      (button.onclick = () => {
+        settingsTab = button.dataset.tab;
+        renderSettings();
+      })
+  );
+  window.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (!$("#imageViewer").classList.contains("hidden")) {
+      closeImageViewer();
+      closeFileViewer();
+      return;
+    }
+    const expanded = document.querySelector(".work-expanded");
+    if (expanded) {
+      closeExpandedWork();
+      return;
+    }
+    closeModelMenu();
+    if (confirmResolve) settleConfirm(false);
+    else if (!$("#settingsModal").classList.contains("hidden")) closeSettings();
+    else if (editingMessageId) {
+      editingMessageId = null;
+      renderConversation(false);
+      if (sideThreadId) renderSidePanel();
+    } else if (sideThreadId) closeSidePanel();
+    else if (pendingQuote && document.activeElement === $("#chatInput") && !$("#chatInput").value) {
+      pendingQuote = null;
+      renderQuote();
+      persistDraft();
+    }
+  });
+  $("#chatScroll").addEventListener("scroll", () => {
+    const el = $("#chatScroll"),
+      gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (gap < 8) {
+      followBottom = true;
+      autoScrolling = false;
+    } else if (!autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false;
+    syncJumpBottom(gap);
+    syncOutline();
+  });
+  $("#messages").addEventListener("click", event => {
+    const button = event.target.closest("[data-toggle-compacted]");
+    if (!button) return;
+    const c = currentConversation();
+    if (!c) return;
+    c.showCompacted = !c.showCompacted;
+    foldCompacted(c);
+    if (!c.showCompacted) scrollChatTo(button.closest(".context-divider"), "center");
+  });
+  $("#messages").addEventListener("click", event => {
+    const button = event.target.closest("[data-deliver-action]");
+    if (!button) return;
+    const path = button.closest("[data-deliver]")?.dataset.deliver;
+    if (!path) return;
+    if (deliverableMissing(path)) return toast("这件已从卷宗移除");
+    if (button.dataset.deliverAction === "download") downloadArchiveFile(path);
+    else void openFileViewer(path);
+  });
+  $("#outline").addEventListener("click", event => {
+    const item = event.target.closest(".outline-item");
+    if (item) jumpToOutline(item.dataset.target);
+  });
+  $("#contextGauge").addEventListener("click", event => {
+    event.stopPropagation();
+    openContextMenu(event.currentTarget);
+  });
+  $("#chatInput").addEventListener("input", () => scheduleContextGauge());
+  $("#chatScroll").addEventListener(
+    "wheel",
+    e => {
+      if (e.deltaY < 0) followBottom = false;
+    },
+    { passive: true }
+  );
+  $("#chatScroll").addEventListener(
+    "pointerdown",
+    () => {
+      autoScrolling = false;
+    },
+    { passive: true }
+  );
+  window.addEventListener("pagehide", () => {
+    persistDraft();
+    saveStore();
+  });
+  window.addEventListener("offline", () => setConnection("error", "连接中断"));
+  window.addEventListener("online", refreshConnection);
+  window.addEventListener("message", event => {
+    const data = event.data;
+    if (!data || !["yan-preview-ready", "yan-preview-state"].includes(data.type)) return;
+    const app = [...document.querySelectorAll(".html-app[data-app-id]")].find(
+      el => el.dataset.appId === data.id && el.querySelector("iframe")?.contentWindow === event.source
+    );
+    if (!app) return;
+    if (data.type === "yan-preview-ready") return sendHtmlApp(app);
+    app.dataset.appState = data.state;
+    app.classList.toggle("html-app-error", data.state === "error");
+    const label = app.querySelector(".code-lang");
+    if (label) {
+      label.textContent = data.state === "error" ? "html · 运行有误" : "html · 可交互";
+      label.title = data.detail || "";
+    }
+    if (data.state === "ready" && followBottom) requestAnimationFrame(scrollBottom);
+  });
+  let wasMobile = isMobile();
+  window.addEventListener("resize", () => {
+    const mobile = isMobile();
+    if (mobile && !wasMobile) toggleSidebar(true);
+    wasMobile = mobile;
+    syncScrim();
+  });
+  $("#sidebarScrim").onclick = () => toggleSidebar(true);
+  // 生成时向上翻阅后，给一枚「回到最新」；贴近底部自动隐去
+  $("#jumpBottom").onclick = () => {
+    const el = $("#chatScroll");
+    followBottom = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: reducedMotion.matches ? "instant" : "smooth" });
+  };
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+    if (store.settings.theme === "system") {
+      applyAppearance();
+      if (view === "chat") renderConversation(false);
+    }
+  });
+  reducedMotion.addEventListener?.("change", () => {
+    if (store.settings.inkMotion === "system") applyAppearance();
+  });
+}
+
+function syncScrim() {
+  $("#sidebarScrim").classList.toggle("hidden", !isMobile() || $("#sidebar").classList.contains("collapsed"));
+}
+function toggleSidebar(force) {
+  const sidebar = $("#sidebar"),
+    collapsed = force ?? !sidebar.classList.contains("collapsed");
+  sidebar.classList.toggle("collapsed", collapsed);
+  syncScrim();
+  const button = $("#collapseSidebar");
+  button.textContent = collapsed ? "›" : "‹";
+  button.title = collapsed ? "展开侧栏" : "收起侧栏";
+}
+function toggleHistorySearch(force) {
+  const wrap = $("#historySearchWrap"),
+    show = force ?? wrap.classList.contains("hidden");
+  wrap.classList.toggle("hidden", !show);
+  $("#historySearchToggle").classList.toggle("active", show);
+  if (show) setTimeout(() => $("#historySearch").focus(), 0);
+  else {
+    clearTimeout(historySearchTimer);
+    if (historyQuery) {
+      historyQuery = "";
+      $("#historySearch").value = "";
+      renderHistory();
+    }
+  }
+}
+// 执事 / 对谈：模式跟着正在看的对话走；「翻页」按当前模式新起一段

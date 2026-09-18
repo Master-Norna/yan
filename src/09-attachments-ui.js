@@ -1,0 +1,122 @@
+// 言 · 附件卡片、引用与划选提示
+// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
+const icons = {
+  copy: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="5.2" y="5.2" width="7.4" height="7.4" rx="1.5"/><path d="M10.5 3.4H4.9a1.5 1.5 0 0 0-1.5 1.5v5.6"/></svg>`,
+  edit: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M3.3 12.7l.6-3 6.8-6.8 2.4 2.4-6.8 6.8-3 .6z"/><path d="M9.8 3.8l2.4 2.4"/></svg>`,
+  regenerate: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 3.2v2.6h-2.6"/></svg>`,
+  resume: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.2v9.6L12 8 4 3.2z"/></svg>`,
+  retry: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M8 3v5l3 1.8"/><circle cx="8" cy="8" r="5.2"/></svg>`,
+  note: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M3.5 4h6M3.5 8h6M3.5 12h6"/><path d="M12.6 6.4v3.2"/><path d="M11 8h3.2"/></svg>`,
+  retract: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 4.6 3.4 7.4l2.8 2.8"/><path d="M3.6 7.4h5.6a3 3 0 0 1 0 6H7"/></svg>`
+};
+function actionIcon(action, title, icon) {
+  return `<button class="message-action" data-action="${action}" title="${title}" aria-label="${title}">${icon}</button>`;
+}
+function fileTypeLabel(file) {
+  const match = String(file.name || "").match(/\.([^.]+)$/),
+    extension = match?.[1]?.replace(/[^a-z0-9]/gi, "").toUpperCase();
+  if (extension) return extension.slice(0, 7);
+  const subtype = String(file.mime || "")
+    .split("/")[1]
+    ?.split(/[;+]/)[0]
+    ?.toUpperCase();
+  return (subtype || "FILE").slice(0, 7);
+}
+function formatFileSize(value) {
+  const bytes = Number(value || 0);
+  return bytes < 1024
+    ? `${bytes} B`
+    : bytes < 1048576
+      ? `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`
+      : `${(bytes / 1048576).toFixed(1)} MB`;
+}
+function kindGlyph(kind) {
+  return kind === "image" ? "画" : kind === "text" ? "文" : "卷";
+}
+function attachmentCard(file, index, sent = false) {
+  const type = fileTypeLabel(file),
+    title = `${file.name} · ${formatFileSize(file.size)}`;
+  const thumb = file.kind === "image" && file.id ? `<img class="attachment-thumb" data-thumb="${escapeHtml(file.id)}" alt="">` : "";
+  const body = `${thumb}<span class="attachment-name">${escapeHtml(file.name)}</span><span class="attachment-mark" aria-hidden="true">${kindGlyph(file.kind)}</span><span class="attachment-type">${escapeHtml(type)}</span>`;
+  const save = file.id
+    ? `<button class="attachment-tool attachment-save" data-save-attachment="${escapeHtml(file.id)}" title="收入卷宗" aria-label="收入卷宗">藏</button>`
+    : "";
+  if (sent && file.id) {
+    const action =
+      file.kind === "image"
+        ? `data-open-image="${escapeHtml(file.id)}" title="查看 ${escapeHtml(title)}"`
+        : `data-download-attachment="${escapeHtml(file.id)}" title="下载 ${escapeHtml(title)}"`;
+    return `<div class="attachment-card sent" role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}${save}</div>`;
+  }
+  return `<div class="attachment-card pending" data-kind="${file.kind}" title="${escapeHtml(title)}">${body}${save}${index !== null ? `<button class="attachment-tool attachment-remove" data-remove-attachment="${index}" title="移除 ${escapeHtml(file.name)}" aria-label="移除 ${escapeHtml(file.name)}">×</button>` : ""}</div>`;
+}
+function renderAttachments() {
+  const html = pendingAttachments.map((file, index) => attachmentCard(file, index)).join("");
+  [$("#attachments"), $("#welcomeAttachments")].forEach(el => {
+    el.classList.toggle("hidden", !pendingAttachments.length);
+    el.innerHTML = html;
+    void loadThumbnails(el);
+  });
+  renderSendButtons();
+  scheduleContextGauge(); // 案上的附件也是下一问要送出的，计数随之变
+}
+// 引用追问：在回复或自己的话里划选一段，浮出「引用」；点了就作为引文带进输入框，随下一问送出
+function renderQuote() {
+  const box = $("#composerQuote");
+  if (!box) return;
+  box.classList.toggle("hidden", !pendingQuote);
+  box.querySelector(".composer-quote-text").textContent = pendingQuote?.text || "";
+  renderSendButtons();
+  scheduleContextGauge();
+}
+function setupQuoteTip() {
+  const tip = $("#quoteTip");
+  let current = null,
+    timer = null;
+  const hide = () => {
+    current = null;
+    if (!tip.classList.contains("hidden")) tip.classList.add("hidden");
+  };
+  const check = () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return hide();
+    const range = selection.getRangeAt(0);
+    let text = selection.toString().trim();
+    // 划选跨过了已有旁注的小标（脚注号）：那个数字不是正文，去掉，否则落点在正文里找不到
+    const picked = range.cloneContents();
+    if (picked.querySelector?.("sup.note-ref")) {
+      picked.querySelectorAll("sup.note-ref").forEach(node => node.remove());
+      text = picked.textContent.trim();
+    }
+    const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+    const body = host?.closest("#messages .message .markdown, #messages .message .user-bubble"),
+      article = body?.closest("[data-message]");
+    if (!body || !article || text.length < 2 || body.closest(".message-editor")) return hide();
+    const rect = range.getBoundingClientRect();
+    if (!rect.width && !rect.height) return hide();
+    current = { text: text.slice(0, 1200), messageId: article.dataset.message };
+    tip.style.left = `${Math.min(innerWidth - 40, Math.max(40, rect.left + rect.width / 2))}px`;
+    tip.style.top = `${Math.max(8, rect.top - 34)}px`;
+    tip.classList.remove("hidden");
+  };
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(timer);
+    timer = setTimeout(check, 120);
+  });
+  $("#chatScroll").addEventListener("scroll", hide, { passive: true });
+  tip.addEventListener("pointerdown", event => event.preventDefault()); // 别让点击把划选清掉
+  tip.addEventListener("click", event => {
+    const button = event.target.closest("[data-tip]");
+    if (!button || !current) return hide();
+    const picked = current;
+    getSelection()?.removeAllRanges();
+    hide();
+    if (button.dataset.tip === "note") return createThread(picked);
+    pendingQuote = picked;
+    renderQuote();
+    persistDraft();
+    const input = $("#chatInput");
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+}
