@@ -5,19 +5,50 @@ const path = require("node:path");
 const dns = require("node:dns").promises;
 const net = require("node:net");
 const { spawn } = require("node:child_process");
+const os = require("node:os");
 const { Readable } = require("node:stream");
+const bundler = require("./build.js");
 const { pipeline } = require("node:stream/promises");
+const crypto = require("node:crypto");
 
 const ROOT = __dirname;
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.YAN_PORT || 8787);
 const CONFIG_CANDIDATES = [process.env.YAN_API_CONFIG].filter(Boolean);
-const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".pfb": "application/octet-stream", ".bcmap": "application/octet-stream" };
+// 会话令牌：桥接每次启动随机生成，只发给本站页面与 VS Code Webview（见 handleBootstrap）。
+// 服务端预设模型的 Key 在桥接手里，转发时须带上这枚令牌，别的本地页面（file:// 或其他端口）拿不到令牌就不能借它消耗额度；
+// 用户自己填 Key 的模型不受此限——Key 本就是页面自己的
+const SESSION_TOKEN = crypto.randomBytes(24).toString("hex");
+const SESSION_HEADER = "x-yan-session";
+function sessionOk(req) {
+  const given = String(req.headers[SESSION_HEADER] || "");
+  return given.length === SESSION_TOKEN.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(SESSION_TOKEN));
+}
+// 工具定义一次最多带多少件：超过不再静默截掉后面的，明确报错，接入更多工具时一眼能看出来
+const TOOLS_LIMIT = 128;
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".pfb": "application/octet-stream",
+  ".bcmap": "application/octet-stream"
+};
 
 function loadServerConfig() {
   const file = CONFIG_CANDIDATES.find(candidate => fs.existsSync(candidate));
   if (!file) return { unconfigured: true };
-  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const lines = fs
+    .readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
   const read = label => {
     const index = lines.findIndex(line => new RegExp(`^${label}\\s*:`, "i").test(line));
     if (index < 0) return "";
@@ -39,30 +70,63 @@ function securityHeaders(req, res) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
   // preview.html 只允许被本站（主页面）嵌入，且只有它需要执行 blob: 脚本；否则任意网站都能把它 iframe 进去并注入脚本读取 localStorage
-  res.setHeader("Content-Security-Policy", isPreview
-    ? "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
-    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+  res.setHeader(
+    "Content-Security-Policy",
+    isPreview
+      ? "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+      : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  );
 }
 function corsHeaders(req, res) {
   const origin = req.headers.origin;
-  const allowed = origin === "null" || /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin || "") || /^vscode-webview:\/\//i.test(origin || "") || /^https:\/\/[a-z0-9-]+\.(vscode-cdn|vscode-webview)\.net$/i.test(origin || "");
+  const allowed =
+    origin === "null" ||
+    /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin || "") ||
+    /^vscode-webview:\/\//i.test(origin || "") ||
+    /^https:\/\/[a-z0-9-]+\.(vscode-cdn|vscode-webview)\.net$/i.test(origin || "");
   if (!allowed) return;
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Yan-Session");
   if (req.headers["access-control-request-private-network"] === "true") res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
-function readJson(req, limit = 24 * 1024 * 1024) {
-  return new Promise((resolve,reject) => {
-    const chunks = []; let size = 0; let rejected = false;
+// 执事接口能执行本机指令，不能只依赖 CORS：不可信页面即使读不到响应，也可能用简单请求触发副作用。
+// 无 Origin 的本机脚本仍可调用；浏览器只接受本站页面与 VS Code Webview。file:// 预览可对谈，但不开放执事。
+function trustedWorkRequest(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  if (/^vscode-webview:\/\//i.test(origin) || /^https:\/\/[a-z0-9-]+\.(vscode-cdn|vscode-webview)\.net$/i.test(origin)) return true;
+  try {
+    const url = new URL(origin),
+      port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+    return url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname.toLowerCase()) && port === PORT;
+  } catch {
+    return false;
+  }
+}
+function readJson(req, limit = 128 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let rejected = false;
     req.on("data", chunk => {
       if (rejected) return;
       size += chunk.length;
-      if (size > limit) { rejected = true; reject(Error("请求内容过大")); req.destroy(); }
-      else chunks.push(chunk);
+      if (size > limit) {
+        rejected = true;
+        reject(Error("请求内容过大"));
+        req.destroy();
+      } else chunks.push(chunk);
     });
-    req.on("end", () => { if (rejected) return; try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")); } catch { reject(Error("请求 JSON 无效")); } });
+    req.on("end", () => {
+      if (rejected) return;
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"));
+      } catch {
+        reject(Error("请求 JSON 无效"));
+      }
+    });
     req.on("error", reject);
   });
 }
@@ -72,64 +136,227 @@ function endpoint(baseUrl, suffix) {
   if (!/^https?:$/.test(url.protocol)) throw Error("Base URL 只支持 http 或 https");
   return /\/chat\/completions\/?$/.test(url.pathname) ? url.href : `${url.href.replace(/\/$/, "")}${suffix}`;
 }
-function resolveProfile(input, requireModel = true) {
-  if (input?.source === "server") { const config = loadServerConfig(); if (config.error) throw Error(config.error); if (config.unconfigured) throw Error("服务端没有预设模型，请在页面中手动添加"); return config; }
-  const config = { baseUrl: String(input?.baseUrl || "").trim(), model: String(input?.model || "").trim(), apiKey: String(input?.apiKey || "").trim() };
+function resolveProfile(input, requireModel = true, req = null) {
+  if (input?.source === "server") {
+    if (req && !sessionOk(req)) throw Error("此页面无权使用桥接预设的模型，请从桥接地址或 VS Code 打开「言」");
+    const config = loadServerConfig();
+    if (config.error) throw Error(config.error);
+    if (config.unconfigured) throw Error("服务端没有预设模型，请在页面中手动添加");
+    return config;
+  }
+  const config = {
+    baseUrl: String(input?.baseUrl || "").trim(),
+    model: String(input?.model || "").trim(),
+    apiKey: String(input?.apiKey || "").trim()
+  };
   if (!config.baseUrl || (requireModel && !config.model)) throw Error(requireModel ? "请填写 Base URL 和模型 ID" : "请填写 Base URL");
   return config;
 }
-function modelsUrl(baseUrl) { const url = new URL(baseUrl); url.pathname = `${url.pathname.replace(/\/chat\/completions\/?$/i, "").replace(/\/$/, "")}/models`; return url; }
+function modelsUrl(baseUrl) {
+  const url = new URL(baseUrl);
+  url.pathname = `${url.pathname.replace(/\/chat\/completions\/?$/i, "").replace(/\/$/, "")}/models`;
+  return url;
+}
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
-function decodeEntities(value) { return String(value).replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&(amp|lt|gt|quot|apos|nbsp|ensp|emsp|thinsp|hellip|mdash|ndash|middot|laquo|raquo|ldquo|rdquo|lsquo|rsquo|copy);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ensp: " ", emsp: " ", thinsp: " ", hellip: "…", mdash: "—", ndash: "–", middot: "·", laquo: "«", raquo: "»", ldquo: "“", rdquo: "”", lsquo: "‘", rsquo: "’", copy: "©" }[e])); }
-function stripTags(value) { return decodeEntities(String(value).replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim(); }
+function decodeEntities(value) {
+  return String(value)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(
+      /&(amp|lt|gt|quot|apos|nbsp|ensp|emsp|thinsp|hellip|mdash|ndash|middot|laquo|raquo|ldquo|rdquo|lsquo|rsquo|copy);/g,
+      (_, e) =>
+        ({
+          amp: "&",
+          lt: "<",
+          gt: ">",
+          quot: '"',
+          apos: "'",
+          nbsp: " ",
+          ensp: " ",
+          emsp: " ",
+          thinsp: " ",
+          hellip: "…",
+          mdash: "—",
+          ndash: "–",
+          middot: "·",
+          laquo: "«",
+          raquo: "»",
+          ldquo: "“",
+          rdquo: "”",
+          lsquo: "‘",
+          rsquo: "’",
+          copy: "©"
+        })[e]
+    );
+}
+function stripTags(value) {
+  return decodeEntities(String(value).replace(/<[^>]+>/g, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
 function htmlToText(html) {
-  let text = String(html).replace(/<(script|style|noscript|svg|nav|header|footer|iframe|template|form)\b[\s\S]*?<\/\1>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ");
-  const main = text.match(/<(article|main)\b[^>]*>([\s\S]*?)<\/\1>/i); if (main && main[2].length > 500) text = main[2];
-  text = text.replace(/<\/(p|div|li|h\d|tr|section|blockquote|pre|dd|dt)>/gi, "\n").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ");
-  return decodeEntities(text).replace(/[ \t\u00a0]+/g, " ").replace(/\s*\n\s*/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  let text = String(html)
+    .replace(/<(script|style|noscript|svg|nav|header|footer|iframe|template|form)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ");
+  const main = text.match(/<(article|main)\b[^>]*>([\s\S]*?)<\/\1>/i);
+  if (main && main[2].length > 500) text = main[2];
+  text = text
+    .replace(/<\/(p|div|li|h\d|tr|section|blockquote|pre|dd|dt)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+  return decodeEntities(text)
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/\s*\n\s*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+// URL.hostname 里的 IPv6 字面量带方括号（[::1]），net.isIP 不认，先剥掉
+function hostLiteral(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
+}
+// 把 IPv6 字面量展开成 8 组（处理 :: 与末尾的点分 IPv4）
+function ipv6Groups(host) {
+  let text = host;
+  const dotted = text.match(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number);
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const parts = text.split("::");
+  if (parts.length > 2) return null;
+  const head = parts[0] ? parts[0].split(":") : [],
+    tail = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
+  const fill = 8 - head.length - tail.length;
+  if (parts.length === 1 ? head.length !== 8 : fill < 1) return null;
+  return [...head, ...Array(parts.length === 2 ? fill : 0).fill("0"), ...tail].map(group => parseInt(group, 16));
+}
+// IPv4 映射地址（::ffff:127.0.0.1）：WHATWG URL 会把它规整成十六进制（::ffff:7f00:1），两种写法都还原成点分 IPv4，按 IPv4 的规矩判——
+// 支持公网 IPv6 的同时，不能给 ::ffff:127.0.0.1 之类留出绕过的口子
+function unmapIpv4(host) {
+  const groups = ipv6Groups(host);
+  if (!groups || groups.some(Number.isNaN) || groups.slice(0, 5).some(Boolean) || groups[5] !== 0xffff) return null;
+  return `${groups[6] >> 8}.${groups[6] & 255}.${groups[7] >> 8}.${groups[7] & 255}`;
 }
 function isPrivateAddress(value) {
-  const host = String(value || "").toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const host = hostLiteral(value);
   if (/^(localhost|.*\.localhost|.*\.local|.*\.internal)$/.test(host)) return true;
   if (net.isIPv4(host)) {
-    const [a,b] = host.split(".").map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+    const [a, b] = host.split(".").map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
+    );
   }
-  if (net.isIPv6(host)) return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || /^::ffff:(?:0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host);
+  if (net.isIPv6(host)) {
+    const mapped = unmapIpv4(host);
+    if (mapped) return isPrivateAddress(mapped);
+    // 未指定、回环、ULA（fc00::/7）、链路本地（fe80::/10）、NAT64（64:ff9b::/96，能映射到内网 IPv4）
+    return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || /^64:ff9b:/.test(host);
+  }
   return false;
 }
 async function assertPublicUrl(url) {
   if (!/^https?:$/.test(url.protocol)) throw Error("只支持 http 或 https 地址");
-  if (isPrivateAddress(url.hostname)) throw Error("不允许访问本机或内网地址");
-  if (net.isIP(url.hostname)) return;
-  const addresses = await dns.lookup(url.hostname, { all: true, verbatim: true });
+  const host = hostLiteral(url.hostname);
+  if (isPrivateAddress(host)) throw Error("不允许访问本机或内网地址");
+  if (net.isIP(host)) return;
+  const addresses = await dns.lookup(host, { all: true, verbatim: true });
   if (!addresses.length || addresses.some(item => isPrivateAddress(item.address))) throw Error("网址解析到了本机或内网地址");
 }
-async function fetchText(url, timeout = 15000) {
-  const response = await fetch(url, { headers: { "User-Agent": BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7", Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5" }, redirect: "follow", signal: AbortSignal.timeout(timeout) });
-  if (!response.ok) throw Error(`网页返回 ${response.status}`);
+const FETCH_TEXT_LIMIT = 3 * 1024 * 1024;
+// 正文最多只收 3 MB：边读边计，到量即取消读取器——不先把整个响应吃进内存再截，对方回 500 MB 也只占 3 MB
+async function readLimitedText(response, limit = FETCH_TEXT_LIMIT) {
   const type = response.headers.get("content-type") || "";
-  if (!/text\/|application\/(xhtml|json|xml)/i.test(type)) throw Error(`不支持的内容类型 ${type.split(";")[0] || "未知"}`);
-  const buffer = Buffer.from(await response.arrayBuffer()).subarray(0, 3 * 1024 * 1024);
-  const charset = (type.match(/charset=["']?([\w-]+)/i) || buffer.subarray(0, 4096).toString("latin1").match(/charset=["']?([\w-]+)/i) || [])[1] || "utf-8";
-  let text; try { text = new TextDecoder(charset).decode(buffer); } catch { text = buffer.toString("utf8"); }
+  if (!/text\/|application\/(xhtml|json|xml)/i.test(type)) {
+    await response.body?.cancel().catch(() => {});
+    throw Error(`不支持的内容类型 ${type.split(";")[0] || "未知"}`);
+  }
+  const chunks = [];
+  let size = 0;
+  if (response.body) {
+    const reader = response.body.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (size + value.length >= limit) {
+        chunks.push(value.subarray(0, limit - size));
+        size = limit;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(value);
+      size += value.length;
+    }
+  }
+  const buffer = Buffer.concat(chunks.map(chunk => Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)));
+  const charset =
+    (type.match(/charset=["']?([\w-]+)/i) ||
+      buffer
+        .subarray(0, 4096)
+        .toString("latin1")
+        .match(/charset=["']?([\w-]+)/i) ||
+      [])[1] || "utf-8";
+  let text;
+  try {
+    text = new TextDecoder(charset).decode(buffer);
+  } catch {
+    text = buffer.toString("utf8");
+  }
+  return { text, type, truncated: size >= limit };
+}
+async function fetchText(url, timeout = 15000) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": BROWSER_UA,
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+      Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeout)
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw Error(`网页返回 ${response.status}`);
+  }
+  const { text, type } = await readLimitedText(response);
   return { text, url: response.url, type };
 }
 async function fetchPublicText(url, timeout = 20000) {
-  let current = new URL(url); const signal = AbortSignal.timeout(timeout);
+  let current = new URL(url);
+  const signal = AbortSignal.timeout(timeout);
   for (let redirects = 0; redirects <= 5; redirects++) {
     await assertPublicUrl(current);
-    const response = await fetch(current, { headers: { "User-Agent": BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7", Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5" }, redirect: "manual", signal });
+    const response = await fetch(current, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+        Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"
+      },
+      redirect: "manual",
+      signal
+    });
     if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location"); if (!location) throw Error("网页跳转缺少目标地址");
-      current = new URL(location, current); continue;
+      const location = response.headers.get("location");
+      await response.body?.cancel().catch(() => {});
+      if (!location) throw Error("网页跳转缺少目标地址");
+      current = new URL(location, current);
+      continue;
     }
-    if (!response.ok) throw Error(`网页返回 ${response.status}`);
-    const type = response.headers.get("content-type") || "";
-    if (!/text\/|application\/(xhtml|json|xml)/i.test(type)) throw Error(`不支持的内容类型 ${type.split(";")[0] || "未知"}`);
-    const buffer = Buffer.from(await response.arrayBuffer()).subarray(0, 3 * 1024 * 1024);
-    const charset = (type.match(/charset=["']?([\w-]+)/i) || buffer.subarray(0, 4096).toString("latin1").match(/charset=["']?([\w-]+)/i) || [])[1] || "utf-8";
-    let text; try { text = new TextDecoder(charset).decode(buffer); } catch { text = buffer.toString("utf8"); }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw Error(`网页返回 ${response.status}`);
+    }
+    const { text, type } = await readLimitedText(response);
     return { text, url: current.href, type };
   }
   throw Error("网页跳转次数过多");
@@ -138,12 +365,23 @@ async function fetchPublicText(url, timeout = 20000) {
 // Bing 结果链接是 /ck/a?…&u=a1<base64url> 形式的跳转，还原成真实地址
 function resolveBingUrl(href) {
   const raw = decodeEntities(href);
-  try { const url = new URL(raw, "https://www.bing.com"); if (/bing\.com$/i.test(url.hostname) && url.pathname === "/ck/a") { const u = url.searchParams.get("u") || ""; if (u.startsWith("a1")) return Buffer.from(u.slice(2), "base64url").toString("utf8"); } return url.href; } catch { return raw; }
+  try {
+    const url = new URL(raw, "https://www.bing.com");
+    if (/bing\.com$/i.test(url.hostname) && url.pathname === "/ck/a") {
+      const u = url.searchParams.get("u") || "";
+      if (u.startsWith("a1")) return Buffer.from(u.slice(2), "base64url").toString("utf8");
+    }
+    return url.href;
+  } catch {
+    return raw;
+  }
 }
 async function searchBing(query, count) {
   const { text } = await fetchText(`https://www.bing.com/search?q=${encodeURIComponent(query)}&ensearch=1&count=${count}`);
   const results = [];
-  for (const match of text.matchAll(/<li class="b_algo"[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h2>([\s\S]*?)<\/li>/g)) {
+  for (const match of text.matchAll(
+    /<li class="b_algo"[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h2>([\s\S]*?)<\/li>/g
+  )) {
     const snippet = (match[3].match(/<p[^>]*>([\s\S]*?)<\/p>/) || [])[1] || "";
     const url = resolveBingUrl(match[1]);
     if (/^https?:\/\//.test(url)) results.push({ title: stripTags(match[2]), url, snippet: stripTags(snippet) });
@@ -154,8 +392,13 @@ async function searchBing(query, count) {
 async function searchDuckDuckGo(query, count) {
   const { text } = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=cn-zh`);
   const results = [];
-  for (const match of text.matchAll(/<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)) {
-    let url = match[1]; const uddg = url.match(/[?&]uddg=([^&]+)/); if (uddg) url = decodeURIComponent(uddg[1]); if (url.startsWith("//")) url = `https:${url}`;
+  for (const match of text.matchAll(
+    /<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
+  )) {
+    let url = match[1];
+    const uddg = url.match(/[?&]uddg=([^&]+)/);
+    if (uddg) url = decodeURIComponent(uddg[1]);
+    if (url.startsWith("//")) url = `https:${url}`;
     results.push({ title: stripTags(match[2]), url, snippet: stripTags(match[3]) });
     if (results.length >= count) break;
   }
@@ -163,110 +406,306 @@ async function searchDuckDuckGo(query, count) {
 }
 async function handleSearch(req, res) {
   try {
-    const body = await readJson(req), query = String(body.query || "").trim().slice(0, 300), count = Math.max(1, Math.min(10, Number(body.count) || 6));
+    const body = await readJson(req),
+      query = String(body.query || "")
+        .trim()
+        .slice(0, 300),
+      count = Math.max(1, Math.min(10, Number(body.count) || 6));
     if (!query) throw Error("搜索关键词不能为空");
-    const errors = []; let results = [];
-    for (const engine of [searchBing, searchDuckDuckGo]) { try { results = await engine(query, count); if (results.length) break; } catch (error) { errors.push(error.message); } }
+    const errors = [];
+    let results = [];
+    for (const engine of [searchBing, searchDuckDuckGo]) {
+      try {
+        results = await engine(query, count);
+        if (results.length) break;
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
     if (!results.length && errors.length === 2) throw Error(`搜索引擎暂时不可用：${errors[0]}`);
     sendJson(res, 200, { query, results });
-  } catch (error) { sendJson(res, 400, { error: String(error.message || error).slice(0,500) }); }
+  } catch (error) {
+    sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
+  }
 }
 async function handleFetch(req, res) {
   try {
-    const body = await readJson(req); let url;
-    try { url = new URL(String(body.url || "").trim()); } catch { throw Error("网址无效"); }
+    const body = await readJson(req);
+    let url;
+    try {
+      url = new URL(String(body.url || "").trim());
+    } catch {
+      throw Error("网址无效");
+    }
     const page = await fetchPublicText(url.href, 20000);
     const title = stripTags((page.text.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "");
     const text = (/html|xml/i.test(page.type) ? htmlToText(page.text) : page.text).slice(0, 24000);
     sendJson(res, 200, { title, url: page.url, text });
-  } catch (error) { sendJson(res, 400, { error: String(error.message || error).slice(0,500) }); }
+  } catch (error) {
+    sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
+  }
 }
-function upstreamHeaders(config) { return { "Content-Type": "application/json; charset=utf-8", ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}) }; }
+function upstreamHeaders(config) {
+  return { "Content-Type": "application/json; charset=utf-8", ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}) };
+}
 async function upstreamError(response) {
   const raw = await response.text().catch(() => "");
-  try { const json = JSON.parse(raw); return json.error?.message || json.message || `上游接口返回 ${response.status}`; }
-  catch { return raw.slice(0,300) || `上游接口返回 ${response.status}`; }
+  try {
+    const json = JSON.parse(raw);
+    return json.error?.message || json.message || `上游接口返回 ${response.status}`;
+  } catch {
+    return raw.slice(0, 300) || `上游接口返回 ${response.status}`;
+  }
 }
 
-let APP_VERSION = ""; try { APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8")).version || ""; } catch {}
-function handleBootstrap(res) {
+let APP_VERSION = "";
+try {
+  APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8")).version || "";
+} catch {}
+function handleBootstrap(req, res) {
   const config = loadServerConfig();
-  if (config.unconfigured) return sendJson(res, 200, { version: APP_VERSION, serverProfile: null, configError: "" });
-  if (config.error) return sendJson(res, 200, { version: APP_VERSION, serverProfile: null, configError: config.error });
+  // 令牌与预设模型只给本站页面与 VS Code Webview；别的页面（file:// 预览、其他端口）照常拿到目录信息，但没有预设模型可用
+  const trusted = trustedWorkRequest(req),
+    token = trusted ? SESSION_TOKEN : "";
+  const work = {
+    home: WORK.WORK_HOME,
+    archive: WORK.ARCHIVE_HOME,
+    scratch: WORK.SCRATCH_DIR,
+    platform: process.platform,
+    shell: WORK.WORK_SHELL
+  };
+  if (config.unconfigured || !trusted)
+    return sendJson(res, 200, { version: APP_VERSION, work, token, serverProfile: null, configError: "" });
+  if (config.error) return sendJson(res, 200, { version: APP_VERSION, work, token, serverProfile: null, configError: config.error });
   const lower = config.model.toLowerCase();
   const name = lower.includes("qwen") ? "Qwen" : lower.includes("claude") ? "Claude" : lower.includes("gpt") ? "GPT" : "预设模型";
-  sendJson(res, 200, { version: APP_VERSION, serverProfile: { id: "server-preset", source: "server", name, model: config.model, baseUrl: config.baseUrl, temperature: .7, maxTokens: 8192, systemPrompt: "" }, configError: "" });
+  sendJson(res, 200, {
+    version: APP_VERSION,
+    work,
+    token,
+    serverProfile: {
+      id: "server-preset",
+      source: "server",
+      name,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      temperature: 0.7,
+      maxTokens: 8192,
+      systemPrompt: ""
+    },
+    configError: ""
+  });
 }
 async function handleTest(req, res) {
   const started = Date.now();
   try {
-    const body = await readJson(req), config = resolveProfile(body.profile);
+    const body = await readJson(req),
+      config = resolveProfile(body.profile, true, req);
     const response = await fetch(modelsUrl(config.baseUrl), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw Error(await upstreamError(response));
     const data = await response.json();
-    sendJson(res, 200, { ok: true, latencyMs: Date.now() - started, modelFound: !Array.isArray(data.data) || data.data.some(item => item.id === config.model) });
-  } catch (error) { sendJson(res, 400, { error: String(error.message || error).slice(0,500) }); }
+    sendJson(res, 200, {
+      ok: true,
+      latencyMs: Date.now() - started,
+      modelFound: !Array.isArray(data.data) || data.data.some(item => item.id === config.model)
+    });
+  } catch (error) {
+    sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
+  }
 }
 async function handleModels(req, res) {
   try {
-    const body = await readJson(req), config = resolveProfile(body.profile, false);
+    const body = await readJson(req),
+      config = resolveProfile(body.profile, false, req);
     const response = await fetch(modelsUrl(config.baseUrl), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw Error(await upstreamError(response));
     const data = await response.json();
     const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
-    sendJson(res, 200, { models: list.map(item => typeof item === "string" ? item : item?.id || item?.name).filter(Boolean) });
-  } catch (error) { sendJson(res, 400, { error: String(error.message || error).slice(0,500) }); }
+    sendJson(res, 200, { models: list.map(item => (typeof item === "string" ? item : item?.id || item?.name)).filter(Boolean) });
+  } catch (error) {
+    sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
+  }
 }
 async function handleChat(req, res) {
   try {
-    const body = await readJson(req), config = resolveProfile(body.profile);
+    const body = await readJson(req),
+      config = resolveProfile(body.profile, true, req);
     if (!Array.isArray(body.messages) || !body.messages.length) throw Error("消息不能为空");
-    const messages = body.systemPrompt ? [{ role: "system", content: String(body.systemPrompt).slice(0,20000) }, ...body.messages] : body.messages;
-    const payload = { model: config.model, messages, stream: true, stream_options: { include_usage: true }, temperature: Math.max(0, Math.min(2, Number(body.temperature ?? .7))), max_tokens: Math.max(16, Math.min(65536, Number(body.maxTokens || 8192))) };
-    if (Array.isArray(body.tools) && body.tools.length) payload.tools = body.tools.slice(0, 16);
+    const messages = body.systemPrompt
+      ? [{ role: "system", content: String(body.systemPrompt).slice(0, 20000) }, ...body.messages]
+      : body.messages;
+    const payload = {
+      model: config.model,
+      messages,
+      stream: true,
+      stream_options: { include_usage: true },
+      temperature: Math.max(0, Math.min(2, Number(body.temperature ?? 0.7))),
+      max_tokens: Math.max(16, Math.min(65536, Number(body.maxTokens || 8192)))
+    };
+    if (Array.isArray(body.tools) && body.tools.length) {
+      if (body.tools.length > TOOLS_LIMIT) throw Error(`工具定义过多：${body.tools.length} 件，一次最多 ${TOOLS_LIMIT} 件`);
+      payload.tools = body.tools;
+    }
     if (body.enable_search === true) payload.enable_search = true;
+    // 思考强度：只透传这几个字段
+    for (const key of ["reasoning_effort", "enable_thinking", "thinking_budget"]) if (body[key] !== undefined) payload[key] = body[key];
     const abort = new AbortController();
-    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
-    console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })} → ${config.model}：${messages.length} 条消息${payload.tools ? `，工具 ${payload.tools.length} 个` : ""}${payload.enable_search ? "，enable_search" : ""}`);
-    const response = await fetch(endpoint(config.baseUrl, "/chat/completions"), { method: "POST", headers: upstreamHeaders(config), body: JSON.stringify(payload), signal: abort.signal });
+    res.on("close", () => {
+      if (!res.writableEnded) abort.abort();
+    });
+    console.log(
+      `${new Date().toLocaleTimeString("zh-CN", { hour12: false })} → ${config.model}：${messages.length} 条消息${payload.tools ? `，工具 ${payload.tools.length} 个` : ""}${payload.enable_search ? "，enable_search" : ""}`
+    );
+    const response = await fetch(endpoint(config.baseUrl, "/chat/completions"), {
+      method: "POST",
+      headers: upstreamHeaders(config),
+      body: JSON.stringify(payload),
+      signal: abort.signal
+    });
     if (!response.ok) throw Error(await upstreamError(response));
-    res.writeHead(200, { "Content-Type": response.headers.get("content-type") || "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+    res.writeHead(200, {
+      "Content-Type": response.headers.get("content-type") || "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
     await pipeline(Readable.fromWeb(response.body), res);
   } catch (error) {
-    if (!res.headersSent) sendJson(res, 400, { error: String(error.message || error).slice(0,500) });
+    if (!res.headersSent) sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
     else if (!res.writableEnded && !res.destroyed) res.end();
   }
 }
+const WORK = require("./server/work.js")({ sendJson, readJson, decodeEntities });
+
+const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>此页不存在 · 言</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#fbfaf6;color:#292724;font-family:"Noto Serif SC","Songti SC","STSong",serif}@media(prefers-color-scheme:dark){body{background:#1e1c19;color:#e6e1d6}}main{text-align:center;letter-spacing:.06em}.seal{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #9b5540;color:#9b5540;font-size:18px;transform:rotate(-3deg)}h1{margin:18px 0 8px;font-weight:500;font-size:24px}p{margin:0 0 22px;opacity:.6;font-size:13px}a{color:#9b5540;text-decoration:none;font-size:13px;border-bottom:1px solid currentColor}</style></head><body><main><span class="seal">空</span><h1>此页不存在</h1><p>所寻之处并无一字</p><a href="/">回到案前</a></main></body></html>`;
+// 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
+// 仓库里的 support.js / app.css 是 build.js 的产物，供 file:// 直接打开时使用，桥接启动时也会顺手刷新它们
+const BUNDLES = {
+  "/support.js": { build: bundler.bundleScript, type: "application/javascript; charset=utf-8" },
+  "/app.css": { build: bundler.bundleStyles, type: "text/css; charset=utf-8" }
+};
+function serveBundle(req, res, urlPath) {
+  const entry = BUNDLES[urlPath];
+  if (!entry) return false;
+  const bundle = entry.build();
+  if (!bundle.files.length) return false;
+  const etag = `W/"${Buffer.from(bundle.stamp).toString("base64url").slice(0, 40)}-${bundle.text.length.toString(16)}"`;
+  const headers = { "Content-Type": entry.type, "Cache-Control": "no-cache", ETag: etag };
+  if (req.headers["if-none-match"] === etag) {
+    res.writeHead(304, headers);
+    res.end();
+    return true;
+  }
+  const body = Buffer.from(bundle.text, "utf8");
+  res.writeHead(200, { ...headers, "Content-Length": body.length });
+  res.end(req.method === "HEAD" ? undefined : body);
+  return true;
+}
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, `http://${HOST}`).pathname);
+  if (serveBundle(req, res, urlPath)) return;
   const requested = urlPath === "/" ? "Lumen Chat.dc.html" : urlPath.slice(1);
   const file = path.resolve(ROOT, requested);
-  if (!file.startsWith(ROOT + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return sendJson(res, 404, { error: "未找到页面" });
-  res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-cache" });
+  const stat = file.startsWith(ROOT + path.sep) && fs.existsSync(file) ? fs.statSync(file) : null;
+  if (!stat || stat.isDirectory()) {
+    if (urlPath.startsWith("/api/")) return sendJson(res, 404, { error: "未找到接口" });
+    res.writeHead(404, { "Content-Type": MIME[".html"], "Cache-Control": "no-store" });
+    return res.end(NOT_FOUND_PAGE);
+  }
+  // 带上 ETag / Last-Modified：no-cache 只要求重新验证，有了校验值浏览器才会真正拿到改动后的文件，而不是沿用旧缓存
+  const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+  const headers = {
+    "Content-Type": MIME[path.extname(file)] || "application/octet-stream",
+    "Cache-Control": "no-cache",
+    ETag: etag,
+    "Last-Modified": stat.mtime.toUTCString()
+  };
+  if (req.headers["if-none-match"] === etag) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
+  res.writeHead(200, { ...headers, "Content-Length": stat.size });
   if (req.method === "HEAD") return res.end();
   fs.createReadStream(file).pipe(res);
 }
 
-const server = http.createServer(async (req,res) => {
+// YAN_DEBUG=1：把每个请求与异常断开都打到控制台，排查「页面说桥接没起」这类问题时用
+const DEBUG = /^(1|true|yes)$/i.test(String(process.env.YAN_DEBUG || ""));
+const stamp = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
+const server = http.createServer(async (req, res) => {
+  if (DEBUG) {
+    console.log(`${stamp()} ${req.method} ${req.url} origin=${req.headers.origin || "-"}`);
+    res.on("close", () => {
+      if (!res.writableFinished) console.log(`${stamp()}   ↳ ${req.method} ${req.url} 连接在响应写完前断开`);
+    });
+  }
   try {
     securityHeaders(req, res);
+    const urlPath = new URL(req.url, `http://${HOST}`).pathname;
+    if ((urlPath.startsWith("/api/work/") || urlPath.startsWith("/api/archive/")) && !trustedWorkRequest(req))
+      return sendJson(res, 403, { error: "此页面无权调用本机执事接口，请从桥接地址或 VS Code 打开「言」" });
     corsHeaders(req, res);
-    if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
-    if (req.method === "GET" && req.url === "/api/bootstrap") return handleBootstrap(res);
-    if (req.method === "POST" && req.url === "/api/test") return await handleTest(req,res);
-    if (req.method === "POST" && req.url === "/api/models") return await handleModels(req,res);
-    if (req.method === "POST" && req.url === "/api/search") return await handleSearch(req,res);
-    if (req.method === "POST" && req.url === "/api/fetch") return await handleFetch(req,res);
-    if (req.method === "POST" && req.url === "/api/chat") return await handleChat(req,res);
-    if (req.method === "GET" || req.method === "HEAD") return serveStatic(req,res);
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      return res.end();
+    }
+    if (req.method === "GET" && req.url === "/api/bootstrap") return handleBootstrap(req, res);
+    if (req.method === "POST" && req.url === "/api/test") return await handleTest(req, res);
+    if (req.method === "POST" && req.url === "/api/models") return await handleModels(req, res);
+    if (req.method === "POST" && req.url === "/api/search") return await handleSearch(req, res);
+    if (req.method === "POST" && req.url === "/api/fetch") return await handleFetch(req, res);
+    if (req.method === "POST" && req.url === "/api/chat") return await handleChat(req, res);
+    if (req.method === "POST" && req.url === "/api/work/prepare") return await WORK.handleWorkPrepare(req, res);
+    if (req.method === "POST" && req.url === "/api/work/pick") return await WORK.handleWorkPick(req, res);
+    if (req.method === "POST" && req.url === "/api/work/run") return await WORK.handleWorkRun(req, res);
+    if (req.method === "POST" && req.url === "/api/work/write") return await WORK.handleWorkWrite(req, res);
+    if (req.method === "POST" && req.url === "/api/work/read") return await WORK.handleWorkRead(req, res);
+    if (req.method === "POST" && req.url === "/api/work/list") return await WORK.handleWorkList(req, res);
+    if (req.method === "POST" && req.url === "/api/work/edit") return await WORK.handleWorkEdit(req, res);
+    if (req.method === "POST" && req.url === "/api/work/search") return await WORK.handleWorkSearch(req, res);
+    if (req.method === "POST" && req.url === "/api/archive/list") return await WORK.handleArchiveList(req, res);
+    if (req.method === "POST" && req.url === "/api/archive/put") return await WORK.handleArchivePut(req, res);
+    if (req.method === "POST" && req.url === "/api/archive/remove") return await WORK.handleArchiveRemove(req, res);
+    if (req.method === "POST" && req.url === "/api/archive/clean") return await WORK.handleArchiveClean(req, res);
+    if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/api/archive/file")
+      return await WORK.handleArchiveFile(req, res, new URL(req.url, `http://${HOST}`).searchParams);
+    if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res);
     sendJson(res, 405, { error: "不支持此请求" });
-  } catch (error) { if (!res.headersSent) sendJson(res, 500, { error: String(error.message || error).slice(0,500) }); else res.end(); }
+  } catch (error) {
+    if (!res.headersSent) sendJson(res, 500, { error: String(error.message || error).slice(0, 500) });
+    else res.end();
+  }
 });
-server.on("error", error => { if (error.code === "EADDRINUSE") console.error(`端口 ${PORT} 已被占用，可设置 YAN_PORT 后重试。`); else console.error(error); process.exitCode = 1; });
+server.on("error", error => {
+  if (error.code === "EADDRINUSE") console.error(`端口 ${PORT} 已被占用，可设置 YAN_PORT 后重试。`);
+  else console.error(error);
+  process.exitCode = 1;
+});
+server.on("clientError", (error, socket) => {
+  if (DEBUG) console.log(`${stamp()} 客户端连接错误：${error.code || error.message}`);
+  if (!socket.destroyed) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+});
+// 浏览器复用空闲连接的瞬间桥接恰好把它关掉，POST 会以「Failed to fetch」失败（GET 浏览器会自动重发，POST 不会）：
+// 把空闲连接保得比浏览器久一些，这个竞态就不会发生
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
+// 桥接是本机常驻进程：某个请求里没兜住的异常打出来即可，不能让整个桥接倒下、页面从此「Failed to fetch」
+process.on("uncaughtException", error => console.error(`${stamp()} 桥接内部错误（已忽略）：`, error));
+process.on("unhandledRejection", error => console.error(`${stamp()} 桥接内部错误（已忽略）：`, error));
 server.listen(PORT, HOST, () => {
   const address = `http://${HOST}:${PORT}`;
-  console.log(`言下已启动：${address}`);
-  console.log("请保持此窗口开启；关闭后页面刷新、模型转发和联网都会停止。按 Ctrl+C 可退出。");
-  console.log("此窗口不会显示 API Key。");
-  if (process.argv.includes("--open") && process.platform === "win32") { const child = spawn("cmd.exe", ["/c", "start", "", address], { detached: true, stdio: "ignore", windowsHide: true }); child.unref(); }
+  try {
+    bundler.build({ quiet: true });
+  } catch (error) {
+    console.log(`  （产出 support.js / app.css 失败：${error.message}）`);
+  }
+  console.log(
+    `\n  言 · 本机桥接${APP_VERSION ? `  v${APP_VERSION}` : ""}\n  页面    ${address}\n  执事    ${WORK.WORK_HOME}\n  卷宗    ${WORK.ARCHIVE_HOME}\n`
+  );
+  console.log("  请保持此窗口开启；关闭后页面刷新、模型转发、联网与执事都会停止。按 Ctrl+C 退出。");
+  console.log("  此窗口不会显示 API Key。\n");
+  if (process.argv.includes("--open") && process.platform === "win32") {
+    const child = spawn("cmd.exe", ["/c", "start", "", address], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+  }
 });
