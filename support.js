@@ -52,7 +52,9 @@
  * @property {string} [note]
  * @property {string} [url]
  * @property {any[]} [results] 检索 / 翻记忆 / 查旧谈的命中
- * @property {string} [output] 指令输出、搜索结果、目录清单
+ * @property {string} [output] 指令输出、搜索结果、目录清单、计算结果、接口响应
+ * @property {string} [code] run_js 跑的代码
+ * @property {Array<{ text: string, status: string }>} [plan] update_plan 的清单
  * @property {number} [exitCode]
  * @property {boolean} [readOnly] 只读指令，免确认
  * @property {{ old: string, new: string }} [diff]
@@ -117,7 +119,6 @@
  * @property {Thread[]} threads
  * @property {string} [workdir] 绑了目录即为行
  * @property {boolean} [workAuto] 径行
- * @property {boolean} [sandbox] 沙箱：桥接那头筛指令、锁目录、去机密环境变量；没写过的按开
  * @property {string} [reasoning] 思考档位
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
@@ -164,7 +165,7 @@
  * @property {string[]} collapsedRepos
  * @property {string} reasoning 新对话默认的思考档位
  * @property {boolean} workAutoDefault
- * @property {boolean} [sandboxDefault] 新对话默认开沙箱
+ * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
  * @property {number} compactAt
  * @property {"anywhere"|"inside"} toolReach
  * @property {boolean} archiveRead
@@ -245,7 +246,7 @@ const defaultStore = {
     collapsedRepos: [],
     reasoning: "",
     workAutoDefault: false,
-    sandboxDefault: true,
+    sandbox: true,
     compactAt: 0,
     toolReach: "anywhere",
     archiveRead: true,
@@ -2103,14 +2104,6 @@ function bindEvents() {
     renderWorkAuto();
     if (c.workAuto) for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
   };
-  $("#workSandbox").onclick = () => {
-    const c = currentConversation();
-    if (!c) return;
-    c.sandbox = !sandboxed(c);
-    saveStore();
-    renderSandbox();
-    toast(c.sandbox ? "已套上沙箱：下一条指令起生效" : "已解开沙箱：指令与文件工具不再设限");
-  };
   setupChips();
   setupQuoteTip();
   setupSidePanel();
@@ -2423,10 +2416,9 @@ function toggleHistorySearch(force) {
 function isWork(c) {
   return !!c?.workdir;
 }
-// 沙箱：言与行都有——桥接那头筛指令、锁目录、去机密环境变量。对话自己记着开没开；没记过的按设置的默认，默认开
-/** @param {Conversation} c */
-function sandboxed(c) {
-  return typeof c?.sandbox === "boolean" ? c.sandbox : store.settings.sandboxDefault !== false;
+// 沙箱：言与行都套着——桥接那头筛指令、锁目录、去机密环境变量。只有设置 → 工具里一个总开关，默认开
+function sandboxed() {
+  return store.settings.sandbox !== false;
 }
 function workMode() {
   const c = currentConversation();
@@ -2474,21 +2466,6 @@ function renderWorkAuto() {
   button.title = c.workAuto ? "径行：指令径直执行" : "问而后行：每条指令先经确认";
   button.classList.toggle("on", !!c.workAuto);
 }
-// 沙箱钮：言与行都有，只要这段对话有落脚的目录、模型开着工具
-function renderSandbox() {
-  const c = currentConversation(),
-    button = $("#workSandbox");
-  if (!button) return;
-  const show = !!c && !!workRoot(c) && activeProfile()?.tools !== false;
-  button.classList.toggle("hidden", !show);
-  if (!show) return;
-  const on = sandboxed(c);
-  button.textContent = on ? "沙箱" : "无沙箱";
-  button.title = on
-    ? "沙箱：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令。点一下解开"
-    : "无沙箱：指令与文件工具不设限（文件可及范围按设置）。点一下套上沙箱";
-  button.classList.toggle("on", on);
-}
 function renderWelcome() {
   const work = workMode(),
     bridged = apiBase !== null;
@@ -2531,12 +2508,6 @@ function renderChips(work, bridged) {
   approve.querySelector(".chip-text").textContent = store.settings.workAutoDefault ? "径行" : "问而后行";
   approve.classList.toggle("on", !!store.settings.workAutoDefault);
   approve.title = store.settings.workAutoDefault ? "径行：新对话中的指令径直执行" : "问而后行：新对话中每条指令先经确认";
-  const box = $("#sandboxChip"),
-    boxed = store.settings.sandboxDefault !== false;
-  box.classList.toggle("hidden", !bridged);
-  box.querySelector(".chip-text").textContent = boxed ? "沙箱" : "无沙箱";
-  box.classList.toggle("on", boxed);
-  box.title = boxed ? "沙箱：新对话里路径不出目录、动系统与外联的指令拒绝" : "无沙箱：新对话里指令与文件工具不设限";
 }
 function closeChipPop() {
   document.querySelectorAll(".chip-pop").forEach(pop => pop.remove());
@@ -2752,7 +2723,6 @@ async function bindWorkdir(c, dir) {
     if (prepared.workdir === c.workdir) return;
     c.workdir = prepared.workdir;
     if (c.workAuto === undefined) c.workAuto = !!store.settings.workAutoDefault;
-    if (c.sandbox === undefined) c.sandbox = sandboxed(c);
     rememberWorkdir(prepared.workdir);
     saveStore();
     render();
@@ -2782,11 +2752,6 @@ function setupChips() {
     });
   $("#approveChip").onclick = () => {
     store.settings.workAutoDefault = !store.settings.workAutoDefault;
-    saveStore();
-    renderChips(workMode(), apiBase !== null);
-  };
-  $("#sandboxChip").onclick = () => {
-    store.settings.sandboxDefault = store.settings.sandboxDefault === false;
     saveStore();
     renderChips(workMode(), apiBase !== null);
   };
@@ -3147,7 +3112,6 @@ function renderConversation(shouldScroll = false) {
   $("#chatTitle").textContent = c.title;
   renderChatMeta(c);
   renderWorkAuto();
-  renderSandbox();
   renderModelTriggers();
   const scrollHost = $("#chatScroll");
   scrollHost.classList.toggle(
@@ -3502,6 +3466,10 @@ const TOOL_LABELS = {
   recall: "翻记忆",
   search_conversations: "查旧谈",
   read_conversation: "翻旧谈",
+  run_js: "计算",
+  http_request: "调接口",
+  download_file: "下载",
+  update_plan: "计划",
   user_note: "补言"
 };
 function toolStackLabel() {
@@ -3693,16 +3661,31 @@ function stepHtml(step) {
   if (step.name === "ask_user") return askStepHtml(step);
   if (step.name === "delegate") return delegateStepHtml(step);
   if (step.name === "user_note") return noteStepHtml(step);
-  const body = step.results?.length
-    ? `<ul class="tool-results">${step.results
-        .slice(0, 8)
-        .map(r => `<li>${resultLink(r)}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
-        .join("")}</ul>`
-    : step.url
-      ? `<div class="tool-note">${stepUrl ? `<a href="${escapeHtml(stepUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(stepUrl)}</a>` : escapeHtml(step.url)}</div>`
-      : step.note
-        ? `<div class="tool-note">${escapeHtml(step.note)}</div>`
-        : "";
+  if (step.name === "update_plan") return planStepHtml(step);
+  // 计算与调接口：代码（或请求）在上、输出在下，与指令输出同一套折叠与「展开全部」
+  let more = "";
+  const clamp = text => {
+    const out = clampLines(text, step.full);
+    if (out.clipped) more = `展开全部 · ${out.total} 行`;
+    else if (step.full && out.total > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
+    return escapeHtml(out.text);
+  };
+  const outputBody =
+    step.code || step.output
+      ? `${step.code ? `<pre class="tool-output tool-code">${clamp(step.code)}</pre>` : ""}${step.output ? `<pre class="tool-output">${clamp(step.output)}</pre>` : ""}${more ? `<button type="button" class="tool-more" data-step-more>${more}</button>` : ""}`
+      : "";
+  const body = outputBody
+    ? outputBody
+    : step.results?.length
+      ? `<ul class="tool-results">${step.results
+          .slice(0, 8)
+          .map(r => `<li>${resultLink(r)}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
+          .join("")}</ul>`
+      : step.url
+        ? `<div class="tool-note">${stepUrl ? `<a href="${escapeHtml(stepUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(stepUrl)}</a>` : escapeHtml(step.url)}</div>`
+        : step.note
+          ? `<div class="tool-note">${escapeHtml(step.note)}</div>`
+          : "";
   const status = step.status || "done",
     state =
       status === "running"
@@ -3969,6 +3952,21 @@ function noteStepHtml(step) {
       ? `<div class="tool-note">${escapeHtml(text)}${files.length ? `<div class="tool-note-files">${files.map(name => escapeHtml(name)).join("、")}</div>` : ""}</div>`
       : "";
   return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+}
+// 计划卡：一行一项，○ 待做、▶ 正在做（朱色呼吸点）、✓ 做完、– 不做了；标题行是正在做的那一项或「n/m」
+/** @param {Step} step */
+function planStepHtml(step) {
+  const status = step.status || "done",
+    items = step.plan || [],
+    done = items.filter(item => item.status === "done").length;
+  const rows = items
+    .map(
+      item =>
+        `<li class="plan-item" data-plan="${escapeHtml(item.status)}"><span class="plan-mark" aria-hidden="true">${{ done: "✓", doing: "", skipped: "–" }[item.status] ?? "○"}</span><span class="plan-text">${escapeHtml(item.text)}</span></li>`
+    )
+    .join("");
+  const meta = status === "error" ? escapeHtml(step.result || "失败") : `${done}/${items.length}`;
+  return `<div class="tool-step tool-step-plan" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">计划</span><span class="tool-title" title="${escapeHtml(step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${items.length ? `<ol class="plan-list">${rows}</ol>` : ""}</div>`;
 }
 function stepStateHtml(status) {
   return status === "running"
@@ -4974,6 +4972,7 @@ const MEMORY_WRITE_TOOLS = new Set(["remember", "forget"]);
 // 差遣也并行：同一轮里派出的几名帮手同时开工，各自的卡片各自刷新；活是主模型分的，不重叠靠它分派时留意（工具说明里有交代）
 const PARALLEL_TOOLS = new Set([
   "delegate",
+  "run_js",
   "search_web",
   "fetch_page",
   "read_document",
@@ -6426,7 +6425,9 @@ function quotedText(message) {
 /** @param {Message} message */
 function stepsDigest(message, label = "行迹") {
   const steps = (message.steps || []).filter(
-    step => WORK_TOOLS.has(step.name) || ["ask_user", "delegate", "search_web", "fetch_page", "user_note"].includes(step.name)
+    step =>
+      WORK_TOOLS.has(step.name) ||
+      ["ask_user", "delegate", "search_web", "fetch_page", "user_note", "download_file", "update_plan"].includes(step.name)
   );
   if (!steps.length) return "";
   const items = steps.slice(0, 16).map(step =>
@@ -6447,7 +6448,9 @@ function stepsDigest(message, label = "行迹") {
               }`
             : step.name === "fetch_page"
               ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
-              : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
+              : step.name === "update_plan"
+                ? `计划 → ${(step.plan || []).map(item => `${{ done: "✓", doing: "▶", skipped: "–" }[item.status] || "○"}${item.text.slice(0, 40)}`).join("；")}`
+                : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
   );
   return `［${label}］${items.join("；")}${steps.length > 16 ? `；…共 ${steps.length} 步` : ""}`;
 }
@@ -6577,7 +6580,6 @@ async function sendOrStop() {
       messages: [],
       workdir: pending,
       workAuto: !!store.settings.workAutoDefault,
-      sandbox: store.settings.sandboxDefault !== false,
       reasoning: store.settings.reasoning || ""
     };
     if (!(await ensureWorkReady(c))) return;
@@ -7197,8 +7199,14 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   };
   const tools = [];
   if (apiBase !== null) tools.push(define("search_web"), define("fetch_page"));
-  // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线
-  if (workRoot(conversation) && !lookup) tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)));
+  // 调接口能发 POST，不算纯查阅，旁注不给；算一段 JS 在浏览器里的隔离沙箱跑，不经桥接，谁都有
+  if (apiBase !== null && !lookup) tools.push(define("http_request"));
+  tools.push(define("run_js"));
+  // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线。下载也落在同一处
+  if (workRoot(conversation) && !lookup)
+    tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));
+  // 计划：行里给用户看的清单，只有主模型维护
+  if (work && !sub) tools.push(define("update_plan"));
   if (!sub && !lookup) tools.push(define("ask_user"));
   // 帮手与旁注对记忆只读：翻记忆、查旧谈可以，记与忘留给主模型
   if (memoryEnabled())
@@ -7218,7 +7226,7 @@ function workHint(conversation) {
   return prompt(isWork(conversation) ? "work.hint" : "work.archive", {
     workdir: workRoot(conversation),
     scratch: scratchRel(conversation),
-    reach: prompt(sandboxed(conversation) ? "work.reachSandbox" : roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
+    reach: prompt(sandboxed() ? "work.reachSandbox" : roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
     platform: win ? "Windows" : bootstrap.work?.platform || "类 Unix",
     shell,
     shellNote: win ? prompt("work.windowsShell") : ""
@@ -7305,7 +7313,16 @@ function parseToolArguments(raw) {
   return { ok: false, error: String(first?.error?.message || "不是合法 JSON"), raw: text };
 }
 // 有副作用的工具：参数必须是完整的 JSON，且 schema 里的必填项一个不少，否则不执行
-const SIDE_EFFECT_TOOLS = new Set(["run_command", "write_file", "edit_file", "remember", "forget", "delegate"]);
+const SIDE_EFFECT_TOOLS = new Set([
+  "run_command",
+  "write_file",
+  "edit_file",
+  "remember",
+  "forget",
+  "delegate",
+  "download_file",
+  "http_request"
+]);
 // 按 prompts/tools.js 里的 schema 把参数理顺：模型写参数常有小出入，能理解的都照单收下，只有真讲不通的才算失败——
 // 键名写成了常见的别名（file_path → path、cmd → command、old_string → old）、数字与布尔给成了字符串、该是数组的只给了一项、
 // 该是数组的整段 JSON 又编码成了字符串、ask_user 把单个问题直接摊在顶层……都在这里归位；必填项理顺后仍缺的才报
@@ -7512,6 +7529,10 @@ async function runTool(step, conversation, assistant, signal) {
       };
     }
     if (step.name === "read_document") return await readDocumentTool(step, args, conversation);
+    if (step.name === "run_js") return await runJsTool(step, args, signal);
+    if (step.name === "http_request") return await httpRequestTool(step, args, signal);
+    if (step.name === "download_file") return await downloadFileTool(step, args, conversation, signal);
+    if (step.name === "update_plan") return updatePlanTool(step, args);
     if (MEMORY_TOOLS.has(step.name)) return runMemoryTool(step, args, conversation);
     if (step.name === "ask_user") return await askUserTool(step, args, conversation, assistant, signal);
     if (step.name === "delegate") return await runDelegate(step, args, conversation, assistant, signal);
@@ -7525,6 +7546,132 @@ async function runTool(step, conversation, assistant, signal) {
       display: friendlyError(String(error.message || error)).slice(0, 60)
     };
   }
+}
+// ---- run_js：在隔离沙箱里算一段 JS。沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；
+// 每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉；直连没桥接也能用
+function computeInSandbox(code, timeoutMs, signal) {
+  return new Promise((resolve, reject) => {
+    const id = `compute-${uid()}`,
+      iframe = document.createElement("iframe");
+    iframe.setAttribute("sandbox", "allow-scripts");
+    iframe.className = "compute-frame";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.src = `./preview.html#${id}`;
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(guard);
+      window.removeEventListener("message", onMessage);
+      signal?.removeEventListener("abort", onAbort);
+      iframe.remove();
+      fn(value);
+    };
+    const onMessage = event => {
+      if (event.source !== iframe.contentWindow || event.data?.id !== id) return;
+      if (event.data.type === "yan-preview-ready")
+        iframe.contentWindow.postMessage({ type: "yan-compute", id, code, timeout: timeoutMs }, "*");
+      else if (event.data.type === "yan-compute-result") finish(resolve, event.data);
+    };
+    const onAbort = () => finish(reject, Object.assign(Error("已停止"), { name: "AbortError" }));
+    // 那头没回话（页没起来、Worker 起不来）：多等 5 秒就算了
+    const guard = setTimeout(() => finish(resolve, { ok: false, error: "沙箱没有回话" }), timeoutMs + 5000);
+    window.addEventListener("message", onMessage);
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    document.body.append(iframe);
+  });
+}
+async function runJsTool(step, args, signal) {
+  const code = String(args.code ?? "").trim();
+  step.code = code;
+  step.title =
+    code
+      .split("\n")
+      .find(line => line.trim())
+      ?.trim()
+      .slice(0, 80) || "";
+  if (!code) return { ok: false, content: "code 为空", display: "代码为空" };
+  const timeout = clampNumber(Number(args.timeout) * 1000, 10000, 1000, 60000);
+  const result = await computeInSandbox(code, timeout, signal);
+  const parts = [];
+  if (result.logs) parts.push(result.logs);
+  if (result.value !== undefined) parts.push(`→ ${result.value}`);
+  if (result.error) parts.push(`✗ ${result.error}`);
+  step.output = trimOutput(parts.join("\n"));
+  const ms = Number(result.ms) || 0;
+  return {
+    ok: !!result.ok,
+    content: result.ok
+      ? `${result.logs ? `输出：\n${result.logs}\n` : ""}返回值：${result.value === undefined ? "（无；用 return 交回结果）" : result.value}`.slice(
+          0,
+          60000
+        )
+      : `运行出错：${result.error || "未知错误"}${result.logs ? `\n出错前的输出：\n${result.logs}` : ""}`,
+    display: result.ok ? `${ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`}` : "出错"
+  };
+}
+function clampNumber(value, fallback, min, max) {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : fallback));
+}
+// ---- http_request：经桥接向公网接口发请求；地址门禁在桥接那头（不许本机与内网）
+async function httpRequestTool(step, args, signal) {
+  const url = String(args.url || "").trim(),
+    method = String(args.method || "GET")
+      .trim()
+      .toUpperCase();
+  step.url = url;
+  step.title = `${method} ${url}`.slice(0, 200);
+  const data = await bridge("/api/http", { url, method, headers: args.headers, body: args.body }, signal);
+  const headers = Object.entries(data.headers || {})
+    .map(([name, value]) => `${name}: ${String(value).slice(0, 300)}`)
+    .join("\n");
+  const body = data.textual ? data.text || "(空)" : `（${data.type || "二进制"}，${formatFileSize(data.bytes)}，不作为文本返回）`;
+  step.output = trimOutput(`${data.status} ${data.statusText || ""}\n${body}`);
+  return {
+    ok: data.status < 400,
+    content: `HTTP ${data.status} ${data.statusText || ""}${data.url && data.url !== url ? `（跳转到 ${data.url}）` : ""}\n--- 响应头 ---\n${headers}\n--- 正文${data.truncated ? "（已截断）" : ""} ---\n${body}`,
+    display: `${data.status} · ${data.textual ? `${(data.text || "").length} 字` : formatFileSize(data.bytes)}`
+  };
+}
+// ---- download_file：桥接把网上的文件存进工作目录或卷宗；沙箱照常管路径
+async function downloadFileTool(step, args, conversation, signal) {
+  const workdir = workRoot(conversation);
+  if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
+  const url = String(args.url || "").trim();
+  step.url = url;
+  step.title = String(args.path || "").trim() || url.split("/").pop() || url;
+  const data = await bridge("/api/work/download", { workdir, roam: roamAllowed(), sandbox: sandboxed(), url, path: args.path }, signal);
+  step.title = data.path;
+  step.note = url;
+  step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要
+  return {
+    ok: true,
+    content: `已存为 ${data.path}（${formatFileSize(data.bytes)}${data.type ? `，${data.type}` : ""}）`,
+    display: formatFileSize(data.bytes)
+  };
+}
+// ---- update_plan：清单画在行迹里，每次都是完整的一份；回给模型一行计数就够
+function updatePlanTool(step, args) {
+  const STATUSES = new Set(["pending", "doing", "done", "skipped"]);
+  const items = (Array.isArray(args.items) ? args.items : [])
+    .map(item => (typeof item === "string" ? { text: item, status: "pending" } : item))
+    .filter(item => item && typeof item === "object" && String(item.text || "").trim())
+    .slice(0, 12)
+    .map(item => ({
+      text: String(item.text).trim().slice(0, 200),
+      status: STATUSES.has(String(item.status || "").toLowerCase()) ? String(item.status).toLowerCase() : "pending"
+    }));
+  if (!items.length) return { ok: false, content: "items 为空：每项给 text 与 status", display: "清单为空" };
+  step.plan = items;
+  const done = items.filter(item => item.status === "done").length,
+    doing = items.find(item => item.status === "doing");
+  step.title = doing ? doing.text : done === items.length ? "全部完成" : `${done}/${items.length}`;
+  return {
+    ok: true,
+    content: `计划已更新：${done}/${items.length} 完成${doing ? `，正在做「${doing.text}」` : ""}`,
+    display: `${done}/${items.length}`
+  };
 }
 // 执事模式的四件事。run_command 默认问而后行：步骤卡上给出「运行 / 跳过 / 径行」，模型等用户点了才继续
 const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),
@@ -8045,7 +8192,7 @@ function roamAllowed() {
 async function runWorkTool(step, args, conversation, assistant, signal) {
   const workdir = workRoot(conversation),
     roam = roamAllowed(),
-    sandbox = sandboxed(conversation);
+    sandbox = sandboxed();
   if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
   const job = requestJob(conversation.id);
   if (step.name === "run_command") {
@@ -8901,6 +9048,7 @@ function renderSettings() {
   if (settingsTab === "general") host.innerHTML = generalSettingsHtml();
   if (settingsTab === "appearance") host.innerHTML = appearanceSettingsHtml();
   if (settingsTab === "models") host.innerHTML = modelsSettingsHtml();
+  if (settingsTab === "tools") host.innerHTML = toolsSettingsHtml();
   if (settingsTab === "memory") host.innerHTML = memorySettingsHtml();
   if (settingsTab === "about") host.innerHTML = aboutSettingsHtml();
   bindSettingsEvents();
@@ -8912,11 +9060,15 @@ function renderSettings() {
   }
 }
 function generalSettingsHtml() {
-  return `<h2>通用</h2><p class="settings-lead">所有数据仅存于此设备的浏览器。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>新对话默认是否套上沙箱：路径不出目录、目录里的机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；在桥接那头守，模型绕不过。每段对话可在输入框旁随时开合。这是静态筛查，不是进程隔离</small></div><div class="segmented"><button data-setting="sandboxDefault" data-value="true" class="${store.settings.sandboxDefault !== false ? "active" : ""}">开</button><button data-setting="sandboxDefault" data-value="false" class="${store.settings.sandboxDefault === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>${
+  return `<h2>通用</h2><p class="settings-lead">所有数据仅存于此设备的浏览器。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div>${
     apiBase !== null
       ? `<div class="setting-row"><div class="setting-copy"><strong>卷宗目录</strong><small>卷宗在本机的位置；未绑目录的对话里，模型写出的文件与草稿皆落于此。留空则用默认 ${escapeHtml(bootstrap.work?.archive || "")}</small></div><div class="setting-actions setting-archive"><input id="settingArchive" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(bootstrap.work?.archive || "")}" value="${escapeHtml(store.settings.archiveDir || "")}"><button id="settingArchivePick" class="outline-btn" type="button">选择…</button></div></div>`
       : ""
   }<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
+}
+// 工具：沙箱、指令确认、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
+function toolsSettingsHtml() {
+  return `<h2>工具</h2><p class="settings-lead">模型能做什么、做到哪一步问一声，都在这里定。</p><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>言与行的指令与文件工具都套着一层：路径不出目录、目录里的机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；在桥接那头守，模型绕不过。这是静态筛查，不是进程隔离。非要让模型动目录之外的东西时再关</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">开</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>指令确认</strong><small>新的行（执事）对话里，会改动状态的指令是先问再跑，还是径直执行；只读指令一律免确认。对话里输入框旁可随时切换，欢迎页填了目录后也有小签</small></div><div class="segmented"><button data-setting="workAutoDefault" data-value="false" class="${store.settings.workAutoDefault ? "" : "active"}">问而后行</button><button data-setting="workAutoDefault" data-value="true" class="${store.settings.workAutoDefault ? "active" : ""}">径行</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>`;
 }
 function appearanceSettingsHtml() {
   const s = store.settings;
@@ -8979,7 +9131,7 @@ function aboutSettingsHtml() {
       ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
       [
         "沙箱",
-        "默认套着：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令，在桥接那头守。是静态筛查，不是进程隔离——脚本里的代码仍以你的权限运行"
+        "指令与文件工具默认套着：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令，在桥接那头守。是静态筛查，不是进程隔离——脚本里的代码仍以你的权限运行；设置 → 工具可关"
       ],
       ["记忆", "模型在对谈中记下的一句句话，只存于本机；何时记、何时看由它判断，不随每次请求发送，可在「记忆」页查改或关闭"],
       ["备份", "导出的备份不含 API Key；可选择是否带上附件原件"]
@@ -9155,7 +9307,11 @@ function bindSettingsEvents() {
           return;
         }
         store.settings[key] =
-          key === "width" ? Number(value) : ["autoTitle", "archiveRead", "sandboxDefault"].includes(key) ? value === "true" : value;
+          key === "width"
+            ? Number(value)
+            : ["autoTitle", "archiveRead", "sandbox", "workAutoDefault"].includes(key)
+              ? value === "true"
+              : value;
         saveStore();
         applyAppearance();
         renderSettings();
