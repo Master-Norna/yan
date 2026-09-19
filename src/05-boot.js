@@ -445,13 +445,13 @@ function bindEvents() {
     // 差遣卡片整张折叠（默认摊开），指令输出默认折起；两者都记在步骤上，重画不丢
     if (el.classList.contains("tool-step-delegate")) {
       if (step) step.folded = !step.folded;
-      el.classList.toggle("folded", step ? !!step.folded : !el.classList.contains("folded"));
+      morphHeight(el, () => el.classList.toggle("folded", step ? !!step.folded : !el.classList.contains("folded")));
       saveStoreSoon();
       return;
     }
     const wasFolded = el.classList.contains("folded");
     if (step) step.expanded = wasFolded;
-    el.classList.toggle("folded", !wasFolded);
+    morphHeight(el, () => el.classList.toggle("folded", !wasFolded));
     head.title = wasFolded ? "收起输出" : "展开输出";
     saveStoreSoon();
   });
@@ -469,7 +469,14 @@ function bindEvents() {
     step.full = !step.full;
     step.expanded = true;
     saveStoreSoon();
-    el.outerHTML = stepHtml(step);
+    // 节点留在原处只换内容，高度才好从旧高动到新高
+    const fresh = document.createElement("div");
+    fresh.innerHTML = stepHtml(step);
+    const next = fresh.firstElementChild;
+    morphHeight(el, () => {
+      el.className = next.className;
+      el.innerHTML = next.innerHTML;
+    });
   });
   // 差遣卡片里「帮手 · n 步」的开合记在步骤上，卡片重画时不丢
   $("#messages").addEventListener("click", event => {
@@ -484,9 +491,20 @@ function bindEvents() {
         allMessages(c)
           .flatMap(m => m.steps || [])
           .find(s => s.id === id);
-    details.open = !details.open;
+    const nextOpen = details._motionAnimation ? !details._motionTarget : !details.open;
+    clearTimeout(details._settleTimer);
+    details._settleTimer = null;
     details.dataset.touched = "1";
-    if (step) step.subOpen = details.open;
+    if (step) step.subOpen = nextOpen;
+    setProcessDetails(details, nextOpen);
+  });
+  // 出处也是一块可开合的，与思绪、行迹同一种开合
+  $("#messages").addEventListener("click", event => {
+    const summary = event.target.closest(".source-stack > summary");
+    if (!summary) return;
+    event.preventDefault();
+    const details = summary.parentElement;
+    setProcessDetails(details, details._motionAnimation ? !details._motionTarget : !details.open);
   });
   $("#approvalBar").addEventListener("click", event => {
     const bar = $("#approvalBar"),

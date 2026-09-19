@@ -140,8 +140,12 @@
   }
 }
 .reasoning.is-closing summary:before,
-.tool-stack.is-closing > summary:before {
+.tool-stack.is-closing > summary:before,
+.source-stack.is-closing > summary:before {
   transform: rotate(-45deg);
+}
+.sub-steps.is-closing > summary:before {
+  transform: none;
 }
 html.theme-fade,
 html.theme-fade * {

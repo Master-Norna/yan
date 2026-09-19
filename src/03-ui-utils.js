@@ -201,7 +201,8 @@ function setProcessDetails(details, open, animate = true) {
   details._motionAnimation?.cancel();
   details._motionAnimation = null;
   details._motionTarget = open;
-  const body = details.querySelector(".reasoning-body, .tool-stack-body");
+  // 只认自己直接的那层正文：帮手卡片的「帮手 · n 步」里还套着各轮的思绪，不能抓到里头那个去动
+  const body = details.querySelector(":scope > .reasoning-body, :scope > .tool-stack-body, :scope > .sub-timeline, :scope > .source-grid");
   details.classList.remove("is-closing");
   if (body) {
     body.style.removeProperty("overflow");
@@ -245,5 +246,23 @@ function setProcessDetails(details, open, animate = true) {
     animation.cancel();
     details._motionAnimation = null;
     details._motionTarget = undefined;
+  };
+}
+// 就地改内容时高度平滑过渡（先量旧高，改完量新高，再从旧高动到新高）：步骤输出的折起摊开、「展开全部」都走这里，
+// 别让一块内容凭空出现又凭空消失。动效关掉时直接改
+function morphHeight(el, mutate, duration = 360) {
+  if (!el || inkMotionOff() || typeof el.animate !== "function") return mutate();
+  const from = el.getBoundingClientRect().height;
+  mutate();
+  const to = el.getBoundingClientRect().height;
+  if (Math.abs(to - from) < 2) return;
+  el._morph?.cancel();
+  el.style.overflow = "hidden";
+  const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: "cubic-bezier(.22,.72,.2,1)" });
+  el._morph = animation;
+  animation.onfinish = animation.oncancel = () => {
+    if (el._morph !== animation) return;
+    el._morph = null;
+    el.style.removeProperty("overflow");
   };
 }
