@@ -1532,6 +1532,12 @@ sup.note-ref.active {
   font-size: 16.5px;
   line-height: 1.85;
 }
+/* 楷与仿宋比宋清瘦，回复放大半号、行距略松，读起来才不费眼 */
+:root[data-font="kai"] .assistant-block,
+:root[data-font="fangsong"] .assistant-block {
+  font-size: 17.5px;
+  line-height: 1.9;
+}
 .message-meta {
   display: flex;
   flex-wrap: wrap;
@@ -2366,31 +2372,29 @@ sup.note-ref.active {
 }
 .viz-pending-body {
   position: relative;
-  height: 68px;
+  height: 96px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
-/* 虚痕：与顶栏「余墨」同一笔形，墨未着纸，淡淡地呼吸；每来一行吸一口朱墨（viz-ink-pulse 由 paintTail 点亮） */
-.viz-pending-stroke {
+/* 草图：将要画的东西的底稿，淡墨勾线；动效开着时一笔一笔勾出来（见 90-motion），每来一行轮到的一笔蘸朱（pulseInkStroke） */
+.viz-sketch {
   display: block;
-  width: 150px;
-  height: 27px;
-}
-.viz-pending-stroke svg {
-  display: block;
-  width: 100%;
-  height: 100%;
+  width: 160px;
+  height: 72px;
   overflow: visible;
+  color: var(--ink-3);
 }
-.viz-ink-ghost {
-  fill: var(--ink-3);
-  opacity: 0.16;
-}
-.viz-ink-pulse {
-  fill: var(--accent);
-  opacity: 0;
+.viz-sketch path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  opacity: 0.42;
 }
 .tool-steps {
   margin: 0 0 14px;
@@ -4456,6 +4460,10 @@ textarea::placeholder,
 .library-tools .segmented button {
   min-width: 44px;
 }
+.font-segmented button {
+  min-width: 54px;
+  font-size: 13px;
+}
 .close-modal {
   position: absolute;
   right: 16px;
@@ -6092,28 +6100,17 @@ body {
   position: relative;
   isolation: isolate;
 }
-.viz-pending:before,
 .viz-pending:after {
   content: "";
   position: absolute;
   z-index: 3;
   pointer-events: none;
-}
-.viz-pending:before {
-  left: 0;
-  top: 0;
-  width: 24%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  opacity: 0;
-}
-.viz-pending:after {
   inset: 0;
   border-radius: inherit;
   box-shadow:
     inset 0 0 0 1px var(--accent),
     inset 0 0 22px color-mix(in srgb, var(--accent) 7%, transparent);
-  opacity: 0.12;
+  opacity: 0.1;
 }
 .viz-pending-signal {
   width: 5px;
@@ -6123,62 +6120,52 @@ body {
   opacity: 0.55;
 }
 /* 占位框的几处循环动效都接着 --phase 的拍子（负的 animation-delay），节点重建也不从头来 */
-:root[data-ink-motion="on"] .viz-pending:before {
-  animation: pendingTrace 1.9s cubic-bezier(0.35, 0.05, 0.28, 1) infinite;
-  animation-delay: var(--phase, 0ms);
-}
 :root[data-ink-motion="on"] .viz-pending:after {
-  animation: pendingFrame 1.9s ease-in-out infinite;
+  animation: pendingFrame 4.6s ease-in-out infinite;
   animation-delay: var(--phase, 0ms);
 }
 :root[data-ink-motion="on"] .viz-pending-signal {
   animation: pendingSignal 1.35s ease-in-out infinite;
   animation-delay: var(--phase, 0ms);
 }
-:root[data-ink-motion="on"] .viz-ink-ghost {
-  animation: strokeBreath 2.6s ease-in-out infinite;
-  animation-delay: var(--phase, 0ms);
+/* 草图一笔一笔勾：各笔按 --i 错开 0.24s 起笔，勾完停一停，淡去，再从头勾；一轮 4.6s */
+:root[data-ink-motion="on"] .viz-sketch path {
+  animation: sketchDraw 4.6s cubic-bezier(0.4, 0.05, 0.3, 1) infinite;
+  animation-delay: calc(var(--phase, 0ms) + var(--i, 0) * 0.24s);
 }
-:root[data-ink-motion="off"] .viz-pending:before,
 :root[data-ink-motion="off"] .viz-pending:after,
 :root[data-ink-motion="off"] .viz-pending-signal,
-:root[data-ink-motion="off"] .viz-ink-ghost,
+:root[data-ink-motion="off"] .viz-sketch path,
 :root[data-ink-motion="off"] .history-state.running,
 :root[data-ink-motion="off"] .history-state.waiting {
   animation: none !important;
 }
-@keyframes pendingTrace {
-  0% {
-    opacity: 0;
-    transform: translateX(-120%);
-  }
-  14%,
-  82% {
-    opacity: 0.72;
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(520%);
-  }
-}
 @keyframes pendingFrame {
   0%,
   100% {
-    opacity: 0.1;
+    opacity: 0.08;
   }
-  50% {
-    opacity: 0.42;
+  45% {
+    opacity: 0.3;
   }
 }
-@keyframes strokeBreath {
-  0%,
-  100% {
-    opacity: 0.1;
-    transform: scale(0.985);
+@keyframes sketchDraw {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0.42;
   }
-  50% {
-    opacity: 0.34;
-    transform: scale(1.015);
+  18% {
+    stroke-dashoffset: 0;
+    opacity: 0.42;
+  }
+  70% {
+    stroke-dashoffset: 0;
+    opacity: 0.42;
+  }
+  84%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
   }
 }
 @keyframes pendingSignal {

@@ -117,6 +117,7 @@
  * @property {Thread[]} threads
  * @property {string} [workdir] 绑了目录即为行
  * @property {boolean} [workAuto] 径行
+ * @property {boolean} [sandbox] 沙箱：桥接那头筛指令、锁目录、去机密环境变量；没写过的按开
  * @property {string} [reasoning] 思考档位
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
@@ -153,7 +154,7 @@
  * @property {string} name
  * @property {"light"|"dark"|"system"} theme
  * @property {"on"|"off"|"system"} inkMotion
- * @property {"sans"|"serif"|"mixed"} font
+ * @property {"sans"|"serif"|"mixed"|"kai"|"fangsong"} font
  * @property {number} width
  * @property {string} accent
  * @property {string} activeProfileId
@@ -163,6 +164,7 @@
  * @property {string[]} collapsedRepos
  * @property {string} reasoning 新对话默认的思考档位
  * @property {boolean} workAutoDefault
+ * @property {boolean} [sandboxDefault] 新对话默认开沙箱
  * @property {number} compactAt
  * @property {"anywhere"|"inside"} toolReach
  * @property {boolean} archiveRead
@@ -243,6 +245,7 @@ const defaultStore = {
     collapsedRepos: [],
     reasoning: "",
     workAutoDefault: false,
+    sandboxDefault: true,
     compactAt: 0,
     toolReach: "anywhere",
     archiveRead: true,
@@ -968,18 +971,52 @@ function renderMath(tex, display) {
 }
 // 占位框里的动效在逐帧重画的尾段里会随节点重建从头再来，看着像定住了：把相位记在节点上（负的 animation-delay），重建也接着原来的拍子走
 const vizPhase = () => `-${Math.round(performance.now())}ms`;
-// 占位框里是一道虚痕——与顶栏「余墨」同一笔形，只是墨未着纸：淡淡地呼吸着；每来一行，痕上吸一口朱墨又散去（见 paintTail），
-// 流停了痕就只剩呼吸，看得出还在写还是卡住了
-const INK_STROKE =
-  "M1.4 6.4C8 4.2 18 3.9 30 4.4c12 .5 22 1.3 34.4.2.9-.1 1.5.9 1 1.6-3.8 2.8-11.6 3-21 2.6C33 8.4 22 7.6 11 8.5c-3.4.3-6.8.5-9.2-.5-.9-.4-1-1.3-.4-1.6z";
-function pendingSketchHtml() {
-  return `<span class="viz-pending-stroke"><svg viewBox="0 0 68 12" aria-hidden="true"><path class="viz-ink-ghost" d="${INK_STROKE}"/><path class="viz-ink-pulse" d="${INK_STROKE}"/></svg></span>`;
+// 占位框里是一页草图：将要画的东西的底稿——图表是轴、柱与一条折线，流程图是三个框两支箭，网页是一页版式——
+// 用淡墨一笔一笔勾出来，勾完停一停、淡去、再勾（pathLength 归一，stroke-dashoffset 从 1 走到 0 就是「画出来」，各笔按 --i 错开）。
+// 每来一行，草图上有一笔蘸朱（见 pulseInkStroke，由 paintTail 点）：流着时朱笔此起彼伏，流停了草图只剩自己勾着，看得出还在写还是卡住了
+const VIZ_SKETCHES = {
+  echarts: [
+    "M16 6v56h136",
+    "M32 62V42",
+    "M52 62V30",
+    "M72 62V48",
+    "M92 62V20",
+    "M112 62V36",
+    "M132 62V28",
+    "M24 46C40 22 56 50 72 36S104 14 136 24"
+  ],
+  mermaid: [
+    "M10 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z",
+    "M46 36h14M56 32l4 4-4 4",
+    "M64 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H64a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z",
+    "M100 36h14M110 32l4 4-4 4",
+    "M118 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4h-32a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z"
+  ],
+  html: [
+    "M8 6h144a3 3 0 0 1 3 3v54a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z",
+    "M5 18h150",
+    "M12 25h30a2 2 0 0 1 2 2v30a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V27a2 2 0 0 1 2-2z",
+    "M52 28h92",
+    "M52 36h72",
+    "M52 44h84",
+    "M52 52h26a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H52a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z"
+  ]
+};
+function pendingSketchHtml(language) {
+  const strokes = VIZ_SKETCHES[language] || VIZ_SKETCHES.html;
+  return `<svg class="viz-sketch" viewBox="0 0 160 72" aria-hidden="true">${strokes.map((d, i) => `<path d="${d}" pathLength="1" style="--i:${i}"/>`).join("")}</svg>`;
 }
-// 新来一行：虚痕上吸一口朱墨，随即散去
+// 新来一行：草图上轮到的那一笔蘸一口朱墨，随即褪回淡墨
 function pulseInkStroke(pending) {
-  const pulse = pending.querySelector(".viz-ink-pulse");
-  if (!pulse || inkMotionOff() || typeof pulse.animate !== "function") return;
-  pulse.animate([{ opacity: 0 }, { opacity: 0.55, offset: 0.22 }, { opacity: 0 }], { duration: 640, easing: "ease-out" });
+  const strokes = pending.querySelectorAll(".viz-sketch path");
+  if (!strokes.length || inkMotionOff()) return;
+  const stroke = strokes[(Number(pending.dataset.lines) || 0) % strokes.length];
+  if (typeof stroke.animate !== "function") return;
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#9b5540";
+  stroke.animate([{ stroke: accent, opacity: 0.95, offset: 0.12 }, { stroke: accent, opacity: 0.8, offset: 0.4 }, { offset: 1 }], {
+    duration: 900,
+    easing: "ease-out"
+  });
 }
 // 尾段每帧整段重画，占位框若跟着重建，虚痕的呼吸每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
 // 只换它周围的内容；行数变了就让虚痕吸一口墨
@@ -996,8 +1033,9 @@ function paintTail(tail, html) {
     tail.innerHTML = html;
     return;
   }
-  if (live.dataset.lines !== next.dataset.lines) pulseInkStroke(live);
+  const grew = live.dataset.lines !== next.dataset.lines;
   live.dataset.lines = next.dataset.lines;
+  if (grew) pulseInkStroke(live);
   live.setAttribute("aria-label", next.getAttribute("aria-label"));
   for (const node of [...tail.childNodes]) if (node !== live) node.remove();
   const before = [],
@@ -1017,10 +1055,10 @@ function codeBlockHtml(text, lang) {
       .toLowerCase(),
     known = !!(window.hljs && language && hljs.getLanguage(language));
   const htmlApp = ["html", "interactive", "app"].includes(language);
-  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是一页正在落笔的手稿（见 pendingSketchHtml）
+  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是将要画的东西的草图（见 pendingSketchHtml）
   if (suppressViz && (htmlApp || language === "mermaid" || language === "echarts")) {
     const lines = String(text || "").split("\n").length;
-    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml()}</div></div>\n`;
+    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml(htmlApp ? "html" : language)}</div></div>\n`;
   }
   if (!suppressViz && (language === "mermaid" || language === "echarts"))
     return `<div class="viz" data-viz="${language}"><div class="code-head"><span class="code-lang">${language}</span><span><button type="button" class="code-copy" data-viz-toggle>源码</button><button type="button" class="code-copy" data-viz-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="viz-canvas"></div><pre class="viz-source hidden"><code>${escapeHtml(text)}</code></pre></div>\n`;
@@ -2065,6 +2103,14 @@ function bindEvents() {
     renderWorkAuto();
     if (c.workAuto) for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
   };
+  $("#workSandbox").onclick = () => {
+    const c = currentConversation();
+    if (!c) return;
+    c.sandbox = !sandboxed(c);
+    saveStore();
+    renderSandbox();
+    toast(c.sandbox ? "已套上沙箱：下一条指令起生效" : "已解开沙箱：指令与文件工具不再设限");
+  };
   setupChips();
   setupQuoteTip();
   setupSidePanel();
@@ -2252,6 +2298,7 @@ function bindEvents() {
     if (!c) return;
     c.showCompacted = !c.showCompacted;
     foldCompacted(c);
+    renderOutline();
     if (!c.showCompacted) scrollChatTo(button.closest(".context-divider"), "center");
   });
   $("#messages").addEventListener("click", event => {
@@ -2376,6 +2423,11 @@ function toggleHistorySearch(force) {
 function isWork(c) {
   return !!c?.workdir;
 }
+// 沙箱：言与行都有——桥接那头筛指令、锁目录、去机密环境变量。对话自己记着开没开；没记过的按设置的默认，默认开
+/** @param {Conversation} c */
+function sandboxed(c) {
+  return typeof c?.sandbox === "boolean" ? c.sandbox : store.settings.sandboxDefault !== false;
+}
 function workMode() {
   const c = currentConversation();
   return c ? isWork(c) : !!(store.settings.pendingWorkdir || "").trim();
@@ -2422,6 +2474,21 @@ function renderWorkAuto() {
   button.title = c.workAuto ? "径行：指令径直执行" : "问而后行：每条指令先经确认";
   button.classList.toggle("on", !!c.workAuto);
 }
+// 沙箱钮：言与行都有，只要这段对话有落脚的目录、模型开着工具
+function renderSandbox() {
+  const c = currentConversation(),
+    button = $("#workSandbox");
+  if (!button) return;
+  const show = !!c && !!workRoot(c) && activeProfile()?.tools !== false;
+  button.classList.toggle("hidden", !show);
+  if (!show) return;
+  const on = sandboxed(c);
+  button.textContent = on ? "沙箱" : "无沙箱";
+  button.title = on
+    ? "沙箱：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令。点一下解开"
+    : "无沙箱：指令与文件工具不设限（文件可及范围按设置）。点一下套上沙箱";
+  button.classList.toggle("on", on);
+}
 function renderWelcome() {
   const work = workMode(),
     bridged = apiBase !== null;
@@ -2464,6 +2531,12 @@ function renderChips(work, bridged) {
   approve.querySelector(".chip-text").textContent = store.settings.workAutoDefault ? "径行" : "问而后行";
   approve.classList.toggle("on", !!store.settings.workAutoDefault);
   approve.title = store.settings.workAutoDefault ? "径行：新对话中的指令径直执行" : "问而后行：新对话中每条指令先经确认";
+  const box = $("#sandboxChip"),
+    boxed = store.settings.sandboxDefault !== false;
+  box.classList.toggle("hidden", !bridged);
+  box.querySelector(".chip-text").textContent = boxed ? "沙箱" : "无沙箱";
+  box.classList.toggle("on", boxed);
+  box.title = boxed ? "沙箱：新对话里路径不出目录、动系统与外联的指令拒绝" : "无沙箱：新对话里指令与文件工具不设限";
 }
 function closeChipPop() {
   document.querySelectorAll(".chip-pop").forEach(pop => pop.remove());
@@ -2679,6 +2752,7 @@ async function bindWorkdir(c, dir) {
     if (prepared.workdir === c.workdir) return;
     c.workdir = prepared.workdir;
     if (c.workAuto === undefined) c.workAuto = !!store.settings.workAutoDefault;
+    if (c.sandbox === undefined) c.sandbox = sandboxed(c);
     rememberWorkdir(prepared.workdir);
     saveStore();
     render();
@@ -2708,6 +2782,11 @@ function setupChips() {
     });
   $("#approveChip").onclick = () => {
     store.settings.workAutoDefault = !store.settings.workAutoDefault;
+    saveStore();
+    renderChips(workMode(), apiBase !== null);
+  };
+  $("#sandboxChip").onclick = () => {
+    store.settings.sandboxDefault = store.settings.sandboxDefault === false;
     saveStore();
     renderChips(workMode(), apiBase !== null);
   };
@@ -3068,6 +3147,7 @@ function renderConversation(shouldScroll = false) {
   $("#chatTitle").textContent = c.title;
   renderChatMeta(c);
   renderWorkAuto();
+  renderSandbox();
   renderModelTriggers();
   const scrollHost = $("#chatScroll");
   scrollHost.classList.toggle(
@@ -5165,7 +5245,7 @@ function sealGlyph(button, running) {
   button.dataset.glyph = glyph;
   button.innerHTML = `<span class="seal-glyph" aria-hidden="true">${glyph}</span>`;
 }
-// 作答途中：案上空着，印是「止」；写了话，印又成「寄」——寄出去的是补言，递给正在作答的模型
+// 作答途中：案上空着，印是「止」；写了话，印又成「寄」——寄出去的是补言，递给正在作答的模型，它读了就改道
 function renderSendButtons() {
   const running = conversationRunning(),
     ended = conversationDry(currentConversation()),
@@ -5173,13 +5253,13 @@ function renderSendButtons() {
     stop = running && !has;
   document.querySelectorAll(".send-trigger").forEach(b => {
     sealGlyph(b, stop);
-    b.title = stop ? "停止生成" : running ? "补言：递给正在作答的模型" : "发送";
+    b.title = stop ? "停止生成" : running ? "插言引路：模型读了这句即改道" : "发送";
     b.classList.toggle("stop-btn", stop);
     b.classList.toggle("empty", !running && !has);
     b.disabled = !running && ended;
   });
   const input = $("#chatInput");
-  if (input && !input.disabled) input.placeholder = running ? "作答途中，亦可补言" : "续言于此";
+  if (input && !input.disabled) input.placeholder = running ? "此时插言，可引其向" : "续言于此";
 }
 // 图片缩略图：原件在 IndexedDB，渲染后异步补上 src；缓存最近 40 张
 async function loadThumbnails(root) {
@@ -5533,16 +5613,26 @@ function applyAppearance() {
   if (window.mermaid) setupMermaid();
   document.documentElement.style.setProperty("--read", `${Number(width) || 760}px`);
   document.documentElement.style.setProperty("--accent", accent || "#9b5540");
-  const root = document.documentElement.style;
-  root.setProperty(
-    "--body",
-    font === "serif" ? '"Noto Serif SC","Songti SC","STSong",serif' : '"Noto Sans SC","Microsoft YaHei UI",system-ui,sans-serif'
-  );
-  root.setProperty(
-    "--title",
-    font === "sans" ? '"Noto Sans SC","Microsoft YaHei UI",system-ui,sans-serif' : '"Noto Serif SC","Songti SC","STSong",serif'
-  );
+  const root = document.documentElement.style,
+    stacks = FONT_STACKS[font] || FONT_STACKS.mixed;
+  html.dataset.font = FONT_STACKS[font] ? font : "mixed";
+  root.setProperty("--body", stacks.body);
+  root.setProperty("--title", stacks.title);
 }
+// 字体档。--title 是读的字（回复正文、标题、印），--body 是界面的字（侧栏、输入、设置）：混排（默认）界面黑、读宋；黑与宋是通体一种；
+// 楷与仿宋只换读的字，界面仍是黑——楷与仿宋清瘦，小字号的界面用它费眼。楷与仿宋取自系统（Windows 的 KaiTi / FangSong，
+// macOS 的楷体-简 / 仿宋-简），没有的机器落到宋。theme-boot.js 里有同一份表，改这里也要改那里
+const SANS = '"Noto Sans SC","Microsoft YaHei UI",system-ui,sans-serif',
+  SERIF = '"Noto Serif SC","Songti SC","STSong",serif',
+  KAI = '"Kaiti SC","KaiTi","STKaiti","楷体","AR PL UKai CN",serif',
+  FANGSONG = '"Fangsong SC","FangSong","STFangsong","仿宋","AR PL UMing CN",serif';
+const FONT_STACKS = {
+  mixed: { body: SANS, title: SERIF },
+  sans: { body: SANS, title: SANS },
+  serif: { body: SERIF, title: SERIF },
+  kai: { body: SANS, title: KAI },
+  fangsong: { body: SANS, title: FANGSONG }
+};
 
   // ---- 13-files.js ----
 // 言 · 文件接入、卷宗（磁盘目录 / 浏览器内）、文档抽取、下载
@@ -6487,6 +6577,7 @@ async function sendOrStop() {
       messages: [],
       workdir: pending,
       workAuto: !!store.settings.workAutoDefault,
+      sandbox: store.settings.sandboxDefault !== false,
       reasoning: store.settings.reasoning || ""
     };
     if (!(await ensureWorkReady(c))) return;
@@ -6538,9 +6629,11 @@ async function startTurn(c, user, profile) {
   if (c.messages.filter(m => m.role === "user").length === 1) void maybeAutoTitle(c, profile);
   await streamReply(c, assistant, profile);
 }
-// 补言：模型作答途中用户再寄来的话。先落在行迹里它到达的那一刻（一步「补言 · 待寄」），到下一回合的边界——
-// 工具结果交回、模型再开口之前——递给模型；这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出
-const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］";
+// 补言：模型作答途中用户再寄来的话，是引导不是排队。先落在行迹里它到达的那一刻（一步「补言 · 待寄」）；模型正在写着，
+// 就把这一轮的流掐断、已写的留着，随即连同补言再请它开口——它读了这句接着写，可就此改道；正跑着工具时等结果交回、
+// 模型再开口之前递上；这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出
+const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］",
+  STEER_PREFIX = "［用户在你作答途中插了一句，你写到此处暂停。读后接着作答，可据此改变方向；不必重复已写的内容］";
 function sendSupplement() {
   const c = currentConversation(),
     job = c && requestJob(c.id),
@@ -6566,18 +6659,21 @@ function sendSupplement() {
   refreshSteps(assistant);
   renderSendButtons();
   if (followBottom) scrollBottom();
+  // 模型正写着：掐断这一轮，streamReply 的循环接手——已写的留下，补言递上，随即再请它开口
+  if (job.reading) job.round?.abort();
 }
-// 回合边界：把排着的补言递给模型（历史里接在工具结果之后），行迹里那一步打勾
-async function deliverSupplements(job, history, budget) {
+// 回合边界：把排着的补言递给模型（历史里接在工具结果之后，或接在被掐断的半截话之后），行迹里那一步打勾
+async function deliverSupplements(job, history, budget, { steer = false } = {}) {
   const queue = job.queue || [];
   job.queue = [];
   for (const { user, step } of queue) {
-    const entry = await messageForApi(user, true, budget);
-    if (typeof entry.content === "string") entry.content = `${SUPPLEMENT_PREFIX}${entry.content}`;
-    else entry.content[0].text = `${SUPPLEMENT_PREFIX}${entry.content[0].text}`;
+    const entry = await messageForApi(user, true, budget),
+      prefix = steer ? STEER_PREFIX : SUPPLEMENT_PREFIX;
+    if (typeof entry.content === "string") entry.content = `${prefix}${entry.content}`;
+    else entry.content[0].text = `${prefix}${entry.content[0].text}`;
     history.push(entry);
     step.status = "done";
-    step.result = "已递";
+    step.result = steer ? "已递 · 改道" : "已递";
   }
 }
 // 收尾时还没递出去的补言：从行迹里撤下，整答顺利写完的作为新的一问接着送；停了、断了的放回案上，话不能丢
@@ -6668,8 +6764,16 @@ function stopAllGenerations() {
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // 这一答是不是执事的，记在消息自己身上：生成期间用户可能翻去欢迎页或卷宗，页面上一时没有「当前对话」，时间线不能因此改画法
   assistant.work = isWork(conversation);
-  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }> }} */
-  const job = { controller: new AbortController(), assistantId: assistant.id, label: "生成中", profile, queue: [] };
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean }} */
+  const job = {
+    controller: new AbortController(),
+    assistantId: assistant.id,
+    label: "生成中",
+    profile,
+    queue: [],
+    round: null,
+    reading: false
+  };
   requestJobs.set(conversation.id, job);
   renderSendButtons();
   renderHistory();
@@ -6687,6 +6791,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
   let usageKnown = false,
     roundOpen = false,
     opened = false,
+    steered = false,
     roundStart = 0,
     releaseQuota = () => {};
   try {
@@ -6718,7 +6823,35 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       assistant.usage = null;
       roundStart = assistant.content.length;
       roundOpen = false;
-      await readReply(profile, history, job.controller.signal, overrides, assistant, false, () => (roundOpen = opened = true));
+      // 每一轮自己一个中止器：补言只掐这一轮的流，整答的 controller 留给「停止」
+      const round = new AbortController(),
+        stopRound = () => round.abort();
+      job.round = round;
+      job.controller.signal.addEventListener("abort", stopRound, { once: true });
+      job.reading = true;
+      try {
+        await readReply(profile, history, round.signal, overrides, assistant, false, () => (roundOpen = opened = true));
+      } catch (error) {
+        if (error.name !== "AbortError" || job.controller.signal.aborted || !job.queue?.length) throw error;
+        // 补言掐断的：这一轮写到哪算哪（花的墨按估算记上），半截话与补言一起进历史，没执行的工具调用一律作废，随即再开一轮
+        const said = assistant.content.slice(roundStart);
+        if (roundOpen) {
+          const spent = estimateTokens(history) + estimateTokens([{ content: said }]);
+          usage.prompt_tokens += spent;
+          usage.total_tokens += spent;
+          usageKnown = steered = true;
+          roundOpen = false;
+        }
+        assistant.toolCalls = null;
+        if (said.trim()) history.push({ role: "assistant", content: said });
+        await deliverSupplements(job, history, budget, { steer: true });
+        if (assistant.content) assistant.content += "\n\n";
+        continue;
+      } finally {
+        job.reading = false;
+        job.round = null;
+        job.controller.signal.removeEventListener("abort", stopRound);
+      }
       if (assistant.usage) {
         usageKnown = true;
         roundOpen = false;
@@ -6800,7 +6933,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       }
     assistant.usage = usageKnown ? usage : null;
     releaseQuota();
-    accountUsage(profile, assistant, history, conversation, { opened, partialRound: roundOpen, roundStart });
+    accountUsage(profile, assistant, history, conversation, { opened, partialRound: roundOpen, roundStart, steered });
     if (requestJobs.get(conversation.id) === job) requestJobs.delete(conversation.id);
     settleSupplements(conversation, assistant, job, profile);
     if (currentId !== conversation.id || view !== "chat") conversation.unread = true;
@@ -6911,14 +7044,20 @@ async function runSteps(steps, conversation, assistant, signal, toolCache) {
  * @param {Message} assistant
  * @param {Conversation} conversation
  */
-function accountUsage(profile, assistant, requestMessages, conversation, { opened = true, partialRound = false, roundStart = 0 } = {}) {
+function accountUsage(
+  profile,
+  assistant,
+  requestMessages,
+  conversation,
+  { opened = true, partialRound = false, roundStart = 0, steered = false } = {}
+) {
   const exact = Number(assistant.usage?.total_tokens || 0);
   const estimate = from => estimateTokens(requestMessages) + estimateTokens([{ content: String(assistant.content || "").slice(from) }]);
   const consumed = exact > 0 ? exact + (partialRound ? estimate(roundStart) : 0) : opened ? estimate(0) : 0;
   if (!(consumed > 0)) return;
   profile.usedTokens = Math.max(0, Number(profile.usedTokens || 0)) + consumed;
   assistant.tokenCount = consumed;
-  assistant.tokenEstimated = !(exact > 0) || partialRound;
+  assistant.tokenEstimated = !(exact > 0) || partialRound || steered;
   persistServerProfile(profile);
   if (quotaExhausted(profile)) toast("此答写毕，余墨已尽；换个模型可续");
   renderQuota();
@@ -7046,7 +7185,7 @@ function workHint(conversation) {
   return prompt(isWork(conversation) ? "work.hint" : "work.archive", {
     workdir: workRoot(conversation),
     scratch: scratchRel(conversation),
-    reach: prompt(roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
+    reach: prompt(sandboxed(conversation) ? "work.reachSandbox" : roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
     platform: win ? "Windows" : bootstrap.work?.platform || "类 Unix",
     shell,
     shellNote: win ? prompt("work.windowsShell") : ""
@@ -7872,7 +8011,8 @@ function roamAllowed() {
  */
 async function runWorkTool(step, args, conversation, assistant, signal) {
   const workdir = workRoot(conversation),
-    roam = roamAllowed();
+    roam = roamAllowed(),
+    sandbox = sandboxed(conversation);
   if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
   const job = requestJob(conversation.id);
   if (step.name === "run_command") {
@@ -7896,7 +8036,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
       }
     } else if (job) setJobLabel(conversation, job, "执行中");
-    const data = await bridge("/api/work/run", { workdir, command: step.title, timeout: Number(args.timeout) || 120 }, signal);
+    const data = await bridge("/api/work/run", { workdir, sandbox, command: step.title, timeout: Number(args.timeout) || 120 }, signal);
     step.exitCode = data.exitCode;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
     const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
@@ -7909,7 +8049,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   }
   if (step.name === "write_file") {
     step.title = String(args.path || "");
-    const data = await bridge("/api/work/write", { workdir, roam, path: step.title, content: String(args.content ?? "") }, signal);
+    const data = await bridge("/api/work/write", { workdir, roam, sandbox, path: step.title, content: String(args.content ?? "") }, signal);
     step.title = data.path;
     markSeen(conversation, data.path, step);
     step.note = `${data.lines} 行 · ${formatFileSize(data.bytes)}${data.existed ? " · 覆盖" : ""}`;
@@ -7927,7 +8067,11 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   }
   if (step.name === "read_file") {
     step.title = String(args.path || "");
-    const data = await bridge("/api/work/read", { workdir, roam, path: step.title, offset: args.offset, limit: args.limit }, signal);
+    const data = await bridge(
+      "/api/work/read",
+      { workdir, roam, sandbox, path: step.title, offset: args.offset, limit: args.limit },
+      signal
+    );
     step.title = data.path;
     markSeen(conversation, data.path, step);
     return {
@@ -7943,7 +8087,15 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     if (!seen?.has(normalized)) return { ok: false, content: prompt("work.unread", { path: step.title }), display: "需先读取" };
     const data = await bridge(
       "/api/work/edit",
-      { workdir, roam, path: step.title, old: String(args.old ?? ""), new: String(args.new ?? ""), replaceAll: args.replace_all === true },
+      {
+        workdir,
+        roam,
+        sandbox,
+        path: step.title,
+        old: String(args.old ?? ""),
+        new: String(args.new ?? ""),
+        replaceAll: args.replace_all === true
+      },
       signal
     );
     step.title = data.path;
@@ -7960,7 +8112,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.query || "");
     const data = await bridge(
       "/api/work/search",
-      { workdir, roam, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
+      { workdir, roam, sandbox, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
       signal
     );
     const lines = data.matches.map(match => `${match.file}:${match.line}: ${match.text}`);
@@ -7975,7 +8127,11 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     };
   }
   step.title = `${String(args.path || ".")}${args.pattern ? ` · ${args.pattern}` : ""}`;
-  const data = await bridge("/api/work/list", { workdir, roam, path: args.path, depth: args.depth, pattern: args.pattern }, signal);
+  const data = await bridge(
+    "/api/work/list",
+    { workdir, roam, sandbox, path: args.path, depth: args.depth, pattern: args.pattern },
+    signal
+  );
   step.title = `${data.path}${args.pattern ? ` · ${args.pattern}` : ""}`;
   step.output = trimOutput(data.entries.join("\n"));
   return {
@@ -8452,48 +8608,57 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     think.held = "";
     think.mode = "body";
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || "";
-    // 流到头了：最后一段没跟换行的 data: 也得处理，否则末尾几个字或最终的 usage 就丢了
-    if (done && buffer) {
-      lines.push(buffer);
-      buffer = "";
-    }
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === "[DONE]") continue;
-      try {
-        const json = JSON.parse(data);
-        const delta = json.choices?.[0]?.delta;
-        const text = normalizeContent(delta?.content),
-          reasoning = normalizeContent(delta?.reasoning_content ?? delta?.reasoning);
-        if (reasoning) {
-          assistant.reasoning = (assistant.reasoning || "") + reasoning;
-          refresh();
-        }
-        if (text) {
-          ingest(text);
-          refresh();
-        }
-        // Anthropic 的思考块（带签名）：这一轮带工具调用时要原样回传，记在消息上
-        if (delta?.thinking_block?.signature) (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
-        if (Array.isArray(delta?.tool_calls)) {
-          for (const call of delta.tool_calls) {
-            const slot = ((assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" });
-            if (call.id) slot.id = call.id;
-            if (call.function?.name) slot.name += call.function.name;
-            if (call.function?.arguments) slot.arguments += call.function.arguments;
+  // 流被掐断（停止、补言改道）时这一段的帧循环到此为止：接下来的一轮另起一个，两个循环不能同时画一条消息
+  try {
+    await pump();
+  } catch (error) {
+    closed = true;
+    throw error;
+  }
+  async function pump() {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      // 流到头了：最后一段没跟换行的 data: 也得处理，否则末尾几个字或最终的 usage 就丢了
+      if (done && buffer) {
+        lines.push(buffer);
+        buffer = "";
+      }
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        try {
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta;
+          const text = normalizeContent(delta?.content),
+            reasoning = normalizeContent(delta?.reasoning_content ?? delta?.reasoning);
+          if (reasoning) {
+            assistant.reasoning = (assistant.reasoning || "") + reasoning;
+            refresh();
           }
-          refresh();
-        }
-        if (json.usage) assistant.usage = json.usage;
-      } catch {}
+          if (text) {
+            ingest(text);
+            refresh();
+          }
+          // Anthropic 的思考块（带签名）：这一轮带工具调用时要原样回传，记在消息上
+          if (delta?.thinking_block?.signature) (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
+          if (Array.isArray(delta?.tool_calls)) {
+            for (const call of delta.tool_calls) {
+              const slot = ((assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" });
+              if (call.id) slot.id = call.id;
+              if (call.function?.name) slot.name += call.function.name;
+              if (call.function?.arguments) slot.arguments += call.function.arguments;
+            }
+            refresh();
+          }
+          if (json.usage) assistant.usage = json.usage;
+        } catch {}
+      }
+      if (done) break;
     }
-    if (done) break;
   }
   flushThink();
   // 流结束后把积压的字写完再返回，收尾和下一轮工具调用都等在这后面；标签页不可见时直接补齐
@@ -8714,7 +8879,7 @@ function renderSettings() {
   }
 }
 function generalSettingsHtml() {
-  return `<h2>通用</h2><p class="settings-lead">所有数据仅存于此设备的浏览器。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>${
+  return `<h2>通用</h2><p class="settings-lead">所有数据仅存于此设备的浏览器。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>新对话默认是否套上沙箱：路径不出目录、目录里的机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；在桥接那头守，模型绕不过。每段对话可在输入框旁随时开合。这是静态筛查，不是进程隔离</small></div><div class="segmented"><button data-setting="sandboxDefault" data-value="true" class="${store.settings.sandboxDefault !== false ? "active" : ""}">开</button><button data-setting="sandboxDefault" data-value="false" class="${store.settings.sandboxDefault === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>${
     apiBase !== null
       ? `<div class="setting-row"><div class="setting-copy"><strong>卷宗目录</strong><small>卷宗在本机的位置；未绑目录的对话里，模型写出的文件与草稿皆落于此。留空则用默认 ${escapeHtml(bootstrap.work?.archive || "")}</small></div><div class="setting-actions setting-archive"><input id="settingArchive" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(bootstrap.work?.archive || "")}" value="${escapeHtml(store.settings.archiveDir || "")}"><button id="settingArchivePick" class="outline-btn" type="button">选择…</button></div></div>`
       : ""
@@ -8742,17 +8907,7 @@ function appearanceSettingsHtml() {
       ["off", "关"]
     ],
     s.inkMotion || "on"
-  )}${segmentRow(
-    "字体",
-    "正文与标题的气质",
-    "font",
-    [
-      ["sans", "无衬线"],
-      ["serif", "衬线"],
-      ["mixed", "混排"]
-    ],
-    s.font
-  )}${segmentRow(
+  )}${fontRow(s.font)}${segmentRow(
     "阅读宽度",
     "长文的行宽",
     "width",
@@ -8788,7 +8943,11 @@ function aboutSettingsHtml() {
     `<div class="about-section"><h3>数据与边界</h3>${rows([
       ["存放", "对话、模型配置与草稿存于此浏览器的本地存储，附件原件存于 IndexedDB；不经任何云端"],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
-      ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内，但这不是沙箱"],
+      ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
+      [
+        "沙箱",
+        "默认套着：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令，在桥接那头守。是静态筛查，不是进程隔离——脚本里的代码仍以你的权限运行"
+      ],
       ["记忆", "模型在对谈中记下的一句句话，只存于本机；何时记、何时看由它判断，不随每次请求发送，可在「记忆」页查改或关闭"],
       ["备份", "导出的备份不含 API Key；可选择是否带上附件原件"]
     ])}</div>` +
@@ -8802,6 +8961,17 @@ function aboutSettingsHtml() {
     ])}</div>` +
     `<div class="about-section"><h3>开源致谢</h3><ul class="about-credits">${CREDITS.map(([name, ver, license]) => `<li><span>${escapeHtml(name)}</span><small>${escapeHtml(ver)} · ${escapeHtml(license)}</small></li>`).join("")}</ul><p class="about-note">以上库全部随项目本地分发，不加载任何在线资源；许可全文见 vendor 目录。运行环境仅需 Node.js 18 或更高版本，无需安装依赖。</p></div>`
   );
+}
+// 字体一行：每个钮用自己那种字写自己的名字，一眼看出气质
+function fontRow(active = "mixed") {
+  const items = [
+    ["mixed", "混排"],
+    ["sans", "黑体"],
+    ["serif", "宋体"],
+    ["kai", "楷体"],
+    ["fangsong", "仿宋"]
+  ];
+  return `<div class="setting-row"><div class="setting-copy"><strong>字体</strong><small>回复与标题用的字；楷体与仿宋取自系统，没有的机器落回宋体</small></div><div class="segmented font-segmented">${items.map(([v, label]) => `<button data-setting="font" data-value="${v}" class="${(active || "mixed") === v ? "active" : ""}" style="font-family:${escapeHtml(FONT_STACKS[v].title)}">${label}</button>`).join("")}</div></div>`;
 }
 function segmentRow(title, desc, key, items, active) {
   return `<div class="setting-row"><div class="setting-copy"><strong>${title}</strong><small>${desc}</small></div><div class="segmented">${items.map(([v, label]) => `<button data-setting="${key}" data-value="${v}" class="${String(active) === String(v) ? "active" : ""}">${label}</button>`).join("")}</div></div>`;
@@ -8951,7 +9121,8 @@ function bindSettingsEvents() {
           renderSettings();
           return;
         }
-        store.settings[key] = key === "width" ? Number(value) : ["autoTitle", "archiveRead"].includes(key) ? value === "true" : value;
+        store.settings[key] =
+          key === "width" ? Number(value) : ["autoTitle", "archiveRead", "sandboxDefault"].includes(key) ? value === "true" : value;
         saveStore();
         applyAppearance();
         renderSettings();
@@ -9462,8 +9633,10 @@ function outlineLabel(message) {
 function renderOutline() {
   const rail = $("#outline");
   if (!rail) return;
+  // 压缩过的前文在页上折着，导航条上也不列它们的问；「展开前文」后再列出来
   const c = currentConversation(),
-    users = c && view === "chat" ? c.messages.filter(m => m.role === "user") : [];
+    foldAt = c && !c.showCompacted ? c.messages.map(m => (m.role === "context" && m.summary ? 1 : 0)).lastIndexOf(1) : -1,
+    users = c && view === "chat" ? c.messages.slice(foldAt + 1).filter(m => m.role === "user") : [];
   if (users.length < 2) {
     rail.classList.add("hidden");
     rail.innerHTML = "";
