@@ -12,5 +12,7 @@
     if (settings.accent) html.style.setProperty("--accent", settings.accent);
     if (settings.width) html.style.setProperty("--read", `${Number(settings.width) || 760}px`);
     if (settings.font === "serif") html.style.setProperty("--body", '"Noto Serif SC","Songti SC","STSong",serif');
+    // 侧栏上次是收着的就先收着（宽屏才记；见 toggleSidebar），免得开页先展开再缩回去
+    if (localStorage.getItem("yan-sidebar") === "collapsed" && innerWidth > 760) html.dataset.sidebar = "collapsed";
   } catch {}
 })();

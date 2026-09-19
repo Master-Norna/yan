@@ -10,8 +10,12 @@
   background: var(--grain), var(--paper-2);
   transition: width 0.38s cubic-bezier(0.22, 0.72, 0.2, 1);
 }
-.sidebar.collapsed {
+.sidebar.collapsed,
+html[data-sidebar="collapsed"] .sidebar {
   width: 64px;
+}
+html[data-sidebar="collapsed"] .sidebar .wide {
+  opacity: 0;
 }
 .sidebar-inner {
   width: 270px;
