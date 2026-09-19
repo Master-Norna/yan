@@ -91,39 +91,24 @@
   justify-content: center;
   overflow: hidden;
 }
-/* 手稿：一行一笔，六笔一行，写满三行翻页；最新一笔朱色 */
-.viz-pending-sketch {
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  gap: 11px 8px;
-  width: 224px;
-  height: 28px;
-}
-.viz-pending-sketch i {
+/* 正在落的一笔：与顶栏「余墨」同一笔形，朱墨随行数往前走 */
+.viz-pending-stroke {
   display: block;
-  width: var(--w, 28px);
-  height: 2px;
-  border-radius: 1px;
-  background: var(--ink-3);
-  opacity: 0.42;
-  transform-origin: left center;
-  transition:
-    background-color 0.5s,
-    opacity 0.5s;
+  width: 150px;
+  height: 27px;
 }
-.viz-pending-sketch i:last-child {
-  background: var(--accent);
-  opacity: 0.8;
+.viz-pending-stroke svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
-/* 纸面掠过的一道光：只动 transform，走合成层 */
-.viz-pending-body:after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(100deg, transparent 32%, color-mix(in srgb, var(--accent) 8%, transparent) 50%, transparent 68%);
-  transform: translateX(-100%);
-  pointer-events: none;
+.viz-ink-ghost {
+  fill: color-mix(in srgb, var(--ink-3) 13%, transparent);
+}
+.viz-ink-fill {
+  fill: url(#vizInkGrad);
+  transition: width 0.55s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 .tool-steps {
   margin: 0 0 14px;

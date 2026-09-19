@@ -738,18 +738,9 @@ body {
   animation: pendingSignal 1.35s ease-in-out infinite;
   animation-delay: var(--phase, 0ms);
 }
-:root[data-ink-motion="on"] .viz-pending-body:after {
-  animation: pendingSheen 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  animation-delay: var(--phase, 0ms);
-}
-:root[data-ink-motion="on"] .viz-pending-sketch i {
-  animation: strokeInk 0.36s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
-}
 :root[data-ink-motion="off"] .viz-pending:before,
 :root[data-ink-motion="off"] .viz-pending:after,
 :root[data-ink-motion="off"] .viz-pending-signal,
-:root[data-ink-motion="off"] .viz-pending-body:after,
-:root[data-ink-motion="off"] .viz-pending-sketch i,
 :root[data-ink-motion="off"] .history-state.running,
 :root[data-ink-motion="off"] .history-state.waiting {
   animation: none !important;
@@ -775,20 +766,6 @@ body {
   }
   50% {
     opacity: 0.42;
-  }
-}
-@keyframes pendingSheen {
-  to {
-    transform: translateX(100%);
-  }
-}
-@keyframes strokeInk {
-  from {
-    transform: scaleX(0);
-    opacity: 0;
-  }
-  60% {
-    opacity: 0.9;
   }
 }
 @keyframes pendingSignal {
