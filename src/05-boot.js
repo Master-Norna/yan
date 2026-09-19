@@ -786,6 +786,7 @@ function bindEvents() {
     if (!c) return;
     c.showCompacted = !c.showCompacted;
     foldCompacted(c);
+    renderOutline();
     if (!c.showCompacted) scrollChatTo(button.closest(".context-divider"), "center");
   });
   $("#messages").addEventListener("click", event => {

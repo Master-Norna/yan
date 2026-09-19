@@ -128,5 +128,18 @@ await waitFor(
 );
 const after = await evalJs(`[...document.querySelectorAll(".message.assistant .assistant-block > .markdown")].at(-1).textContent`);
 check("next request carries only the summary pair and the new question", /n:4/.test(after), after);
-check("outline still covers all questions", (await evalJs(`document.querySelectorAll("#outline .outline-item").length`)) === 4);
+// 导航条只列压缩分隔之后的问（折着的前文不列）；「展开前文」后再列全
+check(
+  "outline lists only the questions after the compaction divider while the rest is folded",
+  await evalJs(
+    `document.querySelectorAll("#outline .outline-item").length === 0 && document.querySelector("#outline").classList.contains("hidden")`
+  )
+);
+await evalJs(`document.querySelector("[data-toggle-compacted]").click(); true`);
+check(
+  "unfolding the compacted part brings all questions back to the outline",
+  (await evalJs(`document.querySelectorAll("#outline .outline-item").length`)) === 4
+);
+await evalJs(`document.querySelector("[data-toggle-compacted]").click(); true`);
+check("folding again hides them", (await evalJs(`document.querySelector("#outline").classList.contains("hidden")`)) === true);
 close();

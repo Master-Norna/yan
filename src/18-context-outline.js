@@ -225,8 +225,10 @@ function outlineLabel(message) {
 function renderOutline() {
   const rail = $("#outline");
   if (!rail) return;
+  // 压缩过的前文在页上折着，导航条上也不列它们的问；「展开前文」后再列出来
   const c = currentConversation(),
-    users = c && view === "chat" ? c.messages.filter(m => m.role === "user") : [];
+    foldAt = c && !c.showCompacted ? c.messages.map(m => (m.role === "context" && m.summary ? 1 : 0)).lastIndexOf(1) : -1,
+    users = c && view === "chat" ? c.messages.slice(foldAt + 1).filter(m => m.role === "user") : [];
   if (users.length < 2) {
     rail.classList.add("hidden");
     rail.innerHTML = "";
