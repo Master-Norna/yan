@@ -379,13 +379,23 @@ function applyAppearance() {
   if (window.mermaid) setupMermaid();
   document.documentElement.style.setProperty("--read", `${Number(width) || 760}px`);
   document.documentElement.style.setProperty("--accent", accent || "#9b5540");
-  const root = document.documentElement.style;
-  root.setProperty(
-    "--body",
-    font === "serif" ? '"Noto Serif SC","Songti SC","STSong",serif' : '"Noto Sans SC","Microsoft YaHei UI",system-ui,sans-serif'
-  );
-  root.setProperty(
-    "--title",
-    font === "sans" ? '"Noto Sans SC","Microsoft YaHei UI",system-ui,sans-serif' : '"Noto Serif SC","Songti SC","STSong",serif'
-  );
+  const root = document.documentElement.style,
+    stacks = FONT_STACKS[font] || FONT_STACKS.mixed;
+  html.dataset.font = FONT_STACKS[font] ? font : "mixed";
+  root.setProperty("--body", stacks.body);
+  root.setProperty("--title", stacks.title);
 }
+// 字体档。--title 是读的字（回复正文、标题、印），--body 是界面的字（侧栏、输入、设置）：混排（默认）界面黑、读宋；黑与宋是通体一种；
+// 楷与仿宋只换读的字，界面仍是黑——楷与仿宋清瘦，小字号的界面用它费眼。楷与仿宋取自系统（Windows 的 KaiTi / FangSong，
+// macOS 的楷体-简 / 仿宋-简），没有的机器落到宋。theme-boot.js 里有同一份表，改这里也要改那里
+const SANS = '"Noto Sans SC","Microsoft YaHei UI",system-ui,sans-serif',
+  SERIF = '"Noto Serif SC","Songti SC","STSong",serif',
+  KAI = '"Kaiti SC","KaiTi","STKaiti","楷体","AR PL UKai CN",serif',
+  FANGSONG = '"Fangsong SC","FangSong","STFangsong","仿宋","AR PL UMing CN",serif';
+const FONT_STACKS = {
+  mixed: { body: SANS, title: SERIF },
+  sans: { body: SANS, title: SANS },
+  serif: { body: SERIF, title: SERIF },
+  kai: { body: SANS, title: KAI },
+  fangsong: { body: SANS, title: FANGSONG }
+};

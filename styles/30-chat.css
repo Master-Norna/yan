@@ -517,6 +517,12 @@ sup.note-ref.active {
   font-size: 16.5px;
   line-height: 1.85;
 }
+/* 楷与仿宋比宋清瘦，回复放大半号、行距略松，读起来才不费眼 */
+:root[data-font="kai"] .assistant-block,
+:root[data-font="fangsong"] .assistant-block {
+  font-size: 17.5px;
+  line-height: 1.9;
+}
 .message-meta {
   display: flex;
   flex-wrap: wrap;

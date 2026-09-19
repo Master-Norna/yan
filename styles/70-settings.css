@@ -613,6 +613,10 @@
 .library-tools .segmented button {
   min-width: 44px;
 }
+.font-segmented button {
+  min-width: 54px;
+  font-size: 13px;
+}
 .close-modal {
   position: absolute;
   right: 16px;

@@ -11,7 +11,17 @@
     html.dataset.inkMotion = motionOff ? "off" : "on";
     if (settings.accent) html.style.setProperty("--accent", settings.accent);
     if (settings.width) html.style.setProperty("--read", `${Number(settings.width) || 760}px`);
-    if (settings.font === "serif") html.style.setProperty("--body", '"Noto Serif SC","Songti SC","STSong",serif');
+    // 与 support.js 里的 FONT_STACKS 同一份表：--title 是读的字，--body 是界面的字
+    const sans = '"Noto Sans SC","Microsoft YaHei UI",system-ui,sans-serif',
+      serif = '"Noto Serif SC","Songti SC","STSong",serif',
+      title = {
+        sans,
+        kai: '"Kaiti SC","KaiTi","STKaiti","楷体","AR PL UKai CN",serif',
+        fangsong: '"Fangsong SC","FangSong","STFangsong","仿宋","AR PL UMing CN",serif'
+      }[settings.font];
+    if (title) html.style.setProperty("--title", title);
+    if (settings.font === "serif") html.style.setProperty("--body", serif);
+    if (title || settings.font === "serif") html.dataset.font = settings.font;
     // 侧栏上次是收着的就先收着（宽屏才记；见 toggleSidebar），免得开页先展开再缩回去
     if (localStorage.getItem("yan-sidebar") === "collapsed" && innerWidth > 760) html.dataset.sidebar = "collapsed";
   } catch {}

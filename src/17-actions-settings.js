@@ -175,17 +175,7 @@ function appearanceSettingsHtml() {
       ["off", "关"]
     ],
     s.inkMotion || "on"
-  )}${segmentRow(
-    "字体",
-    "正文与标题的气质",
-    "font",
-    [
-      ["sans", "无衬线"],
-      ["serif", "衬线"],
-      ["mixed", "混排"]
-    ],
-    s.font
-  )}${segmentRow(
+  )}${fontRow(s.font)}${segmentRow(
     "阅读宽度",
     "长文的行宽",
     "width",
@@ -235,6 +225,17 @@ function aboutSettingsHtml() {
     ])}</div>` +
     `<div class="about-section"><h3>开源致谢</h3><ul class="about-credits">${CREDITS.map(([name, ver, license]) => `<li><span>${escapeHtml(name)}</span><small>${escapeHtml(ver)} · ${escapeHtml(license)}</small></li>`).join("")}</ul><p class="about-note">以上库全部随项目本地分发，不加载任何在线资源；许可全文见 vendor 目录。运行环境仅需 Node.js 18 或更高版本，无需安装依赖。</p></div>`
   );
+}
+// 字体一行：每个钮用自己那种字写自己的名字，一眼看出气质
+function fontRow(active = "mixed") {
+  const items = [
+    ["mixed", "混排"],
+    ["sans", "黑体"],
+    ["serif", "宋体"],
+    ["kai", "楷体"],
+    ["fangsong", "仿宋"]
+  ];
+  return `<div class="setting-row"><div class="setting-copy"><strong>字体</strong><small>回复与标题用的字；楷体与仿宋取自系统，没有的机器落回宋体</small></div><div class="segmented font-segmented">${items.map(([v, label]) => `<button data-setting="font" data-value="${v}" class="${(active || "mixed") === v ? "active" : ""}" style="font-family:${escapeHtml(FONT_STACKS[v].title)}">${label}</button>`).join("")}</div></div>`;
 }
 function segmentRow(title, desc, key, items, active) {
   return `<div class="setting-row"><div class="setting-copy"><strong>${title}</strong><small>${desc}</small></div><div class="segmented">${items.map(([v, label]) => `<button data-setting="${key}" data-value="${v}" class="${String(active) === String(v) ? "active" : ""}">${label}</button>`).join("")}</div></div>`;
@@ -384,7 +385,8 @@ function bindSettingsEvents() {
           renderSettings();
           return;
         }
-        store.settings[key] = key === "width" ? Number(value) : ["autoTitle", "archiveRead"].includes(key) ? value === "true" : value;
+        store.settings[key] =
+          key === "width" ? Number(value) : ["autoTitle", "archiveRead"].includes(key) ? value === "true" : value;
         saveStore();
         applyAppearance();
         renderSettings();

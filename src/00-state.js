@@ -150,7 +150,7 @@
  * @property {string} name
  * @property {"light"|"dark"|"system"} theme
  * @property {"on"|"off"|"system"} inkMotion
- * @property {"sans"|"serif"|"mixed"} font
+ * @property {"sans"|"serif"|"mixed"|"kai"|"fangsong"} font
  * @property {number} width
  * @property {string} accent
  * @property {string} activeProfileId
