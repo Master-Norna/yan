@@ -493,13 +493,18 @@ function stepStateHtml(status) {
           ? `<span class="tool-state failed" aria-label="失败">×</span>`
           : `<span class="tool-state done" aria-label="完成">✓</span>`;
 }
-// 步骤输出的露出规矩：默认只露前 10 行（diff 两侧各 10 行），底下一行「展开全部」；报错的默认折起，点标题行才看；
-// 步骤上记两位：expanded（折起 / 摊开，未记则按状态定）与 full（全部 / 前 10 行），重画不丢
-const STEP_SHOW_LINES = 10;
+// 步骤输出的露出规矩：默认只露前 10 行（diff 两侧各 10 行）、且不超过 1200 字——一整页 HTML 挤在一行里也算一行，
+// 光按行数拦不住；底下一行「展开全部」。报错的默认折起，点标题行才看；
+// 步骤上记两位：expanded（折起 / 摊开，未记则按状态定）与 full（全部 / 开头），重画不丢
+const STEP_SHOW_LINES = 10,
+  STEP_SHOW_CHARS = 1200;
 function clampLines(text, full) {
-  const lines = String(text || "").split("\n"),
-    clipped = !full && lines.length > STEP_SHOW_LINES;
-  return { text: clipped ? lines.slice(0, STEP_SHOW_LINES).join("\n") : lines.join("\n"), total: lines.length, clipped };
+  const whole = String(text || ""),
+    lines = whole.split("\n");
+  if (full) return { text: whole, total: lines.length, chars: whole.length, clipped: false };
+  let kept = lines.slice(0, STEP_SHOW_LINES).join("\n");
+  if (kept.length > STEP_SHOW_CHARS) kept = `${kept.slice(0, STEP_SHOW_CHARS)}…`;
+  return { text: kept, total: lines.length, chars: whole.length, clipped: kept !== whole };
 }
 /** @param {Step} step */
 function workStepHtml(step, title) {
@@ -516,12 +521,13 @@ function workStepHtml(step, title) {
       ins = clampLines(step.diff.new, step.full);
     body = `<div class="tool-diff"><pre class="tool-output diff-del">${escapeHtml(del.text)}</pre><pre class="tool-output diff-ins">${escapeHtml(ins.text)}</pre></div>`;
     if (del.clipped || ins.clipped) more = `展开全部 · −${del.total} +${ins.total} 行`;
-    else if (step.full && Math.max(del.total, ins.total) > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
+    else if (step.full && (Math.max(del.total, ins.total) > STEP_SHOW_LINES || Math.max(del.chars, ins.chars) > STEP_SHOW_CHARS))
+      more = "只看开头";
   } else if (step.output) {
     const out = clampLines(step.output, step.full);
     body = `<pre class="tool-output">${escapeHtml(out.text)}</pre>`;
-    if (out.clipped) more = `展开全部 · ${out.total} 行`;
-    else if (step.full && out.total > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
+    if (out.clipped) more = `展开全部 · ${out.total > 1 ? `${out.total} 行` : `${out.chars} 字`}`;
+    else if (step.full && (out.total > STEP_SHOW_LINES || out.chars > STEP_SHOW_CHARS)) more = "只看开头";
   } else if (step.note && !command) body = `<div class="tool-note">${escapeHtml(step.note)}</div>`;
   if (more) body += `<button type="button" class="tool-more" data-step-more>${more}</button>`;
   const foldable = !!body && status !== "pending",
