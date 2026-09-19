@@ -84,7 +84,7 @@ async function boot() {
   recoverInterruptedMessages();
   applyAppearance();
   bindEvents();
-  (window.requestIdleCallback || (fn => setTimeout(fn, 800)))(() => void rasterMasks());
+  (window.requestIdleCallback || (fn => setTimeout(fn, 800)))(() => void themeSheets());
   void cleanupAttachmentStore();
   void refreshArchive();
   // 侧栏的开合记在本机（不随备份走）：宽屏按上次的来，窄屏一律收起；theme-boot 已按同一记录先把宽度放好，这里接过来
