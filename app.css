@@ -36,6 +36,9 @@ button:disabled {
   --danger: #a34f45;
   --gold: #a4823a;
   --gold-soft: #efe4c6;
+  /* 黛：记忆五件的专色。记入、忘却、翻记忆、查旧谈、翻旧谈——它们跨出这一段对话，存到别处去了，
+     在一串暖调的步骤里用一点冷色标出来，扫一眼就知道这一步动的不是眼前的东西 */
+  --keep: #4f6470;
   --code-green: #536d62;
   --code-blue: #5c6386;
   --shadow: 0 18px 55px rgba(61, 49, 32, 0.13);
@@ -154,6 +157,7 @@ button:disabled {
   --danger: #d17b6f;
   --gold: #cfae62;
   --gold-soft: #4a3f27;
+  --keep: #8fa6b4;
   --code-green: #8fb3a3;
   --code-blue: #9aa3cc;
   --shadow: 0 22px 64px rgba(0, 0, 0, 0.36);
@@ -4783,8 +4787,8 @@ textarea::placeholder,
   opacity: 0;
   pointer-events: none;
 }
-/* 差遣：整张卡片衬一层淡金、左侧一道金线，在一串步骤里一眼能认出来（朱留给印章与删减）；帮手的小时间线嵌在里面，做完折成一行，只留回报在外。
-   卡片内一切都不许溢出背景：回报里的宽表格在卡片里横向滚动 */
+/* 差遣的签：行迹里只留这一行——一道金线、一枚「遣」印、标题与状态。帮手自己的那条时间线在右侧面板里。
+   金是「代人行事」的专色（朱留给人自己说话：请示、补言、旁注），在一串步骤里一眼认得出 */
 .tool-step-delegate {
   margin: 4px 0;
   padding-bottom: 2px;
@@ -4801,31 +4805,29 @@ textarea::placeholder,
 .tool-step-delegate > .tool-step-head .tool-label {
   color: var(--gold);
 }
-/* 整张卡片可折叠：点头部一行收起，只留标题与「n 步 · 改 n 个文件」 */
+/* 整枚签可点：点一下在右侧开面板看帮手做了什么 */
 .tool-step-delegate > .tool-step-head {
   cursor: pointer;
   border-radius: 0 7px 7px 0;
 }
 .tool-step-delegate > .tool-step-head:hover {
-  background: color-mix(in srgb, var(--gold) 8%, transparent);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
 }
-.tool-step-delegate > .tool-step-head .tool-label:before {
+.tool-step-delegate > .tool-step-head:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: -1px;
+}
+/* 末尾一枚小角标，示意「还有一层，在侧边」 */
+.tool-step-delegate > .tool-step-head:after {
   content: "›";
-  display: inline-block;
-  width: 7px;
-  color: var(--ink-3);
-  font-size: 11px;
-  transform: rotate(90deg);
+  flex: none;
+  margin-left: 2px;
+  color: color-mix(in srgb, var(--gold) 70%, transparent);
+  font-size: 13px;
   transition: transform 0.18s ease;
 }
-.tool-step-delegate.folded > .tool-step-head .tool-label:before {
-  transform: none;
-}
-.tool-step-delegate.folded > :not(.tool-step-head) {
-  display: none;
-}
-.tool-step-delegate.folded {
-  padding-bottom: 0;
+.tool-step-delegate > .tool-step-head:hover:after {
+  transform: translateX(2px);
 }
 .tool-step-delegate > .tool-step-head {
   min-height: 30px;
@@ -4885,46 +4887,6 @@ textarea::placeholder,
   max-height: 140px;
   font-size: 11.5px;
 }
-.sub-steps > summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 22px;
-  cursor: pointer;
-  list-style: none;
-  color: var(--ink-3);
-  font: 10px var(--title);
-  letter-spacing: 0.1em;
-}
-.sub-steps > summary::-webkit-details-marker {
-  display: none;
-}
-.sub-steps > summary:before {
-  content: "›";
-  display: inline-block;
-  width: 8px;
-  transition: transform 0.18s ease;
-}
-.sub-steps[open] > summary:before {
-  transform: rotate(90deg);
-}
-.sub-steps > summary:hover {
-  color: var(--ink-2);
-}
-.sub-trail[data-live="true"] .sub-steps > summary span:after {
-  content: "";
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--gold);
-  vertical-align: 1px;
-  animation: pulse 1.4s ease-in-out infinite;
-}
-.sub-steps .tool-steps {
-  margin-top: 2px;
-}
 .sub-said {
   margin: 4px 0 2px;
   color: var(--ink-2);
@@ -4953,9 +4915,21 @@ textarea::placeholder,
   min-width: 0;
   font-size: 13px;
 }
-.sub-steps + .sub-report {
-  padding-top: 6px;
+/* 签上那份回报是结论（主模型消费的就是它），面板里这份只是帮手自己这条时间线的收尾——同一段话，收轻一档，不与签抢 */
+.helper-panel-body .sub-report {
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px dashed color-mix(in srgb, var(--gold) 40%, var(--line));
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.helper-panel-body .sub-report:before {
+  content: "回报";
+  display: block;
+  margin-bottom: 3px;
+  color: var(--gold);
+  font: 10.5px var(--title);
+  letter-spacing: 0.14em;
 }
 .sub-report h1,
 .sub-report h2,
@@ -4999,6 +4973,87 @@ textarea::placeholder,
 .trail-note code,
 .sub-report code {
   overflow-wrap: anywhere;
+}
+
+/* ---------- 差遣面板：借旁注的 .side-panel 几何，朱砂换金 ---------- */
+.helper-panel {
+  border-left-color: color-mix(in srgb, var(--gold) 40%, var(--line));
+  background: color-mix(in srgb, var(--gold) 4%, var(--paper-2));
+}
+.helper-panel .side-head {
+  border-bottom-color: color-mix(in srgb, var(--gold) 28%, var(--line));
+}
+.helper-panel .side-seal {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.helper-panel .side-title strong {
+  color: var(--gold);
+}
+.helper-panel .side-anchor {
+  border-left-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 6%, transparent);
+}
+/* 面板里那条时间线自己已经在一道金线里了，不必再套一层缩进 */
+.helper-panel-body {
+  padding: 16px 18px 22px;
+}
+.helper-panel-body > .sub-trail {
+  margin: 0;
+}
+/* 几次差遣之间切换的小签 */
+.helper-panel-nav {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.helper-panel-nav::-webkit-scrollbar {
+  display: none;
+}
+.helper-nav-item {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--gold) 30%, var(--line));
+  border-radius: 999px;
+  color: var(--ink-3);
+  font: 10.5px var(--title);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition:
+    color 0.16s,
+    border-color 0.16s,
+    background-color 0.16s;
+}
+.helper-nav-item:hover {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+.helper-nav-item.here {
+  color: var(--paper);
+  border-color: var(--gold);
+  background: var(--gold);
+}
+.helper-nav-item[data-status="running"]:not(.here) {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
+/* ---------- 专色：只给性质不同的行为，寻常步骤一律留在朱砂里，少数才有色才认得出 ----------
+   金 = 代人行事（差遣，见上）；黛 = 跨出这段对话（记忆五件） */
+.tool-step[data-tool="remember"] .tool-label,
+.tool-step[data-tool="forget"] .tool-label,
+.tool-step[data-tool="recall"] .tool-label,
+.tool-step[data-tool="search_conversations"] .tool-label,
+.tool-step[data-tool="read_conversation"] .tool-label {
+  color: var(--keep);
+}
+.tool-step[data-tool="remember"],
+.tool-step[data-tool="forget"] {
+  border-left: 2px solid color-mix(in srgb, var(--keep) 45%, transparent);
+  border-radius: 0 9px 9px 0;
+  padding-left: 6px;
 }
 
 /* ---- 85-components.css ---- */
@@ -5609,9 +5664,6 @@ button.source-local {
 .tool-stack.is-closing > summary:before,
 .source-stack.is-closing > summary:before {
   transform: rotate(-45deg);
-}
-.sub-steps.is-closing > summary:before {
-  transform: none;
 }
 html.theme-fade,
 html.theme-fade * {
