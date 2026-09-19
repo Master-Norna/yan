@@ -303,8 +303,8 @@ await evalJs(
   `(i => { i.value = "补一句：ASK 顺便看看卷宗"; i.dispatchEvent(new Event("input")); })(document.querySelector("#chatInput")); true`
 );
 check(
-  "typing during a reply turns the seal into 寄 with a 补言 hint",
-  await evalJs(`document.querySelector("#chatSend").dataset.glyph === "寄" && document.querySelector("#chatSend").title.startsWith("补言")`)
+  "typing during a reply turns the seal into 寄 with a 插言 hint",
+  await evalJs(`document.querySelector("#chatSend").dataset.glyph === "寄" && document.querySelector("#chatSend").title.startsWith("插言")`)
 );
 await evalJs(
   `document.querySelector("#chatInput").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); true`

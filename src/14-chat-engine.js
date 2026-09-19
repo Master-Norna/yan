@@ -222,9 +222,11 @@ async function startTurn(c, user, profile) {
   if (c.messages.filter(m => m.role === "user").length === 1) void maybeAutoTitle(c, profile);
   await streamReply(c, assistant, profile);
 }
-// 补言：模型作答途中用户再寄来的话。先落在行迹里它到达的那一刻（一步「补言 · 待寄」），到下一回合的边界——
-// 工具结果交回、模型再开口之前——递给模型；这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出
-const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］";
+// 补言：模型作答途中用户再寄来的话，是引导不是排队。先落在行迹里它到达的那一刻（一步「补言 · 待寄」）；模型正在写着，
+// 就把这一轮的流掐断、已写的留着，随即连同补言再请它开口——它读了这句接着写，可就此改道；正跑着工具时等结果交回、
+// 模型再开口之前递上；这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出
+const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］",
+  STEER_PREFIX = "［用户在你作答途中插了一句，你写到此处暂停。读后接着作答，可据此改变方向；不必重复已写的内容］";
 function sendSupplement() {
   const c = currentConversation(),
     job = c && requestJob(c.id),
@@ -250,18 +252,21 @@ function sendSupplement() {
   refreshSteps(assistant);
   renderSendButtons();
   if (followBottom) scrollBottom();
+  // 模型正写着：掐断这一轮，streamReply 的循环接手——已写的留下，补言递上，随即再请它开口
+  if (job.reading) job.round?.abort();
 }
-// 回合边界：把排着的补言递给模型（历史里接在工具结果之后），行迹里那一步打勾
-async function deliverSupplements(job, history, budget) {
+// 回合边界：把排着的补言递给模型（历史里接在工具结果之后，或接在被掐断的半截话之后），行迹里那一步打勾
+async function deliverSupplements(job, history, budget, { steer = false } = {}) {
   const queue = job.queue || [];
   job.queue = [];
   for (const { user, step } of queue) {
-    const entry = await messageForApi(user, true, budget);
-    if (typeof entry.content === "string") entry.content = `${SUPPLEMENT_PREFIX}${entry.content}`;
-    else entry.content[0].text = `${SUPPLEMENT_PREFIX}${entry.content[0].text}`;
+    const entry = await messageForApi(user, true, budget),
+      prefix = steer ? STEER_PREFIX : SUPPLEMENT_PREFIX;
+    if (typeof entry.content === "string") entry.content = `${prefix}${entry.content}`;
+    else entry.content[0].text = `${prefix}${entry.content[0].text}`;
     history.push(entry);
     step.status = "done";
-    step.result = "已递";
+    step.result = steer ? "已递 · 改道" : "已递";
   }
 }
 // 收尾时还没递出去的补言：从行迹里撤下，整答顺利写完的作为新的一问接着送；停了、断了的放回案上，话不能丢
@@ -352,8 +357,16 @@ function stopAllGenerations() {
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // 这一答是不是执事的，记在消息自己身上：生成期间用户可能翻去欢迎页或卷宗，页面上一时没有「当前对话」，时间线不能因此改画法
   assistant.work = isWork(conversation);
-  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }> }} */
-  const job = { controller: new AbortController(), assistantId: assistant.id, label: "生成中", profile, queue: [] };
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean }} */
+  const job = {
+    controller: new AbortController(),
+    assistantId: assistant.id,
+    label: "生成中",
+    profile,
+    queue: [],
+    round: null,
+    reading: false
+  };
   requestJobs.set(conversation.id, job);
   renderSendButtons();
   renderHistory();
@@ -371,6 +384,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
   let usageKnown = false,
     roundOpen = false,
     opened = false,
+    steered = false,
     roundStart = 0,
     releaseQuota = () => {};
   try {
@@ -402,7 +416,35 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       assistant.usage = null;
       roundStart = assistant.content.length;
       roundOpen = false;
-      await readReply(profile, history, job.controller.signal, overrides, assistant, false, () => (roundOpen = opened = true));
+      // 每一轮自己一个中止器：补言只掐这一轮的流，整答的 controller 留给「停止」
+      const round = new AbortController(),
+        stopRound = () => round.abort();
+      job.round = round;
+      job.controller.signal.addEventListener("abort", stopRound, { once: true });
+      job.reading = true;
+      try {
+        await readReply(profile, history, round.signal, overrides, assistant, false, () => (roundOpen = opened = true));
+      } catch (error) {
+        if (error.name !== "AbortError" || job.controller.signal.aborted || !job.queue?.length) throw error;
+        // 补言掐断的：这一轮写到哪算哪（花的墨按估算记上），半截话与补言一起进历史，没执行的工具调用一律作废，随即再开一轮
+        const said = assistant.content.slice(roundStart);
+        if (roundOpen) {
+          const spent = estimateTokens(history) + estimateTokens([{ content: said }]);
+          usage.prompt_tokens += spent;
+          usage.total_tokens += spent;
+          usageKnown = steered = true;
+          roundOpen = false;
+        }
+        assistant.toolCalls = null;
+        if (said.trim()) history.push({ role: "assistant", content: said });
+        await deliverSupplements(job, history, budget, { steer: true });
+        if (assistant.content) assistant.content += "\n\n";
+        continue;
+      } finally {
+        job.reading = false;
+        job.round = null;
+        job.controller.signal.removeEventListener("abort", stopRound);
+      }
       if (assistant.usage) {
         usageKnown = true;
         roundOpen = false;
@@ -484,7 +526,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       }
     assistant.usage = usageKnown ? usage : null;
     releaseQuota();
-    accountUsage(profile, assistant, history, conversation, { opened, partialRound: roundOpen, roundStart });
+    accountUsage(profile, assistant, history, conversation, { opened, partialRound: roundOpen, roundStart, steered });
     if (requestJobs.get(conversation.id) === job) requestJobs.delete(conversation.id);
     settleSupplements(conversation, assistant, job, profile);
     if (currentId !== conversation.id || view !== "chat") conversation.unread = true;
@@ -595,14 +637,20 @@ async function runSteps(steps, conversation, assistant, signal, toolCache) {
  * @param {Message} assistant
  * @param {Conversation} conversation
  */
-function accountUsage(profile, assistant, requestMessages, conversation, { opened = true, partialRound = false, roundStart = 0 } = {}) {
+function accountUsage(
+  profile,
+  assistant,
+  requestMessages,
+  conversation,
+  { opened = true, partialRound = false, roundStart = 0, steered = false } = {}
+) {
   const exact = Number(assistant.usage?.total_tokens || 0);
   const estimate = from => estimateTokens(requestMessages) + estimateTokens([{ content: String(assistant.content || "").slice(from) }]);
   const consumed = exact > 0 ? exact + (partialRound ? estimate(roundStart) : 0) : opened ? estimate(0) : 0;
   if (!(consumed > 0)) return;
   profile.usedTokens = Math.max(0, Number(profile.usedTokens || 0)) + consumed;
   assistant.tokenCount = consumed;
-  assistant.tokenEstimated = !(exact > 0) || partialRound;
+  assistant.tokenEstimated = !(exact > 0) || partialRound || steered;
   persistServerProfile(profile);
   if (quotaExhausted(profile)) toast("此答写毕，余墨已尽；换个模型可续");
   renderQuota();

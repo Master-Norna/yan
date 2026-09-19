@@ -389,48 +389,57 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     think.held = "";
     think.mode = "body";
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || "";
-    // 流到头了：最后一段没跟换行的 data: 也得处理，否则末尾几个字或最终的 usage 就丢了
-    if (done && buffer) {
-      lines.push(buffer);
-      buffer = "";
-    }
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === "[DONE]") continue;
-      try {
-        const json = JSON.parse(data);
-        const delta = json.choices?.[0]?.delta;
-        const text = normalizeContent(delta?.content),
-          reasoning = normalizeContent(delta?.reasoning_content ?? delta?.reasoning);
-        if (reasoning) {
-          assistant.reasoning = (assistant.reasoning || "") + reasoning;
-          refresh();
-        }
-        if (text) {
-          ingest(text);
-          refresh();
-        }
-        // Anthropic 的思考块（带签名）：这一轮带工具调用时要原样回传，记在消息上
-        if (delta?.thinking_block?.signature) (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
-        if (Array.isArray(delta?.tool_calls)) {
-          for (const call of delta.tool_calls) {
-            const slot = ((assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" });
-            if (call.id) slot.id = call.id;
-            if (call.function?.name) slot.name += call.function.name;
-            if (call.function?.arguments) slot.arguments += call.function.arguments;
+  // 流被掐断（停止、补言改道）时这一段的帧循环到此为止：接下来的一轮另起一个，两个循环不能同时画一条消息
+  try {
+    await pump();
+  } catch (error) {
+    closed = true;
+    throw error;
+  }
+  async function pump() {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      // 流到头了：最后一段没跟换行的 data: 也得处理，否则末尾几个字或最终的 usage 就丢了
+      if (done && buffer) {
+        lines.push(buffer);
+        buffer = "";
+      }
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        try {
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta;
+          const text = normalizeContent(delta?.content),
+            reasoning = normalizeContent(delta?.reasoning_content ?? delta?.reasoning);
+          if (reasoning) {
+            assistant.reasoning = (assistant.reasoning || "") + reasoning;
+            refresh();
           }
-          refresh();
-        }
-        if (json.usage) assistant.usage = json.usage;
-      } catch {}
+          if (text) {
+            ingest(text);
+            refresh();
+          }
+          // Anthropic 的思考块（带签名）：这一轮带工具调用时要原样回传，记在消息上
+          if (delta?.thinking_block?.signature) (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
+          if (Array.isArray(delta?.tool_calls)) {
+            for (const call of delta.tool_calls) {
+              const slot = ((assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" });
+              if (call.id) slot.id = call.id;
+              if (call.function?.name) slot.name += call.function.name;
+              if (call.function?.arguments) slot.arguments += call.function.arguments;
+            }
+            refresh();
+          }
+          if (json.usage) assistant.usage = json.usage;
+        } catch {}
+      }
+      if (done) break;
     }
-    if (done) break;
   }
   flushThink();
   // 流结束后把积压的字写完再返回，收尾和下一轮工具调用都等在这后面；标签页不可见时直接补齐
