@@ -69,16 +69,21 @@ function renderMath(tex, display) {
 }
 // 占位框里的动效在逐帧重画的尾段里会随节点重建从头再来，看着像定住了：把相位记在节点上（负的 animation-delay），重建也接着原来的拍子走
 const vizPhase = () => `-${Math.round(performance.now())}ms`;
-// 占位框里是一笔墨痕——与顶栏「余墨」同一笔形：底下一道极淡的虚痕，朱墨随行数从笔头往前走（越写越慢，永远差一点到头），
-// 流停了笔也停，看得出还在写还是卡住了。不是进度条，是正在落的一笔
+// 占位框里是一道虚痕——与顶栏「余墨」同一笔形，只是墨未着纸：淡淡地呼吸着；每来一行，痕上吸一口朱墨又散去（见 paintTail），
+// 流停了痕就只剩呼吸，看得出还在写还是卡住了
 const INK_STROKE =
   "M1.4 6.4C8 4.2 18 3.9 30 4.4c12 .5 22 1.3 34.4.2.9-.1 1.5.9 1 1.6-3.8 2.8-11.6 3-21 2.6C33 8.4 22 7.6 11 8.5c-3.4.3-6.8.5-9.2-.5-.9-.4-1-1.3-.4-1.6z";
-const inkStrokeWidth = lines => (68 * (1 - Math.exp(-Math.max(1, Number(lines) || 1) / 26))).toFixed(2);
-function pendingSketchHtml(lines) {
-  return `<span class="viz-pending-stroke"><svg viewBox="0 0 68 12" aria-hidden="true"><defs><clipPath id="vizInkClip"><path d="${INK_STROKE}"/></clipPath><linearGradient id="vizInkGrad"><stop class="ink-grad-a" offset="0"/><stop class="ink-grad-b" offset=".82"/><stop class="ink-grad-c" offset="1"/></linearGradient></defs><path class="viz-ink-ghost" d="${INK_STROKE}"/><rect class="viz-ink-fill" clip-path="url(#vizInkClip)" x="0" y="0" height="12" style="width:${inkStrokeWidth(lines)}px"/></svg></span>`;
+function pendingSketchHtml() {
+  return `<span class="viz-pending-stroke"><svg viewBox="0 0 68 12" aria-hidden="true"><path class="viz-ink-ghost" d="${INK_STROKE}"/><path class="viz-ink-pulse" d="${INK_STROKE}"/></svg></span>`;
 }
-// 尾段每帧整段重画，占位框若跟着重建，墨痕的过渡每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
-// 只换它周围的内容，按新的行数把墨痕往前推
+// 新来一行：虚痕上吸一口朱墨，随即散去
+function pulseInkStroke(pending) {
+  const pulse = pending.querySelector(".viz-ink-pulse");
+  if (!pulse || inkMotionOff() || typeof pulse.animate !== "function") return;
+  pulse.animate([{ opacity: 0 }, { opacity: 0.55, offset: 0.22 }, { opacity: 0 }], { duration: 640, easing: "ease-out" });
+}
+// 尾段每帧整段重画，占位框若跟着重建，虚痕的呼吸每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
+// 只换它周围的内容；行数变了就让虚痕吸一口墨
 function paintTail(tail, html) {
   const live = [...tail.querySelectorAll(".viz-pending")].at(-1);
   if (!live || live.parentNode !== tail) {
@@ -92,8 +97,7 @@ function paintTail(tail, html) {
     tail.innerHTML = html;
     return;
   }
-  const fill = live.querySelector(".viz-ink-fill");
-  if (fill) fill.style.width = `${inkStrokeWidth(next.dataset.lines)}px`;
+  if (live.dataset.lines !== next.dataset.lines) pulseInkStroke(live);
   live.dataset.lines = next.dataset.lines;
   live.setAttribute("aria-label", next.getAttribute("aria-label"));
   for (const node of [...tail.childNodes]) if (node !== live) node.remove();
@@ -117,7 +121,7 @@ function codeBlockHtml(text, lang) {
   // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是一页正在落笔的手稿（见 pendingSketchHtml）
   if (suppressViz && (htmlApp || language === "mermaid" || language === "echarts")) {
     const lines = String(text || "").split("\n").length;
-    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml(lines)}</div></div>\n`;
+    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml()}</div></div>\n`;
   }
   if (!suppressViz && (language === "mermaid" || language === "echarts"))
     return `<div class="viz" data-viz="${language}"><div class="code-head"><span class="code-lang">${language}</span><span><button type="button" class="code-copy" data-viz-toggle>源码</button><button type="button" class="code-copy" data-viz-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="viz-canvas"></div><pre class="viz-source hidden"><code>${escapeHtml(text)}</code></pre></div>\n`;

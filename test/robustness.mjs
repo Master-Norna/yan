@@ -52,15 +52,15 @@ check(
 await evalJs(
   `document.querySelector("#chatInput").value = "SLOWHTML 画个页"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
-await waitFor(`document.querySelectorAll(".message.assistant").length === 2 && !!${lastAssistant}.querySelector(".viz-ink-fill")`, 20000);
+await waitFor(`document.querySelectorAll(".message.assistant").length === 2 && !!${lastAssistant}.querySelector(".viz-ink-ghost")`, 20000);
 const lines1 = await evalJs(`Number(${lastAssistant}.querySelector(".viz-pending")?.dataset.lines)`);
 await waitFor(`Number(${lastAssistant}.querySelector(".viz-pending")?.dataset.lines || 0) > ${lines1}`, 5000);
 const sketch = await evalJs(
-  `(v => ({ lines: Number(v.dataset.lines), ink: parseFloat(v.querySelector(".viz-ink-fill").style.width), label: v.getAttribute("aria-label") }))(${lastAssistant}.querySelector(".viz-pending"))`
+  `(v => ({ lines: Number(v.dataset.lines), ink: !!v.querySelector(".viz-ink-ghost"), label: v.getAttribute("aria-label") }))(${lastAssistant}.querySelector(".viz-pending"))`
 );
 check(
   "pending viz box reports a growing line count through its ink stroke",
-  sketch.lines > lines1 && sketch.ink > 0 && sketch.ink < 68 && /已写 \d+ 行$/.test(sketch.label),
+  sketch.lines > lines1 && sketch.ink && /已写 \d+ 行$/.test(sketch.label),
   JSON.stringify([lines1, sketch])
 );
 await waitFor(`${lastAssistant}.dataset.status === "complete"`, 20000);

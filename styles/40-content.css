@@ -91,7 +91,7 @@
   justify-content: center;
   overflow: hidden;
 }
-/* 正在落的一笔：与顶栏「余墨」同一笔形，朱墨随行数往前走 */
+/* 虚痕：与顶栏「余墨」同一笔形，墨未着纸，淡淡地呼吸；每来一行吸一口朱墨（viz-ink-pulse 由 paintTail 点亮） */
 .viz-pending-stroke {
   display: block;
   width: 150px;
@@ -104,11 +104,12 @@
   overflow: visible;
 }
 .viz-ink-ghost {
-  fill: color-mix(in srgb, var(--ink-3) 13%, transparent);
+  fill: var(--ink-3);
+  opacity: 0.16;
 }
-.viz-ink-fill {
-  fill: url(#vizInkGrad);
-  transition: width 0.55s cubic-bezier(0.2, 0.7, 0.2, 1);
+.viz-ink-pulse {
+  fill: var(--accent);
+  opacity: 0;
 }
 .tool-steps {
   margin: 0 0 14px;

@@ -22,12 +22,12 @@ await evalJs(
 );
 await waitFor(`!!${lastAssistant}?.querySelector(".viz-pending")`, 20000);
 await evalJs(`${lastAssistant}.querySelector(".viz-pending").dataset.probe = "same"; true`);
-const ink1 = await evalJs(`parseFloat(${lastAssistant}.querySelector(".viz-ink-fill").style.width)`);
-await waitFor(`parseFloat(${lastAssistant}.querySelector(".viz-ink-fill")?.style.width || 0) > ${ink1}`, 5000);
+const lines1 = await evalJs(`Number(${lastAssistant}.querySelector(".viz-pending").dataset.lines)`);
+await waitFor(`Number(${lastAssistant}.querySelector(".viz-pending")?.dataset.lines || 0) > ${lines1}`, 5000);
 check(
-  "pending viz box keeps the same node across frames and its ink stroke advances; no line-count copy",
+  "pending viz box keeps the same node across frames, the ghost stroke pulses on new lines; no line-count copy",
   await evalJs(
-    `(v => v.dataset.probe === "same" && parseFloat(v.querySelector(".viz-ink-fill").style.width) > ${ink1} && !v.textContent.includes("行") && v.style.getPropertyValue("--phase").endsWith("ms"))(${lastAssistant}.querySelector(".viz-pending"))`
+    `(v => v.dataset.probe === "same" && v.querySelector(".viz-ink-pulse").getAnimations().length > 0 && !v.textContent.includes("行") && v.style.getPropertyValue("--phase").endsWith("ms"))(${lastAssistant}.querySelector(".viz-pending"))`
   )
 );
 await type("PLAIN 补一句");
