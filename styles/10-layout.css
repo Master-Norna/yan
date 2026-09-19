@@ -553,8 +553,15 @@ button.history-repo:hover .history-repo-name {
   display: flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
+}
+.model-option-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .model-option small {
   display: block;

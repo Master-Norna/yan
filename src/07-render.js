@@ -92,7 +92,8 @@ function renderModelMenu() {
     ? all
         .map(p => {
           const active = p.id === store.settings.activeProfileId;
-          return `<button class="model-option${active ? " active" : ""}" data-profile="${escapeHtml(p.id)}"${active ? ' aria-current="true"' : ""}><strong><span class="model-dot"></span>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.model)} · ${p.source === "server" ? "服务端配置" : safeHost(p.baseUrl)}</small></button>`;
+          // 只列显示名：模型原名与接口地址长短不一，行高参差；要看去模型设置
+          return `<button class="model-option${active ? " active" : ""}" data-profile="${escapeHtml(p.id)}"${active ? ' aria-current="true"' : ""} title="${escapeHtml(p.model)}"><strong><span class="model-dot"></span><span class="model-option-name">${escapeHtml(p.name)}</span></strong></button>`;
         })
         .join("")
     : `<button class="model-option" id="configureFirst"><strong>接入模型</strong><small>任何 OpenAI 兼容接口</small></button>`;
