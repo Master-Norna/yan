@@ -131,9 +131,10 @@ function safeHost(url) {
 // 明暗切换：新主题像墨一样从右上角侵蚀到左下角（View Transitions）；浏览器不支持或用户减少动态效果时退回颜色渐变
 let suppressThemeFade = false;
 function switchTheme(next, origin) {
+  // 换主题那一下要轻：存盘推后一拍，画面只就地换色（图表由 renderConversation 里的 rethemeViz 就地重上色）
   const apply = () => {
     store.settings.theme = next;
-    saveStore();
+    saveStoreSoon();
     applyAppearance();
     renderHeader();
     if (view === "chat") renderConversation(false);
@@ -141,7 +142,29 @@ function switchTheme(next, origin) {
   const willDark = next === "dark" || (next === "system" && matchMedia("(prefers-color-scheme: dark)").matches),
     current = document.documentElement.dataset.theme;
   if (!document.startViewTransition || inkMotionOff() || (willDark ? "dark" : "light") === current) return apply();
-  void (willDark ? runInkDrops(apply) : runDawn(apply, origin));
+  void rasterMasks().then(() => (willDark ? runInkDrops(apply) : runDawn(apply, origin)));
+}
+// 明暗切换的遮罩是几张带 feTurbulence 的 SVG（见 00-base.css）。mask-size 逐帧在变，浏览器便逐帧按整屏尺寸重新光栅化这几张矢量图，
+// 湍流滤镜算到几千像素见方，再好的机器也掉帧。所以开机后闲时先把它们各画成一张位图，遮罩换成位图，逐帧就只剩缩放一张图
+const MASK_VARS = ["--ink-blob-1", "--ink-blob-2", "--ink-blob-3", "--dawn-glow"],
+  MASK_BITMAP_SIZE = 1024;
+let maskBitmaps = null;
+function rasterMasks() {
+  if (maskBitmaps) return maskBitmaps;
+  maskBitmaps = Promise.all(
+    MASK_VARS.map(async name => {
+      const url = cssVar(name).match(/^url\((["']?)(.*)\1\)$/s)?.[2];
+      if (!url || !url.startsWith("data:image/svg+xml")) return;
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = MASK_BITMAP_SIZE;
+      canvas.getContext("2d").drawImage(image, 0, 0, MASK_BITMAP_SIZE, MASK_BITMAP_SIZE);
+      document.documentElement.style.setProperty(name, `url("${canvas.toDataURL("image/png")}")`);
+    })
+  ).catch(() => {});
+  return maskBitmaps;
 }
 // 亮到暗「落墨」：三滴墨先后从画面上方落到纸上，各自洇开——大的那滴居中先落、洇得最快，另两滴偏左右、晚一步、慢一些。
 // 落点与各自的半径写在 --x1/--y1/--r1… 上，三层遮罩各走各的动画（见 00-base.css）
@@ -160,17 +183,17 @@ async function runInkDrops(apply) {
     html.style.setProperty(`--r${i + 1}`, `${Math.ceil(reach * 1.15)}px`);
   });
   await Promise.all(points.map(point => inkDropFall(point)));
+  // 触纸：滴身钻进纸面，脚下洇出一圈墨——这圈墨就是随后那团暗色的起点。洇开一小会儿再起过渡：旧画面里定格着这几圈墨，
+  // 新画面的暗色正从同一处漫出来盖过去，看着就是墨渗进纸里再摊开，而不是先落一滴、再另起一团
+  points.forEach(point => inkSoak(point));
+  await new Promise(resolve => setTimeout(resolve, 140));
   html.dataset.themeMotion = "ink";
   suppressThemeFade = true;
   const transition = document.startViewTransition(apply);
-  transition.ready.then(() => {
-    document.querySelectorAll(".ink-drop").forEach(node => node.remove());
-    points.forEach((point, i) => setTimeout(() => inkSplash(point.px, point.py, point.size), i * 55));
-  });
   transition.finished.finally(() => {
     suppressThemeFade = false;
     delete html.dataset.themeMotion;
-    document.querySelectorAll(".ink-drop, .ink-splash").forEach(node => node.remove());
+    document.querySelectorAll(".ink-drop, .ink-soak").forEach(node => node.remove());
   });
 }
 // 一滴墨：在落点上方凝出、垂下、坠落时被拉长，触纸的一瞬摊成一小摊。滴身带高光与拖尾，落得越久拉得越长
@@ -224,36 +247,34 @@ function inkDropFall(point) {
     )
     .finally(() => trail.remove());
 }
-// 溅起的几点墨：落点周围随机几粒，冒出即淡去
-function inkSplash(x, y, scale = 1) {
-  const count = Math.round(11 * scale);
-  for (let i = 0; i < count; i++) {
-    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.9,
-      distance = (34 + Math.random() * 62) * scale,
-      size = (3 + Math.random() * 6) * scale,
-      dot = document.createElement("div");
-    dot.className = "ink-splash";
-    dot.style.cssText = `left:${x}px;top:${y}px;width:${size}px;height:${size}px`;
-    document.body.append(dot);
-    dot
-      .animate(
-        [
-          { transform: "translate(-50%, -50%) scale(0.2)", opacity: 0.9 },
-          {
-            transform: `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px)) scale(1)`,
-            opacity: 0.75,
-            offset: 0.4
-          },
-          {
-            transform: `translate(calc(-50% + ${Math.cos(angle) * distance * 1.2}px), calc(-50% + ${Math.sin(angle) * distance * 1.2}px)) scale(0.7)`,
-            opacity: 0
-          }
-        ],
-        { duration: 460 + Math.random() * 200, delay: 10 + i * 14, easing: "cubic-bezier(0.15, 0.75, 0.3, 1)", fill: "both" }
-      )
-      .finished.catch(() => {})
-      .finally(() => dot.remove());
-  }
+// 渗入：落点上一圈边缘毛糙的墨，从滴身底下洇出来，越摊越大、越摊越淡；滴身随之压扁、沉进纸里。
+// 一滴只画一个元素、只动 transform 与 opacity——旧版落地时溅的十几粒墨点是暗底上的暗点，几乎看不见，白费一份功夫
+function inkSoak(point) {
+  const size = Math.round(46 * point.size),
+    soak = document.createElement("div");
+  soak.className = "ink-soak";
+  soak.style.cssText = `left:${point.px}px;top:${point.py}px;width:${size}px;height:${size}px`;
+  document.body.append(soak);
+  soak
+    .animate(
+      [
+        { transform: "translate(-50%, -50%) scale(0.35, 0.22)", opacity: 0 },
+        { transform: "translate(-50%, -50%) scale(1, 0.72)", opacity: 0.92, offset: 0.3 },
+        { transform: "translate(-50%, -50%) scale(2.4, 2)", opacity: 0.55 }
+      ],
+      { duration: 620, easing: "cubic-bezier(0.2, 0.7, 0.25, 1)", fill: "both" }
+    )
+    .finished.catch(() => {});
+  const drop = [...document.querySelectorAll(".ink-drop")].find(node => node.style.left === `${point.px}px`);
+  drop
+    ?.animate(
+      [
+        { transform: `translate(-50%, calc(-50% + ${innerHeight * point.fall}px)) scale(1.55, 0.48)`, opacity: 1 },
+        { transform: `translate(-50%, calc(-50% + ${innerHeight * point.fall}px)) scale(1.9, 0.16)`, opacity: 0 }
+      ],
+      { duration: 260, easing: "ease-in", fill: "both" }
+    )
+    .finished.catch(() => {});
 }
 // 暗到亮「天光」：墨是从高处落下来的，光则是从按下的那一点亮起来的——以砚台为心向四下漫开，
 // 先急后缓，过处的墨色被照淡；旧的暗色在底下略略提亮又退去，像天亮了

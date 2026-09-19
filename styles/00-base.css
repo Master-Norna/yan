@@ -222,7 +222,7 @@ html[data-theme-motion="dawn"]::view-transition-old(root) {
     filter: brightness(1.25);
   }
 }
-/* 墨滴与溅点：只在切换的一瞬存在 */
+/* 墨滴与渗痕：只在切换的一瞬存在 */
 .ink-drop {
   position: fixed;
   z-index: 2000;
@@ -243,12 +243,14 @@ html[data-theme-motion="dawn"]::view-transition-old(root) {
   transform-origin: top center;
   pointer-events: none;
 }
-.ink-splash {
+/* 落点上洇开的一圈：中心实、边缘虚，像墨渗进纸纹 */
+.ink-soak {
   position: fixed;
-  z-index: 2000;
-  border-radius: 50%;
-  background: #25231f;
+  z-index: 1998;
+  border-radius: 46% 54% 50% 50% / 52% 48% 52% 48%;
+  background: radial-gradient(closest-side, #1d1a16 0%, #221e19 42%, rgba(34, 30, 25, 0.62) 68%, rgba(34, 30, 25, 0) 100%);
   pointer-events: none;
+  will-change: transform, opacity;
 }
 :root[data-theme="dark"] {
   --paper: #201f1c;

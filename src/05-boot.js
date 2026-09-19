@@ -84,6 +84,7 @@ async function boot() {
   recoverInterruptedMessages();
   applyAppearance();
   bindEvents();
+  (window.requestIdleCallback || (fn => setTimeout(fn, 800)))(() => void rasterMasks());
   void cleanupAttachmentStore();
   void refreshArchive();
   if (isMobile()) toggleSidebar(true);
