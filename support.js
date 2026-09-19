@@ -167,6 +167,8 @@
  * @property {number} subRounds
  * @property {string} [archiveDir]
  * @property {Partial<Profile>} serverProfile 桥接预设模型上用户可改的几项
+ * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
+ * @property {string} [lastConversationId]
  */
 /**
  * @typedef {Object} Store 整个本地存储（localStorage 里的一份 JSON）
@@ -1503,12 +1505,13 @@ async function boot() {
   recoverInterruptedMessages();
   applyAppearance();
   bindEvents();
-  (window.requestIdleCallback || (fn => setTimeout(fn, 800)))(() => void rasterMasks());
+  (window.requestIdleCallback || (fn => setTimeout(fn, 800)))(() => void themeSheets());
   void cleanupAttachmentStore();
   void refreshArchive();
   // 侧栏的开合记在本机（不随备份走）：宽屏按上次的来，窄屏一律收起；theme-boot 已按同一记录先把宽度放好，这里接过来
   toggleSidebar(isMobile() || localStorage.getItem("yan-sidebar") === "collapsed");
   delete document.documentElement.dataset.sidebar;
+  restorePlace();
   render();
 }
 
@@ -2791,6 +2794,7 @@ function syncDocumentTitle() {
 // 言 · 整体渲染：顶栏、模型菜单、历史、对话与消息
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 function render(shouldScroll = false) {
+  rememberPlace();
   renderHeader();
   renderHistory();
   syncDocumentTitle();
@@ -3053,6 +3057,26 @@ function renderConversation(shouldScroll = false) {
   foldCompacted(c);
   renderOutline();
   updateContextGauge();
+}
+// 停在哪一页记在设置里：刷新后回到原处——正看着的那段对话、或卷宗；开机时由 boot 读回
+function rememberPlace() {
+  const s = store.settings,
+    /** @type {{ view: "chat"|"library", id: string }} */
+    next = { view: view === "library" ? "library" : "chat", id: view === "library" ? "" : currentId || "" };
+  if (s.lastView === next.view && (s.lastConversationId || "") === next.id) return;
+  s.lastView = next.view;
+  s.lastConversationId = next.id;
+  saveStoreSoon();
+}
+function restorePlace() {
+  const { lastView, lastConversationId } = store.settings;
+  if (lastView === "library") view = "library";
+  else if (lastConversationId && store.conversations.some(c => c.id === lastConversationId)) {
+    currentId = lastConversationId;
+    const c = currentConversation();
+    c.unread = false;
+    if (c.profileId) selectProfile(c.profileId, false);
+  }
 }
 // 压缩过的前文在页面上折起（记录都在，只是不占地方）；最近一次压缩的分隔上有「展开前文 / 收起前文」
 /** @param {Conversation} c */
@@ -5200,73 +5224,131 @@ function safeHost(url) {
     return "未填写地址";
   }
 }
-// 明暗切换：新主题像墨一样从右上角侵蚀到左下角（View Transitions）；浏览器不支持或用户减少动态效果时退回颜色渐变
+// 明暗切换只动 transform 与 opacity：墨（或光）是几张铺在页面上的位图，从落点放大到盖满整屏，屏幕被完全盖住的那一帧换主题，
+// 再让墨色退去、字迹从中浮出。全程在合成层上——不套遮罩、不动滤镜、不用 View Transitions。
+// 此前是把新画面套在逐帧变化的遮罩里：遮罩每帧都要按整屏合成一遍，240 Hz 的屏上一眼看得出掉帧；主题重排那一下现在也藏在墨底下
 let suppressThemeFade = false;
 function switchTheme(next, origin) {
-  // 换主题那一下要轻：存盘推后一拍，画面只就地换色（图表由 renderConversation 里的 rethemeViz 就地重上色）
   const apply = () => {
     store.settings.theme = next;
-    saveStoreSoon();
     applyAppearance();
     renderHeader();
     if (view === "chat") renderConversation(false);
   };
   const willDark = next === "dark" || (next === "system" && matchMedia("(prefers-color-scheme: dark)").matches),
     current = document.documentElement.dataset.theme;
-  if (!document.startViewTransition || inkMotionOff() || (willDark ? "dark" : "light") === current) return apply();
-  void rasterMasks().then(() => (willDark ? runInkDrops(apply) : runDawn(apply, origin)));
+  if (inkMotionOff() || (willDark ? "dark" : "light") === current) {
+    apply();
+    saveStoreSoon();
+    return;
+  }
+  // 存盘等动效走完再做：整个 store 序列化一次可能要几十毫秒，别落在动效中间
+  void themeSheets()
+    .then(sheets => (willDark ? runInkDrops(apply, sheets) : runDawn(apply, origin, sheets)))
+    .finally(saveStoreSoon);
 }
-// 明暗切换的遮罩是几张带 feTurbulence 的 SVG（见 00-base.css）。mask-size 逐帧在变，浏览器便逐帧按整屏尺寸重新光栅化这几张矢量图，
-// 湍流滤镜算到几千像素见方，再好的机器也掉帧。所以开机后闲时先把它们各画成一张位图，遮罩换成位图，逐帧就只剩缩放一张图
-const MASK_VARS = ["--ink-blob-1", "--ink-blob-2", "--ink-blob-3", "--dawn-glow"],
-  MASK_BITMAP_SIZE = 1024;
-let maskBitmaps = null;
-function rasterMasks() {
-  if (maskBitmaps) return maskBitmaps;
-  maskBitmaps = Promise.all(
-    MASK_VARS.map(async name => {
+// 墨团与光晕的形状是 00-base.css 里几张带湍流滤镜的 SVG（--ink-blob-1/2/3、--dawn-glow）。开机后闲时各画成一张上了色的位图：
+// 墨团填墨色、光晕填纸色，切换时只是把这几张图放大——矢量与滤镜一次也不在动效里算
+const THEME_SHEETS = [
+    ["blob1", "--ink-blob-1", "#1c1a17"],
+    ["blob2", "--ink-blob-2", "#1c1a17"],
+    ["blob3", "--ink-blob-3", "#1c1a17"],
+    ["glow", "--dawn-glow", "#fffdf7"]
+  ],
+  SHEET_PX = 1024;
+/** @type {Promise<Record<string, string>|null>|null} */
+let themeSheetCache = null;
+function themeSheets() {
+  if (themeSheetCache) return themeSheetCache;
+  themeSheetCache = Promise.all(
+    THEME_SHEETS.map(async ([, name, color]) => {
       const url = cssVar(name).match(/^url\((["']?)(.*)\1\)$/s)?.[2];
-      if (!url || !url.startsWith("data:image/svg+xml")) return;
+      if (!url) throw Error(name);
       const image = new Image();
       image.src = url;
       await image.decode();
       const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = MASK_BITMAP_SIZE;
-      canvas.getContext("2d").drawImage(image, 0, 0, MASK_BITMAP_SIZE, MASK_BITMAP_SIZE);
-      document.documentElement.style.setProperty(name, `url("${canvas.toDataURL("image/png")}")`);
+      canvas.width = canvas.height = SHEET_PX;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(image, 0, 0, SHEET_PX, SHEET_PX);
+      ctx.globalCompositeOperation = "source-in";
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, SHEET_PX, SHEET_PX);
+      return `url("${canvas.toDataURL("image/png")}")`;
     })
-  ).catch(() => {});
-  return maskBitmaps;
+  )
+    .then(urls => Object.fromEntries(THEME_SHEETS.map(([key], i) => [key, urls[i]])))
+    .catch(() => {
+      themeSheetCache = null;
+      return null;
+    });
+  return themeSheetCache;
 }
+// 一张铺开的图：定在 (x, y)，从 from 放大到 to；返回节点与放大完成的 promise
+function spreadSheet(url, x, y, { from, to, duration, delay = 0, easing }) {
+  const el = document.createElement("div");
+  el.className = "theme-sheet";
+  el.style.cssText = `left:${x}px;top:${y}px;background-image:${url}`;
+  document.body.append(el);
+  const finished = el
+    .animate([{ transform: `translate(-50%, -50%) scale(${from})` }, { transform: `translate(-50%, -50%) scale(${to})` }], {
+      duration,
+      delay,
+      easing,
+      fill: "both"
+    })
+    .finished.catch(() => {});
+  return { el, finished };
+}
+// 盖住整屏之后：换主题、等一帧让新画面在底下画好，再让盖着的图退去
+async function revealUnder(apply, sheets, fade) {
+  apply();
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await Promise.all(
+    sheets.map(el =>
+      el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: fade, easing: "ease-out", fill: "both" }).finished.catch(() => {})
+    )
+  );
+  sheets.forEach(el => el.remove());
+}
+const farthestCorner = (x, y) => Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
 // 亮到暗「落墨」：三滴墨先后从画面上方落到纸上，各自洇开——大的那滴居中先落、洇得最快，另两滴偏左右、晚一步、慢一些。
-// 落点与各自的半径写在 --x1/--y1/--r1… 上，三层遮罩各走各的动画（见 00-base.css）
+// 墨团铺满整屏那一刻换主题，墨色再退成暗色的纸、字迹浮出
 const INK_DROPS = [
-  { x: 0.5, y: 0.46, size: 1, delay: 0, fall: 0.5 },
-  { x: 0.34, y: 0.58, size: 0.76, delay: 85, fall: 0.4 },
-  { x: 0.66, y: 0.37, size: 0.62, delay: 165, fall: 0.33 }
+  { x: 0.5, y: 0.46, size: 1, delay: 0, fall: 0.5, duration: 720, easing: "cubic-bezier(0.12, 0.86, 0.28, 1)" },
+  { x: 0.34, y: 0.58, size: 0.76, delay: 85, fall: 0.4, duration: 860, easing: "cubic-bezier(0.12, 0.86, 0.28, 1)" },
+  { x: 0.66, y: 0.37, size: 0.62, delay: 165, fall: 0.33, duration: 980, easing: "cubic-bezier(0.18, 0.78, 0.32, 1)" }
 ];
-async function runInkDrops(apply) {
-  const html = document.documentElement,
-    points = INK_DROPS.map(drop => ({ ...drop, px: innerWidth * drop.x, py: innerHeight * drop.y }));
-  points.forEach((point, i) => {
-    const reach = Math.hypot(Math.max(point.px, innerWidth - point.px), Math.max(point.py, innerHeight - point.py));
-    html.style.setProperty(`--x${i + 1}`, `${point.px}px`);
-    html.style.setProperty(`--y${i + 1}`, `${point.py}px`);
-    html.style.setProperty(`--r${i + 1}`, `${Math.ceil(reach * 1.15)}px`);
-  });
+// 墨团图里实心的部分到半径的 52%，墨团本身占图的 80%：最远的角要落进实心里，图就得放到这么大
+const INK_SOLID = 0.8 * 0.52,
+  GLOW_SOLID = 0.96 * 0.4;
+async function runInkDrops(apply, sheets) {
+  if (!sheets) return apply();
+  const points = INK_DROPS.map(drop => ({ ...drop, px: innerWidth * drop.x, py: innerHeight * drop.y }));
   await Promise.all(points.map(point => inkDropFall(point)));
-  // 触纸：滴身钻进纸面，脚下洇出一圈墨——这圈墨就是随后那团暗色的起点。洇开一小会儿再起过渡：旧画面里定格着这几圈墨，
-  // 新画面的暗色正从同一处漫出来盖过去，看着就是墨渗进纸里再摊开，而不是先落一滴、再另起一团
+  // 触纸：滴身钻进纸面，脚下洇出一圈墨——这圈墨就是随后那团暗色的起点
   points.forEach(point => inkSoak(point));
-  await new Promise(resolve => setTimeout(resolve, 140));
-  html.dataset.themeMotion = "ink";
   suppressThemeFade = true;
-  const transition = document.startViewTransition(apply);
-  transition.finished.finally(() => {
+  const spreads = points.map((point, i) =>
+    spreadSheet(sheets[`blob${i + 1}`], point.px, point.py, {
+      from: 0.04,
+      to: (farthestCorner(point.px, point.py) / ((SHEET_PX / 2) * INK_SOLID)) * [1, 0.9, 0.8][i],
+      duration: point.duration,
+      delay: [40, 80, 130][i],
+      easing: point.easing
+    })
+  );
+  await Promise.all(spreads.map(spread => spread.finished));
+  try {
+    await revealUnder(
+      apply,
+      spreads.map(spread => spread.el),
+      460
+    );
+  } finally {
     suppressThemeFade = false;
-    delete html.dataset.themeMotion;
-    document.querySelectorAll(".ink-drop, .ink-soak").forEach(node => node.remove());
-  });
+    document.querySelectorAll(".ink-drop, .ink-soak, .theme-sheet").forEach(node => node.remove());
+  }
 }
 // 一滴墨：在落点上方凝出、垂下、坠落时被拉长，触纸的一瞬摊成一小摊。滴身带高光与拖尾，落得越久拉得越长
 function inkDropFall(point) {
@@ -5344,29 +5426,31 @@ function inkSoak(point) {
         { transform: `translate(-50%, calc(-50% + ${innerHeight * point.fall}px)) scale(1.55, 0.48)`, opacity: 1 },
         { transform: `translate(-50%, calc(-50% + ${innerHeight * point.fall}px)) scale(1.9, 0.16)`, opacity: 0 }
       ],
-      { duration: 260, easing: "ease-in", fill: "both" }
+      { duration: 180, easing: "ease-in", fill: "both" }
     )
     .finished.catch(() => {});
 }
-// 暗到亮「天光」：墨是从高处落下来的，光则是从按下的那一点亮起来的——以砚台为心向四下漫开，
-// 先急后缓，过处的墨色被照淡；旧的暗色在底下略略提亮又退去，像天亮了
-function runDawn(apply, origin) {
-  const html = document.documentElement,
-    rect = origin?.getBoundingClientRect?.(),
+// 暗到亮「天光」：墨是从高处落下来的，光则是从按下的那一点亮起来的——以砚台为心向四下漫开，先急后缓；
+// 光把整屏照白的那一刻换主题，再让光退去，眼睛适应了天光，字迹浮出
+async function runDawn(apply, origin, sheets) {
+  if (!sheets) return apply();
+  const rect = origin?.getBoundingClientRect?.(),
     x = rect ? rect.left + rect.width / 2 : innerWidth - 60,
     y = rect ? rect.top + rect.height / 2 : 28;
-  const reach = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
-  html.style.setProperty("--tx", `${x}px`);
-  html.style.setProperty("--ty", `${y}px`);
-  // 遮罩外圈近一半是渐隐，要放到两倍多，实心的部分才够推过最远的角
-  html.style.setProperty("--tr", `${Math.ceil(reach * 2.2)}px`);
-  html.dataset.themeMotion = "dawn";
   suppressThemeFade = true;
-  const transition = document.startViewTransition(apply);
-  transition.finished.finally(() => {
-    suppressThemeFade = false;
-    delete html.dataset.themeMotion;
+  const glow = spreadSheet(sheets.glow, x, y, {
+    from: 0.02,
+    to: farthestCorner(x, y) / ((SHEET_PX / 2) * GLOW_SOLID),
+    duration: 1050,
+    easing: "cubic-bezier(0.5, 0.06, 0.3, 1)"
   });
+  await glow.finished;
+  try {
+    await revealUnder(apply, [glow.el], 560);
+  } finally {
+    suppressThemeFade = false;
+    document.querySelectorAll(".theme-sheet").forEach(node => node.remove());
+  }
 }
 function applyAppearance() {
   const { theme, inkMotion, font, width, accent } = store.settings;

@@ -90,138 +90,26 @@ button:disabled {
   );
   transform: none;
 }
-/* 明暗切换。亮→暗「落墨」：新主题的快照套三层墨缘参差的圆形遮罩（经湍流位移的圆），各以自己的速度从各自的落点洇开——
-   居中那滴最大最快，另两滴偏左右、晚一步、慢一些；落点与半径由 switchTheme 写在 --x1/--y1/--r1… 上。
-   暗→亮「展卷」：亮色从中缝向两边铺开，边缘是纸卷的柔边。半径要能动画插值，先用 @property 注册。 */
-@property --s1 {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
-}
-@property --s2 {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
-}
-@property --s3 {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
-}
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-  mix-blend-mode: normal;
-}
-html[data-theme-motion="ink"]::view-transition-new(root) {
-  animation:
-    inkSpread1 0.82s cubic-bezier(0.12, 0.86, 0.28, 1) both,
-    inkSpread2 1s cubic-bezier(0.12, 0.86, 0.28, 1) 0.04s both,
-    inkSpread3 1.18s cubic-bezier(0.18, 0.78, 0.32, 1) 0.1s both;
-  -webkit-mask-image: var(--ink-blob-1), var(--ink-blob-2), var(--ink-blob-3);
-  mask-image: var(--ink-blob-1), var(--ink-blob-2), var(--ink-blob-3);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-composite: source-over;
-  mask-composite: add;
-  -webkit-mask-size:
-    calc(var(--r1) * var(--s1) * 2) calc(var(--r1) * var(--s1) * 2),
-    calc(var(--r2) * var(--s2) * 2) calc(var(--r2) * var(--s2) * 2),
-    calc(var(--r3) * var(--s3) * 2) calc(var(--r3) * var(--s3) * 2);
-  mask-size:
-    calc(var(--r1) * var(--s1) * 2) calc(var(--r1) * var(--s1) * 2),
-    calc(var(--r2) * var(--s2) * 2) calc(var(--r2) * var(--s2) * 2),
-    calc(var(--r3) * var(--s3) * 2) calc(var(--r3) * var(--s3) * 2);
-  -webkit-mask-position:
-    calc(var(--x1) - var(--r1) * var(--s1)) calc(var(--y1) - var(--r1) * var(--s1)),
-    calc(var(--x2) - var(--r2) * var(--s2)) calc(var(--y2) - var(--r2) * var(--s2)),
-    calc(var(--x3) - var(--r3) * var(--s3)) calc(var(--y3) - var(--r3) * var(--s3));
-  mask-position:
-    calc(var(--x1) - var(--r1) * var(--s1)) calc(var(--y1) - var(--r1) * var(--s1)),
-    calc(var(--x2) - var(--r2) * var(--s2)) calc(var(--y2) - var(--r2) * var(--s2)),
-    calc(var(--x3) - var(--r3) * var(--s3)) calc(var(--y3) - var(--r3) * var(--s3));
-}
 :root {
+  /* 明暗切换用的几个形状：带湍流滤镜的 SVG，开机后由 themeSheets 各画成一张上了色的位图，动效里只放大位图 */
   --dawn-glow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%23000'/%3E%3Cstop offset='40%25' stop-color='%23000'/%3E%3Cstop offset='62%25' stop-color='%23000' stop-opacity='.72'/%3E%3Cstop offset='82%25' stop-color='%23000' stop-opacity='.24'/%3E%3Cstop offset='100%25' stop-color='%23000' stop-opacity='0'/%3E%3C/radialGradient%3E%3Cfilter id='w' x='-25%25' y='-25%25' width='150%25' height='150%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.02' numOctaves='3' seed='5'/%3E%3CfeDisplacementMap in='SourceGraphic' scale='22' xChannelSelector='R' yChannelSelector='G'/%3E%3CfeGaussianBlur stdDeviation='1.1'/%3E%3C/filter%3E%3C/defs%3E%3Ccircle cx='100' cy='100' r='96' fill='url(%23g)' filter='url(%23w)'/%3E%3C/svg%3E");
   --ink-blob-1: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%23000'/%3E%3Cstop offset='52%25' stop-color='%23000'/%3E%3Cstop offset='82%25' stop-color='%23000' stop-opacity='.78'/%3E%3Cstop offset='100%25' stop-color='%23000' stop-opacity='.42'/%3E%3C/radialGradient%3E%3Cfilter id='f' x='-25%25' y='-25%25' width='150%25' height='150%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.03' numOctaves='3' seed='9'/%3E%3CfeDisplacementMap in='SourceGraphic' scale='26' xChannelSelector='R' yChannelSelector='G'/%3E%3CfeGaussianBlur stdDeviation='.6'/%3E%3C/filter%3E%3C/defs%3E%3Ccircle cx='100' cy='100' r='80' fill='url(%23g)' filter='url(%23f)'/%3E%3C/svg%3E");
   --ink-blob-2: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%23000'/%3E%3Cstop offset='44%25' stop-color='%23000'/%3E%3Cstop offset='82%25' stop-color='%23000' stop-opacity='.7'/%3E%3Cstop offset='100%25' stop-color='%23000' stop-opacity='.42'/%3E%3C/radialGradient%3E%3Cfilter id='f' x='-25%25' y='-25%25' width='150%25' height='150%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.042' numOctaves='3' seed='31'/%3E%3CfeDisplacementMap in='SourceGraphic' scale='30' xChannelSelector='R' yChannelSelector='G'/%3E%3CfeGaussianBlur stdDeviation='.6'/%3E%3C/filter%3E%3C/defs%3E%3Ccircle cx='100' cy='100' r='78' fill='url(%23g)' filter='url(%23f)'/%3E%3C/svg%3E");
   --ink-blob-3: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%23000'/%3E%3Cstop offset='38%25' stop-color='%23000'/%3E%3Cstop offset='82%25' stop-color='%23000' stop-opacity='.64'/%3E%3Cstop offset='100%25' stop-color='%23000' stop-opacity='.42'/%3E%3C/radialGradient%3E%3Cfilter id='f' x='-25%25' y='-25%25' width='150%25' height='150%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.05' numOctaves='3' seed='57'/%3E%3CfeDisplacementMap in='SourceGraphic' scale='24' xChannelSelector='R' yChannelSelector='G'/%3E%3CfeGaussianBlur stdDeviation='.6'/%3E%3C/filter%3E%3C/defs%3E%3Ccircle cx='100' cy='100' r='76' fill='url(%23g)' filter='url(%23f)'/%3E%3C/svg%3E");
 }
-@keyframes inkSpread1 {
-  from {
-    --s1: 0;
-  }
-  to {
-    --s1: 1;
-  }
-}
-@keyframes inkSpread2 {
-  from {
-    --s2: 0;
-  }
-  to {
-    --s2: 1;
-  }
-}
-@keyframes inkSpread3 {
-  from {
-    --s3: 0;
-  }
-  to {
-    --s3: 1;
-  }
-}
-/* 天光：新的亮色从按下的那一点漫开，边缘是宽宽的渐隐——没有墨缘那样的参差，光本就没有形体；
-   起势急、收势缓，过处先亮一下再落回本色，如同眼睛适应了天光。旧的暗色在底下提一提亮再退去 */
-html[data-theme-motion="dawn"]::view-transition-new(root) {
-  animation:
-    dawnSpread 1.6s cubic-bezier(0.5, 0.06, 0.3, 1) both,
-    dawnGlow 1.6s ease-out both;
-  -webkit-mask-image: var(--dawn-glow);
-  mask-image: var(--dawn-glow);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-}
-html[data-theme-motion="dawn"]::view-transition-old(root) {
-  animation: dawnRetreat 1.6s ease-out both;
-}
-@keyframes dawnSpread {
-  from {
-    -webkit-mask-size: 0 0;
-    mask-size: 0 0;
-    -webkit-mask-position: var(--tx) var(--ty);
-    mask-position: var(--tx) var(--ty);
-  }
-  to {
-    -webkit-mask-size: calc(var(--tr) * 2) calc(var(--tr) * 2);
-    mask-size: calc(var(--tr) * 2) calc(var(--tr) * 2);
-    -webkit-mask-position: calc(var(--tx) - var(--tr)) calc(var(--ty) - var(--tr));
-    mask-position: calc(var(--tx) - var(--tr)) calc(var(--ty) - var(--tr));
-  }
-}
-@keyframes dawnGlow {
-  0% {
-    filter: brightness(1.5) contrast(0.9);
-  }
-  40% {
-    filter: brightness(1.14) contrast(0.97);
-  }
-  100% {
-    filter: none;
-  }
-}
-@keyframes dawnRetreat {
-  0% {
-    opacity: 1;
-    filter: none;
-  }
-  55% {
-    filter: brightness(1.18);
-  }
-  100% {
-    opacity: 0.6;
-    filter: brightness(1.25);
-  }
+/* 铺在页面上的墨与光：位图（见 themeSheets），只动 transform 与 opacity */
+.theme-sheet {
+  position: fixed;
+  z-index: 1997;
+  left: 0;
+  top: 0;
+  width: 1024px;
+  height: 1024px;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  transform-origin: center;
+  pointer-events: none;
+  will-change: transform, opacity;
 }
 /* 墨滴与渗痕：只在切换的一瞬存在 */
 .ink-drop {
