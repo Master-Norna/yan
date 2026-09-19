@@ -224,8 +224,9 @@ async function startTurn(c, user, profile) {
   await streamReply(c, assistant, profile);
 }
 // 补言：模型作答途中用户再寄来的话，是引导不是排队。先落在行迹里它到达的那一刻（一步「补言 · 待寄」）；模型正在写着，
-// 就把这一轮的流掐断、已写的留着，随即连同补言再请它开口——它读了这句接着写，可就此改道；正跑着工具时等结果交回、
-// 模型再开口之前递上；这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出
+// 就等它说到一个自然的落点（见 watchSteer：思考写完、句尾或段落尾、代码围栏闭合）把这一轮的流停下、已写的留着，随即连同补言
+// 再请它开口——它读了这句接着写，可就此改道；正在拟工具调用或跑着工具时不停，等结果交回、模型再开口之前递上；
+// 这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出。引导是为了答得更好，从不硬掐
 const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］",
   STEER_PREFIX = "［用户在你作答途中插了一句，你写到此处暂停。读后接着作答，可据此改变方向；不必重复已写的内容］";
 function sendSupplement() {
@@ -253,8 +254,34 @@ function sendSupplement() {
   refreshSteps(assistant);
   renderSendButtons();
   if (followBottom) scrollBottom();
-  // 模型正写着：掐断这一轮，streamReply 的循环接手——已写的留下，补言递上，随即再请它开口
-  if (job.reading) job.round?.abort();
+  // 模型正写着：盯着它说到落点再停这一轮，streamReply 的循环接手——已写的留下，补言递上，随即再请它开口
+  if (job.reading) watchSteer(job, assistant);
+}
+// 补言到了不是立刻停——像人插话也等对方一句说完，且不设时限：正在思考就等思考写完（正文起笔），想多久都等；
+// 正在拟工具调用就不停，等结果交回时递；正在写正文就等到句尾或段落尾、且不在代码围栏里（围栏等它闭合）。
+// 每 120ms 看一眼；流自己先到头了就不停（回合边界或收尾处理）
+/** @param {Message} assistant */
+function watchSteer(job, assistant) {
+  if (job.steerTimer) return;
+  job.steerTimer = setInterval(() => {
+    const stop = () => {
+      clearInterval(job.steerTimer);
+      job.steerTimer = 0;
+    };
+    if (!job.reading || !job.round) return stop();
+    if (assistant.toolCalls?.length) return; // 正在拟调用：等它拟完，结果交回时递
+    const said = assistant.content.slice(job.roundStart || 0);
+    if (!said.trim()) return; // 还在想（或还没开口）：等
+    const fenced = (said.match(/^\s*```/gm) || []).length % 2 === 1;
+    if (fenced || !/[\n。！？!?]\s*$/.test(said)) return;
+    stop();
+    job.round.abort();
+  }, 120);
+}
+// 停的位置若略过了句尾，把多出的那几个字退回去，落点干净
+function trimToBoundary(text) {
+  const match = text.match(/^([\s\S]*[\n。！？!?])[^\n。！？!?]*$/);
+  return match && text.length - match[1].length < 120 ? match[1] : text;
 }
 // 回合边界：把排着的补言递给模型（历史里接在工具结果之后，或接在被掐断的半截话之后），行迹里那一步打勾
 async function deliverSupplements(job, history, budget, { steer = false } = {}) {
@@ -267,7 +294,7 @@ async function deliverSupplements(job, history, budget, { steer = false } = {}) 
     else entry.content[0].text = `${prefix}${entry.content[0].text}`;
     history.push(entry);
     step.status = "done";
-    step.result = steer ? "已递 · 改道" : "已递";
+    step.result = steer ? "已递 · 引路" : "已递";
   }
 }
 // 收尾时还没递出去的补言：从行迹里撤下，整答顺利写完的作为新的一问接着送；停了、断了的放回案上，话不能丢
@@ -358,7 +385,7 @@ function stopAllGenerations() {
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // 这一答是不是执事的，记在消息自己身上：生成期间用户可能翻去欢迎页或卷宗，页面上一时没有「当前对话」，时间线不能因此改画法
   assistant.work = isWork(conversation);
-  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean }} */
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number }} */
   const job = {
     controller: new AbortController(),
     assistantId: assistant.id,
@@ -366,7 +393,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     profile,
     queue: [],
     round: null,
-    reading: false
+    reading: false,
+    roundStart: 0,
+    steerTimer: 0
   };
   requestJobs.set(conversation.id, job);
   renderSendButtons();
@@ -415,9 +444,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     for (;;) {
       assistant.toolCalls = null;
       assistant.usage = null;
-      roundStart = assistant.content.length;
+      roundStart = job.roundStart = assistant.content.length;
       roundOpen = false;
-      // 每一轮自己一个中止器：补言只掐这一轮的流，整答的 controller 留给「停止」
+      // 每一轮自己一个中止器：补言只停这一轮的流，整答的 controller 留给「停止」
       const round = new AbortController(),
         stopRound = () => round.abort();
       job.round = round;
@@ -427,8 +456,10 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         await readReply(profile, history, round.signal, overrides, assistant, false, () => (roundOpen = opened = true));
       } catch (error) {
         if (error.name !== "AbortError" || job.controller.signal.aborted || !job.queue?.length) throw error;
-        // 补言掐断的：这一轮写到哪算哪（花的墨按估算记上），半截话与补言一起进历史，没执行的工具调用一律作废，随即再开一轮
-        const said = assistant.content.slice(roundStart);
+        // 补言停下的：这一轮写到落点为止（花的墨按估算记上），已写的话与补言一起进历史，没执行的工具调用一律作废，随即再开一轮
+        const said = trimToBoundary(assistant.content.slice(roundStart)).replace(/\n+$/, "");
+        assistant.content = assistant.content.slice(0, roundStart) + said;
+        for (const { step } of job.queue) if (typeof step.at === "number") step.at = Math.min(step.at, assistant.content.length);
         if (roundOpen) {
           const spent = estimateTokens(history) + estimateTokens([{ content: said }]);
           usage.prompt_tokens += spent;
@@ -444,6 +475,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       } finally {
         job.reading = false;
         job.round = null;
+        clearInterval(job.steerTimer);
+        job.steerTimer = 0;
         job.controller.signal.removeEventListener("abort", stopRound);
       }
       if (assistant.usage) {

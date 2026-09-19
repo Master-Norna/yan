@@ -1,12 +1,12 @@
 // 假的 OpenAI 兼容接口：第一轮回 run_command 工具调用，收到 tool 结果后回正文；可通过 X-Mode 切换行为
 import http from "node:http";
-const sse = (res, chunks) => {
+const sse = (res, chunks, gap = 30) => {
   res.writeHead(200, { "Content-Type": "text/event-stream" });
   let i = 0;
   const tick = () => {
     if (i < chunks.length) {
       res.write(`data: ${JSON.stringify(chunks[i++])}\n\n`);
-      setTimeout(tick, 30);
+      setTimeout(tick, gap);
     } else {
       res.write("data: [DONE]\n\n");
       res.end();
@@ -117,6 +117,11 @@ http
           "```\n"
         ];
         return sse(res, [...lines.map(content => delta({ content })), delta({}, { usage: { total_tokens: 11 } })]);
+      }
+      if (typeof lastUser === "string" && lastUser.includes("SLOWTEXT")) {
+        // 一段一段慢慢说的纯文本（每段两句，段尾空行），给补言找落点用：约 8 秒说完
+        const paragraphs = Array.from({ length: 20 }, (_, i) => `第${i + 1}段，先说一句。再说一句。\n\n`);
+        return sse(res, [...paragraphs.map(content => delta({ content })), delta({}, { usage: { total_tokens: 20 } })], 400);
       }
       if (typeof lastUser === "string" && lastUser.includes("NOEOL"))
         return sseNoEol(res, [delta({ content: "开头，" }), delta({ content: "结尾在此" }), delta({}, { usage: { total_tokens: 77 } })]);

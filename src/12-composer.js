@@ -19,13 +19,13 @@ function renderSendButtons() {
     stop = running && !has;
   document.querySelectorAll(".send-trigger").forEach(b => {
     sealGlyph(b, stop);
-    b.title = stop ? "停止生成" : running ? "插言引路：模型读了这句即改道" : "发送";
+    b.title = stop ? "停止生成" : running ? "插言引路：模型说到落点便读这句，可就此改道" : "发送";
     b.classList.toggle("stop-btn", stop);
     b.classList.toggle("empty", !running && !has);
     b.disabled = !running && ended;
   });
   const input = $("#chatInput");
-  if (input && !input.disabled) input.placeholder = running ? "此时插言，可引其向" : "续言于此";
+  if (input && !input.disabled) input.placeholder = "续言于此"; // 生成中也不换提示语，能插言这件事由印上的「寄」示意
 }
 // 图片缩略图：原件在 IndexedDB，渲染后异步补上 src；缓存最近 40 张
 async function loadThumbnails(root) {
