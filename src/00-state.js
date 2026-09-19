@@ -40,7 +40,7 @@
 /**
  * @typedef {Object} Step 行迹里的一步：一次工具调用及其结果、呈现与开合状态
  * @property {string} id
- * @property {string} name 工具名
+ * @property {string} name 工具名；user_note 是作答途中用户寄来的补言，不是工具
  * @property {string} arguments 模型给的参数原文（JSON）
  * @property {StepStatus} status
  * @property {string} [title] 标题行：指令、路径、关键词……
@@ -56,6 +56,7 @@
  * @property {number} [at] 调用发起时正文的长度（时间线分组、思绪按轮切分都靠它）
  * @property {number} [rat] 调用发起时思绪的长度
  * @property {string} [scope] 帮手的步骤记它所属的帮手 id
+ * @property {Attachment[]} [attachments] 补言（user_note）随带的附件
  * @property {boolean} [cached] 结果是复用的
  * @property {boolean} [skipped]
  * @property {boolean} [expanded] 输出摊开 / 折起；未记则按状态定（报错折起）

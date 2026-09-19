@@ -11,17 +11,21 @@ function sealGlyph(button, running) {
   button.dataset.glyph = glyph;
   button.innerHTML = `<span class="seal-glyph" aria-hidden="true">${glyph}</span>`;
 }
+// 作答途中：案上空着，印是「止」；写了话，印又成「寄」——寄出去的是补言，递给正在作答的模型
 function renderSendButtons() {
   const running = conversationRunning(),
     ended = conversationDry(currentConversation()),
-    empty = !running && !composerHasContent();
+    has = composerHasContent(),
+    stop = running && !has;
   document.querySelectorAll(".send-trigger").forEach(b => {
-    sealGlyph(b, running);
-    b.title = running ? "停止生成" : "发送";
-    b.classList.toggle("stop-btn", running);
-    b.classList.toggle("empty", empty);
+    sealGlyph(b, stop);
+    b.title = stop ? "停止生成" : running ? "补言：递给正在作答的模型" : "发送";
+    b.classList.toggle("stop-btn", stop);
+    b.classList.toggle("empty", !running && !has);
     b.disabled = !running && ended;
   });
+  const input = $("#chatInput");
+  if (input && !input.disabled) input.placeholder = running ? "作答途中，亦可补言" : "续言于此";
 }
 // 图片缩略图：原件在 IndexedDB，渲染后异步补上 src；缓存最近 40 张
 async function loadThumbnails(root) {

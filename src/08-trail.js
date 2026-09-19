@@ -16,7 +16,8 @@ const TOOL_LABELS = {
   forget: "忘却",
   recall: "翻记忆",
   search_conversations: "查旧谈",
-  read_conversation: "翻旧谈"
+  read_conversation: "翻旧谈",
+  user_note: "补言"
 };
 function toolStackLabel() {
   return "行迹";
@@ -206,6 +207,7 @@ function stepHtml(step) {
   if (WORK_TOOLS.has(step.name)) return workStepHtml(step, title);
   if (step.name === "ask_user") return askStepHtml(step);
   if (step.name === "delegate") return delegateStepHtml(step);
+  if (step.name === "user_note") return noteStepHtml(step);
   const body = step.results?.length
     ? `<ul class="tool-results">${step.results
         .slice(0, 8)
@@ -466,6 +468,20 @@ function renderHelperBar() {
   }
   if (bar.classList.contains("hidden") || bar.classList.contains("leaving")) showNow(bar);
 }
+// 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面
+/** @param {Step} step */
+function noteStepHtml(step) {
+  const status = step.status || "done",
+    text = String(step.note || "").trim(),
+    first = text.split("\n").find(Boolean)?.slice(0, 80) || "",
+    files = (step.attachments || []).map(file => file.name);
+  const meta = status === "running" ? "待寄" : status === "error" ? escapeHtml(step.result || "未送达") : escapeHtml(step.result || "已递");
+  const body =
+    text.length > first.length || files.length
+      ? `<div class="tool-note">${escapeHtml(text)}${files.length ? `<div class="tool-note-files">${files.map(name => escapeHtml(name)).join("、")}</div>` : ""}</div>`
+      : "";
+  return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+}
 function stepStateHtml(status) {
   return status === "running"
     ? `<span class="tool-state spinning" aria-label="进行中"></span>`
@@ -580,6 +596,9 @@ function refreshSteps(assistant) {
         step,
         seen
       );
+    // 没递出去就撤下的补言（收尾时另作新一问、或停了放回案上）：页上那一步也撤
+    const ids = new Set((assistant.steps || []).map(step => step.id));
+    for (const el of stack.querySelectorAll(".tool-step-note[data-step-id]")) if (!ids.has(el.dataset.stepId)) el.remove();
     renderHelperBar();
     // 一答只开一次、收一次：第一步起就摊开，整答写完才收（言里模型说话的间隙也不收）；请示时必开
     const pending = assistant.steps.some(step => step.status === "pending");
@@ -612,7 +631,8 @@ function insertAboveChangeBar(block, html) {
 /** @param {Message} message */
 function reasoningLive(message) {
   if (message.status !== "streaming") return false;
-  const last = (message.steps || []).at(-1),
+  // 补言不是一轮：它落下时模型可能正想到一半，块上的勾不能因它先打上
+  const last = (message.steps || []).filter(step => step.name !== "user_note").at(-1),
     at = Number(last?.at) || 0,
     rat = Number(last?.rat) || 0;
   return (

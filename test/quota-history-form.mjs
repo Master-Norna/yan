@@ -294,6 +294,28 @@ check(
     `[...document.querySelectorAll('#approvalBar .ask-q[data-q="1"] .ask-opt')].map(b => b.getAttribute("aria-checked")).join() === "true,false,true"`
   )
 );
+// 补言：作答途中输入框里写了字，印由「止」变「寄」；Enter 寄出，落在行迹里一步「补言 · 待寄」；请示答复回去后随工具结果一并递给模型
+check(
+  "seal reads 止 while the reply runs and the box is empty",
+  (await evalJs(`document.querySelector("#chatSend").dataset.glyph`)) === "止"
+);
+await evalJs(
+  `(i => { i.value = "补一句：ASK 顺便看看卷宗"; i.dispatchEvent(new Event("input")); })(document.querySelector("#chatInput")); true`
+);
+check(
+  "typing during a reply turns the seal into 寄 with a 补言 hint",
+  await evalJs(`document.querySelector("#chatSend").dataset.glyph === "寄" && document.querySelector("#chatSend").title.startsWith("补言")`)
+);
+await evalJs(
+  `document.querySelector("#chatInput").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); true`
+);
+await sleep(200);
+check(
+  "supplement lands in the trail as a pending 补言 step; box cleared; reply still running; form still up",
+  await evalJs(
+    `(s => !!s && s.dataset.status === "running" && s.querySelector(".tool-title").textContent === "补一句：ASK 顺便看看卷宗" && s.querySelector(".tool-meta").textContent === "待寄")(document.querySelector('#messages .tool-step-note')) && document.querySelector("#chatInput").value === "" && document.querySelector("#chatSend").dataset.glyph === "止" && !document.querySelector("#approvalBar").classList.contains("hidden")`
+  )
+);
 // 请示挂着时第一轮思绪已收（正文起过笔）；答复回去、模型接着想，同一块思绪要重新标成在写并摊开；收尾再收
 await waitFor(
   `(d => d?.dataset.state === "done" && !d.open)([...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector(".reasoning"))`,
@@ -321,6 +343,20 @@ check(
     askText.includes("用哪种风格？ → 清简") &&
     askText.includes("要哪些部分？ → 首页、关于、还有卷宗"),
   askText
+);
+check(
+  "supplement was handed to the model after the tool result, marked as said mid-reply; trail step now 已递",
+  askText.includes("|note:［用户在你作答途中补充的话］补一句：ASK 顺便看看卷宗") &&
+    (await evalJs(
+      `(s => s.dataset.status === "done" && s.querySelector(".tool-meta").textContent === "已递")(document.querySelector('#messages .tool-step-note'))`
+    )),
+  askText
+);
+check(
+  "supplement persists in the trail and in the digest for the next turn",
+  await evalJs(
+    `(c => c.messages.at(-1).steps.some(s => s.name === "user_note" && s.status === "done" && s.note === "补一句：ASK 顺便看看卷宗"))(JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`
+  )
 );
 check(
   "form bar gone; trail card shows the answers",

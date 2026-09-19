@@ -250,6 +250,20 @@
   font-family: var(--title);
   font-size: 12.5px;
 }
+.note-seal {
+  width: 15px;
+  height: 15px;
+  font-size: 9px;
+  transform: rotate(3deg);
+}
+.tool-step-note > .tool-step-head .tool-title {
+  color: var(--ink-2);
+}
+.tool-note-files {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+}
 .sub-seal {
   width: 15px;
   height: 15px;

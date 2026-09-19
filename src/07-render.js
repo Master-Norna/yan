@@ -470,7 +470,9 @@ function finalizeAssistant(conversation, assistant, leadTrim = 0) {
   const article = document.querySelector(`#messages [data-message="${CSS.escape(assistant.id)}"]`),
     block = article?.querySelector(".assistant-block");
   if (!block || conversation.ended) return renderConversation(followBottom);
+  // 步骤可能收尾时全撤了（只排着补言、没递出去就停了）：行迹整块撤掉
   if (assistant.steps?.length) refreshSteps(assistant);
+  else block.querySelector(":scope > .tool-stack")?.remove();
   if (assistant.deliverables?.length && !block.querySelector(":scope > .deliver-bar"))
     (block.querySelector(":scope > .change-bar") || block.querySelector(":scope > .markdown") || block).insertAdjacentHTML(
       "afterend",

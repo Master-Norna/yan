@@ -485,10 +485,12 @@ http
             }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
+        // 作答途中用户补的话接在工具结果之后（role 仍是 user）：原样带回，测试里看得见它到没到
+        const note = msgs.at(-1)?.role === "user" && msgs.at(-2)?.role === "tool" ? String(msgs.at(-1).content) : "";
         return sse(res, [
           ...Array.from({ length: 20 }, (_, i) => delta({ reasoning_content: `答复来了，再想 ${i + 1}。` })),
           delta({
-            content: `ASK|hint:${sys.includes("ask_user") ? "yes" : "no"}|tool:${names.includes("ask_user") ? "yes" : "no"}|${String(toolResults.at(-1).content).replace(/\s+/g, " ")}`
+            content: `ASK|hint:${sys.includes("ask_user") ? "yes" : "no"}|tool:${names.includes("ask_user") ? "yes" : "no"}|${String(toolResults.at(-1).content).replace(/\s+/g, " ")}${note ? `|note:${note.replace(/\s+/g, " ")}` : ""}`
           }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);

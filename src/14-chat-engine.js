@@ -20,26 +20,28 @@ function quotedText(message) {
 /** @param {Message} message */
 function stepsDigest(message, label = "行迹") {
   const steps = (message.steps || []).filter(
-    step => WORK_TOOLS.has(step.name) || ["ask_user", "delegate", "search_web", "fetch_page"].includes(step.name)
+    step => WORK_TOOLS.has(step.name) || ["ask_user", "delegate", "search_web", "fetch_page", "user_note"].includes(step.name)
   );
   if (!steps.length) return "";
   const items = steps.slice(0, 16).map(step =>
-    step.name === "ask_user"
-      ? `请示 → ${step.answers ? String(step.note || "").slice(0, 200) : "用户未作答"}`
-      : step.name === "delegate"
-        ? `差遣「${String(step.title || "").slice(0, 40)}」→ ${step.result || step.status}${subChangedPaths(step).length ? `，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
-        : step.name === "search_web"
-          ? `检索「${String(step.title || "").slice(0, 60)}」→ ${
-              (step.results || [])
-                .slice(0, 3)
-                .map(r => `${String(r.title || "").slice(0, 40)}（${r.url}）`)
-                .join("；") ||
-              step.result ||
-              step.status
-            }`
-          : step.name === "fetch_page"
-            ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
-            : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
+    step.name === "user_note"
+      ? `用户补言「${String(step.note || "").slice(0, 200)}」`
+      : step.name === "ask_user"
+        ? `请示 → ${step.answers ? String(step.note || "").slice(0, 200) : "用户未作答"}`
+        : step.name === "delegate"
+          ? `差遣「${String(step.title || "").slice(0, 40)}」→ ${step.result || step.status}${subChangedPaths(step).length ? `，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
+          : step.name === "search_web"
+            ? `检索「${String(step.title || "").slice(0, 60)}」→ ${
+                (step.results || [])
+                  .slice(0, 3)
+                  .map(r => `${String(r.title || "").slice(0, 40)}（${r.url}）`)
+                  .join("；") ||
+                step.result ||
+                step.status
+              }`
+            : step.name === "fetch_page"
+              ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
+              : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
   );
   return `［${label}］${items.join("；")}${steps.length > 16 ? `；…共 ${steps.length} 步` : ""}`;
 }
@@ -117,7 +119,8 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
   return { role: "user", content };
 }
 async function sendOrStop() {
-  if (conversationRunning()) return stopGeneration();
+  // 作答途中：输入框里有话就是补言，递给正在作答的模型；空着才是停止
+  if (conversationRunning()) return composerHasContent() ? sendSupplement() : stopGeneration();
   const input = currentConversation() ? $("#chatInput") : $("#welcomeInput");
   const text = input.value.trim();
   if (!text && !pendingAttachments.length && !pendingQuote) return;
@@ -176,28 +179,131 @@ async function sendOrStop() {
     store.conversations.unshift(c);
     currentId = c.id;
   }
+  const user = takeComposer(input, sendingDraftKey);
+  await startTurn(c, user, profile);
+}
+// 把案上的东西（话、附件、引文）收成一条用户消息，输入框与草稿随之清空
+/** @returns {Message} */
+function takeComposer(input, key = draftKey()) {
   /** @type {Message} */
   const user = {
     id: uid(),
     role: "user",
-    content: text,
+    content: input.value.trim(),
     timestamp: now(),
     attachments: pendingAttachments,
     ...(pendingQuote ? { quote: pendingQuote } : {})
   };
+  input.value = "";
+  input.style.height = "auto";
+  delete store.drafts[key];
+  pendingAttachments = [];
+  pendingQuote = null;
+  renderAttachments();
+  renderQuote();
+  return user;
+}
+// 起一问：用户消息与待写的一答一起入册，随即向模型要回复
+/**
+ * @param {Conversation} c
+ * @param {Message} user
+ * @param {Profile} profile
+ */
+async function startTurn(c, user, profile) {
   /** @type {Message} */
   const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
   c.messages.push(user, assistant);
   c.updatedAt = now();
   c.profileId = profile.id;
-  input.value = "";
-  input.style.height = "auto";
-  delete store.drafts[sendingDraftKey];
-  pendingAttachments = [];
-  pendingQuote = null;
   saveStore();
-  render(true);
+  if (currentId === c.id) render(true);
+  else renderHistory();
   await streamReply(c, assistant, profile);
+}
+// 补言：模型作答途中用户再寄来的话。先落在行迹里它到达的那一刻（一步「补言 · 待寄」），到下一回合的边界——
+// 工具结果交回、模型再开口之前——递给模型；这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出
+const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］";
+function sendSupplement() {
+  const c = currentConversation(),
+    job = c && requestJob(c.id),
+    assistant = c?.messages.find(message => message.id === job?.assistantId);
+  if (!c || !job || !assistant || assistant.status !== "streaming") return stopGeneration();
+  const user = takeComposer($("#chatInput"));
+  const text = user.quote ? quotedText(user) : user.content;
+  /** @type {Step} */
+  const step = {
+    id: `note_${uid().slice(0, 8)}`,
+    name: "user_note",
+    arguments: "{}",
+    status: "running",
+    title: text.split("\n").find(Boolean)?.slice(0, 80) || "",
+    note: text,
+    attachments: user.attachments?.length ? user.attachments : undefined,
+    at: assistant.content.length,
+    rat: String(assistant.reasoning || "").length
+  };
+  (job.queue ||= []).push({ user, step });
+  (assistant.steps ||= []).push(step);
+  saveStoreSoon();
+  refreshSteps(assistant);
+  renderSendButtons();
+  if (followBottom) scrollBottom();
+}
+// 回合边界：把排着的补言递给模型（历史里接在工具结果之后），行迹里那一步打勾
+async function deliverSupplements(job, history, budget) {
+  const queue = job.queue || [];
+  job.queue = [];
+  for (const { user, step } of queue) {
+    const entry = await messageForApi(user, true, budget);
+    if (typeof entry.content === "string") entry.content = `${SUPPLEMENT_PREFIX}${entry.content}`;
+    else entry.content[0].text = `${SUPPLEMENT_PREFIX}${entry.content[0].text}`;
+    history.push(entry);
+    step.status = "done";
+    step.result = "已递";
+  }
+}
+// 收尾时还没递出去的补言：从行迹里撤下，整答顺利写完的作为新的一问接着送；停了、断了的放回案上，话不能丢
+/**
+ * @param {Conversation} conversation
+ * @param {Message} assistant
+ * @param {Profile} profile
+ */
+function settleSupplements(conversation, assistant, job, profile) {
+  const queue = job.queue || [];
+  job.queue = [];
+  if (!queue.length) return;
+  const ids = new Set(queue.map(item => item.step.id));
+  assistant.steps = (assistant.steps || []).filter(step => !ids.has(step.id));
+  if (!assistant.steps.length) delete assistant.steps;
+  const users = queue.map(item => item.user),
+    quote = users.find(u => u.quote)?.quote || null;
+  if (assistant.status === "complete") {
+    /** @type {Message} */
+    const user = {
+      id: uid(),
+      role: "user",
+      content: users
+        .map(u => u.content)
+        .filter(Boolean)
+        .join("\n\n"),
+      timestamp: now(),
+      attachments: users.flatMap(u => u.attachments || []),
+      ...(quote ? { quote } : {})
+    };
+    setTimeout(() => void startTurn(conversation, user, profile), 0);
+    return;
+  }
+  const key = draftKey(conversation.id),
+    draft = draftRecord(conversation.id);
+  store.drafts ||= {};
+  store.drafts[key] = {
+    text: [draft.text, ...users.map(u => u.content)].filter(Boolean).join("\n\n"),
+    attachments: [...draft.attachments, ...users.flatMap(u => u.attachments || [])],
+    quote: draft.quote || quote,
+    updatedAt: now()
+  };
+  if (currentId === conversation.id && view === "chat") restoreDraft();
+  toast("这一答未写完，补言已放回案上");
 }
 function titleFrom(text, attachments) {
   const value = (text || `关于 ${attachments[0]?.name || "附件"}`).replace(/\s+/g, " ").trim();
@@ -244,7 +350,8 @@ function stopAllGenerations() {
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // 这一答是不是执事的，记在消息自己身上：生成期间用户可能翻去欢迎页或卷宗，页面上一时没有「当前对话」，时间线不能因此改画法
   assistant.work = isWork(conversation);
-  const job = { controller: new AbortController(), assistantId: assistant.id, label: "生成中", profile };
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }> }} */
+  const job = { controller: new AbortController(), assistantId: assistant.id, label: "生成中", profile, queue: [] };
   requestJobs.set(conversation.id, job);
   renderSendButtons();
   renderHistory();
@@ -330,6 +437,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
+      await deliverSupplements(job, history, budget);
       if (assistant.content) assistant.content += "\n\n";
       setJobLabel(conversation, job, "生成中");
     }
@@ -375,6 +483,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     releaseQuota();
     accountUsage(profile, assistant, history, conversation, { opened, partialRound: roundOpen, roundStart });
     if (requestJobs.get(conversation.id) === job) requestJobs.delete(conversation.id);
+    settleSupplements(conversation, assistant, job, profile);
     if (currentId !== conversation.id || view !== "chat") conversation.unread = true;
     saveStore();
     renderHistory();
