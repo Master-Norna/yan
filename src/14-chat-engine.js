@@ -736,7 +736,10 @@ function workHint(conversation) {
  * @param {Conversation} conversation
  */
 function assistantHint(profile, tools, conversation = null) {
-  const lines = [prompt("assistant.today", { day: formatDay(now()), iso: new Date().toISOString().slice(0, 10) })];
+  const lines = [
+    prompt("assistant.today", { day: formatDay(now()), iso: new Date().toISOString().slice(0, 10) }),
+    prompt("assistant.judgement")
+  ];
   const names = new Set((tools || []).map(tool => tool?.function?.name));
   if (names.has("run_command") && conversation) lines.push(workHint(conversation));
   if (names.has("search_web")) lines.push(prompt("assistant.search"));
