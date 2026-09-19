@@ -433,7 +433,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       history.push({
         role: "assistant",
         content: assistant.content.slice(roundStart) || null,
-        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } }))
+        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } })),
+        ...(assistant.thinkingBlocks?.length ? { thinking_blocks: assistant.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
@@ -505,10 +506,12 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
  * @param {Message|SubAgent} target 主消息或帮手（拟题 / 压缩的临时对象也按 Message 的样子造）
  */
 async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
+  target.thinkingBlocks = null;
   const response = await requestChat(profile, history, signal, overrides);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    const message = data.error || `请求失败（${response.status}）`;
+    // 桥接回的 error 是一句话；直连 Anthropic 回的是 { error: { message } }
+    const message = (typeof data.error === "string" ? data.error : data.error?.message) || `请求失败（${response.status}）`;
     // 接口不认这个思考档位：记下它认的几档，换成最接近的一档重发一次；再不行才算失败
     const sent = reasoningFields(profile, overrides.reasoning).reasoning_effort;
     if (!retried && sent && learnReasoningLevels(profile, message, sent)) {

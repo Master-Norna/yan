@@ -28,6 +28,10 @@ const f = load([
   "fileTypeLabel",
   "trailGroups",
   "repairEchartsOption",
+  "anthropicRequest",
+  "anthropicToOpenAiStream",
+  "anthropicEndpoint",
+  "anthropicLike",
   "PROMPTS"
 ]);
 // 工具的 schema 在 prompts/tools.js 里（挂在 window.YAN_PROMPTS 上）；这里把它接进来，参数归位才有 schema 可查
@@ -217,4 +221,105 @@ test("repairEchartsOption：系列指到不存在的轴、轴指到不存在的�
   const pie = f.repairEchartsOption({ series: { data: [{ name: "a", value: 1 }] } });
   assert.equal(pie.series[0].type, "pie");
   assert.equal(pie.series[0].xAxisIndex, undefined);
+});
+test("anthropicRequest：system 单列、工具结果并进 user、思考块回传、工具定义与思考预算换算", () => {
+  const body = f.anthropicRequest({
+    model: "claude",
+    max_tokens: 4096,
+    temperature: 0.7,
+    reasoning_effort: "medium",
+    tools: [
+      {
+        type: "function",
+        function: { name: "read_file", description: "读", parameters: { type: "object", properties: { path: { type: "string" } } } }
+      }
+    ],
+    messages: [
+      { role: "system", content: "你是言" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "看看" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }
+        ]
+      },
+      {
+        role: "assistant",
+        content: "我读一下",
+        tool_calls: [{ id: "t1", type: "function", function: { name: "read_file", arguments: '{"path":"a.js"}' } }],
+        thinking_blocks: [{ thinking: "想", signature: "sig" }]
+      },
+      { role: "tool", tool_call_id: "t1", content: "const a = 1" },
+      { role: "user", content: "补一句" }
+    ]
+  });
+  assert.equal(body.system, "你是言");
+  assert.equal(body.thinking.budget_tokens, 8192);
+  assert.equal(body.max_tokens, 8192 + 4096);
+  assert.equal(body.temperature, undefined);
+  assert.deepEqual(body.tools[0], {
+    name: "read_file",
+    description: "读",
+    input_schema: { type: "object", properties: { path: { type: "string" } } }
+  });
+  assert.equal(body.messages.length, 3);
+  assert.deepEqual(body.messages[0].content[1], { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } });
+  assert.deepEqual(
+    body.messages[1].content.map(b => b.type),
+    ["thinking", "text", "tool_use"]
+  );
+  assert.deepEqual(body.messages[1].content[2].input, { path: "a.js" });
+  assert.deepEqual(
+    body.messages[2].content.map(b => b.type),
+    ["tool_result", "text"]
+  );
+  assert.equal(
+    f.anthropicRequest({ model: "m", messages: [{ role: "assistant", content: "先" }], temperature: 1.7 }).messages[0].role,
+    "user"
+  );
+  assert.equal(f.anthropicRequest({ model: "m", messages: [{ role: "user", content: "x" }], temperature: 1.7 }).temperature, 1);
+  assert.equal(f.anthropicEndpoint("https://api.anthropic.com/v1/"), "https://api.anthropic.com/v1/messages");
+  assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com" }), true);
+  assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com", api: "openai" }), false);
+});
+test("anthropicToOpenAiStream：事件流换成 OpenAI 风格分块——文字、思考、工具调用、签名、用量、[DONE]", async () => {
+  const events = [
+    ["message_start", { type: "message_start", message: { model: "claude-x", usage: { input_tokens: 10 } } }],
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "想一想" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig1" } }],
+    ["content_block_stop", { type: "content_block_stop", index: 0 }],
+    ["content_block_start", { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "先读" } }],
+    ["content_block_stop", { type: "content_block_stop", index: 1 }],
+    [
+      "content_block_start",
+      { type: "content_block_start", index: 2, content_block: { type: "tool_use", id: "toolu_1", name: "read_file", input: {} } }
+    ],
+    ["content_block_delta", { type: "content_block_delta", index: 2, delta: { type: "input_json_delta", partial_json: '{"path":' } }],
+    ["content_block_delta", { type: "content_block_delta", index: 2, delta: { type: "input_json_delta", partial_json: '"a.js"}' } }],
+    ["content_block_stop", { type: "content_block_stop", index: 2 }],
+    ["message_delta", { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 7 } }],
+    ["message_stop", { type: "message_stop" }]
+  ];
+  const raw = events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join("");
+  const stream = new Blob([raw]).stream().pipeThrough(f.anthropicToOpenAiStream("claude"));
+  const text = await new Response(stream).text();
+  const chunks = text
+    .split("\n\n")
+    .filter(Boolean)
+    .map(line => line.replace(/^data: /, ""));
+  assert.equal(chunks.at(-1), "[DONE]");
+  const deltas = chunks.slice(0, -1).map(c => JSON.parse(c));
+  assert.equal(deltas[0].choices[0].delta.reasoning_content, "想一想");
+  assert.deepEqual(deltas[1].choices[0].delta.thinking_block, { thinking: "想一想", signature: "sig1" });
+  assert.equal(deltas[2].choices[0].delta.content, "先读");
+  const calls = deltas.flatMap(d => d.choices[0].delta.tool_calls || []);
+  assert.equal(calls[0].id, "toolu_1");
+  assert.equal(calls[0].function.name, "read_file");
+  assert.equal(calls.map(c => c.function.arguments).join(""), '{"path":"a.js"}');
+  const last = deltas.at(-1);
+  assert.equal(last.choices[0].finish_reason, "tool_calls");
+  assert.deepEqual(last.usage, { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 });
+  assert.equal(last.model, "claude-x");
 });

@@ -8,6 +8,9 @@ const { spawn } = require("node:child_process");
 const os = require("node:os");
 const { Readable } = require("node:stream");
 const bundler = require("./build.js");
+// Anthropic 适配与页面共用同一份源码（src/19-anthropic.js）：请求换成 Messages API 的，事件流换回 OpenAI 风格
+require("./src/19-anthropic.js");
+const ANTHROPIC = globalThis.YAN_ANTHROPIC;
 const { pipeline } = require("node:stream/promises");
 const crypto = require("node:crypto");
 
@@ -55,8 +58,16 @@ function loadServerConfig() {
     const inline = lines[index].replace(new RegExp(`^${label}\\s*:\\s*`, "i"), "");
     return inline || lines[index + 1] || "";
   };
-  const config = { baseUrl: read("Base URL"), model: read("Model"), apiKey: read("API Key"), sourceFile: file };
+  const config = {
+    baseUrl: read("Base URL"),
+    model: read("Model"),
+    apiKey: read("API Key"),
+    api: read("API").toLowerCase(),
+    sourceFile: file
+  };
   if (!config.baseUrl || !config.model || !config.apiKey) return { error: "API 配置缺少 Base URL、Model 或 API Key" };
+  if (config.api && !["openai", "anthropic"].includes(config.api))
+    return { error: `API 配置里的 API 只认 openai 或 anthropic（现在是 ${config.api}）` };
   return config;
 }
 
@@ -147,7 +158,10 @@ function resolveProfile(input, requireModel = true, req = null) {
   const config = {
     baseUrl: String(input?.baseUrl || "").trim(),
     model: String(input?.model || "").trim(),
-    apiKey: String(input?.apiKey || "").trim()
+    apiKey: String(input?.apiKey || "").trim(),
+    api: String(input?.api || "")
+      .trim()
+      .toLowerCase()
   };
   if (!config.baseUrl || (requireModel && !config.model)) throw Error(requireModel ? "请填写 Base URL 和模型 ID" : "请填写 Base URL");
   return config;
@@ -446,7 +460,12 @@ async function handleFetch(req, res) {
   }
 }
 function upstreamHeaders(config) {
+  if (ANTHROPIC.anthropicLike(config)) return ANTHROPIC.anthropicHeaders(config.apiKey);
   return { "Content-Type": "application/json; charset=utf-8", ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}) };
+}
+// 列模型的地址：Anthropic 是 /v1/models，OpenAI 兼容的是 Base URL 下的 /models
+function upstreamModelsUrl(config) {
+  return ANTHROPIC.anthropicLike(config) ? ANTHROPIC.anthropicEndpoint(config.baseUrl, "/v1/models") : modelsUrl(config.baseUrl);
 }
 async function upstreamError(response) {
   const raw = await response.text().catch(() => "");
@@ -489,6 +508,7 @@ function handleBootstrap(req, res) {
       name,
       model: config.model,
       baseUrl: config.baseUrl,
+      api: config.api || (ANTHROPIC.anthropicLike(config) ? "anthropic" : "openai"),
       temperature: 0.7,
       maxTokens: 8192,
       systemPrompt: ""
@@ -501,7 +521,7 @@ async function handleTest(req, res) {
   try {
     const body = await readJson(req),
       config = resolveProfile(body.profile, true, req);
-    const response = await fetch(modelsUrl(config.baseUrl), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
+    const response = await fetch(upstreamModelsUrl(config), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw Error(await upstreamError(response));
     const data = await response.json();
     sendJson(res, 200, {
@@ -517,7 +537,7 @@ async function handleModels(req, res) {
   try {
     const body = await readJson(req),
       config = resolveProfile(body.profile, false, req);
-    const response = await fetch(modelsUrl(config.baseUrl), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
+    const response = await fetch(upstreamModelsUrl(config), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw Error(await upstreamError(response));
     const data = await response.json();
     const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
@@ -556,20 +576,28 @@ async function handleChat(req, res) {
     console.log(
       `${new Date().toLocaleTimeString("zh-CN", { hour12: false })} → ${config.model}：${messages.length} 条消息${payload.tools ? `，工具 ${payload.tools.length} 个` : ""}${payload.enable_search ? "，enable_search" : ""}`
     );
-    const response = await fetch(endpoint(config.baseUrl, "/chat/completions"), {
+    // Anthropic：请求换成 Messages API 的，回来的事件流换回 OpenAI 风格再给页面；OpenAI 兼容的原样透传（thinking_blocks 是 Anthropic 才要的，去掉）
+    const anthropic = ANTHROPIC.anthropicLike(config);
+    if (!anthropic) payload.messages = messages.map(m => (m.thinking_blocks ? { ...m, thinking_blocks: undefined } : m));
+    const response = await fetch(anthropic ? ANTHROPIC.anthropicEndpoint(config.baseUrl) : endpoint(config.baseUrl, "/chat/completions"), {
       method: "POST",
       headers: upstreamHeaders(config),
-      body: JSON.stringify(payload),
+      body: JSON.stringify(anthropic ? ANTHROPIC.anthropicRequest(payload) : payload),
       signal: abort.signal
     });
     if (!response.ok) throw Error(await upstreamError(response));
     res.writeHead(200, {
-      "Content-Type": response.headers.get("content-type") || "text/event-stream; charset=utf-8",
+      "Content-Type": anthropic
+        ? "text/event-stream; charset=utf-8"
+        : response.headers.get("content-type") || "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no"
     });
-    await pipeline(Readable.fromWeb(response.body), res);
+    await pipeline(
+      Readable.fromWeb(anthropic ? response.body.pipeThrough(ANTHROPIC.anthropicToOpenAiStream(config.model)) : response.body),
+      res
+    );
   } catch (error) {
     if (!res.headersSent) sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
     else if (!res.writableEnded && !res.destroyed) res.end();

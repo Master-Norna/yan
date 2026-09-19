@@ -3,6 +3,7 @@
 // 所以这里的声明是全局的，各段之间的函数引用也能跨文件解析。数据模型的 JSDoc typedef 在 00-state.js 顶部。
 
 // ---- 随项目本地分发的库与提示词：挂在 window 上，按 any 看待 ----
+declare var YAN_ANTHROPIC: any;
 declare const marked: any;
 declare const DOMPurify: any;
 declare const hljs: any;

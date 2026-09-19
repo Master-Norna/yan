@@ -33,6 +33,7 @@
  * @property {"streaming"|"complete"|"stopped"|"error"} status
  * @property {Usage|null} usage
  * @property {number} rounds
+ * @property {{ thinking: string, signature: string }[]|null} [thinkingBlocks]
  * @property {string} [report] 最后一轮说的话，即交回主模型的回报
  * @property {number} [durationMs]
  * @property {ToolCall[]|null} [toolCalls]
@@ -82,6 +83,7 @@
  * @property {string} [reasoning]
  * @property {Step[]} [steps]
  * @property {ToolCall[]|null} [toolCalls] 只在流式期间用
+ * @property {{ thinking: string, signature: string }[]|null} [thinkingBlocks] 这一轮的思考块（Anthropic 带工具调用时要回传），只在流式期间用
  * @property {Usage|null} [usage]
  * @property {number} [tokenCount] 这一答耗的墨
  * @property {boolean} [tokenEstimated]
@@ -129,6 +131,7 @@
  * @property {string} model
  * @property {string} [baseUrl]
  * @property {string} [apiKey]
+ * @property {"openai"|"anthropic"} [api] 接口类型；没写按地址认（anthropic.com）
  * @property {number} temperature
  * @property {number} maxTokens
  * @property {string} quota 用量上限，如 "100k"

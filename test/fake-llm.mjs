@@ -29,13 +29,66 @@ const sseNoEol = (res, chunks) => {
   res.write(body.slice(0, Math.floor(body.length / 2)));
   setTimeout(() => res.end(body.slice(Math.floor(body.length / 2))), 40);
 };
+// 假的 Anthropic Messages API：事件流的写法与真接口一致（event: 行 + data: 行）。第一轮：思考块（带签名）+ 一句话 + list_files 的 tool_use；
+// 第二轮（带 tool_result）：把收到的东西原样报回去——system 有没有、上一轮的思考块（带签名）有没有回传、工具几件、工具结果是什么
+const anthropicSse = (res, events) => {
+  res.writeHead(200, { "Content-Type": "text/event-stream" });
+  let i = 0;
+  const tick = () => {
+    if (i < events.length) {
+      const [name, data] = events[i++];
+      res.write(`event: ${name}\ndata: ${JSON.stringify({ type: name, ...data })}\n\n`);
+      setTimeout(tick, 20);
+    } else res.end();
+  };
+  tick();
+};
+const anthropicMessages = (payload, res) => {
+  const msgs = payload.messages || [];
+  const results = msgs.flatMap(m => (Array.isArray(m.content) ? m.content.filter(b => b.type === "tool_result") : []));
+  const text = (name, id) => [
+    ["content_block_start", { index: 1, content_block: { type: "text", text: "" } }],
+    ["content_block_delta", { index: 1, delta: { type: "text_delta", text: name } }],
+    ["content_block_stop", { index: 1 }]
+  ];
+  if (!results.length)
+    return anthropicSse(res, [
+      ["message_start", { message: { id: "msg_1", model: payload.model, usage: { input_tokens: 12 } } }],
+      ["content_block_start", { index: 0, content_block: { type: "thinking", thinking: "" } }],
+      ["content_block_delta", { index: 0, delta: { type: "thinking_delta", thinking: "想一想先看目录。" } }],
+      ["content_block_delta", { index: 0, delta: { type: "signature_delta", signature: "sig-1" } }],
+      ["content_block_stop", { index: 0 }],
+      ...text("先看目录。"),
+      ["content_block_start", { index: 2, content_block: { type: "tool_use", id: "toolu_1", name: "list_files", input: {} } }],
+      ["content_block_delta", { index: 2, delta: { type: "input_json_delta", partial_json: '{"path":' } }],
+      ["content_block_delta", { index: 2, delta: { type: "input_json_delta", partial_json: '"."}' } }],
+      ["content_block_stop", { index: 2 }],
+      ["message_delta", { delta: { stop_reason: "tool_use" }, usage: { output_tokens: 9 } }],
+      ["message_stop", {}]
+    ]);
+  const prev = [...msgs].reverse().find(m => m.role === "assistant"),
+    thought = Array.isArray(prev?.content) ? prev.content.find(b => b.type === "thinking") : null;
+  return anthropicSse(res, [
+    ["message_start", { message: { id: "msg_2", model: payload.model, usage: { input_tokens: 30 } } }],
+    ...text(
+      `ANTHROPIC|sys:${String(payload.system || "").includes("今天") ? "yes" : "no"}|think:${thought?.signature === "sig-1" ? "yes" : "no"}|tools:${(payload.tools || []).length}|schema:${payload.tools?.[0]?.input_schema ? "yes" : "no"}|result:${String(results.at(-1).content).replace(/\s+/g, " ").slice(0, 30)}`
+    ),
+    ["message_delta", { delta: { stop_reason: "end_turn" }, usage: { output_tokens: 11 } }],
+    ["message_stop", {}]
+  ]);
+};
 http
   .createServer((req, res) => {
+    if (req.url.endsWith("/v1/models") && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ data: [{ id: "claude-test", type: "model" }] }));
+    }
     let body = "";
     req.on("data", c => (body += c));
     req.on("end", () => {
       const payload = JSON.parse(body || "{}");
       calls += 1;
+      if (req.url.endsWith("/v1/messages")) return anthropicMessages(payload, res);
       const msgs = payload.messages || [],
         toolResults = msgs.filter(m => m.role === "tool");
       const lastUser = [...msgs].reverse().find(m => m.role === "user")?.content || "";

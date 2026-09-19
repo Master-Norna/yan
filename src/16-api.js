@@ -179,20 +179,43 @@ async function requestChat(profile, messages, signal, overrides = {}) {
       signal
     });
   if (profile.source === "server") throw Error("本机桥接未启动");
+  const payload = {
+    model: profile.model,
+    messages: parameters.systemPrompt ? [{ role: "system", content: parameters.systemPrompt }, ...messages] : messages,
+    stream: true,
+    stream_options: { include_usage: true },
+    temperature: parameters.temperature,
+    max_tokens: parameters.maxTokens,
+    ...extras
+  };
+  // 直连 Anthropic：请求换成 Messages API 的，回来的事件流换回 OpenAI 风格，后面的读法不变
+  if (anthropicLike(profile)) {
+    const upstream = await fetch(anthropicEndpoint(profile.baseUrl), {
+      method: "POST",
+      headers: anthropicHeaders(profile.apiKey, true),
+      body: JSON.stringify(anthropicRequest(payload)),
+      signal
+    });
+    if (!upstream.ok || !upstream.body) return upstream;
+    return new Response(upstream.body.pipeThrough(anthropicToOpenAiStream(profile.model)), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" }
+    });
+  }
+  payload.messages = payload.messages.map(m => (m.thinking_blocks ? { ...m, thinking_blocks: undefined } : m));
   return fetch(completionEndpoint(profile.baseUrl), {
     method: "POST",
     headers: directHeaders(profile),
-    body: JSON.stringify({
-      model: profile.model,
-      messages: parameters.systemPrompt ? [{ role: "system", content: parameters.systemPrompt }, ...messages] : messages,
-      stream: true,
-      stream_options: { include_usage: true },
-      temperature: parameters.temperature,
-      max_tokens: parameters.maxTokens,
-      ...extras
-    }),
+    body: JSON.stringify(payload),
     signal
   });
+}
+// 直连时列模型的地址与请求头：Anthropic 与 OpenAI 兼容的各一套
+/** @param {Profile} profile */
+function directModelsRequest(profile) {
+  return anthropicLike(profile)
+    ? { url: anthropicEndpoint(profile.baseUrl, "/v1/models"), headers: anthropicHeaders(profile.apiKey, true) }
+    : { url: modelsEndpoint(profile.baseUrl), headers: directHeaders(profile) };
 }
 function completionEndpoint(baseUrl) {
   const url = String(baseUrl || "")
@@ -214,7 +237,7 @@ function directHeaders(profile) {
 function profileForRequest(profile) {
   return profile.source === "server"
     ? { source: "server" }
-    : { source: "custom", baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model };
+    : { source: "custom", baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model, api: profile.api || "" };
 }
 /** @param {Message} assistant 主消息、帮手，或拟题 / 压缩用的临时消息 */
 async function readSse(response, assistant, { onFrame = null } = {}) {
@@ -393,6 +416,8 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
           ingest(text);
           refresh();
         }
+        // Anthropic 的思考块（带签名）：这一轮带工具调用时要原样回传，记在消息上
+        if (delta?.thinking_block?.signature) (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
         if (Array.isArray(delta?.tool_calls)) {
           for (const call of delta.tool_calls) {
             const slot = ((assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" });
