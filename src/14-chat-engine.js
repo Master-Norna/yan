@@ -286,7 +286,7 @@ function trimToBoundary(text) {
   return match && text.length - match[1].length < 120 ? match[1] : text;
 }
 // 回合边界：把排着的补言递给模型（历史里接在工具结果之后，或接在被掐断的半截话之后），行迹里那一步打勾
-async function deliverSupplements(job, history, budget, { steer = false } = {}) {
+async function deliverSupplements(job, history, budget, assistant, { steer = false } = {}) {
   const queue = job.queue || [];
   job.queue = [];
   for (const { user, step } of queue) {
@@ -297,6 +297,12 @@ async function deliverSupplements(job, history, budget, { steer = false } = {}) 
     history.push(entry);
     step.status = "done";
     step.result = steer ? "已递 · 引路" : "已递";
+  }
+  // 递出去就立刻打勾。不补这一下，纯文字作答里没有下一个工具轮来顺带重画，
+  // 那枚「待寄」会一直转到整答写完——模型早读到了，页面上还像没送出去
+  if (queue.length) {
+    saveStoreSoon();
+    refreshSteps(assistant);
   }
 }
 // 收尾时还没递出去的补言：从行迹里撤下，整答顺利写完的作为新的一问接着送；停了、断了的放回案上，话不能丢
@@ -473,7 +479,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         }
         assistant.toolCalls = null;
         if (said.trim()) history.push({ role: "assistant", content: said });
-        await deliverSupplements(job, history, budget, { steer: true });
+        await deliverSupplements(job, history, budget, assistant, { steer: true });
         if (assistant.content) assistant.content += "\n\n";
         continue;
       } finally {
@@ -520,7 +526,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
-      await deliverSupplements(job, history, budget);
+      await deliverSupplements(job, history, budget, assistant);
       if (assistant.content) assistant.content += "\n\n";
       setJobLabel(conversation, job, "生成中");
     }
