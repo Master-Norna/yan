@@ -27,6 +27,7 @@ const f = load([
   "limitLabel",
   "fileTypeLabel",
   "trailGroups",
+  "repairEchartsOption",
   "PROMPTS"
 ]);
 // 工具的 schema 在 prompts/tools.js 里（挂在 window.YAN_PROMPTS 上）；这里把它接进来，参数归位才有 schema 可查
@@ -199,4 +200,21 @@ test("trailGroups：同一轮的步骤归一组，记下这轮的话与思绪的
   assert.equal(groups.length, 2);
   assert.deepEqual([groups[0].from, groups[0].at, groups[0].steps.length], [0, 3, 2]);
   assert.deepEqual([groups[1].from, groups[1].at, groups[1].rfrom, groups[1].rat], [3, 9, 2, 5]);
+});
+test("repairEchartsOption：系列指到不存在的轴、轴指到不存在的格子都收回来，漏了 type 按数据补", () => {
+  const fixed = f.repairEchartsOption({
+    grid: [{}, {}],
+    xAxis: [{ gridIndex: 0 }, { gridIndex: 3 }],
+    yAxis: [{ gridIndex: 0 }, { gridIndex: 1 }],
+    series: [
+      { data: [1, 2], xAxisIndex: 5, yAxisIndex: 1 },
+      { data: [{ name: "a", value: 1 }], xAxisIndex: 0, yAxisIndex: 0 }
+    ]
+  });
+  assert.equal(fixed.xAxis[1].gridIndex, 1);
+  assert.equal(fixed.series[0].xAxisIndex, 1);
+  assert.equal(fixed.series[0].type, "bar");
+  const pie = f.repairEchartsOption({ series: { data: [{ name: "a", value: 1 }] } });
+  assert.equal(pie.series[0].type, "pie");
+  assert.equal(pie.series[0].xAxisIndex, undefined);
 });

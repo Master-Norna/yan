@@ -165,8 +165,47 @@ function mapOptionPart(value, transform) {
   if (Array.isArray(value)) return value.map(item => transform(item || {}));
   return transform(value && typeof value === "object" ? value : {});
 }
+// 模型写 ECharts option 常见的几处失手，画之前先扶正——否则 ECharts 只抛一句 "reading 'coordinateSystem'"，图就白写了：
+// 系列指到不存在的坐标轴 / 坐标轴指到不存在的格子（多图并排时最常见）→ 收到最后一个；系列漏了 type → 按数据形状补
+function repairEchartsOption(option) {
+  const list = value => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]);
+  const clamp = (item, key, count) => {
+    if (typeof item?.[key] !== "number" || item[key] < count) return;
+    if (count > 0) item[key] = count - 1;
+    else delete item[key];
+  };
+  const grids = list(option.grid).length,
+    xs = list(option.xAxis),
+    ys = list(option.yAxis);
+  for (const axis of [...xs, ...ys]) if (axis && typeof axis === "object") clamp(axis, "gridIndex", grids);
+  const polar = list(option.polar).length,
+    radius = list(option.radiusAxis).length,
+    angle = list(option.angleAxis).length;
+  if (option.series !== undefined)
+    option.series = list(option.series)
+      .filter(item => item && typeof item === "object")
+      .map(item => {
+        const series = { ...item };
+        clamp(series, "xAxisIndex", xs.length);
+        clamp(series, "yAxisIndex", ys.length);
+        clamp(series, "polarIndex", polar);
+        clamp(series, "radiusAxisIndex", radius);
+        clamp(series, "angleAxisIndex", angle);
+        if (!series.type) {
+          const sample = Array.isArray(series.data) ? series.data[0] : null;
+          series.type =
+            !xs.length && !ys.length && sample && typeof sample === "object" && "value" in sample
+              ? "pie"
+              : xs.length || ys.length
+                ? "bar"
+                : "line";
+        }
+        return series;
+      });
+  return option;
+}
 function themedEchartsOption(raw, canvas) {
-  const option = { ...raw };
+  const option = repairEchartsOption({ ...raw });
   delete option.height;
   const ink = cssVar("--ink"),
     muted = cssVar("--ink-2"),
@@ -202,7 +241,9 @@ function themedEchartsOption(raw, canvas) {
     });
   if (option.xAxis !== undefined) option.xAxis = axisPart(option.xAxis);
   if (option.yAxis !== undefined) option.yAxis = axisPart(option.yAxis);
-  if (narrow) option.grid = { top: titleShown ? 94 : 58, left: 12, right: 12, bottom: 28, containLabel: true, ...(option.grid || {}) };
+  // 窄处给单个格子套一份默认边距；多图并排（grid 是数组）的布局是模型算好的，不动——把数组摊进对象会只剩一个格子，系列全找不着坐标系
+  if (narrow && !Array.isArray(option.grid))
+    option.grid = { top: titleShown ? 94 : 58, left: 12, right: 12, bottom: 28, containLabel: true, ...(option.grid || {}) };
   return {
     ...option,
     backgroundColor: option.backgroundColor ?? "transparent",
