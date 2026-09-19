@@ -293,14 +293,23 @@ writeFileSync(`${WORK}/.env`, "API_KEY=inside-secret\n");
 writeFileSync(`${WORK}/plain.txt`, "API_KEY mention in a plain file\n");
 mkdirSync(`${WORK}/.git`, { recursive: true });
 writeFileSync(`${WORK}/.git/config`, "[core]\n");
-r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-ChildItem C:\\Windows" : "ls /etc" });
+r = await post("/api/work/run", {
+  workdir,
+  sandbox: true,
+  command: win ? "Copy-Item plain.txt C:\\Windows\\yan-probe.txt" : "cp plain.txt /etc/yan-probe.txt"
+});
 check(
-  "sandbox: a command reaching outside the workdir is refused with a reason",
+  "sandbox: a command mutating outside the workdir is refused with a reason",
   r.status === 400 && /沙箱拒绝.*越出/.test(r.data?.error || ""),
   `${r.status} ${r.data?.error}`
 );
+r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Copy-Item plain.txt ../probe.txt" : "cp plain.txt ../probe.txt" });
+check("sandbox: .. is refused for mutations", r.status === 400 && /沙箱拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+// 查看则不锁目录——给电脑做检查要翻系统目录、注册表与进程，这条路必须通
+r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-ChildItem C:\\Windows" : "ls /etc" });
+check("sandbox: reading outside the workdir is allowed", r.status === 200, `${r.status} ${r.data?.error || ""}`);
 r = await post("/api/work/run", { workdir, sandbox: true, command: "Get-ChildItem .." });
-check("sandbox: .. is refused", r.status === 400 && /沙箱拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+check("sandbox: .. is allowed for reads", r.status === 200, `${r.status} ${r.data?.error || ""}`);
 r = await post("/api/work/run", { workdir, sandbox: true, command: "curl https://example.com" });
 check("sandbox: direct outbound fetch is refused", r.status === 400 && /外联/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
 r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-Content .env" : "cat .env" });
@@ -330,7 +339,7 @@ r = await post("/api/work/run", {
   permission: "review",
   command: win ? "Set-ExecutionPolicy Unrestricted" : "sudo true"
 });
-check("automatic review rejects clear host risk", r.status === 400 && /自动审查拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error || ""}`);
+check("automatic review rejects clear host risk", r.status === 400 && /审查拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error || ""}`);
 const outsideNative = OUTSIDE.split("/").join(win ? "\\" : "/"),
   outsideReviewFile = `${outsideNative}${win ? "\\" : "/"}reviewed-outside.txt`;
 r = await post("/api/work/run", {
@@ -341,7 +350,7 @@ r = await post("/api/work/run", {
 });
 check(
   "automatic review does not mutate an explicit path outside the workdir",
-  r.status === 400 && /工作目录之外/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
+  r.status === 400 && /越出了工作目录/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
   `${r.status} ${r.data?.error || ""}`
 );
 r = await post("/api/work/write", {
@@ -354,13 +363,13 @@ r = await post("/api/work/write", {
 });
 check(
   "automatic review also keeps file tools inside the workdir",
-  r.status === 400 && /工作目录之外/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
+  r.status === 400 && /越出了工作目录/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
   `${r.status} ${r.data?.error || ""}`
 );
 r = await post("/api/work/read", { workdir, sandbox: false, permission: "review", path: ".env" });
 check(
   "automatic review keeps file tools from reading secret files",
-  r.status === 400 && /自动审查拒绝.*机密文件/.test(r.data?.error || ""),
+  r.status === 400 && /审查拒绝.*机密文件/.test(r.data?.error || ""),
   `${r.status} ${r.data?.error || ""}`
 );
 if (win) {

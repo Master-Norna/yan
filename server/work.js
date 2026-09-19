@@ -10,7 +10,7 @@ const sandbox = require("./sandbox.js");
 module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
-  // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见，并按问而后行 / 自动审查 / 径行三档处理。
+  // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见，并按问而后行 / 审而后行 / 径行三档处理。
   // 请求带 sandbox: true 时再加一道沙箱（server/sandbox.js）：路径不出目录、机密文件不碰、指令先筛、环境变量去掉机密——在桥接这头守，页面与模型都绕不过
   const WORK_HOME = path.join(os.homedir(), "言", "工作");
   // 卷宗：对话没绑工作目录时，模型的工具就落在这里——写出的表格、文档都收在卷宗里；页面上的卷宗即这个目录的视图。
@@ -93,8 +93,8 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
     await assertReachable(workdir, target);
     if (body.permission === "review") {
       const why = sandbox.screenPath(relPath(workdir, target), { write });
-      if (why) throw Error(why.replace(/^沙箱拒绝：/, "自动审查拒绝："));
-      if (write && !pathIsInside(workdir, target)) throw Error(`自动审查拒绝：不自动改动工作目录之外的路径（${target}）`);
+      if (why) throw Error(why.replace(/^沙箱拒绝：/, "审查拒绝："));
+      if (write && !pathIsInside(workdir, target)) throw Error(`审查拒绝：改动的路径越出了工作目录（${target}）`);
     }
     if (boxed) {
       const why = sandbox.screenPath(relPath(workdir, target), { write });
@@ -689,7 +689,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         target = path.join(target, path.basename(fromUrl));
         if (body.permission === "review") {
           const why = sandbox.screenPath(relPath(workdir, target), { write: true });
-          if (why) throw Error(why.replace(/^沙箱拒绝：/, "自动审查拒绝："));
+          if (why) throw Error(why.replace(/^沙箱拒绝：/, "审查拒绝："));
         }
         if (body.sandbox === true) {
           const why = sandbox.screenPath(relPath(workdir, target), { write: true });
@@ -771,7 +771,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
             continue;
           }
           if (filter && !filter.test(rel)) continue;
-          if ((boxed || body.permission === "review") && sandbox.screenPath(rel)) continue; // 沙箱与自动审查都不借检索带出机密文件
+          if ((boxed || body.permission === "review") && sandbox.screenPath(rel)) continue; // 沙箱与审而后行都不借检索带出机密文件
           if (++scanned > SEARCH_FILE_LIMIT) {
             truncated = true;
             return;

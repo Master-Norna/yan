@@ -86,8 +86,8 @@
   },
 
   run_command: {
-    description: "在工作目录执行一条非交互式指令，返回退出码、stdout 与 stderr；也可在用户明确要求时用本机只读命令诊断电脑。",
-    brief: "在卷宗目录执行一条非交互式指令（生成文件或按用户要求诊断本机），返回退出码与输出。",
+    description: "在工作目录执行一条非交互式指令，返回退出码、stdout 与 stderr。改动限于工作目录，查看不限。",
+    brief: "在卷宗目录执行一条非交互式指令（生成文件、检查本机），返回退出码与输出。",
     parameters: {
       type: "object",
       properties: {
@@ -100,7 +100,7 @@
 
   inspect_computer: {
     description:
-      "用固定的只读探针检查本机，不接收脚本、不修改状态。各检查项独立，某项失败仍返回其余结果；适合电脑体检，也可在 shell 路径走不通时换用。",
+      "用固定的只读探针检查本机，不接收脚本、不修改状态。各检查项独立，某项失败仍返回其余结果；体检先用它起底，要更深的再用 run_command 直查。",
     parameters: {
       type: "object",
       properties: {
