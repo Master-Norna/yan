@@ -156,7 +156,7 @@ check("stop settles pending step", step3.status === "skipped" && step3.meta === 
 check("message stopped", (await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1)?.dataset.status`)) === "stopped");
 check("send button back to 寄", (await evalJs(`document.querySelector("#chatSend").textContent`)) === "寄");
 
-// ---- 场景 4：径行 + 轮次上限（模型无限要求 list_files）；上限在「设置 → 通用」里改成 12
+// ---- 场景 4：三档切到径行 + 轮次上限（模型无限要求 list_files）；上限在「设置 → 通用」里改成 12
 await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
 await sleep(300);
 await evalJs(`document.querySelector('.tab-btn[data-tab="tools"]')?.click(); true`);
@@ -171,7 +171,9 @@ await evalJs(
 );
 await sleep(300);
 await evalJs(`document.querySelector("#workAuto").click(); true`);
-check("workAuto toggled", (await evalJs(`document.querySelector("#workAuto").textContent`)) === "径行");
+check("first policy step is automatic review", (await evalJs(`document.querySelector("#workAuto").textContent`)) === "自动审查");
+await evalJs(`document.querySelector("#workAuto").click(); true`);
+check("second policy step is auto-run", (await evalJs(`document.querySelector("#workAuto").textContent`)) === "径行");
 mkdirSync(WORK, { recursive: true });
 for (let i = 0; i < 14; i++) writeFileSync(`${WORK}/file-${i}.txt`, "x");
 await evalJs(

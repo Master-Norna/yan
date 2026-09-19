@@ -727,6 +727,7 @@ async function handleChat(req, res) {
   }
 }
 const WORK = require("./server/work.js")({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes });
+const COMPUTER = require("./server/computer.js")({ sendJson, readJson });
 
 const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>此页不存在 · 言</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#fbfaf6;color:#292724;font-family:"Noto Serif SC","Songti SC","STSong",serif}@media(prefers-color-scheme:dark){body{background:#1e1c19;color:#e6e1d6}}main{text-align:center;letter-spacing:.06em}.seal{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #9b5540;color:#9b5540;font-size:18px;transform:rotate(-3deg)}h1{margin:18px 0 8px;font-weight:500;font-size:24px}p{margin:0 0 22px;opacity:.6;font-size:13px}a{color:#9b5540;text-decoration:none;font-size:13px;border-bottom:1px solid currentColor}</style></head><body><main><span class="seal">空</span><h1>此页不存在</h1><p>所寻之处并无一字</p><a href="/">回到案前</a></main></body></html>`;
 // 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
@@ -811,6 +812,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/work/prepare") return await WORK.handleWorkPrepare(req, res);
     if (req.method === "POST" && req.url === "/api/work/pick") return await WORK.handleWorkPick(req, res);
     if (req.method === "POST" && req.url === "/api/work/run") return await WORK.handleWorkRun(req, res);
+    if (req.method === "POST" && req.url === "/api/work/inspect") return await COMPUTER.handleInspect(req, res);
     if (req.method === "POST" && req.url === "/api/work/write") return await WORK.handleWorkWrite(req, res);
     if (req.method === "POST" && req.url === "/api/work/read") return await WORK.handleWorkRead(req, res);
     if (req.method === "POST" && req.url === "/api/work/list") return await WORK.handleWorkList(req, res);

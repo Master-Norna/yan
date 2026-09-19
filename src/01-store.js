@@ -13,6 +13,20 @@ function migrateStoreV3(data) {
   for (const c of data.conversations || []) c.forks ||= [];
   data.version = 4;
 }
+function migrateStoreV4(data) {
+  const fallback = data.settings?.workAutoDefault ? "auto" : "ask";
+  data.settings ||= {};
+  data.settings.commandPolicyDefault = normalizeCommandPolicy(data.settings.commandPolicyDefault, fallback);
+  delete data.settings.workAutoDefault;
+  for (const c of data.conversations || []) {
+    c.commandPolicy = normalizeCommandPolicy(c.commandPolicy, c.workAuto ? "auto" : "ask");
+    delete c.workAuto;
+  }
+  data.version = 5;
+}
+function normalizeCommandPolicy(value, fallback = "ask") {
+  return ["ask", "review", "auto"].includes(value) ? value : fallback;
+}
 function loadStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -22,6 +36,7 @@ function loadStore() {
     if (data.version === 1) migrateStoreV1(data);
     if (data.version === 2) migrateStoreV2(data);
     if (data.version === 3) migrateStoreV3(data);
+    if (data.version === 4) migrateStoreV4(data);
     if (data.version > STORE_VERSION) data.version = STORE_VERSION;
     return {
       ...structuredClone(defaultStore),
@@ -32,8 +47,9 @@ function loadStore() {
         serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) }
       },
       profiles: Array.isArray(data.profiles) ? data.profiles : [],
-      conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(({ ended, ...c }) => ({
+      conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(({ ended, workAuto, ...c }) => ({
         ...c,
+        commandPolicy: normalizeCommandPolicy(c.commandPolicy, workAuto ? "auto" : "ask"),
         // 旧版在压缩开始时就先落一个 compacting 分隔：页面若在摘要生成前关掉，它会留下来把历史长期截断；启动时清掉
         messages: (Array.isArray(c.messages) ? c.messages : []).filter(m => !(m?.role === "context" && m.compacting)),
         forks: Array.isArray(c.forks) ? c.forks : [],

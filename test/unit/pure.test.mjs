@@ -128,11 +128,15 @@ test("learnReasoningLevels：从报错里认出接口支持的几档，被拒的
   assert.equal(p.reasoningLevels, "low, medium, xhigh");
   assert.equal(f.learnReasoningLevels(p, "rate limited", "high"), false);
 });
-test("isReadOnlyCommand：只读命令免确认，带管道 / 重定向 / 串联的不算", () => {
+test("isReadOnlyCommand：开发与系统检查免确认，只放行纯展示管道", () => {
   assert.equal(f.isReadOnlyCommand("git status"), true);
   assert.equal(f.isReadOnlyCommand("Get-ChildItem src"), true);
   assert.equal(f.isReadOnlyCommand("node --version"), true);
-  assert.equal(f.isReadOnlyCommand("git status | grep x"), false);
+  assert.equal(f.isReadOnlyCommand("Get-Process | Sort-Object WorkingSet64 | Select-Object -First 10"), true);
+  assert.equal(f.isReadOnlyCommand("Get-CimInstance Win32_OperatingSystem | ConvertTo-Json"), true);
+  assert.equal(f.isReadOnlyCommand("git status | grep x"), true);
+  assert.equal(f.isReadOnlyCommand("Get-Process -ComputerName elsewhere"), false);
+  assert.equal(f.isReadOnlyCommand("Get-Process | Remove-Item"), false);
   assert.equal(f.isReadOnlyCommand("rm -rf ."), false);
   assert.equal(f.isReadOnlyCommand("cat a > b"), false);
 });

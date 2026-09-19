@@ -4,7 +4,7 @@
 // search_web / fetch_page / http_request 在桥接在线时提供；run_js 一律提供（在浏览器里的隔离沙箱跑，直连也有）；六件文件工具在桥接在线时提供（绑了目录落在工作目录，没绑落在卷宗），
 // download_file 随之；update_plan 只给行的主模型；delegate 在桥接在线且有别的工具可交给帮手时提供（帮手自己不再差遣）；
 // ask_user 对谈与执事都提供（帮手没有）；五件记忆工具在记忆启用时提供（帮手只有 recall / search_conversations / read_conversation，不能 remember / forget）；read_document 在对话带有可读文档时提供。
-// 言（对谈）里工具只为产出文件，不带 edit_file / search_files，且带 brief 的工具用 brief 代替 description——对谈的每一问都背着这份定义，越轻越好。
+// 言（对谈）的文件工具只为产出文件，不带 edit_file / search_files；电脑检查另走 inspect_computer。带 brief 的工具用短说明——对谈的每一问都背着这份定义，越轻越好。
 // 参数在页面上按这里的 schema 核对：必填项缺了不执行；有副作用的工具（run_command / write_file / edit_file / remember / forget / delegate）参数 JSON 被截断时也不执行。
 (window.YAN_PROMPTS ||= {}).tools = {
   search_web: {
@@ -86,8 +86,8 @@
   },
 
   run_command: {
-    description: "在工作目录执行一条非交互式指令，返回退出码、stdout 与 stderr。",
-    brief: "在卷宗目录执行一条非交互式指令（生成文件用），返回退出码与输出。",
+    description: "在工作目录执行一条非交互式指令，返回退出码、stdout 与 stderr；也可在用户明确要求时用本机只读命令诊断电脑。",
+    brief: "在卷宗目录执行一条非交互式指令（生成文件或按用户要求诊断本机），返回退出码与输出。",
     parameters: {
       type: "object",
       properties: {
@@ -95,6 +95,25 @@
         timeout: { type: "number", description: "超时秒数，默认 120，最大 600；耗时长的指令记得给" }
       },
       required: ["command"]
+    }
+  },
+
+  inspect_computer: {
+    description:
+      "用固定的只读探针检查本机，不接收脚本、不修改状态。各检查项独立，某项失败仍返回其余结果；适合电脑体检，也可在 shell 路径走不通时换用。",
+    parameters: {
+      type: "object",
+      properties: {
+        sections: {
+          type: "array",
+          description: "要检查的项目；省略时查概况、资源、磁盘、网络、开发环境",
+          items: {
+            type: "string",
+            enum: ["overview", "resources", "storage", "network", "services", "startup", "software", "development", "security", "events"]
+          }
+        },
+        detail: { type: "string", enum: ["summary", "full"], description: "摘要或较完整结果，默认 summary" }
+      }
     }
   },
 

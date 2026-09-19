@@ -10,7 +10,7 @@ const sandbox = require("./sandbox.js");
 module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
-  // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见、默认先问再跑，安全边界守在那一层。
+  // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见，并按问而后行 / 自动审查 / 径行三档处理。
   // 请求带 sandbox: true 时再加一道沙箱（server/sandbox.js）：路径不出目录、机密文件不碰、指令先筛、环境变量去掉机密——在桥接这头守，页面与模型都绕不过
   const WORK_HOME = path.join(os.homedir(), "言", "工作");
   // 卷宗：对话没绑工作目录时，模型的工具就落在这里——写出的表格、文档都收在卷宗里；页面上的卷宗即这个目录的视图。
@@ -91,6 +91,11 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
     const boxed = body.sandbox === true,
       target = resolveTarget(workdir, body.path, body.roam === true && !boxed);
     await assertReachable(workdir, target);
+    if (body.permission === "review") {
+      const why = sandbox.screenPath(relPath(workdir, target), { write });
+      if (why) throw Error(why.replace(/^沙箱拒绝：/, "自动审查拒绝："));
+      if (write && !pathIsInside(workdir, target)) throw Error(`自动审查拒绝：不自动改动工作目录之外的路径（${target}）`);
+    }
     if (boxed) {
       const why = sandbox.screenPath(relPath(workdir, target), { write });
       if (why) throw Error(why);
@@ -455,6 +460,10 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         const why = sandbox.screenCommand(command, workdir);
         if (why) throw Error(why);
       }
+      if (body.permission === "review") {
+        const why = sandbox.screenAutoReview(command, workdir);
+        if (why) throw Error(why);
+      }
       const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 600000);
       console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })} $ ${command.slice(0, 120)}`);
       // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉
@@ -678,8 +687,14 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       const stat = await fs.promises.stat(target).catch(() => null);
       if (!given || /[\\/]$/.test(given) || stat?.isDirectory()) {
         target = path.join(target, path.basename(fromUrl));
-        const why = body.sandbox === true ? sandbox.screenPath(relPath(workdir, target), { write: true }) : null;
-        if (why) throw Error(why);
+        if (body.permission === "review") {
+          const why = sandbox.screenPath(relPath(workdir, target), { write: true });
+          if (why) throw Error(why.replace(/^沙箱拒绝：/, "自动审查拒绝："));
+        }
+        if (body.sandbox === true) {
+          const why = sandbox.screenPath(relPath(workdir, target), { write: true });
+          if (why) throw Error(why);
+        }
       }
       const started = Date.now(),
         { response } = await fetchPublicResponse(url.href, { timeout: 120000, allowLoopback: true });
@@ -756,7 +771,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
             continue;
           }
           if (filter && !filter.test(rel)) continue;
-          if (boxed && sandbox.screenPath(rel)) continue; // 沙箱里检索也不翻机密文件，.env 里的 Key 不能借一条命中带出来
+          if ((boxed || body.permission === "review") && sandbox.screenPath(rel)) continue; // 沙箱与自动审查都不借检索带出机密文件
           if (++scanned > SEARCH_FILE_LIMIT) {
             truncated = true;
             return;

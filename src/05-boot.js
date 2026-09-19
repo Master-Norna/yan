@@ -594,10 +594,11 @@ function bindEvents() {
   $("#workAuto").onclick = () => {
     const c = currentConversation();
     if (!c) return;
-    c.workAuto = !c.workAuto;
+    c.commandPolicy = nextCommandPolicy(commandPolicyOf(c));
     saveStore();
     renderWorkAuto();
-    if (c.workAuto) for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
+    if (c.commandPolicy !== "ask")
+      for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
   };
   setupChips();
   setupQuoteTip();

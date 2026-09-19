@@ -646,6 +646,23 @@ http
           ]);
         return sse(res, [delta({ content: "CHAT-AUTO done" }), delta({}, { usage: { total_tokens: 5 } })]);
       }
+      if (typeof lastUser === "string" && lastUser.includes("POLICY-REVIEW")) {
+        const lastUserIndex = msgs.findLastIndex(m => m.role === "user"),
+          turnToolResults = msgs.slice(lastUserIndex + 1).filter(m => m.role === "tool"),
+          n = turnToolResults.length,
+          call = (name, args) =>
+            sse(res, [
+              delta({ tool_calls: [{ index: 0, id: `call_review_${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] }),
+              delta({}, { usage: { total_tokens: 5 } })
+            ]);
+        if (n === 0) return call("run_command", { command: "Set-Content review-ok.txt ok" });
+        if (n === 1) return call("run_command", { command: "Set-ExecutionPolicy Unrestricted" });
+        if (n === 2) return call("inspect_computer", { sections: ["overview", "storage"], detail: "summary" });
+        return sse(res, [
+          delta({ content: `POLICY-REVIEW done｜${turnToolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 100)).join(" ▸ ")}` }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       if (!toolResults.length)
         return sse(res, [
           delta({ content: "我先执行一条指令。" }),

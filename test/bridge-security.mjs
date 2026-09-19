@@ -50,6 +50,12 @@ check(
   r.status === 200 && r.data.workdir.toLowerCase() === workdir.toLowerCase(),
   `${r.status} ${JSON.stringify(r.data).slice(0, 120)}`
 );
+r = await post("/api/work/inspect", { sections: ["overview"] });
+check(
+  "native computer inspection returns the requested read-only section",
+  r.status === 200 && r.data?.sections?.length === 1 && r.data.sections[0].name === "overview" && r.data.sections[0].ok,
+  `${r.status} ${JSON.stringify(r.data).slice(0, 180)}`
+);
 // 工作目录必须完整限定
 for (const bad of win ? ["\\yan-drive-relative", "/yan-drive-relative", "C:yan-relative", "foo", "./foo"] : ["foo", "./foo"]) {
   r = await post("/api/work/prepare", { workdir: bad });
@@ -307,6 +313,56 @@ r = await post("/api/work/run", {
 check("sandbox: the command channel cannot directly write .git internals", r.status === 400 && /\.git 内部/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
 r = await post("/api/work/run", { workdir, sandbox: false, command: "Get-ChildItem .." });
 check("without sandbox the same command runs", r.status === 200, `${r.status} ${r.data?.error}`);
+r = await post("/api/work/run", {
+  workdir,
+  sandbox: false,
+  permission: "review",
+  command: win ? "Set-Content reviewed.txt ok" : "printf ok > reviewed.txt"
+});
+check(
+  "automatic review allows ordinary work without asking",
+  r.status === 200 && existsSync(`${WORK}/reviewed.txt`),
+  `${r.status} ${r.data?.error || ""}`
+);
+r = await post("/api/work/run", {
+  workdir,
+  sandbox: false,
+  permission: "review",
+  command: win ? "Set-ExecutionPolicy Unrestricted" : "sudo true"
+});
+check("automatic review rejects clear host risk", r.status === 400 && /自动审查拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error || ""}`);
+const outsideNative = OUTSIDE.split("/").join(win ? "\\" : "/"),
+  outsideReviewFile = `${outsideNative}${win ? "\\" : "/"}reviewed-outside.txt`;
+r = await post("/api/work/run", {
+  workdir,
+  sandbox: false,
+  permission: "review",
+  command: win ? `Set-Content "${outsideReviewFile}" x` : `printf x > "${outsideReviewFile}"`
+});
+check(
+  "automatic review does not mutate an explicit path outside the workdir",
+  r.status === 400 && /工作目录之外/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
+  `${r.status} ${r.data?.error || ""}`
+);
+r = await post("/api/work/write", {
+  workdir,
+  sandbox: false,
+  permission: "review",
+  roam: true,
+  path: outsideReviewFile,
+  content: "x"
+});
+check(
+  "automatic review also keeps file tools inside the workdir",
+  r.status === 400 && /工作目录之外/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
+  `${r.status} ${r.data?.error || ""}`
+);
+r = await post("/api/work/read", { workdir, sandbox: false, permission: "review", path: ".env" });
+check(
+  "automatic review keeps file tools from reading secret files",
+  r.status === 400 && /自动审查拒绝.*机密文件/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error || ""}`
+);
 if (win) {
   r = await post("/api/work/run", {
     workdir,

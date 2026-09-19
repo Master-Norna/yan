@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { screenCommand, sandboxEnv, screenPath } = require("../../server/sandbox.js");
+const { screenCommand, screenAutoReview, sandboxEnv, screenPath } = require("../../server/sandbox.js");
 const wd = "E:\\项目\\言",
   win = { platform: "win32" },
   screen = command => screenCommand(command, wd, win);
@@ -52,7 +52,8 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("net user admin pw /add"), /账户/);
   assert.match(screen("shutdown /s"), /系统、磁盘与权限/);
   assert.match(screen("format c:"), /磁盘/);
-  assert.match(screen("Start-Process notepad"), /提权/);
+  assert.equal(screen("Start-Process notepad"), null);
+  assert.match(screen("Start-Process powershell -Verb RunAs"), /提权/);
   assert.match(screen("Set-ExecutionPolicy Unrestricted"), /执行策略/);
   assert.match(screen("powershell -enc AGUAYwBoAG8AIABoAGkAAGUAYwBoAG8AIABoAGkA"), /编码/);
   assert.match(screen('iex "dir"'), /编码/);
@@ -60,6 +61,30 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("iwr https://example.com -OutFile x"), /外联/);
   assert.match(screen("curl $url"), /外联/);
   assert.match(screen("(New-Object Net.WebClient).DownloadString('http://x')"), /外联/);
+});
+test("screenAutoReview：常规开发直接放行，明确宿主机风险才拒绝", () => {
+  for (const command of [
+    "npm install",
+    "git commit -m test",
+    "Start-Process notepad",
+    "Stop-Process -Id 1234",
+    "curl https://example.com",
+    "Set-Content src/out.txt ok",
+    "Remove-Item build -Recurse -Force",
+    "rmdir /s /q build"
+  ])
+    assert.equal(screenAutoReview(command, wd, win), null, command);
+  for (const command of [
+    "Set-ExecutionPolicy Unrestricted",
+    "Stop-Service WinDefend",
+    "shutdown /s",
+    "git reset --hard",
+    "Remove-Item . -Recurse -Force",
+    "Get-Content .env",
+    "Set-Content .git/config x",
+    String.raw`Set-Content C:\Windows\temp\x.txt x`
+  ])
+    assert.match(screenAutoReview(command, wd, win), /自动审查拒绝/, command);
 });
 test("screenCommand：指令通道也不许显式碰机密文件或直接改 .git 内部", () => {
   for (const command of [

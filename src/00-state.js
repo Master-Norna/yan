@@ -21,6 +21,7 @@
 /** @typedef {{ text: string, messageId?: string }} Quote 引用追问：划选的一段与它所在的消息（旁注锚文本作引文时没有 messageId） */
 /** @typedef {{ id: string, name: string, arguments: string }} ToolCall 流式拼出的一次工具调用 */
 /** @typedef {{ prompt_tokens: number, completion_tokens: number, total_tokens: number }} Usage */
+/** @typedef {"ask"|"review"|"auto"} CommandPolicy 问而后行 / 自动审查 / 径行 */
 /** @typedef {"running"|"pending"|"done"|"error"|"skipped"} StepStatus */
 /** @typedef {{ question: string, header: string, multi: boolean, options: { label: string, description: string }[] }} AskQuestion */
 /**
@@ -116,7 +117,7 @@
  * @property {Fork[]} forks
  * @property {Thread[]} threads
  * @property {string} [workdir] 绑了目录即为行
- * @property {boolean} [workAuto] 径行
+ * @property {CommandPolicy} [commandPolicy] 指令权限模式
  * @property {string} [reasoning] 思考档位
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
@@ -161,7 +162,7 @@
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
  * @property {string} reasoning 新对话默认的思考档位
- * @property {boolean} workAutoDefault
+ * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
  * @property {number} compactAt
  * @property {"anywhere"|"inside"} toolReach
@@ -224,7 +225,7 @@ const REVEAL_RATE = 0.16,
 const $ = selector => document.querySelector(selector);
 const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const now = () => new Date().toISOString();
-const STORE_VERSION = 4;
+const STORE_VERSION = 5;
 const NEW_DRAFT_ID = "__new__";
 /** @type {Store} */
 const defaultStore = {
@@ -241,7 +242,7 @@ const defaultStore = {
     pendingWorkdir: "",
     collapsedRepos: [],
     reasoning: "",
-    workAutoDefault: false,
+    commandPolicyDefault: "ask",
     sandbox: true,
     compactAt: 0,
     toolReach: "anywhere",

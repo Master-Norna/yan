@@ -37,14 +37,14 @@ function sys(names, { work = false, archive = false, sub = false } = {}) {
 }
 const modes = {
   "言（桥接+记忆，工具落卷宗）": {
-    tools: ["search_web", "fetch_page", "http_request", "run_js", ...CHAT_FILES, "download_file", "ask_user", ...MEM, "delegate"],
+    tools: ["search_web", "fetch_page", "http_request", "run_js", "inspect_computer", ...CHAT_FILES, "download_file", "ask_user", ...MEM, "delegate"],
     archive: true
   },
   "行（桥接+记忆）": {
-    tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", "update_plan", "ask_user", ...MEM, "delegate"],
+    tools: ["search_web", "fetch_page", "http_request", "run_js", "inspect_computer", ...WORK, "download_file", "update_plan", "ask_user", ...MEM, "delegate"],
     work: true
   },
-  "行·帮手": { tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", ...MEM], work: true, sub: true },
+  "行·帮手": { tools: ["search_web", "fetch_page", "http_request", "run_js", "inspect_computer", ...WORK, "download_file", ...MEM], work: true, sub: true },
   "言（直连，无桥接、无记忆）": { tools: ["run_js", "ask_user"] }
 };
 let out = "";

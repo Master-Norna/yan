@@ -274,6 +274,7 @@ async function runTool(step, conversation, assistant, signal) {
     }
     if (step.name === "read_document") return await readDocumentTool(step, args, conversation);
     if (step.name === "run_js") return await runJsTool(step, args, signal);
+    if (step.name === "inspect_computer") return await inspectComputerTool(step, args, signal);
     if (step.name === "http_request") return await httpRequestTool(step, args, signal);
     if (step.name === "download_file") return await downloadFileTool(step, args, conversation, signal);
     if (step.name === "update_plan") return updatePlanTool(step, args);
@@ -290,6 +291,22 @@ async function runTool(step, conversation, assistant, signal) {
       display: friendlyError(String(error.message || error)).slice(0, 60)
     };
   }
+}
+async function inspectComputerTool(step, args, signal) {
+  const sections = Array.isArray(args.sections) ? args.sections : args.sections ? [args.sections] : [],
+    data = await bridge("/api/work/inspect", { sections, detail: args.detail === "full" ? "full" : "summary" }, signal),
+    rows = (data.sections || []).map(section =>
+      section.ok ? `## ${section.title}\n${section.output || "（无结果）"}` : `## ${section.title}\n检查失败：${section.error || "未知错误"}`
+    ),
+    ok = (data.sections || []).filter(section => section.ok).length;
+  step.title = sections.length ? (data.sections || []).map(section => section.title).join("、") : "常规体检";
+  step.output = rows.join("\n\n");
+  step.note = `${ok}/${(data.sections || []).length} 项 · ${(Number(data.durationMs || 0) / 1000).toFixed(1)}s`;
+  return {
+    ok: ok > 0,
+    content: step.output || "没有可用的检查结果",
+    display: step.note
+  };
 }
 // ---- run_js：在隔离沙箱里算一段 JS。沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；
 // 每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉；直连没桥接也能用
@@ -385,7 +402,11 @@ async function downloadFileTool(step, args, conversation, signal) {
   const url = String(args.url || "").trim();
   step.url = url;
   step.title = String(args.path || "").trim() || url.split("/").pop() || url;
-  const data = await bridge("/api/work/download", { workdir, roam: roamAllowed(), sandbox: sandboxed(), url, path: args.path }, signal);
+  const data = await bridge(
+    "/api/work/download",
+    { workdir, roam: roamAllowed(), sandbox: sandboxed(), permission: commandPolicyOf(conversation), url, path: args.path },
+    signal
+  );
   step.title = data.path;
   step.note = url;
   step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要
@@ -417,18 +438,20 @@ function updatePlanTool(step, args) {
     display: `${done}/${items.length}`
   };
 }
-// run_command 的确认：行默认逐条问，可切成整段对话径行；言也问，但只允许把当前这一答一并放行，下一答重新询问。
+// run_command 三档：问而后行（只读免问）、自动审查（无请求，桥接判放行/拒绝）、径行；言与行都可逐段设置。
 const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),
   // 言（对谈）里只给这四件：对谈的文件工具只为产出成品，逐字替换与代码检索是执事的活
   CHAT_FILE_TOOLS = ["run_command", "write_file", "read_file", "list_files"],
   pendingApprovals = new Map();
-// 只读指令免确认：命令本身只是查看，且不带任何管道、重定向或串联，才算只读
+// 「问而后行」里的本机规则：明确只读才免确认。系统检查纳入白名单；只允许一组纯展示管道，脚本块、远程会话与重定向仍去请示。
 const READ_ONLY_COMMAND =
-  /^(?:git\s+(?:status|log|diff|show|rev-parse|ls-files|remote\s+-v)\b|git\s+branch(?:\s+(?:-a|-r|-v|-vv|--list))*\s*$|(?:ls|dir|tree|pwd|cat|type|head|tail|wc|grep|findstr|which|where|whoami)\b|Get-(?:ChildItem|Content|Location|Command|Item|Date)\b|Select-String\b|(?:node|npm|npx|python|python3|pip|dotnet|java|go|cargo|rustc|ruby|php)\s+(?:-v|-V|--version|version)\s*$)/i;
+    /^(?:git\s+(?:status|log|diff|show|rev-parse|ls-files|remote\s+-v)\b|git\s+branch(?:\s+(?:-a|-r|-v|-vv|--list))*\s*$|(?:ls|dir|tree|pwd|cat|type|head|tail|wc|grep|findstr|which|where|whoami|hostname|uname|uptime|free|df|du|ps|lscpu|lsmem|lsblk|lspci|lsusb|mount|id|groups|sw_vers|vm_stat)\b|Get-(?:ChildItem|Content|Location|Command|Item|ItemProperty|Date|ComputerInfo|CimInstance|WmiObject|Process|Service|NetAdapter|NetIPConfiguration|NetIPAddress|NetRoute|NetTCPConnection|NetUDPEndpoint|DnsClientServerAddress|Volume|Disk|Partition|PhysicalDisk|StorageReliabilityCounter|MpComputerStatus|HotFix|WinEvent|EventLog|ScheduledTask|LocalUser|LocalGroup|Acl|Package)\b|Select-String\b|(?:systeminfo|tasklist|driverquery|ipconfig|netstat)\b|sc(?:\.exe)?\s+query\b|wmic(?:\.exe)?\b[^\n]*\bget\b|wsl(?:\.exe)?\s+(?:--status|--version|-l\b|--list\b)|docker\s+(?:version|info|ps|images)\b|(?:node|npm|npx|python|python3|pip|dotnet|java|go|cargo|rustc|ruby|php|git)\s+(?:-v|-V|--version|version)\s*$)/i,
+  READ_ONLY_PIPE = /^(?:Select-Object|Sort-Object|Format-Table|Format-List|ConvertTo-Json|Measure-Object|Group-Object|findstr|grep|head|tail|wc)\b/i;
 function isReadOnlyCommand(command) {
   const text = String(command || "").trim();
-  if (/[;&|<>`\n]|\$\(/.test(text)) return false;
-  return READ_ONLY_COMMAND.test(text);
+  if (/[;&<>`\n{}]|\$\(|\|\|/.test(text) || /-(?:ComputerName|CimSession|Session|Credential)\b/i.test(text)) return false;
+  const parts = text.split("|").map(part => part.trim());
+  return !!parts[0] && READ_ONLY_COMMAND.test(parts[0]) && parts.slice(1).every(part => READ_ONLY_PIPE.test(part));
 }
 // 本段对话里读过或写过的文件才允许 edit_file：模型必须对着真实内容改，而不是凭记忆猜。
 // 帮手另记一份（按步骤上的 scope 分开）：主模型没亲眼读过帮手改过的文件，要改就得再读一遍，帮手亦然
@@ -651,7 +674,7 @@ function approveFrom(button) {
       const job = requestJob(c.id);
       if (job) job.commandAuto = true;
     } else {
-      c.workAuto = true;
+      c.commandPolicy = "auto";
       saveStore();
       renderWorkAuto();
     }
@@ -942,7 +965,8 @@ function roamAllowed() {
 async function runWorkTool(step, args, conversation, assistant, signal) {
   const workdir = workRoot(conversation),
     roam = roamAllowed(),
-    sandbox = sandboxed();
+    sandbox = sandboxed(),
+    permission = commandPolicyOf(conversation);
   if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
   const job = requestJob(conversation.id);
   if (step.name === "run_command") {
@@ -950,8 +974,8 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     if (!step.title) return { ok: false, content: "指令为空", display: "指令为空" };
     step.readOnly = isReadOnlyCommand(step.title);
     // shell 不是进程隔离：行可把整段对话切成径行；言第一次问，可只放行本答，不能悄悄把今后的对谈都放开
-    const auto = isWork(conversation) ? conversation.workAuto : job?.commandAuto;
-    if (!auto && !step.readOnly) {
+    let policy = job?.commandAuto ? "auto" : commandPolicyOf(conversation);
+    if (policy === "ask" && !step.readOnly) {
       step.approvalScope = isWork(conversation) ? "conversation" : "answer";
       step.status = "pending";
       if (job) setJobLabel(conversation, job, "等待确认");
@@ -968,7 +992,13 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
       }
     } else if (job) setJobLabel(conversation, job, "执行中");
-    const data = await bridge("/api/work/run", { workdir, sandbox, command: step.title, timeout: Number(args.timeout) || 120 }, signal);
+    // 用户可能在等待条上把这一段对话切成自动审查或径行；执行前再取一次，不沿用旧档位。
+    policy = job?.commandAuto ? "auto" : commandPolicyOf(conversation);
+    const data = await bridge(
+      "/api/work/run",
+      { workdir, sandbox, permission: policy, command: step.title, timeout: Number(args.timeout) || 120 },
+      signal
+    );
     step.exitCode = data.exitCode;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
     const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
@@ -981,7 +1011,11 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   }
   if (step.name === "write_file") {
     step.title = String(args.path || "");
-    const data = await bridge("/api/work/write", { workdir, roam, sandbox, path: step.title, content: String(args.content ?? "") }, signal);
+    const data = await bridge(
+      "/api/work/write",
+      { workdir, roam, sandbox, permission, path: step.title, content: String(args.content ?? "") },
+      signal
+    );
     step.title = data.path;
     markSeen(conversation, data.path, step);
     step.note = `${data.lines} 行 · ${formatFileSize(data.bytes)}${data.existed ? " · 覆盖" : ""}`;
@@ -1001,7 +1035,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.path || "");
     const data = await bridge(
       "/api/work/read",
-      { workdir, roam, sandbox, path: step.title, offset: args.offset, limit: args.limit },
+      { workdir, roam, sandbox, permission, path: step.title, offset: args.offset, limit: args.limit },
       signal
     );
     step.title = data.path;
@@ -1023,6 +1057,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         workdir,
         roam,
         sandbox,
+        permission,
         path: step.title,
         old: String(args.old ?? ""),
         new: String(args.new ?? ""),
@@ -1044,7 +1079,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.query || "");
     const data = await bridge(
       "/api/work/search",
-      { workdir, roam, sandbox, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
+      { workdir, roam, sandbox, permission, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
       signal
     );
     const lines = data.matches.map(match => `${match.file}:${match.line}: ${match.text}`);
@@ -1061,7 +1096,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   step.title = `${String(args.path || ".")}${args.pattern ? ` · ${args.pattern}` : ""}`;
   const data = await bridge(
     "/api/work/list",
-    { workdir, roam, sandbox, path: args.path, depth: args.depth, pattern: args.pattern },
+    { workdir, roam, sandbox, permission, path: args.path, depth: args.depth, pattern: args.pattern },
     signal
   );
   step.title = `${data.path}${args.pattern ? ` · ${args.pattern}` : ""}`;

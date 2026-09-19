@@ -20,13 +20,14 @@ const FORBIDDEN = [
   [cmd("schtasks"), "不动计划任务"],
   [cmd("sc", String.raw`(?:\.exe)?\s+(?:create|delete|config|start|stop|failure)\b`), "不动系统服务"],
   [/\b(New|Set|Remove|Start|Stop|Restart)-Service\b/i, "不动系统服务"],
-  [cmd("netsh"), "不动网络与防火墙配置"],
+  [/\bnetsh(?:\.exe)?\b[^\n]*\b(?:set|add|delete|reset|exec|import)\b/i, "不动网络与防火墙配置"],
   [/\b(New|Set|Remove)-NetFirewallRule\b|\bSet-DnsClient/i, "不动网络与防火墙配置"],
   [cmd("net", String.raw`(?:\.exe)?\s+(?:user|localgroup|group|share|use|accounts)\b`), "不动用户与账户"],
   [/\b(New|Remove|Set|Enable|Disable)-LocalUser\b|\bAdd-LocalGroupMember\b/i, "不动用户与账户"],
-  [cmd("runas|shutdown|bcdedit|diskpart|wmic|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限"],
+  [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限"],
+  [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不通过 WMI 改系统"],
   [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不动磁盘"],
-  [/\bStart-Process\b|-Verb\s+RunAs\b|(^|\s)sudo\s/i, "不另起进程、不提权"],
+  [/-Verb\s+RunAs\b|(^|\s)sudo\s/i, "不提权"],
   [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不改执行策略与安全设置"],
   [/\bInvoke-Expression\b|(^|[\s;&|(])iex\s|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}/i, "不用编码或拼接的指令，直接写出来"],
   [
@@ -45,7 +46,30 @@ const SECRET_PATH_IN_COMMAND =
 // `.git` 要由 git 自己维护；显式读可以，直接用 shell 写、删、搬则拒绝。脚本内部仍不在静态筛查能力之内。
 const GIT_INTERNAL_PATH = /(^|[\s"'=;|&(])[^\s"'`;|&<>()]*\.git[\\/][^\s"'`;|&<>()]*/i,
   DIRECT_FILE_MUTATION =
-    /(^|[;&|(\n]\s*|\bcmd(?:\.exe)?\s+\/c\s+)(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|Clear-Content|del|erase|rm|mv|cp|touch|tee)(?:\.exe)?\b|(?:^|[^<])>{1,2}\s*[^&]/im;
+    /(^|[;&|(\n]\s*|\bcmd(?:\.exe)?\s+\/c\s+)(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|Clear-Content|del|erase|rmdir|rd|rm|mv|cp|touch|tee)(?:\.exe)?\b|(?:^|[^<])>{1,2}\s*[^&]/im;
+
+// 自动审查不是第二个沙箱：常规开发、安装、Git 提交、本机进程与联网都放行，只拦明确可能伤及宿主机或难以恢复的动作。
+// 它不向用户请示；拿不准而确实需要做时，模型可以换用结构化工具，或用户切到「问而后行 / 径行」。
+const AUTO_REVIEW_FORBIDDEN = [
+  [cmd("reg", String.raw`(?:\.exe)?\s+(?:add|delete|import|restore|load|unload|copy|save)\b`), "不自动修改注册表"],
+  [/\bregedit\b|\b(New|Set|Remove)-ItemProperty\b[^\n]*(?:HKLM|HKCU|Registry::)/i, "不自动修改注册表"],
+  [/\bschtasks(?:\.exe)?\b[^\n]*(?:\/create|\/delete|\/change|\/run|\/end)\b/i, "不自动修改或触发计划任务"],
+  [cmd("sc", String.raw`(?:\.exe)?\s+(?:create|delete|config|start|stop|failure)\b`), "不自动修改系统服务"],
+  [/\b(New|Set|Remove|Start|Stop|Restart)-Service\b/i, "不自动修改系统服务"],
+  [/\bnetsh(?:\.exe)?\b[^\n]*\b(?:set|add|delete|reset|exec|import)\b/i, "不自动修改网络与防火墙配置"],
+  [/\b(New|Set|Remove)-NetFirewallRule\b|\bSet-DnsClient/i, "不自动修改网络与防火墙配置"],
+  [cmd("net", String.raw`(?:\.exe)?\s+(?:user|localgroup|group|share|accounts)\b`), "不自动修改用户、账户与共享"],
+  [/\b(New|Remove|Set|Enable|Disable)-LocalUser\b|\bAdd-LocalGroupMember\b/i, "不自动修改用户与账户"],
+  [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不自动提权或修改系统、磁盘与权限"],
+  [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不自动格式化磁盘"],
+  [/-Verb\s+RunAs\b|(^|\s)sudo\s/i, "不自动提权"],
+  [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不自动修改执行策略与安全设置"],
+  [/\bInvoke-Expression\b|(^|[\s;&|(])iex\s|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}/i, "不自动执行隐藏或动态拼接的指令"],
+  [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不自动通过 WMI 修改系统"],
+  [/\bgit\s+(?:reset\s+--hard|clean\s+-[^\s]*[fdx]|checkout\s+--\s|restore\b[^\n]*\s--source\b)/i, "不自动执行难以恢复的 Git 清理或回退"]
+];
+const BROAD_DELETE =
+  /\bRemove-Item\b(?=[^\n]*(?:-Recurse|-Force))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
 
 function normalizeLower(p) {
   return path
@@ -97,6 +121,29 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   return null;
 }
 /**
+ * 无请示的自动审查。通过返回 null；明确高风险返回拒绝原因。规则刻意比沙箱宽：普通开发与诊断不拦。
+ * @param {string} command
+ * @param {string} workdir
+ */
+function screenAutoReview(command, workdir, { platform = process.platform } = {}) {
+  const text = String(command || ""),
+    win = platform === "win32";
+  for (const [pattern, why] of AUTO_REVIEW_FORBIDDEN) if (pattern.test(text)) return `自动审查拒绝：${why}`;
+  if (SECRET_PATH_IN_COMMAND.test(text)) return "自动审查拒绝：不自动读取或改写 .env、密钥与凭据文件";
+  if (GIT_INTERNAL_PATH.test(text) && DIRECT_FILE_MUTATION.test(text)) return "自动审查拒绝：不直接修改 .git 内部，请使用 git 指令";
+  if (BROAD_DELETE.test(text)) return "自动审查拒绝：不自动执行整目录、通配符或磁盘级删除";
+  if (DIRECT_FILE_MUTATION.test(text)) {
+    if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])|\$HOME\b|(^|[\s"'=])~([\\/]|$)/i.test(text))
+      return "自动审查拒绝：不自动改动工作目录之外的路径";
+    const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+    for (const raw of absolutePathsIn(text, win)) {
+      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
+      if (!inside(root, candidate)) return `自动审查拒绝：不自动改动工作目录之外的路径（${raw}）`;
+    }
+  }
+  return null;
+}
+/**
  * 给指令的环境变量：去掉名字像机密的；其余照传（PATH、SystemRoot、TEMP 这些没了程序起不来）
  * @param {NodeJS.ProcessEnv} env
  */
@@ -122,4 +169,4 @@ function screenPath(rel, { write = false } = {}) {
   return null;
 }
 
-module.exports = { screenCommand, sandboxEnv, screenPath, SECRET_ENV };
+module.exports = { screenCommand, screenAutoReview, sandboxEnv, screenPath, SECRET_ENV };

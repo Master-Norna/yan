@@ -29,7 +29,10 @@ check(
   "the second command in the same answer ran without another prompt",
   await evalJs(`document.querySelectorAll('.tool-step[data-status="done"] .tool-label').length === 2 && document.querySelector("#approvalBar").classList.contains("hidden")`)
 );
-check("answer-scoped approval was not persisted on the conversation", !(await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].workAuto`)));
+check(
+  "answer-scoped approval was not persisted on the conversation",
+  (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].commandPolicy`)) === "ask"
+);
 
 await evalJs(
   `document.querySelector("#chatInput").value = "CHAT-AUTO again"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`

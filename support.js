@@ -24,6 +24,7 @@
 /** @typedef {{ text: string, messageId?: string }} Quote 引用追问：划选的一段与它所在的消息（旁注锚文本作引文时没有 messageId） */
 /** @typedef {{ id: string, name: string, arguments: string }} ToolCall 流式拼出的一次工具调用 */
 /** @typedef {{ prompt_tokens: number, completion_tokens: number, total_tokens: number }} Usage */
+/** @typedef {"ask"|"review"|"auto"} CommandPolicy 问而后行 / 自动审查 / 径行 */
 /** @typedef {"running"|"pending"|"done"|"error"|"skipped"} StepStatus */
 /** @typedef {{ question: string, header: string, multi: boolean, options: { label: string, description: string }[] }} AskQuestion */
 /**
@@ -119,7 +120,7 @@
  * @property {Fork[]} forks
  * @property {Thread[]} threads
  * @property {string} [workdir] 绑了目录即为行
- * @property {boolean} [workAuto] 径行
+ * @property {CommandPolicy} [commandPolicy] 指令权限模式
  * @property {string} [reasoning] 思考档位
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
@@ -164,7 +165,7 @@
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
  * @property {string} reasoning 新对话默认的思考档位
- * @property {boolean} workAutoDefault
+ * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
  * @property {number} compactAt
  * @property {"anywhere"|"inside"} toolReach
@@ -227,7 +228,7 @@ const REVEAL_RATE = 0.16,
 const $ = selector => document.querySelector(selector);
 const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const now = () => new Date().toISOString();
-const STORE_VERSION = 4;
+const STORE_VERSION = 5;
 const NEW_DRAFT_ID = "__new__";
 /** @type {Store} */
 const defaultStore = {
@@ -244,7 +245,7 @@ const defaultStore = {
     pendingWorkdir: "",
     collapsedRepos: [],
     reasoning: "",
-    workAutoDefault: false,
+    commandPolicyDefault: "ask",
     sandbox: true,
     compactAt: 0,
     toolReach: "anywhere",
@@ -329,6 +330,20 @@ function migrateStoreV3(data) {
   for (const c of data.conversations || []) c.forks ||= [];
   data.version = 4;
 }
+function migrateStoreV4(data) {
+  const fallback = data.settings?.workAutoDefault ? "auto" : "ask";
+  data.settings ||= {};
+  data.settings.commandPolicyDefault = normalizeCommandPolicy(data.settings.commandPolicyDefault, fallback);
+  delete data.settings.workAutoDefault;
+  for (const c of data.conversations || []) {
+    c.commandPolicy = normalizeCommandPolicy(c.commandPolicy, c.workAuto ? "auto" : "ask");
+    delete c.workAuto;
+  }
+  data.version = 5;
+}
+function normalizeCommandPolicy(value, fallback = "ask") {
+  return ["ask", "review", "auto"].includes(value) ? value : fallback;
+}
 function loadStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -338,6 +353,7 @@ function loadStore() {
     if (data.version === 1) migrateStoreV1(data);
     if (data.version === 2) migrateStoreV2(data);
     if (data.version === 3) migrateStoreV3(data);
+    if (data.version === 4) migrateStoreV4(data);
     if (data.version > STORE_VERSION) data.version = STORE_VERSION;
     return {
       ...structuredClone(defaultStore),
@@ -348,8 +364,9 @@ function loadStore() {
         serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) }
       },
       profiles: Array.isArray(data.profiles) ? data.profiles : [],
-      conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(({ ended, ...c }) => ({
+      conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(({ ended, workAuto, ...c }) => ({
         ...c,
+        commandPolicy: normalizeCommandPolicy(c.commandPolicy, workAuto ? "auto" : "ask"),
         // 旧版在压缩开始时就先落一个 compacting 分隔：页面若在摘要生成前关掉，它会留下来把历史长期截断；启动时清掉
         messages: (Array.isArray(c.messages) ? c.messages : []).filter(m => !(m?.role === "context" && m.compacting)),
         forks: Array.isArray(c.forks) ? c.forks : [],
@@ -2098,10 +2115,11 @@ function bindEvents() {
   $("#workAuto").onclick = () => {
     const c = currentConversation();
     if (!c) return;
-    c.workAuto = !c.workAuto;
+    c.commandPolicy = nextCommandPolicy(commandPolicyOf(c));
     saveStore();
     renderWorkAuto();
-    if (c.workAuto) for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
+    if (c.commandPolicy !== "ask")
+      for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
   };
   setupChips();
   setupQuoteTip();
@@ -2410,7 +2428,7 @@ function toggleHistorySearch(force) {
 // 言 · 言 / 行两态、欢迎页与目录签、开合对话
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // 言与行不是两个入口，而是一段对话有没有绑工作目录：绑了就是行（执事，改动落在那个目录，提示词也是执事的做法）；
-// 没绑就是言（对谈，桥接在线时工具落在卷宗目录，只为产出文件）。目录可以在对话中途绑上或解开，上下文不断
+// 没绑就是言（对谈，文件工具落在卷宗，电脑检查另有固定只读探针）。目录可以在对话中途绑上或解开，上下文不断
 /** @param {Conversation} c */
 function isWork(c) {
   return !!c?.workdir;
@@ -2450,17 +2468,30 @@ function renderModeSwitch() {
   seal.querySelector(".wide").textContent = work ? "执事" : "对谈";
   seal.title = work ? "行 · 执事：指令与改动落在工作目录" : "言 · 对谈：产出收入卷宗";
 }
-// 问而后行 / 径行：只有行保留整段对话的开关；言的指令确认按每一答处理
+const COMMAND_POLICY_META = {
+  ask: ["问而后行", "已知只读指令直接运行，其余先经确认"],
+  review: ["自动审查", "常规操作直接运行，明确的高风险操作直接拒绝，不弹确认"],
+  auto: ["径行", "不做权限请示；沙箱若开启仍会守住它的边界"]
+};
+function commandPolicyOf(c) {
+  return normalizeCommandPolicy(c?.commandPolicy, normalizeCommandPolicy(store.settings.commandPolicyDefault));
+}
+function nextCommandPolicy(value) {
+  return ({ ask: "review", review: "auto", auto: "ask" })[normalizeCommandPolicy(value)];
+}
+// 三档权限：言与行都可逐段对话设置；按钮循环切换，设置页决定新对话默认值
 function renderWorkAuto() {
   const c = currentConversation(),
     button = $("#workAuto");
   if (!button) return;
-  const show = !!c && isWork(c) && activeProfile()?.tools !== false;
+  const show = !!c && !!workRoot(c) && activeProfile()?.tools !== false;
   button.classList.toggle("hidden", !show);
   if (!show) return;
-  button.textContent = c.workAuto ? "径行" : "问而后行";
-  button.title = c.workAuto ? "径行：指令径直执行" : "问而后行：每条指令先经确认";
-  button.classList.toggle("on", !!c.workAuto);
+  const policy = commandPolicyOf(c),
+    meta = COMMAND_POLICY_META[policy];
+  button.textContent = meta[0];
+  button.title = `${meta[0]}：${meta[1]}`;
+  button.classList.toggle("on", policy !== "ask");
 }
 function renderWelcome() {
   const work = workMode(),
@@ -2481,7 +2512,7 @@ function renderWelcomeNotice() {
   el.innerHTML = `<span class="seal" aria-hidden="true">始</span><span>尚未接入模型。任何 OpenAI 兼容接口均可使用，配置只存于此浏览器。</span><button type="button" data-open-models>前往设置 →</button>`;
   el.querySelector("[data-open-models]").onclick = () => openSettings("models");
 }
-// 欢迎页输入框上方的一行小签：目录签（空着是言、落在卷宗；填了是行）、问而后行 / 径行
+// 欢迎页输入框上方的一行小签：目录签（空着是言、落在卷宗；填了是行）、新对话的三档指令权限
 function pathTail(dir) {
   const parts = String(dir || "")
     .split(/[\\/]+/)
@@ -2500,10 +2531,12 @@ function renderChips(work, bridged) {
       : "言：绑定目录与生成文件需本机桥接（start.cmd）";
   dirChip.classList.toggle("on", !!pending);
   const approve = $("#approveChip");
-  approve.classList.toggle("hidden", !work);
-  approve.querySelector(".chip-text").textContent = store.settings.workAutoDefault ? "径行" : "问而后行";
-  approve.classList.toggle("on", !!store.settings.workAutoDefault);
-  approve.title = store.settings.workAutoDefault ? "径行：新对话中的指令径直执行" : "问而后行：新对话中每条指令先经确认";
+  const policy = normalizeCommandPolicy(store.settings.commandPolicyDefault),
+    meta = COMMAND_POLICY_META[policy];
+  approve.classList.toggle("hidden", !bridged);
+  approve.querySelector(".chip-text").textContent = meta[0];
+  approve.classList.toggle("on", policy !== "ask");
+  approve.title = `${meta[0]}：${meta[1]}（新对话默认）`;
 }
 function closeChipPop() {
   document.querySelectorAll(".chip-pop").forEach(pop => pop.remove());
@@ -2711,7 +2744,7 @@ async function bindWorkdir(c, dir) {
     const prepared = await bridge("/api/work/prepare", { workdir: dir }, AbortSignal.timeout(8000));
     if (prepared.workdir === c.workdir) return;
     c.workdir = prepared.workdir;
-    if (c.workAuto === undefined) c.workAuto = !!store.settings.workAutoDefault;
+    c.commandPolicy = commandPolicyOf(c);
     saveStore();
     render();
     toast(`已绑定 ${pathTail(prepared.workdir)}${prepared.created ? "（新建）" : ""}，此后为行`);
@@ -2739,7 +2772,7 @@ function setupChips() {
       }
     });
   $("#approveChip").onclick = () => {
-    store.settings.workAutoDefault = !store.settings.workAutoDefault;
+    store.settings.commandPolicyDefault = nextCommandPolicy(store.settings.commandPolicyDefault);
     saveStore();
     renderChips(workMode(), apiBase !== null);
   };
@@ -3442,6 +3475,7 @@ const TOOL_LABELS = {
   fetch_page: "翻阅网页",
   read_document: "翻阅文档",
   run_command: "运行",
+  inspect_computer: "检查电脑",
   write_file: "写入",
   edit_file: "修改",
   read_file: "读取",
@@ -6567,7 +6601,7 @@ async function sendOrStop() {
       profileId: profile.id,
       messages: [],
       workdir: pending,
-      workAuto: !!store.settings.workAutoDefault,
+      commandPolicy: normalizeCommandPolicy(store.settings.commandPolicyDefault),
       reasoning: store.settings.reasoning || ""
     };
     if (!(await ensureWorkReady(c))) return;
@@ -7174,7 +7208,7 @@ function modelSearchEnabled(profile) {
 /** @param {Conversation} conversation */
 function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   // 描述与参数说明在 prompts/tools.js；这里只决定哪些工具在此对话里可用
-  // 言（对谈）里工具只为产出文件：带 brief 的用 brief（短说明），且不带 edit_file / search_files——对谈的每一问都背着这份定义，越轻越好
+  // 言（对谈）的文件工具只为产出；电脑检查是一件多路复用工具。带 brief 的用短说明，且不带 edit_file / search_files
   // lookup：旁注用的只查不改的一套——检索、翻网页、翻文档、翻记忆与旧谈；不动文件、不请示、不差遣、不记不忘
   const work = isWork(conversation) && !lookup;
   const define = (name, vars = {}) => {
@@ -7191,6 +7225,8 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   // 调接口能发 POST，不算纯查阅，旁注不给；算一段 JS 在浏览器里的隔离沙箱跑，不经桥接，谁都有
   if (apiBase !== null && !lookup) tools.push(define("http_request"));
   tools.push(define("run_js"));
+  // 固定只读探针不依赖工作目录；与通用 shell 是两条路，某条受限时仍能完成本机诊断
+  if (apiBase !== null && !lookup) tools.push(define("inspect_computer"));
   // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线。下载也落在同一处
   if (workRoot(conversation) && !lookup)
     tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));
@@ -7519,6 +7555,7 @@ async function runTool(step, conversation, assistant, signal) {
     }
     if (step.name === "read_document") return await readDocumentTool(step, args, conversation);
     if (step.name === "run_js") return await runJsTool(step, args, signal);
+    if (step.name === "inspect_computer") return await inspectComputerTool(step, args, signal);
     if (step.name === "http_request") return await httpRequestTool(step, args, signal);
     if (step.name === "download_file") return await downloadFileTool(step, args, conversation, signal);
     if (step.name === "update_plan") return updatePlanTool(step, args);
@@ -7535,6 +7572,22 @@ async function runTool(step, conversation, assistant, signal) {
       display: friendlyError(String(error.message || error)).slice(0, 60)
     };
   }
+}
+async function inspectComputerTool(step, args, signal) {
+  const sections = Array.isArray(args.sections) ? args.sections : args.sections ? [args.sections] : [],
+    data = await bridge("/api/work/inspect", { sections, detail: args.detail === "full" ? "full" : "summary" }, signal),
+    rows = (data.sections || []).map(section =>
+      section.ok ? `## ${section.title}\n${section.output || "（无结果）"}` : `## ${section.title}\n检查失败：${section.error || "未知错误"}`
+    ),
+    ok = (data.sections || []).filter(section => section.ok).length;
+  step.title = sections.length ? (data.sections || []).map(section => section.title).join("、") : "常规体检";
+  step.output = rows.join("\n\n");
+  step.note = `${ok}/${(data.sections || []).length} 项 · ${(Number(data.durationMs || 0) / 1000).toFixed(1)}s`;
+  return {
+    ok: ok > 0,
+    content: step.output || "没有可用的检查结果",
+    display: step.note
+  };
 }
 // ---- run_js：在隔离沙箱里算一段 JS。沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；
 // 每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉；直连没桥接也能用
@@ -7630,7 +7683,11 @@ async function downloadFileTool(step, args, conversation, signal) {
   const url = String(args.url || "").trim();
   step.url = url;
   step.title = String(args.path || "").trim() || url.split("/").pop() || url;
-  const data = await bridge("/api/work/download", { workdir, roam: roamAllowed(), sandbox: sandboxed(), url, path: args.path }, signal);
+  const data = await bridge(
+    "/api/work/download",
+    { workdir, roam: roamAllowed(), sandbox: sandboxed(), permission: commandPolicyOf(conversation), url, path: args.path },
+    signal
+  );
   step.title = data.path;
   step.note = url;
   step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要
@@ -7662,18 +7719,20 @@ function updatePlanTool(step, args) {
     display: `${done}/${items.length}`
   };
 }
-// run_command 的确认：行默认逐条问，可切成整段对话径行；言也问，但只允许把当前这一答一并放行，下一答重新询问。
+// run_command 三档：问而后行（只读免问）、自动审查（无请求，桥接判放行/拒绝）、径行；言与行都可逐段设置。
 const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),
   // 言（对谈）里只给这四件：对谈的文件工具只为产出成品，逐字替换与代码检索是执事的活
   CHAT_FILE_TOOLS = ["run_command", "write_file", "read_file", "list_files"],
   pendingApprovals = new Map();
-// 只读指令免确认：命令本身只是查看，且不带任何管道、重定向或串联，才算只读
+// 「问而后行」里的本机规则：明确只读才免确认。系统检查纳入白名单；只允许一组纯展示管道，脚本块、远程会话与重定向仍去请示。
 const READ_ONLY_COMMAND =
-  /^(?:git\s+(?:status|log|diff|show|rev-parse|ls-files|remote\s+-v)\b|git\s+branch(?:\s+(?:-a|-r|-v|-vv|--list))*\s*$|(?:ls|dir|tree|pwd|cat|type|head|tail|wc|grep|findstr|which|where|whoami)\b|Get-(?:ChildItem|Content|Location|Command|Item|Date)\b|Select-String\b|(?:node|npm|npx|python|python3|pip|dotnet|java|go|cargo|rustc|ruby|php)\s+(?:-v|-V|--version|version)\s*$)/i;
+    /^(?:git\s+(?:status|log|diff|show|rev-parse|ls-files|remote\s+-v)\b|git\s+branch(?:\s+(?:-a|-r|-v|-vv|--list))*\s*$|(?:ls|dir|tree|pwd|cat|type|head|tail|wc|grep|findstr|which|where|whoami|hostname|uname|uptime|free|df|du|ps|lscpu|lsmem|lsblk|lspci|lsusb|mount|id|groups|sw_vers|vm_stat)\b|Get-(?:ChildItem|Content|Location|Command|Item|ItemProperty|Date|ComputerInfo|CimInstance|WmiObject|Process|Service|NetAdapter|NetIPConfiguration|NetIPAddress|NetRoute|NetTCPConnection|NetUDPEndpoint|DnsClientServerAddress|Volume|Disk|Partition|PhysicalDisk|StorageReliabilityCounter|MpComputerStatus|HotFix|WinEvent|EventLog|ScheduledTask|LocalUser|LocalGroup|Acl|Package)\b|Select-String\b|(?:systeminfo|tasklist|driverquery|ipconfig|netstat)\b|sc(?:\.exe)?\s+query\b|wmic(?:\.exe)?\b[^\n]*\bget\b|wsl(?:\.exe)?\s+(?:--status|--version|-l\b|--list\b)|docker\s+(?:version|info|ps|images)\b|(?:node|npm|npx|python|python3|pip|dotnet|java|go|cargo|rustc|ruby|php|git)\s+(?:-v|-V|--version|version)\s*$)/i,
+  READ_ONLY_PIPE = /^(?:Select-Object|Sort-Object|Format-Table|Format-List|ConvertTo-Json|Measure-Object|Group-Object|findstr|grep|head|tail|wc)\b/i;
 function isReadOnlyCommand(command) {
   const text = String(command || "").trim();
-  if (/[;&|<>`\n]|\$\(/.test(text)) return false;
-  return READ_ONLY_COMMAND.test(text);
+  if (/[;&<>`\n{}]|\$\(|\|\|/.test(text) || /-(?:ComputerName|CimSession|Session|Credential)\b/i.test(text)) return false;
+  const parts = text.split("|").map(part => part.trim());
+  return !!parts[0] && READ_ONLY_COMMAND.test(parts[0]) && parts.slice(1).every(part => READ_ONLY_PIPE.test(part));
 }
 // 本段对话里读过或写过的文件才允许 edit_file：模型必须对着真实内容改，而不是凭记忆猜。
 // 帮手另记一份（按步骤上的 scope 分开）：主模型没亲眼读过帮手改过的文件，要改就得再读一遍，帮手亦然
@@ -7896,7 +7955,7 @@ function approveFrom(button) {
       const job = requestJob(c.id);
       if (job) job.commandAuto = true;
     } else {
-      c.workAuto = true;
+      c.commandPolicy = "auto";
       saveStore();
       renderWorkAuto();
     }
@@ -8187,7 +8246,8 @@ function roamAllowed() {
 async function runWorkTool(step, args, conversation, assistant, signal) {
   const workdir = workRoot(conversation),
     roam = roamAllowed(),
-    sandbox = sandboxed();
+    sandbox = sandboxed(),
+    permission = commandPolicyOf(conversation);
   if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
   const job = requestJob(conversation.id);
   if (step.name === "run_command") {
@@ -8195,8 +8255,8 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     if (!step.title) return { ok: false, content: "指令为空", display: "指令为空" };
     step.readOnly = isReadOnlyCommand(step.title);
     // shell 不是进程隔离：行可把整段对话切成径行；言第一次问，可只放行本答，不能悄悄把今后的对谈都放开
-    const auto = isWork(conversation) ? conversation.workAuto : job?.commandAuto;
-    if (!auto && !step.readOnly) {
+    let policy = job?.commandAuto ? "auto" : commandPolicyOf(conversation);
+    if (policy === "ask" && !step.readOnly) {
       step.approvalScope = isWork(conversation) ? "conversation" : "answer";
       step.status = "pending";
       if (job) setJobLabel(conversation, job, "等待确认");
@@ -8213,7 +8273,13 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
       }
     } else if (job) setJobLabel(conversation, job, "执行中");
-    const data = await bridge("/api/work/run", { workdir, sandbox, command: step.title, timeout: Number(args.timeout) || 120 }, signal);
+    // 用户可能在等待条上把这一段对话切成自动审查或径行；执行前再取一次，不沿用旧档位。
+    policy = job?.commandAuto ? "auto" : commandPolicyOf(conversation);
+    const data = await bridge(
+      "/api/work/run",
+      { workdir, sandbox, permission: policy, command: step.title, timeout: Number(args.timeout) || 120 },
+      signal
+    );
     step.exitCode = data.exitCode;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
     const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
@@ -8226,7 +8292,11 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   }
   if (step.name === "write_file") {
     step.title = String(args.path || "");
-    const data = await bridge("/api/work/write", { workdir, roam, sandbox, path: step.title, content: String(args.content ?? "") }, signal);
+    const data = await bridge(
+      "/api/work/write",
+      { workdir, roam, sandbox, permission, path: step.title, content: String(args.content ?? "") },
+      signal
+    );
     step.title = data.path;
     markSeen(conversation, data.path, step);
     step.note = `${data.lines} 行 · ${formatFileSize(data.bytes)}${data.existed ? " · 覆盖" : ""}`;
@@ -8246,7 +8316,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.path || "");
     const data = await bridge(
       "/api/work/read",
-      { workdir, roam, sandbox, path: step.title, offset: args.offset, limit: args.limit },
+      { workdir, roam, sandbox, permission, path: step.title, offset: args.offset, limit: args.limit },
       signal
     );
     step.title = data.path;
@@ -8268,6 +8338,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         workdir,
         roam,
         sandbox,
+        permission,
         path: step.title,
         old: String(args.old ?? ""),
         new: String(args.new ?? ""),
@@ -8289,7 +8360,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.query || "");
     const data = await bridge(
       "/api/work/search",
-      { workdir, roam, sandbox, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
+      { workdir, roam, sandbox, permission, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
       signal
     );
     const lines = data.matches.map(match => `${match.file}:${match.line}: ${match.text}`);
@@ -8306,7 +8377,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   step.title = `${String(args.path || ".")}${args.pattern ? ` · ${args.pattern}` : ""}`;
   const data = await bridge(
     "/api/work/list",
-    { workdir, roam, sandbox, path: args.path, depth: args.depth, pattern: args.pattern },
+    { workdir, roam, sandbox, permission, path: args.path, depth: args.depth, pattern: args.pattern },
     signal
   );
   step.title = `${data.path}${args.pattern ? ` · ${args.pattern}` : ""}`;
@@ -9063,9 +9134,10 @@ function generalSettingsHtml() {
       : ""
   }<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
 }
-// 工具：沙箱、指令确认、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
+// 工具：沙箱、三档指令权限、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
 function toolsSettingsHtml() {
-  return `<h2>工具</h2><p class="settings-lead">模型能做什么、做到哪一步问一声，都在这里定。</p><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>言与行的指令与文件工具都套着一层：路径不出目录、目录里的机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；在桥接那头守，模型绕不过。这是静态筛查，不是进程隔离。非要让模型动目录之外的东西时再关</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">开</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>指令确认</strong><small>新的行（执事）对话里，会改动状态的指令是先问再跑，还是径直执行；只读指令一律免确认。言固定先问一次，只可让当前这一答径行。行可在输入框旁随时切换，欢迎页填了目录后也有小签</small></div><div class="segmented"><button data-setting="workAutoDefault" data-value="false" class="${store.settings.workAutoDefault ? "" : "active"}">问而后行</button><button data-setting="workAutoDefault" data-value="true" class="${store.settings.workAutoDefault ? "active" : ""}">径行</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>`;
+  const policy = normalizeCommandPolicy(store.settings.commandPolicyDefault);
+  return `<h2>工具</h2><p class="settings-lead">模型能做什么、做到哪一步问一声，都在这里定。</p><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>言与行的指令与文件工具都套着一层：路径不出目录、目录里的机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；在桥接那头守，模型绕不过。这是静态筛查，不是进程隔离。非要让模型动目录之外的东西时再关</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">开</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>指令权限</strong><small>新对话默认档位：问而后行会确认非只读指令；自动审查不弹请求，常规操作放行、明确高风险拒绝；径行不审查。三档都不调用额外模型，沙箱开启时仍优先守住目录与系统边界</small></div><div class="segmented"><button data-setting="commandPolicyDefault" data-value="ask" class="${policy === "ask" ? "active" : ""}">问而后行</button><button data-setting="commandPolicyDefault" data-value="review" class="${policy === "review" ? "active" : ""}">自动审查</button><button data-setting="commandPolicyDefault" data-value="auto" class="${policy === "auto" ? "active" : ""}">径行</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>`;
 }
 function appearanceSettingsHtml() {
   const s = store.settings;
@@ -9306,7 +9378,7 @@ function bindSettingsEvents() {
         store.settings[key] =
           key === "width"
             ? Number(value)
-            : ["autoTitle", "archiveRead", "sandbox", "workAutoDefault"].includes(key)
+            : ["autoTitle", "archiveRead", "sandbox"].includes(key)
               ? value === "true"
               : value;
         saveStore();

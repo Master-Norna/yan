@@ -17,12 +17,12 @@ const welcome = await evalJs(
 await shot("archive-welcome.png");
 const w = JSON.parse(welcome);
 check(
-  "welcome without a directory is 言 with the chip reading 卷宗 and no approval chip",
+  "welcome without a directory is 言 with the chip reading 卷宗 and the command-policy chip available",
   w.mode === "对谈" &&
     w.seal === "言" &&
     !w.chip.includes("hidden") &&
     w.chipText === "卷宗" &&
-    w.approve.includes("hidden") &&
+    !w.approve.includes("hidden") &&
     w.btn === "chat言",
   welcome
 );
@@ -108,7 +108,10 @@ check(
   (await evalJs(`document.querySelector("#chatMeta .chat-meta-bind")?.textContent`)) === "绑定目录"
 );
 check("seal still says 言", (await evalJs(`document.querySelector("#modeSeal").dataset.mode`)) === "chat");
-check("no approval toggle in 言", await evalJs(`document.querySelector("#workAuto").classList.contains("hidden")`));
+check(
+  "the three-mode command-policy toggle is also available in 言",
+  await evalJs(`!document.querySelector("#workAuto").classList.contains("hidden") && document.querySelector("#workAuto").textContent === "问而后行"`)
+);
 
 // ---- 中途绑定：同一段对话，下一问起变为行
 await evalJs(`document.querySelector("#chatMeta .chat-meta-bind").click(); true`);
@@ -126,7 +129,7 @@ check(
   "seal flips to 行",
   (await evalJs(`document.querySelector("#modeSeal").dataset.mode + document.querySelector("#modeSeal .wide").textContent`)) === "work执事"
 );
-check("approval toggle appears once bound", await evalJs(`!document.querySelector("#workAuto").classList.contains("hidden")`));
+check("command-policy toggle remains available once bound", await evalJs(`!document.querySelector("#workAuto").classList.contains("hidden")`));
 check(
   "history now shows the conversation inside a 工 group",
   await evalJs(

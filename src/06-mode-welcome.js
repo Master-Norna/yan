@@ -1,7 +1,7 @@
 // 言 · 言 / 行两态、欢迎页与目录签、开合对话
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // 言与行不是两个入口，而是一段对话有没有绑工作目录：绑了就是行（执事，改动落在那个目录，提示词也是执事的做法）；
-// 没绑就是言（对谈，桥接在线时工具落在卷宗目录，只为产出文件）。目录可以在对话中途绑上或解开，上下文不断
+// 没绑就是言（对谈，文件工具落在卷宗，电脑检查另有固定只读探针）。目录可以在对话中途绑上或解开，上下文不断
 /** @param {Conversation} c */
 function isWork(c) {
   return !!c?.workdir;
@@ -41,17 +41,30 @@ function renderModeSwitch() {
   seal.querySelector(".wide").textContent = work ? "执事" : "对谈";
   seal.title = work ? "行 · 执事：指令与改动落在工作目录" : "言 · 对谈：产出收入卷宗";
 }
-// 问而后行 / 径行：只有行保留整段对话的开关；言的指令确认按每一答处理
+const COMMAND_POLICY_META = {
+  ask: ["问而后行", "已知只读指令直接运行，其余先经确认"],
+  review: ["自动审查", "常规操作直接运行，明确的高风险操作直接拒绝，不弹确认"],
+  auto: ["径行", "不做权限请示；沙箱若开启仍会守住它的边界"]
+};
+function commandPolicyOf(c) {
+  return normalizeCommandPolicy(c?.commandPolicy, normalizeCommandPolicy(store.settings.commandPolicyDefault));
+}
+function nextCommandPolicy(value) {
+  return ({ ask: "review", review: "auto", auto: "ask" })[normalizeCommandPolicy(value)];
+}
+// 三档权限：言与行都可逐段对话设置；按钮循环切换，设置页决定新对话默认值
 function renderWorkAuto() {
   const c = currentConversation(),
     button = $("#workAuto");
   if (!button) return;
-  const show = !!c && isWork(c) && activeProfile()?.tools !== false;
+  const show = !!c && !!workRoot(c) && activeProfile()?.tools !== false;
   button.classList.toggle("hidden", !show);
   if (!show) return;
-  button.textContent = c.workAuto ? "径行" : "问而后行";
-  button.title = c.workAuto ? "径行：指令径直执行" : "问而后行：每条指令先经确认";
-  button.classList.toggle("on", !!c.workAuto);
+  const policy = commandPolicyOf(c),
+    meta = COMMAND_POLICY_META[policy];
+  button.textContent = meta[0];
+  button.title = `${meta[0]}：${meta[1]}`;
+  button.classList.toggle("on", policy !== "ask");
 }
 function renderWelcome() {
   const work = workMode(),
@@ -72,7 +85,7 @@ function renderWelcomeNotice() {
   el.innerHTML = `<span class="seal" aria-hidden="true">始</span><span>尚未接入模型。任何 OpenAI 兼容接口均可使用，配置只存于此浏览器。</span><button type="button" data-open-models>前往设置 →</button>`;
   el.querySelector("[data-open-models]").onclick = () => openSettings("models");
 }
-// 欢迎页输入框上方的一行小签：目录签（空着是言、落在卷宗；填了是行）、问而后行 / 径行
+// 欢迎页输入框上方的一行小签：目录签（空着是言、落在卷宗；填了是行）、新对话的三档指令权限
 function pathTail(dir) {
   const parts = String(dir || "")
     .split(/[\\/]+/)
@@ -91,10 +104,12 @@ function renderChips(work, bridged) {
       : "言：绑定目录与生成文件需本机桥接（start.cmd）";
   dirChip.classList.toggle("on", !!pending);
   const approve = $("#approveChip");
-  approve.classList.toggle("hidden", !work);
-  approve.querySelector(".chip-text").textContent = store.settings.workAutoDefault ? "径行" : "问而后行";
-  approve.classList.toggle("on", !!store.settings.workAutoDefault);
-  approve.title = store.settings.workAutoDefault ? "径行：新对话中的指令径直执行" : "问而后行：新对话中每条指令先经确认";
+  const policy = normalizeCommandPolicy(store.settings.commandPolicyDefault),
+    meta = COMMAND_POLICY_META[policy];
+  approve.classList.toggle("hidden", !bridged);
+  approve.querySelector(".chip-text").textContent = meta[0];
+  approve.classList.toggle("on", policy !== "ask");
+  approve.title = `${meta[0]}：${meta[1]}（新对话默认）`;
 }
 function closeChipPop() {
   document.querySelectorAll(".chip-pop").forEach(pop => pop.remove());
@@ -302,7 +317,7 @@ async function bindWorkdir(c, dir) {
     const prepared = await bridge("/api/work/prepare", { workdir: dir }, AbortSignal.timeout(8000));
     if (prepared.workdir === c.workdir) return;
     c.workdir = prepared.workdir;
-    if (c.workAuto === undefined) c.workAuto = !!store.settings.workAutoDefault;
+    c.commandPolicy = commandPolicyOf(c);
     saveStore();
     render();
     toast(`已绑定 ${pathTail(prepared.workdir)}${prepared.created ? "（新建）" : ""}，此后为行`);
@@ -330,7 +345,7 @@ function setupChips() {
       }
     });
   $("#approveChip").onclick = () => {
-    store.settings.workAutoDefault = !store.settings.workAutoDefault;
+    store.settings.commandPolicyDefault = nextCommandPolicy(store.settings.commandPolicyDefault);
     saveStore();
     renderChips(workMode(), apiBase !== null);
   };
