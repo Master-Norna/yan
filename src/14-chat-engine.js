@@ -218,6 +218,8 @@ async function startTurn(c, user, profile) {
   saveStore();
   if (currentId === c.id) render(true);
   else renderHistory();
+  // 头一问一发出就拟题，与作答并行：侧栏里立刻是个像样的名字，不用等一答写完；没拟成的，那一答收尾时再试
+  if (c.messages.filter(m => m.role === "user").length === 1) void maybeAutoTitle(c, profile);
   await streamReply(c, assistant, profile);
 }
 // 补言：模型作答途中用户再寄来的话。先落在行迹里它到达的那一刻（一步「补言 · 待寄」），到下一回合的边界——
@@ -618,14 +620,14 @@ async function maybeAutoTitle(conversation, profile) {
   if (!store.settings.autoTitle || conversation.titleAuto === false || conversation.titled || titlingIds.has(conversation.id)) return;
   if (quotaExhausted(profile) || (conversation.titleTries || 0) >= 3) return;
   const first = conversation.messages.find(m => m.role === "user"),
-    replies = conversation.messages.filter(m => m.role === "assistant" && m.status === "complete");
-  if (!first || !replies.length) return;
+    reply = conversation.messages.find(m => m.role === "assistant" && m.status === "complete");
+  if (!first) return;
   titlingIds.add(conversation.id);
   conversation.titleTries = (conversation.titleTries || 0) + 1;
   try {
     const ask = prompt("assistant.title", {
-      user: String(first.content || "（附件）").slice(0, 1200),
-      assistant: String(replies[0].content).slice(0, 1200)
+      user: String(first.content || (first.attachments || []).map(a => a.name).join("、") || "（附件）").slice(0, 1200),
+      assistant: reply ? `\n\n助手：${String(reply.content).slice(0, 1200)}` : ""
     });
     const response = await requestChat(profile, [{ role: "user", content: ask }], AbortSignal.timeout(30000), {
       maxTokens: 600,

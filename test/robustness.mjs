@@ -39,12 +39,12 @@ check(
 );
 await shot("robust-trunc.png");
 
-// ---- 拟题：第一次失败不该把 titled 锁死，第二答收尾时再试并成功
-await sleep(600);
+// ---- 拟题：发问时就拟，头一次失败不该把 titled 锁死，那一答收尾时再试并成功
+await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].titled === true`, 8000).catch(() => {});
 let s1 = await store();
 check(
-  "title stays untitled after the first failure",
-  !s1.conversations[0].titled && s1.conversations[0].title.startsWith("TRUNC"),
+  "first titling failed at send time, retried at the end of the first reply and succeeded",
+  s1.conversations[0].titled === true && s1.conversations[0].title === "测试标题" && s1.conversations[0].titleTries === undefined,
   JSON.stringify([s1.conversations[0].titled, s1.conversations[0].title])
 );
 
@@ -84,7 +84,7 @@ check(
   JSON.stringify(s1.conversations[0].messages.at(-1).usage)
 );
 check(
-  "title retried and set on the next reply",
+  "title still set after later replies",
   s1.conversations[0].titled === true && s1.conversations[0].title === "测试标题",
   JSON.stringify([s1.conversations[0].titled, s1.conversations[0].title])
 );
