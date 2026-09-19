@@ -1,4 +1,4 @@
-// 三档权限：自动审查不弹请求，常规工作放行、明确高风险拒绝；原生电脑检查不依赖 shell
+// 三档权限：审而后行不弹请求，常规工作放行、明确高风险拒绝；原生电脑检查不依赖 shell
 import { existsSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 
@@ -12,7 +12,7 @@ await evalJs(
 await send("Page.navigate", { url: PAGE });
 await sleep(900);
 
-check("welcome exposes automatic review as the default third-mode policy", (await evalJs(`document.querySelector("#approveChip .chip-text").textContent`)) === "自动审查");
+check("welcome exposes automatic review as the default third-mode policy", (await evalJs(`document.querySelector("#approveChip .chip-text").textContent`)) === "审而后行");
 await evalJs(
   `document.querySelector("#welcomeInput").value = "POLICY-REVIEW"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
 );
@@ -22,7 +22,7 @@ const state = await evalJs(
 );
 check("automatic review persisted on the conversation and never opened an approval request", state.policy === "review" && (await evalJs(`document.querySelector("#approvalBar").classList.contains("hidden")`)));
 check("ordinary state-changing work was allowed automatically", state.steps[0]?.name === "run_command" && state.steps[0].status === "done" && existsSync(`${TMP}/permission-inspection/review-ok.txt`), JSON.stringify(state.steps[0]));
-check("clear host risk was denied without asking", state.steps[1]?.name === "run_command" && state.steps[1].status === "error" && /自动审查拒绝/.test(state.steps[1].result || ""), JSON.stringify(state.steps[1]));
+check("clear host risk was denied without asking", state.steps[1]?.name === "run_command" && state.steps[1].status === "error" && /审查拒绝/.test(state.steps[1].result || ""), JSON.stringify(state.steps[1]));
 check("native inspection still returned overview and storage after the shell route was denied", state.steps[2]?.name === "inspect_computer" && state.steps[2].status === "done" && /系统概况/.test(state.steps[2].output || "") && /磁盘与存储/.test(state.steps[2].output || ""), JSON.stringify(state.steps[2]));
 
 const labels = [];
@@ -30,11 +30,11 @@ for (let i = 0; i < 3; i++) {
   labels.push(await evalJs(`document.querySelector("#workAuto").textContent`));
   await evalJs(`document.querySelector("#workAuto").click(); true`);
 }
-check("conversation policy cycles through review, auto and ask", labels.join("|") === "自动审查|径行|问而后行", labels.join("|"));
+check("conversation policy cycles through review, auto and ask", labels.join("|") === "审而后行|径行|问而后行", labels.join("|"));
 await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
 await sleep(250);
 await evalJs(`document.querySelector('.tab-btn[data-tab="tools"]')?.click(); true`);
 await sleep(150);
-check("settings offers all three permission modes", (await evalJs(`[...document.querySelectorAll('[data-setting="commandPolicyDefault"]')].map(b => b.textContent).join("|")`)) === "问而后行|自动审查|径行");
+check("settings offers all three permission modes", (await evalJs(`[...document.querySelectorAll('[data-setting="commandPolicyDefault"]')].map(b => b.textContent).join("|")`)) === "问而后行|审而后行|径行");
 
 close();

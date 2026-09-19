@@ -42,9 +42,9 @@ function renderModeSwitch() {
   seal.title = work ? "行 · 执事：指令与改动落在工作目录" : "言 · 对谈：产出收入卷宗";
 }
 const COMMAND_POLICY_META = {
-  ask: ["问而后行", "已知只读指令直接运行，其余先经确认"],
-  review: ["自动审查", "常规操作直接运行，明确的高风险操作直接拒绝，不弹确认"],
-  auto: ["径行", "不做权限请示；沙箱若开启仍会守住它的边界"]
+  ask: ["问而后行", "明确只读的指令径直运行，其余先经确认"],
+  review: ["审而后行", "桥接代为审过：常规改动与整机查看放行，明确的高风险动作当场回绝，不来打扰"],
+  auto: ["径行", "不再审查；沙箱开着时仍守着它那道界"]
 };
 function commandPolicyOf(c) {
   return normalizeCommandPolicy(c?.commandPolicy, normalizeCommandPolicy(store.settings.commandPolicyDefault));

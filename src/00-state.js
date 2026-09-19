@@ -21,7 +21,7 @@
 /** @typedef {{ text: string, messageId?: string }} Quote 引用追问：划选的一段与它所在的消息（旁注锚文本作引文时没有 messageId） */
 /** @typedef {{ id: string, name: string, arguments: string }} ToolCall 流式拼出的一次工具调用 */
 /** @typedef {{ prompt_tokens: number, completion_tokens: number, total_tokens: number }} Usage */
-/** @typedef {"ask"|"review"|"auto"} CommandPolicy 问而后行 / 自动审查 / 径行 */
+/** @typedef {"ask"|"review"|"auto"} CommandPolicy 问而后行 / 审而后行 / 径行 */
 /** @typedef {"running"|"pending"|"done"|"error"|"skipped"} StepStatus */
 /** @typedef {{ question: string, header: string, multi: boolean, options: { label: string, description: string }[] }} AskQuestion */
 /**

@@ -171,7 +171,7 @@ await evalJs(
 );
 await sleep(300);
 await evalJs(`document.querySelector("#workAuto").click(); true`);
-check("first policy step is automatic review", (await evalJs(`document.querySelector("#workAuto").textContent`)) === "自动审查");
+check("first policy step is automatic review", (await evalJs(`document.querySelector("#workAuto").textContent`)) === "审而后行");
 await evalJs(`document.querySelector("#workAuto").click(); true`);
 check("second policy step is auto-run", (await evalJs(`document.querySelector("#workAuto").textContent`)) === "径行");
 mkdirSync(WORK, { recursive: true });

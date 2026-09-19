@@ -438,7 +438,7 @@ function updatePlanTool(step, args) {
     display: `${done}/${items.length}`
   };
 }
-// run_command 三档：问而后行（只读免问）、自动审查（无请求，桥接判放行/拒绝）、径行；言与行都可逐段设置。
+// run_command 三档：问而后行（只读免问）、审而后行（不请示，桥接代判放行或回绝）、径行；言与行都可逐段设置。
 const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),
   // 言（对谈）里只给这四件：对谈的文件工具只为产出成品，逐字替换与代码检索是执事的活
   CHAT_FILE_TOOLS = ["run_command", "write_file", "read_file", "list_files"],
@@ -992,7 +992,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
       }
     } else if (job) setJobLabel(conversation, job, "执行中");
-    // 用户可能在等待条上把这一段对话切成自动审查或径行；执行前再取一次，不沿用旧档位。
+    // 用户可能在等待条上把这一段对话切成审而后行或径行；执行前再取一次，不沿用旧档位。
     policy = job?.commandAuto ? "auto" : commandPolicyOf(conversation);
     const data = await bridge(
       "/api/work/run",
@@ -1002,7 +1002,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.exitCode = data.exitCode;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
     const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
-    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${step.readOnly ? " · 只读免确认" : ""}`;
+    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${step.readOnly && policy === "ask" ? " · 只读免确认" : ""}`;
     return {
       ok: !data.timedOut && data.exitCode === 0,
       content: `退出码：${data.exitCode}${data.timedOut ? "（超时被终止）" : ""}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
