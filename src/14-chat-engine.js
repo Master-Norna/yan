@@ -387,7 +387,7 @@ function stopAllGenerations() {
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // 这一答是不是执事的，记在消息自己身上：生成期间用户可能翻去欢迎页或卷宗，页面上一时没有「当前对话」，时间线不能因此改画法
   assistant.work = isWork(conversation);
-  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number }} */
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number, commandAuto: boolean }} */
   const job = {
     controller: new AbortController(),
     assistantId: assistant.id,
@@ -397,7 +397,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     round: null,
     reading: false,
     roundStart: 0,
-    steerTimer: 0
+    steerTimer: 0,
+    // 言里的 shell 不是进程隔离：用户可在第一次请示时只放行本答，下一答重新询问
+    commandAuto: false
   };
   requestJobs.set(conversation.id, job);
   renderSendButtons();

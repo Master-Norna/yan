@@ -548,7 +548,7 @@ function workStepHtml(step, title) {
     more = "";
   // 等待确认时把整条指令完整摊开，不能只靠单行省略号让用户猜着点头
   if (status === "pending")
-    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre><div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre><div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="${step.approvalScope === "answer" ? "本答径行：本次回答里的后续指令不再询问，下一问恢复" : "径行：此对话中后续指令不再询问"}">${step.approvalScope === "answer" ? "本答径行" : "径行"}</button></div>`;
   else if (step.diff) {
     const del = clampLines(step.diff.old, step.full),
       ins = clampLines(step.diff.new, step.full);

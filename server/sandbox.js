@@ -38,6 +38,14 @@ const FORBIDDEN = [
 // 外联工具：只放行目标全在本机的（curl http://127.0.0.1:8787 这样测本地服务是常事）
 const NET_TOOLS = /(^|[\s;&|(])(curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(\.exe)?(\s|$)/i;
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
+// 文件工具会用 screenPath 拦机密文件；指令通道也得拦显式点名，否则 `Get-Content .env` 能从 shell 绕过去。
+// 这里只认完整的路径片段，避免把 `dotnet user-secrets list`、`env.d.ts` 这类正常参数误判成文件。
+const SECRET_PATH_IN_COMMAND =
+  /(^|[\s"'=;|&(])(?:[^\s"'`;|&<>()]*[\\/])?(?:\.env(?:\.[^\s"'`;|&<>()\\/]*)?|[^\s"'`;|&<>()\\/]*\.(?:pem|key|pfx|p12|jks|keystore)|id_(?:rsa|ed25519|ecdsa|dsa)(?:\.pub)?|[^\s"'`;|&<>()\\/]*\.(?:credentials|secret|secrets)|credentials\.json|secrets\.(?:json|ya?ml|toml))(?=$|[\s"'`;|&)])/i;
+// `.git` 要由 git 自己维护；显式读可以，直接用 shell 写、删、搬则拒绝。脚本内部仍不在静态筛查能力之内。
+const GIT_INTERNAL_PATH = /(^|[\s"'=;|&(])[^\s"'`;|&<>()]*\.git[\\/][^\s"'`;|&<>()]*/i,
+  DIRECT_FILE_MUTATION =
+    /(^|[;&|(\n]\s*|\bcmd(?:\.exe)?\s+\/c\s+)(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|Clear-Content|del|erase|rm|mv|cp|touch|tee)(?:\.exe)?\b|(?:^|[^<])>{1,2}\s*[^&]/im;
 
 function normalizeLower(p) {
   return path
@@ -70,6 +78,9 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const text = String(command || "");
   const win = platform === "win32";
   for (const [pattern, why] of FORBIDDEN) if (pattern.test(text)) return `沙箱拒绝：${why}`;
+  if (SECRET_PATH_IN_COMMAND.test(text)) return "沙箱拒绝：指令不读写 .env、密钥或凭据文件；需要普通配置时请改用不含机密的文件";
+  if (GIT_INTERNAL_PATH.test(text) && DIRECT_FILE_MUTATION.test(text))
+    return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
   if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])/.test(text)) return "沙箱拒绝：路径不用 .. 上溯，一律相对工作目录写";
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");

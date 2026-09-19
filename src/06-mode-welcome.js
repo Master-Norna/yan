@@ -41,7 +41,7 @@ function renderModeSwitch() {
   seal.querySelector(".wide").textContent = work ? "执事" : "对谈";
   seal.title = work ? "行 · 执事：指令与改动落在工作目录" : "言 · 对谈：产出收入卷宗";
 }
-// 问而后行 / 径行：只有行才有这一档；言里落在卷宗的指令径直执行
+// 问而后行 / 径行：只有行保留整段对话的开关；言的指令确认按每一答处理
 function renderWorkAuto() {
   const c = currentConversation(),
     button = $("#workAuto");

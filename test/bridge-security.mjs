@@ -297,6 +297,14 @@ r = await post("/api/work/run", { workdir, sandbox: true, command: "Get-ChildIte
 check("sandbox: .. is refused", r.status === 400 && /沙箱拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
 r = await post("/api/work/run", { workdir, sandbox: true, command: "curl https://example.com" });
 check("sandbox: direct outbound fetch is refused", r.status === 400 && /外联/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-Content .env" : "cat .env" });
+check("sandbox: the command channel cannot read .env", r.status === 400 && /机密|凭据/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+r = await post("/api/work/run", {
+  workdir,
+  sandbox: true,
+  command: win ? "Set-Content .git/config x" : "printf x > .git/config"
+});
+check("sandbox: the command channel cannot directly write .git internals", r.status === 400 && /\.git 内部/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
 r = await post("/api/work/run", { workdir, sandbox: false, command: "Get-ChildItem .." });
 check("without sandbox the same command runs", r.status === 200, `${r.status} ${r.data?.error}`);
 if (win) {

@@ -61,6 +61,20 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("curl $url"), /外联/);
   assert.match(screen("(New-Object Net.WebClient).DownloadString('http://x')"), /外联/);
 });
+test("screenCommand：指令通道也不许显式碰机密文件或直接改 .git 内部", () => {
+  for (const command of [
+    "Get-Content .env",
+    "type src\\.env.local",
+    'cat "keys/id_rsa"',
+    "Get-Content config/secrets.yaml",
+    "Remove-Item certs/site.pfx"
+  ])
+    assert.match(screen(command), /机密|凭据/, command);
+  for (const command of ["Set-Content .git/config x", "Remove-Item .git/hooks/pre-commit", "echo x > .git/config"])
+    assert.match(screen(command), /\.git 内部/, command);
+  for (const command of ["Get-Content .git/config", "git config user.name", "dotnet user-secrets list", "Get-Content env.d.ts"])
+    assert.equal(screen(command), null, command);
+});
 test("sandboxEnv：名字像机密的环境变量不给指令，其余照传", () => {
   const env = sandboxEnv({
     PATH: "1",

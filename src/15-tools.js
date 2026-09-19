@@ -417,7 +417,7 @@ function updatePlanTool(step, args) {
     display: `${done}/${items.length}`
   };
 }
-// 执事模式的四件事。run_command 默认问而后行：步骤卡上给出「运行 / 跳过 / 径行」，模型等用户点了才继续
+// run_command 的确认：行默认逐条问，可切成整段对话径行；言也问，但只允许把当前这一答一并放行，下一答重新询问。
 const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),
   // 言（对谈）里只给这四件：对谈的文件工具只为产出成品，逐字替换与代码检索是执事的活
   CHAT_FILE_TOOLS = ["run_command", "write_file", "read_file", "list_files"],
@@ -610,7 +610,7 @@ function askStepHtml(step) {
 /** @param {Step} step */
 function approvalBarHtml(step) {
   if (step.name !== "ask_user")
-    return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">执事请示 · 运行此指令</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre><div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+    return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">${step.approvalScope === "answer" ? "本机请示" : "执事请示"} · 运行此指令</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre><div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="${step.approvalScope === "answer" ? "本答径行：本次回答里的后续指令不再询问，下一问恢复" : "径行：此对话中后续指令不再询问"}">${step.approvalScope === "answer" ? "本答径行" : "径行"}</button></div>`;
   const questions = step.form?.questions || [];
   const block = (q, i) =>
     `<div class="ask-q" data-q="${i}" data-multi="${q.multi ? "true" : "false"}"><div class="ask-question">${q.header ? `<span class="ask-header">${escapeHtml(q.header)}</span>` : ""}${escapeHtml(q.question)}${q.multi ? `<span class="ask-multi">可多选</span>` : ""}</div><div class="ask-options" role="${q.multi ? "group" : "radiogroup"}">${q.options.map((o, j) => `<button type="button" class="ask-opt" role="${q.multi ? "checkbox" : "radio"}" aria-checked="false" data-opt="${j}"><span class="ask-tick" aria-hidden="true"></span><span class="ask-opt-copy"><strong>${escapeHtml(o.label)}</strong>${o.description ? `<small>${escapeHtml(o.description)}</small>` : ""}</span></button>`).join("")}</div><input class="ask-other" type="text" maxlength="200" placeholder="${q.options.length ? (q.multi ? "还可自行补充" : "或自行填写") : "请填写"}" aria-label="自行填写"></div>`;
@@ -646,9 +646,15 @@ function approveFrom(button) {
     c = currentConversation();
   if (!stepId || !c) return;
   if (button.dataset.approve === "auto") {
-    c.workAuto = true;
-    saveStore();
-    renderWorkAuto();
+    const step = pendingApprovals.get(stepId)?.step;
+    if (step?.approvalScope === "answer") {
+      const job = requestJob(c.id);
+      if (job) job.commandAuto = true;
+    } else {
+      c.workAuto = true;
+      saveStore();
+      renderWorkAuto();
+    }
   }
   settleApproval(stepId, button.dataset.approve !== "skip");
 }
@@ -943,8 +949,10 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.command || "").trim();
     if (!step.title) return { ok: false, content: "指令为空", display: "指令为空" };
     step.readOnly = isReadOnlyCommand(step.title);
-    // 只有行才问；言里落在卷宗的指令径直执行
-    if (isWork(conversation) && !conversation.workAuto && !step.readOnly) {
+    // shell 不是进程隔离：行可把整段对话切成径行；言第一次问，可只放行本答，不能悄悄把今后的对谈都放开
+    const auto = isWork(conversation) ? conversation.workAuto : job?.commandAuto;
+    if (!auto && !step.readOnly) {
+      step.approvalScope = isWork(conversation) ? "conversation" : "answer";
       step.status = "pending";
       if (job) setJobLabel(conversation, job, "等待确认");
       refreshSteps(assistant);
@@ -964,7 +972,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.exitCode = data.exitCode;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
     const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
-    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${step.readOnly && !conversation.workAuto && isWork(conversation) ? " · 只读免确认" : ""}`;
+    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${step.readOnly ? " · 只读免确认" : ""}`;
     return {
       ok: !data.timedOut && data.exitCode === 0,
       content: `退出码：${data.exitCode}${data.timedOut ? "（超时被终止）" : ""}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,

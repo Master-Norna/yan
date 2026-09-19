@@ -57,6 +57,7 @@
  * @property {Array<{ text: string, status: string }>} [plan] update_plan 的清单
  * @property {number} [exitCode]
  * @property {boolean} [readOnly] 只读指令，免确认
+ * @property {"conversation"|"answer"} [approvalScope] 指令确认的放行范围：行可对整段对话径行，言只可放行本答
  * @property {{ old: string, new: string }} [diff]
  * @property {{ path: string, added: number, removed: number, created?: boolean }} [change]
  * @property {number} [at] 调用发起时正文的长度（时间线分组、思绪按轮切分都靠它）
@@ -2449,7 +2450,7 @@ function renderModeSwitch() {
   seal.querySelector(".wide").textContent = work ? "执事" : "对谈";
   seal.title = work ? "行 · 执事：指令与改动落在工作目录" : "言 · 对谈：产出收入卷宗";
 }
-// 问而后行 / 径行：只有行才有这一档；言里落在卷宗的指令径直执行
+// 问而后行 / 径行：只有行保留整段对话的开关；言的指令确认按每一答处理
 function renderWorkAuto() {
   const c = currentConversation(),
     button = $("#workAuto");
@@ -3984,7 +3985,7 @@ function workStepHtml(step, title) {
     more = "";
   // 等待确认时把整条指令完整摊开，不能只靠单行省略号让用户猜着点头
   if (status === "pending")
-    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre><div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre><div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="${step.approvalScope === "answer" ? "本答径行：本次回答里的后续指令不再询问，下一问恢复" : "径行：此对话中后续指令不再询问"}">${step.approvalScope === "answer" ? "本答径行" : "径行"}</button></div>`;
   else if (step.diff) {
     const del = clampLines(step.diff.old, step.full),
       ins = clampLines(step.diff.new, step.full);
@@ -6779,7 +6780,7 @@ function stopAllGenerations() {
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // 这一答是不是执事的，记在消息自己身上：生成期间用户可能翻去欢迎页或卷宗，页面上一时没有「当前对话」，时间线不能因此改画法
   assistant.work = isWork(conversation);
-  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number }} */
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number, commandAuto: boolean }} */
   const job = {
     controller: new AbortController(),
     assistantId: assistant.id,
@@ -6789,7 +6790,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     round: null,
     reading: false,
     roundStart: 0,
-    steerTimer: 0
+    steerTimer: 0,
+    // 言里的 shell 不是进程隔离：用户可在第一次请示时只放行本答，下一答重新询问
+    commandAuto: false
   };
   requestJobs.set(conversation.id, job);
   renderSendButtons();
@@ -7659,7 +7662,7 @@ function updatePlanTool(step, args) {
     display: `${done}/${items.length}`
   };
 }
-// 执事模式的四件事。run_command 默认问而后行：步骤卡上给出「运行 / 跳过 / 径行」，模型等用户点了才继续
+// run_command 的确认：行默认逐条问，可切成整段对话径行；言也问，但只允许把当前这一答一并放行，下一答重新询问。
 const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),
   // 言（对谈）里只给这四件：对谈的文件工具只为产出成品，逐字替换与代码检索是执事的活
   CHAT_FILE_TOOLS = ["run_command", "write_file", "read_file", "list_files"],
@@ -7852,7 +7855,7 @@ function askStepHtml(step) {
 /** @param {Step} step */
 function approvalBarHtml(step) {
   if (step.name !== "ask_user")
-    return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">执事请示 · 运行此指令</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre><div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+    return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">${step.approvalScope === "answer" ? "本机请示" : "执事请示"} · 运行此指令</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre><div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="${step.approvalScope === "answer" ? "本答径行：本次回答里的后续指令不再询问，下一问恢复" : "径行：此对话中后续指令不再询问"}">${step.approvalScope === "answer" ? "本答径行" : "径行"}</button></div>`;
   const questions = step.form?.questions || [];
   const block = (q, i) =>
     `<div class="ask-q" data-q="${i}" data-multi="${q.multi ? "true" : "false"}"><div class="ask-question">${q.header ? `<span class="ask-header">${escapeHtml(q.header)}</span>` : ""}${escapeHtml(q.question)}${q.multi ? `<span class="ask-multi">可多选</span>` : ""}</div><div class="ask-options" role="${q.multi ? "group" : "radiogroup"}">${q.options.map((o, j) => `<button type="button" class="ask-opt" role="${q.multi ? "checkbox" : "radio"}" aria-checked="false" data-opt="${j}"><span class="ask-tick" aria-hidden="true"></span><span class="ask-opt-copy"><strong>${escapeHtml(o.label)}</strong>${o.description ? `<small>${escapeHtml(o.description)}</small>` : ""}</span></button>`).join("")}</div><input class="ask-other" type="text" maxlength="200" placeholder="${q.options.length ? (q.multi ? "还可自行补充" : "或自行填写") : "请填写"}" aria-label="自行填写"></div>`;
@@ -7888,9 +7891,15 @@ function approveFrom(button) {
     c = currentConversation();
   if (!stepId || !c) return;
   if (button.dataset.approve === "auto") {
-    c.workAuto = true;
-    saveStore();
-    renderWorkAuto();
+    const step = pendingApprovals.get(stepId)?.step;
+    if (step?.approvalScope === "answer") {
+      const job = requestJob(c.id);
+      if (job) job.commandAuto = true;
+    } else {
+      c.workAuto = true;
+      saveStore();
+      renderWorkAuto();
+    }
   }
   settleApproval(stepId, button.dataset.approve !== "skip");
 }
@@ -8185,8 +8194,10 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.command || "").trim();
     if (!step.title) return { ok: false, content: "指令为空", display: "指令为空" };
     step.readOnly = isReadOnlyCommand(step.title);
-    // 只有行才问；言里落在卷宗的指令径直执行
-    if (isWork(conversation) && !conversation.workAuto && !step.readOnly) {
+    // shell 不是进程隔离：行可把整段对话切成径行；言第一次问，可只放行本答，不能悄悄把今后的对谈都放开
+    const auto = isWork(conversation) ? conversation.workAuto : job?.commandAuto;
+    if (!auto && !step.readOnly) {
+      step.approvalScope = isWork(conversation) ? "conversation" : "answer";
       step.status = "pending";
       if (job) setJobLabel(conversation, job, "等待确认");
       refreshSteps(assistant);
@@ -8206,7 +8217,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.exitCode = data.exitCode;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
     const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
-    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${step.readOnly && !conversation.workAuto && isWork(conversation) ? " · 只读免确认" : ""}`;
+    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${step.readOnly ? " · 只读免确认" : ""}`;
     return {
       ok: !data.timedOut && data.exitCode === 0,
       content: `退出码：${data.exitCode}${data.timedOut ? "（超时被终止）" : ""}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
@@ -9054,7 +9065,7 @@ function generalSettingsHtml() {
 }
 // 工具：沙箱、指令确认、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
 function toolsSettingsHtml() {
-  return `<h2>工具</h2><p class="settings-lead">模型能做什么、做到哪一步问一声，都在这里定。</p><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>言与行的指令与文件工具都套着一层：路径不出目录、目录里的机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；在桥接那头守，模型绕不过。这是静态筛查，不是进程隔离。非要让模型动目录之外的东西时再关</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">开</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>指令确认</strong><small>新的行（执事）对话里，会改动状态的指令是先问再跑，还是径直执行；只读指令一律免确认。对话里输入框旁可随时切换，欢迎页填了目录后也有小签</small></div><div class="segmented"><button data-setting="workAutoDefault" data-value="false" class="${store.settings.workAutoDefault ? "" : "active"}">问而后行</button><button data-setting="workAutoDefault" data-value="true" class="${store.settings.workAutoDefault ? "active" : ""}">径行</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>`;
+  return `<h2>工具</h2><p class="settings-lead">模型能做什么、做到哪一步问一声，都在这里定。</p><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>言与行的指令与文件工具都套着一层：路径不出目录、目录里的机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；在桥接那头守，模型绕不过。这是静态筛查，不是进程隔离。非要让模型动目录之外的东西时再关</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">开</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>指令确认</strong><small>新的行（执事）对话里，会改动状态的指令是先问再跑，还是径直执行；只读指令一律免确认。言固定先问一次，只可让当前这一答径行。行可在输入框旁随时切换，欢迎页填了目录后也有小签</small></div><div class="segmented"><button data-setting="workAutoDefault" data-value="false" class="${store.settings.workAutoDefault ? "" : "active"}">问而后行</button><button data-setting="workAutoDefault" data-value="true" class="${store.settings.workAutoDefault ? "active" : ""}">径行</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>`;
 }
 function appearanceSettingsHtml() {
   const s = store.settings;

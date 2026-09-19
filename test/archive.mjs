@@ -1,4 +1,4 @@
-// 言 / 行合一：没绑目录的对话是言——桥接在线时工具落在卷宗目录（设置里改过的位置），脚本落在隐藏的草稿目录、指令不问；
+// 言 / 行合一：没绑目录的对话是言——桥接在线时工具落在卷宗目录（设置里改过的位置），脚本落在隐藏的草稿目录、非只读指令先问；
 // 中途绑上目录即为行，提示词随之而变，解开又回到言；卷宗页面即目录的视图，不列草稿
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { connect, check, sleep, PAGE, WORK, TMP } from "./lib.mjs";
@@ -42,7 +42,7 @@ const convId = await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).con
 const scratch = `${ARCHIVE}/.草稿/${convId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 12)}`;
 check("scratch directory prepared for the conversation", existsSync(scratch), scratch);
 check(
-  "command in 言 ran without asking",
+  "the file tool in 言 does not show a shell-command approval",
   await evalJs(
     `!document.querySelector('[data-approve]') && [...document.querySelectorAll(".tool-step")].every(s => s.dataset.status === "done")`
   )

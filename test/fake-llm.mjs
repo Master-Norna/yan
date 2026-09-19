@@ -626,6 +626,26 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      if (typeof lastUser === "string" && lastUser.includes("CHAT-AUTO")) {
+        const lastUserIndex = msgs.findLastIndex(m => m.role === "user"),
+          turnToolResults = msgs.slice(lastUserIndex + 1).filter(m => m.role === "tool");
+        if (turnToolResults.length < 2)
+          return sse(res, [
+            delta({ content: turnToolResults.length ? "再跑一条。" : "先跑一条。" }),
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: `call_chat_${turnToolResults.length}`,
+                  type: "function",
+                  function: { name: "run_command", arguments: JSON.stringify({ command: `Write-Output 'chat-${turnToolResults.length + 1}'` }) }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [delta({ content: "CHAT-AUTO done" }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
       if (!toolResults.length)
         return sse(res, [
           delta({ content: "我先执行一条指令。" }),
