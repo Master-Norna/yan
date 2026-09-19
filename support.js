@@ -4170,9 +4170,10 @@ function refreshSteps(assistant) {
     rollText(stack.querySelector(".tool-stack-meta"), trailMeta(assistant));
     stack.dataset.state = assistant.status || "complete";
     const work = trailWork(assistant),
-      bodyHost = stack.querySelector(".tool-stack-body");
+      bodyHost = stack.querySelector(".tool-stack-body"),
+      groups = work ? trailGroups(assistant) : [];
     if (work)
-      for (const group of trailGroups(assistant)) {
+      for (const group of groups) {
         if (bodyHost.querySelector(`.trail-group[data-at="${group.at}"]`)) continue;
         // 正在承接这一轮话的「进行中」分组就地转正：话按最终文本重画一遍（流式可能还差几个字），再挂上步骤容器
         const live = bodyHost.querySelector(":scope > .trail-group.trail-live");
@@ -4188,6 +4189,13 @@ function refreshSteps(assistant) {
         const note = (live || bodyHost.lastElementChild).querySelector(".trail-note");
         if (note) renderEnhancements(note);
       }
+    // 分组是按 at 定位的，而 at 会变：一答收尾时裁掉正文开头的空行，所有步骤的 at 都往前挪一截（见 streamReply 的 leadTrim）。
+    // 键一变就当成新分组重画一份，旧的那份连同里面画好的步骤还留在页上——同一次差遣便出现两遍。落单的分组撤掉
+    if (work) {
+      const alive = new Set(groups.map(group => String(group.at)));
+      for (const el of bodyHost.querySelectorAll(":scope > .trail-group"))
+        if (!el.classList.contains("trail-live") && !alive.has(el.dataset.at)) el.remove();
+    }
     if (work && assistant.status !== "streaming") bodyHost.querySelector(":scope > .trail-group.trail-live")?.remove();
     // 时间线消息里，行迹之前的顶层思绪是第一轮留下的旧块（那段思绪已收进第一个分组），撤掉；最后一轮的思绪收尾时画在行迹之后
     if (work) {

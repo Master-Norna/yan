@@ -382,6 +382,9 @@ http
           ];
         if (n === 0)
           return sse(res, [
+            // 主模型也先吐几个空行：收尾裁掉后所有步骤的 at 都会前移，分组的键随之变。
+            // 页面若不撤掉落单的旧分组，同一次差遣就会画两遍
+            delta({ content: "\n\n\n" }),
             delta({ content: "主 1：派两名帮手。" }),
             delta({
               tool_calls: [

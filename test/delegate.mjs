@@ -92,6 +92,15 @@ check(
   JSON.stringify(card)
 );
 check("marker meta counts helper steps and files", /2 步 · 改 1 个文件 · \d+ 秒/.test(card.meta), card.meta);
+// 一答收尾时步骤的 at 会前移，分组的键随之变。页面若不撤掉落单的旧分组，同一次差遣就画两遍
+const painted = await evalJs(
+  `JSON.stringify({ markers: document.querySelectorAll(".message.assistant .tool-step-delegate").length, groups: document.querySelectorAll(".message.assistant .tool-stack-body > .trail-group").length, steps: JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].messages.at(-1).steps.length })`
+);
+check(
+  "each step is painted once — stale groups are dropped when offsets shift",
+  JSON.parse(painted).markers === 2 && JSON.parse(painted).groups <= JSON.parse(painted).steps,
+  painted
+);
 check("report stays in the trail — that is what the main model consumed", card.report.startsWith("回报：已把 return 1 改为 return 2"), card.report);
 // 点那枚签在右侧开面板，帮手做过的两步都在里面
 await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
