@@ -96,6 +96,15 @@ check(
   JSON.stringify(panel)
 );
 check("panel head names the errand and its tally", /改 a\.js · 2 步 · 改 1 个文件/.test(panel.sub), panel.sub);
+// 首轮吐的空行会被裁掉，步骤的偏移得跟着前移；不然每一轮说的话都错位、被切在字中间
+const saidPerRound = await evalJs(
+  `JSON.stringify([...document.querySelectorAll("#helperPanel .sub-timeline > .trail-group > .trail-note")].map(n => n.textContent.trim()))`
+);
+check(
+  "each round's words stay whole — offsets follow the trimmed leading blank lines",
+  JSON.parse(saidPerRound).join("|") === "帮手第 1 步。|帮手第 2 步。",
+  saidPerRound
+);
 check("panel lists both errands to switch between", panel.nav === 2, String(panel.nav));
 check("helper had its own system prompt and no delegate / ask_user", card.report.includes("sys:yes|delegate:no|ask:no"), card.report);
 check("helper can read memory but not write it", card.report.includes("|memw:0|memr:2|"), card.report);

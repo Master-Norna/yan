@@ -8247,7 +8247,11 @@ async function runDelegate(step, args, conversation, assistant, signal) {
     sub.usage = usage.total_tokens ? usage : null;
     sub.durationMs = Math.round(performance.now() - started);
     sub.report = sub.content.slice(reportStart).trim();
+    // 裁掉开头的空行就得把步骤记的偏移一起前移，否则帮手那条时间线上每一段话都错位、被切在字中间
+    // （主循环里是补偿了的，见 streamReply 的 leadTrim）
+    const leadTrim = sub.content.match(/^\n*/)[0].length;
     sub.content = sub.content.replace(/^\n+|\n+$/g, "");
+    if (leadTrim) for (const s of sub.steps) if (typeof s.at === "number") s.at = Math.max(0, s.at - leadTrim);
     if (job) setJobLabel(conversation, job, "生成中");
     paint();
   }

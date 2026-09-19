@@ -361,7 +361,9 @@ http
             delta({ tool_calls: [{ index: 0, id: `call_s${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] }),
             delta({}, { usage: { total_tokens: 7 } })
           ];
-        if (n === 0) return sse(res, call("read_file", { path: "src/a.js" }));
+        // 头一轮先吐几个空行再说话：真模型常这样。正文最后会被裁掉开头的空行，
+        // 步骤记的偏移若不跟着前移，这条时间线上每段话都会错位、被切在字中间
+        if (n === 0) return sse(res, [delta({ content: "\n\n\n\n\n" }), ...call("read_file", { path: "src/a.js" })]);
         if (n === 1) return sse(res, call("edit_file", { path: "src/a.js", old: "return 1;", new: "return 2;" }));
         return sse(res, [
           delta({
