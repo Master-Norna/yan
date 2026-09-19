@@ -161,7 +161,6 @@
  * @property {string} activeProfileId
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
- * @property {string[]} recentWorkdirs
  * @property {string[]} collapsedRepos
  * @property {string} reasoning 新对话默认的思考档位
  * @property {boolean} workAutoDefault
@@ -242,7 +241,6 @@ const defaultStore = {
     activeProfileId: "",
     autoTitle: true,
     pendingWorkdir: "",
-    recentWorkdirs: [],
     collapsedRepos: [],
     reasoning: "",
     workAutoDefault: false,
@@ -2441,9 +2439,6 @@ function scratchRel(c) {
 function workRoot(c) {
   return c?.workdir || (apiBase !== null ? archiveDir() : "");
 }
-function rememberWorkdir(dir) {
-  store.settings.recentWorkdirs = [dir, ...(store.settings.recentWorkdirs || []).filter(item => item !== dir)].slice(0, 8);
-}
 // 侧栏的一枚印：只显示当前的态（言 / 行），改态的入口是目录签
 function renderModeSwitch() {
   const work = workMode(),
@@ -2648,7 +2643,8 @@ function openHistoryMenu(id, anchor) {
     }
   });
 }
-// 目录签的弹层，欢迎页与对话页共用：输入 / 选择 / 最近；live 时每敲一字都落值（欢迎页记到待绑目录），否则回车、点选才落值（对话页要经桥接绑定）
+// 目录签的弹层，欢迎页与对话页共用：输入 / 选择；不列「最近」——删掉的目录会留在那儿、点了又能把它绑回来，每次自己选。
+// live 时每敲一字都落值（欢迎页记到待绑目录），否则回车、点选才落值（对话页要经桥接绑定）
 // floating：不挂在 host 里而是浮在锚点旁（侧栏历史条目的「绑定目录」用），其余一样
 function openWorkdirPop({ anchor, host, value, live, bound, onCommit, floating = false }) {
   if (apiBase === null) {
@@ -2656,8 +2652,7 @@ function openWorkdirPop({ anchor, host, value, live, bound, onCommit, floating =
     return toast("绑定目录需要本机桥接，请先运行 start.cmd");
   }
   if ((floating ? document : host).querySelector(".chip-pop[data-kind=workdir]")) return closeChipPop();
-  const recent = store.settings.recentWorkdirs || [];
-  const html = `<div class="chip-pop-row"><input id="workdirInput" class="field" spellcheck="false" autocomplete="off" placeholder="${live ? "留空则为言" : "输入或选择目录"}" value="${escapeHtml(value || "")}"><button id="workdirPick" class="outline-btn" type="button">选择…</button>${live ? "" : `<button id="workdirCommit" class="outline-btn" type="button">${bound ? "更换" : "绑定"}</button>`}</div>${recent.length ? `<div class="chip-pop-list"><div class="chip-pop-label">最近</div>${recent.map(dir => `<button type="button" data-dir="${escapeHtml(dir)}" title="${escapeHtml(dir)}">${escapeHtml(dir)}</button>`).join("")}</div>` : ""}${bound ? `<button type="button" class="chip-pop-unbind" data-unbind>解开目录，回到言</button>` : live ? `<button type="button" class="chip-pop-unbind${value ? "" : " hidden"}" data-unbind>不绑目录，回到言</button>` : ""}<small>指令由 ${escapeHtml(bootstrap.work?.shell || "本机 shell")} 执行；${live ? `不绑目录时落在卷宗 ${escapeHtml(archiveDir())}` : "上下文不变，此后的改动落在该目录"}</small>`;
+  const html = `<div class="chip-pop-row"><input id="workdirInput" class="field" spellcheck="false" autocomplete="off" placeholder="${live ? "留空则为言" : "输入或选择目录"}" value="${escapeHtml(value || "")}"><button id="workdirPick" class="outline-btn" type="button">选择…</button>${live ? "" : `<button id="workdirCommit" class="outline-btn" type="button">${bound ? "更换" : "绑定"}</button>`}</div>${bound ? `<button type="button" class="chip-pop-unbind" data-unbind>解开目录，回到言</button>` : live ? `<button type="button" class="chip-pop-unbind${value ? "" : " hidden"}" data-unbind>不绑目录，回到言</button>` : ""}<small>指令由 ${escapeHtml(bootstrap.work?.shell || "本机 shell")} 执行；${live ? `不绑目录时落在卷宗 ${escapeHtml(archiveDir())}` : "上下文不变，此后的改动落在该目录"}</small>`;
   const pop = floating ? openFloatingPop(anchor, html, { align: "right", menu: false }) : openChipPop(anchor, host, html);
   pop.dataset.kind = "workdir";
   const input = pop.querySelector("#workdirInput"),
@@ -2677,13 +2672,6 @@ function openWorkdirPop({ anchor, host, value, live, bound, onCommit, floating =
   });
   pop.querySelector("#workdirCommit")?.addEventListener("click", () => commit(input.value, true));
   pop.querySelector("[data-unbind]")?.addEventListener("click", () => commit("", true));
-  pop.querySelectorAll("[data-dir]").forEach(
-    button =>
-      (button.onclick = () => {
-        input.value = button.dataset.dir;
-        commit(input.value, true);
-      })
-  );
   // 「选择…」：由桥接弹出本机的文件夹对话框，选好回填
   pop.querySelector("#workdirPick").onclick = async () => {
     const button = pop.querySelector("#workdirPick");
@@ -2723,7 +2711,6 @@ async function bindWorkdir(c, dir) {
     if (prepared.workdir === c.workdir) return;
     c.workdir = prepared.workdir;
     if (c.workAuto === undefined) c.workAuto = !!store.settings.workAutoDefault;
-    rememberWorkdir(prepared.workdir);
     saveStore();
     render();
     toast(`已绑定 ${pathTail(prepared.workdir)}${prepared.created ? "（新建）" : ""}，此后为行`);
@@ -6583,7 +6570,6 @@ async function sendOrStop() {
       reasoning: store.settings.reasoning || ""
     };
     if (!(await ensureWorkReady(c))) return;
-    if (c.workdir) rememberWorkdir(c.workdir);
     closeChipPop();
     store.conversations.unshift(c);
     currentId = c.id;
