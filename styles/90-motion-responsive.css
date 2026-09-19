@@ -645,13 +645,8 @@ body {
   overscroll-behavior-y: contain;
   overflow-anchor: none;
 }
-.reasoning-body,
-.tool-stack-body,
-.source-grid,
-.html-app-source,
-.viz-source {
-  overscroll-behavior: contain;
-}
+/* 思绪、行迹、源码这些块以前设了 overscroll-behavior: contain——它们是 overflow: auto 的容器，内容不够高不能滚时，
+   浏览器照样把滚轮截在里面不往外传，鼠标停在上面页面就滚不动，像那一块失灵了。去掉；正文那侧的 chat-scroll 照旧 */
 .work-mode .chat-scroll {
   overflow: hidden;
 }
