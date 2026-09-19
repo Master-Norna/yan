@@ -36,6 +36,7 @@
  * @property {"streaming"|"complete"|"stopped"|"error"} status
  * @property {Usage|null} usage
  * @property {number} rounds
+ * @property {{ thinking: string, signature: string }[]|null} [thinkingBlocks]
  * @property {string} [report] 最后一轮说的话，即交回主模型的回报
  * @property {number} [durationMs]
  * @property {ToolCall[]|null} [toolCalls]
@@ -85,6 +86,7 @@
  * @property {string} [reasoning]
  * @property {Step[]} [steps]
  * @property {ToolCall[]|null} [toolCalls] 只在流式期间用
+ * @property {{ thinking: string, signature: string }[]|null} [thinkingBlocks] 这一轮的思考块（Anthropic 带工具调用时要回传），只在流式期间用
  * @property {Usage|null} [usage]
  * @property {number} [tokenCount] 这一答耗的墨
  * @property {boolean} [tokenEstimated]
@@ -132,6 +134,7 @@
  * @property {string} model
  * @property {string} [baseUrl]
  * @property {string} [apiKey]
+ * @property {"openai"|"anthropic"} [api] 接口类型；没写按地址认（anthropic.com）
  * @property {number} temperature
  * @property {number} maxTokens
  * @property {string} quota 用量上限，如 "100k"
@@ -3627,7 +3630,10 @@ function stepHtml(step) {
         : status === "error"
           ? `<span class="tool-state failed" aria-label="失败">×</span>`
           : `<span class="tool-state done" aria-label="完成">✓</span>`;
-  return `<div class="tool-step" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
+  // 检索、翻阅这类查阅步骤默认折起：一答里几十次检索，命中全摊开要占一整屏；标题行有关键词与结果数，点开才看命中
+  const foldable = !!body,
+    folded = foldable && (step.expanded === undefined ? true : !step.expanded);
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开" : "收起"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
 }
 // 差遣卡片：帮手自己的一条小时间线——每轮的思绪、说的话、各步，与主行迹同一套画法；进行中时最新的思绪与话跟着流，
 // 做完折成一行「帮手 · n 步」，只留回报在外。首次画整张；此后由 syncDelegateCard 就地更新
@@ -3895,13 +3901,18 @@ function stepStateHtml(status) {
           ? `<span class="tool-state failed" aria-label="失败">×</span>`
           : `<span class="tool-state done" aria-label="完成">✓</span>`;
 }
-// 步骤输出的露出规矩：默认只露前 10 行（diff 两侧各 10 行），底下一行「展开全部」；报错的默认折起，点标题行才看；
-// 步骤上记两位：expanded（折起 / 摊开，未记则按状态定）与 full（全部 / 前 10 行），重画不丢
-const STEP_SHOW_LINES = 10;
+// 步骤输出的露出规矩：默认只露前 10 行（diff 两侧各 10 行）、且不超过 1200 字——一整页 HTML 挤在一行里也算一行，
+// 光按行数拦不住；底下一行「展开全部」。报错的默认折起，点标题行才看；
+// 步骤上记两位：expanded（折起 / 摊开，未记则按状态定）与 full（全部 / 开头），重画不丢
+const STEP_SHOW_LINES = 10,
+  STEP_SHOW_CHARS = 1200;
 function clampLines(text, full) {
-  const lines = String(text || "").split("\n"),
-    clipped = !full && lines.length > STEP_SHOW_LINES;
-  return { text: clipped ? lines.slice(0, STEP_SHOW_LINES).join("\n") : lines.join("\n"), total: lines.length, clipped };
+  const whole = String(text || ""),
+    lines = whole.split("\n");
+  if (full) return { text: whole, total: lines.length, chars: whole.length, clipped: false };
+  let kept = lines.slice(0, STEP_SHOW_LINES).join("\n");
+  if (kept.length > STEP_SHOW_CHARS) kept = `${kept.slice(0, STEP_SHOW_CHARS)}…`;
+  return { text: kept, total: lines.length, chars: whole.length, clipped: kept !== whole };
 }
 /** @param {Step} step */
 function workStepHtml(step, title) {
@@ -3918,12 +3929,13 @@ function workStepHtml(step, title) {
       ins = clampLines(step.diff.new, step.full);
     body = `<div class="tool-diff"><pre class="tool-output diff-del">${escapeHtml(del.text)}</pre><pre class="tool-output diff-ins">${escapeHtml(ins.text)}</pre></div>`;
     if (del.clipped || ins.clipped) more = `展开全部 · −${del.total} +${ins.total} 行`;
-    else if (step.full && Math.max(del.total, ins.total) > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
+    else if (step.full && (Math.max(del.total, ins.total) > STEP_SHOW_LINES || Math.max(del.chars, ins.chars) > STEP_SHOW_CHARS))
+      more = "只看开头";
   } else if (step.output) {
     const out = clampLines(step.output, step.full);
     body = `<pre class="tool-output">${escapeHtml(out.text)}</pre>`;
-    if (out.clipped) more = `展开全部 · ${out.total} 行`;
-    else if (step.full && out.total > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
+    if (out.clipped) more = `展开全部 · ${out.total > 1 ? `${out.total} 行` : `${out.chars} 字`}`;
+    else if (step.full && (out.total > STEP_SHOW_LINES || out.chars > STEP_SHOW_CHARS)) more = "只看开头";
   } else if (step.note && !command) body = `<div class="tool-note">${escapeHtml(step.note)}</div>`;
   if (more) body += `<button type="button" class="tool-more" data-step-more>${more}</button>`;
   const foldable = !!body && status !== "pending",
@@ -4843,7 +4855,8 @@ async function streamSideReply(conversation, thread, assistant, profile) {
       history.push({
         role: "assistant",
         content: assistant.content.slice(roundStart) || null,
-        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } }))
+        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } })),
+        ...(assistant.thinkingBlocks?.length ? { thinking_blocks: assistant.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
@@ -6525,6 +6538,8 @@ async function startTurn(c, user, profile) {
   saveStore();
   if (currentId === c.id) render(true);
   else renderHistory();
+  // 头一问一发出就拟题，与作答并行：侧栏里立刻是个像样的名字，不用等一答写完；没拟成的，那一答收尾时再试
+  if (c.messages.filter(m => m.role === "user").length === 1) void maybeAutoTitle(c, profile);
   await streamReply(c, assistant, profile);
 }
 // 补言：模型作答途中用户再寄来的话。先落在行迹里它到达的那一刻（一步「补言 · 待寄」），到下一回合的边界——
@@ -6740,7 +6755,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       history.push({
         role: "assistant",
         content: assistant.content.slice(roundStart) || null,
-        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } }))
+        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } })),
+        ...(assistant.thinkingBlocks?.length ? { thinking_blocks: assistant.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
@@ -6812,10 +6828,12 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
  * @param {Message|SubAgent} target 主消息或帮手（拟题 / 压缩的临时对象也按 Message 的样子造）
  */
 async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
+  target.thinkingBlocks = null;
   const response = await requestChat(profile, history, signal, overrides);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    const message = data.error || `请求失败（${response.status}）`;
+    // 桥接回的 error 是一句话；直连 Anthropic 回的是 { error: { message } }
+    const message = (typeof data.error === "string" ? data.error : data.error?.message) || `请求失败（${response.status}）`;
     // 接口不认这个思考档位：记下它认的几档，换成最接近的一档重发一次；再不行才算失败
     const sent = reasoningFields(profile, overrides.reasoning).reasoning_effort;
     if (!retried && sent && learnReasoningLevels(profile, message, sent)) {
@@ -6922,14 +6940,14 @@ async function maybeAutoTitle(conversation, profile) {
   if (!store.settings.autoTitle || conversation.titleAuto === false || conversation.titled || titlingIds.has(conversation.id)) return;
   if (quotaExhausted(profile) || (conversation.titleTries || 0) >= 3) return;
   const first = conversation.messages.find(m => m.role === "user"),
-    replies = conversation.messages.filter(m => m.role === "assistant" && m.status === "complete");
-  if (!first || !replies.length) return;
+    reply = conversation.messages.find(m => m.role === "assistant" && m.status === "complete");
+  if (!first) return;
   titlingIds.add(conversation.id);
   conversation.titleTries = (conversation.titleTries || 0) + 1;
   try {
     const ask = prompt("assistant.title", {
-      user: String(first.content || "（附件）").slice(0, 1200),
-      assistant: String(replies[0].content).slice(0, 1200)
+      user: String(first.content || (first.attachments || []).map(a => a.name).join("、") || "（附件）").slice(0, 1200),
+      assistant: reply ? `\n\n助手：${String(reply.content).slice(0, 1200)}` : ""
     });
     const response = await requestChat(profile, [{ role: "user", content: ask }], AbortSignal.timeout(30000), {
       maxTokens: 600,
@@ -7756,7 +7774,8 @@ async function runDelegate(step, args, conversation, assistant, signal) {
       history.push({
         role: "assistant",
         content: sub.content.slice(reportStart) || null,
-        tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: s.arguments } }))
+        tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: s.arguments } })),
+        ...(sub.thinkingBlocks?.length ? { thinking_blocks: sub.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, signal, toolCache);
       for (const s of steps) history.push({ role: "tool", tool_call_id: s.id, content: outcomes.get(s.id) ?? "" });
@@ -8227,20 +8246,43 @@ async function requestChat(profile, messages, signal, overrides = {}) {
       signal
     });
   if (profile.source === "server") throw Error("本机桥接未启动");
+  const payload = {
+    model: profile.model,
+    messages: parameters.systemPrompt ? [{ role: "system", content: parameters.systemPrompt }, ...messages] : messages,
+    stream: true,
+    stream_options: { include_usage: true },
+    temperature: parameters.temperature,
+    max_tokens: parameters.maxTokens,
+    ...extras
+  };
+  // 直连 Anthropic：请求换成 Messages API 的，回来的事件流换回 OpenAI 风格，后面的读法不变
+  if (anthropicLike(profile)) {
+    const upstream = await fetch(anthropicEndpoint(profile.baseUrl), {
+      method: "POST",
+      headers: anthropicHeaders(profile.apiKey, true),
+      body: JSON.stringify(anthropicRequest(payload)),
+      signal
+    });
+    if (!upstream.ok || !upstream.body) return upstream;
+    return new Response(upstream.body.pipeThrough(anthropicToOpenAiStream(profile.model)), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" }
+    });
+  }
+  payload.messages = payload.messages.map(m => (m.thinking_blocks ? { ...m, thinking_blocks: undefined } : m));
   return fetch(completionEndpoint(profile.baseUrl), {
     method: "POST",
     headers: directHeaders(profile),
-    body: JSON.stringify({
-      model: profile.model,
-      messages: parameters.systemPrompt ? [{ role: "system", content: parameters.systemPrompt }, ...messages] : messages,
-      stream: true,
-      stream_options: { include_usage: true },
-      temperature: parameters.temperature,
-      max_tokens: parameters.maxTokens,
-      ...extras
-    }),
+    body: JSON.stringify(payload),
     signal
   });
+}
+// 直连时列模型的地址与请求头：Anthropic 与 OpenAI 兼容的各一套
+/** @param {Profile} profile */
+function directModelsRequest(profile) {
+  return anthropicLike(profile)
+    ? { url: anthropicEndpoint(profile.baseUrl, "/v1/models"), headers: anthropicHeaders(profile.apiKey, true) }
+    : { url: modelsEndpoint(profile.baseUrl), headers: directHeaders(profile) };
 }
 function completionEndpoint(baseUrl) {
   const url = String(baseUrl || "")
@@ -8262,7 +8304,7 @@ function directHeaders(profile) {
 function profileForRequest(profile) {
   return profile.source === "server"
     ? { source: "server" }
-    : { source: "custom", baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model };
+    : { source: "custom", baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model, api: profile.api || "" };
 }
 /** @param {Message} assistant 主消息、帮手，或拟题 / 压缩用的临时消息 */
 async function readSse(response, assistant, { onFrame = null } = {}) {
@@ -8441,6 +8483,8 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
           ingest(text);
           refresh();
         }
+        // Anthropic 的思考块（带签名）：这一轮带工具调用时要原样回传，记在消息上
+        if (delta?.thinking_block?.signature) (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
         if (Array.isArray(delta?.tool_calls)) {
           for (const call of delta.tool_calls) {
             const slot = ((assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" });
@@ -8797,7 +8841,7 @@ function profileCardHtml(p) {
   ]
     .map(([v, label]) => `<option value="${v}"${quota.unit === v ? " selected" : ""}>${label}</option>`)
     .join("")}</select></div>`;
-  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${locked ? `<span class="profile-badge">服务端</span>` : ""}${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}" ${locked ? "disabled" : ""}></label><label>用量限制${quotaField}<small>必填；改动后重新计量</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="https://example.com/v1" ${locked ? "disabled" : ""}></label>${locked ? "" : `<label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label>`}<label class="profile-full">模型${modelField}${locked ? "" : `<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small>`}</label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${[p.tools === false ? "本机工具关" : "", modelSearchEnabled(p) ? "接口原生联网开" : "", p.systemPrompt ? "已设 system prompt" : ""].filter(Boolean).join(" · ")}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label>接口原生联网（实验）<div class="segmented"><button data-toggle-field="enableSearch" data-value="true" class="${modelSearchEnabled(p) ? "active" : ""}">开</button><button data-toggle-field="enableSearch" data-value="false" class="${modelSearchEnabled(p) ? "" : "active"}">关</button></div><small>仅当接口文档明确支持时开启，仅附加 <code>enable_search: true</code>；普通 OpenAI 兼容服务通常会忽略该字段，不能替代本机联网</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label><label><code>max_tokens</code><input type="number" min="16" max="65536" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens || DEFAULT_MAX_TOKENS)}"><small>单次回复的输出上限，默认 ${DEFAULT_MAX_TOKENS}</small></label><label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；留空用低 / 中 / 高，接口拒绝某档时会自动记下</small></label><label class="profile-full"><code>system prompt</code><textarea class="field wide field-area" data-field="systemPrompt" placeholder="可选。设定模型的身份与应答方式">${escapeHtml(p.systemPrompt || "")}</textarea></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}${locked ? "" : `<button class="danger-btn" data-profile-action="delete">删除</button>`}<span class="profile-status">${invalidQuota ? "请先设定用量上限" : ""}</span></div></div>`;
+  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${locked ? `<span class="profile-badge">服务端</span>` : ""}${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}" ${locked ? "disabled" : ""}></label><label>用量限制${quotaField}<small>必填；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}" ${locked ? "disabled" : ""}>OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}" ${locked ? "disabled" : ""}>Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}" ${locked ? "disabled" : ""}></label>${locked ? "" : `<label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label>`}<label class="profile-full">模型${modelField}${locked ? "" : `<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small>`}</label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${[p.tools === false ? "本机工具关" : "", modelSearchEnabled(p) ? "接口原生联网开" : "", p.systemPrompt ? "已设 system prompt" : ""].filter(Boolean).join(" · ")}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label>接口原生联网（实验）<div class="segmented"><button data-toggle-field="enableSearch" data-value="true" class="${modelSearchEnabled(p) ? "active" : ""}">开</button><button data-toggle-field="enableSearch" data-value="false" class="${modelSearchEnabled(p) ? "" : "active"}">关</button></div><small>仅当接口文档明确支持时开启，仅附加 <code>enable_search: true</code>；普通 OpenAI 兼容服务通常会忽略该字段，不能替代本机联网</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label><label><code>max_tokens</code><input type="number" min="16" max="65536" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens || DEFAULT_MAX_TOKENS)}"><small>单次回复的输出上限，默认 ${DEFAULT_MAX_TOKENS}</small></label><label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；留空用低 / 中 / 高，接口拒绝某档时会自动记下</small></label><label class="profile-full"><code>system prompt</code><textarea class="field wide field-area" data-field="systemPrompt" placeholder="可选。设定模型的身份与应答方式">${escapeHtml(p.systemPrompt || "")}</textarea></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}${locked ? "" : `<button class="danger-btn" data-profile-action="delete">删除</button>`}<span class="profile-status">${invalidQuota ? "请先设定用量上限" : ""}</span></div></div>`;
 }
 function storageSize() {
   const bytes = new Blob([JSON.stringify(store)]).size;
@@ -8995,6 +9039,15 @@ function bindSettingsEvents() {
           renderSettings();
         })
     );
+    card.querySelectorAll("[data-choice-field]").forEach(
+      button =>
+        (button.onclick = () => {
+          if (button.disabled) return;
+          p[button.dataset.choiceField] = button.dataset.value;
+          saveStore();
+          renderSettings();
+        })
+    );
     card.querySelector(".profile-advanced")?.addEventListener("toggle", e => {
       if (e.target.open) advancedOpen.add(p.id);
       else advancedOpen.delete(p.id);
@@ -9070,7 +9123,7 @@ async function handleProfileAction(profile, action, card) {
               headers: bridgeHeaders(profile),
               body: JSON.stringify({ profile: profileForRequest(profile) })
             })
-          : await fetch(modelsEndpoint(profile.baseUrl), { headers: directHeaders(profile) });
+          : await fetch(directModelsRequest(profile).url, { headers: directModelsRequest(profile).headers });
       const type = response.headers.get("content-type") || "";
       const data = type.includes("application/json") ? await response.json() : {};
       if (!response.ok) throw Error(data.error || data.message || `连接失败（${response.status}）`);
@@ -9095,7 +9148,7 @@ async function fetchModelList(profile) {
     if (!response.ok) throw Error(data.error || `请求失败（${response.status}）`);
     return [...new Set(data.models || [])].sort();
   }
-  response = await fetch(modelsEndpoint(profile.baseUrl), { headers: directHeaders(profile) });
+  response = await fetch(directModelsRequest(profile).url, { headers: directModelsRequest(profile).headers });
   data = await response.json().catch(() => ({}));
   if (!response.ok) throw Error(data.error?.message || data.message || `请求失败（${response.status}）`);
   return [
@@ -9528,6 +9581,212 @@ async function exportConversationMarkdown(c) {
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+  // ---- 19-anthropic.js ----
+// 言 · Anthropic 适配：页面与桥接内部一律用 OpenAI 的格式（消息、工具、流式分块）；接 Anthropic 时在这里换一层——
+// 把 OpenAI 格式的请求换成 Messages API 的，再把它的事件流换回 OpenAI 风格的 SSE 分块，其余代码一字不动。
+// 这一段两处跑：浏览器里随 support.js 拼进闭包（直连时用），桥接里由 server.js require（经桥接时用）；不能碰 DOM
+const ANTHROPIC_VERSION = "2023-06-01";
+// 思考档位换成思考预算（token）；预算得小于 max_tokens，不够就把 max_tokens 抬上去
+const ANTHROPIC_BUDGETS = { minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 32768, max: 65536 };
+// 是不是 Anthropic 的接口：模型上明说的优先，没说就看地址
+function anthropicLike(profile) {
+  const api = String(profile?.api || "").toLowerCase();
+  if (api) return api === "anthropic";
+  return /anthropic\.com/i.test(String(profile?.baseUrl || ""));
+}
+// Base URL 可以填到根、到 /v1 或到 /v1/messages，都归到根再拼
+function anthropicEndpoint(baseUrl, suffix = "/v1/messages") {
+  const url = String(baseUrl || "")
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/v1(\/messages)?$/i, "");
+  if (!/^https?:\/\//i.test(url)) throw Error("Base URL 只支持 http 或 https");
+  return `${url}${suffix}`;
+}
+function anthropicHeaders(apiKey, browser = false) {
+  return {
+    "Content-Type": "application/json",
+    "x-api-key": String(apiKey || ""),
+    "anthropic-version": ANTHROPIC_VERSION,
+    ...(browser ? { "anthropic-dangerous-direct-browser-access": "true" } : {})
+  };
+}
+// 用户消息里的一段内容换成内容块：文字、图片（data: 或 http 地址）、PDF（按文件名认）；别的文件只能以一行说明代替
+function anthropicUserBlocks(content) {
+  if (typeof content === "string") return content ? [{ type: "text", text: content }] : [];
+  if (!Array.isArray(content)) return [];
+  const blocks = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    if (part.type === "text") {
+      if (part.text) blocks.push({ type: "text", text: String(part.text) });
+    } else if (part.type === "image_url") {
+      const url = String(part.image_url?.url || ""),
+        data = url.match(/^data:([^;,]+);base64,(.*)$/s);
+      if (data) blocks.push({ type: "image", source: { type: "base64", media_type: data[1], data: data[2] } });
+      else if (/^https?:\/\//i.test(url)) blocks.push({ type: "image", source: { type: "url", url } });
+    } else if (part.type === "file") {
+      const name = String(part.file?.filename || "");
+      if (/\.pdf$/i.test(name) && part.file?.file_data)
+        blocks.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: String(part.file.file_data) } });
+      else blocks.push({ type: "text", text: `[附件 ${name || "文件"}：此接口不接受该格式的原件]` });
+    }
+  }
+  return blocks;
+}
+// OpenAI 格式的请求体 → Messages API 的请求体。system 单列；user / assistant 交替，相邻同角色并成一条（工具结果与紧接的补言都进同一条 user）；
+// 助手一轮里的思考块原样带回（带工具调用的那一轮，Anthropic 要求回传）；空的 assistant 略去
+function anthropicRequest(payload) {
+  const system = [],
+    messages = [];
+  const push = (role, blocks) => {
+    if (!blocks.length) return;
+    const last = messages[messages.length - 1];
+    if (last && last.role === role) last.content.push(...blocks);
+    else messages.push({ role, content: blocks });
+  };
+  for (const message of payload.messages || []) {
+    const role = message?.role;
+    if (role === "system") {
+      const text =
+        typeof message.content === "string"
+          ? message.content
+          : anthropicUserBlocks(message.content)
+              .map(b => b.text || "")
+              .join("\n");
+      if (text) system.push(text);
+    } else if (role === "user") push("user", anthropicUserBlocks(message.content));
+    else if (role === "assistant") {
+      const blocks = [];
+      for (const block of Array.isArray(message.thinking_blocks) ? message.thinking_blocks : [])
+        if (block?.thinking && block.signature) blocks.push({ type: "thinking", thinking: block.thinking, signature: block.signature });
+      const text = typeof message.content === "string" ? message.content : "";
+      if (text.trim()) blocks.push({ type: "text", text });
+      for (const call of Array.isArray(message.tool_calls) ? message.tool_calls : []) {
+        let input = {};
+        try {
+          input = JSON.parse(call.function?.arguments || "{}");
+        } catch {}
+        blocks.push({
+          type: "tool_use",
+          id: call.id,
+          name: call.function?.name || "",
+          input: input && typeof input === "object" ? input : {}
+        });
+      }
+      push("assistant", blocks);
+    } else if (role === "tool")
+      push("user", [{ type: "tool_result", tool_use_id: message.tool_call_id, content: String(message.content ?? "") }]);
+  }
+  if (!messages.length || messages[0].role !== "user") messages.unshift({ role: "user", content: [{ type: "text", text: "（接上文）" }] });
+  const level = String(payload.reasoning_effort || "").toLowerCase(),
+    budget = level && level !== "none" && level !== "off" ? ANTHROPIC_BUDGETS[level] || 8192 : 0;
+  const maxTokens = Math.max(16, Number(payload.max_tokens) || 8192);
+  const body = {
+    model: payload.model,
+    max_tokens: budget ? Math.max(maxTokens, budget + 4096) : maxTokens,
+    messages,
+    stream: true
+  };
+  if (system.length) body.system = system.join("\n\n");
+  // 开了思考 temperature 只能是 1：不传
+  if (budget) body.thinking = { type: "enabled", budget_tokens: budget };
+  else if (payload.temperature !== undefined) body.temperature = Math.max(0, Math.min(1, Number(payload.temperature)));
+  if (Array.isArray(payload.tools) && payload.tools.length)
+    body.tools = payload.tools.map(tool => ({
+      name: tool.function?.name || "",
+      description: tool.function?.description || "",
+      input_schema: tool.function?.parameters || { type: "object", properties: {} }
+    }));
+  return body;
+}
+// Messages API 的事件流 → OpenAI 风格的 SSE 分块（data: {...}\n\n，末尾 [DONE]）。
+// text_delta → content，thinking_delta → reasoning_content，tool_use 块 → tool_calls（按出现顺序编号），思考块收尾时整块带上签名
+// 作 thinking_block 交给页面（带工具调用的那一轮要回传）；message_delta 里的用量换成 usage
+function anthropicToOpenAiStream(model = "") {
+  const decoder = new TextDecoder(),
+    encoder = new TextEncoder(),
+    id = `chatcmpl-${Date.now().toString(36)}`;
+  let buffer = "",
+    event = "",
+    tools = 0,
+    stopped = false;
+  const blocks = new Map(),
+    usage = { prompt_tokens: 0, completion_tokens: 0 };
+  const chunk = (delta, extra = {}, finish = null) =>
+    encoder.encode(
+      `data: ${JSON.stringify({ id, object: "chat.completion.chunk", model, choices: [{ index: 0, delta, finish_reason: finish }], ...extra })}\n\n`
+    );
+  const handle = (controller, name, data) => {
+    if (name === "message_start") {
+      const u = data.message?.usage || {};
+      usage.prompt_tokens =
+        Number(u.input_tokens || 0) + Number(u.cache_read_input_tokens || 0) + Number(u.cache_creation_input_tokens || 0);
+      if (data.message?.model) model = data.message.model;
+    } else if (name === "content_block_start") {
+      const block = { ...(data.content_block || {}), text: "", json: "", signature: "" };
+      blocks.set(data.index, block);
+      if (block.type === "tool_use") {
+        block.slot = tools++;
+        controller.enqueue(
+          chunk({ tool_calls: [{ index: block.slot, id: block.id, type: "function", function: { name: block.name, arguments: "" } }] })
+        );
+      }
+    } else if (name === "content_block_delta") {
+      const block = blocks.get(data.index),
+        delta = data.delta || {};
+      if (delta.type === "text_delta" && delta.text) controller.enqueue(chunk({ content: delta.text }));
+      else if (delta.type === "thinking_delta" && delta.thinking) {
+        if (block) block.text += delta.thinking;
+        controller.enqueue(chunk({ reasoning_content: delta.thinking }));
+      } else if (delta.type === "input_json_delta" && block) {
+        block.json += delta.partial_json || "";
+        if (delta.partial_json)
+          controller.enqueue(chunk({ tool_calls: [{ index: block.slot, function: { arguments: delta.partial_json } }] }));
+      } else if (delta.type === "signature_delta" && block) block.signature += delta.signature || "";
+    } else if (name === "content_block_stop") {
+      const block = blocks.get(data.index);
+      if (block?.type === "thinking" && block.signature)
+        controller.enqueue(chunk({ thinking_block: { thinking: block.text, signature: block.signature } }));
+    } else if (name === "message_delta") {
+      if (data.usage?.output_tokens !== undefined) usage.completion_tokens = Number(data.usage.output_tokens) || 0;
+      const reason = data.delta?.stop_reason,
+        finish = reason === "tool_use" ? "tool_calls" : reason === "max_tokens" ? "length" : reason ? "stop" : null;
+      controller.enqueue(chunk({}, { usage: { ...usage, total_tokens: usage.prompt_tokens + usage.completion_tokens } }, finish));
+    } else if (name === "message_stop") {
+      stopped = true;
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    } else if (name === "error")
+      controller.enqueue(chunk({ content: `\n[接口错误：${data.error?.message || data.error?.type || "未知"}]` }));
+  };
+  const feed = (controller, text) => {
+    buffer += text;
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) {
+        try {
+          const data = JSON.parse(line.slice(5).trim());
+          handle(controller, event || data.type, data);
+        } catch {}
+      } else if (!line) event = "";
+    }
+  };
+  return new TransformStream({
+    transform(bytes, controller) {
+      feed(controller, decoder.decode(bytes, { stream: true }));
+    },
+    flush(controller) {
+      feed(controller, decoder.decode());
+      if (buffer) feed(controller, "\n");
+      if (!stopped) controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    }
+  });
+}
+// 桥接 require 这一段后从 globalThis.YAN_ANTHROPIC 取；不写 module.exports——那会让类型检查把这一段当成独立模块，页面里就找不到这些名字
+globalThis.YAN_ANTHROPIC = { anthropicLike, anthropicEndpoint, anthropicHeaders, anthropicRequest, anthropicToOpenAiStream };
 
   // ---- 99-start.js ----
 // 言 · 启动
