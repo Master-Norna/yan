@@ -1,27 +1,18 @@
-.chat-scroll,
-.history,
-.settings-content,
-.library-page,
-.reasoning-body,
-.tool-stack-body {
+/* 滚动条：一份管全站。原先是把 .chat-scroll、.history…一个个点名，加一处容器就漏一处，
+   于是页面上总有几条冒出来的系统灰条。这里对所有能滚的元素一次写定，新加的地方自然就对 */
+* {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--ink-3) 28%, transparent) transparent;
 }
-.chat-scroll::-webkit-scrollbar,
-.history::-webkit-scrollbar,
-.settings-content::-webkit-scrollbar,
-.library-page::-webkit-scrollbar,
-.reasoning-body::-webkit-scrollbar,
-.tool-stack-body::-webkit-scrollbar {
+::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-.chat-scroll::-webkit-scrollbar-track,
-.history::-webkit-scrollbar-track,
-.settings-content::-webkit-scrollbar-track,
-.library-page::-webkit-scrollbar-track,
-.reasoning-body::-webkit-scrollbar-track,
-.tool-stack-body::-webkit-scrollbar-track {
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* 两端淡出，不在容器的首尾戳出一截硬边 */
+::-webkit-scrollbar-track {
   background: linear-gradient(
     to bottom,
     transparent 0,
@@ -30,12 +21,16 @@
     transparent 100%
   );
 }
-.chat-scroll::-webkit-scrollbar-thumb,
-.history::-webkit-scrollbar-thumb,
-.settings-content::-webkit-scrollbar-thumb,
-.library-page::-webkit-scrollbar-thumb,
-.reasoning-body::-webkit-scrollbar-thumb,
-.tool-stack-body::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-track:horizontal {
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    color-mix(in srgb, var(--line) 44%, transparent) 18%,
+    color-mix(in srgb, var(--line) 44%, transparent) 82%,
+    transparent 100%
+  );
+}
+::-webkit-scrollbar-thumb {
   border: 1px solid transparent;
   border-radius: 99px;
   background: linear-gradient(
@@ -47,11 +42,25 @@
   );
   background-clip: padding-box;
 }
-.chat-scroll::-webkit-scrollbar-thumb:hover,
-.reasoning-body::-webkit-scrollbar-thumb:hover,
-.tool-stack-body::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--ink-3) 42%, transparent);
+::-webkit-scrollbar-thumb:horizontal {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--ink-3) 7%, transparent),
+    color-mix(in srgb, var(--ink-3) 34%, transparent) 22%,
+    color-mix(in srgb, var(--ink-3) 34%, transparent) 78%,
+    color-mix(in srgb, var(--ink-3) 7%, transparent)
+  );
   background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink-3) 46%, transparent);
+  background-clip: padding-box;
+}
+/* 上下那两个方向箭头是系统件，纸上不该有 */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .html-app {
   margin: 1em 0;
