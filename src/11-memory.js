@@ -9,6 +9,7 @@ const MEMORY_WRITE_TOOLS = new Set(["remember", "forget"]);
 // 差遣也并行：同一轮里派出的几名帮手同时开工，各自的卡片各自刷新；活是主模型分的，不重叠靠它分派时留意（工具说明里有交代）
 const PARALLEL_TOOLS = new Set([
   "delegate",
+  "run_js",
   "search_web",
   "fetch_page",
   "read_document",

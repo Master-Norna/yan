@@ -49,7 +49,9 @@
  * @property {string} [note]
  * @property {string} [url]
  * @property {any[]} [results] 检索 / 翻记忆 / 查旧谈的命中
- * @property {string} [output] 指令输出、搜索结果、目录清单
+ * @property {string} [output] 指令输出、搜索结果、目录清单、计算结果、接口响应
+ * @property {string} [code] run_js 跑的代码
+ * @property {Array<{ text: string, status: string }>} [plan] update_plan 的清单
  * @property {number} [exitCode]
  * @property {boolean} [readOnly] 只读指令，免确认
  * @property {{ old: string, new: string }} [diff]

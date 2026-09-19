@@ -192,6 +192,67 @@
   overflow: visible;
   font-size: 10.5px;
 }
+/* 计算：代码在上、输出在下，两块之间只留一线 */
+.tool-code {
+  margin-bottom: 4px;
+  color: var(--ink-3);
+}
+/* 计划卡：一行一项 */
+.plan-list {
+  margin: 0 9px 8px 50px;
+  padding: 0;
+  list-style: none;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.plan-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ink-2);
+}
+.plan-mark {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  color: var(--ink-3);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.plan-item[data-plan="done"] .plan-mark {
+  color: var(--code-green);
+}
+.plan-item[data-plan="done"] .plan-text,
+.plan-item[data-plan="skipped"] .plan-text {
+  color: var(--ink-3);
+}
+.plan-item[data-plan="skipped"] .plan-text {
+  text-decoration: line-through;
+}
+.plan-item[data-plan="doing"] .plan-text {
+  color: var(--ink);
+}
+.plan-item[data-plan="doing"] .plan-mark:before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+:root[data-ink-motion="on"] .tool-step-plan[data-status="running"] .plan-item[data-plan="doing"] .plan-mark:before,
+:root[data-ink-motion="on"] .tool-stack[data-state="streaming"] .plan-item[data-plan="doing"] .plan-mark:before {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+/* 算一段 JS 用的隐形沙箱页 */
+.compute-frame {
+  position: fixed;
+  width: 0;
+  height: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 /* 差遣：整张卡片衬一层淡金、左侧一道金线，在一串步骤里一眼能认出来（朱留给印章与删减）；帮手的小时间线嵌在里面，做完折成一行，只留回报在外。
    卡片内一切都不许溢出背景：回报里的宽表格在卡片里横向滚动 */
 .tool-step-delegate {

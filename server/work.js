@@ -1,5 +1,5 @@
 // 言 · 桥接的执事接口：工作目录、指令执行、文件读写与检索、目录选择对话框；卷宗目录的列、收、取、删
-// 由 server.js 装配：require("./server/work.js")({ sendJson, readJson, decodeEntities })
+// 由 server.js 装配：require("./server/work.js")({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes })
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
@@ -7,7 +7,7 @@ const os = require("node:os");
 const { spawn } = require("node:child_process");
 const sandbox = require("./sandbox.js");
 
-module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
+module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
   // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见、默认先问再跑，安全边界守在那一层。
@@ -652,6 +652,71 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
   const SEARCH_MATCH_LIMIT = 200,
     SEARCH_FILE_LIMIT = 4000,
     SEARCH_FILE_BYTES = 2 * 1024 * 1024;
+  // ---- download_file：把网上的文件存进工作目录。地址门禁与 fetch_page 同一套（不许本机与内网）；path 给目录或省略时按网址里的文件名存，
+  // 已有同名文件就加 (2)；最多 64 MB
+  const DOWNLOAD_LIMIT = 64 * 1024 * 1024;
+  async function handleWorkDownload(req, res) {
+    try {
+      const body = await readJson(req),
+        workdir = resolveWorkdir(body.workdir);
+      let url;
+      try {
+        url = new URL(String(body.url || "").trim());
+      } catch {
+        throw Error("网址无效");
+      }
+      const given = String(body.path || "").trim(),
+        fromUrl =
+          (() => {
+            try {
+              return decodeURIComponent(path.posix.basename(url.pathname));
+            } catch {
+              return path.posix.basename(url.pathname);
+            }
+          })() || "下载文件";
+      let target = await targetOf(workdir, { ...body, path: given || "." }, { write: true });
+      const stat = await fs.promises.stat(target).catch(() => null);
+      if (!given || /[\\/]$/.test(given) || stat?.isDirectory()) {
+        target = path.join(target, path.basename(fromUrl));
+        const why = body.sandbox === true ? sandbox.screenPath(relPath(workdir, target), { write: true }) : null;
+        if (why) throw Error(why);
+      }
+      const started = Date.now(),
+        { response } = await fetchPublicResponse(url.href, { timeout: 120000 });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        throw Error(`对方返回 ${response.status}`);
+      }
+      const length = Number(response.headers.get("content-length") || 0);
+      if (length > DOWNLOAD_LIMIT) {
+        await response.body?.cancel().catch(() => {});
+        throw Error(`文件超过 ${DOWNLOAD_LIMIT / 1048576} MB`);
+      }
+      const { buffer, truncated } = await readLimitedBytes(response, DOWNLOAD_LIMIT);
+      if (truncated) throw Error(`文件超过 ${DOWNLOAD_LIMIT / 1048576} MB`);
+      const release = await lockFile(workdir, target);
+      try {
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        const extension = path.extname(target),
+          stem = target.slice(0, target.length - extension.length);
+        let file = target;
+        for (let n = 2; fs.existsSync(file); n++) file = `${stem} (${n})${extension}`;
+        await fs.promises.writeFile(file, buffer).catch(error => {
+          throw Error(describeFsError(error, shownPath(workdir, file)));
+        });
+        sendJson(res, 200, {
+          path: shownPath(workdir, file),
+          bytes: buffer.length,
+          type: (response.headers.get("content-type") || "").split(";")[0].trim(),
+          durationMs: Date.now() - started
+        });
+      } finally {
+        release();
+      }
+    } catch (error) {
+      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+    }
+  }
   async function handleWorkSearch(req, res) {
     try {
       const body = await readJson(req),
@@ -922,6 +987,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
     handleWorkRead,
     handleWorkList,
     handleWorkEdit,
-    handleWorkSearch
+    handleWorkSearch,
+    handleWorkDownload
   };
 };

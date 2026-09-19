@@ -20,7 +20,9 @@ function quotedText(message) {
 /** @param {Message} message */
 function stepsDigest(message, label = "行迹") {
   const steps = (message.steps || []).filter(
-    step => WORK_TOOLS.has(step.name) || ["ask_user", "delegate", "search_web", "fetch_page", "user_note"].includes(step.name)
+    step =>
+      WORK_TOOLS.has(step.name) ||
+      ["ask_user", "delegate", "search_web", "fetch_page", "user_note", "download_file", "update_plan"].includes(step.name)
   );
   if (!steps.length) return "";
   const items = steps.slice(0, 16).map(step =>
@@ -41,7 +43,9 @@ function stepsDigest(message, label = "行迹") {
               }`
             : step.name === "fetch_page"
               ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
-              : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
+              : step.name === "update_plan"
+                ? `计划 → ${(step.plan || []).map(item => `${{ done: "✓", doing: "▶", skipped: "–" }[item.status] || "○"}${item.text.slice(0, 40)}`).join("；")}`
+                : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
   );
   return `［${label}］${items.join("；")}${steps.length > 16 ? `；…共 ${steps.length} 步` : ""}`;
 }
@@ -790,8 +794,14 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   };
   const tools = [];
   if (apiBase !== null) tools.push(define("search_web"), define("fetch_page"));
-  // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线
-  if (workRoot(conversation) && !lookup) tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)));
+  // 调接口能发 POST，不算纯查阅，旁注不给；算一段 JS 在浏览器里的隔离沙箱跑，不经桥接，谁都有
+  if (apiBase !== null && !lookup) tools.push(define("http_request"));
+  tools.push(define("run_js"));
+  // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线。下载也落在同一处
+  if (workRoot(conversation) && !lookup)
+    tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));
+  // 计划：行里给用户看的清单，只有主模型维护
+  if (work && !sub) tools.push(define("update_plan"));
   if (!sub && !lookup) tools.push(define("ask_user"));
   // 帮手与旁注对记忆只读：翻记忆、查旧谈可以，记与忘留给主模型
   if (memoryEnabled())

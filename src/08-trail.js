@@ -17,6 +17,10 @@ const TOOL_LABELS = {
   recall: "翻记忆",
   search_conversations: "查旧谈",
   read_conversation: "翻旧谈",
+  run_js: "计算",
+  http_request: "调接口",
+  download_file: "下载",
+  update_plan: "计划",
   user_note: "补言"
 };
 function toolStackLabel() {
@@ -208,16 +212,31 @@ function stepHtml(step) {
   if (step.name === "ask_user") return askStepHtml(step);
   if (step.name === "delegate") return delegateStepHtml(step);
   if (step.name === "user_note") return noteStepHtml(step);
-  const body = step.results?.length
-    ? `<ul class="tool-results">${step.results
-        .slice(0, 8)
-        .map(r => `<li>${resultLink(r)}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
-        .join("")}</ul>`
-    : step.url
-      ? `<div class="tool-note">${stepUrl ? `<a href="${escapeHtml(stepUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(stepUrl)}</a>` : escapeHtml(step.url)}</div>`
-      : step.note
-        ? `<div class="tool-note">${escapeHtml(step.note)}</div>`
-        : "";
+  if (step.name === "update_plan") return planStepHtml(step);
+  // 计算与调接口：代码（或请求）在上、输出在下，与指令输出同一套折叠与「展开全部」
+  let more = "";
+  const clamp = text => {
+    const out = clampLines(text, step.full);
+    if (out.clipped) more = `展开全部 · ${out.total} 行`;
+    else if (step.full && out.total > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
+    return escapeHtml(out.text);
+  };
+  const outputBody =
+    step.code || step.output
+      ? `${step.code ? `<pre class="tool-output tool-code">${clamp(step.code)}</pre>` : ""}${step.output ? `<pre class="tool-output">${clamp(step.output)}</pre>` : ""}${more ? `<button type="button" class="tool-more" data-step-more>${more}</button>` : ""}`
+      : "";
+  const body = outputBody
+    ? outputBody
+    : step.results?.length
+      ? `<ul class="tool-results">${step.results
+          .slice(0, 8)
+          .map(r => `<li>${resultLink(r)}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
+          .join("")}</ul>`
+      : step.url
+        ? `<div class="tool-note">${stepUrl ? `<a href="${escapeHtml(stepUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(stepUrl)}</a>` : escapeHtml(step.url)}</div>`
+        : step.note
+          ? `<div class="tool-note">${escapeHtml(step.note)}</div>`
+          : "";
   const status = step.status || "done",
     state =
       status === "running"
@@ -484,6 +503,21 @@ function noteStepHtml(step) {
       ? `<div class="tool-note">${escapeHtml(text)}${files.length ? `<div class="tool-note-files">${files.map(name => escapeHtml(name)).join("、")}</div>` : ""}</div>`
       : "";
   return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+}
+// 计划卡：一行一项，○ 待做、▶ 正在做（朱色呼吸点）、✓ 做完、– 不做了；标题行是正在做的那一项或「n/m」
+/** @param {Step} step */
+function planStepHtml(step) {
+  const status = step.status || "done",
+    items = step.plan || [],
+    done = items.filter(item => item.status === "done").length;
+  const rows = items
+    .map(
+      item =>
+        `<li class="plan-item" data-plan="${escapeHtml(item.status)}"><span class="plan-mark" aria-hidden="true">${{ done: "✓", doing: "", skipped: "–" }[item.status] ?? "○"}</span><span class="plan-text">${escapeHtml(item.text)}</span></li>`
+    )
+    .join("");
+  const meta = status === "error" ? escapeHtml(step.result || "失败") : `${done}/${items.length}`;
+  return `<div class="tool-step tool-step-plan" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">计划</span><span class="tool-title" title="${escapeHtml(step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${items.length ? `<ol class="plan-list">${rows}</ol>` : ""}</div>`;
 }
 function stepStateHtml(status) {
   return status === "running"

@@ -36,10 +36,16 @@ function sys(names, { work = false, archive = false, sub = false } = {}) {
   return lines.join("\n");
 }
 const modes = {
-  "言（桥接+记忆，工具落卷宗）": { tools: ["search_web", "fetch_page", ...CHAT_FILES, "ask_user", ...MEM, "delegate"], archive: true },
-  "行（桥接+记忆）": { tools: ["search_web", "fetch_page", ...WORK, "ask_user", ...MEM, "delegate"], work: true },
-  "行·帮手": { tools: ["search_web", "fetch_page", ...WORK, ...MEM], work: true, sub: true },
-  "言（直连，无桥接、无记忆）": { tools: ["ask_user"] }
+  "言（桥接+记忆，工具落卷宗）": {
+    tools: ["search_web", "fetch_page", "http_request", "run_js", ...CHAT_FILES, "download_file", "ask_user", ...MEM, "delegate"],
+    archive: true
+  },
+  "行（桥接+记忆）": {
+    tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", "update_plan", "ask_user", ...MEM, "delegate"],
+    work: true
+  },
+  "行·帮手": { tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", ...MEM], work: true, sub: true },
+  "言（直连，无桥接、无记忆）": { tools: ["run_js", "ask_user"] }
 };
 let out = "";
 for (const [label, m] of Object.entries(modes)) {

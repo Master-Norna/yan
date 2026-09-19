@@ -123,6 +123,43 @@ http
         const paragraphs = Array.from({ length: 20 }, (_, i) => `第${i + 1}段，先说一句。再说一句。\n\n`);
         return sse(res, [...paragraphs.map(content => delta({ content })), delta({}, { usage: { total_tokens: 20 } })], 400);
       }
+      if (typeof lastUser === "string" && lastUser.includes("NEWTOOLS")) {
+        // 新工具一轮全用上：算一段 JS、调本机地址（桥接该拒）、下载本机地址（同样该拒）、列一份计划；第二轮把各结果回显
+        const n = toolResults.length;
+        const tool = (index, name, args) => ({
+          index,
+          id: `call_n${index}`,
+          type: "function",
+          function: { name, arguments: JSON.stringify(args) }
+        });
+        if (n === 0)
+          return sse(res, [
+            delta({ content: "先算一下。" }),
+            delta({
+              tool_calls: [
+                tool(0, "run_js", {
+                  code: 'const xs = [1, 2, 3];\nconsole.log("sum", xs.reduce((a, b) => a + b));\nreturn xs.map(x => x * x);'
+                }),
+                tool(1, "run_js", { code: "while (true) {}", timeout: 1 }),
+                tool(2, "http_request", { url: "http://127.0.0.1:9/x" }),
+                tool(3, "download_file", { url: "http://127.0.0.1:9/a.txt" }),
+                tool(4, "update_plan", {
+                  items: [
+                    { text: "算平方", status: "done" },
+                    { text: "调接口", status: "doing" },
+                    { text: "收尾", status: "pending" },
+                    { text: "不做的", status: "skipped" }
+                  ]
+                })
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [
+          delta({ content: `NEWTOOLS|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 90)).join(" ▸ ")}` }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       if (typeof lastUser === "string" && lastUser.includes("NOEOL"))
         return sseNoEol(res, [delta({ content: "开头，" }), delta({ content: "结尾在此" }), delta({}, { usage: { total_tokens: 77 } })]);
       if (typeof lastUser === "string" && lastUser.includes("TRUNC")) {

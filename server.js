@@ -287,6 +287,112 @@ async function assertPublicUrl(url) {
   const addresses = await dns.lookup(host, { all: true, verbatim: true });
   if (!addresses.length || addresses.some(item => isPrivateAddress(item.address))) throw Error("网址解析到了本机或内网地址");
 }
+// 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读
+async function fetchPublicResponse(url, { method = "GET", headers = {}, body = null, timeout = 30000 } = {}) {
+  let current = new URL(url);
+  const signal = AbortSignal.timeout(timeout);
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    await assertPublicUrl(current);
+    const response = await fetch(current, {
+      method,
+      headers: { "User-Agent": BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7", ...headers },
+      body: body && !["GET", "HEAD"].includes(method) ? body : undefined,
+      redirect: "manual",
+      signal
+    });
+    if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
+      await response.body?.cancel().catch(() => {});
+      current = new URL(response.headers.get("location"), current);
+      // 303 与 POST 后的 301/302 按浏览器惯例改成 GET
+      if (response.status === 303 || (method !== "GET" && method !== "HEAD" && [301, 302].includes(response.status))) {
+        method = "GET";
+        body = null;
+      }
+      continue;
+    }
+    return { response, url: current.href };
+  }
+  throw Error("跳转次数过多");
+}
+// 按字节收响应正文，最多 limit 字节，到量即停
+async function readLimitedBytes(response, limit) {
+  const chunks = [];
+  let size = 0,
+    truncated = false;
+  if (response.body) {
+    const reader = response.body.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (size + value.length > limit) {
+        chunks.push(value.subarray(0, limit - size));
+        size = limit;
+        truncated = true;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(value);
+      size += value.length;
+    }
+  }
+  return { buffer: Buffer.concat(chunks.map(chunk => Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength))), truncated };
+}
+const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]),
+  HTTP_BODY_LIMIT = 1024 * 1024,
+  HTTP_TEXT_CHARS = 60000;
+// http_request：调公网接口，回状态码、响应头与正文；正文是文本或 JSON 的给原文（截到 6 万字），二进制的只给类型与大小
+async function handleHttp(req, res) {
+  try {
+    const body = await readJson(req);
+    let url;
+    try {
+      url = new URL(String(body.url || "").trim());
+    } catch {
+      throw Error("网址无效");
+    }
+    const method = String(body.method || "GET")
+      .trim()
+      .toUpperCase();
+    if (!HTTP_METHODS.has(method)) throw Error(`不支持的方法 ${method}`);
+    const headers = {};
+    for (const [name, value] of Object.entries(body.headers && typeof body.headers === "object" ? body.headers : {}))
+      if (/^[\w-]+$/.test(name) && !/^(host|content-length|connection|cookie)$/i.test(name)) headers[name] = String(value).slice(0, 4000);
+    const payload = body.body === undefined || body.body === null ? null : typeof body.body === "string" ? body.body : JSON.stringify(body.body);
+    if (payload && Buffer.byteLength(payload) > HTTP_BODY_LIMIT) throw Error("请求体超过 1 MB");
+    if (payload && typeof body.body !== "string" && !Object.keys(headers).some(name => /^content-type$/i.test(name)))
+      headers["Content-Type"] = "application/json; charset=utf-8";
+    const started = Date.now(),
+      { response, url: finalUrl } = await fetchPublicResponse(url.href, { method, headers, body: payload, timeout: 30000 });
+    const type = response.headers.get("content-type") || "",
+      textual = /text\/|application\/(json|xml|xhtml|javascript|x-www-form-urlencoded|ld\+json|problem\+json)|\+(json|xml)\b/i.test(type) || !type,
+      { buffer, truncated } = await readLimitedBytes(response, textual ? 4 * 1024 * 1024 : 64 * 1024);
+    const responseHeaders = {};
+    for (const [name, value] of response.headers) if (!/^set-cookie$/i.test(name)) responseHeaders[name] = value;
+    let text = "";
+    if (textual) {
+      const charset = (type.match(/charset=["']?([\w-]+)/i) || [])[1] || "utf-8";
+      try {
+        text = new TextDecoder(charset).decode(buffer);
+      } catch {
+        text = buffer.toString("utf8");
+      }
+    }
+    sendJson(res, 200, {
+      status: response.status,
+      statusText: response.statusText,
+      url: finalUrl,
+      headers: responseHeaders,
+      type: type.split(";")[0].trim(),
+      textual,
+      bytes: buffer.length,
+      truncated: truncated || text.length > HTTP_TEXT_CHARS,
+      text: text.slice(0, HTTP_TEXT_CHARS),
+      durationMs: Date.now() - started
+    });
+  } catch (error) {
+    sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
+  }
+}
 const FETCH_TEXT_LIMIT = 3 * 1024 * 1024;
 // 正文最多只收 3 MB：边读边计，到量即取消读取器——不先把整个响应吃进内存再截，对方回 500 MB 也只占 3 MB
 async function readLimitedText(response, limit = FETCH_TEXT_LIMIT) {
@@ -603,7 +709,7 @@ async function handleChat(req, res) {
     else if (!res.writableEnded && !res.destroyed) res.end();
   }
 }
-const WORK = require("./server/work.js")({ sendJson, readJson, decodeEntities });
+const WORK = require("./server/work.js")({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes });
 
 const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>此页不存在 · 言</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#fbfaf6;color:#292724;font-family:"Noto Serif SC","Songti SC","STSong",serif}@media(prefers-color-scheme:dark){body{background:#1e1c19;color:#e6e1d6}}main{text-align:center;letter-spacing:.06em}.seal{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #9b5540;color:#9b5540;font-size:18px;transform:rotate(-3deg)}h1{margin:18px 0 8px;font-weight:500;font-size:24px}p{margin:0 0 22px;opacity:.6;font-size:13px}a{color:#9b5540;text-decoration:none;font-size:13px;border-bottom:1px solid currentColor}</style></head><body><main><span class="seal">空</span><h1>此页不存在</h1><p>所寻之处并无一字</p><a href="/">回到案前</a></main></body></html>`;
 // 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
@@ -682,6 +788,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/models") return await handleModels(req, res);
     if (req.method === "POST" && req.url === "/api/search") return await handleSearch(req, res);
     if (req.method === "POST" && req.url === "/api/fetch") return await handleFetch(req, res);
+    if (req.method === "POST" && req.url === "/api/http") return await handleHttp(req, res);
     if (req.method === "POST" && req.url === "/api/chat") return await handleChat(req, res);
     if (req.method === "POST" && req.url === "/api/work/prepare") return await WORK.handleWorkPrepare(req, res);
     if (req.method === "POST" && req.url === "/api/work/pick") return await WORK.handleWorkPick(req, res);
@@ -691,6 +798,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/work/list") return await WORK.handleWorkList(req, res);
     if (req.method === "POST" && req.url === "/api/work/edit") return await WORK.handleWorkEdit(req, res);
     if (req.method === "POST" && req.url === "/api/work/search") return await WORK.handleWorkSearch(req, res);
+    if (req.method === "POST" && req.url === "/api/work/download") return await WORK.handleWorkDownload(req, res);
     if (req.method === "POST" && req.url === "/api/archive/list") return await WORK.handleArchiveList(req, res);
     if (req.method === "POST" && req.url === "/api/archive/put") return await WORK.handleArchivePut(req, res);
     if (req.method === "POST" && req.url === "/api/archive/remove") return await WORK.handleArchiveRemove(req, res);

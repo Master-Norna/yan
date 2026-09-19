@@ -57,7 +57,16 @@ function parseToolArguments(raw) {
   return { ok: false, error: String(first?.error?.message || "不是合法 JSON"), raw: text };
 }
 // 有副作用的工具：参数必须是完整的 JSON，且 schema 里的必填项一个不少，否则不执行
-const SIDE_EFFECT_TOOLS = new Set(["run_command", "write_file", "edit_file", "remember", "forget", "delegate"]);
+const SIDE_EFFECT_TOOLS = new Set([
+  "run_command",
+  "write_file",
+  "edit_file",
+  "remember",
+  "forget",
+  "delegate",
+  "download_file",
+  "http_request"
+]);
 // 按 prompts/tools.js 里的 schema 把参数理顺：模型写参数常有小出入，能理解的都照单收下，只有真讲不通的才算失败——
 // 键名写成了常见的别名（file_path → path、cmd → command、old_string → old）、数字与布尔给成了字符串、该是数组的只给了一项、
 // 该是数组的整段 JSON 又编码成了字符串、ask_user 把单个问题直接摊在顶层……都在这里归位；必填项理顺后仍缺的才报
@@ -264,6 +273,10 @@ async function runTool(step, conversation, assistant, signal) {
       };
     }
     if (step.name === "read_document") return await readDocumentTool(step, args, conversation);
+    if (step.name === "run_js") return await runJsTool(step, args, signal);
+    if (step.name === "http_request") return await httpRequestTool(step, args, signal);
+    if (step.name === "download_file") return await downloadFileTool(step, args, conversation, signal);
+    if (step.name === "update_plan") return updatePlanTool(step, args);
     if (MEMORY_TOOLS.has(step.name)) return runMemoryTool(step, args, conversation);
     if (step.name === "ask_user") return await askUserTool(step, args, conversation, assistant, signal);
     if (step.name === "delegate") return await runDelegate(step, args, conversation, assistant, signal);
@@ -277,6 +290,132 @@ async function runTool(step, conversation, assistant, signal) {
       display: friendlyError(String(error.message || error)).slice(0, 60)
     };
   }
+}
+// ---- run_js：在隔离沙箱里算一段 JS。沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；
+// 每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉；直连没桥接也能用
+function computeInSandbox(code, timeoutMs, signal) {
+  return new Promise((resolve, reject) => {
+    const id = `compute-${uid()}`,
+      iframe = document.createElement("iframe");
+    iframe.setAttribute("sandbox", "allow-scripts");
+    iframe.className = "compute-frame";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.src = `./preview.html#${id}`;
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(guard);
+      window.removeEventListener("message", onMessage);
+      signal?.removeEventListener("abort", onAbort);
+      iframe.remove();
+      fn(value);
+    };
+    const onMessage = event => {
+      if (event.source !== iframe.contentWindow || event.data?.id !== id) return;
+      if (event.data.type === "yan-preview-ready")
+        iframe.contentWindow.postMessage({ type: "yan-compute", id, code, timeout: timeoutMs }, "*");
+      else if (event.data.type === "yan-compute-result") finish(resolve, event.data);
+    };
+    const onAbort = () => finish(reject, Object.assign(Error("已停止"), { name: "AbortError" }));
+    // 那头没回话（页没起来、Worker 起不来）：多等 5 秒就算了
+    const guard = setTimeout(() => finish(resolve, { ok: false, error: "沙箱没有回话" }), timeoutMs + 5000);
+    window.addEventListener("message", onMessage);
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    document.body.append(iframe);
+  });
+}
+async function runJsTool(step, args, signal) {
+  const code = String(args.code ?? "").trim();
+  step.code = code;
+  step.title =
+    code
+      .split("\n")
+      .find(line => line.trim())
+      ?.trim()
+      .slice(0, 80) || "";
+  if (!code) return { ok: false, content: "code 为空", display: "代码为空" };
+  const timeout = clampNumber(Number(args.timeout) * 1000, 10000, 1000, 60000);
+  const result = await computeInSandbox(code, timeout, signal);
+  const parts = [];
+  if (result.logs) parts.push(result.logs);
+  if (result.value !== undefined) parts.push(`→ ${result.value}`);
+  if (result.error) parts.push(`✗ ${result.error}`);
+  step.output = trimOutput(parts.join("\n"));
+  const ms = Number(result.ms) || 0;
+  return {
+    ok: !!result.ok,
+    content: result.ok
+      ? `${result.logs ? `输出：\n${result.logs}\n` : ""}返回值：${result.value === undefined ? "（无；用 return 交回结果）" : result.value}`.slice(
+          0,
+          60000
+        )
+      : `运行出错：${result.error || "未知错误"}${result.logs ? `\n出错前的输出：\n${result.logs}` : ""}`,
+    display: result.ok ? `${ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`}` : "出错"
+  };
+}
+function clampNumber(value, fallback, min, max) {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : fallback));
+}
+// ---- http_request：经桥接向公网接口发请求；地址门禁在桥接那头（不许本机与内网）
+async function httpRequestTool(step, args, signal) {
+  const url = String(args.url || "").trim(),
+    method = String(args.method || "GET")
+      .trim()
+      .toUpperCase();
+  step.url = url;
+  step.title = `${method} ${url}`.slice(0, 200);
+  const data = await bridge("/api/http", { url, method, headers: args.headers, body: args.body }, signal);
+  const headers = Object.entries(data.headers || {})
+    .map(([name, value]) => `${name}: ${String(value).slice(0, 300)}`)
+    .join("\n");
+  const body = data.textual ? data.text || "(空)" : `（${data.type || "二进制"}，${formatFileSize(data.bytes)}，不作为文本返回）`;
+  step.output = trimOutput(`${data.status} ${data.statusText || ""}\n${body}`);
+  return {
+    ok: data.status < 400,
+    content: `HTTP ${data.status} ${data.statusText || ""}${data.url && data.url !== url ? `（跳转到 ${data.url}）` : ""}\n--- 响应头 ---\n${headers}\n--- 正文${data.truncated ? "（已截断）" : ""} ---\n${body}`,
+    display: `${data.status} · ${data.textual ? `${(data.text || "").length} 字` : formatFileSize(data.bytes)}`
+  };
+}
+// ---- download_file：桥接把网上的文件存进工作目录或卷宗；沙箱照常管路径
+async function downloadFileTool(step, args, conversation, signal) {
+  const workdir = workRoot(conversation);
+  if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
+  const url = String(args.url || "").trim();
+  step.url = url;
+  step.title = String(args.path || "").trim() || url.split("/").pop() || url;
+  const data = await bridge("/api/work/download", { workdir, roam: roamAllowed(), sandbox: sandboxed(), url, path: args.path }, signal);
+  step.title = data.path;
+  step.note = url;
+  step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要
+  return {
+    ok: true,
+    content: `已存为 ${data.path}（${formatFileSize(data.bytes)}${data.type ? `，${data.type}` : ""}）`,
+    display: formatFileSize(data.bytes)
+  };
+}
+// ---- update_plan：清单画在行迹里，每次都是完整的一份；回给模型一行计数就够
+function updatePlanTool(step, args) {
+  const STATUSES = new Set(["pending", "doing", "done", "skipped"]);
+  const items = (Array.isArray(args.items) ? args.items : [])
+    .map(item => (typeof item === "string" ? { text: item, status: "pending" } : item))
+    .filter(item => item && typeof item === "object" && String(item.text || "").trim())
+    .slice(0, 12)
+    .map(item => ({
+      text: String(item.text).trim().slice(0, 200),
+      status: STATUSES.has(String(item.status || "").toLowerCase()) ? String(item.status).toLowerCase() : "pending"
+    }));
+  if (!items.length) return { ok: false, content: "items 为空：每项给 text 与 status", display: "清单为空" };
+  step.plan = items;
+  const done = items.filter(item => item.status === "done").length,
+    doing = items.find(item => item.status === "doing");
+  step.title = doing ? doing.text : done === items.length ? "全部完成" : `${done}/${items.length}`;
+  return {
+    ok: true,
+    content: `计划已更新：${done}/${items.length} 完成${doing ? `，正在做「${doing.text}」` : ""}`,
+    display: `${done}/${items.length}`
+  };
 }
 // 执事模式的四件事。run_command 默认问而后行：步骤卡上给出「运行 / 跳过 / 径行」，模型等用户点了才继续
 const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),

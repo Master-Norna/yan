@@ -1,7 +1,8 @@
 // 言 · 内置提示词 · 工具定义
 // 交给模型的 function 定义（OpenAI tools 格式里 function 的 description 与 parameters）。
 // 模型是把系统提示和这一整份一起读的：每件工具做什么、何时用、有什么不能猜的规矩，只在这里说一遍，系统提示不复述。
-// search_web / fetch_page 在桥接在线时提供；六件文件工具在桥接在线时提供（绑了目录落在工作目录，没绑落在卷宗）；delegate 在桥接在线且有别的工具可交给帮手时提供（帮手自己不再差遣）；
+// search_web / fetch_page / http_request 在桥接在线时提供；run_js 一律提供（在浏览器里的隔离沙箱跑，直连也有）；六件文件工具在桥接在线时提供（绑了目录落在工作目录，没绑落在卷宗），
+// download_file 随之；update_plan 只给行的主模型；delegate 在桥接在线且有别的工具可交给帮手时提供（帮手自己不再差遣）；
 // ask_user 对谈与执事都提供（帮手没有）；五件记忆工具在记忆启用时提供（帮手只有 recall / search_conversations / read_conversation，不能 remember / forget）；read_document 在对话带有可读文档时提供。
 // 言（对谈）里工具只为产出文件，不带 edit_file / search_files，且带 brief 的工具用 brief 代替 description——对谈的每一问都背着这份定义，越轻越好。
 // 参数在页面上按这里的 schema 核对：必填项缺了不执行；有副作用的工具（run_command / write_file / edit_file / remember / forget / delegate）参数 JSON 被截断时也不执行。
@@ -14,6 +15,74 @@
   fetch_page: {
     description: "读取网页正文（已去 HTML），通常用于查看某条搜索结果的详情。",
     parameters: { type: "object", properties: { url: { type: "string", description: "完整的 http/https 地址" } }, required: ["url"] }
+  },
+
+  http_request: {
+    description:
+      "向公网接口发一个 HTTP 请求（GET / POST / PUT / PATCH / DELETE / HEAD），返回状态码、响应头与正文（文本或 JSON，过长截断）。读普通网页用 fetch_page；这件用于调 API、看原始响应。不能访问本机与内网地址。",
+    brief: "向公网接口发 HTTP 请求（调 API、看原始响应），返回状态码、响应头与正文；读网页用 fetch_page。",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "完整的 http/https 地址" },
+        method: { type: "string", description: "GET（默认）/ POST / PUT / PATCH / DELETE / HEAD" },
+        headers: { type: "object", description: '请求头，如 { "Accept": "application/json" }' },
+        body: { type: "string", description: "请求体原文（JSON 请自行序列化并给 Content-Type）" }
+      },
+      required: ["url"]
+    }
+  },
+
+  // 计算：在浏览器里的隔离沙箱（沙箱 iframe 里的 Worker）跑，没有网络、文件与页面；直连没桥接时也有
+  run_js: {
+    description:
+      "在隔离的 JavaScript 沙箱里跑一段代码做计算与数据处理：算术与统计、单位换算、日期与时间（new Date() 即当前时间）、正则、JSON 与文本变换、排序去重——凡是心算容易错的都交给它。只有标准 JS，没有网络、文件与页面。单个表达式直接写；多条语句用 return 交回结果，console.log 的输出也一并返回。",
+    brief: "在隔离的 JS 沙箱里跑一段代码（算术、日期、正则、JSON 变换），返回 return 的值与 console 输出；心算易错的交给它。",
+    parameters: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "JavaScript 代码：单个表达式，或带 return 的多条语句" },
+        timeout: { type: "number", description: "超时秒数，默认 10，最大 60" }
+      },
+      required: ["code"]
+    }
+  },
+
+  download_file: {
+    description:
+      "把网上的文件下载到工作目录里（图片、PDF、压缩包、数据文件……最大 64 MB）。path 是相对工作目录的文件路径；给目录或省略则按网址里的文件名存。不能访问本机与内网地址。",
+    brief: "把网上的文件下载进卷宗（最大 64 MB）；path 省略则按网址里的文件名存。",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "完整的 http/https 地址" },
+        path: { type: "string", description: "存成的文件路径，相对工作目录；省略则按网址里的文件名" }
+      },
+      required: ["url"]
+    }
+  },
+
+  // 计划：行里给用户看的任务清单，每次给完整清单；只给主模型
+  update_plan: {
+    description:
+      "任务不止三五步时，先把计划列给用户看，做的过程中随时更新各项状态；每次给出完整的清单（不是增量），项目不宜多于十条。状态：pending（待做）、doing（正在做，同时至多一项）、done（做完）、skipped（不做了，text 里说明为何）。一两步的小事不必用。",
+    parameters: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string", description: "一句话说明这一项" },
+              status: { type: "string", description: "pending / doing / done / skipped" }
+            },
+            required: ["text", "status"]
+          }
+        }
+      },
+      required: ["items"]
+    }
   },
 
   run_command: {

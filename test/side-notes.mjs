@@ -47,7 +47,7 @@ await waitFor(`[...document.querySelectorAll('#sideMessages .message.assistant')
 const sideText = await evalJs(`[...document.querySelectorAll('#sideMessages .message.assistant .markdown')].at(-1).textContent.trim()`);
 check(
   "side context: system note, quoted anchor, no later main content, lookup-only tools",
-  sideText === "SIDE|sys:yes|quote:yes|secret:no|tools:search_web+fetch_page+recall+search_conversations+read_conversation|n:4",
+  sideText === "SIDE|sys:yes|quote:yes|secret:no|tools:search_web+fetch_page+run_js+recall+search_conversations+read_conversation|n:4",
   sideText
 );
 check("main line untouched", await evalJs(`document.querySelectorAll('#messages .message').length === 4`));

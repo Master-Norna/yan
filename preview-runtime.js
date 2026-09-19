@@ -74,9 +74,78 @@
     window.dispatchEvent(new Event("load"));
     notify("ready");
   }
+  // run_js：在一个 Worker 里跑模型给的代码，收集 console 输出与返回值；超时就把 Worker 整个杀掉。
+  // CSP 不许 eval / new Function，所以代码不是运行时求值，而是直接拼进 Worker 的脚本（blob 脚本是许可的）：
+  // 先按「单个表达式」拼——脚本解析不过（还没发出 loaded 就出错）就按「语句块」再拼一次，用 return 交回结果
+  const COMPUTE_PRELUDE = String.raw`"use strict";
+const logs = [];
+const fmt = value => {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return String(value.stack || value);
+  if (typeof value === "bigint") return String(value) + "n";
+  if (typeof value === "function" || typeof value === "symbol") return String(value);
+  try {
+    const text = JSON.stringify(value, (k, v) => (typeof v === "bigint" ? String(v) + "n" : v instanceof Map ? Object.fromEntries(v) : v instanceof Set ? [...v] : v), 2);
+    return text === undefined ? String(value) : text;
+  } catch {
+    return String(value);
+  }
+};
+const push = level => (...args) => {
+  if (logs.reduce((n, line) => n + line.length, 0) > 20000) return;
+  logs.push((level ? level + " " : "") + args.map(fmt).join(" "));
+};
+self.console = { log: push(""), info: push(""), debug: push(""), table: push(""), warn: push("[warn]"), error: push("[error]") };
+for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts", "indexedDB", "caches", "BroadcastChannel", "Worker", "SharedWorker", "navigator"])
+  try { Object.defineProperty(self, name, { value: undefined, configurable: false, writable: false }); } catch {}
+self.postMessage({ type: "loaded" });
+`;
+  const COMPUTE_EPILOGUE = String.raw`
+(async () => {
+  const started = Date.now();
+  let value, error = null;
+  try { value = await __main(); } catch (err) { error = String((err && err.stack) || err).slice(0, 2000); }
+  self.postMessage({ type: "result", ok: !error, logs: logs.join("\n"), value: value === undefined ? undefined : fmt(value), error, ms: Date.now() - started });
+})();`;
+  const computeSource = (code, asExpression) =>
+    COMPUTE_PRELUDE +
+    (asExpression ? `const __main = async () => (\n${code}\n);` : `const __main = async () => {\n${code}\n};`) +
+    COMPUTE_EPILOGUE;
+  function compute(job) {
+    const reply = data => parent.postMessage({ ...data, type: "yan-compute-result", id: job.id }, "*");
+    const attempt = asExpression => {
+      let worker;
+      try {
+        worker = new Worker(URL.createObjectURL(new Blob([computeSource(job.code, asExpression)], { type: "text/javascript" })));
+      } catch (error) {
+        return reply({ ok: false, error: `沙箱无法启动：${error.message || error}` });
+      }
+      let loaded = false;
+      const timer = setTimeout(() => {
+        worker.terminate();
+        reply({ ok: false, error: `超时（${Math.round(job.timeout / 1000)} 秒）：已终止` });
+      }, job.timeout);
+      worker.onmessage = event => {
+        if (event.data?.type === "loaded") return void (loaded = true);
+        clearTimeout(timer);
+        worker.terminate();
+        reply(event.data);
+      };
+      worker.onerror = event => {
+        event.preventDefault(); // 不让它再冒到本页的 window.error 去报「运行错误」
+        clearTimeout(timer);
+        worker.terminate();
+        // 还没 loaded 就出错：脚本没解析过。表达式写法不成就按语句块再来；语句块也不成才是真的语法错
+        if (!loaded && asExpression) return attempt(false);
+        reply({ ok: false, error: String(event.message || "运行出错") });
+      };
+    };
+    attempt(true);
+  }
   window.addEventListener("message", event => {
-    if (event.source !== parent || event.data?.type !== "yan-preview-render" || event.data.id !== previewId) return;
-    run(event.data.html).catch(showError);
+    if (event.source !== parent || event.data?.id !== previewId) return;
+    if (event.data.type === "yan-preview-render") run(event.data.html).catch(showError);
+    else if (event.data.type === "yan-compute") compute(event.data);
   });
   parent.postMessage({ type: "yan-preview-ready", id: previewId }, "*");
 })();
