@@ -1,6 +1,7 @@
 // 言 · 整体渲染：顶栏、模型菜单、历史、对话与消息
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 function render(shouldScroll = false) {
+  rememberPlace();
   renderHeader();
   renderHistory();
   syncDocumentTitle();
@@ -263,6 +264,26 @@ function renderConversation(shouldScroll = false) {
   foldCompacted(c);
   renderOutline();
   updateContextGauge();
+}
+// 停在哪一页记在设置里：刷新后回到原处——正看着的那段对话、或卷宗；开机时由 boot 读回
+function rememberPlace() {
+  const s = store.settings,
+    /** @type {{ view: "chat"|"library", id: string }} */
+    next = { view: view === "library" ? "library" : "chat", id: view === "library" ? "" : currentId || "" };
+  if (s.lastView === next.view && (s.lastConversationId || "") === next.id) return;
+  s.lastView = next.view;
+  s.lastConversationId = next.id;
+  saveStoreSoon();
+}
+function restorePlace() {
+  const { lastView, lastConversationId } = store.settings;
+  if (lastView === "library") view = "library";
+  else if (lastConversationId && store.conversations.some(c => c.id === lastConversationId)) {
+    currentId = lastConversationId;
+    const c = currentConversation();
+    c.unread = false;
+    if (c.profileId) selectProfile(c.profileId, false);
+  }
 }
 // 压缩过的前文在页面上折起（记录都在，只是不占地方）；最近一次压缩的分隔上有「展开前文 / 收起前文」
 /** @param {Conversation} c */

@@ -164,6 +164,8 @@
  * @property {number} subRounds
  * @property {string} [archiveDir]
  * @property {Partial<Profile>} serverProfile 桥接预设模型上用户可改的几项
+ * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
+ * @property {string} [lastConversationId]
  */
 /**
  * @typedef {Object} Store 整个本地存储（localStorage 里的一份 JSON）

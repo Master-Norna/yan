@@ -82,6 +82,10 @@ check(
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1300);
+check(
+  "reload lands back in the conversation that was open, not on the welcome page",
+  await evalJs(`!document.querySelector("#chat").classList.contains("hidden") && document.querySelector("#welcome").classList.contains("hidden")`)
+);
 await evalJs(`document.querySelector("#history [data-conversation] .history-open").click(); true`);
 await sleep(400);
 check(
