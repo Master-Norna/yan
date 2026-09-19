@@ -43,7 +43,7 @@
 /**
  * @typedef {Object} Step 行迹里的一步：一次工具调用及其结果、呈现与开合状态
  * @property {string} id
- * @property {string} name 工具名
+ * @property {string} name 工具名；user_note 是作答途中用户寄来的补言，不是工具
  * @property {string} arguments 模型给的参数原文（JSON）
  * @property {StepStatus} status
  * @property {string} [title] 标题行：指令、路径、关键词……
@@ -59,6 +59,7 @@
  * @property {number} [at] 调用发起时正文的长度（时间线分组、思绪按轮切分都靠它）
  * @property {number} [rat] 调用发起时思绪的长度
  * @property {string} [scope] 帮手的步骤记它所属的帮手 id
+ * @property {Attachment[]} [attachments] 补言（user_note）随带的附件
  * @property {boolean} [cached] 结果是复用的
  * @property {boolean} [skipped]
  * @property {boolean} [expanded] 输出摊开 / 折起；未记则按状态定（报错折起）
@@ -101,7 +102,7 @@
  * @property {boolean} [compacting]
  */
 /** @typedef {{ id: string, parentId: string|null, messages: Message[], createdAt: string }} Fork 被换下来的一段尾巴 */
-/** @typedef {{ id: string, anchor: { messageId: string, text: string }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注 */
+/** @typedef {{ id: string, anchor: { messageId: string, text: string, occurrence?: number }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注；occurrence 是所注的那段在正文里第几次出现（从 0 起） */
 /**
  * @typedef {Object} Conversation
  * @property {string} id
@@ -546,6 +547,8 @@ function switchBranch(c, index, step) {
   editingMessageId = null;
   saveStore();
   renderConversation(false);
+  // 面板里开着的旁注若注在被换下去的那几条上，退回目录（那里只列眼前这条路上的）
+  if (sidePanelOpen()) renderSidePanel();
   // 切换后让这一条留在原来的位置，视线不用重新找
   const next = document.querySelector(`#messages [data-message="${CSS.escape(c.messages[index].id)}"]`);
   if (next && keepTop !== null) {
@@ -822,7 +825,8 @@ function setProcessDetails(details, open, animate = true) {
   details._motionAnimation?.cancel();
   details._motionAnimation = null;
   details._motionTarget = open;
-  const body = details.querySelector(".reasoning-body, .tool-stack-body");
+  // 只认自己直接的那层正文：帮手卡片的「帮手 · n 步」里还套着各轮的思绪，不能抓到里头那个去动
+  const body = details.querySelector(":scope > .reasoning-body, :scope > .tool-stack-body, :scope > .sub-timeline, :scope > .source-grid");
   details.classList.remove("is-closing");
   if (body) {
     body.style.removeProperty("overflow");
@@ -866,6 +870,24 @@ function setProcessDetails(details, open, animate = true) {
     animation.cancel();
     details._motionAnimation = null;
     details._motionTarget = undefined;
+  };
+}
+// 就地改内容时高度平滑过渡（先量旧高，改完量新高，再从旧高动到新高）：步骤输出的折起摊开、「展开全部」都走这里，
+// 别让一块内容凭空出现又凭空消失。动效关掉时直接改
+function morphHeight(el, mutate, duration = 360) {
+  if (!el || inkMotionOff() || typeof el.animate !== "function") return mutate();
+  const from = el.getBoundingClientRect().height;
+  mutate();
+  const to = el.getBoundingClientRect().height;
+  if (Math.abs(to - from) < 2) return;
+  el._morph?.cancel();
+  el.style.overflow = "hidden";
+  const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: "cubic-bezier(.22,.72,.2,1)" });
+  el._morph = animation;
+  animation.onfinish = animation.oncancel = () => {
+    if (el._morph !== animation) return;
+    el._morph = null;
+    el.style.removeProperty("overflow");
   };
 }
 
@@ -939,6 +961,49 @@ function renderMath(tex, display) {
     return `<code>${escapeHtml(tex)}</code>`;
   }
 }
+// 占位框里的动效在逐帧重画的尾段里会随节点重建从头再来，看着像定住了：把相位记在节点上（负的 animation-delay），重建也接着原来的拍子走
+const vizPhase = () => `-${Math.round(performance.now())}ms`;
+// 占位框里的「手稿」：每来一行落一笔，十八笔写满一页便翻页重起；笔画长短按固定的韵律排，是一页字的样子而不是进度条。
+// 最新的一笔是朱色，流式停住了，笔也就停住了，看得出来
+const SKETCH_PAGE = 18,
+  SKETCH_WIDTHS = [34, 22, 44, 27, 18, 38];
+function pendingSketchHtml(lines) {
+  const inked = ((Math.max(1, Number(lines) || 1) - 1) % SKETCH_PAGE) + 1;
+  return `<div class="viz-pending-sketch">${Array.from({ length: inked }, (_, i) => `<i style="--w:${SKETCH_WIDTHS[i % SKETCH_WIDTHS.length]}px"></i>`).join("")}</div>`;
+}
+// 尾段每帧整段重画，占位框若跟着重建，笔画的落笔动效每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
+// 只换它周围的内容，并按新的行数补上新落的几笔（翻页了才整页重写）
+function paintTail(tail, html) {
+  const live = [...tail.querySelectorAll(".viz-pending")].at(-1);
+  if (!live || live.parentNode !== tail) {
+    tail.innerHTML = html;
+    return;
+  }
+  const fresh = document.createElement("div");
+  fresh.innerHTML = html;
+  const next = [...fresh.querySelectorAll(".viz-pending")].at(-1);
+  if (!next || next.parentNode !== fresh || next.dataset.vizPending !== live.dataset.vizPending) {
+    tail.innerHTML = html;
+    return;
+  }
+  const sketch = live.querySelector(".viz-pending-sketch"),
+    strokes = next.querySelectorAll(".viz-pending-sketch i");
+  if (sketch && strokes.length >= sketch.children.length)
+    for (const stroke of [...strokes].slice(sketch.children.length)) sketch.append(stroke);
+  else if (sketch) sketch.replaceChildren(...strokes);
+  live.dataset.lines = next.dataset.lines;
+  live.setAttribute("aria-label", next.getAttribute("aria-label"));
+  for (const node of [...tail.childNodes]) if (node !== live) node.remove();
+  const before = [],
+    after = [];
+  let seen = false;
+  for (const node of [...fresh.childNodes]) {
+    if (node === next) seen = true;
+    else (seen ? after : before).push(node);
+  }
+  live.before(...before);
+  live.after(...after);
+}
 function codeBlockHtml(text, lang) {
   const language = String(lang || "")
       .trim()
@@ -946,11 +1011,10 @@ function codeBlockHtml(text, lang) {
       .toLowerCase(),
     known = !!(window.hljs && language && hljs.getLanguage(language));
   const htmlApp = ["html", "interactive", "app"].includes(language);
-  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时显示轻量成图状态。
-  // 占位框里报着写到第几行：数字随流式跳动，动效关掉了也看得出还在写，不会以为卡住了
+  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是一页正在落笔的手稿（见 pendingSketchHtml）
   if (suppressViz && (htmlApp || language === "mermaid" || language === "echarts")) {
     const lines = String(text || "").split("\n").length;
-    return `<div class="viz viz-pending" data-viz-pending="${language}" role="status" aria-label="${htmlApp ? "交互内容仍在生成" : "图形仍在生成"}"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true"><span class="viz-pending-mark"></span><span class="viz-pending-label">${htmlApp ? "页面" : "图形"}写到第 ${lines} 行</span></div></div>\n`;
+    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml(lines)}</div></div>\n`;
   }
   if (!suppressViz && (language === "mermaid" || language === "echarts"))
     return `<div class="viz" data-viz="${language}"><div class="code-head"><span class="code-lang">${language}</span><span><button type="button" class="code-copy" data-viz-toggle>源码</button><button type="button" class="code-copy" data-viz-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="viz-canvas"></div><pre class="viz-source hidden"><code>${escapeHtml(text)}</code></pre></div>\n`;
@@ -1439,9 +1503,12 @@ async function boot() {
   recoverInterruptedMessages();
   applyAppearance();
   bindEvents();
+  (window.requestIdleCallback || (fn => setTimeout(fn, 800)))(() => void rasterMasks());
   void cleanupAttachmentStore();
   void refreshArchive();
-  if (isMobile()) toggleSidebar(true);
+  // 侧栏的开合记在本机（不随备份走）：宽屏按上次的来，窄屏一律收起；theme-boot 已按同一记录先把宽度放好，这里接过来
+  toggleSidebar(isMobile() || localStorage.getItem("yan-sidebar") === "collapsed");
+  delete document.documentElement.dataset.sidebar;
   render();
 }
 
@@ -1636,8 +1703,13 @@ function bindEvents() {
     e.preventDefault();
     openArchiveImage(e.target.dataset.openDiskImage, e.target);
   });
-  let dragHideTimer = null;
-  const hasDraggedFiles = event => Array.from(event.dataTransfer?.types || []).includes("Files");
+  let dragHideTimer = null,
+    dragFromPage = false;
+  // 拖的是页面里自己的东西（卷宗里的图、案上的附件、答里的图片）时浏览器也会把它当文件拖入：
+  // 松手就又收一份进卷宗。页内起手的拖动一概不接——卷宗可能绑着用户自己的目录，里面本就允许有重样的文件，不能靠查重来挡
+  window.addEventListener("dragstart", () => (dragFromPage = true));
+  window.addEventListener("dragend", () => (dragFromPage = false));
+  const hasDraggedFiles = event => !dragFromPage && Array.from(event.dataTransfer?.types || []).includes("Files");
   const showDropVeil = () => {
     clearTimeout(dragHideTimer);
     const toLibrary = view === "library";
@@ -1799,13 +1871,13 @@ function bindEvents() {
     // 差遣卡片整张折叠（默认摊开），指令输出默认折起；两者都记在步骤上，重画不丢
     if (el.classList.contains("tool-step-delegate")) {
       if (step) step.folded = !step.folded;
-      el.classList.toggle("folded", step ? !!step.folded : !el.classList.contains("folded"));
+      morphHeight(el, () => el.classList.toggle("folded", step ? !!step.folded : !el.classList.contains("folded")));
       saveStoreSoon();
       return;
     }
     const wasFolded = el.classList.contains("folded");
     if (step) step.expanded = wasFolded;
-    el.classList.toggle("folded", !wasFolded);
+    morphHeight(el, () => el.classList.toggle("folded", !wasFolded));
     head.title = wasFolded ? "收起输出" : "展开输出";
     saveStoreSoon();
   });
@@ -1823,7 +1895,14 @@ function bindEvents() {
     step.full = !step.full;
     step.expanded = true;
     saveStoreSoon();
-    el.outerHTML = stepHtml(step);
+    // 节点留在原处只换内容，高度才好从旧高动到新高
+    const fresh = document.createElement("div");
+    fresh.innerHTML = stepHtml(step);
+    const next = fresh.firstElementChild;
+    morphHeight(el, () => {
+      el.className = next.className;
+      el.innerHTML = next.innerHTML;
+    });
   });
   // 差遣卡片里「帮手 · n 步」的开合记在步骤上，卡片重画时不丢
   $("#messages").addEventListener("click", event => {
@@ -1838,9 +1917,20 @@ function bindEvents() {
         allMessages(c)
           .flatMap(m => m.steps || [])
           .find(s => s.id === id);
-    details.open = !details.open;
+    const nextOpen = details._motionAnimation ? !details._motionTarget : !details.open;
+    clearTimeout(details._settleTimer);
+    details._settleTimer = null;
     details.dataset.touched = "1";
-    if (step) step.subOpen = details.open;
+    if (step) step.subOpen = nextOpen;
+    setProcessDetails(details, nextOpen);
+  });
+  // 出处也是一块可开合的，与思绪、行迹同一种开合
+  $("#messages").addEventListener("click", event => {
+    const summary = event.target.closest(".source-stack > summary");
+    if (!summary) return;
+    event.preventDefault();
+    const details = summary.parentElement;
+    setProcessDetails(details, details._motionAnimation ? !details._motionTarget : !details.open);
   });
   $("#approvalBar").addEventListener("click", event => {
     const bar = $("#approvalBar"),
@@ -2079,8 +2169,8 @@ function bindEvents() {
     else if (editingMessageId) {
       editingMessageId = null;
       renderConversation(false);
-      if (sideThreadId) renderSidePanel();
-    } else if (sideThreadId) closeSidePanel();
+      if (sidePanelOpen()) renderSidePanel();
+    } else if (sidePanelOpen()) closeSidePanel();
     else if (pendingQuote && document.activeElement === $("#chatInput") && !$("#chatInput").value) {
       pendingQuote = null;
       renderQuote();
@@ -2193,6 +2283,10 @@ function toggleSidebar(force) {
   const sidebar = $("#sidebar"),
     collapsed = force ?? !sidebar.classList.contains("collapsed");
   sidebar.classList.toggle("collapsed", collapsed);
+  if (!isMobile())
+    try {
+      localStorage.setItem("yan-sidebar", collapsed ? "collapsed" : "open");
+    } catch {}
   syncScrim();
   const button = $("#collapseSidebar");
   button.textContent = collapsed ? "›" : "‹";
@@ -2905,7 +2999,7 @@ function restoreScrollPosition(snapshot) {
 /** @param {Conversation} c */
 function renderChatMeta(c) {
   $("#chatMeta").innerHTML =
-    `${escapeHtml(formatDay(c.createdAt))} · ${escapeHtml(chineseNumber(c.messages.filter(m => m.role === "user").length, true))}问${threadsOf(c).length ? ` · <button class="chat-meta-notes" type="button" data-open-notes title="打开旁注">旁注 ${threadsOf(c).length}</button>` : ""}${isWork(c) ? ` · <button type="button" class="chat-meta-path" data-workdir-bind title="工作目录">${escapeHtml(c.workdir || "")}</button>` : c.ended ? "" : ` · <button type="button" class="chat-meta-bind" data-workdir-bind title="绑定工作目录，此后指令与改动落于其中">绑定目录</button>`}${c.messages.some(m => m.role === "assistant" && m.status === "complete") ? ` · <button type="button" class="chat-meta-bind" data-export-md title="${archiveOnline() ? "以 Markdown 存入卷宗" : "以 Markdown 下载"}">${archiveOnline() ? "存入卷宗" : "存为 Markdown"}</button>` : ""}`;
+    `${escapeHtml(formatDay(c.createdAt))} · ${escapeHtml(chineseNumber(c.messages.filter(m => m.role === "user").length, true))}问${visibleThreads(c).length ? ` · <button class="chat-meta-notes" type="button" data-open-notes title="打开旁注">旁注 ${visibleThreads(c).length}</button>` : ""}${isWork(c) ? ` · <button type="button" class="chat-meta-path" data-workdir-bind title="工作目录">${escapeHtml(c.workdir || "")}</button>` : c.ended ? "" : ` · <button type="button" class="chat-meta-bind" data-workdir-bind title="绑定工作目录，此后指令与改动落于其中">绑定目录</button>`}${c.messages.some(m => m.role === "assistant" && m.status === "complete") ? ` · <button type="button" class="chat-meta-bind" data-export-md title="${archiveOnline() ? "以 Markdown 存入卷宗" : "以 Markdown 下载"}">${archiveOnline() ? "存入卷宗" : "存为 Markdown"}</button>` : ""}`;
 }
 function renderConversation(shouldScroll = false) {
   const c = currentConversation();
@@ -3081,7 +3175,7 @@ function renderMessage(message, branch = null, side = false) {
     const quote = message.quote?.text
       ? `<div class="user-quote" data-quote-source="${escapeHtml(message.quote.messageId || "")}" title="回到出处">${escapeHtml(message.quote.text)}</div>`
       : "";
-    return `<article class="message user" data-message="${escapeHtml(message.id)}">${side ? "" : noteMarkHtml(message)}${files}${quote}${message.content ? `<div class="user-bubble">${escapeHtml(message.content)}</div>` : ""}<div class="message-actions${branch ? " has-branch" : ""}">${branchNavHtml(branch)}${actionIcon("copy", "复制消息", icons.copy)}${actionIcon("edit", "编辑消息", icons.edit)}${side ? actionIcon("retract", "撤回此问及其后的往来", icons.retract) : ""}</div></article>`;
+    return `<article class="message user" data-message="${escapeHtml(message.id)}">${side ? "" : noteMarkHtml(message)}${files}${quote}${message.content ? `<div class="user-bubble">${escapeHtml(message.content)}</div>` : ""}<div class="message-actions${branch ? " has-branch" : ""}">${branchNavHtml(branch)}${actionIcon("copy", "复制消息", icons.copy)}${actionIcon("edit", "编辑消息", icons.edit)}</div></article>`;
   }
   // 旁注里的答：复制、重新生成（不分叉，直接换掉）；出错或停止了也能重来
   const actions = side
@@ -3147,7 +3241,7 @@ function assistantActionsHtml(message) {
       ? actionIcon("retry", "重试", icons.retry)
       : message.status === "interrupted"
         ? `${message.content ? actionIcon("copy", "复制已生成内容", icons.copy) : ""}${actionIcon("resume", "继续生成", icons.resume)}${actionIcon("retry", "从头重试", icons.retry)}`
-        : `${actionIcon("copy", "复制回复", icons.copy)}${actionIcon("regenerate", "重新生成", icons.regenerate)}${actionIcon("note", "旁注：就整条回复另开一线，不入正文", icons.note)}${messageCostHtml(message)}`;
+        : `${actionIcon("copy", "复制回复", icons.copy)}${actionIcon("regenerate", "重新生成", icons.regenerate)}${actionIcon("note", "旁注", icons.note)}${messageCostHtml(message)}`;
 }
 // 这一答耗了多少墨：各轮请求的用量之和（含帮手），接口报了用量就用实数，没报则按字数估；当前上下文有多大另看右下角
 /** @param {Message} message */
@@ -3166,7 +3260,9 @@ function finalizeAssistant(conversation, assistant, leadTrim = 0) {
   const article = document.querySelector(`#messages [data-message="${CSS.escape(assistant.id)}"]`),
     block = article?.querySelector(".assistant-block");
   if (!block || conversation.ended) return renderConversation(followBottom);
+  // 步骤可能收尾时全撤了（只排着补言、没递出去就停了）：行迹整块撤掉
   if (assistant.steps?.length) refreshSteps(assistant);
+  else block.querySelector(":scope > .tool-stack")?.remove();
   if (assistant.deliverables?.length && !block.querySelector(":scope > .deliver-bar"))
     (block.querySelector(":scope > .change-bar") || block.querySelector(":scope > .markdown") || block).insertAdjacentHTML(
       "afterend",
@@ -3245,7 +3341,8 @@ const TOOL_LABELS = {
   forget: "忘却",
   recall: "翻记忆",
   search_conversations: "查旧谈",
-  read_conversation: "翻旧谈"
+  read_conversation: "翻旧谈",
+  user_note: "补言"
 };
 function toolStackLabel() {
   return "行迹";
@@ -3435,6 +3532,7 @@ function stepHtml(step) {
   if (WORK_TOOLS.has(step.name)) return workStepHtml(step, title);
   if (step.name === "ask_user") return askStepHtml(step);
   if (step.name === "delegate") return delegateStepHtml(step);
+  if (step.name === "user_note") return noteStepHtml(step);
   const body = step.results?.length
     ? `<ul class="tool-results">${step.results
         .slice(0, 8)
@@ -3695,6 +3793,20 @@ function renderHelperBar() {
   }
   if (bar.classList.contains("hidden") || bar.classList.contains("leaving")) showNow(bar);
 }
+// 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面
+/** @param {Step} step */
+function noteStepHtml(step) {
+  const status = step.status || "done",
+    text = String(step.note || "").trim(),
+    first = text.split("\n").find(Boolean)?.slice(0, 80) || "",
+    files = (step.attachments || []).map(file => file.name);
+  const meta = status === "running" ? "待寄" : status === "error" ? escapeHtml(step.result || "未送达") : escapeHtml(step.result || "已递");
+  const body =
+    text.length > first.length || files.length
+      ? `<div class="tool-note">${escapeHtml(text)}${files.length ? `<div class="tool-note-files">${files.map(name => escapeHtml(name)).join("、")}</div>` : ""}</div>`
+      : "";
+  return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+}
 function stepStateHtml(status) {
   return status === "running"
     ? `<span class="tool-state spinning" aria-label="进行中"></span>`
@@ -3809,6 +3921,9 @@ function refreshSteps(assistant) {
         step,
         seen
       );
+    // 没递出去就撤下的补言（收尾时另作新一问、或停了放回案上）：页上那一步也撤
+    const ids = new Set((assistant.steps || []).map(step => step.id));
+    for (const el of stack.querySelectorAll(".tool-step-note[data-step-id]")) if (!ids.has(el.dataset.stepId)) el.remove();
     renderHelperBar();
     // 一答只开一次、收一次：第一步起就摊开，整答写完才收（言里模型说话的间隙也不收）；请示时必开
     const pending = assistant.steps.some(step => step.status === "pending");
@@ -3841,7 +3956,8 @@ function insertAboveChangeBar(block, html) {
 /** @param {Message} message */
 function reasoningLive(message) {
   if (message.status !== "streaming") return false;
-  const last = (message.steps || []).at(-1),
+  // 补言不是一轮：它落下时模型可能正想到一半，块上的勾不能因它先打上
+  const last = (message.steps || []).filter(step => step.name !== "user_note").at(-1),
     at = Number(last?.at) || 0,
     rat = Number(last?.rat) || 0;
   return (
@@ -3910,8 +4026,7 @@ const icons = {
   regenerate: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 3.2v2.6h-2.6"/></svg>`,
   resume: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.2v9.6L12 8 4 3.2z"/></svg>`,
   retry: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M8 3v5l3 1.8"/><circle cx="8" cy="8" r="5.2"/></svg>`,
-  note: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M3.5 4h6M3.5 8h6M3.5 12h6"/><path d="M12.6 6.4v3.2"/><path d="M11 8h3.2"/></svg>`,
-  retract: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 4.6 3.4 7.4l2.8 2.8"/><path d="M3.6 7.4h5.6a3 3 0 0 1 0 6H7"/></svg>`
+  note: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M3.5 4h6M3.5 8h6M3.5 12h6"/><path d="M12.6 6.4v3.2"/><path d="M11 8h3.2"/></svg>`
 };
 function actionIcon(action, title, icon) {
   return `<button class="message-action" data-action="${action}" title="${title}" aria-label="${title}">${icon}</button>`;
@@ -3973,6 +4088,47 @@ function renderQuote() {
   renderSendButtons();
   scheduleContextGauge();
 }
+// 划选的这段在正文里是第几次出现：同一条回复里同样的词可能出现不止一次，重画后单靠 indexOf 会落到第一处。
+// 数的是划选起点之前出现过几回，空白全去掉再数——与 markAnchor 里的找法一致
+function occurrenceBefore(body, range, text) {
+  try {
+    const pre = document.createRange();
+    pre.selectNodeContents(body);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const picked = pre.cloneContents();
+    picked.querySelectorAll?.(".viz, .html-app, .math-pending, sup.note-ref").forEach(node => node.remove());
+    return countOccurrences(foldSpace(picked.textContent), foldSpace(text));
+  } catch {
+    return 0;
+  }
+}
+const foldSpace = value => String(value || "").replace(/\s+/g, "");
+function countOccurrences(haystack, needle) {
+  if (!needle) return 0;
+  let count = 0;
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) count += 1;
+  return count;
+}
+// 正文里此刻划选的一段：所在消息、文字、第几次出现，以及它在页面上的位置。没划、划在正文之外、太短，都是 null
+function selectionAnchor() {
+  const selection = getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return null;
+  const range = selection.getRangeAt(0);
+  let text = selection.toString().trim();
+  // 划选跨过了已有旁注的小标（脚注号）：那个数字不是正文，去掉，否则落点在正文里找不到
+  const picked = range.cloneContents();
+  if (picked.querySelector?.("sup.note-ref")) {
+    picked.querySelectorAll("sup.note-ref").forEach(node => node.remove());
+    text = picked.textContent.trim();
+  }
+  const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+  const body = host?.closest("#messages .message .markdown, #messages .message .user-bubble"),
+    article = body?.closest("[data-message]");
+  if (!body || !article || text.length < 2 || body.closest(".message-editor")) return null;
+  const rect = range.getBoundingClientRect();
+  if (!rect.width && !rect.height) return null;
+  return { text: text.slice(0, 1200), messageId: article.dataset.message, occurrence: occurrenceBefore(body, range, text), rect };
+}
 function setupQuoteTip() {
   const tip = $("#quoteTip");
   let current = null,
@@ -3982,23 +4138,10 @@ function setupQuoteTip() {
     if (!tip.classList.contains("hidden")) tip.classList.add("hidden");
   };
   const check = () => {
-    const selection = getSelection();
-    if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return hide();
-    const range = selection.getRangeAt(0);
-    let text = selection.toString().trim();
-    // 划选跨过了已有旁注的小标（脚注号）：那个数字不是正文，去掉，否则落点在正文里找不到
-    const picked = range.cloneContents();
-    if (picked.querySelector?.("sup.note-ref")) {
-      picked.querySelectorAll("sup.note-ref").forEach(node => node.remove());
-      text = picked.textContent.trim();
-    }
-    const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
-    const body = host?.closest("#messages .message .markdown, #messages .message .user-bubble"),
-      article = body?.closest("[data-message]");
-    if (!body || !article || text.length < 2 || body.closest(".message-editor")) return hide();
-    const rect = range.getBoundingClientRect();
-    if (!rect.width && !rect.height) return hide();
-    current = { text: text.slice(0, 1200), messageId: article.dataset.message };
+    const picked = selectionAnchor();
+    if (!picked) return hide();
+    const { rect, ...anchor } = picked;
+    current = anchor;
     tip.style.left = `${Math.min(innerWidth - 40, Math.max(40, rect.left + rect.width / 2))}px`;
     tip.style.top = `${Math.max(8, rect.top - 34)}px`;
     tip.classList.remove("hidden");
@@ -4030,13 +4173,20 @@ function setupQuoteTip() {
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // ---------- 旁注：附在正文某条消息某一处的旁支小对话。它读得到正文（到所注消息为止），正文永远读不到它 ----------
 let sideThreadId = null; // 面板里正打开的旁注（内存态，刷新后收起，旁注本身仍在）
+let sideIndexFor = null; // 目录页是从哪条消息打开的：目录里「另起一条」落在它上面
 const noteCounts = new Map(); // messageId → 旁注数；参与消息签名，数量变了那条才重画
 /** @param {Conversation} c */
 function threadsOf(c) {
   return c?.threads || [];
 }
+// 旁注跟着它所注的那一问一答走：换到另一条分支，注在被换下去的那几条上的旁注便不在眼前（仍在册，换回来就回来）
+/** @param {Conversation} c */
+function visibleThreads(c) {
+  const live = new Set((c?.messages || []).map(m => m.id));
+  return threadsOf(c).filter(t => live.has(t.anchor?.messageId));
+}
 function currentThread() {
-  return threadsOf(currentConversation()).find(t => t.id === sideThreadId) || null;
+  return visibleThreads(currentConversation()).find(t => t.id === sideThreadId) || null;
 }
 /** @param {Conversation} c */
 function refreshNoteCounts(c) {
@@ -4056,15 +4206,18 @@ function anchorState(c, thread) {
 function sideJob(thread) {
   return thread ? requestJobs.get(`side:${thread.id}`) || null : null;
 }
+// 起一条旁注：划了一段就注在那一段上；没划（text 为空）就是就整条回复而谈——同一条回复上可以有几条
 function createThread(anchor) {
   const c = currentConversation();
   if (!c || !anchor?.messageId) return;
-  const whole = !String(anchor.text || "").trim(),
-    existing = whole ? threadsOf(c).find(t => t.anchor.messageId === anchor.messageId && !t.anchor.text) : null;
-  if (existing) return openSidePanel(existing.id); // 整条回复只开一条旁注，再点就是打开它
+  const whole = !String(anchor.text || "").trim();
   const thread = {
     id: uid(),
-    anchor: { messageId: anchor.messageId, text: whole ? "" : String(anchor.text).slice(0, 1200) },
+    anchor: {
+      messageId: anchor.messageId,
+      text: whole ? "" : String(anchor.text).slice(0, 1200),
+      occurrence: whole ? 0 : Number(anchor.occurrence) || 0
+    },
     createdAt: now(),
     updatedAt: now(),
     messages: []
@@ -4083,8 +4236,21 @@ function openSidePanel(threadId) {
   syncActiveAnchor();
   setTimeout(() => $("#sideInput")?.focus(), 0);
 }
+// 目录页：这段对话里的旁注都列在这里，点哪条开哪条；从一条回复的「旁注」进来的，还能就那条回复另起一条
+function openSideIndex(messageId = null) {
+  sideThreadId = null;
+  sideIndexFor = messageId;
+  showNow($("#sidePanel"));
+  renderSidePanel();
+  syncActiveAnchor();
+}
+function sidePanelOpen() {
+  const panel = $("#sidePanel");
+  return !!panel && !panel.classList.contains("hidden") && !panel.classList.contains("leaving");
+}
 function closeSidePanel() {
   sideThreadId = null;
+  sideIndexFor = null;
   syncActiveAnchor();
   const panel = $("#sidePanel");
   if (panel && !panel.classList.contains("hidden")) hideWithFade(panel);
@@ -4123,6 +4289,17 @@ function textNodesIn(root) {
   while (walker.nextNode()) nodes.push(walker.currentNode);
   return nodes;
 }
+// 第 n 次出现的位置（n 从 0 起）；不够 n 次就退到第一次，一次也没有才是 -1
+function nthIndexOf(haystack, needle, n) {
+  if (!needle) return -1;
+  let at = haystack.indexOf(needle);
+  for (let i = 0; i < n && at >= 0; i++) {
+    const next = haystack.indexOf(needle, at + 1);
+    if (next < 0) break;
+    at = next;
+  }
+  return at;
+}
 /** @param {Thread} thread */
 function markAnchor(body, thread, ordinal) {
   const nodes = textNodesIn(body);
@@ -4133,8 +4310,10 @@ function markAnchor(body, thread, ordinal) {
     starts.push(joined.length);
     joined += node.data;
   }
-  const needle = thread.anchor.text;
-  let from = joined.indexOf(needle),
+  // 同样的词在这条回复里出现不止一次时，按记下的「第几次」落；这一版里没那么多次了（改过、另一版本）就退到第一处
+  const needle = thread.anchor.text,
+    occurrence = Number(thread.anchor.occurrence) || 0;
+  let from = nthIndexOf(joined, needle, occurrence),
     to = from + needle.length;
   if (from < 0) {
     // 划选得到的文字与渲染文字在空白上多半不一致（换行、缩进；跨段划选时段与段之间有换行、而文字节点连起来没有）：
@@ -4147,7 +4326,7 @@ function markAnchor(body, thread, ordinal) {
       map.push(i);
     }
     const target = needle.replace(/\s+/g, ""),
-      at = folded.indexOf(target);
+      at = nthIndexOf(folded, target, occurrence);
     if (at < 0 || !target) return false;
     from = map[at];
     to = map[at + target.length - 1] + 1;
@@ -4185,17 +4364,20 @@ function markAnchor(body, thread, ordinal) {
 function renderSidePanel() {
   const c = currentConversation(),
     thread = currentThread();
-  if (!c || !thread) return closeSidePanel();
-  const list = threadsOf(c),
+  if (!c) return closeSidePanel();
+  if (!thread) return renderSideIndex(c);
+  $("#sidePanel").dataset.mode = "thread";
+  const list = visibleThreads(c),
     at = list.indexOf(thread) + 1;
   $("#sideNav").innerHTML =
     list.length > 1
       ? `<button class="message-action" type="button" data-side-nav="-1" title="上一条旁注" ${at <= 1 ? "disabled" : ""}>‹</button><span>${at}/${list.length}</span><button class="message-action" type="button" data-side-nav="1" title="下一条旁注" ${at >= list.length ? "disabled" : ""}>›</button>`
       : "";
+  // 所注的一段列在顶上，点它回到出处；就整条回复起的旁注没有范围可言，不列
   const { live, any } = anchorState(c, thread),
     anchorEl = $("#sideAnchor");
-  anchorEl.textContent = thread.anchor.text || "整条回复";
-  anchorEl.classList.toggle("whole", !thread.anchor.text);
+  anchorEl.textContent = thread.anchor.text;
+  anchorEl.classList.toggle("hidden", !thread.anchor.text);
   anchorEl.classList.toggle("lost", !live);
   anchorEl.disabled = !live;
   anchorEl.title = live ? "回到出处" : any ? "所注段落在另一版本中" : "所注段落已不在此对话中";
@@ -4213,6 +4395,49 @@ function renderSidePanel() {
   // 生成中用户往上翻了就不再拉回底部；换了旁注、发出新一问时照旧到底
   const scroller = $("#sideScroll");
   if (sideFollow) scroller.scrollTop = scroller.scrollHeight;
+}
+// 目录：按所注消息在对话里的先后排，同一条消息上的按起注时间排；每条列所注的一段（整条回复的列第一问），
+// 下面一行是落在第几答、几问几答、最近一次动笔
+/** @param {Conversation} c */
+function renderSideIndex(c) {
+  $("#sidePanel").dataset.mode = "index";
+  $("#sideNav").innerHTML = "";
+  $("#sideAnchor").classList.add("hidden");
+  const order = new Map(c.messages.map((m, i) => [m.id, i])),
+    list = [...visibleThreads(c)].sort(
+      (a, b) => order.get(a.anchor.messageId) - order.get(b.anchor.messageId) || String(a.createdAt).localeCompare(String(b.createdAt))
+    );
+  const where = thread => {
+    const index = order.get(thread.anchor.messageId),
+      message = c.messages[index],
+      nth = c.messages.slice(0, index + 1).filter(m => m.role === message.role).length;
+    return `第${chineseNumber(nth)}${message.role === "user" ? "问" : "答"}`;
+  };
+  const items = list
+    .map((thread, i) => {
+      const asked = thread.messages.filter(m => m.role === "user").length,
+        lead = thread.anchor.text || thread.messages.find(m => m.role === "user")?.content || "尚未落笔",
+        running = !!sideJob(thread);
+      return `<button type="button" class="side-index-item${thread.anchor.messageId === sideIndexFor ? " here" : ""}" data-side-open="${escapeHtml(thread.id)}"><span class="side-index-num">${i + 1}</span><span class="side-index-copy"><strong>${escapeHtml(lead)}</strong><small>${escapeHtml(where(thread))} · ${asked ? `${escapeHtml(chineseNumber(asked, true))}问` : "未问"}${running ? " · 作答中" : ""} · ${escapeHtml(formatDay(thread.updatedAt || thread.createdAt))}</small></span></button>`;
+    })
+    .join("");
+  // 「＋」另起一条：正文里划着一段就注在那一段上；没划就是就整条回复而谈（从哪条回复进来的就是哪条，否则是最末一答）
+  $("#sideMessages").innerHTML =
+    `<div class="side-index" data-message="__index"><button type="button" class="side-index-new" data-side-new title="划选正文中的一段即注在那一段上；未划选则就整条回复而谈"><span>＋</span>另起一条</button>${
+      items || `<div class="side-empty">还没有旁注<br>划选正文中的一段，或按上面的「＋」</div>`
+    }</div>`;
+  renderSideSend();
+}
+// 目录页「＋」落在哪条消息上：划着正文就是那一段；否则是打开目录时的那条回复，再不然是最末一答
+/** @param {Conversation} c */
+function indexNewAnchor(c) {
+  const picked = selectionAnchor();
+  if (picked) return { messageId: picked.messageId, text: picked.text, occurrence: picked.occurrence };
+  const id =
+    (sideIndexFor && c.messages.some(m => m.id === sideIndexFor) ? sideIndexFor : null) ||
+    [...c.messages].reverse().find(m => m.role === "assistant" && m.status !== "streaming")?.id ||
+    [...c.messages].reverse().find(m => m.role !== "context")?.id;
+  return id ? { messageId: id, text: "" } : null;
 }
 // 旁注面板的跟随：贴着底部时随生成往下走，往上翻就停，翻回底部再跟——与正文那侧一个规矩
 let sideFollow = true;
@@ -4255,9 +4480,22 @@ function setupSidePanel() {
   };
   $("#chatMeta").addEventListener("click", e => {
     if (!e.target.closest("[data-open-notes]")) return;
-    const list = threadsOf(currentConversation());
-    if (!list.length) return;
-    openSidePanel((currentThread() || list[list.length - 1]).id);
+    if (visibleThreads(currentConversation()).length) openSideIndex();
+  });
+  $("#sideIndexBtn").onclick = () => openSideIndex(currentThread()?.anchor.messageId || null);
+  // 按「＋」前不让这一下把正文里的划选清掉，落点才认得出来
+  $("#sideMessages").addEventListener("pointerdown", e => {
+    if (e.target.closest("[data-side-new]")) e.preventDefault();
+  });
+  $("#sideMessages").addEventListener("click", e => {
+    const open = e.target.closest("[data-side-open]");
+    if (open) return openSidePanel(open.dataset.sideOpen);
+    if (!e.target.closest("[data-side-new]")) return;
+    const c = currentConversation(),
+      anchor = c && indexNewAnchor(c);
+    if (!anchor) return toast("这段对话里还没有可注的回复");
+    getSelection()?.removeAllRanges();
+    createThread(anchor);
   });
   $("#sideSend").onclick = () => void sendSide();
   const input = $("#sideInput");
@@ -4275,7 +4513,7 @@ function setupSidePanel() {
   $("#sideNav").addEventListener("click", e => {
     const button = e.target.closest("[data-side-nav]");
     if (!button) return;
-    const list = threadsOf(currentConversation()),
+    const list = visibleThreads(currentConversation()),
       index = list.findIndex(t => t.id === sideThreadId) + Number(button.dataset.sideNav);
     if (list[index]) openSidePanel(list[index].id);
   });
@@ -4304,13 +4542,10 @@ function setupSidePanel() {
       job.controller.abort();
       requestJobs.delete(`side:${thread.id}`);
     }
-    const list = threadsOf(c),
-      index = list.indexOf(thread);
-    c.threads = list.filter(t => t !== thread);
+    c.threads = threadsOf(c).filter(t => t !== thread);
     saveStore();
     renderConversation(false);
-    const next = c.threads[index] || c.threads[index - 1];
-    if (next) openSidePanel(next.id);
+    if (visibleThreads(c).length) openSideIndex(thread.anchor.messageId);
     else closeSidePanel();
   };
   $("#sideMessages").addEventListener("click", async e => {
@@ -4351,14 +4586,6 @@ function setupSidePanel() {
       message.timestamp = now();
       return askSideAgain(c, thread, index + 1);
     }
-    // 撤回：这一问连同其后的往来一并抹去（旁注不留版本，抹了就是抹了）
-    if (action === "retract") {
-      thread.messages = thread.messages.slice(0, index);
-      thread.updatedAt = now();
-      saveStore();
-      renderSidePanel();
-      return;
-    }
     // 重新生成：换掉这一答（及其后的往来），就上一问再答一次
     if (action === "regenerate") {
       const question = thread.messages.slice(0, index).findLastIndex(m => m.role === "user");
@@ -4398,9 +4625,8 @@ function setupSidePanel() {
     const id = mark.closest("[data-message]")?.dataset.message,
       list = threadsOf(currentConversation()).filter(t => t.anchor.messageId === id);
     if (!list.length) return;
-    const current = currentThread(),
-      index = current ? list.indexOf(current) : -1;
-    openSidePanel(list[(index + 1) % list.length].id); // 同一条消息上有几条旁注时，逐次点击轮流打开
+    if (list.length === 1) openSidePanel(list[0].id);
+    else openSideIndex(id); // 同一条消息上有几条旁注时，到目录里挑
   });
 }
 async function sendSide() {
@@ -4853,17 +5079,21 @@ function sealGlyph(button, running) {
   button.dataset.glyph = glyph;
   button.innerHTML = `<span class="seal-glyph" aria-hidden="true">${glyph}</span>`;
 }
+// 作答途中：案上空着，印是「止」；写了话，印又成「寄」——寄出去的是补言，递给正在作答的模型
 function renderSendButtons() {
   const running = conversationRunning(),
     ended = conversationDry(currentConversation()),
-    empty = !running && !composerHasContent();
+    has = composerHasContent(),
+    stop = running && !has;
   document.querySelectorAll(".send-trigger").forEach(b => {
-    sealGlyph(b, running);
-    b.title = running ? "停止生成" : "发送";
-    b.classList.toggle("stop-btn", running);
-    b.classList.toggle("empty", empty);
+    sealGlyph(b, stop);
+    b.title = stop ? "停止生成" : running ? "补言：递给正在作答的模型" : "发送";
+    b.classList.toggle("stop-btn", stop);
+    b.classList.toggle("empty", !running && !has);
     b.disabled = !running && ended;
   });
+  const input = $("#chatInput");
+  if (input && !input.disabled) input.placeholder = running ? "作答途中，亦可补言" : "续言于此";
 }
 // 图片缩略图：原件在 IndexedDB，渲染后异步补上 src；缓存最近 40 张
 async function loadThumbnails(root) {
@@ -4973,9 +5203,10 @@ function safeHost(url) {
 // 明暗切换：新主题像墨一样从右上角侵蚀到左下角（View Transitions）；浏览器不支持或用户减少动态效果时退回颜色渐变
 let suppressThemeFade = false;
 function switchTheme(next, origin) {
+  // 换主题那一下要轻：存盘推后一拍，画面只就地换色（图表由 renderConversation 里的 rethemeViz 就地重上色）
   const apply = () => {
     store.settings.theme = next;
-    saveStore();
+    saveStoreSoon();
     applyAppearance();
     renderHeader();
     if (view === "chat") renderConversation(false);
@@ -4983,7 +5214,29 @@ function switchTheme(next, origin) {
   const willDark = next === "dark" || (next === "system" && matchMedia("(prefers-color-scheme: dark)").matches),
     current = document.documentElement.dataset.theme;
   if (!document.startViewTransition || inkMotionOff() || (willDark ? "dark" : "light") === current) return apply();
-  void (willDark ? runInkDrops(apply) : runDawn(apply, origin));
+  void rasterMasks().then(() => (willDark ? runInkDrops(apply) : runDawn(apply, origin)));
+}
+// 明暗切换的遮罩是几张带 feTurbulence 的 SVG（见 00-base.css）。mask-size 逐帧在变，浏览器便逐帧按整屏尺寸重新光栅化这几张矢量图，
+// 湍流滤镜算到几千像素见方，再好的机器也掉帧。所以开机后闲时先把它们各画成一张位图，遮罩换成位图，逐帧就只剩缩放一张图
+const MASK_VARS = ["--ink-blob-1", "--ink-blob-2", "--ink-blob-3", "--dawn-glow"],
+  MASK_BITMAP_SIZE = 1024;
+let maskBitmaps = null;
+function rasterMasks() {
+  if (maskBitmaps) return maskBitmaps;
+  maskBitmaps = Promise.all(
+    MASK_VARS.map(async name => {
+      const url = cssVar(name).match(/^url\((["']?)(.*)\1\)$/s)?.[2];
+      if (!url || !url.startsWith("data:image/svg+xml")) return;
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = MASK_BITMAP_SIZE;
+      canvas.getContext("2d").drawImage(image, 0, 0, MASK_BITMAP_SIZE, MASK_BITMAP_SIZE);
+      document.documentElement.style.setProperty(name, `url("${canvas.toDataURL("image/png")}")`);
+    })
+  ).catch(() => {});
+  return maskBitmaps;
 }
 // 亮到暗「落墨」：三滴墨先后从画面上方落到纸上，各自洇开——大的那滴居中先落、洇得最快，另两滴偏左右、晚一步、慢一些。
 // 落点与各自的半径写在 --x1/--y1/--r1… 上，三层遮罩各走各的动画（见 00-base.css）
@@ -5002,17 +5255,17 @@ async function runInkDrops(apply) {
     html.style.setProperty(`--r${i + 1}`, `${Math.ceil(reach * 1.15)}px`);
   });
   await Promise.all(points.map(point => inkDropFall(point)));
+  // 触纸：滴身钻进纸面，脚下洇出一圈墨——这圈墨就是随后那团暗色的起点。洇开一小会儿再起过渡：旧画面里定格着这几圈墨，
+  // 新画面的暗色正从同一处漫出来盖过去，看着就是墨渗进纸里再摊开，而不是先落一滴、再另起一团
+  points.forEach(point => inkSoak(point));
+  await new Promise(resolve => setTimeout(resolve, 140));
   html.dataset.themeMotion = "ink";
   suppressThemeFade = true;
   const transition = document.startViewTransition(apply);
-  transition.ready.then(() => {
-    document.querySelectorAll(".ink-drop").forEach(node => node.remove());
-    points.forEach((point, i) => setTimeout(() => inkSplash(point.px, point.py, point.size), i * 55));
-  });
   transition.finished.finally(() => {
     suppressThemeFade = false;
     delete html.dataset.themeMotion;
-    document.querySelectorAll(".ink-drop, .ink-splash").forEach(node => node.remove());
+    document.querySelectorAll(".ink-drop, .ink-soak").forEach(node => node.remove());
   });
 }
 // 一滴墨：在落点上方凝出、垂下、坠落时被拉长，触纸的一瞬摊成一小摊。滴身带高光与拖尾，落得越久拉得越长
@@ -5066,36 +5319,34 @@ function inkDropFall(point) {
     )
     .finally(() => trail.remove());
 }
-// 溅起的几点墨：落点周围随机几粒，冒出即淡去
-function inkSplash(x, y, scale = 1) {
-  const count = Math.round(11 * scale);
-  for (let i = 0; i < count; i++) {
-    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.9,
-      distance = (34 + Math.random() * 62) * scale,
-      size = (3 + Math.random() * 6) * scale,
-      dot = document.createElement("div");
-    dot.className = "ink-splash";
-    dot.style.cssText = `left:${x}px;top:${y}px;width:${size}px;height:${size}px`;
-    document.body.append(dot);
-    dot
-      .animate(
-        [
-          { transform: "translate(-50%, -50%) scale(0.2)", opacity: 0.9 },
-          {
-            transform: `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px)) scale(1)`,
-            opacity: 0.75,
-            offset: 0.4
-          },
-          {
-            transform: `translate(calc(-50% + ${Math.cos(angle) * distance * 1.2}px), calc(-50% + ${Math.sin(angle) * distance * 1.2}px)) scale(0.7)`,
-            opacity: 0
-          }
-        ],
-        { duration: 460 + Math.random() * 200, delay: 10 + i * 14, easing: "cubic-bezier(0.15, 0.75, 0.3, 1)", fill: "both" }
-      )
-      .finished.catch(() => {})
-      .finally(() => dot.remove());
-  }
+// 渗入：落点上一圈边缘毛糙的墨，从滴身底下洇出来，越摊越大、越摊越淡；滴身随之压扁、沉进纸里。
+// 一滴只画一个元素、只动 transform 与 opacity——旧版落地时溅的十几粒墨点是暗底上的暗点，几乎看不见，白费一份功夫
+function inkSoak(point) {
+  const size = Math.round(46 * point.size),
+    soak = document.createElement("div");
+  soak.className = "ink-soak";
+  soak.style.cssText = `left:${point.px}px;top:${point.py}px;width:${size}px;height:${size}px`;
+  document.body.append(soak);
+  soak
+    .animate(
+      [
+        { transform: "translate(-50%, -50%) scale(0.35, 0.22)", opacity: 0 },
+        { transform: "translate(-50%, -50%) scale(1, 0.72)", opacity: 0.92, offset: 0.3 },
+        { transform: "translate(-50%, -50%) scale(2.4, 2)", opacity: 0.55 }
+      ],
+      { duration: 620, easing: "cubic-bezier(0.2, 0.7, 0.25, 1)", fill: "both" }
+    )
+    .finished.catch(() => {});
+  const drop = [...document.querySelectorAll(".ink-drop")].find(node => node.style.left === `${point.px}px`);
+  drop
+    ?.animate(
+      [
+        { transform: `translate(-50%, calc(-50% + ${innerHeight * point.fall}px)) scale(1.55, 0.48)`, opacity: 1 },
+        { transform: `translate(-50%, calc(-50% + ${innerHeight * point.fall}px)) scale(1.9, 0.16)`, opacity: 0 }
+      ],
+      { duration: 260, easing: "ease-in", fill: "both" }
+    )
+    .finished.catch(() => {});
 }
 // 暗到亮「天光」：墨是从高处落下来的，光则是从按下的那一点亮起来的——以砚台为心向四下漫开，
 // 先急后缓，过处的墨色被照淡；旧的暗色在底下略略提亮又退去，像天亮了
@@ -5934,26 +6185,28 @@ function quotedText(message) {
 /** @param {Message} message */
 function stepsDigest(message, label = "行迹") {
   const steps = (message.steps || []).filter(
-    step => WORK_TOOLS.has(step.name) || ["ask_user", "delegate", "search_web", "fetch_page"].includes(step.name)
+    step => WORK_TOOLS.has(step.name) || ["ask_user", "delegate", "search_web", "fetch_page", "user_note"].includes(step.name)
   );
   if (!steps.length) return "";
   const items = steps.slice(0, 16).map(step =>
-    step.name === "ask_user"
-      ? `请示 → ${step.answers ? String(step.note || "").slice(0, 200) : "用户未作答"}`
-      : step.name === "delegate"
-        ? `差遣「${String(step.title || "").slice(0, 40)}」→ ${step.result || step.status}${subChangedPaths(step).length ? `，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
-        : step.name === "search_web"
-          ? `检索「${String(step.title || "").slice(0, 60)}」→ ${
-              (step.results || [])
-                .slice(0, 3)
-                .map(r => `${String(r.title || "").slice(0, 40)}（${r.url}）`)
-                .join("；") ||
-              step.result ||
-              step.status
-            }`
-          : step.name === "fetch_page"
-            ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
-            : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
+    step.name === "user_note"
+      ? `用户补言「${String(step.note || "").slice(0, 200)}」`
+      : step.name === "ask_user"
+        ? `请示 → ${step.answers ? String(step.note || "").slice(0, 200) : "用户未作答"}`
+        : step.name === "delegate"
+          ? `差遣「${String(step.title || "").slice(0, 40)}」→ ${step.result || step.status}${subChangedPaths(step).length ? `，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
+          : step.name === "search_web"
+            ? `检索「${String(step.title || "").slice(0, 60)}」→ ${
+                (step.results || [])
+                  .slice(0, 3)
+                  .map(r => `${String(r.title || "").slice(0, 40)}（${r.url}）`)
+                  .join("；") ||
+                step.result ||
+                step.status
+              }`
+            : step.name === "fetch_page"
+              ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
+              : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
   );
   return `［${label}］${items.join("；")}${steps.length > 16 ? `；…共 ${steps.length} 步` : ""}`;
 }
@@ -6031,7 +6284,8 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
   return { role: "user", content };
 }
 async function sendOrStop() {
-  if (conversationRunning()) return stopGeneration();
+  // 作答途中：输入框里有话就是补言，递给正在作答的模型；空着才是停止
+  if (conversationRunning()) return composerHasContent() ? sendSupplement() : stopGeneration();
   const input = currentConversation() ? $("#chatInput") : $("#welcomeInput");
   const text = input.value.trim();
   if (!text && !pendingAttachments.length && !pendingQuote) return;
@@ -6090,28 +6344,131 @@ async function sendOrStop() {
     store.conversations.unshift(c);
     currentId = c.id;
   }
+  const user = takeComposer(input, sendingDraftKey);
+  await startTurn(c, user, profile);
+}
+// 把案上的东西（话、附件、引文）收成一条用户消息，输入框与草稿随之清空
+/** @returns {Message} */
+function takeComposer(input, key = draftKey()) {
   /** @type {Message} */
   const user = {
     id: uid(),
     role: "user",
-    content: text,
+    content: input.value.trim(),
     timestamp: now(),
     attachments: pendingAttachments,
     ...(pendingQuote ? { quote: pendingQuote } : {})
   };
+  input.value = "";
+  input.style.height = "auto";
+  delete store.drafts[key];
+  pendingAttachments = [];
+  pendingQuote = null;
+  renderAttachments();
+  renderQuote();
+  return user;
+}
+// 起一问：用户消息与待写的一答一起入册，随即向模型要回复
+/**
+ * @param {Conversation} c
+ * @param {Message} user
+ * @param {Profile} profile
+ */
+async function startTurn(c, user, profile) {
   /** @type {Message} */
   const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
   c.messages.push(user, assistant);
   c.updatedAt = now();
   c.profileId = profile.id;
-  input.value = "";
-  input.style.height = "auto";
-  delete store.drafts[sendingDraftKey];
-  pendingAttachments = [];
-  pendingQuote = null;
   saveStore();
-  render(true);
+  if (currentId === c.id) render(true);
+  else renderHistory();
   await streamReply(c, assistant, profile);
+}
+// 补言：模型作答途中用户再寄来的话。先落在行迹里它到达的那一刻（一步「补言 · 待寄」），到下一回合的边界——
+// 工具结果交回、模型再开口之前——递给模型；这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出
+const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］";
+function sendSupplement() {
+  const c = currentConversation(),
+    job = c && requestJob(c.id),
+    assistant = c?.messages.find(message => message.id === job?.assistantId);
+  if (!c || !job || !assistant || assistant.status !== "streaming") return stopGeneration();
+  const user = takeComposer($("#chatInput"));
+  const text = user.quote ? quotedText(user) : user.content;
+  /** @type {Step} */
+  const step = {
+    id: `note_${uid().slice(0, 8)}`,
+    name: "user_note",
+    arguments: "{}",
+    status: "running",
+    title: text.split("\n").find(Boolean)?.slice(0, 80) || "",
+    note: text,
+    attachments: user.attachments?.length ? user.attachments : undefined,
+    at: assistant.content.length,
+    rat: String(assistant.reasoning || "").length
+  };
+  (job.queue ||= []).push({ user, step });
+  (assistant.steps ||= []).push(step);
+  saveStoreSoon();
+  refreshSteps(assistant);
+  renderSendButtons();
+  if (followBottom) scrollBottom();
+}
+// 回合边界：把排着的补言递给模型（历史里接在工具结果之后），行迹里那一步打勾
+async function deliverSupplements(job, history, budget) {
+  const queue = job.queue || [];
+  job.queue = [];
+  for (const { user, step } of queue) {
+    const entry = await messageForApi(user, true, budget);
+    if (typeof entry.content === "string") entry.content = `${SUPPLEMENT_PREFIX}${entry.content}`;
+    else entry.content[0].text = `${SUPPLEMENT_PREFIX}${entry.content[0].text}`;
+    history.push(entry);
+    step.status = "done";
+    step.result = "已递";
+  }
+}
+// 收尾时还没递出去的补言：从行迹里撤下，整答顺利写完的作为新的一问接着送；停了、断了的放回案上，话不能丢
+/**
+ * @param {Conversation} conversation
+ * @param {Message} assistant
+ * @param {Profile} profile
+ */
+function settleSupplements(conversation, assistant, job, profile) {
+  const queue = job.queue || [];
+  job.queue = [];
+  if (!queue.length) return;
+  const ids = new Set(queue.map(item => item.step.id));
+  assistant.steps = (assistant.steps || []).filter(step => !ids.has(step.id));
+  if (!assistant.steps.length) delete assistant.steps;
+  const users = queue.map(item => item.user),
+    quote = users.find(u => u.quote)?.quote || null;
+  if (assistant.status === "complete") {
+    /** @type {Message} */
+    const user = {
+      id: uid(),
+      role: "user",
+      content: users
+        .map(u => u.content)
+        .filter(Boolean)
+        .join("\n\n"),
+      timestamp: now(),
+      attachments: users.flatMap(u => u.attachments || []),
+      ...(quote ? { quote } : {})
+    };
+    setTimeout(() => void startTurn(conversation, user, profile), 0);
+    return;
+  }
+  const key = draftKey(conversation.id),
+    draft = draftRecord(conversation.id);
+  store.drafts ||= {};
+  store.drafts[key] = {
+    text: [draft.text, ...users.map(u => u.content)].filter(Boolean).join("\n\n"),
+    attachments: [...draft.attachments, ...users.flatMap(u => u.attachments || [])],
+    quote: draft.quote || quote,
+    updatedAt: now()
+  };
+  if (currentId === conversation.id && view === "chat") restoreDraft();
+  toast("这一答未写完，补言已放回案上");
 }
 function titleFrom(text, attachments) {
   const value = (text || `关于 ${attachments[0]?.name || "附件"}`).replace(/\s+/g, " ").trim();
@@ -6158,7 +6515,8 @@ function stopAllGenerations() {
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // 这一答是不是执事的，记在消息自己身上：生成期间用户可能翻去欢迎页或卷宗，页面上一时没有「当前对话」，时间线不能因此改画法
   assistant.work = isWork(conversation);
-  const job = { controller: new AbortController(), assistantId: assistant.id, label: "生成中", profile };
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user: Message, step: Step }> }} */
+  const job = { controller: new AbortController(), assistantId: assistant.id, label: "生成中", profile, queue: [] };
   requestJobs.set(conversation.id, job);
   renderSendButtons();
   renderHistory();
@@ -6244,6 +6602,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
+      await deliverSupplements(job, history, budget);
       if (assistant.content) assistant.content += "\n\n";
       setJobLabel(conversation, job, "生成中");
     }
@@ -6289,6 +6648,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     releaseQuota();
     accountUsage(profile, assistant, history, conversation, { opened, partialRound: roundOpen, roundStart });
     if (requestJobs.get(conversation.id) === job) requestJobs.delete(conversation.id);
+    settleSupplements(conversation, assistant, job, profile);
     if (currentId !== conversation.id || view !== "chat") conversation.unread = true;
     saveStore();
     renderHistory();
@@ -7840,7 +8200,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
       const tail = markdown.querySelector(".md-tail");
       suppressViz = true;
       try {
-        tail.innerHTML = renderMarkdown(visible.slice(renderedCut));
+        paintTail(tail, renderMarkdown(visible.slice(renderedCut)));
       } finally {
         suppressViz = false;
       }
@@ -8036,7 +8396,7 @@ async function handleMessageAction(event) {
     await copyText(message.content);
     return toast("已复制");
   }
-  if (button.dataset.action === "note") return createThread({ messageId: message.id, text: "" });
+  if (button.dataset.action === "note") return openSideIndex(message.id);
   if (button.dataset.action === "branch-prev" || button.dataset.action === "branch-next")
     return switchBranch(c, index, button.dataset.action === "branch-prev" ? -1 : 1);
   if (button.dataset.action === "cancel-edit") {

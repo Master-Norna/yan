@@ -223,7 +223,7 @@ html[data-theme-motion="dawn"]::view-transition-old(root) {
     filter: brightness(1.25);
   }
 }
-/* 墨滴与溅点：只在切换的一瞬存在 */
+/* 墨滴与渗痕：只在切换的一瞬存在 */
 .ink-drop {
   position: fixed;
   z-index: 2000;
@@ -244,12 +244,14 @@ html[data-theme-motion="dawn"]::view-transition-old(root) {
   transform-origin: top center;
   pointer-events: none;
 }
-.ink-splash {
+/* 落点上洇开的一圈：中心实、边缘虚，像墨渗进纸纹 */
+.ink-soak {
   position: fixed;
-  z-index: 2000;
-  border-radius: 50%;
-  background: #25231f;
+  z-index: 1998;
+  border-radius: 46% 54% 50% 50% / 52% 48% 52% 48%;
+  background: radial-gradient(closest-side, #1d1a16 0%, #221e19 42%, rgba(34, 30, 25, 0.62) 68%, rgba(34, 30, 25, 0) 100%);
   pointer-events: none;
+  will-change: transform, opacity;
 }
 :root[data-theme="dark"] {
   --paper: #201f1c;
@@ -292,8 +294,12 @@ body {
   background: var(--grain), var(--paper-2);
   transition: width 0.38s cubic-bezier(0.22, 0.72, 0.2, 1);
 }
-.sidebar.collapsed {
+.sidebar.collapsed,
+html[data-sidebar="collapsed"] .sidebar {
   width: 64px;
+}
+html[data-sidebar="collapsed"] .sidebar .wide {
+  opacity: 0;
 }
 .sidebar-inner {
   width: 270px;
@@ -1343,6 +1349,89 @@ button.history-repo:hover .history-repo-name {
 .side-messages .message-actions {
   opacity: 0.5;
 }
+/* 目录页：不列范围、不设输入；目录钮只在看某一条时出现 */
+.side-panel[data-mode="index"] .side-composer,
+.side-panel[data-mode="index"] #sideRemove,
+.side-panel[data-mode="index"] #sideIndexBtn {
+  display: none;
+}
+.side-index {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-index-item {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px 9px 8px;
+  border-radius: 9px;
+  text-align: left;
+  color: var(--ink-2);
+  transition: background 0.16s;
+}
+.side-index-item:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.side-index-item.here {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.side-index-num {
+  flex: none;
+  width: 18px;
+  padding-top: 2px;
+  color: var(--accent);
+  font: 10.5px var(--title);
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.side-index-copy {
+  flex: 1;
+  min-width: 0;
+}
+.side-index-copy strong {
+  display: -webkit-box;
+  font: 12.5px/1.6 var(--body);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.side-index-copy small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.08em;
+}
+.side-index-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 8px 10px 8px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--ink-3);
+  font: 11.5px var(--title);
+  letter-spacing: 0.08em;
+  text-align: left;
+  transition:
+    color 0.16s,
+    border-color 0.16s;
+}
+.side-index-new span {
+  width: 18px;
+  font-size: 14px;
+  text-align: center;
+}
+.side-index-new:hover {
+  border-color: var(--accent);
+}
+.side-index-new:hover {
+  color: var(--accent);
+}
 .side-empty {
   padding: 34px 8px;
   text-align: center;
@@ -2341,48 +2430,47 @@ sup.note-ref.active {
   font: 13px/1.6 var(--body);
   text-align: left;
 }
-.viz-pending-label {
-  color: var(--ink-3);
-  font: 10.5px var(--body);
-  letter-spacing: 0.06em;
-  font-variant-numeric: tabular-nums; /* 行数在跳，数字等宽才不抖 */
-}
 .viz-pending-body {
+  position: relative;
   height: 68px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  color: var(--ink-3);
-  font: 11px var(--title);
-  letter-spacing: 0.1em;
-}
-.viz-pending-mark {
-  position: relative;
-  width: 26px;
-  height: 7px;
   overflow: hidden;
 }
-.viz-pending-mark:before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 3px;
-  width: 100%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: inkWriting 1.2s ease-in-out infinite;
+/* 手稿：一行一笔，六笔一行，写满三行翻页；最新一笔朱色 */
+.viz-pending-sketch {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 11px 8px;
+  width: 224px;
+  height: 28px;
 }
-.viz-pending-mark:after {
+.viz-pending-sketch i {
+  display: block;
+  width: var(--w, 28px);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink-3);
+  opacity: 0.42;
+  transform-origin: left center;
+  transition:
+    background-color 0.5s,
+    opacity 0.5s;
+}
+.viz-pending-sketch i:last-child {
+  background: var(--accent);
+  opacity: 0.8;
+}
+/* 纸面掠过的一道光：只动 transform，走合成层 */
+.viz-pending-body:after {
   content: "";
   position: absolute;
-  left: 0;
-  top: 1px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: inkTravel 1.2s ease-in-out infinite;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 32%, color-mix(in srgb, var(--accent) 8%, transparent) 50%, transparent 68%);
+  transform: translateX(-100%);
+  pointer-events: none;
 }
 .tool-steps {
   margin: 0 0 14px;
@@ -4764,6 +4852,20 @@ textarea::placeholder,
   font-family: var(--title);
   font-size: 12.5px;
 }
+.note-seal {
+  width: 15px;
+  height: 15px;
+  font-size: 9px;
+  transform: rotate(3deg);
+}
+.tool-step-note > .tool-step-head .tool-title {
+  color: var(--ink-2);
+}
+.tool-note-files {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+}
 .sub-seal {
   width: 15px;
   height: 15px;
@@ -5440,33 +5542,6 @@ button.source-local {
     transform: rotate(360deg);
   }
 }
-@keyframes inkWriting {
-  0%,
-  100% {
-    opacity: 0.28;
-    transform: scaleX(0.35);
-  }
-  50% {
-    opacity: 0.9;
-    transform: scaleX(1);
-  }
-}
-@keyframes inkTravel {
-  0% {
-    opacity: 0;
-    transform: translateX(0) scale(0.7);
-  }
-  15% {
-    opacity: 1;
-  }
-  75% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(22px) scale(0.35);
-  }
-}
 @keyframes veilIn {
   from {
     opacity: 0;
@@ -5542,8 +5617,12 @@ button.source-local {
   }
 }
 .reasoning.is-closing summary:before,
-.tool-stack.is-closing > summary:before {
+.tool-stack.is-closing > summary:before,
+.source-stack.is-closing > summary:before {
   transform: rotate(-45deg);
+}
+.sub-steps.is-closing > summary:before {
+  transform: none;
 }
 html.theme-fade,
 html.theme-fade * {
@@ -6128,33 +6207,31 @@ body {
   background: var(--accent);
   opacity: 0.55;
 }
-.viz-pending-body {
-  height: 76px;
-}
-.viz-pending-mark {
-  width: 34px;
-}
-.viz-pending-mark:before {
-  height: 1px;
-}
-.viz-pending-mark:after {
-  width: 4px;
-  height: 4px;
-}
+/* 占位框的几处循环动效都接着 --phase 的拍子（负的 animation-delay），节点重建也不从头来 */
 :root[data-ink-motion="on"] .viz-pending:before {
   animation: pendingTrace 1.9s cubic-bezier(0.35, 0.05, 0.28, 1) infinite;
+  animation-delay: var(--phase, 0ms);
 }
 :root[data-ink-motion="on"] .viz-pending:after {
   animation: pendingFrame 1.9s ease-in-out infinite;
+  animation-delay: var(--phase, 0ms);
 }
 :root[data-ink-motion="on"] .viz-pending-signal {
   animation: pendingSignal 1.35s ease-in-out infinite;
+  animation-delay: var(--phase, 0ms);
+}
+:root[data-ink-motion="on"] .viz-pending-body:after {
+  animation: pendingSheen 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: var(--phase, 0ms);
+}
+:root[data-ink-motion="on"] .viz-pending-sketch i {
+  animation: strokeInk 0.36s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
 }
 :root[data-ink-motion="off"] .viz-pending:before,
 :root[data-ink-motion="off"] .viz-pending:after,
 :root[data-ink-motion="off"] .viz-pending-signal,
-:root[data-ink-motion="off"] .viz-pending-mark:before,
-:root[data-ink-motion="off"] .viz-pending-mark:after,
+:root[data-ink-motion="off"] .viz-pending-body:after,
+:root[data-ink-motion="off"] .viz-pending-sketch i,
 :root[data-ink-motion="off"] .history-state.running,
 :root[data-ink-motion="off"] .history-state.waiting {
   animation: none !important;
@@ -6180,6 +6257,20 @@ body {
   }
   50% {
     opacity: 0.42;
+  }
+}
+@keyframes pendingSheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes strokeInk {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  60% {
+    opacity: 0.9;
   }
 }
 @keyframes pendingSignal {
