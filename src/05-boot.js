@@ -599,6 +599,14 @@ function bindEvents() {
     renderWorkAuto();
     if (c.workAuto) for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
   };
+  $("#workSandbox").onclick = () => {
+    const c = currentConversation();
+    if (!c) return;
+    c.sandbox = !sandboxed(c);
+    saveStore();
+    renderSandbox();
+    toast(c.sandbox ? "已套上沙箱：下一条指令起生效" : "已解开沙箱：指令与文件工具不再设限");
+  };
   setupChips();
   setupQuoteTip();
   setupSidePanel();

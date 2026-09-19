@@ -5,11 +5,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
+const sandbox = require("./sandbox.js");
 
 module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
   // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见、默认先问再跑，安全边界守在那一层。
+  // 请求带 sandbox: true 时再加一道沙箱（server/sandbox.js）：路径不出目录、机密文件不碰、指令先筛、环境变量去掉机密——在桥接这头守，页面与模型都绕不过
   const WORK_HOME = path.join(os.homedir(), "言", "工作");
   // 卷宗：对话没绑工作目录时，模型的工具就落在这里——写出的表格、文档都收在卷宗里；页面上的卷宗即这个目录的视图。
   // 这里只是默认位置（测试用 YAN_ARCHIVE 指到临时目录）；用户在设置里改过的路径存在浏览器配置里，随每个请求的 root 传来，桥接不记状态。
@@ -83,6 +85,17 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
   }
   async function assertReachable(workdir, target) {
     if (pathIsInside(workdir, target)) await assertNoEscapingLink(workdir, target);
+  }
+  // 各文件接口的落点：沙箱里不认「全盘」，目录内的机密文件、.git 内部（写）也拦下
+  async function targetOf(workdir, body, { write = false } = {}) {
+    const boxed = body.sandbox === true,
+      target = resolveTarget(workdir, body.path, body.roam === true && !boxed);
+    await assertReachable(workdir, target);
+    if (boxed) {
+      const why = sandbox.screenPath(relPath(workdir, target), { write });
+      if (why) throw Error(why);
+    }
+    return target;
   }
   // 给页面与模型看的路径：目录之内给相对路径，目录之外给完整路径
   function shownPath(workdir, file) {
@@ -366,7 +379,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
   function lockWorkdir(workdir) {
     return lockOf(dirLocks, lockKey(workdir)).acquire(true);
   }
-  function runShell(command, cwd, timeoutMs, signal = null) {
+  function runShell(command, cwd, timeoutMs, signal = null, { boxed = false } = {}) {
     return new Promise(resolve => {
       const win = process.platform === "win32";
       // PowerShell 默认按系统代码页输出，中文会成乱码；先把输入输出都切到 UTF-8。
@@ -381,7 +394,14 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
         cwd,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, TERM: "dumb", NO_COLOR: "1", PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", CI: "1" }
+        env: {
+          ...(boxed ? sandbox.sandboxEnv(process.env) : process.env),
+          TERM: "dumb",
+          NO_COLOR: "1",
+          PYTHONIOENCODING: "utf-8",
+          PYTHONUTF8: "1",
+          CI: "1"
+        }
       });
       let stdout = "",
         stderr = "",
@@ -430,6 +450,11 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
         command = String(body.command || "").trim();
       if (!command) throw Error("指令不能为空");
       if (!fs.existsSync(workdir)) throw Error("工作目录已不存在，请重新发送以重建，或另起对话");
+      const boxed = body.sandbox === true;
+      if (boxed) {
+        const why = sandbox.screenCommand(command, workdir);
+        if (why) throw Error(why);
+      }
       const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 600000);
       console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })} $ ${command.slice(0, 120)}`);
       // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉
@@ -441,7 +466,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
         release = await lockWorkdir(workdir);
       let result;
       try {
-        result = await runShell(command, workdir, timeoutMs, abort.signal);
+        result = await runShell(command, workdir, timeoutMs, abort.signal, { boxed });
       } finally {
         release();
       }
@@ -455,9 +480,8 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
     try {
       const body = await readJson(req),
         workdir = resolveWorkdir(body.workdir),
-        file = resolveTarget(workdir, body.path, body.roam === true);
+        file = await targetOf(workdir, body, { write: true });
       if (file === workdir) throw Error("请给出文件名");
-      await assertReachable(workdir, file);
       const content = String(body.content ?? "");
       if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
       const release = await lockFile(workdir, file);
@@ -491,8 +515,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
     try {
       const body = await readJson(req),
         workdir = resolveWorkdir(body.workdir),
-        file = resolveTarget(workdir, body.path, body.roam === true);
-      await assertReachable(workdir, file);
+        file = await targetOf(workdir, body);
       const stat = await fs.promises.stat(file).catch(() => null);
       if (!stat) throw Error(`文件不存在：${body.path}`);
       if (stat.isDirectory()) throw Error(`${body.path} 是目录，请改用 list_files`);
@@ -567,8 +590,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
     try {
       const body = await readJson(req),
         workdir = resolveWorkdir(body.workdir),
-        dir = resolveTarget(workdir, body.path, body.roam === true);
-      await assertReachable(workdir, dir);
+        dir = await targetOf(workdir, body);
       const stat = await fs.promises.stat(dir).catch(() => null);
       if (!stat?.isDirectory()) throw Error(`目录不存在：${body.path || "."}`);
       const filter = globToRegExp(body.pattern),
@@ -584,12 +606,11 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
     try {
       const body = await readJson(req),
         workdir = resolveWorkdir(body.workdir),
-        file = resolveTarget(workdir, body.path, body.roam === true);
+        file = await targetOf(workdir, body, { write: true });
       const oldText = String(body.old ?? ""),
         newText = String(body.new ?? ""),
         replaceAll = body.replaceAll === true;
       if (file === workdir) throw Error("请给出文件名");
-      await assertReachable(workdir, file);
       if (!oldText) throw Error("old 不能为空；新建文件请用 write_file");
       if (oldText === newText) throw Error("old 与 new 相同，无需修改");
       const release = await lockFile(workdir, file);
@@ -635,8 +656,8 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
     try {
       const body = await readJson(req),
         workdir = resolveWorkdir(body.workdir),
-        dir = resolveTarget(workdir, body.path, body.roam === true);
-      await assertReachable(workdir, dir);
+        dir = await targetOf(workdir, body),
+        boxed = body.sandbox === true;
       const query = String(body.query || "");
       if (!query.trim()) throw Error("query 不能为空");
       let regex;
@@ -670,6 +691,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities }) {
             continue;
           }
           if (filter && !filter.test(rel)) continue;
+          if (boxed && sandbox.screenPath(rel)) continue; // 沙箱里检索也不翻机密文件，.env 里的 Key 不能借一条命中带出来
           if (++scanned > SEARCH_FILE_LIMIT) {
             truncated = true;
             return;

@@ -796,7 +796,8 @@ function roamAllowed() {
  */
 async function runWorkTool(step, args, conversation, assistant, signal) {
   const workdir = workRoot(conversation),
-    roam = roamAllowed();
+    roam = roamAllowed(),
+    sandbox = sandboxed(conversation);
   if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
   const job = requestJob(conversation.id);
   if (step.name === "run_command") {
@@ -820,7 +821,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
       }
     } else if (job) setJobLabel(conversation, job, "执行中");
-    const data = await bridge("/api/work/run", { workdir, command: step.title, timeout: Number(args.timeout) || 120 }, signal);
+    const data = await bridge("/api/work/run", { workdir, sandbox, command: step.title, timeout: Number(args.timeout) || 120 }, signal);
     step.exitCode = data.exitCode;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
     const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
@@ -833,7 +834,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   }
   if (step.name === "write_file") {
     step.title = String(args.path || "");
-    const data = await bridge("/api/work/write", { workdir, roam, path: step.title, content: String(args.content ?? "") }, signal);
+    const data = await bridge("/api/work/write", { workdir, roam, sandbox, path: step.title, content: String(args.content ?? "") }, signal);
     step.title = data.path;
     markSeen(conversation, data.path, step);
     step.note = `${data.lines} 行 · ${formatFileSize(data.bytes)}${data.existed ? " · 覆盖" : ""}`;
@@ -851,7 +852,11 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
   }
   if (step.name === "read_file") {
     step.title = String(args.path || "");
-    const data = await bridge("/api/work/read", { workdir, roam, path: step.title, offset: args.offset, limit: args.limit }, signal);
+    const data = await bridge(
+      "/api/work/read",
+      { workdir, roam, sandbox, path: step.title, offset: args.offset, limit: args.limit },
+      signal
+    );
     step.title = data.path;
     markSeen(conversation, data.path, step);
     return {
@@ -867,7 +872,15 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     if (!seen?.has(normalized)) return { ok: false, content: prompt("work.unread", { path: step.title }), display: "需先读取" };
     const data = await bridge(
       "/api/work/edit",
-      { workdir, roam, path: step.title, old: String(args.old ?? ""), new: String(args.new ?? ""), replaceAll: args.replace_all === true },
+      {
+        workdir,
+        roam,
+        sandbox,
+        path: step.title,
+        old: String(args.old ?? ""),
+        new: String(args.new ?? ""),
+        replaceAll: args.replace_all === true
+      },
       signal
     );
     step.title = data.path;
@@ -884,7 +897,7 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.query || "");
     const data = await bridge(
       "/api/work/search",
-      { workdir, roam, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
+      { workdir, roam, sandbox, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
       signal
     );
     const lines = data.matches.map(match => `${match.file}:${match.line}: ${match.text}`);
@@ -899,7 +912,11 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     };
   }
   step.title = `${String(args.path || ".")}${args.pattern ? ` · ${args.pattern}` : ""}`;
-  const data = await bridge("/api/work/list", { workdir, roam, path: args.path, depth: args.depth, pattern: args.pattern }, signal);
+  const data = await bridge(
+    "/api/work/list",
+    { workdir, roam, sandbox, path: args.path, depth: args.depth, pattern: args.pattern },
+    signal
+  );
   step.title = `${data.path}${args.pattern ? ` · ${args.pattern}` : ""}`;
   step.output = trimOutput(data.entries.join("\n"));
   return {

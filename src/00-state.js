@@ -114,6 +114,7 @@
  * @property {Thread[]} threads
  * @property {string} [workdir] 绑了目录即为行
  * @property {boolean} [workAuto] 径行
+ * @property {boolean} [sandbox] 沙箱：桥接那头筛指令、锁目录、去机密环境变量；没写过的按开
  * @property {string} [reasoning] 思考档位
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
@@ -160,6 +161,7 @@
  * @property {string[]} collapsedRepos
  * @property {string} reasoning 新对话默认的思考档位
  * @property {boolean} workAutoDefault
+ * @property {boolean} [sandboxDefault] 新对话默认开沙箱
  * @property {number} compactAt
  * @property {"anywhere"|"inside"} toolReach
  * @property {boolean} archiveRead
@@ -240,6 +242,7 @@ const defaultStore = {
     collapsedRepos: [],
     reasoning: "",
     workAutoDefault: false,
+    sandboxDefault: true,
     compactAt: 0,
     toolReach: "anywhere",
     archiveRead: true,

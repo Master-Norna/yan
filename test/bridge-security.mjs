@@ -1,4 +1,4 @@
-// 桥接安全检查：Origin 门禁、工作目录必须完整限定、链接不能越出工作目录；卷宗接口不能越出卷宗目录、网页按纯文本给
+// 桥接安全检查：Origin 门禁、工作目录必须完整限定、链接不能越出工作目录；卷宗接口不能越出卷宗目录、网页按纯文本给；沙箱在桥接这头守
 import { mkdirSync, writeFileSync, rmSync, symlinkSync, existsSync } from "node:fs";
 const PORT = Number(process.env.YAN_PORT || 8797),
   BASE = `http://127.0.0.1:${PORT}`;
@@ -282,6 +282,60 @@ const edits = await Promise.all([
     `${edits.map(e => e.status).join(",")} ${JSON.stringify(readFileSync(`${WORK}/race.txt`, "utf8"))}`
   );
 }
+// ---- 沙箱（sandbox: true）：路径不出目录、机密文件不碰、指令先筛、机密环境变量不给指令；不带 sandbox 的请求照旧
+writeFileSync(`${WORK}/.env`, "API_KEY=inside-secret\n");
+writeFileSync(`${WORK}/plain.txt`, "API_KEY mention in a plain file\n");
+mkdirSync(`${WORK}/.git`, { recursive: true });
+writeFileSync(`${WORK}/.git/config`, "[core]\n");
+r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-ChildItem C:\\Windows" : "ls /etc" });
+check(
+  "sandbox: a command reaching outside the workdir is refused with a reason",
+  r.status === 400 && /沙箱拒绝.*越出/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error}`
+);
+r = await post("/api/work/run", { workdir, sandbox: true, command: "Get-ChildItem .." });
+check("sandbox: .. is refused", r.status === 400 && /沙箱拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+r = await post("/api/work/run", { workdir, sandbox: true, command: "curl https://example.com" });
+check("sandbox: direct outbound fetch is refused", r.status === 400 && /外联/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+r = await post("/api/work/run", { workdir, sandbox: false, command: "Get-ChildItem .." });
+check("without sandbox the same command runs", r.status === 200, `${r.status} ${r.data?.error}`);
+if (win) {
+  r = await post("/api/work/run", {
+    workdir,
+    sandbox: true,
+    command: 'Write-Output "tok=[$env:YAN_TEST_SECRET_TOKEN] path=[$($env:PATH.Length -gt 0)]"'
+  });
+  check(
+    "sandbox: env vars named like secrets are withheld from the command while PATH stays",
+    r.status === 200 && /tok=\[\] path=\[True\]/.test(r.data?.stdout || ""),
+    `${r.status} ${JSON.stringify(r.data?.stdout)}`
+  );
+}
+r = await post("/api/work/read", { workdir, sandbox: true, path: ".env" });
+check("sandbox: reading .env is refused", r.status === 400 && /机密文件/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+r = await post("/api/work/read", { workdir, sandbox: false, path: ".env" });
+check("without sandbox .env is readable", r.status === 200, `${r.status} ${r.data?.error}`);
+r = await post("/api/work/write", { workdir, sandbox: true, path: ".git/config", content: "x" });
+check("sandbox: writing into .git is refused", r.status === 400 && /\.git 内部/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+r = await post("/api/work/read", { workdir, sandbox: true, path: ".git/config" });
+check("sandbox: reading .git/config is fine", r.status === 200, `${r.status} ${r.data?.error}`);
+r = await post("/api/work/search", { workdir, sandbox: true, query: "API_KEY" });
+check(
+  "sandbox: search skips secret files but still hits plain ones",
+  r.status === 200 && r.data.matches.every(m => !/\.env$/.test(m.file)) && r.data.matches.some(m => /plain\.txt$/.test(m.file)),
+  `${r.status} ${JSON.stringify(r.data?.matches)}`
+);
+r = await post("/api/work/read", {
+  workdir,
+  sandbox: true,
+  roam: true,
+  path: `${OUTSIDE.split("/").join(win ? "\\" : "/")}${win ? "\\" : "/"}secret.txt`
+});
+check(
+  "sandbox: roam (全盘) is ignored — absolute paths outside are refused",
+  r.status === 400 && /越出/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error}`
+);
 rmSync(ARCHIVE, { recursive: true, force: true });
 rmSync(WORK, { recursive: true, force: true });
 rmSync(OUTSIDE, { recursive: true, force: true });

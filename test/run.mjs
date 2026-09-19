@@ -150,7 +150,13 @@ try {
   if (wants("bridge-security")) {
     start(process.execPath, ["server.js"], {
       cwd: ROOT,
-      env: { ...process.env, YAN_PORT: String(SECURITY_PORT), YAN_ARCHIVE: path.join(TMP, "archive-security") }
+      // YAN_TEST_SECRET_TOKEN：名字像机密的环境变量，沙箱里的指令不该看见它（bridge-security 里查）
+      env: {
+        ...process.env,
+        YAN_PORT: String(SECURITY_PORT),
+        YAN_ARCHIVE: path.join(TMP, "archive-security"),
+        YAN_TEST_SECRET_TOKEN: "leak-me"
+      }
     });
     await waitPort(SECURITY_PORT);
     await runSpec("bridge-security.mjs", { YAN_PORT: String(SECURITY_PORT) });

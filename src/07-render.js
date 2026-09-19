@@ -220,6 +220,7 @@ function renderConversation(shouldScroll = false) {
   $("#chatTitle").textContent = c.title;
   renderChatMeta(c);
   renderWorkAuto();
+  renderSandbox();
   renderModelTriggers();
   const scrollHost = $("#chatScroll");
   scrollHost.classList.toggle(

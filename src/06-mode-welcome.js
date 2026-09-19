@@ -6,6 +6,11 @@
 function isWork(c) {
   return !!c?.workdir;
 }
+// 沙箱：言与行都有——桥接那头筛指令、锁目录、去机密环境变量。对话自己记着开没开；没记过的按设置的默认，默认开
+/** @param {Conversation} c */
+function sandboxed(c) {
+  return typeof c?.sandbox === "boolean" ? c.sandbox : store.settings.sandboxDefault !== false;
+}
 function workMode() {
   const c = currentConversation();
   return c ? isWork(c) : !!(store.settings.pendingWorkdir || "").trim();
@@ -52,6 +57,21 @@ function renderWorkAuto() {
   button.title = c.workAuto ? "径行：指令径直执行" : "问而后行：每条指令先经确认";
   button.classList.toggle("on", !!c.workAuto);
 }
+// 沙箱钮：言与行都有，只要这段对话有落脚的目录、模型开着工具
+function renderSandbox() {
+  const c = currentConversation(),
+    button = $("#workSandbox");
+  if (!button) return;
+  const show = !!c && !!workRoot(c) && activeProfile()?.tools !== false;
+  button.classList.toggle("hidden", !show);
+  if (!show) return;
+  const on = sandboxed(c);
+  button.textContent = on ? "沙箱" : "无沙箱";
+  button.title = on
+    ? "沙箱：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令。点一下解开"
+    : "无沙箱：指令与文件工具不设限（文件可及范围按设置）。点一下套上沙箱";
+  button.classList.toggle("on", on);
+}
 function renderWelcome() {
   const work = workMode(),
     bridged = apiBase !== null;
@@ -94,6 +114,12 @@ function renderChips(work, bridged) {
   approve.querySelector(".chip-text").textContent = store.settings.workAutoDefault ? "径行" : "问而后行";
   approve.classList.toggle("on", !!store.settings.workAutoDefault);
   approve.title = store.settings.workAutoDefault ? "径行：新对话中的指令径直执行" : "问而后行：新对话中每条指令先经确认";
+  const box = $("#sandboxChip"),
+    boxed = store.settings.sandboxDefault !== false;
+  box.classList.toggle("hidden", !bridged);
+  box.querySelector(".chip-text").textContent = boxed ? "沙箱" : "无沙箱";
+  box.classList.toggle("on", boxed);
+  box.title = boxed ? "沙箱：新对话里路径不出目录、动系统与外联的指令拒绝" : "无沙箱：新对话里指令与文件工具不设限";
 }
 function closeChipPop() {
   document.querySelectorAll(".chip-pop").forEach(pop => pop.remove());
@@ -309,6 +335,7 @@ async function bindWorkdir(c, dir) {
     if (prepared.workdir === c.workdir) return;
     c.workdir = prepared.workdir;
     if (c.workAuto === undefined) c.workAuto = !!store.settings.workAutoDefault;
+    if (c.sandbox === undefined) c.sandbox = sandboxed(c);
     rememberWorkdir(prepared.workdir);
     saveStore();
     render();
@@ -338,6 +365,11 @@ function setupChips() {
     });
   $("#approveChip").onclick = () => {
     store.settings.workAutoDefault = !store.settings.workAutoDefault;
+    saveStore();
+    renderChips(workMode(), apiBase !== null);
+  };
+  $("#sandboxChip").onclick = () => {
+    store.settings.sandboxDefault = store.settings.sandboxDefault === false;
     saveStore();
     renderChips(workMode(), apiBase !== null);
   };
