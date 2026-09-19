@@ -965,16 +965,16 @@ function renderMath(tex, display) {
 }
 // 占位框里的动效在逐帧重画的尾段里会随节点重建从头再来，看着像定住了：把相位记在节点上（负的 animation-delay），重建也接着原来的拍子走
 const vizPhase = () => `-${Math.round(performance.now())}ms`;
-// 占位框里的「手稿」：每来一行落一笔，十八笔写满一页便翻页重起；笔画长短按固定的韵律排，是一页字的样子而不是进度条。
-// 最新的一笔是朱色，流式停住了，笔也就停住了，看得出来
-const SKETCH_PAGE = 18,
-  SKETCH_WIDTHS = [34, 22, 44, 27, 18, 38];
+// 占位框里是一笔墨痕——与顶栏「余墨」同一笔形：底下一道极淡的虚痕，朱墨随行数从笔头往前走（越写越慢，永远差一点到头），
+// 流停了笔也停，看得出还在写还是卡住了。不是进度条，是正在落的一笔
+const INK_STROKE =
+  "M1.4 6.4C8 4.2 18 3.9 30 4.4c12 .5 22 1.3 34.4.2.9-.1 1.5.9 1 1.6-3.8 2.8-11.6 3-21 2.6C33 8.4 22 7.6 11 8.5c-3.4.3-6.8.5-9.2-.5-.9-.4-1-1.3-.4-1.6z";
+const inkStrokeWidth = lines => (68 * (1 - Math.exp(-Math.max(1, Number(lines) || 1) / 26))).toFixed(2);
 function pendingSketchHtml(lines) {
-  const inked = ((Math.max(1, Number(lines) || 1) - 1) % SKETCH_PAGE) + 1;
-  return `<div class="viz-pending-sketch">${Array.from({ length: inked }, (_, i) => `<i style="--w:${SKETCH_WIDTHS[i % SKETCH_WIDTHS.length]}px"></i>`).join("")}</div>`;
+  return `<span class="viz-pending-stroke"><svg viewBox="0 0 68 12" aria-hidden="true"><defs><clipPath id="vizInkClip"><path d="${INK_STROKE}"/></clipPath><linearGradient id="vizInkGrad"><stop class="ink-grad-a" offset="0"/><stop class="ink-grad-b" offset=".82"/><stop class="ink-grad-c" offset="1"/></linearGradient></defs><path class="viz-ink-ghost" d="${INK_STROKE}"/><rect class="viz-ink-fill" clip-path="url(#vizInkClip)" x="0" y="0" height="12" style="width:${inkStrokeWidth(lines)}px"/></svg></span>`;
 }
-// 尾段每帧整段重画，占位框若跟着重建，笔画的落笔动效每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
-// 只换它周围的内容，并按新的行数补上新落的几笔（翻页了才整页重写）
+// 尾段每帧整段重画，占位框若跟着重建，墨痕的过渡每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
+// 只换它周围的内容，按新的行数把墨痕往前推
 function paintTail(tail, html) {
   const live = [...tail.querySelectorAll(".viz-pending")].at(-1);
   if (!live || live.parentNode !== tail) {
@@ -988,11 +988,8 @@ function paintTail(tail, html) {
     tail.innerHTML = html;
     return;
   }
-  const sketch = live.querySelector(".viz-pending-sketch"),
-    strokes = next.querySelectorAll(".viz-pending-sketch i");
-  if (sketch && strokes.length >= sketch.children.length)
-    for (const stroke of [...strokes].slice(sketch.children.length)) sketch.append(stroke);
-  else if (sketch) sketch.replaceChildren(...strokes);
+  const fill = live.querySelector(".viz-ink-fill");
+  if (fill) fill.style.width = `${inkStrokeWidth(next.dataset.lines)}px`;
   live.dataset.lines = next.dataset.lines;
   live.setAttribute("aria-label", next.getAttribute("aria-label"));
   for (const node of [...tail.childNodes]) if (node !== live) node.remove();
@@ -2926,7 +2923,8 @@ function renderModelMenu() {
     ? all
         .map(p => {
           const active = p.id === store.settings.activeProfileId;
-          return `<button class="model-option${active ? " active" : ""}" data-profile="${escapeHtml(p.id)}"${active ? ' aria-current="true"' : ""}><strong><span class="model-dot"></span>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.model)} · ${p.source === "server" ? "服务端配置" : safeHost(p.baseUrl)}</small></button>`;
+          // 只列显示名：模型原名与接口地址长短不一，行高参差；要看去模型设置
+          return `<button class="model-option${active ? " active" : ""}" data-profile="${escapeHtml(p.id)}"${active ? ' aria-current="true"' : ""} title="${escapeHtml(p.model)}"><strong><span class="model-dot"></span><span class="model-option-name">${escapeHtml(p.name)}</span></strong></button>`;
         })
         .join("")
     : `<button class="model-option" id="configureFirst"><strong>接入模型</strong><small>任何 OpenAI 兼容接口</small></button>`;
