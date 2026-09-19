@@ -84,7 +84,9 @@ await send("Page.navigate", { url: PAGE });
 await sleep(1300);
 check(
   "reload lands back in the conversation that was open, not on the welcome page",
-  await evalJs(`!document.querySelector("#chat").classList.contains("hidden") && document.querySelector("#welcome").classList.contains("hidden")`)
+  await evalJs(
+    `!document.querySelector("#chat").classList.contains("hidden") && document.querySelector("#welcome").classList.contains("hidden")`
+  )
 );
 await evalJs(`document.querySelector("#history [data-conversation] .history-open").click(); true`);
 await sleep(400);
@@ -160,10 +162,10 @@ await evalJs(`document.querySelector("#sideInput").value = "SIDE whole"; documen
 await waitFor(`[...document.querySelectorAll('#sideMessages .message.assistant')].at(-1)?.dataset.status === "complete"`);
 const wholeText = await evalJs(`[...document.querySelectorAll('#sideMessages .message.assistant .markdown')].at(-1).textContent.trim()`);
 check("whole-reply note: no quote, system note present", wholeText.includes("sys:yes|quote:no"), wholeText);
-await evalJs(`document.querySelector("#sideIndexBtn").click(); true`);
+await evalJs(`document.querySelector("#sideBack").click(); true`);
 await sleep(250);
 check(
-  "目 returns to the index with both entries; whole-reply entry leads with its first question",
+  "‹ 目录 returns to the index with both entries; whole-reply entry leads with its first question",
   await evalJs(
     `document.querySelector("#sidePanel").dataset.mode === "index" && [...document.querySelectorAll("#sideMessages .side-index-item strong")].map(n => n.textContent).join("|") === "术语 X|SIDE whole"`
   )
@@ -298,9 +300,9 @@ await shot("side-normal.png");
 await evalJs(`document.querySelector("#sideExpand").click(); true`);
 await sleep(400);
 check(
-  "panel widens",
+  "阔 fills the whole page",
   await evalJs(
-    `document.querySelector("#sidePanel").classList.contains("wide") && document.querySelector("#sidePanel").getBoundingClientRect().width > 700 && document.querySelector("#sideExpand").textContent === "窄"`
+    `document.querySelector("#sidePanel").classList.contains("wide") && Math.round(document.querySelector("#sidePanel").getBoundingClientRect().width) === innerWidth && document.querySelector("#sideExpand").textContent === "窄"`
   )
 );
 await shot("side.png");

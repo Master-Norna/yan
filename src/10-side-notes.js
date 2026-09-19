@@ -304,14 +304,14 @@ function setupSidePanel() {
     panel.classList.toggle("wide", wide);
     const b = $("#sideExpand");
     b.textContent = wide ? "窄" : "阔";
-    b.title = wide ? "收窄面板" : "放宽面板";
+    b.title = wide ? "收回侧边" : "铺满整页";
     b.setAttribute("aria-pressed", String(wide));
   };
   $("#chatMeta").addEventListener("click", e => {
     if (!e.target.closest("[data-open-notes]")) return;
     if (visibleThreads(currentConversation()).length) openSideIndex();
   });
-  $("#sideIndexBtn").onclick = () => openSideIndex(currentThread()?.anchor.messageId || null);
+  $("#sideBack").onclick = () => openSideIndex(currentThread()?.anchor.messageId || null);
   // 按「＋」前不让这一下把正文里的划选清掉，落点才认得出来
   $("#sideMessages").addEventListener("pointerdown", e => {
     if (e.target.closest("[data-side-new]")) e.preventDefault();
