@@ -282,8 +282,13 @@ function bindEvents() {
     e.preventDefault();
     openArchiveImage(e.target.dataset.openDiskImage, e.target);
   });
-  let dragHideTimer = null;
-  const hasDraggedFiles = event => Array.from(event.dataTransfer?.types || []).includes("Files");
+  let dragHideTimer = null,
+    dragFromPage = false;
+  // 拖的是页面里自己的东西（卷宗里的图、案上的附件、答里的图片）时浏览器也会把它当文件拖入：
+  // 松手就又收一份进卷宗。页内起手的拖动一概不接——卷宗可能绑着用户自己的目录，里面本就允许有重样的文件，不能靠查重来挡
+  window.addEventListener("dragstart", () => (dragFromPage = true));
+  window.addEventListener("dragend", () => (dragFromPage = false));
+  const hasDraggedFiles = event => !dragFromPage && Array.from(event.dataTransfer?.types || []).includes("Files");
   const showDropVeil = () => {
     clearTimeout(dragHideTimer);
     const toLibrary = view === "library";

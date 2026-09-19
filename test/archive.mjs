@@ -249,4 +249,15 @@ check(
   (await evalJs(`(JSON.parse(localStorage.getItem("yan-chat-v1")).settings.archiveDir || "").toLowerCase()`)).includes("archive3") &&
     existsSync(`${TMP}/archive3`)
 );
+// 页内起手的拖动（卷宗里的图、案上的附件）不当作外来文件：不掀落件幕布；拖完之后外来的照常
+await evalJs(`document.querySelector("#closeSettings")?.click(); true`);
+await sleep(200);
+const drag = await evalJs(
+  `(() => { const dt = new DataTransfer(); dt.items.add(new File(["x"], "again.txt", { type: "text/plain" })); const fire = (type, target = window) => target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })); const veil = () => !document.querySelector("#dropVeil").classList.contains("hidden"); fire("dragstart", document.body); fire("dragenter"); fire("dragover"); const inside = veil(); fire("dragend", document.body); fire("dragenter"); const outside = veil(); fire("dragleave"); return { inside, outside }; })()`
+);
+check(
+  "drags that start inside the page do not raise the drop veil; external ones still do",
+  !drag.inside && drag.outside,
+  JSON.stringify(drag)
+);
 close();
