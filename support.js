@@ -1061,8 +1061,47 @@ function mapOptionPart(value, transform) {
   if (Array.isArray(value)) return value.map(item => transform(item || {}));
   return transform(value && typeof value === "object" ? value : {});
 }
+// 模型写 ECharts option 常见的几处失手，画之前先扶正——否则 ECharts 只抛一句 "reading 'coordinateSystem'"，图就白写了：
+// 系列指到不存在的坐标轴 / 坐标轴指到不存在的格子（多图并排时最常见）→ 收到最后一个；系列漏了 type → 按数据形状补
+function repairEchartsOption(option) {
+  const list = value => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]);
+  const clamp = (item, key, count) => {
+    if (typeof item?.[key] !== "number" || item[key] < count) return;
+    if (count > 0) item[key] = count - 1;
+    else delete item[key];
+  };
+  const grids = list(option.grid).length,
+    xs = list(option.xAxis),
+    ys = list(option.yAxis);
+  for (const axis of [...xs, ...ys]) if (axis && typeof axis === "object") clamp(axis, "gridIndex", grids);
+  const polar = list(option.polar).length,
+    radius = list(option.radiusAxis).length,
+    angle = list(option.angleAxis).length;
+  if (option.series !== undefined)
+    option.series = list(option.series)
+      .filter(item => item && typeof item === "object")
+      .map(item => {
+        const series = { ...item };
+        clamp(series, "xAxisIndex", xs.length);
+        clamp(series, "yAxisIndex", ys.length);
+        clamp(series, "polarIndex", polar);
+        clamp(series, "radiusAxisIndex", radius);
+        clamp(series, "angleAxisIndex", angle);
+        if (!series.type) {
+          const sample = Array.isArray(series.data) ? series.data[0] : null;
+          series.type =
+            !xs.length && !ys.length && sample && typeof sample === "object" && "value" in sample
+              ? "pie"
+              : xs.length || ys.length
+                ? "bar"
+                : "line";
+        }
+        return series;
+      });
+  return option;
+}
 function themedEchartsOption(raw, canvas) {
-  const option = { ...raw };
+  const option = repairEchartsOption({ ...raw });
   delete option.height;
   const ink = cssVar("--ink"),
     muted = cssVar("--ink-2"),
@@ -1098,7 +1137,9 @@ function themedEchartsOption(raw, canvas) {
     });
   if (option.xAxis !== undefined) option.xAxis = axisPart(option.xAxis);
   if (option.yAxis !== undefined) option.yAxis = axisPart(option.yAxis);
-  if (narrow) option.grid = { top: titleShown ? 94 : 58, left: 12, right: 12, bottom: 28, containLabel: true, ...(option.grid || {}) };
+  // 窄处给单个格子套一份默认边距；多图并排（grid 是数组）的布局是模型算好的，不动——把数组摊进对象会只剩一个格子，系列全找不着坐标系
+  if (narrow && !Array.isArray(option.grid))
+    option.grid = { top: titleShown ? 94 : 58, left: 12, right: 12, bottom: 28, containLabel: true, ...(option.grid || {}) };
   return {
     ...option,
     backgroundColor: option.backgroundColor ?? "transparent",
@@ -4499,14 +4540,14 @@ function setupSidePanel() {
     panel.classList.toggle("wide", wide);
     const b = $("#sideExpand");
     b.textContent = wide ? "窄" : "阔";
-    b.title = wide ? "收窄面板" : "放宽面板";
+    b.title = wide ? "收回侧边" : "铺满整页";
     b.setAttribute("aria-pressed", String(wide));
   };
   $("#chatMeta").addEventListener("click", e => {
     if (!e.target.closest("[data-open-notes]")) return;
     if (visibleThreads(currentConversation()).length) openSideIndex();
   });
-  $("#sideIndexBtn").onclick = () => openSideIndex(currentThread()?.anchor.messageId || null);
+  $("#sideBack").onclick = () => openSideIndex(currentThread()?.anchor.messageId || null);
   // 按「＋」前不让这一下把正文里的划选清掉，落点才认得出来
   $("#sideMessages").addEventListener("pointerdown", e => {
     if (e.target.closest("[data-side-new]")) e.preventDefault();
@@ -5315,13 +5356,16 @@ const farthestCorner = (x, y) => Math.hypot(Math.max(x, innerWidth - x), Math.ma
 // 亮到暗「落墨」：三滴墨先后从画面上方落到纸上，各自洇开——大的那滴居中先落、洇得最快，另两滴偏左右、晚一步、慢一些。
 // 墨团铺满整屏那一刻换主题，墨色再退成暗色的纸、字迹浮出
 const INK_DROPS = [
-  { x: 0.5, y: 0.46, size: 1, delay: 0, fall: 0.5, duration: 720, easing: "cubic-bezier(0.12, 0.86, 0.28, 1)" },
-  { x: 0.34, y: 0.58, size: 0.76, delay: 85, fall: 0.4, duration: 860, easing: "cubic-bezier(0.12, 0.86, 0.28, 1)" },
-  { x: 0.66, y: 0.37, size: 0.62, delay: 165, fall: 0.33, duration: 980, easing: "cubic-bezier(0.18, 0.78, 0.32, 1)" }
+  { x: 0.5, y: 0.46, size: 1, delay: 0, fall: 0.5, duration: 640, easing: "cubic-bezier(0.12, 0.86, 0.28, 1)" },
+  { x: 0.34, y: 0.58, size: 0.76, delay: 60, fall: 0.4, duration: 760, easing: "cubic-bezier(0.12, 0.86, 0.28, 1)" },
+  { x: 0.66, y: 0.37, size: 0.62, delay: 120, fall: 0.33, duration: 860, easing: "cubic-bezier(0.18, 0.78, 0.32, 1)" }
 ];
-// 墨团图里实心的部分到半径的 52%，墨团本身占图的 80%：最远的角要落进实心里，图就得放到这么大
+// 墨团图里实心的部分到半径的 52%，墨团本身占图的 80%：最远的角要落进实心里，图就得放到这么大；
+// 位移滤镜把边缘往里推了些，再放宽近一半才保险。放大走到 COVER_AT 时换主题——不等铺完，全黑只停一两帧
 const INK_SOLID = 0.8 * 0.52,
-  GLOW_SOLID = 0.96 * 0.4;
+  GLOW_SOLID = 0.96 * 0.4,
+  COVER_MARGIN = 1.45,
+  COVER_AT = 0.55;
 async function runInkDrops(apply, sheets) {
   if (!sheets) return apply();
   const points = INK_DROPS.map(drop => ({ ...drop, px: innerWidth * drop.x, py: innerHeight * drop.y }));
@@ -5332,18 +5376,19 @@ async function runInkDrops(apply, sheets) {
   const spreads = points.map((point, i) =>
     spreadSheet(sheets[`blob${i + 1}`], point.px, point.py, {
       from: 0.04,
-      to: (farthestCorner(point.px, point.py) / ((SHEET_PX / 2) * INK_SOLID)) * [1, 0.9, 0.8][i],
+      to: (farthestCorner(point.px, point.py) / ((SHEET_PX / 2) * INK_SOLID)) * COVER_MARGIN * [1, 0.9, 0.8][i],
       duration: point.duration,
-      delay: [40, 80, 130][i],
+      delay: [30, 70, 110][i],
       easing: point.easing
     })
   );
-  await Promise.all(spreads.map(spread => spread.finished));
+  // 盖满就换，不等三团都铺完：第一团放大到五成半时（缓动前急后缓，这时已到九成六）实心已过最远的角，全黑只停一两帧
+  await new Promise(resolve => setTimeout(resolve, 30 + points[0].duration * COVER_AT));
   try {
     await revealUnder(
       apply,
       spreads.map(spread => spread.el),
-      460
+      400
     );
   } finally {
     suppressThemeFade = false;
@@ -5370,7 +5415,7 @@ function inkDropFall(point) {
         { transform: "translate(-50%, 0) scaleY(0.75)", opacity: 0.45, offset: 0.6 },
         { transform: "translate(-50%, 0) scaleY(1)", opacity: 0 }
       ],
-      { duration: 330, delay: point.delay + 165, easing: "cubic-bezier(0.55, 0, 0.9, 0.42)", fill: "both" }
+      { duration: 290, delay: point.delay + 135, easing: "cubic-bezier(0.55, 0, 0.9, 0.42)", fill: "both" }
     )
     .finished.catch(() => {});
   // 凝出、垂下、坠落、触纸摊开。坠落那一段单独用接近自由落体的曲线（位移随时间平方增长），
@@ -5382,8 +5427,9 @@ function inkDropFall(point) {
       // 将坠未坠：被自己的重量拉尖
       { transform: "translate(-50%, -46%) scale(0.74, 1.34)", opacity: 1 }
     ],
-    { duration: 170, delay: point.delay, easing: "cubic-bezier(0.3, 0.6, 0.4, 1)", fill: "both" }
+    { duration: 140, delay: point.delay, easing: "cubic-bezier(0.3, 0.6, 0.4, 1)", fill: "both" }
   );
+  point.drop = drop;
   return gather.finished
     .catch(() => {})
     .then(() =>
@@ -5395,7 +5441,7 @@ function inkDropFall(point) {
             { transform: `translate(-50%, calc(-50% + ${fall}px)) scale(1.55, 0.48)` }
           ],
           // 自由落体：起步几乎不动，越落越快，最后一帧才砸到纸上
-          { duration: 300, easing: "cubic-bezier(0.55, 0, 0.9, 0.42)", fill: "both" }
+          { duration: 260, easing: "cubic-bezier(0.55, 0, 0.9, 0.42)", fill: "both" }
         )
         .finished.catch(() => {})
     )
@@ -5419,8 +5465,7 @@ function inkSoak(point) {
       { duration: 620, easing: "cubic-bezier(0.2, 0.7, 0.25, 1)", fill: "both" }
     )
     .finished.catch(() => {});
-  const drop = [...document.querySelectorAll(".ink-drop")].find(node => node.style.left === `${point.px}px`);
-  drop
+  point.drop
     ?.animate(
       [
         { transform: `translate(-50%, calc(-50% + ${innerHeight * point.fall}px)) scale(1.55, 0.48)`, opacity: 1 },
@@ -5440,13 +5485,14 @@ async function runDawn(apply, origin, sheets) {
   suppressThemeFade = true;
   const glow = spreadSheet(sheets.glow, x, y, {
     from: 0.02,
-    to: farthestCorner(x, y) / ((SHEET_PX / 2) * GLOW_SOLID),
-    duration: 1050,
+    to: (farthestCorner(x, y) / ((SHEET_PX / 2) * GLOW_SOLID)) * COVER_MARGIN,
+    duration: 820,
     easing: "cubic-bezier(0.5, 0.06, 0.3, 1)"
   });
-  await glow.finished;
+  // 光先急后缓，照白整纸大约在七成处；照白就换，再让光退去
+  await new Promise(resolve => setTimeout(resolve, 820 * 0.7));
   try {
-    await revealUnder(apply, [glow.el], 560);
+    await revealUnder(apply, [glow.el], 480);
   } finally {
     suppressThemeFade = false;
     document.querySelectorAll(".theme-sheet").forEach(node => node.remove());

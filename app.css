@@ -1131,15 +1131,13 @@ button.history-repo:hover .history-repo-name {
   animation: fadeIn 0.18s ease;
   transition: width 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
+/* 阔：铺满整页——正文让位，旁注按阅读宽度居中 */
 .side-panel.wide {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
+  position: fixed;
+  inset: 0;
   z-index: 30;
-  width: min(900px, 70vw);
-  box-shadow: var(--shadow);
-  border-radius: 14px 0 0 14px;
+  width: auto;
+  border-left: 0;
 }
 .side-panel.wide .side-scroll {
   padding: 22px 34px 26px;
@@ -1239,9 +1237,47 @@ button.history-repo:hover .history-repo-name {
 }
 /* 目录页：不列范围、不设输入；目录钮只在看某一条时出现 */
 .side-panel[data-mode="index"] .side-composer,
-.side-panel[data-mode="index"] #sideRemove,
-.side-panel[data-mode="index"] #sideIndexBtn {
+.side-panel[data-mode="index"] #sideRemove {
   display: none;
+}
+.side-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+.side-tools .icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  font: 12px var(--title);
+  letter-spacing: 0.04em;
+}
+.side-tools #sideClose {
+  font-size: 15px;
+}
+/* 左下角回目录的箭头：与右边的模型签同一分量 */
+.side-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: auto;
+  padding: 3px 7px 3px 4px;
+  border-radius: 6px;
+  color: var(--ink-3);
+  font: 10.5px var(--title);
+  letter-spacing: 0.08em;
+  transition:
+    color 0.16s,
+    background 0.16s;
+}
+.side-back span {
+  font-size: 14px;
+  line-height: 1;
+}
+.side-back:hover {
+  color: var(--ink);
+  background: var(--paper-3);
 }
 .side-index {
   display: flex;
@@ -6010,13 +6046,8 @@ body {
   overscroll-behavior-y: contain;
   overflow-anchor: none;
 }
-.reasoning-body,
-.tool-stack-body,
-.source-grid,
-.html-app-source,
-.viz-source {
-  overscroll-behavior: contain;
-}
+/* 思绪、行迹、源码这些块以前设了 overscroll-behavior: contain——它们是 overflow: auto 的容器，内容不够高不能滚时，
+   浏览器照样把滚轮截在里面不往外传，鼠标停在上面页面就滚不动，像那一块失灵了。去掉；正文那侧的 chat-scroll 照旧 */
 .work-mode .chat-scroll {
   overflow: hidden;
 }
