@@ -468,12 +468,14 @@
 @keyframes helper-breath {
   0%,
   100% {
-    border-left-color: color-mix(in srgb, var(--gold) 45%, transparent);
-    background: color-mix(in srgb, var(--gold) 6%, transparent);
+    border-left-color: color-mix(in srgb, var(--gold) 30%, transparent);
+    background: color-mix(in srgb, var(--gold) 4%, transparent);
+    box-shadow: inset 3px 0 10px -6px transparent;
   }
   50% {
     border-left-color: var(--gold);
-    background: color-mix(in srgb, var(--gold) 14%, transparent);
+    background: color-mix(in srgb, var(--gold) 20%, transparent);
+    box-shadow: inset 12px 0 18px -10px color-mix(in srgb, var(--gold) 75%, transparent);
   }
 }
 :root[data-ink-motion="on"] .tool-step-delegate[data-status="running"] {
@@ -485,10 +487,12 @@
 @keyframes helper-breath-seal {
   0%,
   100% {
-    opacity: 0.55;
+    opacity: 0.35;
+    transform: rotate(-4deg) scale(0.94);
   }
   50% {
     opacity: 1;
+    transform: rotate(-4deg) scale(1.06);
   }
 }
 
