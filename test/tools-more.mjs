@@ -1,4 +1,5 @@
 // 新添的几件工具：run_js 在隔离沙箱里算（超时能杀掉）、http_request 与 download_file 走桥接的地址门禁、update_plan 在行迹里画成清单
+import { existsSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
 const workdir = `${TMP}/tools-more-work`.split("/").join(process.platform === "win32" ? "\\" : "/");
@@ -31,14 +32,28 @@ check(
   JSON.stringify(byName("run_js")[1])
 );
 check(
-  "http_request to a local address is refused by the bridge",
-  byName("http_request")[0]?.status === "error" && /本机或内网/.test(byName("http_request")[0].result || ""),
+  "http_request to a service on this machine goes through: status, headers and JSON body come back",
+  byName("http_request")[0]?.status === "done" &&
+    /^200/.test(byName("http_request")[0].result || "") &&
+    /claude-test/.test(byName("http_request")[0].output || ""),
   JSON.stringify(byName("http_request")[0])
 );
 check(
-  "download_file to a local address is refused by the bridge",
-  byName("download_file")[0]?.status === "error" && /本机或内网/.test(byName("download_file")[0].result || ""),
+  "http_request to a LAN address is refused by the bridge",
+  byName("http_request")[1]?.status === "error" && /内网/.test(byName("http_request")[1].result || ""),
+  JSON.stringify(byName("http_request")[1])
+);
+check(
+  "download_file saves a file from this machine into the workdir under the given path",
+  byName("download_file")[0]?.status === "done" &&
+    byName("download_file")[0].title === "下载/models.json" &&
+    existsSync(`${TMP}/tools-more-work/下载/models.json`),
   JSON.stringify(byName("download_file")[0])
+);
+check(
+  "download_file from a LAN address is refused by the bridge",
+  byName("download_file")[1]?.status === "error" && /内网/.test(byName("download_file")[1].result || ""),
+  JSON.stringify(byName("download_file")[1])
 );
 check(
   "update_plan keeps the list on the step and titles it with the item in progress",
@@ -60,7 +75,13 @@ check(
 const reply = await evalJs(`${lastAssistant}.textContent`);
 check(
   "the model gets the value, the timeout, both refusals and the plan count back",
-  /NEWTOOLS\|/.test(reply) && /返回值：\[/.test(reply) && /超时/.test(reply) && /本机或内网/.test(reply) && /计划已更新：1\/4/.test(reply),
+  /NEWTOOLS\|/.test(reply) &&
+    /返回值：\[/.test(reply) &&
+    /超时/.test(reply) &&
+    /HTTP 200/.test(reply) &&
+    /内网/.test(reply) &&
+    /已存为 下载\/models\.json/.test(reply) &&
+    /计划已更新：1\/4/.test(reply),
   reply
 );
 close();

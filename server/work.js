@@ -682,7 +682,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         if (why) throw Error(why);
       }
       const started = Date.now(),
-        { response } = await fetchPublicResponse(url.href, { timeout: 120000 });
+        { response } = await fetchPublicResponse(url.href, { timeout: 120000, allowLoopback: true });
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
         throw Error(`对方返回 ${response.status}`);

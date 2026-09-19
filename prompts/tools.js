@@ -19,7 +19,7 @@
 
   http_request: {
     description:
-      "向公网接口发一个 HTTP 请求（GET / POST / PUT / PATCH / DELETE / HEAD），返回状态码、响应头与正文（文本或 JSON，过长截断）。读普通网页用 fetch_page；这件用于调 API、看原始响应。不能访问本机与内网地址。",
+      "向公网接口发一个 HTTP 请求（GET / POST / PUT / PATCH / DELETE / HEAD），返回状态码、响应头与正文（文本或 JSON，过长截断）。读普通网页用 fetch_page；这件用于调 API、看原始响应，也可以测本机 127.0.0.1 上的服务。局域网等内网地址不可访问。",
     brief: "向公网接口发 HTTP 请求（调 API、看原始响应），返回状态码、响应头与正文；读网页用 fetch_page。",
     parameters: {
       type: "object",
@@ -50,7 +50,7 @@
 
   download_file: {
     description:
-      "把网上的文件下载到工作目录里（图片、PDF、压缩包、数据文件……最大 64 MB）。path 是相对工作目录的文件路径；给目录或省略则按网址里的文件名存。不能访问本机与内网地址。",
+      "把网上的文件下载到工作目录里（图片、PDF、压缩包、数据文件……最大 64 MB）。path 是相对工作目录的文件路径；给目录或省略则按网址里的文件名存。本机 127.0.0.1 可访问，局域网等内网地址不可。",
     brief: "把网上的文件下载进卷宗（最大 64 MB）；path 省略则按网址里的文件名存。",
     parameters: {
       type: "object",

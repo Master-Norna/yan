@@ -124,7 +124,7 @@ http
         return sse(res, [...paragraphs.map(content => delta({ content })), delta({}, { usage: { total_tokens: 20 } })], 400);
       }
       if (typeof lastUser === "string" && lastUser.includes("NEWTOOLS")) {
-        // 新工具一轮全用上：算一段 JS、调本机地址（桥接该拒）、下载本机地址（同样该拒）、列一份计划；第二轮把各结果回显
+        // 新工具一轮全用上：算一段 JS、调本机服务（放行）与内网地址（该拒）、下载本机文件与内网地址、列一份计划；第二轮把各结果回显
         const n = toolResults.length;
         const tool = (index, name, args) => ({
           index,
@@ -141,9 +141,11 @@ http
                   code: 'const xs = [1, 2, 3];\nconsole.log("sum", xs.reduce((a, b) => a + b));\nreturn xs.map(x => x * x);'
                 }),
                 tool(1, "run_js", { code: "while (true) {}", timeout: 1 }),
-                tool(2, "http_request", { url: "http://127.0.0.1:9/x" }),
-                tool(3, "download_file", { url: "http://127.0.0.1:9/a.txt" }),
-                tool(4, "update_plan", {
+                tool(2, "http_request", { url: "http://127.0.0.1:8798/v1/models" }),
+                tool(3, "http_request", { url: "http://192.168.0.1/x" }),
+                tool(4, "download_file", { url: "http://127.0.0.1:8798/v1/models", path: "下载/models.json" }),
+                tool(5, "download_file", { url: "http://10.0.0.1/a.txt" }),
+                tool(6, "update_plan", {
                   items: [
                     { text: "算平方", status: "done" },
                     { text: "调接口", status: "doing" },

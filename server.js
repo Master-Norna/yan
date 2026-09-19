@@ -279,20 +279,29 @@ function isPrivateAddress(value) {
   }
   return false;
 }
-async function assertPublicUrl(url) {
+// 本机回环：127.0.0.0/8、::1、localhost。http_request / download_file 对它放行（模型开的本机服务本就该能测，run_command 里 curl 本机也放行），
+// 局域网等别的内网地址照旧拒；fetch_page / search_web 仍一律不碰本机
+function isLoopback(value) {
+  const host = hostLiteral(value),
+    mapped = net.isIPv6(host) ? unmapIpv4(host) : null;
+  if (mapped) return isLoopback(mapped);
+  return host === "localhost" || host === "::1" || (net.isIPv4(host) && host.startsWith("127."));
+}
+async function assertPublicUrl(url, { allowLoopback = false } = {}) {
   if (!/^https?:$/.test(url.protocol)) throw Error("只支持 http 或 https 地址");
   const host = hostLiteral(url.hostname);
-  if (isPrivateAddress(host)) throw Error("不允许访问本机或内网地址");
-  if (net.isIP(host)) return;
+  const blocked = address => isPrivateAddress(address) && !(allowLoopback && isLoopback(address));
+  if (blocked(host)) throw Error(allowLoopback ? "不允许访问内网地址（本机 127.0.0.1 / localhost 除外）" : "不允许访问本机或内网地址");
+  if (net.isIP(host) || (allowLoopback && host === "localhost")) return;
   const addresses = await dns.lookup(host, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some(item => isPrivateAddress(item.address))) throw Error("网址解析到了本机或内网地址");
+  if (!addresses.length || addresses.some(item => blocked(item.address))) throw Error("网址解析到了本机或内网地址");
 }
 // 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读
-async function fetchPublicResponse(url, { method = "GET", headers = {}, body = null, timeout = 30000 } = {}) {
+async function fetchPublicResponse(url, { method = "GET", headers = {}, body = null, timeout = 30000, allowLoopback = false } = {}) {
   let current = new URL(url);
   const signal = AbortSignal.timeout(timeout);
   for (let redirects = 0; redirects <= 5; redirects++) {
-    await assertPublicUrl(current);
+    await assertPublicUrl(current, { allowLoopback });
     const response = await fetch(current, {
       method,
       headers: { "User-Agent": BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7", ...headers },
@@ -357,14 +366,22 @@ async function handleHttp(req, res) {
     const headers = {};
     for (const [name, value] of Object.entries(body.headers && typeof body.headers === "object" ? body.headers : {}))
       if (/^[\w-]+$/.test(name) && !/^(host|content-length|connection|cookie)$/i.test(name)) headers[name] = String(value).slice(0, 4000);
-    const payload = body.body === undefined || body.body === null ? null : typeof body.body === "string" ? body.body : JSON.stringify(body.body);
+    const payload =
+      body.body === undefined || body.body === null ? null : typeof body.body === "string" ? body.body : JSON.stringify(body.body);
     if (payload && Buffer.byteLength(payload) > HTTP_BODY_LIMIT) throw Error("请求体超过 1 MB");
     if (payload && typeof body.body !== "string" && !Object.keys(headers).some(name => /^content-type$/i.test(name)))
       headers["Content-Type"] = "application/json; charset=utf-8";
     const started = Date.now(),
-      { response, url: finalUrl } = await fetchPublicResponse(url.href, { method, headers, body: payload, timeout: 30000 });
+      { response, url: finalUrl } = await fetchPublicResponse(url.href, {
+        method,
+        headers,
+        body: payload,
+        timeout: 30000,
+        allowLoopback: true
+      });
     const type = response.headers.get("content-type") || "",
-      textual = /text\/|application\/(json|xml|xhtml|javascript|x-www-form-urlencoded|ld\+json|problem\+json)|\+(json|xml)\b/i.test(type) || !type,
+      textual =
+        /text\/|application\/(json|xml|xhtml|javascript|x-www-form-urlencoded|ld\+json|problem\+json)|\+(json|xml)\b/i.test(type) || !type,
       { buffer, truncated } = await readLimitedBytes(response, textual ? 4 * 1024 * 1024 : 64 * 1024);
     const responseHeaders = {};
     for (const [name, value] of response.headers) if (!/^set-cookie$/i.test(name)) responseHeaders[name] = value;
@@ -776,7 +793,8 @@ const server = http.createServer(async (req, res) => {
   try {
     securityHeaders(req, res);
     const urlPath = new URL(req.url, `http://${HOST}`).pathname;
-    if ((urlPath.startsWith("/api/work/") || urlPath.startsWith("/api/archive/")) && !trustedWorkRequest(req))
+    // 能打到本机服务的接口（执事、卷宗、http_request）只受理本站页面与 VS Code Webview
+    if ((urlPath.startsWith("/api/work/") || urlPath.startsWith("/api/archive/") || urlPath === "/api/http") && !trustedWorkRequest(req))
       return sendJson(res, 403, { error: "此页面无权调用本机执事接口，请从桥接地址或 VS Code 打开「言」" });
     corsHeaders(req, res);
     if (req.method === "OPTIONS") {
