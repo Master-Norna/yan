@@ -178,7 +178,6 @@ async function sendOrStop() {
       reasoning: store.settings.reasoning || ""
     };
     if (!(await ensureWorkReady(c))) return;
-    if (c.workdir) rememberWorkdir(c.workdir);
     closeChipPop();
     store.conversations.unshift(c);
     currentId = c.id;

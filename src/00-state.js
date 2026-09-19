@@ -158,7 +158,6 @@
  * @property {string} activeProfileId
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
- * @property {string[]} recentWorkdirs
  * @property {string[]} collapsedRepos
  * @property {string} reasoning 新对话默认的思考档位
  * @property {boolean} workAutoDefault
@@ -239,7 +238,6 @@ const defaultStore = {
     activeProfileId: "",
     autoTitle: true,
     pendingWorkdir: "",
-    recentWorkdirs: [],
     collapsedRepos: [],
     reasoning: "",
     workAutoDefault: false,
