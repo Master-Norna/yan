@@ -808,7 +808,6 @@ async function runDelegate(step, args, conversation, assistant, signal) {
   /** @type {SubAgent} */
   const sub = { id: `sub-${uid()}`, task, content: "", reasoning: "", steps: [], status: "streaming", usage: null, rounds: 0 };
   step.sub = sub;
-  step.subOpen = true;
   const history = [{ role: "user", content: task }];
   const overrides = {
     systemPrompt: `${assistantHint(profile, tools, conversation)}\n\n${prompt("delegate.system")}`,
@@ -885,7 +884,6 @@ async function runDelegate(step, args, conversation, assistant, signal) {
     sub.report = sub.content.slice(reportStart).trim();
     sub.content = sub.content.replace(/^\n+|\n+$/g, "");
     if (job) setJobLabel(conversation, job, "生成中");
-    step.subOpen = false;
     paint();
   }
   const changed = subChangedPaths(step),

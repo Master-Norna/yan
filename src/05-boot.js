@@ -441,7 +441,8 @@ function bindEvents() {
       event.stopPropagation();
       return approveFrom(button);
     }
-    const head = event.target.closest(".tool-step.foldable > .tool-step-head, .tool-step-delegate > .tool-step-head");
+    // 差遣的签不在此列：点它是去右侧开面板，不是折叠（见下面的 openHelperPanel）
+    const head = event.target.closest(".tool-step.foldable > .tool-step-head");
     if (!head || event.target.closest("a, button")) return;
     const el = head.parentElement,
       c = currentConversation(),
@@ -450,13 +451,7 @@ function bindEvents() {
         allMessages(c)
           .flatMap(m => allSteps(m))
           .find(s => s.id === el.dataset.stepId);
-    // 差遣卡片整张折叠（默认摊开），指令输出默认折起；两者都记在步骤上，重画不丢
-    if (el.classList.contains("tool-step-delegate")) {
-      if (step) step.folded = !step.folded;
-      morphHeight(el, () => el.classList.toggle("folded", step ? !!step.folded : !el.classList.contains("folded")));
-      saveStoreSoon();
-      return;
-    }
+    // 指令输出默认折起，开合记在步骤上，重画不丢
     const wasFolded = el.classList.contains("folded");
     if (step) step.expanded = wasFolded;
     morphHeight(el, () => el.classList.toggle("folded", !wasFolded));
@@ -485,26 +480,6 @@ function bindEvents() {
       el.className = next.className;
       el.innerHTML = next.innerHTML;
     });
-  });
-  // 差遣卡片里「帮手 · n 步」的开合记在步骤上，卡片重画时不丢
-  $("#messages").addEventListener("click", event => {
-    const summary = event.target.closest(".sub-steps > summary");
-    if (!summary) return;
-    event.preventDefault();
-    const details = summary.parentElement,
-      id = details.closest(".tool-step-delegate")?.dataset.stepId,
-      c = currentConversation(),
-      step =
-        c &&
-        allMessages(c)
-          .flatMap(m => m.steps || [])
-          .find(s => s.id === id);
-    const nextOpen = details._motionAnimation ? !details._motionTarget : !details.open;
-    clearTimeout(details._settleTimer);
-    details._settleTimer = null;
-    details.dataset.touched = "1";
-    if (step) step.subOpen = nextOpen;
-    setProcessDetails(details, nextOpen);
   });
   // 出处也是一块可开合的，与思绪、行迹同一种开合
   $("#messages").addEventListener("click", event => {
@@ -574,13 +549,40 @@ function bindEvents() {
       open = files.classList.toggle("hidden");
     summary.setAttribute("aria-expanded", String(!open));
   });
+  // 帮手条点一下开差遣面板：帮手的活在右边看，行迹里只留一枚签
   $("#helperBar").addEventListener("click", event => {
-    const id = event.target.closest(".helper-row")?.dataset.helper || $("#helperBar").dataset.stepId || "",
-      card = document.querySelector(`#messages .tool-step-delegate[data-step-id="${CSS.escape(id)}"]`);
+    const id = event.target.closest(".helper-row")?.dataset.helper || $("#helperBar").dataset.stepId || "";
+    if (id) openHelperPanel(id);
+  });
+  // 行迹里的那枚签：点它（或敲回车 / 空格）同样开面板
+  $("#messages").addEventListener("click", event => {
+    const head = event.target.closest(".tool-step-delegate > .tool-step-head");
+    if (head) openHelperPanel(head.parentElement.dataset.stepId || "");
+  });
+  $("#messages").addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const head = event.target.closest?.(".tool-step-delegate > .tool-step-head");
+    if (!head) return;
+    event.preventDefault();
+    openHelperPanel(head.parentElement.dataset.stepId || "");
+  });
+  $("#helperClose").onclick = () => closeHelperPanel();
+  $("#helperExpand").onclick = () => {
+    const panel = $("#helperPanel"),
+      wide = panel.classList.toggle("wide");
+    $("#helperExpand").setAttribute("aria-pressed", String(wide));
+    $("#helperExpand").title = wide ? "收回侧栏" : "铺作整页";
+  };
+  $("#helperAnchor").onclick = () => {
+    const card = document.querySelector(`#messages .tool-step-delegate[data-step-id="${CSS.escape(helperStepId || "")}"]`);
     if (!card) return;
     const stack = card.closest(".tool-stack");
     if (stack && !stack.open) setProcessDetails(stack, true);
     scrollChatTo(card, "center");
+  };
+  $("#helperPanelNav").addEventListener("click", event => {
+    const id = event.target.closest("[data-helper-nav]")?.dataset.helperNav;
+    if (id) openHelperPanel(id);
   });
   // 输入框上方多了请示条、帮手条与改动摘要，正文底部留白随之增减，末句不被盖住
   if ("ResizeObserver" in window)

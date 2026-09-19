@@ -14,41 +14,53 @@ await sleep(1200);
 await evalJs(
   `document.querySelector("#welcomeInput").value = "DELEGATE"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
 );
-// 进行中：差遣卡片应在主行迹里出现，帮手的步骤嵌在它里面且摊开
-let nestedLiveSeen = false,
+// 进行中：行迹里只该有一枚签（帮手的步骤不再嵌在里面）；点帮手条开右侧的差遣面板，帮手的时间线在那儿跟着流
+let panelLiveSeen = false,
   bothRunning = false,
   barRows = 0,
   barDoing = "",
   thoughtLive = false,
-  metaHelpers = "";
+  nestedInTrail = 0,
+  metaHelpers = "",
+  panelOpened = false;
 const seen = [];
 for (let i = 0; i < 200; i++) {
+  // 帮手都到齐了就把面板点开（开在最后一名身上——面板一次只看一名，思绪不一定落在头一名），此后它随 350ms 的心跳自己更新
+  if (!panelOpened) {
+    const rows = await evalJs(`document.querySelectorAll("#helperBar:not(.hidden) .helper-row").length`);
+    if (rows >= 2 || (rows >= 1 && i > 20)) {
+      await evalJs(`[...document.querySelectorAll("#helperBar .helper-row")].at(-1).click(); true`);
+      panelOpened = true;
+    }
+  }
   const s = await evalJs(
-    `(d => d ? { status: d.dataset.status, open: !!d.querySelector(".sub-steps[open]"), nested: d.querySelectorAll(".sub-steps .tool-step").length, live: d.querySelector(".sub-trail")?.dataset.live, running: document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length, barRows: document.querySelectorAll("#helperBar:not(.hidden) .helper-row").length, barDoing: [...document.querySelectorAll("#helperBar .helper-doing")].map(n => n.textContent).join("|"), thought: !!document.querySelector('.tool-step-delegate .sub-timeline .reasoning[data-state="live"]'), meta: document.querySelector(".message.assistant .tool-stack-meta")?.textContent || "" } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
+    `(d => d ? { status: d.dataset.status, trailNested: d.querySelectorAll(".tool-step").length, panelNested: document.querySelectorAll("#helperPanel .tool-step").length, panelLive: document.querySelector("#helperPanel .sub-trail")?.dataset.live, panelOpen: !document.querySelector("#helperPanel").classList.contains("hidden"), running: document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length, barRows: document.querySelectorAll("#helperBar:not(.hidden) .helper-row").length, barDoing: [...document.querySelectorAll("#helperBar .helper-doing")].map(n => n.textContent).join("|"), thought: !!document.querySelector('#helperPanel .sub-timeline .reasoning[data-state="live"]'), meta: document.querySelector(".message.assistant .tool-stack-meta")?.textContent || "" } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
   );
   if (s) seen.push(JSON.stringify(s));
-  if (s?.status === "running" && s.open && s.nested >= 1 && s.live === "true") nestedLiveSeen = true;
+  if (s?.status === "running" && s.panelOpen && s.panelNested >= 1 && s.panelLive === "true") panelLiveSeen = true;
+  nestedInTrail = Math.max(nestedInTrail, s?.trailNested || 0);
   if (s?.running === 2) bothRunning = true;
   barRows = Math.max(barRows, s?.barRows || 0);
   if (s?.barDoing && /正在|等待确认|凝神/.test(s.barDoing)) barDoing = s.barDoing;
   if (s?.thought) thoughtLive = true;
   if (/名帮手|帮手「/.test(s?.meta || "")) metaHelpers = s.meta;
-  // 卡片就地更新：进行中给第一张卡片与其第一个做完的嵌套步骤做个记号，之后每次刷新都该还是同一批节点（整张换新会让输出闪、思绪合不上）
-  if (s?.status === "running" && s.nested >= 1)
+  // 面板里就地更新：给第一个做完的嵌套步骤做个记号，之后每次刷新都该还是同一个节点（整段换新会让输出闪、思绪合不上）
+  if (s?.status === "running" && s.panelNested >= 1)
     await evalJs(
-      `(d => { window.__markLost ??= 0; if (!d.dataset.mark) { if (window.__cardMarked) window.__markLost++; d.dataset.mark = "1"; window.__cardMarked = true; } const step = d.querySelector('.sub-steps .tool-step[data-status="done"]'); if (step && !step.dataset.mark) { if (window.__stepMarked) window.__markLost++; step.dataset.mark = "1"; window.__stepMarked = true; } })(document.querySelector(".message.assistant .tool-step-delegate")); true`
+      `(() => { window.__markLost ??= 0; const step = document.querySelector('#helperPanel .tool-step[data-status="done"]'); if (step && !step.dataset.mark) { if (window.__stepMarked) window.__markLost++; step.dataset.mark = "1"; window.__stepMarked = true; } })(); true`
     );
   if (await evalJs(`(document.querySelector('.message.assistant')?.dataset.status ?? "streaming") !== "streaming"`)) break;
   await sleep(60);
 }
-check("helper steps shown nested and open while running", nestedLiveSeen, [...new Set(seen)].slice(0, 6).join(" | "));
+check("helper timeline runs live in the side panel", panelLiveSeen, [...new Set(seen)].slice(0, 6).join(" | "));
+check("the trail keeps only a marker, no nested helper steps", nestedInTrail === 0, String(nestedInTrail));
 check("two helpers ran in parallel", bothRunning, [...new Set(seen)].slice(0, 6).join(" | "));
 check("helper bar above the composer listed both helpers", barRows === 2, String(barRows));
 check("helper bar tells what a helper is doing", /正在 (读取|修改|写入)|凝神|等待确认/.test(barDoing), barDoing);
-check("helper's live thought shown inside its card", thoughtLive);
+check("helper's live thought shown in the panel", thoughtLive);
 check(
-  "delegate card and its nested steps are updated in place, never re-created",
-  await evalJs(`(window.__markLost || 0) === 0 && !!document.querySelector('.tool-step-delegate[data-mark]')`),
+  "panel steps are updated in place, never re-created",
+  await evalJs(`(window.__markLost || 0) === 0 && !!document.querySelector('#helperPanel .tool-step[data-mark]')`),
   await evalJs(`String(window.__markLost)`)
 );
 check("trail summary names the helpers", /2 名帮手 · \d+ 步 · 进行中|帮手「.+」· \d+ 步 · 进行中/.test(metaHelpers), metaHelpers);
@@ -59,68 +71,59 @@ check(
   )
 );
 await waitFor(`document.querySelector('.message.assistant')?.dataset.status === "complete"`, 40000);
-await evalJs(
-  `document.querySelector(".message.assistant .tool-stack").open = true; document.querySelector(".message.assistant .sub-steps").open = true; true`
-);
+await evalJs(`document.querySelector(".message.assistant .tool-stack").open = true; true`);
 await sleep(200);
 await shot("delegate.png");
-await evalJs(`document.querySelector(".message.assistant .sub-steps").open = false; true`);
 const card = await evalJs(
-  `(d => ({ label: d.querySelector(".tool-label").textContent, title: d.querySelector(".tool-title").textContent, meta: d.querySelector(".tool-meta").textContent, status: d.dataset.status, open: !!d.querySelector(".sub-steps[open]"), summary: d.querySelector(".sub-steps > summary")?.textContent.trim(), nested: [...d.querySelectorAll(".sub-steps .tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), report: d.querySelector(".sub-report")?.textContent.trim() || "", topLevel: d.parentElement.querySelectorAll(":scope > .tool-step").length }))(document.querySelector(".message.assistant .tool-step-delegate"))`
+  `(d => ({ label: d.querySelector(".tool-label").textContent, title: d.querySelector(".tool-title").textContent, meta: d.querySelector(".tool-meta").textContent, status: d.dataset.status, nested: d.querySelectorAll(".tool-step").length, report: d.querySelector(".sub-report")?.textContent.trim() || "" }))(document.querySelector(".message.assistant .tool-step-delegate"))`
 );
 check(
-  "delegate card labelled and titled",
-  card.label.endsWith("差遣") && card.title === "改 a.js" && card.status === "done",
+  "the marker is labelled, titled and carries the report",
+  card.label.endsWith("差遣") && card.title === "改 a.js" && card.status === "done" && card.nested === 0,
   JSON.stringify(card)
 );
-// 整张卡片可折叠：点头部收起，只剩标题行；再点展开；折叠状态记在步骤上
+check("marker meta counts helper steps and files", /2 步 · 改 1 个文件 · \d+ 秒/.test(card.meta), card.meta);
+check("report stays in the trail — that is what the main model consumed", card.report.startsWith("回报：已把 return 1 改为 return 2"), card.report);
+// 点那枚签在右侧开面板，帮手做过的两步都在里面
 await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
-check(
-  "clicking the head folds the whole helper card",
-  await evalJs(
-    `(d => d.classList.contains("folded") && getComputedStyle(d.querySelector(".sub-trail")).display === "none" && getComputedStyle(d.querySelector(".tool-step-head")).display !== "none")(document.querySelector(".message.assistant .tool-step-delegate"))`
-  )
-);
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].messages.at(-1).steps[0].folded === true`, 5000);
-check("fold remembered on the step", true);
-await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
-check(
-  "clicking again unfolds it",
-  await evalJs(`!document.querySelector(".message.assistant .tool-step-delegate").classList.contains("folded")`)
+await sleep(200);
+const panel = await evalJs(
+  `(p => ({ open: !p.classList.contains("hidden"), sub: document.querySelector("#helperPanelSub").textContent, nested: [...p.querySelectorAll(".tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), nav: [...p.querySelectorAll(".helper-nav-item")].length, report: p.querySelector(".sub-report")?.textContent.trim().slice(0, 12) || "" }))(document.querySelector("#helperPanel"))`
 );
 check(
-  "helper ran read then edit inside the card",
-  card.nested.join() === "读取:done,修改:done" && card.summary === "帮手 · 2 步",
-  JSON.stringify(card)
+  "clicking the marker opens the helper's timeline in the panel",
+  panel.open && panel.nested.join() === "读取:done,修改:done",
+  JSON.stringify(panel)
 );
-check("card meta counts helper steps and files", /2 步 · 改 1 个文件 · \d+ 秒/.test(card.meta), card.meta);
-check(
-  "helper steps fold after completion, report stays",
-  !card.open && card.report.startsWith("回报：已把 return 1 改为 return 2"),
-  JSON.stringify(card)
-);
+check("panel head names the errand and its tally", /改 a\.js · 2 步 · 改 1 个文件/.test(panel.sub), panel.sub);
+check("panel lists both errands to switch between", panel.nav === 2, String(panel.nav));
 check("helper had its own system prompt and no delegate / ask_user", card.report.includes("sys:yes|delegate:no|ask:no"), card.report);
 check("helper can read memory but not write it", card.report.includes("|memw:0|memr:2|"), card.report);
 check("file actually changed by helper", readFileSync(WORK + "/src/a.js", "utf8").includes("return 2;"));
 const steps = await evalJs(
-  `JSON.stringify([...document.querySelectorAll(".message.assistant .tool-stack > .tool-stack-body .tool-step")].filter(s => !s.closest(".sub-steps")).map(s => ({ label: s.querySelector(".tool-label").textContent, status: s.dataset.status, meta: s.querySelector(".tool-meta").textContent })))`
+  `JSON.stringify([...document.querySelectorAll(".message.assistant .tool-stack > .tool-stack-body .tool-step")].map(s => ({ label: s.querySelector(".tool-label").textContent, status: s.dataset.status, meta: s.querySelector(".tool-meta").textContent })))`
 );
 check(
   "parent editing a file only the helper read is refused",
   JSON.parse(steps)[2]?.label === "修改" && JSON.parse(steps)[2]?.meta === "需先读取",
   steps
 );
+// 第二次差遣：点它的签，面板换过去
+await evalJs(`document.querySelectorAll(".message.assistant .tool-step-delegate")[1].querySelector(".tool-step-head").click(); true`);
+await sleep(200);
 const second = await evalJs(
-  `(d => d ? { title: d.querySelector(".tool-title").textContent, nested: [...d.querySelectorAll(".sub-steps .tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), thought: d.querySelector(".sub-timeline .reasoning .reasoning-body")?.textContent.slice(0, 12), report: d.querySelector(".sub-report")?.textContent.trim() } : null)(document.querySelectorAll(".message.assistant .tool-step-delegate")[1])`
+  `(p => ({ marker: document.querySelectorAll(".message.assistant .tool-step-delegate")[1].querySelector(".tool-title").textContent, nested: [...p.querySelectorAll(".tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), thought: p.querySelector(".sub-timeline .reasoning .reasoning-body")?.textContent.slice(0, 12) || "", report: p.querySelector(".sub-report")?.textContent.trim() }))(document.querySelector("#helperPanel"))`
 );
 check(
-  "second helper's card: thought folded in, write step, report",
-  second?.title === "建 b.js" &&
+  "panel switches to the second errand: its thought, write step and report",
+  second.marker === "建 b.js" &&
     second.nested.join() === "写入:done" &&
     second.thought.startsWith("帮手乙想第 1 步。") &&
     second.report === "回报乙：已新建 src/b.js。",
   JSON.stringify(second)
 );
+// 合起面板，后面几项看的是正文
+await evalJs(`document.querySelector("#helperClose").click(); true`);
 check("second helper's file exists", readFileSync(WORK + "/src/b.js", "utf8").includes("export const b = 2;"));
 const text = await evalJs(`document.querySelector(".message.assistant .assistant-block > .markdown").textContent`);
 check(
@@ -163,8 +166,11 @@ await evalJs(
   `[...document.querySelectorAll("#history .history-item")].find(n => n.textContent.includes("DELEGATE"))?.querySelector(".history-open").click(); true`
 );
 await sleep(600);
+// 重载后：签与回报都还在，点开面板帮手那两步也还在（都存在步骤上，不靠内存）
+await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
+await sleep(300);
 const after = await evalJs(
-  `(d => d ? { nested: d.querySelectorAll(".sub-steps .tool-step").length, report: !!d.querySelector(".sub-report") } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
+  `(d => d ? { marker: !!d, report: !!d.querySelector(".sub-report"), nested: document.querySelectorAll("#helperPanel .tool-step").length } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
 );
-check("delegate card survives reload", after?.nested === 2 && after.report, JSON.stringify(after));
+check("marker, report and the helper's timeline all survive reload", after?.marker && after.report && after.nested === 2, JSON.stringify(after));
 close();

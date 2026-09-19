@@ -248,10 +248,10 @@ function stepHtml(step) {
   // 检索、翻阅这类查阅步骤默认折起：一答里几十次检索，命中全摊开要占一整屏；标题行有关键词与结果数，点开才看命中
   const foldable = !!body,
     folded = foldable && (step.expanded === undefined ? true : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开" : "收起"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开" : "收起"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
 }
-// 差遣卡片：帮手自己的一条小时间线——每轮的思绪、说的话、各步，与主行迹同一套画法；进行中时最新的思绪与话跟着流，
-// 做完折成一行「帮手 · n 步」，只留回报在外。首次画整张；此后由 syncDelegateCard 就地更新
+// 帮手自己的一条小时间线——每轮的思绪、说的话、各步，与主行迹同一套画法；进行中时最新的思绪与话跟着流。
+// 它画在右侧的差遣面板里（不在行迹里：差遣是并行的活，线性的时间线盛不下）；首次画整段，此后由 syncDelegateTrail 就地更新
 /** @param {Step} step */
 function delegateSubState(step) {
   const sub = step.sub,
@@ -293,113 +293,105 @@ function delegateTrailHtml(step) {
         ? `<div class="sub-idle">帮手正在凝神</div>`
         : ""
   }</div>`;
-  const inner = groups || thought || said || live;
-  return `<div class="sub-trail"${live ? ' data-live="true"' : ""}>${
-    inner
-      ? `<details class="sub-steps"${step.subOpen ? " open" : ""}><summary><span>帮手 · ${steps.length} 步</span></summary><div class="sub-timeline">${groups}${tail}</div></details>`
-      : ""
-  }${report ? `<div class="sub-report">${renderMarkdown(report)}</div>` : ""}</div>`;
+  // 面板里不再折起来：这一栏就是为了看过程而开的，开了还要再点一下才见内容没有道理
+  return `<div class="sub-trail"${live ? ' data-live="true"' : ""}><div class="sub-timeline">${groups}${tail}</div>${report ? `<div class="sub-report">${renderMarkdown(report)}</div>` : ""}</div>`;
 }
+// 行迹里只留一枚签：差遣是并行的活，塞进线性的时间线会把后面的东西一直往下顶。
+// 这里记「此刻遣了谁、回报如何」——那确实是这一刻发生的事；帮手自己的那条小时间线去右侧面板看。
 /** @param {Step} step */
 function delegateStepHtml(step) {
-  const { sub, status, meta } = delegateSubState(step);
-  return `<div class="tool-step tool-step-delegate${step.folded ? " folded" : ""}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">帮</span>差遣</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div>${delegateTrailHtml(step)}</div>`;
+  const { sub, status, meta, report } = delegateSubState(step);
+  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>差遣</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div>${report ? `<div class="sub-report">${renderMarkdown(report)}</div>` : ""}</div>`;
 }
-// 差遣卡片就地更新。帮手每隔一会儿刷一次，若整张换新：已画出的步骤输出会重新起入场动画（列目录的结果闪一下又空一片）、
-// 用户收起的思绪又被摊开。这里只动变了的部分：头部的状态、时间线里新出的分组与步骤、最后一轮的思绪与话、做完后的回报
+// 行迹里那枚签的就地更新：只动头上的状态、标题与做完后的回报。帮手自己的时间线不在这儿，在面板里
 /** @param {Step} step */
 function syncDelegateCard(el, step, prev, seen) {
-  const { sub, status, steps, live, thought, said, report, meta } = delegateSubState(step);
+  const { sub, status, report, meta } = delegateSubState(step);
   el.dataset.status = status;
-  el.classList.toggle("folded", !!step.folded);
   const head = el.querySelector(":scope > .tool-step-head");
   rollText(head.querySelector(".tool-meta"), meta);
   if (!prev || prev.status !== status) head.querySelector(".tool-state").outerHTML = stepStateHtml(status);
-  // 标题在领命时才定下来，卡片却在那之前就画出来了
+  // 标题在领命时才定下来，签却在那之前就画出来了
   const title = head.querySelector(".tool-title");
   if (title.textContent !== String(step.title || "")) {
     title.textContent = step.title || "";
     title.title = sub?.task || step.title || "";
   }
-  if (!sub) return;
-  let trail = el.querySelector(":scope > .sub-trail");
-  if (!trail) {
-    el.insertAdjacentHTML("beforeend", delegateTrailHtml(step));
-    trail = el.querySelector(":scope > .sub-trail");
-    trail?.querySelectorAll(".trail-note, .sub-report").forEach(node => renderEnhancements(node));
-    return;
+  const reportEl = el.querySelector(":scope > .sub-report");
+  if (!report) reportEl?.remove();
+  else if (!reportEl) {
+    el.insertAdjacentHTML("beforeend", `<div class="sub-report">${renderMarkdown(report)}</div>`);
+    renderEnhancements(el.lastElementChild);
   }
+}
+// 帮手时间线就地更新（面板里那一条）。帮手每 350ms 刷一次，若整段换新：已画出的步骤输出会重新起入场动画
+// （列目录的结果闪一下又空一片）、用户收起的思绪又被摊开。这里只动变了的部分：新出的分组与步骤、最后一轮的思绪与话、回报
+/** @param {Step} step */
+function syncDelegateTrail(trail, step, seen) {
+  const { sub, steps, live, thought, said, report } = delegateSubState(step);
+  if (!trail || !sub) return;
   if (live) trail.dataset.live = "true";
   else delete trail.dataset.live;
-  let details = trail.querySelector(":scope > .sub-steps");
-  if (!details && (steps.length || thought || said || live)) {
-    trail.insertAdjacentHTML(
-      "afterbegin",
-      `<details class="sub-steps"${step.subOpen ? " open" : ""}><summary><span>帮手 · ${steps.length} 步</span></summary><div class="sub-timeline"><div class="sub-tail"></div></div></details>`
-    );
-    details = trail.firstElementChild;
+  let timeline = trail.querySelector(":scope > .sub-timeline");
+  if (!timeline) {
+    trail.insertAdjacentHTML("afterbegin", `<div class="sub-timeline"><div class="sub-tail"></div></div>`);
+    timeline = trail.firstElementChild;
   }
-  if (details) {
-    rollText(details.querySelector("summary span"), `帮手 · ${steps.length} 步`);
-    // 做完那一刻按步骤上记的开合收起来；用户自己开合过的不动
-    if (prev && prev.status !== status && !live) settleDetails(details, false, () => (step.subOpen = false), true);
-    const timeline = details.querySelector(".sub-timeline");
-    let tail = timeline.querySelector(":scope > .sub-tail");
-    if (!tail) {
-      timeline.insertAdjacentHTML("beforeend", `<div class="sub-tail"></div>`);
-      tail = timeline.lastElementChild;
-    }
-    for (const group of trailGroups(sub)) {
-      let host = timeline.querySelector(`:scope > .trail-group[data-at="${group.at}"]`);
-      if (!host) {
-        tail.insertAdjacentHTML("beforebegin", trailGroupHtml(sub, group));
-        host = tail.previousElementSibling;
-        const note = host.querySelector(".trail-note");
-        if (note) renderEnhancements(note);
-      } else {
-        // 同一轮后来的步骤会把分组的思绪边界再往后推一点
-        const body = host.querySelector(":scope > .reasoning .reasoning-body"),
-          text = String(sub.reasoning || "")
-            .slice(group.rfrom, group.rat)
-            .trim();
-        if (body && body.textContent !== text) body.textContent = text;
-        else if (!body && text) host.insertAdjacentHTML("afterbegin", trailReasoningHtml(sub, group));
-      }
-      for (const s of group.steps) syncStep(host.querySelector(":scope > .tool-steps"), s, seen);
-    }
-    const state = live && !said ? "live" : "done";
-    let thoughtEl = tail.querySelector(":scope > .reasoning");
-    if (!thought) thoughtEl?.remove();
-    else if (!thoughtEl) tail.insertAdjacentHTML("afterbegin", delegateTailThoughtHtml(thought, state));
-    else {
-      const body = thoughtEl.querySelector(".reasoning-body");
-      if (body.textContent !== thought) {
-        body.textContent = thought;
-        if (thoughtEl.dataset.state === "live") body.scrollTop = body.scrollHeight;
-      }
-      if (thoughtEl.dataset.state !== state) {
-        thoughtEl.dataset.state = state;
-        if (state === "done" && thoughtEl.open && !thoughtEl.dataset.touched) settleDetails(thoughtEl, false);
-      }
-    }
-    let saidEl = tail.querySelector(":scope > .sub-said");
-    if (!(live && said)) saidEl?.remove();
-    else {
-      if (!saidEl) {
-        tail.insertAdjacentHTML("beforeend", `<div class="trail-note sub-said"></div>`);
-        saidEl = tail.lastElementChild;
-      }
-      if (saidEl.dataset.text !== said) {
-        saidEl.dataset.text = said;
-        saidEl.innerHTML = renderMarkdown(said);
-        renderEnhancements(saidEl);
-      }
-    }
-    const idle = live && !thought && !said && !steps.length,
-      idleEl = tail.querySelector(":scope > .sub-idle");
-    if (!idle) idleEl?.remove();
-    else if (!idleEl) tail.insertAdjacentHTML("beforeend", `<div class="sub-idle">帮手正在凝神</div>`);
+  let tail = timeline.querySelector(":scope > .sub-tail");
+  if (!tail) {
+    timeline.insertAdjacentHTML("beforeend", `<div class="sub-tail"></div>`);
+    tail = timeline.lastElementChild;
   }
+  for (const group of trailGroups(sub)) {
+    let host = timeline.querySelector(`:scope > .trail-group[data-at="${group.at}"]`);
+    if (!host) {
+      tail.insertAdjacentHTML("beforebegin", trailGroupHtml(sub, group));
+      host = tail.previousElementSibling;
+      const note = host.querySelector(".trail-note");
+      if (note) renderEnhancements(note);
+    } else {
+      // 同一轮后来的步骤会把分组的思绪边界再往后推一点
+      const body = host.querySelector(":scope > .reasoning .reasoning-body"),
+        text = String(sub.reasoning || "")
+          .slice(group.rfrom, group.rat)
+          .trim();
+      if (body && body.textContent !== text) body.textContent = text;
+      else if (!body && text) host.insertAdjacentHTML("afterbegin", trailReasoningHtml(sub, group));
+    }
+    for (const s of group.steps) syncStep(host.querySelector(":scope > .tool-steps"), s, seen);
+  }
+  const state = live && !said ? "live" : "done";
+  let thoughtEl = tail.querySelector(":scope > .reasoning");
+  if (!thought) thoughtEl?.remove();
+  else if (!thoughtEl) tail.insertAdjacentHTML("afterbegin", delegateTailThoughtHtml(thought, state));
+  else {
+    const body = thoughtEl.querySelector(".reasoning-body");
+    if (body.textContent !== thought) {
+      body.textContent = thought;
+      if (thoughtEl.dataset.state === "live") body.scrollTop = body.scrollHeight;
+    }
+    if (thoughtEl.dataset.state !== state) {
+      thoughtEl.dataset.state = state;
+      if (state === "done" && thoughtEl.open && !thoughtEl.dataset.touched) settleDetails(thoughtEl, false);
+    }
+  }
+  let saidEl = tail.querySelector(":scope > .sub-said");
+  if (!(live && said)) saidEl?.remove();
+  else {
+    if (!saidEl) {
+      tail.insertAdjacentHTML("beforeend", `<div class="trail-note sub-said"></div>`);
+      saidEl = tail.lastElementChild;
+    }
+    if (saidEl.dataset.text !== said) {
+      saidEl.dataset.text = said;
+      saidEl.innerHTML = renderMarkdown(said);
+      renderEnhancements(saidEl);
+    }
+  }
+  const idle = live && !thought && !said && !steps.length,
+    idleEl = tail.querySelector(":scope > .sub-idle");
+  if (!idle) idleEl?.remove();
+  else if (!idleEl) tail.insertAdjacentHTML("beforeend", `<div class="sub-idle">帮手正在凝神</div>`);
   const reportEl = trail.querySelector(":scope > .sub-report");
   if (!report) reportEl?.remove();
   else if (!reportEl) {
@@ -491,6 +483,90 @@ function renderHelperBar() {
   }
   if (bar.classList.contains("hidden") || bar.classList.contains("leaving")) showNow(bar);
 }
+
+// ---------- 差遣面板：帮手的那条小时间线开在右侧，与旁注同一套几何，只换色与印 ----------
+// 帮手与旁注是同一种东西的镜像：都是附在正文某一处、独立跑的一条旁支小对话。
+// 旁注是用户起的、读得到正文而不入正文；帮手是模型遣的、共用工作目录而回报入正文。
+// 所以这里不另造范式，借旁注的 .side-panel：朱砂换金，「注」换「遣」。两块面板同时只开一块——窄屏本就紧
+let helperStepId = null; // 面板里正开着的那次差遣
+const helperSeen = new Map(); // 面板里步骤的就地更新台账（与行迹各记各的，互不干扰）
+/** 当前对话里所有的差遣，按发生先后 */
+function allDelegateSteps() {
+  const out = [];
+  for (const message of currentConversation()?.messages || [])
+    for (const step of message.steps || []) if (step.name === "delegate") out.push(step);
+  return out;
+}
+function helperStepById(id) {
+  return allDelegateSteps().find(step => step.id === id) || null;
+}
+function helperPanelOpen() {
+  const panel = $("#helperPanel");
+  return !!panel && !panel.classList.contains("hidden") && !panel.classList.contains("leaving");
+}
+function openHelperPanel(stepId) {
+  const step = helperStepById(stepId);
+  if (!step) return;
+  if (helperStepId !== step.id) helperSeen.clear();
+  helperStepId = step.id;
+  if (typeof closeSidePanel === "function" && sidePanelOpen()) closeSidePanel(); // 一次只开一块
+  showNow($("#helperPanel"));
+  renderHelperPanel(true);
+}
+function closeHelperPanel() {
+  helperStepId = null;
+  helperSeen.clear();
+  const panel = $("#helperPanel");
+  if (panel && !panel.classList.contains("hidden")) hideWithFade(panel);
+}
+// 面板顶的一排小签：这段对话里的几次差遣，点哪次看哪次；只有一次时不画
+function helperPanelNavHtml(steps) {
+  if (steps.length < 2) return "";
+  return steps
+    .map(
+      step =>
+        `<button type="button" class="helper-nav-item${step.id === helperStepId ? " here" : ""}" data-helper-nav="${escapeHtml(step.id)}" title="${escapeHtml(step.title || "")}" data-status="${escapeHtml(step.status || "done")}">${escapeHtml(String(step.title || "帮手").slice(0, 8))}</button>`
+    )
+    .join("");
+}
+/** @param {boolean} fresh 首次打开或换了一次差遣：整段重画；否则就地更新 */
+function renderHelperPanel(fresh = false) {
+  const panel = $("#helperPanel");
+  if (!panel || !helperPanelOpen()) return;
+  const step = helperStepById(helperStepId);
+  // 那次差遣不在眼前了（换了对话、切了分支）：面板合上，不留一块空的
+  if (!step) return closeHelperPanel();
+  const { sub, status, meta } = delegateSubState(step);
+  panel.dataset.status = status;
+  const sublabel = $("#helperPanelSub");
+  if (sublabel) sublabel.textContent = `${step.title || "领命中"} · ${meta}`;
+  const nav = $("#helperPanelNav"),
+    all = allDelegateSteps();
+  if (nav) {
+    const key = `${all.map(s => `${s.id}:${s.status}`).join(",")}|${helperStepId}`;
+    if (nav.dataset.key !== key) {
+      nav.dataset.key = key;
+      nav.innerHTML = helperPanelNavHtml(all);
+    }
+  }
+  const anchor = $("#helperAnchor");
+  if (anchor) anchor.textContent = sub?.task ? String(sub.task).slice(0, 120) : step.title || "";
+  const host = $("#helperPanelBody");
+  if (!host) return;
+  let trail = host.querySelector(":scope > .sub-trail");
+  if (fresh || !trail) {
+    helperSeen.clear();
+    host.innerHTML = delegateTrailHtml(step) || `<div class="sub-trail"><div class="sub-timeline"></div></div>`;
+    trail = host.querySelector(":scope > .sub-trail");
+    trail?.querySelectorAll(".trail-note, .sub-report").forEach(node => renderEnhancements(node));
+    // 首次画完把台账补齐，免得下一轮把已画出的步骤当新的又闪一次
+    if (sub)
+      for (const group of trailGroups(sub))
+        for (const s of group.steps) helperSeen.set(s.id, { html: stepHtml(s), hasBody: false, status: s.status });
+    return;
+  }
+  syncDelegateTrail(trail, step, helperSeen);
+}
 // 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面
 /** @param {Step} step */
 function noteStepHtml(step) {
@@ -566,7 +642,7 @@ function workStepHtml(step, title) {
   const foldable = !!body && status !== "pending",
     openByDefault = status !== "error" && (!!step.diff || step.name === "list_files"),
     folded = foldable && (step.expanded === undefined ? !openByDefault : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开输出" : "收起输出"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title${command ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "执行失败") : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开输出" : "收起输出"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title${command ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "执行失败") : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
 /** @param {Message} assistant */
 function refreshSteps(assistant) {
@@ -640,6 +716,7 @@ function refreshSteps(assistant) {
     const ids = new Set((assistant.steps || []).map(step => step.id));
     for (const el of stack.querySelectorAll(".tool-step-note[data-step-id]")) if (!ids.has(el.dataset.stepId)) el.remove();
     renderHelperBar();
+    renderHelperPanel();
     // 一答只开一次、收一次：第一步起就摊开，整答写完才收（言里模型说话的间隙也不收）；请示时必开
     const pending = assistant.steps.some(step => step.status === "pending");
     if (assistant.status === "streaming") {

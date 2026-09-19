@@ -67,7 +67,6 @@
  * @property {boolean} [expanded] 输出摊开 / 折起；未记则按状态定（报错折起）
  * @property {boolean} [full] 输出看全 / 只看前 10 行
  * @property {boolean} [folded] 差遣卡片整张折起
- * @property {boolean} [subOpen] 差遣卡片里「帮手 · n 步」的开合
  * @property {SubAgent} [sub]
  * @property {{ questions: AskQuestion[] }} [form]
  * @property {string[]} [answers]
