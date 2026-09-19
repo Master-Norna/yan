@@ -298,7 +298,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
       const tail = markdown.querySelector(".md-tail");
       suppressViz = true;
       try {
-        tail.innerHTML = renderMarkdown(visible.slice(renderedCut));
+        paintTail(tail, renderMarkdown(visible.slice(renderedCut)));
       } finally {
         suppressViz = false;
       }

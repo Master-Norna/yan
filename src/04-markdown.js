@@ -67,6 +67,49 @@ function renderMath(tex, display) {
     return `<code>${escapeHtml(tex)}</code>`;
   }
 }
+// 占位框里的动效在逐帧重画的尾段里会随节点重建从头再来，看着像定住了：把相位记在节点上（负的 animation-delay），重建也接着原来的拍子走
+const vizPhase = () => `-${Math.round(performance.now())}ms`;
+// 占位框里的「手稿」：每来一行落一笔，十八笔写满一页便翻页重起；笔画长短按固定的韵律排，是一页字的样子而不是进度条。
+// 最新的一笔是朱色，流式停住了，笔也就停住了，看得出来
+const SKETCH_PAGE = 18,
+  SKETCH_WIDTHS = [34, 22, 44, 27, 18, 38];
+function pendingSketchHtml(lines) {
+  const inked = ((Math.max(1, Number(lines) || 1) - 1) % SKETCH_PAGE) + 1;
+  return `<div class="viz-pending-sketch">${Array.from({ length: inked }, (_, i) => `<i style="--w:${SKETCH_WIDTHS[i % SKETCH_WIDTHS.length]}px"></i>`).join("")}</div>`;
+}
+// 尾段每帧整段重画，占位框若跟着重建，笔画的落笔动效每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
+// 只换它周围的内容，并按新的行数补上新落的几笔（翻页了才整页重写）
+function paintTail(tail, html) {
+  const live = [...tail.querySelectorAll(".viz-pending")].at(-1);
+  if (!live || live.parentNode !== tail) {
+    tail.innerHTML = html;
+    return;
+  }
+  const fresh = document.createElement("div");
+  fresh.innerHTML = html;
+  const next = [...fresh.querySelectorAll(".viz-pending")].at(-1);
+  if (!next || next.parentNode !== fresh || next.dataset.vizPending !== live.dataset.vizPending) {
+    tail.innerHTML = html;
+    return;
+  }
+  const sketch = live.querySelector(".viz-pending-sketch"),
+    strokes = next.querySelectorAll(".viz-pending-sketch i");
+  if (sketch && strokes.length >= sketch.children.length)
+    for (const stroke of [...strokes].slice(sketch.children.length)) sketch.append(stroke);
+  else if (sketch) sketch.replaceChildren(...strokes);
+  live.dataset.lines = next.dataset.lines;
+  live.setAttribute("aria-label", next.getAttribute("aria-label"));
+  for (const node of [...tail.childNodes]) if (node !== live) node.remove();
+  const before = [],
+    after = [];
+  let seen = false;
+  for (const node of [...fresh.childNodes]) {
+    if (node === next) seen = true;
+    else (seen ? after : before).push(node);
+  }
+  live.before(...before);
+  live.after(...after);
+}
 function codeBlockHtml(text, lang) {
   const language = String(lang || "")
       .trim()
@@ -74,11 +117,10 @@ function codeBlockHtml(text, lang) {
       .toLowerCase(),
     known = !!(window.hljs && language && hljs.getLanguage(language));
   const htmlApp = ["html", "interactive", "app"].includes(language);
-  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时显示轻量成图状态。
-  // 占位框里报着写到第几行：数字随流式跳动，动效关掉了也看得出还在写，不会以为卡住了
+  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是一页正在落笔的手稿（见 pendingSketchHtml）
   if (suppressViz && (htmlApp || language === "mermaid" || language === "echarts")) {
     const lines = String(text || "").split("\n").length;
-    return `<div class="viz viz-pending" data-viz-pending="${language}" role="status" aria-label="${htmlApp ? "交互内容仍在生成" : "图形仍在生成"}"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true"><span class="viz-pending-mark"></span><span class="viz-pending-label">${htmlApp ? "页面" : "图形"}写到第 ${lines} 行</span></div></div>\n`;
+    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml(lines)}</div></div>\n`;
   }
   if (!suppressViz && (language === "mermaid" || language === "echarts"))
     return `<div class="viz" data-viz="${language}"><div class="code-head"><span class="code-lang">${language}</span><span><button type="button" class="code-copy" data-viz-toggle>源码</button><button type="button" class="code-copy" data-viz-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="viz-canvas"></div><pre class="viz-source hidden"><code>${escapeHtml(text)}</code></pre></div>\n`;

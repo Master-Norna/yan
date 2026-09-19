@@ -65,33 +65,6 @@
     transform: rotate(360deg);
   }
 }
-@keyframes inkWriting {
-  0%,
-  100% {
-    opacity: 0.28;
-    transform: scaleX(0.35);
-  }
-  50% {
-    opacity: 0.9;
-    transform: scaleX(1);
-  }
-}
-@keyframes inkTravel {
-  0% {
-    opacity: 0;
-    transform: translateX(0) scale(0.7);
-  }
-  15% {
-    opacity: 1;
-  }
-  75% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(22px) scale(0.35);
-  }
-}
 @keyframes veilIn {
   from {
     opacity: 0;
@@ -753,33 +726,31 @@ body {
   background: var(--accent);
   opacity: 0.55;
 }
-.viz-pending-body {
-  height: 76px;
-}
-.viz-pending-mark {
-  width: 34px;
-}
-.viz-pending-mark:before {
-  height: 1px;
-}
-.viz-pending-mark:after {
-  width: 4px;
-  height: 4px;
-}
+/* 占位框的几处循环动效都接着 --phase 的拍子（负的 animation-delay），节点重建也不从头来 */
 :root[data-ink-motion="on"] .viz-pending:before {
   animation: pendingTrace 1.9s cubic-bezier(0.35, 0.05, 0.28, 1) infinite;
+  animation-delay: var(--phase, 0ms);
 }
 :root[data-ink-motion="on"] .viz-pending:after {
   animation: pendingFrame 1.9s ease-in-out infinite;
+  animation-delay: var(--phase, 0ms);
 }
 :root[data-ink-motion="on"] .viz-pending-signal {
   animation: pendingSignal 1.35s ease-in-out infinite;
+  animation-delay: var(--phase, 0ms);
+}
+:root[data-ink-motion="on"] .viz-pending-body:after {
+  animation: pendingSheen 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: var(--phase, 0ms);
+}
+:root[data-ink-motion="on"] .viz-pending-sketch i {
+  animation: strokeInk 0.36s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
 }
 :root[data-ink-motion="off"] .viz-pending:before,
 :root[data-ink-motion="off"] .viz-pending:after,
 :root[data-ink-motion="off"] .viz-pending-signal,
-:root[data-ink-motion="off"] .viz-pending-mark:before,
-:root[data-ink-motion="off"] .viz-pending-mark:after,
+:root[data-ink-motion="off"] .viz-pending-body:after,
+:root[data-ink-motion="off"] .viz-pending-sketch i,
 :root[data-ink-motion="off"] .history-state.running,
 :root[data-ink-motion="off"] .history-state.waiting {
   animation: none !important;
@@ -805,6 +776,20 @@ body {
   }
   50% {
     opacity: 0.42;
+  }
+}
+@keyframes pendingSheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes strokeInk {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  60% {
+    opacity: 0.9;
   }
 }
 @keyframes pendingSignal {

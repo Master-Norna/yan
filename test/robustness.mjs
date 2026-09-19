@@ -48,21 +48,23 @@ check(
   JSON.stringify([s1.conversations[0].titled, s1.conversations[0].title])
 );
 
-// ---- 页内可视化流式未闭合时的占位框：报着写到第几行，数字随流跳动，不像卡住
+// ---- 页内可视化流式未闭合时的占位框：一页手稿随流落笔，行数记在节点上，笔画跟着涨，不像卡住
 await evalJs(
   `document.querySelector("#chatInput").value = "SLOWHTML 画个页"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
 await waitFor(
-  `document.querySelectorAll(".message.assistant").length === 2 && !!${lastAssistant}.querySelector(".viz-pending-label")`,
+  `document.querySelectorAll(".message.assistant").length === 2 && !!${lastAssistant}.querySelector(".viz-pending-sketch")`,
   20000
 );
-const label1 = await evalJs(`${lastAssistant}.querySelector(".viz-pending-label")?.textContent`);
-await waitFor(`(${lastAssistant}.querySelector(".viz-pending-label")?.textContent || "") !== ${JSON.stringify(label1)}`, 5000);
-const label2 = await evalJs(`${lastAssistant}.querySelector(".viz-pending-label")?.textContent`);
+const lines1 = await evalJs(`Number(${lastAssistant}.querySelector(".viz-pending")?.dataset.lines)`);
+await waitFor(`Number(${lastAssistant}.querySelector(".viz-pending")?.dataset.lines || 0) > ${lines1}`, 5000);
+const sketch = await evalJs(
+  `(v => ({ lines: Number(v.dataset.lines), strokes: v.querySelectorAll(".viz-pending-sketch i").length, label: v.getAttribute("aria-label") }))(${lastAssistant}.querySelector(".viz-pending"))`
+);
 check(
-  "pending viz box reports a growing line count",
-  /^页面写到第 \d+ 行$/.test(label1) && /^页面写到第 \d+ 行$/.test(label2) && label1 !== label2,
-  JSON.stringify([label1, label2])
+  "pending viz box reports a growing line count through its sketch",
+  sketch.lines > lines1 && sketch.strokes === sketch.lines && /已写 \d+ 行$/.test(sketch.label),
+  JSON.stringify([lines1, sketch])
 );
 await waitFor(`${lastAssistant}.dataset.status === "complete"`, 20000);
 check(
