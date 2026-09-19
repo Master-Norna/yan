@@ -22,7 +22,8 @@ let panelLiveSeen = false,
   thoughtLive = false,
   nestedInTrail = 0,
   metaHelpers = "",
-  panelOpened = false;
+  panelOpened = false,
+  breathing = false;
 const seen = [];
 for (let i = 0; i < 200; i++) {
   // 帮手都到齐了就把面板点开（开在最后一名身上——面板一次只看一名，思绪不一定落在头一名），此后它随 350ms 的心跳自己更新
@@ -34,7 +35,7 @@ for (let i = 0; i < 200; i++) {
     }
   }
   const s = await evalJs(
-    `(d => d ? { status: d.dataset.status, trailNested: d.querySelectorAll(".tool-step").length, panelNested: document.querySelectorAll("#helperPanel .tool-step").length, panelLive: document.querySelector("#helperPanel .sub-trail")?.dataset.live, panelOpen: !document.querySelector("#helperPanel").classList.contains("hidden"), running: document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length, barRows: document.querySelectorAll("#helperBar:not(.hidden) .helper-row").length, barDoing: [...document.querySelectorAll("#helperBar .helper-doing")].map(n => n.textContent).join("|"), thought: !!document.querySelector('#helperPanel .sub-timeline .reasoning[data-state="live"]'), meta: document.querySelector(".message.assistant .tool-stack-meta")?.textContent || "" } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
+    `(d => d ? { status: d.dataset.status, trailNested: d.querySelectorAll(".tool-step").length, panelNested: document.querySelectorAll("#helperModal .tool-step").length, panelLive: document.querySelector("#helperModal .sub-trail")?.dataset.live, panelOpen: !document.querySelector("#helperModal").classList.contains("hidden"), running: document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length, barRows: document.querySelectorAll("#helperBar:not(.hidden) .helper-row").length, barDoing: [...document.querySelectorAll("#helperBar .helper-doing")].map(n => n.textContent).join("|"), thought: !!document.querySelector('#helperModal .sub-timeline .reasoning[data-state="live"]'), meta: document.querySelector(".message.assistant .tool-stack-meta")?.textContent || "" } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
   );
   if (s) seen.push(JSON.stringify(s));
   if (s?.status === "running" && s.panelOpen && s.panelNested >= 1 && s.panelLive === "true") panelLiveSeen = true;
@@ -43,11 +44,12 @@ for (let i = 0; i < 200; i++) {
   barRows = Math.max(barRows, s?.barRows || 0);
   if (s?.barDoing && /正在|等待确认|凝神/.test(s.barDoing)) barDoing = s.barDoing;
   if (s?.thought) thoughtLive = true;
+  if (s?.status === "running") breathing = true;
   if (/名帮手|帮手「/.test(s?.meta || "")) metaHelpers = s.meta;
   // 面板里就地更新：给第一个做完的嵌套步骤做个记号，之后每次刷新都该还是同一个节点（整段换新会让输出闪、思绪合不上）
   if (s?.status === "running" && s.panelNested >= 1)
     await evalJs(
-      `(() => { window.__markLost ??= 0; const step = document.querySelector('#helperPanel .tool-step[data-status="done"]'); if (step && !step.dataset.mark) { if (window.__stepMarked) window.__markLost++; step.dataset.mark = "1"; window.__stepMarked = true; } })(); true`
+      `(() => { window.__markLost ??= 0; const step = document.querySelector('#helperModal .tool-step[data-status="done"]'); if (step && !step.dataset.mark) { if (window.__stepMarked) window.__markLost++; step.dataset.mark = "1"; window.__stepMarked = true; } })(); true`
     );
   if (await evalJs(`(document.querySelector('.message.assistant')?.dataset.status ?? "streaming") !== "streaming"`)) break;
   await sleep(60);
@@ -58,9 +60,16 @@ check("two helpers ran in parallel", bothRunning, [...new Set(seen)].slice(0, 6)
 check("helper bar above the composer listed both helpers", barRows === 2, String(barRows));
 check("helper bar tells what a helper is doing", /正在 (读取|修改|写入)|凝神|等待确认/.test(barDoing), barDoing);
 check("helper's live thought shown in the panel", thoughtLive);
+// 呼吸是纯 CSS：无头浏览器强制 prefers-reduced-motion: reduce，那一档本就该把动画压掉（用户要少动效就该不动），
+// 在这里量计算样式量不出东西。所以验两件真能验的：运行时那枚签确实带着 running 态（CSS 就钩在这上面），且规则确实进了产物
+check("the marker carries the running state the breathing hooks onto", breathing, String(breathing));
+check(
+  "the breathing rule is in the built stylesheet",
+  readFileSync("app.css", "utf8").includes(':root[data-ink-motion="on"] .tool-step-delegate[data-status="running"]')
+);
 check(
   "panel steps are updated in place, never re-created",
-  await evalJs(`(window.__markLost || 0) === 0 && !!document.querySelector('#helperPanel .tool-step[data-mark]')`),
+  await evalJs(`(window.__markLost || 0) === 0 && !!document.querySelector('#helperModal .tool-step[data-mark]')`),
   await evalJs(`String(window.__markLost)`)
 );
 check("trail summary names the helpers", /2 名帮手 · \d+ 步 · 进行中|帮手「.+」· \d+ 步 · 进行中/.test(metaHelpers), metaHelpers);
@@ -88,24 +97,41 @@ check("report stays in the trail — that is what the main model consumed", card
 await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
 await sleep(200);
 const panel = await evalJs(
-  `(p => ({ open: !p.classList.contains("hidden"), sub: document.querySelector("#helperPanelSub").textContent, nested: [...p.querySelectorAll(".tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), nav: [...p.querySelectorAll(".helper-nav-item")].length, report: p.querySelector(".sub-report")?.textContent.trim().slice(0, 12) || "" }))(document.querySelector("#helperPanel"))`
+  `(p => ({ open: !p.classList.contains("hidden"), title: document.querySelector("#helperTitle").textContent, sub: document.querySelector("#helperPanelSub").textContent, nested: [...p.querySelectorAll(".tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), nav: document.querySelector("#helperNav .helper-nav-count")?.textContent || "", report: p.querySelector(".sub-report")?.textContent.trim().slice(0, 12) || "" }))(document.querySelector("#helperModal"))`
 );
 check(
   "clicking the marker opens the helper's timeline in the panel",
   panel.open && panel.nested.join() === "读取:done,修改:done",
   JSON.stringify(panel)
 );
-check("panel head names the errand and its tally", /改 a\.js · 2 步 · 改 1 个文件/.test(panel.sub), panel.sub);
+check("panel head names the errand and its tally", panel.title === "改 a.js" && /2 步 · 改 1 个文件/.test(panel.sub), JSON.stringify(panel));
 // 首轮吐的空行会被裁掉，步骤的偏移得跟着前移；不然每一轮说的话都错位、被切在字中间
 const saidPerRound = await evalJs(
-  `JSON.stringify([...document.querySelectorAll("#helperPanel .sub-timeline > .trail-group > .trail-note")].map(n => n.textContent.trim()))`
+  `JSON.stringify([...document.querySelectorAll("#helperModal .sub-timeline > .trail-group > .trail-note")].map(n => n.textContent.trim()))`
 );
 check(
   "each round's words stay whole — offsets follow the trimmed leading blank lines",
   JSON.parse(saidPerRound).join("|") === "帮手第 1 步。|帮手第 2 步。",
   saidPerRound
 );
-check("panel lists both errands to switch between", panel.nav === 2, String(panel.nav));
+check("nav shows which errand of how many", panel.nav === "1/2", panel.nav);
+// ‹ › 翻到下一次差遣；中间的计数点开是一张列表
+await evalJs(`document.querySelector('#helperNav [data-helper-step="1"]').click(); true`);
+await sleep(200);
+check(
+  "the › arrow moves to the next errand",
+  (await evalJs(`document.querySelector("#helperTitle").textContent`)) === "建 b.js" &&
+    (await evalJs(`document.querySelector("#helperNav .helper-nav-count").textContent`)) === "2/2"
+);
+await evalJs(`document.querySelector("#helperNav [data-helper-list]").click(); true`);
+await sleep(150);
+const list = await evalJs(
+  `JSON.stringify([...document.querySelectorAll("#helperList .helper-list-item")].map(n => n.querySelector(".helper-list-title").textContent))`
+);
+check("the count opens a list of every errand", JSON.parse(list).join("|") === "改 a.js|建 b.js", list);
+await evalJs(`document.querySelectorAll("#helperList .helper-list-item")[0].click(); true`);
+await sleep(200);
+check("picking from the list switches to it", (await evalJs(`document.querySelector("#helperTitle").textContent`)) === "改 a.js");
 check("helper had its own system prompt and no delegate / ask_user", card.report.includes("sys:yes|delegate:no|ask:no"), card.report);
 check("helper can read memory but not write it", card.report.includes("|memw:0|memr:2|"), card.report);
 check("file actually changed by helper", readFileSync(WORK + "/src/a.js", "utf8").includes("return 2;"));
@@ -121,7 +147,7 @@ check(
 await evalJs(`document.querySelectorAll(".message.assistant .tool-step-delegate")[1].querySelector(".tool-step-head").click(); true`);
 await sleep(200);
 const second = await evalJs(
-  `(p => ({ marker: document.querySelectorAll(".message.assistant .tool-step-delegate")[1].querySelector(".tool-title").textContent, nested: [...p.querySelectorAll(".tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), thought: p.querySelector(".sub-timeline .reasoning .reasoning-body")?.textContent.slice(0, 12) || "", report: p.querySelector(".sub-report")?.textContent.trim() }))(document.querySelector("#helperPanel"))`
+  `(p => ({ marker: document.querySelectorAll(".message.assistant .tool-step-delegate")[1].querySelector(".tool-title").textContent, nested: [...p.querySelectorAll(".tool-step")].map(s => s.querySelector(".tool-label").textContent + ":" + s.dataset.status), thought: p.querySelector(".sub-timeline .reasoning .reasoning-body")?.textContent.slice(0, 12) || "", report: p.querySelector(".sub-report")?.textContent.trim() }))(document.querySelector("#helperModal"))`
 );
 check(
   "panel switches to the second errand: its thought, write step and report",
@@ -131,7 +157,7 @@ check(
     second.report === "回报乙：已新建 src/b.js。",
   JSON.stringify(second)
 );
-// 合起面板，后面几项看的是正文
+// 合上那扇窗，后面几项看的是正文
 await evalJs(`document.querySelector("#helperClose").click(); true`);
 check("second helper's file exists", readFileSync(WORK + "/src/b.js", "utf8").includes("export const b = 2;"));
 const text = await evalJs(`document.querySelector(".message.assistant .assistant-block > .markdown").textContent`);
@@ -179,7 +205,7 @@ await sleep(600);
 await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
 await sleep(300);
 const after = await evalJs(
-  `(d => d ? { marker: !!d, report: !!d.querySelector(".sub-report"), nested: document.querySelectorAll("#helperPanel .tool-step").length } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
+  `(d => d ? { marker: !!d, report: !!d.querySelector(".sub-report"), nested: document.querySelectorAll("#helperModal .tool-step").length } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
 );
 check("marker, report and the helper's timeline all survive reload", after?.marker && after.report && after.nested === 2, JSON.stringify(after));
 close();

@@ -566,22 +566,32 @@ function bindEvents() {
     event.preventDefault();
     openHelperPanel(head.parentElement.dataset.stepId || "");
   });
-  $("#helperClose").onclick = () => closeHelperPanel();
-  $("#helperExpand").onclick = () => {
-    const panel = $("#helperPanel"),
-      wide = panel.classList.toggle("wide");
-    $("#helperExpand").setAttribute("aria-pressed", String(wide));
-    $("#helperExpand").title = wide ? "收回侧栏" : "铺作整页";
-  };
-  $("#helperAnchor").onclick = () => {
-    const card = document.querySelector(`#messages .tool-step-delegate[data-step-id="${CSS.escape(helperStepId || "")}"]`);
+  // 合起即回到行迹里那一步——原先「合」与「行迹」两个按钮做的本是同一件事
+  $("#helperClose").onclick = () => {
+    const id = helperStepId;
+    closeHelperPanel();
+    const card = document.querySelector(`#messages .tool-step-delegate[data-step-id="${CSS.escape(id || "")}"]`);
     if (!card) return;
     const stack = card.closest(".tool-stack");
     if (stack && !stack.open) setProcessDetails(stack, true);
     scrollChatTo(card, "center");
   };
-  $("#helperPanelNav").addEventListener("click", event => {
-    const id = event.target.closest("[data-helper-nav]")?.dataset.helperNav;
+  // 点遮罩、按 Esc 都关得掉，与设置、文件查看器一个脾气
+  $("#helperModal").addEventListener("click", event => {
+    if (event.target === $("#helperModal")) closeHelperPanel();
+  });
+  // ‹ › 翻帮手；中间的计数点开是一张列表——帮手多了一个个翻就难受
+  $("#helperNav").addEventListener("click", event => {
+    const move = event.target.closest("[data-helper-step]")?.dataset.helperStep;
+    if (move) return stepHelperPanel(Number(move));
+    if (event.target.closest("[data-helper-list]")) {
+      const list = $("#helperList");
+      list.classList.toggle("hidden");
+      if (!list.classList.contains("hidden")) renderHelperList();
+    }
+  });
+  $("#helperList").addEventListener("click", event => {
+    const id = event.target.closest("[data-helper-pick]")?.dataset.helperPick;
     if (id) openHelperPanel(id);
   });
   // 输入框上方多了请示条、帮手条与改动摘要，正文底部留白随之增减，末句不被盖住
@@ -746,6 +756,12 @@ function bindEvents() {
     const expanded = document.querySelector(".work-expanded");
     if (expanded) {
       closeExpandedWork();
+      return;
+    }
+    // 差遣那扇窗盖在正文上，Esc 先收它
+    if (helperPanelOpen()) {
+      if (!$("#helperList").classList.contains("hidden")) return $("#helperList").classList.add("hidden");
+      closeHelperPanel();
       return;
     }
     closeModelMenu();

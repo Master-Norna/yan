@@ -4832,6 +4832,11 @@ textarea::placeholder,
 .tool-step-delegate > .tool-step-head {
   min-height: 30px;
 }
+/* 签上的回报：金线与右缘都得留出余地，不然字贴着边界 */
+.tool-step-delegate > .sub-report {
+  margin: 2px 0 0;
+  padding: 0 12px 6px;
+}
 .tool-step-delegate > .tool-step-head .tool-label {
   display: inline-flex;
   align-items: center;
@@ -4975,71 +4980,6 @@ textarea::placeholder,
   overflow-wrap: anywhere;
 }
 
-/* ---------- 差遣面板：借旁注的 .side-panel 几何，朱砂换金 ---------- */
-.helper-panel {
-  border-left-color: color-mix(in srgb, var(--gold) 40%, var(--line));
-  background: color-mix(in srgb, var(--gold) 4%, var(--paper-2));
-}
-.helper-panel .side-head {
-  border-bottom-color: color-mix(in srgb, var(--gold) 28%, var(--line));
-}
-.helper-panel .side-seal {
-  border-color: var(--gold);
-  color: var(--gold);
-}
-.helper-panel .side-title strong {
-  color: var(--gold);
-}
-.helper-panel .side-anchor {
-  border-left-color: var(--gold);
-  background: color-mix(in srgb, var(--gold) 6%, transparent);
-}
-/* 面板里那条时间线自己已经在一道金线里了，不必再套一层缩进 */
-.helper-panel-body {
-  padding: 16px 18px 22px;
-}
-.helper-panel-body > .sub-trail {
-  margin: 0;
-}
-/* 几次差遣之间切换的小签 */
-.helper-panel-nav {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.helper-panel-nav::-webkit-scrollbar {
-  display: none;
-}
-.helper-nav-item {
-  flex: none;
-  padding: 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--gold) 30%, var(--line));
-  border-radius: 999px;
-  color: var(--ink-3);
-  font: 10.5px var(--title);
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  transition:
-    color 0.16s,
-    border-color 0.16s,
-    background-color 0.16s;
-}
-.helper-nav-item:hover {
-  color: var(--gold);
-  border-color: var(--gold);
-}
-.helper-nav-item.here {
-  color: var(--paper);
-  border-color: var(--gold);
-  background: var(--gold);
-}
-.helper-nav-item[data-status="running"]:not(.here) {
-  color: var(--gold);
-  border-color: var(--gold);
-}
-
 /* ---------- 专色：只给性质不同的行为，寻常步骤一律留在朱砂里，少数才有色才认得出 ----------
    金 = 代人行事（差遣，见上）；黛 = 跨出这段对话（记忆五件） */
 .tool-step[data-tool="remember"] .tool-label,
@@ -5054,6 +4994,265 @@ textarea::placeholder,
   border-left: 2px solid color-mix(in srgb, var(--keep) 45%, transparent);
   border-radius: 0 9px 9px 0;
   padding-left: 6px;
+}
+
+/* ---------- 差遣：做事时那枚签在呼吸 ----------
+   状态该长在那个东西自己身上，而不是另起一条去代言。金线一明一暗，慢而浅——
+   它是「还在做」的底噪，不是要你去看它 */
+@keyframes helper-breath {
+  0%,
+  100% {
+    border-left-color: color-mix(in srgb, var(--gold) 45%, transparent);
+    background: color-mix(in srgb, var(--gold) 6%, transparent);
+  }
+  50% {
+    border-left-color: var(--gold);
+    background: color-mix(in srgb, var(--gold) 14%, transparent);
+  }
+}
+:root[data-ink-motion="on"] .tool-step-delegate[data-status="running"] {
+  animation: helper-breath 2.4s ease-in-out infinite;
+}
+:root[data-ink-motion="on"] .tool-step-delegate[data-status="running"] > .tool-step-head .sub-seal {
+  animation: helper-breath-seal 2.4s ease-in-out infinite;
+}
+@keyframes helper-breath-seal {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- 差遣的窗：与文件预览同一路 ----------
+   真·全屏铺满、亮底纸洗（不是压暗的遮罩），中间一张纸按阅读宽度居中——
+   帮手那条时间线里有 diff、有命令输出、有嵌套步骤，给它整个屏幕才看得下去 */
+.helper-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 88;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--gold) 7%, color-mix(in srgb, var(--paper) 93%, transparent));
+  backdrop-filter: blur(12px);
+  animation: fadeIn 0.18s ease;
+}
+.helper-viewer-head {
+  height: 54px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+.helper-head-seal {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-color: var(--gold);
+  color: var(--gold);
+  font-size: 14px;
+}
+.helper-head-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.helper-head-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font: 500 13px var(--title);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.helper-head-title small {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.helper-nav {
+  flex: none;
+}
+.helper-nav-count {
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--ink-3);
+  font: 11px var(--title);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  transition:
+    color 0.16s,
+    background-color 0.16s;
+}
+.helper-nav-count:hover {
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+}
+/* 计数点开的那张列表：帮手多了，一个个翻就难受 */
+.helper-list {
+  flex: none;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 8px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+.helper-list-item {
+  width: min(100%, var(--read));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto;
+  padding: 7px 12px;
+  border-radius: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+  text-align: left;
+  transition: background-color 0.16s;
+}
+.helper-list-item:hover {
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+}
+.helper-list-item.here {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+}
+.helper-list-no {
+  width: 17px;
+  flex: none;
+  color: var(--gold);
+  font: 10px var(--title);
+  font-variant-numeric: tabular-nums;
+}
+.helper-list-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--title);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.helper-list-meta {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 10.5px;
+}
+.helper-stage {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  overflow: auto;
+  padding: 24px;
+}
+/* 中间那张纸 */
+.helper-sheet {
+  width: min(100%, 940px);
+  align-self: flex-start;
+  height: fit-content;
+  padding: 24px 30px 28px;
+  border: 1px solid color-mix(in srgb, var(--gold) 22%, var(--line));
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 10px 40px rgba(35, 30, 22, 0.08);
+}
+/* 所领之命：主模型交给帮手的原话。默认收着只露一行，点开看全——
+   不标出来，它就成了一段没头没尾、看不懂的背景文字 */
+.helper-task {
+  margin: -4px 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  font-size: 12px;
+}
+.helper-task.hidden {
+  display: none;
+}
+.helper-task > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ink-3);
+  cursor: pointer;
+  list-style: none;
+}
+.helper-task > summary::-webkit-details-marker {
+  display: none;
+}
+.helper-task-label {
+  flex: none;
+  color: var(--gold);
+  font: 10.5px var(--title);
+  letter-spacing: 0.14em;
+}
+.helper-task-brief {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.helper-task[open] .helper-task-brief {
+  display: none;
+}
+.helper-task-text {
+  margin-top: 7px;
+  max-height: 34vh;
+  overflow-y: auto;
+  color: var(--ink-2);
+  font-family: var(--title);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.helper-panel-body > .sub-trail {
+  margin: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+/* 签上那份回报是结论（主模型消费的就是它），窗里这份只是帮手自己这条时间线的收尾——同一段话，收轻一档 */
+.helper-panel-body .sub-report {
+  margin-top: 14px;
+  padding: 10px 0 0;
+  border-top: 1px dashed color-mix(in srgb, var(--gold) 40%, var(--line));
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.helper-panel-body .sub-report:before {
+  content: "回报";
+  display: block;
+  margin-bottom: 4px;
+  color: var(--gold);
+  font: 10.5px var(--title);
+  letter-spacing: 0.14em;
+}
+@media (max-width: 720px) {
+  .helper-stage {
+    padding: 0;
+  }
+  .helper-sheet {
+    width: 100%;
+    padding: 18px 16px 22px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+/* 窗里一律不再有第二层滚动条：整个屏幕都给它了，diff 与输出正常展开就是，
+   套一个 220px 的小框再让人在里面滚，是把宽裕的地方又过成了窄的 */
+.helper-panel-body .tool-output,
+.helper-panel-body .tool-results,
+.helper-panel-body .tool-note,
+.helper-panel-body .reasoning-body,
+.helper-panel-body .sub-timeline .reasoning-body {
+  max-height: none;
+  overflow: visible;
 }
 
 /* ---- 85-components.css ---- */

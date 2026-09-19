@@ -484,12 +484,12 @@ function renderHelperBar() {
   if (bar.classList.contains("hidden") || bar.classList.contains("leaving")) showNow(bar);
 }
 
-// ---------- 差遣面板：帮手的那条小时间线开在右侧，与旁注同一套几何，只换色与印 ----------
-// 帮手与旁注是同一种东西的镜像：都是附在正文某一处、独立跑的一条旁支小对话。
-// 旁注是用户起的、读得到正文而不入正文；帮手是模型遣的、共用工作目录而回报入正文。
-// 所以这里不另造范式，借旁注的 .side-panel：朱砂换金，「注」换「遣」。两块面板同时只开一块——窄屏本就紧
-let helperStepId = null; // 面板里正开着的那次差遣
-const helperSeen = new Map(); // 面板里步骤的就地更新台账（与行迹各记各的，互不干扰）
+// ---------- 差遣面板：帮手的活开在一扇全屏的窗里 ----------
+// 行迹里只留一枚签（带回报，做事时呼吸），要看帮手具体做了什么才点开——细看是另一种动作，值得整个屏幕：
+// 那条时间线里有 diff、有命令输出、有嵌套步骤，挤在窄栏里必然难看。
+// 瞥一眼不必开窗：签自己在呼吸，输入框上方还有帮手条。几名帮手用 ‹ n/m › 翻，翻不动了就点中间的计数出列表
+let helperStepId = null; // 窗里正看着的那次差遣
+const helperSeen = new Map(); // 窗里步骤的就地更新台账（与行迹各记各的，互不干扰）
 /** 当前对话里所有的差遣，按发生先后 */
 function allDelegateSteps() {
   const out = [];
@@ -501,7 +501,7 @@ function helperStepById(id) {
   return allDelegateSteps().find(step => step.id === id) || null;
 }
 function helperPanelOpen() {
-  const panel = $("#helperPanel");
+  const panel = $("#helperModal");
   return !!panel && !panel.classList.contains("hidden") && !panel.classList.contains("leaving");
 }
 function openHelperPanel(stepId) {
@@ -509,48 +509,68 @@ function openHelperPanel(stepId) {
   if (!step) return;
   if (helperStepId !== step.id) helperSeen.clear();
   helperStepId = step.id;
-  if (typeof closeSidePanel === "function" && sidePanelOpen()) closeSidePanel(); // 一次只开一块
-  showNow($("#helperPanel"));
+  $("#helperList").classList.add("hidden");
+  showNow($("#helperModal"));
   renderHelperPanel(true);
 }
 function closeHelperPanel() {
   helperStepId = null;
   helperSeen.clear();
-  const panel = $("#helperPanel");
+  const panel = $("#helperModal");
   if (panel && !panel.classList.contains("hidden")) hideWithFade(panel);
 }
-// 面板顶的一排小签：这段对话里的几次差遣，点哪次看哪次；只有一次时不画
-function helperPanelNavHtml(steps) {
-  if (steps.length < 2) return "";
-  return steps
-    .map(
-      step =>
-        `<button type="button" class="helper-nav-item${step.id === helperStepId ? " here" : ""}" data-helper-nav="${escapeHtml(step.id)}" title="${escapeHtml(step.title || "")}" data-status="${escapeHtml(step.status || "done")}">${escapeHtml(String(step.title || "帮手").slice(0, 8))}</button>`
-    )
+// ‹ › 翻到前一次 / 后一次差遣
+function stepHelperPanel(delta) {
+  const all = allDelegateSteps(),
+    at = all.findIndex(step => step.id === helperStepId),
+    next = all[at + delta];
+  if (next) openHelperPanel(next.id);
+}
+// 计数点开的那张列表：帮手多了，一个个翻就难受
+function renderHelperList() {
+  const host = $("#helperList"),
+    all = allDelegateSteps();
+  if (!host) return;
+  host.innerHTML = all
+    .map((step, i) => {
+      const { status, meta } = delegateSubState(step);
+      return `<button type="button" class="helper-list-item${step.id === helperStepId ? " here" : ""}" data-helper-pick="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><span class="helper-list-no">${i + 1}</span><span class="helper-list-title">${escapeHtml(step.title || "领命中")}</span><span class="helper-list-meta">${escapeHtml(meta)}</span></button>`;
+    })
     .join("");
 }
 /** @param {boolean} fresh 首次打开或换了一次差遣：整段重画；否则就地更新 */
 function renderHelperPanel(fresh = false) {
-  const panel = $("#helperPanel");
-  if (!panel || !helperPanelOpen()) return;
+  if (!helperPanelOpen()) return;
   const step = helperStepById(helperStepId);
-  // 那次差遣不在眼前了（换了对话、切了分支）：面板合上，不留一块空的
+  // 那次差遣不在眼前了（换了对话、切了分支）：窗合上，不留一扇空的
   if (!step) return closeHelperPanel();
-  const { sub, status, meta } = delegateSubState(step);
-  panel.dataset.status = status;
-  const sublabel = $("#helperPanelSub");
-  if (sublabel) sublabel.textContent = `${step.title || "领命中"} · ${meta}`;
-  const nav = $("#helperPanelNav"),
-    all = allDelegateSteps();
-  if (nav) {
-    const key = `${all.map(s => `${s.id}:${s.status}`).join(",")}|${helperStepId}`;
-    if (nav.dataset.key !== key) {
-      nav.dataset.key = key;
-      nav.innerHTML = helperPanelNavHtml(all);
-    }
+  const { sub, status, meta } = delegateSubState(step),
+    all = allDelegateSteps(),
+    at = all.findIndex(s => s.id === helperStepId);
+  $("#helperModal").dataset.status = status;
+  const title = $("#helperTitle");
+  if (title && title.textContent !== (step.title || "领命中")) title.textContent = step.title || "领命中";
+  rollText($("#helperPanelSub"), meta);
+  // ‹ n/m ›：只有一次差遣时不画
+  const nav = $("#helperNav"),
+    navKey = `${at + 1}/${all.length}`;
+  if (nav && nav.dataset.key !== navKey) {
+    nav.dataset.key = navKey;
+    nav.innerHTML =
+      all.length > 1
+        ? `<button class="message-action" data-helper-step="-1" title="上一次差遣" aria-label="上一次差遣"${at <= 0 ? " disabled" : ""}>‹</button><button type="button" class="helper-nav-count" data-helper-list title="所有差遣">${navKey}</button><button class="message-action" data-helper-step="1" title="下一次差遣" aria-label="下一次差遣"${at >= all.length - 1 ? " disabled" : ""}>›</button>`
+        : "";
   }
-  const anchor = $("#helperAnchor");
-  if (anchor) anchor.textContent = sub?.task ? String(sub.task).slice(0, 120) : step.title || "";
+  if (!$("#helperList").classList.contains("hidden")) renderHelperList();
+  // 所领之命：主模型交给帮手的原话，默认收着，点开看全
+  const task = String(sub?.task || "");
+  const brief = $("#helperTaskBrief");
+  if (brief && brief.dataset.task !== task) {
+    brief.dataset.task = task;
+    brief.textContent = task.replace(/\s+/g, " ").slice(0, 60);
+    $("#helperTaskText").textContent = task;
+    $("#helperTask").classList.toggle("hidden", !task);
+  }
   const host = $("#helperPanelBody");
   if (!host) return;
   let trail = host.querySelector(":scope > .sub-trail");
@@ -567,6 +587,7 @@ function renderHelperPanel(fresh = false) {
   }
   syncDelegateTrail(trail, step, helperSeen);
 }
+
 // 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面
 /** @param {Step} step */
 function noteStepHtml(step) {

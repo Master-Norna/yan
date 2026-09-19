@@ -3,6 +3,8 @@ import { connect, check, sleep, PAGE, WORK, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
+// 分组是「今天 / 过去七天 / 更早」，按当下算；夹具写死日期就是个定时炸弹，跨一次零点就散架
+const ago = days => new Date(Date.now() - days * 86400000).toISOString();
 const msg = (id, role, content, t) => ({ id, role, content, createdAt: t, status: "complete" });
 const conv = (id, title, t, extra = {}) => ({
   id,
@@ -47,11 +49,11 @@ const seed = {
     }
   ],
   conversations: [
-    conv("c1", "干墨对话", "2026-09-16T01:00:00.000Z", { ended: true }),
-    conv("w1", "言 甲", "2026-09-15T01:00:00.000Z", { mode: "work", workdir: "E:\\项目\\言" }),
-    conv("w2", "言 乙", "2026-09-14T01:00:00.000Z", { mode: "work", workdir: "E:\\项目\\言" }),
-    conv("w3", "别处 丙", "2026-09-13T01:00:00.000Z", { mode: "work", workdir: "D:\\code\\别处" }),
-    conv("c2", "闲谈", "2026-09-10T01:00:00.000Z")
+    conv("c1", "干墨对话", ago(0.1), { ended: true }),
+    conv("w1", "言 甲", ago(2), { mode: "work", workdir: "E:\\项目\\言" }),
+    conv("w2", "言 乙", ago(3), { mode: "work", workdir: "E:\\项目\\言" }),
+    conv("w3", "别处 丙", ago(4), { mode: "work", workdir: "D:\\code\\别处" }),
+    conv("c2", "闲谈", ago(10))
   ],
   library: [],
   drafts: {}
