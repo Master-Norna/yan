@@ -53,9 +53,9 @@ check(
 check("main line untouched", await evalJs(`document.querySelectorAll('#messages .message').length === 4`));
 
 check(
-  "side actions: copy / edit / retract on the question, copy / regenerate on the reply (no note, no branch)",
+  "side actions: copy / edit on the question, copy / regenerate on the reply (no retract, no note, no branch)",
   (await evalJs(`[...document.querySelectorAll('#sideMessages [data-action]')].map(b => b.dataset.action).join()`)) ===
-    "copy,edit,retract,copy,regenerate"
+    "copy,edit,copy,regenerate"
 );
 // 正文下一问不带旁注
 await sendMain("PLAIN check", 3);
@@ -125,32 +125,68 @@ check(
   "panel shows the conversation model",
   (await evalJs(`document.querySelector("#sidePanel .model-trigger .model-name").textContent`)) === "假模型"
 );
-// 整条回复的旁注：回复动作里的「旁注」；不引片段；再点是打开同一条
+// 回复动作里的「旁注」打开的是目录：列着这段对话里的旁注，不列范围、不设输入；「＋」另起一条——没划选就是就整条回复而谈，
+// 同一条回复上可以起几条
 await evalJs(`document.querySelector("#sideClose").click(); true`);
 await sleep(200);
 const before = await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.length`);
 await evalJs(`[...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector('[data-action="note"]').click(); true`);
 await sleep(300);
 check(
-  "whole-reply note opens with 整条回复",
+  "reply action opens the index: one entry, a ＋ row, no anchor, no composer",
   await evalJs(
-    `document.querySelector("#sideAnchor").textContent === "整条回复" && document.querySelector("#sideAnchor").classList.contains("whole")`
+    `document.querySelector("#sidePanel").dataset.mode === "index" && document.querySelectorAll("#sideMessages .side-index-item").length === 1 && !!document.querySelector("#sideMessages [data-side-new]") && document.querySelector("#sideAnchor").classList.contains("hidden") && getComputedStyle(document.querySelector("#sidePanel .side-composer")).display === "none"`
   )
+);
+check(
+  "index entry shows the anchored passage and where it sits",
+  await evalJs(
+    `(i => i.querySelector("strong").textContent === "术语 X" && i.querySelector("small").textContent.startsWith("第一答 · 一问"))(document.querySelector("#sideMessages .side-index-item"))`
+  )
+);
+await evalJs(`getSelection().removeAllRanges(); document.querySelector("#sideMessages [data-side-new]").click(); true`);
+await sleep(300);
+check(
+  "＋ without a selection starts a whole-reply note on that reply: thread mode, no anchor bar",
+  (await evalJs(
+    `document.querySelector("#sidePanel").dataset.mode === "thread" && document.querySelector("#sideAnchor").classList.contains("hidden") && !!document.querySelector(".side-empty")`
+  )) && (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.at(-1).anchor.text === ""`))
 );
 await evalJs(`document.querySelector("#sideInput").value = "SIDE whole"; document.querySelector("#sideSend").click(); true`);
 await waitFor(`[...document.querySelectorAll('#sideMessages .message.assistant')].at(-1)?.dataset.status === "complete"`);
 const wholeText = await evalJs(`[...document.querySelectorAll('#sideMessages .message.assistant .markdown')].at(-1).textContent.trim()`);
 check("whole-reply note: no quote, system note present", wholeText.includes("sys:yes|quote:no"), wholeText);
-await evalJs(
-  `document.querySelector("#sideClose").click(); [...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector('[data-action="note"]').click(); true`
+await evalJs(`document.querySelector("#sideIndexBtn").click(); true`);
+await sleep(250);
+check(
+  "目 returns to the index with both entries; whole-reply entry leads with its first question",
+  await evalJs(
+    `document.querySelector("#sidePanel").dataset.mode === "index" && [...document.querySelectorAll("#sideMessages .side-index-item strong")].map(n => n.textContent).join("|") === "术语 X|SIDE whole"`
+  )
 );
+await evalJs(`document.querySelector("#sideMessages [data-side-new]").click(); true`);
 await sleep(300);
 check(
-  "second click opens the same whole-reply note",
-  (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.length`)) === before + 1 &&
-    (await evalJs(`document.querySelectorAll("#sideMessages .message").length === 2`))
+  "a second whole-reply note on the same reply is allowed; the reply's mark counts 2",
+  (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.length`)) === before + 2 &&
+    (await evalJs(`[...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector(".note-mark").textContent`)) ===
+      "注 2"
 );
-// 旁注里的问可编辑、答可重新生成、问可撤回；旁注不留版本，改了就是改了
+await evalJs(
+  `document.querySelector("#sideClose").click(); [...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector(".note-mark").click(); true`
+);
+await sleep(250);
+check(
+  "a mark with several notes opens the index",
+  await evalJs(
+    `document.querySelector("#sidePanel").dataset.mode === "index" && document.querySelectorAll("#sideMessages .side-index-item").length === 3`
+  )
+);
+await evalJs(`[...document.querySelectorAll("#sideMessages [data-side-open]")].at(-1).click(); true`);
+await sleep(250);
+await evalJs(`document.querySelector("#sideInput").value = "SIDE whole"; document.querySelector("#sideSend").click(); true`);
+await waitFor(`[...document.querySelectorAll('#sideMessages .message.assistant')].at(-1)?.dataset.status === "complete"`);
+// 旁注里的问可编辑、答可重新生成；旁注不留版本，改了就是改了
 const sideCount = () => evalJs(`document.querySelectorAll("#sideMessages .message").length`);
 await evalJs(
   `[...document.querySelectorAll('#sideMessages .message.assistant')].at(-1).querySelector('[data-action="regenerate"]').click(); true`
@@ -175,18 +211,7 @@ check(
   (await sideCount()) === 2 &&
     (await evalJs(`document.querySelector('#sideMessages .message.user .user-bubble').textContent`)) === "SIDE edited"
 );
-await evalJs(`document.querySelector("#sideInput").value = "SIDE second"; document.querySelector("#sideSend").click(); true`);
-await waitFor(
-  `document.querySelectorAll('#sideMessages .message').length === 4 && [...document.querySelectorAll('#sideMessages .message.assistant')].at(-1)?.dataset.status === "complete"`
-);
-await evalJs(`[...document.querySelectorAll('#sideMessages .message.user')].at(-1).querySelector('[data-action="retract"]').click(); true`);
-await sleep(200);
-check(
-  "retracting the last question removes it and its reply",
-  (await sideCount()) === 2 &&
-    (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.at(-1).messages.length`)) === 2
-);
-// 第二条旁注 + 面板导航
+// 又一条划选的旁注 + 面板导航
 await evalJs(
   `(() => { const p = document.querySelectorAll('#messages .message.assistant .markdown p')[1]; const t = p.firstChild; const r = document.createRange(); r.setStart(t, 0); r.setEnd(t, 4); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true; })()`
 );
@@ -194,14 +219,12 @@ await waitFor(`!document.querySelector("#quoteTip").classList.contains("hidden")
 await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').click(); true`);
 await sleep(300);
 check(
-  "second thread, nav shows 2/2",
+  "fourth thread, nav shows 4/4",
   await evalJs(
-    `document.querySelector("#sideNav").textContent.includes("3/3") && document.querySelectorAll("#messages .note-mark").length === 3`
+    `document.querySelector("#sideNav").textContent.includes("4/4") && document.querySelectorAll("#messages .note-mark").length === 3`
   )
 );
-await evalJs(
-  `document.querySelector('#sideNav [data-side-nav="-1"]').click(); document.querySelector('#sideNav [data-side-nav="-1"]').click(); true`
-);
+await evalJs(`for (let i = 0; i < 3; i++) document.querySelector('#sideNav [data-side-nav="-1"]').click(); true`);
 await sleep(200);
 check(
   "nav back to first thread",
@@ -220,29 +243,53 @@ await evalJs(
 await waitFor(
   `[...document.querySelectorAll('#messages .message.assistant')].at(-1)?.dataset.status === "complete" && document.querySelectorAll('#messages .message').length === 2`
 );
+// 旁注跟着所注的那一问一答走：这条分支上没有它们，标记、计数、目录里都不见；换回去就都回来
 check(
-  "after edit: anchored message left the active path, mark gone",
+  "after edit: notes bound to the replaced messages are out of sight (no marks, no 旁注 count)",
   await evalJs(
-    `document.querySelectorAll("#messages .note-mark").length === 0 && document.querySelector("#chatMeta [data-open-notes]")?.textContent === "旁注 3"`
+    `document.querySelectorAll("#messages .note-mark").length === 0 && !document.querySelector("#chatMeta [data-open-notes]") && JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.length === 4`
   )
-);
-await evalJs(`document.querySelector("#chatMeta [data-open-notes]").click(); true`);
-await sleep(250);
-check(
-  "panel marks anchor as in another version",
-  await evalJs(`document.querySelector("#sideAnchor").classList.contains("lost") && document.querySelector("#sideAnchor").disabled`)
 );
 await evalJs(`document.querySelector('#messages [data-action="branch-prev"]').click(); true`);
 await sleep(400);
 check(
-  "switching branch back revives marks",
+  "switching branch back revives marks and the count",
   await evalJs(
-    `document.querySelectorAll("#messages .note-mark").length === 3 && document.querySelectorAll("#messages mark.note-anchor").length === 2`
+    `document.querySelectorAll("#messages .note-mark").length === 3 && document.querySelectorAll("#messages mark.note-anchor").length === 2 && document.querySelector("#chatMeta [data-open-notes]")?.textContent === "旁注 4"`
   )
 );
 await evalJs(`document.querySelector("#chatMeta [data-open-notes]").click(); true`);
 await sleep(200);
-check("anchor live again", await evalJs(`!document.querySelector("#sideAnchor").classList.contains("lost")`));
+check(
+  "header count opens the index listing all four",
+  await evalJs(
+    `document.querySelector("#sidePanel").dataset.mode === "index" && document.querySelectorAll("#sideMessages .side-index-item").length === 4`
+  )
+);
+await evalJs(`document.querySelector("#sideMessages [data-side-open]").click(); true`);
+await sleep(200);
+check(
+  "first entry opens the 术语 X note, anchor live",
+  await evalJs(
+    `document.querySelector("#sideAnchor").textContent === "术语 X" && !document.querySelector("#sideAnchor").classList.contains("lost")`
+  )
+);
+await evalJs(`document.querySelector('#messages [data-action="branch-next"]').click(); true`);
+await sleep(400);
+check(
+  "switching away while a note is open falls back to the (empty) index",
+  await evalJs(
+    `document.querySelector("#sidePanel").dataset.mode === "index" && document.querySelectorAll("#sideMessages .side-index-item").length === 0 && !!document.querySelector("#sideMessages [data-side-new]")`
+  )
+);
+await evalJs(`document.querySelector('#messages [data-action="branch-prev"]').click(); true`);
+await sleep(400);
+check(
+  "switching back restores the note that was open",
+  await evalJs(
+    `document.querySelector("#sidePanel").dataset.mode === "thread" && document.querySelector("#sideAnchor").textContent === "术语 X"`
+  )
+);
 await shot("side-normal.png");
 await evalJs(`document.querySelector("#sideExpand").click(); true`);
 await sleep(400);
@@ -311,4 +358,21 @@ check(
 );
 await waitFor(`[...document.querySelectorAll("#sideMessages .message.assistant")].at(-1)?.dataset.status === "complete"`);
 check("side seal muted again after sending", await evalJs(`document.querySelector("#sideSend").classList.contains("empty")`));
+// 同一条回复里同样的词出现两次，注的是第二处：重画后仍落在第二处（记着第几次出现）
+await evalJs(`document.querySelector("#sideClose").click(); true`);
+await sendMain("PLAIN SAMEWORD", 4);
+await evalJs(
+  `(() => { const p = [...document.querySelectorAll('#messages .message.assistant .markdown p')].at(-1); const t = p.firstChild; const r = document.createRange(); const i = t.data.indexOf("StructRAG", t.data.indexOf("StructRAG") + 1); r.setStart(t, i); r.setEnd(t, i + 9); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true; })()`
+);
+await waitFor(`!document.querySelector("#quoteTip").classList.contains("hidden")`);
+await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').click(); true`);
+await sleep(300);
+const twice = await evalJs(
+  `(p => { const m = p.querySelector("mark.note-anchor"); const r = document.createRange(); r.setStart(p, 0); r.setEnd(m, 0); return { before: r.toString(), mark: m.textContent, occurrence: JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.at(-1).anchor.occurrence }; })([...document.querySelectorAll('#messages .message.assistant .markdown p')].at(-1))`
+);
+check(
+  "note on the second occurrence lands on the second occurrence after re-render",
+  twice.mark === "StructRAG" && twice.before.includes("StructRAG") && twice.occurrence === 1,
+  JSON.stringify(twice)
+);
 close();

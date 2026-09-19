@@ -97,6 +97,8 @@ http
           delta({ content: `- 用户在测试压缩，此前 ${(lastUser.match(/\n用户：/g) || []).length} 问\n- 结论：术语 X 需留意` }),
           delta({}, { usage: { total_tokens: 12 } })
         ]);
+      if (typeof lastUser === "string" && lastUser.includes("SAMEWORD"))
+        return sse(res, [delta({ content: "甲说 StructRAG 好；乙说 StructRAG 更好。" }), delta({}, { usage: { total_tokens: 4 } })]);
       if (typeof lastUser === "string" && lastUser.includes("PLAIN")) {
         const leaked =
           msgs.some(m => typeof m.content === "string" && /SIDE|旁注追问/.test(m.content)) ||

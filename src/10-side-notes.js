@@ -2,13 +2,20 @@
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // ---------- 旁注：附在正文某条消息某一处的旁支小对话。它读得到正文（到所注消息为止），正文永远读不到它 ----------
 let sideThreadId = null; // 面板里正打开的旁注（内存态，刷新后收起，旁注本身仍在）
+let sideIndexFor = null; // 目录页是从哪条消息打开的：目录里「另起一条」落在它上面
 const noteCounts = new Map(); // messageId → 旁注数；参与消息签名，数量变了那条才重画
 /** @param {Conversation} c */
 function threadsOf(c) {
   return c?.threads || [];
 }
+// 旁注跟着它所注的那一问一答走：换到另一条分支，注在被换下去的那几条上的旁注便不在眼前（仍在册，换回来就回来）
+/** @param {Conversation} c */
+function visibleThreads(c) {
+  const live = new Set((c?.messages || []).map(m => m.id));
+  return threadsOf(c).filter(t => live.has(t.anchor?.messageId));
+}
 function currentThread() {
-  return threadsOf(currentConversation()).find(t => t.id === sideThreadId) || null;
+  return visibleThreads(currentConversation()).find(t => t.id === sideThreadId) || null;
 }
 /** @param {Conversation} c */
 function refreshNoteCounts(c) {
@@ -28,15 +35,18 @@ function anchorState(c, thread) {
 function sideJob(thread) {
   return thread ? requestJobs.get(`side:${thread.id}`) || null : null;
 }
+// 起一条旁注：划了一段就注在那一段上；没划（text 为空）就是就整条回复而谈——同一条回复上可以有几条
 function createThread(anchor) {
   const c = currentConversation();
   if (!c || !anchor?.messageId) return;
-  const whole = !String(anchor.text || "").trim(),
-    existing = whole ? threadsOf(c).find(t => t.anchor.messageId === anchor.messageId && !t.anchor.text) : null;
-  if (existing) return openSidePanel(existing.id); // 整条回复只开一条旁注，再点就是打开它
+  const whole = !String(anchor.text || "").trim();
   const thread = {
     id: uid(),
-    anchor: { messageId: anchor.messageId, text: whole ? "" : String(anchor.text).slice(0, 1200) },
+    anchor: {
+      messageId: anchor.messageId,
+      text: whole ? "" : String(anchor.text).slice(0, 1200),
+      occurrence: whole ? 0 : Number(anchor.occurrence) || 0
+    },
     createdAt: now(),
     updatedAt: now(),
     messages: []
@@ -55,8 +65,21 @@ function openSidePanel(threadId) {
   syncActiveAnchor();
   setTimeout(() => $("#sideInput")?.focus(), 0);
 }
+// 目录页：这段对话里的旁注都列在这里，点哪条开哪条；从一条回复的「旁注」进来的，还能就那条回复另起一条
+function openSideIndex(messageId = null) {
+  sideThreadId = null;
+  sideIndexFor = messageId;
+  showNow($("#sidePanel"));
+  renderSidePanel();
+  syncActiveAnchor();
+}
+function sidePanelOpen() {
+  const panel = $("#sidePanel");
+  return !!panel && !panel.classList.contains("hidden") && !panel.classList.contains("leaving");
+}
 function closeSidePanel() {
   sideThreadId = null;
+  sideIndexFor = null;
   syncActiveAnchor();
   const panel = $("#sidePanel");
   if (panel && !panel.classList.contains("hidden")) hideWithFade(panel);
@@ -95,6 +118,17 @@ function textNodesIn(root) {
   while (walker.nextNode()) nodes.push(walker.currentNode);
   return nodes;
 }
+// 第 n 次出现的位置（n 从 0 起）；不够 n 次就退到第一次，一次也没有才是 -1
+function nthIndexOf(haystack, needle, n) {
+  if (!needle) return -1;
+  let at = haystack.indexOf(needle);
+  for (let i = 0; i < n && at >= 0; i++) {
+    const next = haystack.indexOf(needle, at + 1);
+    if (next < 0) break;
+    at = next;
+  }
+  return at;
+}
 /** @param {Thread} thread */
 function markAnchor(body, thread, ordinal) {
   const nodes = textNodesIn(body);
@@ -105,8 +139,10 @@ function markAnchor(body, thread, ordinal) {
     starts.push(joined.length);
     joined += node.data;
   }
-  const needle = thread.anchor.text;
-  let from = joined.indexOf(needle),
+  // 同样的词在这条回复里出现不止一次时，按记下的「第几次」落；这一版里没那么多次了（改过、另一版本）就退到第一处
+  const needle = thread.anchor.text,
+    occurrence = Number(thread.anchor.occurrence) || 0;
+  let from = nthIndexOf(joined, needle, occurrence),
     to = from + needle.length;
   if (from < 0) {
     // 划选得到的文字与渲染文字在空白上多半不一致（换行、缩进；跨段划选时段与段之间有换行、而文字节点连起来没有）：
@@ -119,7 +155,7 @@ function markAnchor(body, thread, ordinal) {
       map.push(i);
     }
     const target = needle.replace(/\s+/g, ""),
-      at = folded.indexOf(target);
+      at = nthIndexOf(folded, target, occurrence);
     if (at < 0 || !target) return false;
     from = map[at];
     to = map[at + target.length - 1] + 1;
@@ -157,17 +193,20 @@ function markAnchor(body, thread, ordinal) {
 function renderSidePanel() {
   const c = currentConversation(),
     thread = currentThread();
-  if (!c || !thread) return closeSidePanel();
-  const list = threadsOf(c),
+  if (!c) return closeSidePanel();
+  if (!thread) return renderSideIndex(c);
+  $("#sidePanel").dataset.mode = "thread";
+  const list = visibleThreads(c),
     at = list.indexOf(thread) + 1;
   $("#sideNav").innerHTML =
     list.length > 1
       ? `<button class="message-action" type="button" data-side-nav="-1" title="上一条旁注" ${at <= 1 ? "disabled" : ""}>‹</button><span>${at}/${list.length}</span><button class="message-action" type="button" data-side-nav="1" title="下一条旁注" ${at >= list.length ? "disabled" : ""}>›</button>`
       : "";
+  // 所注的一段列在顶上，点它回到出处；就整条回复起的旁注没有范围可言，不列
   const { live, any } = anchorState(c, thread),
     anchorEl = $("#sideAnchor");
-  anchorEl.textContent = thread.anchor.text || "整条回复";
-  anchorEl.classList.toggle("whole", !thread.anchor.text);
+  anchorEl.textContent = thread.anchor.text;
+  anchorEl.classList.toggle("hidden", !thread.anchor.text);
   anchorEl.classList.toggle("lost", !live);
   anchorEl.disabled = !live;
   anchorEl.title = live ? "回到出处" : any ? "所注段落在另一版本中" : "所注段落已不在此对话中";
@@ -185,6 +224,49 @@ function renderSidePanel() {
   // 生成中用户往上翻了就不再拉回底部；换了旁注、发出新一问时照旧到底
   const scroller = $("#sideScroll");
   if (sideFollow) scroller.scrollTop = scroller.scrollHeight;
+}
+// 目录：按所注消息在对话里的先后排，同一条消息上的按起注时间排；每条列所注的一段（整条回复的列第一问），
+// 下面一行是落在第几答、几问几答、最近一次动笔
+/** @param {Conversation} c */
+function renderSideIndex(c) {
+  $("#sidePanel").dataset.mode = "index";
+  $("#sideNav").innerHTML = "";
+  $("#sideAnchor").classList.add("hidden");
+  const order = new Map(c.messages.map((m, i) => [m.id, i])),
+    list = [...visibleThreads(c)].sort(
+      (a, b) => order.get(a.anchor.messageId) - order.get(b.anchor.messageId) || String(a.createdAt).localeCompare(String(b.createdAt))
+    );
+  const where = thread => {
+    const index = order.get(thread.anchor.messageId),
+      message = c.messages[index],
+      nth = c.messages.slice(0, index + 1).filter(m => m.role === message.role).length;
+    return `第${chineseNumber(nth)}${message.role === "user" ? "问" : "答"}`;
+  };
+  const items = list
+    .map((thread, i) => {
+      const asked = thread.messages.filter(m => m.role === "user").length,
+        lead = thread.anchor.text || thread.messages.find(m => m.role === "user")?.content || "尚未落笔",
+        running = !!sideJob(thread);
+      return `<button type="button" class="side-index-item${thread.anchor.messageId === sideIndexFor ? " here" : ""}" data-side-open="${escapeHtml(thread.id)}"><span class="side-index-num">${i + 1}</span><span class="side-index-copy"><strong>${escapeHtml(lead)}</strong><small>${escapeHtml(where(thread))} · ${asked ? `${escapeHtml(chineseNumber(asked, true))}问` : "未问"}${running ? " · 作答中" : ""} · ${escapeHtml(formatDay(thread.updatedAt || thread.createdAt))}</small></span></button>`;
+    })
+    .join("");
+  // 「＋」另起一条：正文里划着一段就注在那一段上；没划就是就整条回复而谈（从哪条回复进来的就是哪条，否则是最末一答）
+  $("#sideMessages").innerHTML =
+    `<div class="side-index" data-message="__index"><button type="button" class="side-index-new" data-side-new title="划选正文中的一段即注在那一段上；未划选则就整条回复而谈"><span>＋</span>另起一条</button>${
+      items || `<div class="side-empty">还没有旁注<br>划选正文中的一段，或按上面的「＋」</div>`
+    }</div>`;
+  renderSideSend();
+}
+// 目录页「＋」落在哪条消息上：划着正文就是那一段；否则是打开目录时的那条回复，再不然是最末一答
+/** @param {Conversation} c */
+function indexNewAnchor(c) {
+  const picked = selectionAnchor();
+  if (picked) return { messageId: picked.messageId, text: picked.text, occurrence: picked.occurrence };
+  const id =
+    (sideIndexFor && c.messages.some(m => m.id === sideIndexFor) ? sideIndexFor : null) ||
+    [...c.messages].reverse().find(m => m.role === "assistant" && m.status !== "streaming")?.id ||
+    [...c.messages].reverse().find(m => m.role !== "context")?.id;
+  return id ? { messageId: id, text: "" } : null;
 }
 // 旁注面板的跟随：贴着底部时随生成往下走，往上翻就停，翻回底部再跟——与正文那侧一个规矩
 let sideFollow = true;
@@ -227,9 +309,22 @@ function setupSidePanel() {
   };
   $("#chatMeta").addEventListener("click", e => {
     if (!e.target.closest("[data-open-notes]")) return;
-    const list = threadsOf(currentConversation());
-    if (!list.length) return;
-    openSidePanel((currentThread() || list[list.length - 1]).id);
+    if (visibleThreads(currentConversation()).length) openSideIndex();
+  });
+  $("#sideIndexBtn").onclick = () => openSideIndex(currentThread()?.anchor.messageId || null);
+  // 按「＋」前不让这一下把正文里的划选清掉，落点才认得出来
+  $("#sideMessages").addEventListener("pointerdown", e => {
+    if (e.target.closest("[data-side-new]")) e.preventDefault();
+  });
+  $("#sideMessages").addEventListener("click", e => {
+    const open = e.target.closest("[data-side-open]");
+    if (open) return openSidePanel(open.dataset.sideOpen);
+    if (!e.target.closest("[data-side-new]")) return;
+    const c = currentConversation(),
+      anchor = c && indexNewAnchor(c);
+    if (!anchor) return toast("这段对话里还没有可注的回复");
+    getSelection()?.removeAllRanges();
+    createThread(anchor);
   });
   $("#sideSend").onclick = () => void sendSide();
   const input = $("#sideInput");
@@ -247,7 +342,7 @@ function setupSidePanel() {
   $("#sideNav").addEventListener("click", e => {
     const button = e.target.closest("[data-side-nav]");
     if (!button) return;
-    const list = threadsOf(currentConversation()),
+    const list = visibleThreads(currentConversation()),
       index = list.findIndex(t => t.id === sideThreadId) + Number(button.dataset.sideNav);
     if (list[index]) openSidePanel(list[index].id);
   });
@@ -276,13 +371,10 @@ function setupSidePanel() {
       job.controller.abort();
       requestJobs.delete(`side:${thread.id}`);
     }
-    const list = threadsOf(c),
-      index = list.indexOf(thread);
-    c.threads = list.filter(t => t !== thread);
+    c.threads = threadsOf(c).filter(t => t !== thread);
     saveStore();
     renderConversation(false);
-    const next = c.threads[index] || c.threads[index - 1];
-    if (next) openSidePanel(next.id);
+    if (visibleThreads(c).length) openSideIndex(thread.anchor.messageId);
     else closeSidePanel();
   };
   $("#sideMessages").addEventListener("click", async e => {
@@ -323,14 +415,6 @@ function setupSidePanel() {
       message.timestamp = now();
       return askSideAgain(c, thread, index + 1);
     }
-    // 撤回：这一问连同其后的往来一并抹去（旁注不留版本，抹了就是抹了）
-    if (action === "retract") {
-      thread.messages = thread.messages.slice(0, index);
-      thread.updatedAt = now();
-      saveStore();
-      renderSidePanel();
-      return;
-    }
     // 重新生成：换掉这一答（及其后的往来），就上一问再答一次
     if (action === "regenerate") {
       const question = thread.messages.slice(0, index).findLastIndex(m => m.role === "user");
@@ -370,9 +454,8 @@ function setupSidePanel() {
     const id = mark.closest("[data-message]")?.dataset.message,
       list = threadsOf(currentConversation()).filter(t => t.anchor.messageId === id);
     if (!list.length) return;
-    const current = currentThread(),
-      index = current ? list.indexOf(current) : -1;
-    openSidePanel(list[(index + 1) % list.length].id); // 同一条消息上有几条旁注时，逐次点击轮流打开
+    if (list.length === 1) openSidePanel(list[0].id);
+    else openSideIndex(id); // 同一条消息上有几条旁注时，到目录里挑
   });
 }
 async function sendSide() {

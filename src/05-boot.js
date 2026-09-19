@@ -750,8 +750,8 @@ function bindEvents() {
     else if (editingMessageId) {
       editingMessageId = null;
       renderConversation(false);
-      if (sideThreadId) renderSidePanel();
-    } else if (sideThreadId) closeSidePanel();
+      if (sidePanelOpen()) renderSidePanel();
+    } else if (sidePanelOpen()) closeSidePanel();
     else if (pendingQuote && document.activeElement === $("#chatInput") && !$("#chatInput").value) {
       pendingQuote = null;
       renderQuote();

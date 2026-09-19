@@ -59,6 +59,8 @@ function switchBranch(c, index, step) {
   editingMessageId = null;
   saveStore();
   renderConversation(false);
+  // 面板里开着的旁注若注在被换下去的那几条上，退回目录（那里只列眼前这条路上的）
+  if (sidePanelOpen()) renderSidePanel();
   // 切换后让这一条留在原来的位置，视线不用重新找
   const next = document.querySelector(`#messages [data-message="${CSS.escape(c.messages[index].id)}"]`);
   if (next && keepTop !== null) {

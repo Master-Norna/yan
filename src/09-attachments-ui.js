@@ -6,8 +6,7 @@ const icons = {
   regenerate: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 3.2v2.6h-2.6"/></svg>`,
   resume: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.2v9.6L12 8 4 3.2z"/></svg>`,
   retry: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M8 3v5l3 1.8"/><circle cx="8" cy="8" r="5.2"/></svg>`,
-  note: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M3.5 4h6M3.5 8h6M3.5 12h6"/><path d="M12.6 6.4v3.2"/><path d="M11 8h3.2"/></svg>`,
-  retract: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 4.6 3.4 7.4l2.8 2.8"/><path d="M3.6 7.4h5.6a3 3 0 0 1 0 6H7"/></svg>`
+  note: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M3.5 4h6M3.5 8h6M3.5 12h6"/><path d="M12.6 6.4v3.2"/><path d="M11 8h3.2"/></svg>`
 };
 function actionIcon(action, title, icon) {
   return `<button class="message-action" data-action="${action}" title="${title}" aria-label="${title}">${icon}</button>`;
@@ -69,6 +68,47 @@ function renderQuote() {
   renderSendButtons();
   scheduleContextGauge();
 }
+// 划选的这段在正文里是第几次出现：同一条回复里同样的词可能出现不止一次，重画后单靠 indexOf 会落到第一处。
+// 数的是划选起点之前出现过几回，空白全去掉再数——与 markAnchor 里的找法一致
+function occurrenceBefore(body, range, text) {
+  try {
+    const pre = document.createRange();
+    pre.selectNodeContents(body);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const picked = pre.cloneContents();
+    picked.querySelectorAll?.(".viz, .html-app, .math-pending, sup.note-ref").forEach(node => node.remove());
+    return countOccurrences(foldSpace(picked.textContent), foldSpace(text));
+  } catch {
+    return 0;
+  }
+}
+const foldSpace = value => String(value || "").replace(/\s+/g, "");
+function countOccurrences(haystack, needle) {
+  if (!needle) return 0;
+  let count = 0;
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) count += 1;
+  return count;
+}
+// 正文里此刻划选的一段：所在消息、文字、第几次出现，以及它在页面上的位置。没划、划在正文之外、太短，都是 null
+function selectionAnchor() {
+  const selection = getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return null;
+  const range = selection.getRangeAt(0);
+  let text = selection.toString().trim();
+  // 划选跨过了已有旁注的小标（脚注号）：那个数字不是正文，去掉，否则落点在正文里找不到
+  const picked = range.cloneContents();
+  if (picked.querySelector?.("sup.note-ref")) {
+    picked.querySelectorAll("sup.note-ref").forEach(node => node.remove());
+    text = picked.textContent.trim();
+  }
+  const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+  const body = host?.closest("#messages .message .markdown, #messages .message .user-bubble"),
+    article = body?.closest("[data-message]");
+  if (!body || !article || text.length < 2 || body.closest(".message-editor")) return null;
+  const rect = range.getBoundingClientRect();
+  if (!rect.width && !rect.height) return null;
+  return { text: text.slice(0, 1200), messageId: article.dataset.message, occurrence: occurrenceBefore(body, range, text), rect };
+}
 function setupQuoteTip() {
   const tip = $("#quoteTip");
   let current = null,
@@ -78,23 +118,10 @@ function setupQuoteTip() {
     if (!tip.classList.contains("hidden")) tip.classList.add("hidden");
   };
   const check = () => {
-    const selection = getSelection();
-    if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return hide();
-    const range = selection.getRangeAt(0);
-    let text = selection.toString().trim();
-    // 划选跨过了已有旁注的小标（脚注号）：那个数字不是正文，去掉，否则落点在正文里找不到
-    const picked = range.cloneContents();
-    if (picked.querySelector?.("sup.note-ref")) {
-      picked.querySelectorAll("sup.note-ref").forEach(node => node.remove());
-      text = picked.textContent.trim();
-    }
-    const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
-    const body = host?.closest("#messages .message .markdown, #messages .message .user-bubble"),
-      article = body?.closest("[data-message]");
-    if (!body || !article || text.length < 2 || body.closest(".message-editor")) return hide();
-    const rect = range.getBoundingClientRect();
-    if (!rect.width && !rect.height) return hide();
-    current = { text: text.slice(0, 1200), messageId: article.dataset.message };
+    const picked = selectionAnchor();
+    if (!picked) return hide();
+    const { rect, ...anchor } = picked;
+    current = anchor;
     tip.style.left = `${Math.min(innerWidth - 40, Math.max(40, rect.left + rect.width / 2))}px`;
     tip.style.top = `${Math.max(8, rect.top - 34)}px`;
     tip.classList.remove("hidden");

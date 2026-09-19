@@ -99,7 +99,7 @@
  * @property {boolean} [compacting]
  */
 /** @typedef {{ id: string, parentId: string|null, messages: Message[], createdAt: string }} Fork 被换下来的一段尾巴 */
-/** @typedef {{ id: string, anchor: { messageId: string, text: string }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注 */
+/** @typedef {{ id: string, anchor: { messageId: string, text: string, occurrence?: number }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注；occurrence 是所注的那段在正文里第几次出现（从 0 起） */
 /**
  * @typedef {Object} Conversation
  * @property {string} id

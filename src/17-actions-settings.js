@@ -15,7 +15,7 @@ async function handleMessageAction(event) {
     await copyText(message.content);
     return toast("已复制");
   }
-  if (button.dataset.action === "note") return createThread({ messageId: message.id, text: "" });
+  if (button.dataset.action === "note") return openSideIndex(message.id);
   if (button.dataset.action === "branch-prev" || button.dataset.action === "branch-next")
     return switchBranch(c, index, button.dataset.action === "branch-prev" ? -1 : 1);
   if (button.dataset.action === "cancel-edit") {

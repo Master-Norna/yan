@@ -229,6 +229,89 @@
 .side-messages .message-actions {
   opacity: 0.5;
 }
+/* 目录页：不列范围、不设输入；目录钮只在看某一条时出现 */
+.side-panel[data-mode="index"] .side-composer,
+.side-panel[data-mode="index"] #sideRemove,
+.side-panel[data-mode="index"] #sideIndexBtn {
+  display: none;
+}
+.side-index {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-index-item {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px 9px 8px;
+  border-radius: 9px;
+  text-align: left;
+  color: var(--ink-2);
+  transition: background 0.16s;
+}
+.side-index-item:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.side-index-item.here {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.side-index-num {
+  flex: none;
+  width: 18px;
+  padding-top: 2px;
+  color: var(--accent);
+  font: 10.5px var(--title);
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.side-index-copy {
+  flex: 1;
+  min-width: 0;
+}
+.side-index-copy strong {
+  display: -webkit-box;
+  font: 12.5px/1.6 var(--body);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.side-index-copy small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.08em;
+}
+.side-index-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 8px 10px 8px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--ink-3);
+  font: 11.5px var(--title);
+  letter-spacing: 0.08em;
+  text-align: left;
+  transition:
+    color 0.16s,
+    border-color 0.16s;
+}
+.side-index-new span {
+  width: 18px;
+  font-size: 14px;
+  text-align: center;
+}
+.side-index-new:hover {
+  border-color: var(--accent);
+}
+.side-index-new:hover {
+  color: var(--accent);
+}
 .side-empty {
   padding: 34px 8px;
   text-align: center;
