@@ -1103,14 +1103,17 @@ sup.note-ref.active {
 .reasoning[open] summary:before {
   content: "▾ ";
 }
+/* 思绪原样保留换行与空格（pre-wrap）：一串没有空格的长串、行尾挂着的空格与制表符都会把内容撑宽，横向就多出一条空荡荡的滚动条。
+   长串在任意处折行，横向一律不滚 */
 .reasoning-body {
   max-height: 320px;
-  overflow: auto;
+  overflow: hidden auto;
   margin-top: 8px;
   color: var(--ink-3);
   font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .thinking {
   color: var(--ink-3);
