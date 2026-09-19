@@ -114,6 +114,16 @@ check(
   JSON.stringify(panel)
 );
 check("panel head names the errand and its tally", panel.title === "改 a.js" && /2 步 · 改 1 个文件/.test(panel.sub), JSON.stringify(panel));
+// 专色：只是看的归墨灰、动手改的归朱砂、差遣归金——一条时间线上扫一眼就该分得出，颜色不能是同一个
+const hues = await evalJs(
+  `JSON.stringify({ read: getComputedStyle(document.querySelector('#helperModal .tool-step[data-tool="read_file"] .tool-label')).color, edit: getComputedStyle(document.querySelector('#helperModal .tool-step[data-tool="edit_file"] .tool-label')).color, delegate: getComputedStyle(document.querySelector('.message.assistant .tool-step-delegate .tool-label')).color })`
+);
+const hue = JSON.parse(hues);
+check(
+  "reading, changing and delegating each read as a different colour",
+  hue.read !== hue.edit && hue.edit !== hue.delegate && hue.read !== hue.delegate,
+  hues
+);
 // 首轮吐的空行会被裁掉，步骤的偏移得跟着前移；不然每一轮说的话都错位、被切在字中间
 const saidPerRound = await evalJs(
   `JSON.stringify([...document.querySelectorAll("#helperModal .sub-timeline > .trail-group > .trail-note")].map(n => n.textContent.trim()))`
