@@ -11,7 +11,7 @@
 | `delegate.js` | 差遣（子 Agent）：帮手自己的系统提示；回报的格式 | 帮手的请求另拼一段 |
 | `tools.js` | 各工具的 description 与参数说明；带 `brief` 的在言里用 brief（短说明） | 随工具一并交给模型；言不带 edit_file / search_files |
 
-拼接顺序（系统提示）：用户在模型设置里填的 system prompt → `assistant.today` → `work.hint`（行）/ `work.archive`（言，桥接在线）→ `assistant.search`（桥接在线）→ `assistant.asking`（ask_user 可用）→ `memory.hint`（记忆启用）→ `assistant.drawing` → `assistant.manner`（言）→ `side.*`（旁注）/ `delegate.system`（帮手）。
+拼接顺序（系统提示）：用户在模型设置里填的 system prompt → `assistant.today` → `work.hint`（行）/ `work.archive`（言，桥接在线）→ `assistant.search`（桥接在线）→ `assistant.asking`（ask_user 可用）→ `assistant.delegating`（delegate 可用）→ `memory.hint`（记忆启用）→ `assistant.drawing` → `assistant.manner`（言）→ `side.*`（旁注）/ `delegate.system`（帮手）。
 
 轻重之分：行（执事）的提示可以重一些——它在干活，规矩多是应该的；言（对谈）的每一问都背着系统提示与工具定义，多一句都是开销、也在稀释模型对问题本身的注意，所以言只留三件事：主动问（asking）、画在正文里（drawing）、克制的答法（manner），工具也只带产出文件所需的四件并用短说明。改提示词后跑 `node test/prompt-size.cjs` 看言那一行有没有涨回去。
 

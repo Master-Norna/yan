@@ -741,6 +741,7 @@ function assistantHint(profile, tools, conversation = null) {
   if (names.has("run_command") && conversation) lines.push(workHint(conversation));
   if (names.has("search_web")) lines.push(prompt("assistant.search"));
   if (names.has("ask_user")) lines.push(prompt("assistant.asking"));
+  if (names.has("delegate")) lines.push(prompt("assistant.delegating"));
   if (names.has("remember")) lines.push(prompt("memory.hint", { count: store.memory.items.length }));
   lines.push(prompt("assistant.drawing"));
   if (!conversation || !isWork(conversation)) lines.push(prompt("assistant.manner"));

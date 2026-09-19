@@ -1,5 +1,5 @@
 // 言 · 内置提示词 · 差遣（子 Agent）
-// 何时该差遣写在 tools.js 里 delegate 的说明中，系统提示不再重复。system 是帮手自己的系统提示，接在与主模型相同的通用段落之后；
+// 何时该差遣写在 tools.js 里 delegate 的说明与 assistant.delegating 里。system 是帮手自己的系统提示，接在与主模型相同的通用段落之后；
 // limit 是帮手工具轮次到顶时回给它的话；report / failed 是把帮手的结果回给主模型时的格式，不是系统提示。
 (window.YAN_PROMPTS ||= {}).delegate = {
   system: [
