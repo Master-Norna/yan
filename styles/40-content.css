@@ -85,31 +85,29 @@
 }
 .viz-pending-body {
   position: relative;
-  height: 68px;
+  height: 96px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
-/* 虚痕：与顶栏「余墨」同一笔形，墨未着纸，淡淡地呼吸；每来一行吸一口朱墨（viz-ink-pulse 由 paintTail 点亮） */
-.viz-pending-stroke {
+/* 草图：将要画的东西的底稿，淡墨勾线；动效开着时一笔一笔勾出来（见 90-motion），每来一行轮到的一笔蘸朱（pulseInkStroke） */
+.viz-sketch {
   display: block;
-  width: 150px;
-  height: 27px;
-}
-.viz-pending-stroke svg {
-  display: block;
-  width: 100%;
-  height: 100%;
+  width: 160px;
+  height: 72px;
   overflow: visible;
+  color: var(--ink-3);
 }
-.viz-ink-ghost {
-  fill: var(--ink-3);
-  opacity: 0.16;
-}
-.viz-ink-pulse {
-  fill: var(--accent);
-  opacity: 0;
+.viz-sketch path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  opacity: 0.42;
 }
 .tool-steps {
   margin: 0 0 14px;

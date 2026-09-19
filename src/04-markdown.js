@@ -69,18 +69,52 @@ function renderMath(tex, display) {
 }
 // 占位框里的动效在逐帧重画的尾段里会随节点重建从头再来，看着像定住了：把相位记在节点上（负的 animation-delay），重建也接着原来的拍子走
 const vizPhase = () => `-${Math.round(performance.now())}ms`;
-// 占位框里是一道虚痕——与顶栏「余墨」同一笔形，只是墨未着纸：淡淡地呼吸着；每来一行，痕上吸一口朱墨又散去（见 paintTail），
-// 流停了痕就只剩呼吸，看得出还在写还是卡住了
-const INK_STROKE =
-  "M1.4 6.4C8 4.2 18 3.9 30 4.4c12 .5 22 1.3 34.4.2.9-.1 1.5.9 1 1.6-3.8 2.8-11.6 3-21 2.6C33 8.4 22 7.6 11 8.5c-3.4.3-6.8.5-9.2-.5-.9-.4-1-1.3-.4-1.6z";
-function pendingSketchHtml() {
-  return `<span class="viz-pending-stroke"><svg viewBox="0 0 68 12" aria-hidden="true"><path class="viz-ink-ghost" d="${INK_STROKE}"/><path class="viz-ink-pulse" d="${INK_STROKE}"/></svg></span>`;
+// 占位框里是一页草图：将要画的东西的底稿——图表是轴、柱与一条折线，流程图是三个框两支箭，网页是一页版式——
+// 用淡墨一笔一笔勾出来，勾完停一停、淡去、再勾（pathLength 归一，stroke-dashoffset 从 1 走到 0 就是「画出来」，各笔按 --i 错开）。
+// 每来一行，草图上有一笔蘸朱（见 pulseInkStroke，由 paintTail 点）：流着时朱笔此起彼伏，流停了草图只剩自己勾着，看得出还在写还是卡住了
+const VIZ_SKETCHES = {
+  echarts: [
+    "M16 6v56h136",
+    "M32 62V42",
+    "M52 62V30",
+    "M72 62V48",
+    "M92 62V20",
+    "M112 62V36",
+    "M132 62V28",
+    "M24 46C40 22 56 50 72 36S104 14 136 24"
+  ],
+  mermaid: [
+    "M10 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z",
+    "M46 36h14M56 32l4 4-4 4",
+    "M64 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H64a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z",
+    "M100 36h14M110 32l4 4-4 4",
+    "M118 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4h-32a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z"
+  ],
+  html: [
+    "M8 6h144a3 3 0 0 1 3 3v54a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z",
+    "M5 18h150",
+    "M12 25h30a2 2 0 0 1 2 2v30a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V27a2 2 0 0 1 2-2z",
+    "M52 28h92",
+    "M52 36h72",
+    "M52 44h84",
+    "M52 52h26a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H52a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z"
+  ]
+};
+function pendingSketchHtml(language) {
+  const strokes = VIZ_SKETCHES[language] || VIZ_SKETCHES.html;
+  return `<svg class="viz-sketch" viewBox="0 0 160 72" aria-hidden="true">${strokes.map((d, i) => `<path d="${d}" pathLength="1" style="--i:${i}"/>`).join("")}</svg>`;
 }
-// 新来一行：虚痕上吸一口朱墨，随即散去
+// 新来一行：草图上轮到的那一笔蘸一口朱墨，随即褪回淡墨
 function pulseInkStroke(pending) {
-  const pulse = pending.querySelector(".viz-ink-pulse");
-  if (!pulse || inkMotionOff() || typeof pulse.animate !== "function") return;
-  pulse.animate([{ opacity: 0 }, { opacity: 0.55, offset: 0.22 }, { opacity: 0 }], { duration: 640, easing: "ease-out" });
+  const strokes = pending.querySelectorAll(".viz-sketch path");
+  if (!strokes.length || inkMotionOff()) return;
+  const stroke = strokes[(Number(pending.dataset.lines) || 0) % strokes.length];
+  if (typeof stroke.animate !== "function") return;
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#9b5540";
+  stroke.animate([{ stroke: accent, opacity: 0.95, offset: 0.12 }, { stroke: accent, opacity: 0.8, offset: 0.4 }, { offset: 1 }], {
+    duration: 900,
+    easing: "ease-out"
+  });
 }
 // 尾段每帧整段重画，占位框若跟着重建，虚痕的呼吸每帧都从头来一遍：这里把已在页上的那个占位框留在原处不动，
 // 只换它周围的内容；行数变了就让虚痕吸一口墨
@@ -97,8 +131,9 @@ function paintTail(tail, html) {
     tail.innerHTML = html;
     return;
   }
-  if (live.dataset.lines !== next.dataset.lines) pulseInkStroke(live);
+  const grew = live.dataset.lines !== next.dataset.lines;
   live.dataset.lines = next.dataset.lines;
+  if (grew) pulseInkStroke(live);
   live.setAttribute("aria-label", next.getAttribute("aria-label"));
   for (const node of [...tail.childNodes]) if (node !== live) node.remove();
   const before = [],
@@ -118,10 +153,10 @@ function codeBlockHtml(text, lang) {
       .toLowerCase(),
     known = !!(window.hljs && language && hljs.getLanguage(language));
   const htmlApp = ["html", "interactive", "app"].includes(language);
-  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是一页正在落笔的手稿（见 pendingSketchHtml）
+  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是将要画的东西的草图（见 pendingSketchHtml）
   if (suppressViz && (htmlApp || language === "mermaid" || language === "echarts")) {
     const lines = String(text || "").split("\n").length;
-    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml()}</div></div>\n`;
+    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml(htmlApp ? "html" : language)}</div></div>\n`;
   }
   if (!suppressViz && (language === "mermaid" || language === "echarts"))
     return `<div class="viz" data-viz="${language}"><div class="code-head"><span class="code-lang">${language}</span><span><button type="button" class="code-copy" data-viz-toggle>源码</button><button type="button" class="code-copy" data-viz-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="viz-canvas"></div><pre class="viz-source hidden"><code>${escapeHtml(text)}</code></pre></div>\n`;
