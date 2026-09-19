@@ -159,7 +159,7 @@ check("send button back to 寄", (await evalJs(`document.querySelector("#chatSen
 // ---- 场景 4：径行 + 轮次上限（模型无限要求 list_files）；上限在「设置 → 通用」里改成 12
 await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
 await sleep(300);
-await evalJs(`document.querySelector('.tab-btn[data-tab="general"]')?.click(); true`);
+await evalJs(`document.querySelector('.tab-btn[data-tab="tools"]')?.click(); true`);
 await sleep(200);
 check(
   "default round caps shown in settings",

@@ -797,7 +797,7 @@ function roamAllowed() {
 async function runWorkTool(step, args, conversation, assistant, signal) {
   const workdir = workRoot(conversation),
     roam = roamAllowed(),
-    sandbox = sandboxed(conversation);
+    sandbox = sandboxed();
   if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
   const job = requestJob(conversation.id);
   if (step.name === "run_command") {

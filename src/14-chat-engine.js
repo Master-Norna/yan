@@ -171,7 +171,6 @@ async function sendOrStop() {
       messages: [],
       workdir: pending,
       workAuto: !!store.settings.workAutoDefault,
-      sandbox: store.settings.sandboxDefault !== false,
       reasoning: store.settings.reasoning || ""
     };
     if (!(await ensureWorkReady(c))) return;
@@ -812,7 +811,7 @@ function workHint(conversation) {
   return prompt(isWork(conversation) ? "work.hint" : "work.archive", {
     workdir: workRoot(conversation),
     scratch: scratchRel(conversation),
-    reach: prompt(sandboxed(conversation) ? "work.reachSandbox" : roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
+    reach: prompt(sandboxed() ? "work.reachSandbox" : roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
     platform: win ? "Windows" : bootstrap.work?.platform || "类 Unix",
     shell,
     shellNote: win ? prompt("work.windowsShell") : ""
