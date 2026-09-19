@@ -96,15 +96,16 @@ check(
 await evalJs(`document.querySelector(".tool-stack > summary").click(); true`);
 await sleep(400);
 check(
-  "opening the trail shows the command output unfolded",
+  "opening the trail: command output is folded by default (only listings and diffs open)",
   await evalJs(
-    `document.querySelector(".tool-stack").open && !document.querySelector(".tool-step").classList.contains("folded") && getComputedStyle(document.querySelector(".tool-step .tool-output")).display !== "none"`
+    `document.querySelector(".tool-stack").open && document.querySelector(".tool-step").classList.contains("folded") && getComputedStyle(document.querySelector(".tool-step .tool-output")).display === "none"`
   )
 );
 await evalJs(`document.querySelector(".tool-step .tool-step-head").click(); true`);
-check("clicking the head folds the output", await evalJs(`document.querySelector(".tool-step").classList.contains("folded")`));
+check("clicking the head unfolds the output", await evalJs(`!document.querySelector(".tool-step").classList.contains("folded")`));
 await evalJs(`document.querySelector(".tool-step .tool-step-head").click(); true`);
-check("clicking again unfolds it", await evalJs(`!document.querySelector(".tool-step").classList.contains("folded")`));
+check("clicking again folds it", await evalJs(`document.querySelector(".tool-step").classList.contains("folded")`));
+await evalJs(`document.querySelector(".tool-step .tool-step-head").click(); true`);
 const step1 = await evalJs(
   `(s => ({ status: s.dataset.status, meta: s.querySelector(".tool-meta").textContent, output: s.querySelector(".tool-output")?.textContent }))(document.querySelector(".tool-step"))`
 );
@@ -201,7 +202,7 @@ await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).queryS
 check(
   "展开全部 reveals every line and offers to clip again",
   await evalJs(
-    `(s => s.querySelector(".tool-output").textContent.split("\\n").length > 10 && s.querySelector(".tool-more").textContent === "只看开头")([...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step"))`
+    `(s => s.querySelector(".tool-output").textContent.split("\\n").length > 10 && s.querySelector(".tool-more").textContent === "只看前 10 行")([...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step"))`
   )
 );
 await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step .tool-more").click(); true`);

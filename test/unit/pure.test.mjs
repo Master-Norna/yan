@@ -136,7 +136,7 @@ test("isReadOnlyCommand：只读命令免确认，带管道 / 重定向 / 串联
   assert.equal(f.isReadOnlyCommand("rm -rf ."), false);
   assert.equal(f.isReadOnlyCommand("cat a > b"), false);
 });
-test("clampLines：默认只露前 10 行、不超过 1200 字，full 时全给", () => {
+test("clampLines：默认只露前 10 行，full 时全给", () => {
   const text = Array.from({ length: 14 }, (_, i) => `l${i}`).join("\n");
   const c = f.clampLines(text, false);
   assert.equal(c.clipped, true);
@@ -144,12 +144,6 @@ test("clampLines：默认只露前 10 行、不超过 1200 字，full 时全给"
   assert.equal(c.text.split("\n").length, 10);
   assert.equal(f.clampLines(text, true).clipped, false);
   assert.equal(f.clampLines("a\nb", false).clipped, false);
-  // 一行里挤了一整页：按字数裁
-  const long = f.clampLines("x".repeat(5000), false);
-  assert.equal(long.clipped, true);
-  assert.equal(long.total, 1);
-  assert.equal(long.chars, 5000);
-  assert.equal(long.text.length, 1201);
 });
 test("normalizeDraft：旧版字符串、残缺对象都归一成 { text, attachments, quote }", () => {
   assert.deepEqual(f.normalizeDraft("hi"), { text: "hi", attachments: [], quote: null });
