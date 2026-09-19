@@ -759,16 +759,26 @@ function bindEvents() {
       persistDraft();
     }
   });
+  // 跟随的规矩：往下滚到离底不远就算到底、开始跟随（生成中内容一直在长，硬要滚到最后一像素常常追不上）；
+  // 往上滚离底超过阈值才算离开。内容自己长高、缩短引起的滚动不算用户的意思
+  let lastScrollTop = 0;
   $("#chatScroll").addEventListener("scroll", () => {
     const el = $("#chatScroll"),
-      gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (gap < 8) {
+      gap = el.scrollHeight - el.scrollTop - el.clientHeight,
+      down = el.scrollTop > lastScrollTop;
+    lastScrollTop = el.scrollTop;
+    if (gap < 8 || (down && gap < FOLLOW_THRESHOLD)) {
       followBottom = true;
       autoScrolling = false;
-    } else if (!autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false;
+    } else if (!down && !autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false;
     syncJumpBottom(gap);
     syncOutline();
   });
+  // 跟着的时候，内容不论因何长高（工具输出、图表成图、图片载入、块的开合）都贴着底：不只靠流式的每一帧
+  if (typeof ResizeObserver === "function")
+    new ResizeObserver(() => {
+      if (followBottom && view === "chat" && currentId) scrollBottom();
+    }).observe($("#messages"));
   $("#messages").addEventListener("click", event => {
     const button = event.target.closest("[data-toggle-compacted]");
     if (!button) return;
