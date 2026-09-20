@@ -17,6 +17,7 @@ const f = load([
   "reasoningChoices",
   "reasoningFields",
   "parseReasoningLevels",
+  "reasoningProbed",
   "learnReasoningLevels",
   "isReadOnlyCommand",
   "clampLines",
@@ -145,10 +146,16 @@ test("parseReasoningLevels：报错里列的几档由低到高排；不提档位
   assert.deepEqual(f.parseReasoningLevels("rate limited", "probe"), []);
 });
 test("learnReasoningLevels：从报错里认出接口支持的几档，被拒的那档不算", () => {
-  const p = { id: "p", reasoningLevels: "" };
+  const p = { id: "p", model: "m", baseUrl: "https://x/v1", reasoningLevels: "" };
   assert.equal(f.learnReasoningLevels(p, "Invalid value: 'high'. Supported values are: 'low', 'medium', and 'xhigh'.", "high"), true);
   assert.equal(p.reasoningLevels, "low, medium, xhigh");
   assert.equal(f.learnReasoningLevels(p, "rate limited", "high"), false);
+  // 从报错里学到的就是这个身份的定论，之后不再探
+  assert.equal(f.reasoningProbed(p), true);
+  // 旧版只有档位没有标记的：当手填的，绑在当前身份上
+  const old = { model: "m", baseUrl: "https://x/v1", reasoningLevels: "low, high" };
+  assert.equal(f.reasoningProbed(old), true);
+  assert.equal(old.reasoningProbed, "manual|openai|https://x/v1|m");
 });
 test("isReadOnlyCommand：开发与系统检查免确认，只放行纯展示管道", () => {
   assert.equal(f.isReadOnlyCommand("git status"), true);

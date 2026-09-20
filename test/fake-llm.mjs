@@ -106,7 +106,9 @@ http
         if (model.includes("mute")) return sse(res, [delta({ content: "。" }), delta({}, { usage: { total_tokens: 1 } })]);
         const message = model.includes("plain")
           ? "Unrecognized request argument supplied: reasoning_effort"
-          : `Invalid value: 'probe'. Supported values are: ${model.includes("three") ? "'low', 'medium', and 'high'" : "'low', 'medium', 'high', and 'max'"}.`;
+          : model.includes("vague")
+            ? "Invalid reasoning_effort value: probe"
+            : `Invalid value: 'probe'. Supported values are: ${model.includes("three") ? "'low', 'medium', and 'high'" : "'low', 'medium', 'high', and 'max'"}.`;
         const reply = () => {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message, type: "invalid_request_error", param: "reasoning_effort" } }));
