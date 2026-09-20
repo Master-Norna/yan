@@ -108,6 +108,8 @@ check(
 );
 const raced = await evalJs(`document.querySelector('[data-profile-card="p4"] .profile-status').textContent`);
 check("the late probe does not wipe the status the newer one wrote", /思考档位 低 \/ 中 \/ 高$/.test(raced), raced);
+// 连着探了几回，状态行上只留最后一回的档位，不越接越长
+check("the status line carries one report, not a chain of them", raced === "思考档位 低 / 中 / 高", raced);
 // 记过 none 的模型换成照单全收的：旧的 none 不能跟着走，按四档
 await setModel("fake-plain");
 await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningLevels === "none"`, 8000);

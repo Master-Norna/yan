@@ -512,7 +512,11 @@ async function reportReasoningProbe(profile, card, force = false) {
   if (force && !reasoningManual(profile)) profile.reasoningProbed = "";
   if (!profile.model) return;
   const status = () => document.querySelector(`[data-profile-card="${profile.id}"] .profile-status`);
-  const before = status()?.textContent || "";
+  // 状态行上此前的话留着（「可用 · 4 ms」），但上一回探到的档位不留——刷新列表探了一次、再从下拉里选一个又探一次，不能越接越长
+  const before = (status()?.textContent || "")
+    .split(" · ")
+    .filter(part => !/^(探测)?思考档位/.test(part))
+    .join(" · ");
   if (reasoningProbed(profile)) {
     if (force && status()) {
       const levels = profileReasoningLevels(profile);
