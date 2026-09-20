@@ -145,9 +145,53 @@ function trailLiveHost(block, message) {
   }
   return live.querySelector(".trail-note");
 }
-/** @param {Message|SubAgent} message */
-function trailGroupHtml(message, group) {
-  return `<div class="trail-group" data-at="${group.at}">${trailReasoningHtml(message, group)}${trailNoteHtml(message, group)}<div class="tool-steps">${group.steps.map(stepHtml).join("")}</div></div>`;
+/**
+ * @param {Message|SubAgent} message
+ * @param {boolean} [fold] 帮手时间线：这一轮的各步折进一个「n 步」里，只留思绪与说的话在外
+ */
+function trailGroupHtml(message, group, fold = false) {
+  const steps = fold
+    ? subStepsHtml(/** @type {SubAgent} */ (message), group)
+    : `<div class="tool-steps">${group.steps.map(stepHtml).join("")}</div>`;
+  return `<div class="trail-group" data-at="${group.at}">${trailReasoningHtml(message, group)}${trailNoteHtml(message, group)}${steps}</div>`;
+}
+// 帮手时间线里一轮的各步折成一行：一轮里几十次检索摊开要占几屏，帮手说的话与回报就被顶得看不见了。
+// 与主行迹同一套开合：这一轮还在跑时摊开，跑完收起，用户亲手开合过的不动。标题行是各工具的计数，点开才看各步
+/** @param {SubAgent} sub 帮手停了（中止、出错）的话，没跑完的步骤也不算还在跑 */
+function subStepsRunning(sub, steps) {
+  return sub.status === "streaming" && steps.some(step => step.status === "running" || step.status === "pending");
+}
+function subStepsLabel(steps) {
+  const counts = new Map();
+  for (const step of steps) {
+    const label = TOOL_LABELS[step.name] || step.name;
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts].map(([label, n]) => (n > 1 ? `${label} ${n}` : label)).join(" · ");
+}
+function subStepsMeta(sub, steps) {
+  if (subStepsRunning(sub, steps)) return "进行中";
+  const failed = steps.filter(step => step.status === "error").length,
+    skipped = steps.filter(step => step.status === "skipped").length;
+  return `${steps.length} 步${skipped ? ` · ${skipped} 跳过` : ""}${failed ? ` · ${failed} 失败` : ""}`;
+}
+/** @param {SubAgent} sub */
+function subStepsHtml(sub, group) {
+  const running = subStepsRunning(sub, group.steps);
+  return `<details class="tool-stack sub-steps"${running ? " open" : ""} data-state="${running ? "streaming" : "complete"}"><summary><span class="tool-stack-label">${escapeHtml(subStepsLabel(group.steps))}</span><span class="tool-stack-meta">${escapeHtml(subStepsMeta(sub, group.steps))}</span></summary><div class="tool-stack-body"><div class="tool-steps">${group.steps.map(stepHtml).join("")}</div></div></details>`;
+}
+// 一轮的折叠行就地更新：标题与计数跟着步骤走；这一轮跑完就收起（用户亲手开合过的不动）
+/** @param {SubAgent} sub */
+function syncSubSteps(details, sub, steps) {
+  if (!details) return;
+  const running = subStepsRunning(sub, steps);
+  details.dataset.state = running ? "streaming" : "complete";
+  const label = details.querySelector(":scope > summary > .tool-stack-label");
+  if (label.textContent !== subStepsLabel(steps)) label.textContent = subStepsLabel(steps);
+  rollText(details.querySelector(":scope > summary > .tool-stack-meta"), subStepsMeta(sub, steps));
+  if (details.dataset.touched) return;
+  if (running) settleDetails(details, true);
+  else settleDetails(details, false, null, true);
 }
 /** @param {Message} message */
 function trailLabel(message) {
@@ -284,7 +328,7 @@ function delegateTrailHtml(step) {
   const { sub, steps, live, thought, said, report } = delegateSubState(step);
   if (!sub) return "";
   const groups = trailGroups(sub)
-    .map(group => trailGroupHtml(sub, group))
+    .map(group => trailGroupHtml(sub, group, true))
     .join("");
   // 最后一轮：进行中时思绪跟着流（有话了就收起）、话按最新文本画；做完后这轮思绪收进折叠区，话即回报，留在外面
   const tail = `<div class="sub-tail">${delegateTailThoughtHtml(thought, live && !said ? "live" : "done")}${
@@ -294,20 +338,21 @@ function delegateTrailHtml(step) {
         ? `<div class="sub-idle">帮手正在凝神</div>`
         : ""
   }</div>`;
-  // 面板里不再折起来：这一栏就是为了看过程而开的，开了还要再点一下才见内容没有道理
+  // 面板里整条时间线不再折起来：这一栏就是为了看过程而开的，开了还要再点一下才见内容没有道理；折的是各轮的步骤
   return `<div class="sub-trail"${live ? ' data-live="true"' : ""}><div class="sub-timeline">${groups}${tail}</div>${report ? `<div class="sub-report">${renderMarkdown(report)}</div>` : ""}</div>`;
 }
 // 行迹里只留一枚签：差遣是并行的活，塞进线性的时间线会把后面的东西一直往下顶。
-// 这里记「此刻遣了谁、回报如何」——那确实是这一刻发生的事；帮手自己的那条小时间线去右侧面板看。
+// 这里只记「此刻遣了谁、做到哪一步」——那确实是这一刻发生的事；回报与帮手自己的那条小时间线都在面板里，
+// 签上不铺回报：主模型接着会把它消化进正文，几名帮手的回报叠在行迹里，正文就被顶到几屏之下了。
 /** @param {Step} step */
 function delegateStepHtml(step) {
-  const { sub, status, meta, report } = delegateSubState(step);
-  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>差遣</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div>${report ? `<div class="sub-report">${renderMarkdown(report)}</div>` : ""}</div>`;
+  const { sub, status, meta } = delegateSubState(step);
+  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>差遣</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div></div>`;
 }
-// 行迹里那枚签的就地更新：只动头上的状态、标题与做完后的回报。帮手自己的时间线不在这儿，在面板里
+// 行迹里那枚签的就地更新：只动头上的状态与标题。帮手自己的时间线与回报不在这儿，在面板里
 /** @param {Step} step */
 function syncDelegateCard(el, step, prev, seen) {
-  const { sub, status, report, meta } = delegateSubState(step);
+  const { sub, status, meta } = delegateSubState(step);
   el.dataset.status = status;
   const head = el.querySelector(":scope > .tool-step-head");
   rollText(head.querySelector(".tool-meta"), meta);
@@ -317,12 +362,6 @@ function syncDelegateCard(el, step, prev, seen) {
   if (title.textContent !== String(step.title || "")) {
     title.textContent = step.title || "";
     title.title = sub?.task || step.title || "";
-  }
-  const reportEl = el.querySelector(":scope > .sub-report");
-  if (!report) reportEl?.remove();
-  else if (!reportEl) {
-    el.insertAdjacentHTML("beforeend", `<div class="sub-report">${renderMarkdown(report)}</div>`);
-    renderEnhancements(el.lastElementChild);
   }
 }
 // 帮手时间线就地更新（面板里那一条）。帮手每 350ms 刷一次，若整段换新：已画出的步骤输出会重新起入场动画
@@ -346,7 +385,7 @@ function syncDelegateTrail(trail, step, seen) {
   for (const group of trailGroups(sub)) {
     let host = timeline.querySelector(`:scope > .trail-group[data-at="${group.at}"]`);
     if (!host) {
-      tail.insertAdjacentHTML("beforebegin", trailGroupHtml(sub, group));
+      tail.insertAdjacentHTML("beforebegin", trailGroupHtml(sub, group, true));
       host = tail.previousElementSibling;
       const note = host.querySelector(".trail-note");
       if (note) renderEnhancements(note);
@@ -359,7 +398,9 @@ function syncDelegateTrail(trail, step, seen) {
       if (body && body.textContent !== text) body.textContent = text;
       else if (!body && text) host.insertAdjacentHTML("afterbegin", trailReasoningHtml(sub, group));
     }
-    for (const s of group.steps) syncStep(host.querySelector(":scope > .tool-steps"), s, seen);
+    const fold = host.querySelector(":scope > .sub-steps");
+    for (const s of group.steps) syncStep(fold.querySelector(".tool-steps"), s, seen);
+    syncSubSteps(fold, sub, group.steps);
   }
   const state = live && !said ? "live" : "done";
   let thoughtEl = tail.querySelector(":scope > .reasoning");
@@ -412,7 +453,6 @@ function syncStep(list, step, seen) {
   if (!el) {
     list.insertAdjacentHTML("beforeend", html);
     el = list.lastElementChild;
-    if (step.name === "delegate") el.querySelectorAll(".trail-note, .sub-report").forEach(node => renderEnhancements(node));
   } else if (step.name === "delegate") syncDelegateCard(el, step, prev, seen);
   else if (prev && prev.html !== html) {
     el.insertAdjacentHTML("afterend", html);

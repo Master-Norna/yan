@@ -642,26 +642,26 @@ function bindEvents() {
     void source.offsetWidth;
     source.classList.add("flash");
   });
-  // 思绪与行迹的开合：正文与旁注面板同一套——用户亲手开合的记在消息上，流式期间的自动开合就不再替他动
+  // 思绪与行迹的开合：正文、旁注面板与差遣面板同一套——用户亲手开合的记在消息上，流式期间的自动开合就不再替他动
   const onProcessToggle = event => {
     const summary = event.target.closest(".reasoning > summary, .tool-stack > summary");
     if (!summary) return;
     event.preventDefault();
-    const details = summary.parentElement,
-      id = details.closest("[data-message]")?.dataset.message,
-      side = !!details.closest("#sideMessages");
-    const message = (side ? currentThread()?.messages : currentConversation()?.messages)?.find(item => item.id === id);
-    if (!message) return;
-    const reasoning = details.classList.contains("reasoning");
+    const details = summary.parentElement;
     const nextOpen = details._motionAnimation ? !details._motionTarget : !details.open;
     // 用户亲手动了，程序排着的那次自动收起作废
     clearTimeout(details._settleTimer);
     details._settleTimer = null;
-    // 时间线里各轮的思绪不记在消息上；用户开合过的记一笔，帮手卡片就地更新时不再替它收起
-    if (details.classList.contains("trail-reasoning")) {
+    // 时间线里各轮的思绪与帮手各轮的步骤不记在消息上；用户开合过的记一笔，就地更新时不再替它开合
+    if (details.classList.contains("trail-reasoning") || details.classList.contains("sub-steps")) {
       details.dataset.touched = "1";
       return setProcessDetails(details, nextOpen);
     }
+    const id = details.closest("[data-message]")?.dataset.message,
+      side = !!details.closest("#sideMessages");
+    const message = (side ? currentThread()?.messages : currentConversation()?.messages)?.find(item => item.id === id);
+    if (!message) return setProcessDetails(details, nextOpen);
+    const reasoning = details.classList.contains("reasoning");
     message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
     message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
     saveStoreSoon();
@@ -669,6 +669,7 @@ function bindEvents() {
   };
   $("#messages").addEventListener("click", onProcessToggle);
   $("#sideMessages").addEventListener("click", onProcessToggle);
+  $("#helperPanelBody").addEventListener("click", onProcessToggle);
   document.addEventListener("click", e => {
     const copy = e.target.closest("[data-copy-code]");
     if (copy) {
@@ -829,6 +830,18 @@ function bindEvents() {
     foldCompacted(c);
     renderOutline();
     if (!c.showCompacted) scrollChatTo(button.closest(".context-divider"), "center");
+  });
+  // 正文里指向本地文件的链接（模型写的「下载《x.docx》」）：页面上没有那样的路，到卷宗里找同名的那件来下载
+  document.addEventListener("click", async event => {
+    const link = event.target.closest(".markdown a[data-file]");
+    if (!link) return;
+    event.preventDefault();
+    const name = link.dataset.file;
+    if (!archiveOnline()) return toast(`链接无处可去：「${name}」不在卷宗里`);
+    if (archiveEntries === null) await refreshArchive();
+    const entry = (archiveEntries || []).find(file => file.name === name || file.path === name);
+    if (!entry) return toast(`卷宗里没有「${name}」`);
+    downloadArchiveFile(entry.path);
   });
   $("#messages").addEventListener("click", event => {
     const button = event.target.closest("[data-deliver-action]");

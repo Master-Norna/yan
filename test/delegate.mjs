@@ -87,8 +87,8 @@ const card = await evalJs(
   `(d => ({ label: d.querySelector(".tool-label").textContent, title: d.querySelector(".tool-title").textContent, meta: d.querySelector(".tool-meta").textContent, status: d.dataset.status, nested: d.querySelectorAll(".tool-step").length, report: d.querySelector(".sub-report")?.textContent.trim() || "" }))(document.querySelector(".message.assistant .tool-step-delegate"))`
 );
 check(
-  "the marker is labelled, titled and carries the report",
-  card.label.endsWith("差遣") && card.title === "改 a.js" && card.status === "done" && card.nested === 0,
+  "the marker is labelled and titled, and keeps the report off the trail",
+  card.label.endsWith("差遣") && card.title === "改 a.js" && card.status === "done" && card.nested === 0 && card.report === "",
   JSON.stringify(card)
 );
 check("marker meta counts helper steps and files", /2 步 · 改 1 个文件 · \d+ 秒/.test(card.meta), card.meta);
@@ -101,11 +101,6 @@ check(
   JSON.parse(painted).markers === 2 && JSON.parse(painted).groups <= JSON.parse(painted).steps,
   painted
 );
-check(
-  "report stays in the trail — that is what the main model consumed",
-  card.report.startsWith("回报：已把 return 1 改为 return 2"),
-  card.report
-);
 // 点那枚签在右侧开面板，帮手做过的两步都在里面
 await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
 await sleep(200);
@@ -117,6 +112,7 @@ check(
   panel.open && panel.nested.join() === "读取:done,修改:done",
   JSON.stringify(panel)
 );
+check("the report lives in the panel — that is what the main model consumed", panel.report.startsWith("回报：已把 return"), panel.report);
 check(
   "panel head names the errand and its tally",
   panel.title === "改 a.js" && /2 步 · 改 1 个文件/.test(panel.sub),
@@ -159,8 +155,9 @@ check("the count opens a list of every errand", JSON.parse(list).join("|") === "
 await evalJs(`document.querySelectorAll("#helperList .helper-list-item")[0].click(); true`);
 await sleep(200);
 check("picking from the list switches to it", (await evalJs(`document.querySelector("#helperTitle").textContent`)) === "改 a.js");
-check("helper had its own system prompt and no delegate / ask_user", card.report.includes("sys:yes|delegate:no|ask:no"), card.report);
-check("helper can read memory but not write it", card.report.includes("|memw:0|memr:2|"), card.report);
+const report = await evalJs(`document.querySelector("#helperModal .sub-report")?.textContent.trim() || ""`);
+check("helper had its own system prompt and no delegate / ask_user", report.includes("sys:yes|delegate:no|ask:no"), report);
+check("helper can read memory but not write it", report.includes("|memw:0|memr:2|"), report);
 check("file actually changed by helper", readFileSync(WORK + "/src/a.js", "utf8").includes("return 2;"));
 const steps = await evalJs(
   `JSON.stringify([...document.querySelectorAll(".message.assistant .tool-stack > .tool-stack-body .tool-step")].map(s => ({ label: s.querySelector(".tool-label").textContent, status: s.dataset.status, meta: s.querySelector(".tool-meta").textContent })))`
@@ -228,15 +225,20 @@ await evalJs(
   `[...document.querySelectorAll("#history .history-item")].find(n => n.textContent.includes("DELEGATE"))?.querySelector(".history-open").click(); true`
 );
 await sleep(600);
-// 重载后：签与回报都还在，点开面板帮手那两步也还在（都存在步骤上，不靠内存）
+// 重载后：签还在，点开面板帮手那两步与回报也还在（都存在步骤上，不靠内存）；做完的那一轮折着，步骤仍在折叠区里
 await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
 await sleep(300);
 const after = await evalJs(
-  `(d => d ? { marker: !!d, report: !!d.querySelector(".sub-report"), nested: document.querySelectorAll("#helperModal .tool-step").length } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
+  `(d => d ? { marker: !!d, report: !!document.querySelector("#helperModal .sub-report"), nested: document.querySelectorAll("#helperModal .tool-step").length, folds: [...document.querySelectorAll("#helperModal .sub-steps")].map(f => (f.open ? "open" : "closed") + ":" + f.querySelector(".tool-stack-label").textContent) } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
 );
 check(
   "marker, report and the helper's timeline all survive reload",
   after?.marker && after.report && after.nested === 2,
   JSON.stringify(after)
+);
+check(
+  "finished rounds are folded into one line naming the tools",
+  after?.folds.length > 0 && after.folds.every(f => f.startsWith("closed:")),
+  JSON.stringify(after?.folds)
 );
 close();

@@ -305,11 +305,6 @@
 .tool-step-delegate > .tool-step-head {
   min-height: 30px;
 }
-/* 签上的回报：金线与右缘都得留出余地，不然字贴着边界 */
-.tool-step-delegate > .sub-report {
-  margin: 2px 0 0;
-  padding: 0 12px 6px;
-}
 .tool-step-delegate > .tool-step-head .tool-label {
   display: inline-flex;
   align-items: center;
@@ -392,22 +387,6 @@
   margin-top: 6px;
   min-width: 0;
   font-size: 13px;
-}
-/* 签上那份回报是结论（主模型消费的就是它），面板里这份只是帮手自己这条时间线的收尾——同一段话，收轻一档，不与签抢 */
-.helper-panel-body .sub-report {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed color-mix(in srgb, var(--gold) 40%, var(--line));
-  color: var(--ink-2);
-  font-size: 12.5px;
-}
-.helper-panel-body .sub-report:before {
-  content: "回报";
-  display: block;
-  margin-bottom: 3px;
-  color: var(--gold);
-  font: 10.5px var(--title);
-  letter-spacing: 0.14em;
 }
 .sub-report h1,
 .sub-report h2,
@@ -778,7 +757,37 @@
   padding-left: 0;
   border-left: 0;
 }
-/* 签上那份回报是结论（主模型消费的就是它），窗里这份只是帮手自己这条时间线的收尾——同一段话，收轻一档 */
+/* 帮手各轮的步骤折成一行「检索 18 · 翻阅网页 30    48 步」：与主行迹同一套折叠，但窗里不再套小滚动框。
+   跑着时摊开、跑完收起，帮手说的话与回报就不会被几十条检索顶到几屏之下 */
+.helper-panel-body .sub-steps {
+  margin: 0 0 4px;
+}
+.helper-panel-body .sub-steps > summary {
+  height: 24px;
+  font: 10.5px var(--title);
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
+.helper-panel-body .sub-steps > summary .tool-stack-meta {
+  font-size: 9.5px;
+}
+.helper-panel-body .sub-steps[data-state="streaming"] > summary .tool-stack-label:after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  vertical-align: 1px;
+  animation: pulse 1s infinite;
+}
+.helper-panel-body .sub-steps > .tool-stack-body {
+  max-height: none;
+  overflow: visible;
+  padding-right: 2px;
+}
+/* 回报是帮手自己这条时间线的收尾，也是主模型拿到的结论——签上不铺它，窗里这份就是唯一一份 */
 .helper-panel-body .sub-report {
   margin-top: 14px;
   padding: 10px 0 0;
