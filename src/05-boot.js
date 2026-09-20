@@ -755,8 +755,13 @@ function bindEvents() {
   );
   window.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
+    // 图片查看器盖在卷宗预览之上，先收它；CSV、Markdown、PDF 这些预览单独开着时，Esc 也得关得掉
     if (!$("#imageViewer").classList.contains("hidden")) {
       closeImageViewer();
+      closeFileViewer();
+      return;
+    }
+    if ($("#fileViewer") && !$("#fileViewer").classList.contains("hidden")) {
       closeFileViewer();
       return;
     }
