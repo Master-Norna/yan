@@ -148,6 +148,10 @@ npm start
 - 收敛：`remember` 带 `replaces` 可把相近条目合并成一条，`forget` 删去过时的；上限 200 条，满了模型会被告知先清理
 - 五件工具都在浏览器里完成，不经桥接、不需确认，每一步都在「行迹」里可见；翻过的记忆、查到与读过的旧谈会列在回复底部的「出处」里，点开各归其处；条目随备份导出、导入时按 id 与原文去重
 
+## 许可
+
+本项目以 Apache-2.0 发布，全文见 `LICENSE`。
+
 ## 致谢
 
 随项目本地分发的开源库：marked（MIT）、DOMPurify（Apache-2.0）、highlight.js（BSD-3-Clause）、KaTeX（MIT）、Mermaid（MIT）、Apache ECharts（Apache-2.0）、PDF.js（Apache-2.0）。许可全文见 `vendor/`。
