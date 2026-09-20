@@ -2096,9 +2096,16 @@ function bindEvents() {
     if (stack && !stack.open) setProcessDetails(stack, true);
     scrollChatTo(card, "center");
   };
-  // 点遮罩、按 Esc 都关得掉，与设置、文件查看器一个脾气
+  // 点遮罩、按 Esc 都关得掉，与设置、文件查看器一个脾气。纸张之外的空白由 .helper-stage 铺满，点在它上面也算点了遮罩；
+  // 按下与松开都得落在空白处——在纸上选字、拖到纸外松手，click 会落到两者的共同祖先上，那不是要关窗
+  const helperBackdrop = target => target === $("#helperModal") || target === $("#helperScroll");
+  let helperPressedBackdrop = false;
+  $("#helperModal").addEventListener("pointerdown", event => {
+    helperPressedBackdrop = helperBackdrop(event.target);
+  });
   $("#helperModal").addEventListener("click", event => {
-    if (event.target === $("#helperModal")) closeHelperPanel();
+    if (helperPressedBackdrop && helperBackdrop(event.target)) closeHelperPanel();
+    helperPressedBackdrop = false;
   });
   // ‹ › 翻帮手；中间的计数点开是一张列表——帮手多了一个个翻就难受
   $("#helperNav").addEventListener("click", event => {
@@ -2268,8 +2275,13 @@ function bindEvents() {
   );
   window.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
+    // 图片查看器盖在卷宗预览之上，先收它；CSV、Markdown、PDF 这些预览单独开着时，Esc 也得关得掉
     if (!$("#imageViewer").classList.contains("hidden")) {
       closeImageViewer();
+      closeFileViewer();
+      return;
+    }
+    if ($("#fileViewer") && !$("#fileViewer").classList.contains("hidden")) {
       closeFileViewer();
       return;
     }
@@ -3544,14 +3556,15 @@ function trailGroups(message) {
     const at = Number(step.at) || 0,
       rat = Number(step.rat) || 0,
       last = groups.at(-1);
+    // 同一轮后来的步骤把这组思绪的边界往后推，下一组的起点也得跟着走，不然推过去的那段会在下一组再显示一次
     if (last && last.at === at) {
       last.steps.push(step);
       last.rat = Math.max(last.rat, rat);
     } else {
       groups.push({ at, from: prev, rat, rfrom: rprev, steps: [step] });
       prev = at;
-      rprev = Math.max(rprev, rat);
     }
+    rprev = Math.max(rprev, rat);
   }
   return groups;
 }
@@ -3999,6 +4012,9 @@ function openHelperPanel(stepId) {
   $("#helperList").classList.add("hidden");
   showNow($("#helperModal"));
   renderHelperPanel(true);
+  // 换一名帮手是换一张纸，从头看起；不然上一张滚到多深，这张就从多深打开
+  const stage = $("#helperScroll");
+  if (stage) stage.scrollTop = 0;
 }
 function closeHelperPanel() {
   helperStepId = null;
@@ -7271,10 +7287,13 @@ async function maybeAutoTitle(conversation, profile) {
       user: String(first.content || (first.attachments || []).map(a => a.name).join("、") || "（附件）").slice(0, 1200),
       assistant: reply ? `\n\n助手：${String(reply.content).slice(0, 1200)}` : ""
     });
-    const response = await requestChat(profile, [{ role: "user", content: ask }], AbortSignal.timeout(30000), {
-      maxTokens: 600,
+    // 题目只有几个字，可它是与一答并行发出的：接口忙、模型慢起（会思考的先想再写）时三十秒常常不够，三次都超时就再也拟不上题。
+    // 超时给到两分钟；输出上限不能只按题目本身算——会思考的模型把思考也计在 max_tokens 里；开了思考档位的降到最低一档，拟题用不着深想
+    const response = await requestChat(profile, [{ role: "user", content: ask }], AbortSignal.timeout(120000), {
+      maxTokens: 4000,
       temperature: 0.3,
-      systemPrompt: ""
+      systemPrompt: "",
+      reasoning: conversation.reasoning ? "low" : ""
     });
     if (!response.ok) return;
     /** @type {Message} */
