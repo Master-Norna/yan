@@ -721,10 +721,13 @@ async function maybeAutoTitle(conversation, profile) {
       user: String(first.content || (first.attachments || []).map(a => a.name).join("、") || "（附件）").slice(0, 1200),
       assistant: reply ? `\n\n助手：${String(reply.content).slice(0, 1200)}` : ""
     });
-    const response = await requestChat(profile, [{ role: "user", content: ask }], AbortSignal.timeout(30000), {
-      maxTokens: 600,
+    // 题目只有几个字，可它是与一答并行发出的：接口忙、模型慢起（会思考的先想再写）时三十秒常常不够，三次都超时就再也拟不上题。
+    // 超时给到两分钟；输出上限不能只按题目本身算——会思考的模型把思考也计在 max_tokens 里；开了思考档位的降到最低一档，拟题用不着深想
+    const response = await requestChat(profile, [{ role: "user", content: ask }], AbortSignal.timeout(120000), {
+      maxTokens: 4000,
       temperature: 0.3,
-      systemPrompt: ""
+      systemPrompt: "",
+      reasoning: conversation.reasoning ? "low" : ""
     });
     if (!response.ok) return;
     /** @type {Message} */
