@@ -269,7 +269,7 @@ function bindEvents() {
       id = button.closest("[data-library-item]")?.dataset.libraryItem,
       action = button.dataset.libraryAction;
     if (path) {
-      if (action === "view") void openFileViewer(path);
+      if (action === "view") void openFileViewer(path, "", button);
       else if (action === "place") void placeFromArchive(path);
       else if (action === "download") downloadArchiveFile(path);
       else if (action === "remove") void removeArchiveFile(path);
@@ -277,7 +277,7 @@ function bindEvents() {
     }
     if (action === "place") placeFromLibrary(id);
     else if (action === "view")
-      void openFileViewer({ attachmentId: id }, button.closest(".library-card")?.querySelector("strong")?.textContent || "");
+      void openFileViewer({ attachmentId: id }, button.closest(".library-card")?.querySelector("strong")?.textContent || "", button);
     else if (action === "download") void downloadAttachment(id);
     else if (action === "remove") void removeFromLibrary(id);
   });
@@ -737,7 +737,7 @@ function bindEvents() {
     }
     const open = e.target.closest("[data-open-attachment]");
     if (open) {
-      void openFileViewer({ attachmentId: open.dataset.openAttachment }, open.dataset.name || "");
+      void openFileViewer({ attachmentId: open.dataset.openAttachment }, open.dataset.name || "", open);
       return;
     }
     const download = e.target.closest("[data-download-attachment]");
@@ -750,7 +750,7 @@ function bindEvents() {
       void openImageViewer(e.target.dataset.openImage, e.target);
     } else if (e.target.matches?.("[data-open-attachment]")) {
       e.preventDefault();
-      void openFileViewer({ attachmentId: e.target.dataset.openAttachment }, e.target.dataset.name || "");
+      void openFileViewer({ attachmentId: e.target.dataset.openAttachment }, e.target.dataset.name || "", e.target);
     } else if (e.target.matches?.("[data-download-attachment]")) {
       e.preventDefault();
       void downloadAttachment(e.target.dataset.downloadAttachment);
@@ -837,7 +837,7 @@ function bindEvents() {
     if (!path) return;
     if (deliverableMissing(path)) return toast("这件已从卷宗移除");
     if (button.dataset.deliverAction === "download") downloadArchiveFile(path);
-    else void openFileViewer(path);
+    else void openFileViewer(path, "", button);
   });
   $("#outline").addEventListener("click", event => {
     const item = event.target.closest(".outline-item");

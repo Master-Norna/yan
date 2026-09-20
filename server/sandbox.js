@@ -47,7 +47,7 @@ const FORBIDDEN = [
 ];
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
 const HOME_SYSTEM_PATH =
-  /\$env:(USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)\b|%(USERPROFILE|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)%|\$HOME\b|(^|[\s"'=])~([\\/]|$)/i;
+  /\$env:(USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)\b|%(USERPROFILE|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)%|\$HOME\b|(^|[\s"'=])~([\\/]|$)/i;
 // 外联工具：只放行目标全在本机的（curl http://127.0.0.1:8787 这样测本地服务是常事）
 const NET_TOOLS = /(^|[\s;&|(])(curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(\.exe)?(\s|$)/i;
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
@@ -131,16 +131,21 @@ const READ_SOURCES = new RegExp(
     String.raw`(?:^|[;&|({\n]\s*)(?:Get-Content|gc|cat|type)(?:\.exe)?\s+(?:-(?:Raw|Encoding\s+\S+)\s+)*(?:-(?:Path|LiteralPath)\s+)?["']?(${PATH_TOKEN})(?=[^|>\n]*[|>])`,
   "gim"
 );
-function readSourcesIn(text) {
-  const out = new Set();
-  for (const match of text.matchAll(READ_SOURCES)) out.add(match[1] || match[2]);
-  return out;
-}
-/** 把认出的来源从指令文本里抹掉，剩下的才按「写」查 @param {string} text @param {Set<string>} sources */
-function stripSources(text, sources) {
-  let out = text;
-  for (const source of sources) out = out.split(source).join(" ");
-  return out;
+/**
+ * 只记源参数这一次出现的位置，不能按字符串全局豁免：
+ * `Copy-Item C:\x .; Remove-Item C:\x` 里前一个 C:\x 是只读来源，后一个仍是删除目标。
+ */
+function stripReadSources(text) {
+  // 正则索引按 UTF-16 code unit 计；split("") 保持同一套索引（指令前有 emoji 时也不会错位）
+  const chars = text.split("");
+  for (const match of text.matchAll(READ_SOURCES)) {
+    const source = match[1] || match[2],
+      offset = match[0].lastIndexOf(source),
+      start = Number(match.index) + offset;
+    if (!source || offset < 0) continue;
+    for (let i = start; i < start + source.length; i++) chars[i] = " ";
+  }
+  return chars.join("");
 }
 /**
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，
@@ -149,15 +154,14 @@ function stripSources(text, sources) {
  * @param {string} text @param {string} workdir @param {boolean} win @param {string} prefix
  */
 function screenWritePaths(text, workdir, win, prefix) {
-  const sources = readSourcesIn(text);
+  const writeText = stripReadSources(text);
   // 用户目录与系统目录：只是读的来源可以（把 ~/x.txt 拷进来），写进去不行
-  if (HOME_SYSTEM_PATH.test(stripSources(text, sources))) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
+  if (HOME_SYSTEM_PATH.test(writeText)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
-  if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])/.test(stripSources(text, sources)))
+  if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])/.test(writeText))
     return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-  for (const raw of absolutePathsIn(text, win)) {
-    if (sources.has(raw)) continue;
+  for (const raw of absolutePathsIn(writeText, win)) {
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
     const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
     if (!inside(root, candidate))

@@ -23,7 +23,9 @@ check(
     `(c => c[0]?.dataset.openAttachment && c[0].title.startsWith("预览") && c[1]?.dataset.downloadAttachment && c[1].title.startsWith("下载"))([...document.querySelectorAll(".message.user .attachment-card.sent")])`
   )
 );
-await evalJs(`document.querySelector(".message.user .attachment-card.sent[data-open-attachment]").click(); true`);
+await evalJs(
+  `(() => { const card = document.querySelector(".message.user .attachment-card.sent[data-open-attachment]"); card.focus(); card.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); })(); true`
+);
 await waitFor(`!!document.querySelector("#fileViewerStage .file-viewer-table td")`, 8000);
 await shot("attachment-preview.png");
 check(
@@ -35,9 +37,9 @@ check(
 await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
 await sleep(100);
 check(
-  "Esc closes the file preview",
+  "Esc closes the file preview and returns keyboard focus to its attachment",
   await evalJs(
-    `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewerStage").innerHTML`
+    `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewerStage").innerHTML && document.activeElement === document.querySelector(".message.user .attachment-card.sent[data-open-attachment]")`
   )
 );
 await close();

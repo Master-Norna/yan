@@ -701,7 +701,8 @@ function accountUsage(
 }
 // 首次问答完成后请模型拟一个短标题；用户手动改过题（titleAuto === false）就不再动。
 // titled 只在标题真正写入后才置真：临时的网络错误不该让这段对话从此再也拟不上题，之后几答收尾时会再试（最多三次）
-const titlingIds = new Set();
+const titlingIds = new Set(),
+  titleRetries = new Set();
 /** @param {Conversation} conversation 用户亲手改过题（拟题期间也可能改，收尾前得再看一眼） */
 const renamedByHand = conversation => conversation.titleAuto === false;
 /**
@@ -709,7 +710,14 @@ const renamedByHand = conversation => conversation.titleAuto === false;
  * @param {Profile} profile
  */
 async function maybeAutoTitle(conversation, profile) {
-  if (!store.settings.autoTitle || conversation.titleAuto === false || conversation.titled || titlingIds.has(conversation.id)) return;
+  if (!store.settings.autoTitle || conversation.titleAuto === false || conversation.titled) return;
+  // 首问发出时拟题与正文并行；若正文先写完，收尾处会再来一次。此时不能另发一份重复请求，
+  // 但要把「原请求若失败，随后再试」记下来，否则原请求稍后超时便再也没人触发重试。
+  if (titlingIds.has(conversation.id)) {
+    if (conversation.messages.some(message => message.role === "assistant" && message.status === "complete"))
+      titleRetries.add(conversation.id);
+    return;
+  }
   if (quotaExhausted(profile) || (conversation.titleTries || 0) >= 3) return;
   const first = conversation.messages.find(m => m.role === "user"),
     reply = conversation.messages.find(m => m.role === "assistant" && m.status === "complete");
@@ -763,6 +771,9 @@ async function maybeAutoTitle(conversation, profile) {
   } catch {
   } finally {
     titlingIds.delete(conversation.id);
+    const retry = titleRetries.delete(conversation.id);
+    if (retry && !conversation.titled && !renamedByHand(conversation) && store.settings.autoTitle)
+      setTimeout(() => void maybeAutoTitle(conversation, profile), 0);
   }
 }
 // 可读的文档：对话附件、浏览器内的旧卷宗，以及（设置允许时）磁盘卷宗里的文本与 Office / PDF——后者用到时才取回并抽正文

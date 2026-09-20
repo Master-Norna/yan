@@ -21,7 +21,8 @@ const delta = (d, extra = {}) => ({
   ...extra
 });
 let calls = 0,
-  titleFailed = false;
+  titleFailed = false,
+  slowTitleFailed = false;
 // 流的末尾不带换行就结束：最后一段 data: 与 usage 都没有跟换行，页面在 EOF 时也得把它们处理掉
 const sseNoEol = (res, chunks) => {
   res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -100,6 +101,14 @@ http
           titleFailed = true;
           res.writeHead(502, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: { message: "bad gateway" } }));
+        }
+        // TITLESLOWFAIL：正文已经写完、收尾重试撞上仍在途的拟题请求后，旧请求才失败；页面应记住补试一次
+        if (lastUser.includes("TITLESLOWFAIL") && !slowTitleFailed) {
+          slowTitleFailed = true;
+          return setTimeout(() => {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: { message: "slow bad gateway" } }));
+          }, 800);
         }
         return sse(res, [delta({ content: "测试标题" }), delta({}, { usage: { total_tokens: 10 } })]);
       }

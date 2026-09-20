@@ -1789,7 +1789,7 @@ function bindEvents() {
       id = button.closest("[data-library-item]")?.dataset.libraryItem,
       action = button.dataset.libraryAction;
     if (path) {
-      if (action === "view") void openFileViewer(path);
+      if (action === "view") void openFileViewer(path, "", button);
       else if (action === "place") void placeFromArchive(path);
       else if (action === "download") downloadArchiveFile(path);
       else if (action === "remove") void removeArchiveFile(path);
@@ -1797,7 +1797,7 @@ function bindEvents() {
     }
     if (action === "place") placeFromLibrary(id);
     else if (action === "view")
-      void openFileViewer({ attachmentId: id }, button.closest(".library-card")?.querySelector("strong")?.textContent || "");
+      void openFileViewer({ attachmentId: id }, button.closest(".library-card")?.querySelector("strong")?.textContent || "", button);
     else if (action === "download") void downloadAttachment(id);
     else if (action === "remove") void removeFromLibrary(id);
   });
@@ -2257,7 +2257,7 @@ function bindEvents() {
     }
     const open = e.target.closest("[data-open-attachment]");
     if (open) {
-      void openFileViewer({ attachmentId: open.dataset.openAttachment }, open.dataset.name || "");
+      void openFileViewer({ attachmentId: open.dataset.openAttachment }, open.dataset.name || "", open);
       return;
     }
     const download = e.target.closest("[data-download-attachment]");
@@ -2270,7 +2270,7 @@ function bindEvents() {
       void openImageViewer(e.target.dataset.openImage, e.target);
     } else if (e.target.matches?.("[data-open-attachment]")) {
       e.preventDefault();
-      void openFileViewer({ attachmentId: e.target.dataset.openAttachment }, e.target.dataset.name || "");
+      void openFileViewer({ attachmentId: e.target.dataset.openAttachment }, e.target.dataset.name || "", e.target);
     } else if (e.target.matches?.("[data-download-attachment]")) {
       e.preventDefault();
       void downloadAttachment(e.target.dataset.downloadAttachment);
@@ -2357,7 +2357,7 @@ function bindEvents() {
     if (!path) return;
     if (deliverableMissing(path)) return toast("这件已从卷宗移除");
     if (button.dataset.deliverAction === "download") downloadArchiveFile(path);
-    else void openFileViewer(path);
+    else void openFileViewer(path, "", button);
   });
   $("#outline").addEventListener("click", event => {
     const item = event.target.closest(".outline-item");
@@ -5478,7 +5478,7 @@ async function openImageViewer(id, trigger = null) {
   try {
     const file = await getAttachment(id);
     if (!file) return toast("图片原件已不在此浏览器中");
-    if (file.kind !== "image") return openFileViewer({ attachmentId: id }, file.name);
+    if (file.kind !== "image") return openFileViewer({ attachmentId: id }, file.name, trigger);
     imageViewerAttachmentId = id;
     imageViewerArchivePath = null;
     imageViewerReturnFocus = trigger || document.activeElement;
@@ -6268,6 +6268,7 @@ function previewKind(name) {
 // viewerSource 记着当前看的是哪一件：{ path } 是卷宗，{ attachmentId } 是附件；viewerPath 仍留给卷宗那一路的下载
 let viewerPath = "",
   viewerSource = null,
+  viewerReturnFocus = null,
   viewerObjectUrls = [];
 function viewerBlobUrl(blob) {
   const url = URL.createObjectURL(blob);
@@ -6301,7 +6302,7 @@ async function viewerReader(source) {
   };
 }
 /** @param {string|{path?:string, attachmentId?:string}} target 卷宗路径，或 { attachmentId } */
-async function openFileViewer(target, name = "") {
+async function openFileViewer(target, name = "", trigger = null) {
   const source = typeof target === "string" ? { path: target } : target;
   const viewer = $("#fileViewer");
   if (!viewer) return;
@@ -6315,6 +6316,7 @@ async function openFileViewer(target, name = "") {
     kind = previewKind(title);
   viewerPath = source.path || "";
   viewerSource = source;
+  viewerReturnFocus = trigger || document.activeElement;
   revokeViewerUrls();
   viewer.classList.remove("hidden");
   $("#fileViewerName").textContent = title;
@@ -6411,11 +6413,14 @@ function splitDelimited(row, split) {
   return out;
 }
 function closeFileViewer() {
+  const target = viewerReturnFocus;
   viewerPath = "";
   viewerSource = null;
+  viewerReturnFocus = null;
   revokeViewerUrls();
   $("#fileViewer")?.classList.add("hidden");
   $("#fileViewerStage").innerHTML = "";
+  if (target?.isConnected) target.focus();
 }
 let imageViewerArchivePath = null;
 function openArchiveImage(path, trigger = null) {
@@ -7335,7 +7340,8 @@ function accountUsage(
 }
 // 首次问答完成后请模型拟一个短标题；用户手动改过题（titleAuto === false）就不再动。
 // titled 只在标题真正写入后才置真：临时的网络错误不该让这段对话从此再也拟不上题，之后几答收尾时会再试（最多三次）
-const titlingIds = new Set();
+const titlingIds = new Set(),
+  titleRetries = new Set();
 /** @param {Conversation} conversation 用户亲手改过题（拟题期间也可能改，收尾前得再看一眼） */
 const renamedByHand = conversation => conversation.titleAuto === false;
 /**
@@ -7343,7 +7349,14 @@ const renamedByHand = conversation => conversation.titleAuto === false;
  * @param {Profile} profile
  */
 async function maybeAutoTitle(conversation, profile) {
-  if (!store.settings.autoTitle || conversation.titleAuto === false || conversation.titled || titlingIds.has(conversation.id)) return;
+  if (!store.settings.autoTitle || conversation.titleAuto === false || conversation.titled) return;
+  // 首问发出时拟题与正文并行；若正文先写完，收尾处会再来一次。此时不能另发一份重复请求，
+  // 但要把「原请求若失败，随后再试」记下来，否则原请求稍后超时便再也没人触发重试。
+  if (titlingIds.has(conversation.id)) {
+    if (conversation.messages.some(message => message.role === "assistant" && message.status === "complete"))
+      titleRetries.add(conversation.id);
+    return;
+  }
   if (quotaExhausted(profile) || (conversation.titleTries || 0) >= 3) return;
   const first = conversation.messages.find(m => m.role === "user"),
     reply = conversation.messages.find(m => m.role === "assistant" && m.status === "complete");
@@ -7397,6 +7410,9 @@ async function maybeAutoTitle(conversation, profile) {
   } catch {
   } finally {
     titlingIds.delete(conversation.id);
+    const retry = titleRetries.delete(conversation.id);
+    if (retry && !conversation.titled && !renamedByHand(conversation) && store.settings.autoTitle)
+      setTimeout(() => void maybeAutoTitle(conversation, profile), 0);
   }
 }
 // 可读的文档：对话附件、浏览器内的旧卷宗，以及（设置允许时）磁盘卷宗里的文本与 Office / PDF——后者用到时才取回并抽正文

@@ -457,6 +457,7 @@ function previewKind(name) {
 // viewerSource 记着当前看的是哪一件：{ path } 是卷宗，{ attachmentId } 是附件；viewerPath 仍留给卷宗那一路的下载
 let viewerPath = "",
   viewerSource = null,
+  viewerReturnFocus = null,
   viewerObjectUrls = [];
 function viewerBlobUrl(blob) {
   const url = URL.createObjectURL(blob);
@@ -490,7 +491,7 @@ async function viewerReader(source) {
   };
 }
 /** @param {string|{path?:string, attachmentId?:string}} target 卷宗路径，或 { attachmentId } */
-async function openFileViewer(target, name = "") {
+async function openFileViewer(target, name = "", trigger = null) {
   const source = typeof target === "string" ? { path: target } : target;
   const viewer = $("#fileViewer");
   if (!viewer) return;
@@ -504,6 +505,7 @@ async function openFileViewer(target, name = "") {
     kind = previewKind(title);
   viewerPath = source.path || "";
   viewerSource = source;
+  viewerReturnFocus = trigger || document.activeElement;
   revokeViewerUrls();
   viewer.classList.remove("hidden");
   $("#fileViewerName").textContent = title;
@@ -600,11 +602,14 @@ function splitDelimited(row, split) {
   return out;
 }
 function closeFileViewer() {
+  const target = viewerReturnFocus;
   viewerPath = "";
   viewerSource = null;
+  viewerReturnFocus = null;
   revokeViewerUrls();
   $("#fileViewer")?.classList.add("hidden");
   $("#fileViewerStage").innerHTML = "";
+  if (target?.isConnected) target.focus();
 }
 let imageViewerArchivePath = null;
 function openArchiveImage(path, trigger = null) {

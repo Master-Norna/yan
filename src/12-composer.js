@@ -70,7 +70,7 @@ async function openImageViewer(id, trigger = null) {
   try {
     const file = await getAttachment(id);
     if (!file) return toast("图片原件已不在此浏览器中");
-    if (file.kind !== "image") return openFileViewer({ attachmentId: id }, file.name);
+    if (file.kind !== "image") return openFileViewer({ attachmentId: id }, file.name, trigger);
     imageViewerAttachmentId = id;
     imageViewerArchivePath = null;
     imageViewerReturnFocus = trigger || document.activeElement;

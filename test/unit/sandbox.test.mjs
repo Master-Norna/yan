@@ -113,6 +113,8 @@ test("screenCommand：只读的来源不受目录限——拷进来、读出来�
     String.raw`Get-Content C:\Users\me\input.txt | Set-Content .\input.txt`,
     String.raw`type C:\Users\me\x > out.txt`,
     String.raw`Copy-Item $env:USERPROFILE\x.txt .`,
+    String.raw`Copy-Item $env:TEMP\x.txt .`,
+    String.raw`copy %TMP%\x.txt .`,
     "Copy-Item ../other/x ."
   ]) {
     assert.equal(screen(command), null, command);
@@ -128,6 +130,27 @@ test("screenCommand：只读的来源不受目录限——拷进来、读出来�
     String.raw`Get-Content C:\Users\me\x | Set-Content C:\Users\me\y`
   ])
     assert.match(screen(command), /越出了工作目录/, command);
+  // 来源豁免只属于那一次参数；同一路径稍后成为写入或删除目标时，不能跟着被全局豁免
+  for (const command of [
+    String.raw`Copy-Item C:\Users\me\a .; Set-Content C:\Users\me\a x`,
+    String.raw`Get-Content C:\Users\me\a | Set-Content .\a; Remove-Item C:\Users\me\a`,
+    String.raw`copy C:\Users\me\a . & del C:\Users\me\a`,
+    String.raw`Copy-Item $env:USERPROFILE\a .; Set-Content $env:USERPROFILE\a x`,
+    "Copy-Item ../other/x .; Remove-Item ../other/x"
+  ]) {
+    assert.match(screen(command), /越出了工作目录|用户目录|系统目录|上溯/, command);
+    assert.match(screenAutoReview(command, wd, win), /越出了工作目录|用户目录|系统目录|上溯/, command);
+  }
+  // TEMP / TMP 要留在进程环境里供程序使用，但显式文件指令不能借它们写出工作目录
+  for (const command of [
+    String.raw`Set-Content $env:TEMP\yan.txt x`,
+    String.raw`Set-Content $env:TMP\yan.txt x`,
+    String.raw`Set-Content %TEMP%\yan.txt x`,
+    String.raw`Set-Content %TMP%\yan.txt x`
+  ]) {
+    assert.match(screen(command), /用户目录|系统目录/, command);
+    assert.match(screenAutoReview(command, wd, win), /用户目录|系统目录/, command);
+  }
 });
 test("screenCommand：查看可及整台机器——电脑检查要翻系统目录、注册表与进程，读不设目录限", () => {
   for (const command of [
