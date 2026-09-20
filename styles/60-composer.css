@@ -864,8 +864,10 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
 }
+/* 右侧三样：大小离按钮远一点，「预览」「下载」挨得近一点——大小是说明，两枚按钮是一对 */
 .deliver-file small {
   flex: none;
+  margin-right: 10px;
   color: var(--ink-3);
   font: 10px var(--title);
   letter-spacing: 0.04em;
@@ -873,7 +875,7 @@
 }
 .deliver-btn {
   flex: none;
-  padding: 3px 11px;
+  padding: 3px 9px;
   border: 1px solid transparent;
   border-radius: 99px;
   color: var(--ink-3);
@@ -882,6 +884,9 @@
   transition:
     border-color 0.15s,
     color 0.15s;
+}
+.deliver-btn + .deliver-btn {
+  margin-left: -8px;
 }
 .deliver-btn:hover {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
