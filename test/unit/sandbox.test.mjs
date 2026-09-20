@@ -62,6 +62,73 @@ test("screenCommand：cmd 那套写动词也算改动——目录那一道全压
   for (const command of ["copy a b", "md build", "move a b", "Rename-Item a b", "Compress-Archive src out.zip"])
     assert.equal(screen(command), null, command);
 });
+test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带输出参数的与 .NET 直写，都算改动", () => {
+  for (const command of [
+    String.raw`sc C:\Windows\yan-probe.txt x`,
+    String.raw`ni C:\Windows\yan-probe.txt -ItemType File`,
+    String.raw`ri C:\Windows\x`,
+    String.raw`mi a C:\Windows\x`,
+    String.raw`cpi a C:\Windows\x`,
+    String.raw`rni C:\Windows\a b`,
+    String.raw`ac C:\Users\me\x.txt y`,
+    String.raw`powershell -Command Set-Content C:\Windows\yan-probe.txt x`,
+    String.raw`powershell -NoProfile -Command "Set-Content C:\Windows\yan-probe.txt x"`,
+    String.raw`pwsh -c "Remove-Item C:\Windows\x"`,
+    String.raw`Start-Process powershell -ArgumentList "-Command", "Remove-Item C:\Windows\x"`,
+    String.raw`cmd /c "del C:\Windows\x"`,
+    String.raw`Invoke-Command -ScriptBlock { Remove-Item C:\Windows\x }`,
+    String.raw`curl http://127.0.0.1:8787/x -o C:\Windows\yan-probe.txt`,
+    String.raw`Invoke-WebRequest http://127.0.0.1:1/x -OutFile C:\Windows\x`,
+    String.raw`Start-Process node -RedirectStandardOutput C:\Users\me\log.txt`,
+    String.raw`[IO.File]::WriteAllText("C:\Windows\x", "y")`,
+    String.raw`tar -xf a.tar -C C:\Users\me\out`,
+    String.raw`git clone https://github.com/a/b C:\Users\me\b`
+  ]) {
+    assert.match(screen(command), /越出了工作目录|用户目录|系统目录/, command);
+    assert.match(screenAutoReview(command, wd, win), /越出了工作目录|用户目录|系统目录/, command);
+  }
+  // 别名定义与注册表别名：给写动词换个名字就认不出来了，一律拒
+  assert.match(screen("sal zz Remove-Item; zz C:\\Windows\\x"), /别名/);
+  assert.match(screen("Set-Alias zz Remove-Item"), /别名/);
+  assert.match(screen("sp HKCU:\\Software\\x -Name a -Value 1"), /注册表/);
+  assert.match(screen('powershell -c "reg add HKLM\\Software\\x"'), /注册表/);
+  assert.match(screenAutoReview("sal zz Remove-Item", wd, win), /别名/);
+  // 同名的别的东西照常：sc query 是看服务，Get-Process powershell 只是列进程，gcc -o 写在目录内
+  for (const command of [
+    "sc query spooler",
+    "Get-Process powershell",
+    "tar -tf a.tar",
+    "git clone https://github.com/a/b",
+    "gcc -o build/a.exe a.c"
+  ])
+    assert.equal(screen(command), null, command);
+});
+test("screenCommand：只读的来源不受目录限——拷进来、读出来送进管道的那个路径可以在外面，写的那头仍要在目录内", () => {
+  for (const command of [
+    String.raw`Copy-Item C:\Users\me\input.txt .\input.txt`,
+    String.raw`Copy-Item -Recurse C:\Users\me\src .\src`,
+    String.raw`Copy-Item -Path C:\Users\me\a -Destination .\a`,
+    String.raw`copy C:\Users\me\a .\a`,
+    String.raw`robocopy C:\Users\me\src .\src /E`,
+    String.raw`Get-Content C:\Users\me\input.txt | Set-Content .\input.txt`,
+    String.raw`type C:\Users\me\x > out.txt`,
+    String.raw`Copy-Item $env:USERPROFILE\x.txt .`,
+    "Copy-Item ../other/x ."
+  ]) {
+    assert.equal(screen(command), null, command);
+    assert.equal(screenAutoReview(command, wd, win), null, command);
+  }
+  // 搬走会删掉源头，robocopy /MOV 同理；目标在外面、通过管道去删外面的，都不放
+  for (const command of [
+    String.raw`Move-Item C:\Users\me\input.txt .\input.txt`,
+    String.raw`robocopy C:\Users\me\src .\src /MOV`,
+    String.raw`Copy-Item .\a C:\Users\me\b`,
+    String.raw`Copy-Item C:\Users\me\a C:\Users\me\b`,
+    String.raw`Get-ChildItem C:\Users\me | Remove-Item`,
+    String.raw`Get-Content C:\Users\me\x | Set-Content C:\Users\me\y`
+  ])
+    assert.match(screen(command), /越出了工作目录/, command);
+});
 test("screenCommand：查看可及整台机器——电脑检查要翻系统目录、注册表与进程，读不设目录限", () => {
   for (const command of [
     "Get-ChildItem C:\\Windows\\System32\\drivers\\etc",
