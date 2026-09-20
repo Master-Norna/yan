@@ -303,7 +303,11 @@ check(
   r.status === 400 && /沙箱拒绝.*越出/.test(r.data?.error || ""),
   `${r.status} ${r.data?.error}`
 );
-r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Copy-Item plain.txt ../probe.txt" : "cp plain.txt ../probe.txt" });
+r = await post("/api/work/run", {
+  workdir,
+  sandbox: true,
+  command: win ? "Copy-Item plain.txt ../probe.txt" : "cp plain.txt ../probe.txt"
+});
 check("sandbox: .. is refused for mutations", r.status === 400 && /沙箱拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
 // 查看则不锁目录——给电脑做检查要翻系统目录、注册表与进程，这条路必须通
 r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-ChildItem C:\\Windows" : "ls /etc" });
@@ -313,13 +317,21 @@ check("sandbox: .. is allowed for reads", r.status === 200, `${r.status} ${r.dat
 r = await post("/api/work/run", { workdir, sandbox: true, command: "curl https://example.com" });
 check("sandbox: direct outbound fetch is refused", r.status === 400 && /外联/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
 r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-Content .env" : "cat .env" });
-check("sandbox: the command channel cannot read .env", r.status === 400 && /机密|凭据/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+check(
+  "sandbox: the command channel cannot read .env",
+  r.status === 400 && /机密|凭据/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error}`
+);
 r = await post("/api/work/run", {
   workdir,
   sandbox: true,
   command: win ? "Set-Content .git/config x" : "printf x > .git/config"
 });
-check("sandbox: the command channel cannot directly write .git internals", r.status === 400 && /\.git 内部/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+check(
+  "sandbox: the command channel cannot directly write .git internals",
+  r.status === 400 && /\.git 内部/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error}`
+);
 r = await post("/api/work/run", { workdir, sandbox: false, command: "Get-ChildItem .." });
 check("without sandbox the same command runs", r.status === 200, `${r.status} ${r.data?.error}`);
 r = await post("/api/work/run", {
@@ -339,7 +351,11 @@ r = await post("/api/work/run", {
   permission: "review",
   command: win ? "Set-ExecutionPolicy Unrestricted" : "sudo true"
 });
-check("automatic review rejects clear host risk", r.status === 400 && /审查拒绝/.test(r.data?.error || ""), `${r.status} ${r.data?.error || ""}`);
+check(
+  "automatic review rejects clear host risk",
+  r.status === 400 && /审查拒绝/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error || ""}`
+);
 const outsideNative = OUTSIDE.split("/").join(win ? "\\" : "/"),
   outsideReviewFile = `${outsideNative}${win ? "\\" : "/"}reviewed-outside.txt`;
 r = await post("/api/work/run", {

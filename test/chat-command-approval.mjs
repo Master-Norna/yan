@@ -14,7 +14,9 @@ await sleep(900);
 await evalJs(
   `document.querySelector("#welcomeInput").value = "CHAT-AUTO"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
 );
-await waitFor(`!document.querySelector("#approvalBar").classList.contains("hidden") && !!document.querySelector('#approvalBar [data-approve="auto"]')`);
+await waitFor(
+  `!document.querySelector("#approvalBar").classList.contains("hidden") && !!document.querySelector('#approvalBar [data-approve="auto"]')`
+);
 check(
   "chat command asks through the local-computer approval bar",
   (await evalJs(`document.querySelector("#approvalBar .approval-title").textContent`)) === "本机请示 · 运行此指令"
@@ -27,7 +29,9 @@ await evalJs(`document.querySelector('#approvalBar [data-approve="auto"]').click
 await waitFor(`document.querySelector('.message.assistant')?.dataset.status === "complete"`);
 check(
   "the second command in the same answer ran without another prompt",
-  await evalJs(`document.querySelectorAll('.tool-step[data-status="done"] .tool-label').length === 2 && document.querySelector("#approvalBar").classList.contains("hidden")`)
+  await evalJs(
+    `document.querySelectorAll('.tool-step[data-status="done"] .tool-label').length === 2 && document.querySelector("#approvalBar").classList.contains("hidden")`
+  )
 );
 check(
   "answer-scoped approval was not persisted on the conversation",
@@ -37,9 +41,16 @@ check(
 await evalJs(
   `document.querySelector("#chatInput").value = "CHAT-AUTO again"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
-await waitFor(`!document.querySelector("#approvalBar").classList.contains("hidden") && !!document.querySelector('#approvalBar [data-approve="run"]')`);
-check("the next answer asks again", (await evalJs(`document.querySelector("#approvalBar .approval-title").textContent`)) === "本机请示 · 运行此指令");
+await waitFor(
+  `!document.querySelector("#approvalBar").classList.contains("hidden") && !!document.querySelector('#approvalBar [data-approve="run"]')`
+);
+check(
+  "the next answer asks again",
+  (await evalJs(`document.querySelector("#approvalBar .approval-title").textContent`)) === "本机请示 · 运行此指令"
+);
 await evalJs(`document.querySelector('#approvalBar [data-approve="auto"]').click(); true`);
-await waitFor(`document.querySelectorAll('.message.assistant').length === 2 && [...document.querySelectorAll('.message.assistant')].at(-1).dataset.status === "complete"`);
+await waitFor(
+  `document.querySelectorAll('.message.assistant').length === 2 && [...document.querySelectorAll('.message.assistant')].at(-1).dataset.status === "complete"`
+);
 
 close();

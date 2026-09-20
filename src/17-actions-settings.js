@@ -396,11 +396,7 @@ function bindSettingsEvents() {
           return;
         }
         store.settings[key] =
-          key === "width"
-            ? Number(value)
-            : ["autoTitle", "archiveRead", "sandbox"].includes(key)
-              ? value === "true"
-              : value;
+          key === "width" ? Number(value) : ["autoTitle", "archiveRead", "sandbox"].includes(key) ? value === "true" : value;
         saveStore();
         applyAppearance();
         renderSettings();

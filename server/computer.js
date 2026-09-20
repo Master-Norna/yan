@@ -96,23 +96,41 @@ function windowsScript(section, maxItems) {
   const json = value => `${value} | ConvertTo-Json -Depth 6 -Compress`;
   switch (section) {
     case "resources":
-      return json(`Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First ${maxItems} Name,Id,@{n='MemoryMB';e={[math]::Round($_.WorkingSet64/1MB,1)}},@{n='CpuSeconds';e={if ($_.CPU -ne $null) {[math]::Round($_.CPU,1)} else {$null}}}`);
+      return json(
+        `Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First ${maxItems} Name,Id,@{n='MemoryMB';e={[math]::Round($_.WorkingSet64/1MB,1)}},@{n='CpuSeconds';e={if ($_.CPU -ne $null) {[math]::Round($_.CPU,1)} else {$null}}}`
+      );
     case "storage":
-      return json("Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Root} | Select-Object Name,Root,@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}},@{n='FreePercent';e={if (($_.Used+$_.Free) -gt 0) {[math]::Round(100*$_.Free/($_.Used+$_.Free),1)} else {$null}}}");
+      return json(
+        "Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Root} | Select-Object Name,Root,@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}},@{n='FreePercent';e={if (($_.Used+$_.Free) -gt 0) {[math]::Round(100*$_.Free/($_.Used+$_.Free),1)} else {$null}}}"
+      );
     case "network":
-      return json(`[pscustomobject]@{Configuration=(ipconfig ${maxItems > 12 ? "/all" : ""} | Out-String).Trim();Listeners=@(netstat -ano -p tcp | Select-String 'LISTENING' | Select-Object -First ${maxItems} | ForEach-Object {$_.Line.Trim()})}`);
+      return json(
+        `[pscustomobject]@{Configuration=(ipconfig ${maxItems > 12 ? "/all" : ""} | Out-String).Trim();Listeners=@(netstat -ano -p tcp | Select-String 'LISTENING' | Select-Object -First ${maxItems} | ForEach-Object {$_.Line.Trim()})}`
+      );
     case "services":
-      return json(`[pscustomobject]@{Counts=@(Get-Service | Group-Object Status | Select-Object Name,Count);AutomaticButStopped=@(Get-Service | Where-Object {$_.StartType -eq 'Automatic' -and $_.Status -ne 'Running'} | Select-Object -First ${maxItems} Name,DisplayName,Status,StartType)}`);
+      return json(
+        `[pscustomobject]@{Counts=@(Get-Service | Group-Object Status | Select-Object Name,Count);AutomaticButStopped=@(Get-Service | Where-Object {$_.StartType -eq 'Automatic' -and $_.Status -ne 'Running'} | Select-Object -First ${maxItems} Name,DisplayName,Status,StartType)}`
+      );
     case "startup":
-      return json(`$items=@(); foreach($path in @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run')) { if(Test-Path $path) { foreach($name in (Get-Item $path).Property) { $items += [pscustomobject]@{Name=$name;Location=$path} } } }; foreach($folder in @([Environment]::GetFolderPath('Startup'),[Environment]::GetFolderPath('CommonStartup'))) { if($folder -and (Test-Path $folder)) { Get-ChildItem $folder -File | ForEach-Object { $items += [pscustomobject]@{Name=$_.Name;Location=$folder} } } }; $items | Select-Object -First ${maxItems}`);
+      return json(
+        `$items=@(); foreach($path in @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run')) { if(Test-Path $path) { foreach($name in (Get-Item $path).Property) { $items += [pscustomobject]@{Name=$name;Location=$path} } } }; foreach($folder in @([Environment]::GetFolderPath('Startup'),[Environment]::GetFolderPath('CommonStartup'))) { if($folder -and (Test-Path $folder)) { Get-ChildItem $folder -File | ForEach-Object { $items += [pscustomobject]@{Name=$_.Name;Location=$folder} } } }; $items | Select-Object -First ${maxItems}`
+      );
     case "software":
-      return json(`Get-ItemProperty 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object DisplayName | Sort-Object DisplayName -Unique | Select-Object -First ${maxItems} DisplayName,DisplayVersion,Publisher,InstallDate`);
+      return json(
+        `Get-ItemProperty 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object DisplayName | Sort-Object DisplayName -Unique | Select-Object -First ${maxItems} DisplayName,DisplayVersion,Publisher,InstallDate`
+      );
     case "development":
-      return json(`[pscustomobject]@{PowerShell=$PSVersionTable.PSVersion.ToString();Node=${JSON.stringify(process.version)};Commands=@(Get-Command git,node,npm,python,py,wsl,docker -ErrorAction SilentlyContinue | Select-Object Name,Source,@{n='Version';e={$_.Version.ToString()}})}`);
+      return json(
+        `[pscustomobject]@{PowerShell=$PSVersionTable.PSVersion.ToString();Node=${JSON.stringify(process.version)};Commands=@(Get-Command git,node,npm,python,py,wsl,docker -ErrorAction SilentlyContinue | Select-Object Name,Source,@{n='Version';e={$_.Version.ToString()}})}`
+      );
     case "security":
-      return json("[pscustomobject]@{Services=@(Get-Service WinDefend,SecurityHealthService,wscsvc -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType);DefenderSignature=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Signature Updates' -ErrorAction SilentlyContinue | Select-Object AVSignatureVersion,ASSignatureVersion,SignaturesLastUpdated)}");
+      return json(
+        "[pscustomobject]@{Services=@(Get-Service WinDefend,SecurityHealthService,wscsvc -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType);DefenderSignature=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Signature Updates' -ErrorAction SilentlyContinue | Select-Object AVSignatureVersion,ASSignatureVersion,SignaturesLastUpdated)}"
+      );
     case "events":
-      return json(`Get-WinEvent -FilterHashtable @{LogName='System';Level=1,2;StartTime=(Get-Date).AddDays(-1)} -MaxEvents ${maxItems} -ErrorAction SilentlyContinue | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,@{n='Message';e={($_.Message -replace '\\s+',' ').Trim()}}`);
+      return json(
+        `Get-WinEvent -FilterHashtable @{LogName='System';Level=1,2;StartTime=(Get-Date).AddDays(-1)} -MaxEvents ${maxItems} -ErrorAction SilentlyContinue | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,@{n='Message';e={($_.Message -replace '\\s+',' ').Trim()}}`
+      );
     default:
       return "";
   }
@@ -131,7 +149,11 @@ async function inspectSection(name, detail) {
       if (name === "development")
         output = JSON.stringify({ node: process.version, executable: process.execPath, platform: process.platform }, null, 2);
       else throw Error("该检查项目前只支持 Windows 主机");
-    } else output = await runPowerShell(windowsScript(name, detail === "full" ? 30 : 12), name === "events" || name === "software" ? 20000 : 12000);
+    } else
+      output = await runPowerShell(
+        windowsScript(name, detail === "full" ? 30 : 12),
+        name === "events" || name === "software" ? 20000 : 12000
+      );
     return { name, title: SECTION_TITLES[name], ok: true, output: clip(output), durationMs: Date.now() - started };
   } catch (error) {
     return { name, title: SECTION_TITLES[name], ok: false, error: clip(error?.message || error, 600), durationMs: Date.now() - started };
@@ -141,7 +163,8 @@ async function inspectComputer(sections, detail) {
   const names = normalizeSections(sections),
     results = [];
   // 最多并行三项，免得一次「全查」同时拉起许多 PowerShell 抢机器。
-  for (let i = 0; i < names.length; i += 3) results.push(...(await Promise.all(names.slice(i, i + 3).map(name => inspectSection(name, detail)))));
+  for (let i = 0; i < names.length; i += 3)
+    results.push(...(await Promise.all(names.slice(i, i + 3).map(name => inspectSection(name, detail)))));
   return results;
 }
 

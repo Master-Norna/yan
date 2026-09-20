@@ -110,7 +110,9 @@ check(
 check("seal still says 言", (await evalJs(`document.querySelector("#modeSeal").dataset.mode`)) === "chat");
 check(
   "the three-mode command-policy toggle is also available in 言",
-  await evalJs(`!document.querySelector("#workAuto").classList.contains("hidden") && document.querySelector("#workAuto").textContent === "问而后行"`)
+  await evalJs(
+    `!document.querySelector("#workAuto").classList.contains("hidden") && document.querySelector("#workAuto").textContent === "问而后行"`
+  )
 );
 
 // ---- 中途绑定：同一段对话，下一问起变为行
@@ -129,7 +131,10 @@ check(
   "seal flips to 行",
   (await evalJs(`document.querySelector("#modeSeal").dataset.mode + document.querySelector("#modeSeal .wide").textContent`)) === "work执事"
 );
-check("command-policy toggle remains available once bound", await evalJs(`!document.querySelector("#workAuto").classList.contains("hidden")`));
+check(
+  "command-policy toggle remains available once bound",
+  await evalJs(`!document.querySelector("#workAuto").classList.contains("hidden")`)
+);
 check(
   "history now shows the conversation inside a 工 group",
   await evalJs(

@@ -50,7 +50,7 @@ function commandPolicyOf(c) {
   return normalizeCommandPolicy(c?.commandPolicy, normalizeCommandPolicy(store.settings.commandPolicyDefault));
 }
 function nextCommandPolicy(value) {
-  return ({ ask: "review", review: "auto", auto: "ask" })[normalizeCommandPolicy(value)];
+  return { ask: "review", review: "auto", auto: "ask" }[normalizeCommandPolicy(value)];
 }
 // 三档权限：言与行都可逐段对话设置；按钮循环切换，设置页决定新对话默认值
 function renderWorkAuto() {

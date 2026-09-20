@@ -158,8 +158,7 @@ function screenWritePaths(text, workdir, win, prefix) {
   // 用户目录与系统目录：只是读的来源可以（把 ~/x.txt 拷进来），写进去不行
   if (HOME_SYSTEM_PATH.test(writeText)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
-  if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])/.test(writeText))
-    return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
+  if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])/.test(writeText)) return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
   for (const raw of absolutePathsIn(writeText, win)) {
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;

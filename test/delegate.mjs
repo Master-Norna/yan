@@ -101,7 +101,11 @@ check(
   JSON.parse(painted).markers === 2 && JSON.parse(painted).groups <= JSON.parse(painted).steps,
   painted
 );
-check("report stays in the trail — that is what the main model consumed", card.report.startsWith("回报：已把 return 1 改为 return 2"), card.report);
+check(
+  "report stays in the trail — that is what the main model consumed",
+  card.report.startsWith("回报：已把 return 1 改为 return 2"),
+  card.report
+);
 // 点那枚签在右侧开面板，帮手做过的两步都在里面
 await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
 await sleep(200);
@@ -113,7 +117,11 @@ check(
   panel.open && panel.nested.join() === "读取:done,修改:done",
   JSON.stringify(panel)
 );
-check("panel head names the errand and its tally", panel.title === "改 a.js" && /2 步 · 改 1 个文件/.test(panel.sub), JSON.stringify(panel));
+check(
+  "panel head names the errand and its tally",
+  panel.title === "改 a.js" && /2 步 · 改 1 个文件/.test(panel.sub),
+  JSON.stringify(panel)
+);
 // 专色：只是看的归墨灰、动手改的归朱砂、差遣归金——一条时间线上扫一眼就该分得出，颜色不能是同一个
 const hues = await evalJs(
   `JSON.stringify({ read: getComputedStyle(document.querySelector('#helperModal .tool-step[data-tool="read_file"] .tool-label')).color, edit: getComputedStyle(document.querySelector('#helperModal .tool-step[data-tool="edit_file"] .tool-label')).color, delegate: getComputedStyle(document.querySelector('.message.assistant .tool-step-delegate .tool-label')).color })`
@@ -226,5 +234,9 @@ await sleep(300);
 const after = await evalJs(
   `(d => d ? { marker: !!d, report: !!d.querySelector(".sub-report"), nested: document.querySelectorAll("#helperModal .tool-step").length } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
 );
-check("marker, report and the helper's timeline all survive reload", after?.marker && after.report && after.nested === 2, JSON.stringify(after));
+check(
+  "marker, report and the helper's timeline all survive reload",
+  after?.marker && after.report && after.nested === 2,
+  JSON.stringify(after)
+);
 close();

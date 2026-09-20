@@ -2516,7 +2516,7 @@ function commandPolicyOf(c) {
   return normalizeCommandPolicy(c?.commandPolicy, normalizeCommandPolicy(store.settings.commandPolicyDefault));
 }
 function nextCommandPolicy(value) {
-  return ({ ask: "review", review: "auto", auto: "ask" })[normalizeCommandPolicy(value)];
+  return { ask: "review", review: "auto", auto: "ask" }[normalizeCommandPolicy(value)];
 }
 // 三档权限：言与行都可逐段对话设置；按钮循环切换，设置页决定新对话默认值
 function renderWorkAuto() {
@@ -7809,7 +7809,9 @@ async function inspectComputerTool(step, args, signal) {
   const sections = Array.isArray(args.sections) ? args.sections : args.sections ? [args.sections] : [],
     data = await bridge("/api/work/inspect", { sections, detail: args.detail === "full" ? "full" : "summary" }, signal),
     rows = (data.sections || []).map(section =>
-      section.ok ? `## ${section.title}\n${section.output || "（无结果）"}` : `## ${section.title}\n检查失败：${section.error || "未知错误"}`
+      section.ok
+        ? `## ${section.title}\n${section.output || "（无结果）"}`
+        : `## ${section.title}\n检查失败：${section.error || "未知错误"}`
     ),
     ok = (data.sections || []).filter(section => section.ok).length;
   step.title = sections.length ? (data.sections || []).map(section => section.title).join("、") : "常规体检";
@@ -7959,7 +7961,8 @@ const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file
 // 「问而后行」里的本机规则：明确只读才免确认。系统检查纳入白名单；只允许一组纯展示管道，脚本块、远程会话与重定向仍去请示。
 const READ_ONLY_COMMAND =
     /^(?:git\s+(?:status|log|diff|show|rev-parse|ls-files|remote\s+-v)\b|git\s+branch(?:\s+(?:-a|-r|-v|-vv|--list))*\s*$|(?:ls|dir|tree|pwd|cat|type|head|tail|wc|grep|findstr|which|where|whoami|hostname|uname|uptime|free|df|du|ps|lscpu|lsmem|lsblk|lspci|lsusb|mount|id|groups|sw_vers|vm_stat)\b|Get-(?:ChildItem|Content|Location|Command|Item|ItemProperty|Date|ComputerInfo|CimInstance|WmiObject|Process|Service|NetAdapter|NetIPConfiguration|NetIPAddress|NetRoute|NetTCPConnection|NetUDPEndpoint|DnsClientServerAddress|Volume|Disk|Partition|PhysicalDisk|StorageReliabilityCounter|MpComputerStatus|HotFix|WinEvent|EventLog|ScheduledTask|LocalUser|LocalGroup|Acl|Package)\b|Select-String\b|(?:systeminfo|tasklist|driverquery|ipconfig|netstat)\b|sc(?:\.exe)?\s+query\b|wmic(?:\.exe)?\b[^\n]*\bget\b|wsl(?:\.exe)?\s+(?:--status|--version|-l\b|--list\b)|docker\s+(?:version|info|ps|images)\b|(?:node|npm|npx|python|python3|pip|dotnet|java|go|cargo|rustc|ruby|php|git)\s+(?:-v|-V|--version|version)\s*$)/i,
-  READ_ONLY_PIPE = /^(?:Select-Object|Sort-Object|Format-Table|Format-List|ConvertTo-Json|Measure-Object|Group-Object|findstr|grep|head|tail|wc)\b/i;
+  READ_ONLY_PIPE =
+    /^(?:Select-Object|Sort-Object|Format-Table|Format-List|ConvertTo-Json|Measure-Object|Group-Object|findstr|grep|head|tail|wc)\b/i;
 function isReadOnlyCommand(command) {
   const text = String(command || "").trim();
   if (/[;&<>`\n{}]|\$\(|\|\|/.test(text) || /-(?:ComputerName|CimSession|Session|Credential)\b/i.test(text)) return false;
@@ -8594,7 +8597,17 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.query || "");
     const data = await bridge(
       "/api/work/search",
-      { workdir, roam, sandbox, permission, query: step.title, path: args.path, glob: args.glob, literal: args.literal === true, limit: args.limit },
+      {
+        workdir,
+        roam,
+        sandbox,
+        permission,
+        query: step.title,
+        path: args.path,
+        glob: args.glob,
+        literal: args.literal === true,
+        limit: args.limit
+      },
       signal
     );
     const lines = data.matches.map(match => `${match.file}:${match.line}: ${match.text}`);
@@ -9610,11 +9623,7 @@ function bindSettingsEvents() {
           return;
         }
         store.settings[key] =
-          key === "width"
-            ? Number(value)
-            : ["autoTitle", "archiveRead", "sandbox"].includes(key)
-              ? value === "true"
-              : value;
+          key === "width" ? Number(value) : ["autoTitle", "archiveRead", "sandbox"].includes(key) ? value === "true" : value;
         saveStore();
         applyAppearance();
         renderSettings();

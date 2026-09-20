@@ -12,7 +12,10 @@ await evalJs(
 await send("Page.navigate", { url: PAGE });
 await sleep(900);
 
-check("welcome exposes automatic review as the default third-mode policy", (await evalJs(`document.querySelector("#approveChip .chip-text").textContent`)) === "审而后行");
+check(
+  "welcome exposes automatic review as the default third-mode policy",
+  (await evalJs(`document.querySelector("#approveChip .chip-text").textContent`)) === "审而后行"
+);
 await evalJs(
   `document.querySelector("#welcomeInput").value = "POLICY-REVIEW"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
 );
@@ -20,10 +23,28 @@ await waitFor(`document.querySelector('.message.assistant')?.dataset.status === 
 const state = await evalJs(
   `(c => ({ policy: c.commandPolicy, steps: c.messages.at(-1).steps.map(s => ({ name: s.name, status: s.status, result: s.result, output: s.output })) }))(JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`
 );
-check("automatic review persisted on the conversation and never opened an approval request", state.policy === "review" && (await evalJs(`document.querySelector("#approvalBar").classList.contains("hidden")`)));
-check("ordinary state-changing work was allowed automatically", state.steps[0]?.name === "run_command" && state.steps[0].status === "done" && existsSync(`${TMP}/permission-inspection/review-ok.txt`), JSON.stringify(state.steps[0]));
-check("clear host risk was denied without asking", state.steps[1]?.name === "run_command" && state.steps[1].status === "error" && /审查拒绝/.test(state.steps[1].result || ""), JSON.stringify(state.steps[1]));
-check("native inspection still returned overview and storage after the shell route was denied", state.steps[2]?.name === "inspect_computer" && state.steps[2].status === "done" && /系统概况/.test(state.steps[2].output || "") && /磁盘与存储/.test(state.steps[2].output || ""), JSON.stringify(state.steps[2]));
+check(
+  "automatic review persisted on the conversation and never opened an approval request",
+  state.policy === "review" && (await evalJs(`document.querySelector("#approvalBar").classList.contains("hidden")`))
+);
+check(
+  "ordinary state-changing work was allowed automatically",
+  state.steps[0]?.name === "run_command" && state.steps[0].status === "done" && existsSync(`${TMP}/permission-inspection/review-ok.txt`),
+  JSON.stringify(state.steps[0])
+);
+check(
+  "clear host risk was denied without asking",
+  state.steps[1]?.name === "run_command" && state.steps[1].status === "error" && /审查拒绝/.test(state.steps[1].result || ""),
+  JSON.stringify(state.steps[1])
+);
+check(
+  "native inspection still returned overview and storage after the shell route was denied",
+  state.steps[2]?.name === "inspect_computer" &&
+    state.steps[2].status === "done" &&
+    /系统概况/.test(state.steps[2].output || "") &&
+    /磁盘与存储/.test(state.steps[2].output || ""),
+  JSON.stringify(state.steps[2])
+);
 
 const labels = [];
 for (let i = 0; i < 3; i++) {
@@ -35,6 +56,10 @@ await evalJs(`document.querySelector("#openSettings")?.click() || document.query
 await sleep(250);
 await evalJs(`document.querySelector('.tab-btn[data-tab="tools"]')?.click(); true`);
 await sleep(150);
-check("settings offers all three permission modes", (await evalJs(`[...document.querySelectorAll('[data-setting="commandPolicyDefault"]')].map(b => b.textContent).join("|")`)) === "问而后行|审而后行|径行");
+check(
+  "settings offers all three permission modes",
+  (await evalJs(`[...document.querySelectorAll('[data-setting="commandPolicyDefault"]')].map(b => b.textContent).join("|")`)) ===
+    "问而后行|审而后行|径行"
+);
 
 close();
