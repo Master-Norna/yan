@@ -437,7 +437,7 @@ function bindSettingsEvents() {
         p[field] = ["temperature", "maxTokens", "usedTokens", "contextWindow"].includes(field) ? Number(e.target.value) : e.target.value;
         if (field === "contextWindow") updateContextGauge();
         // 亲手填的档位就是定论，不再探；清空了下次选模型再探
-        if (field === "reasoningLevels") p.reasoningProbed = e.target.value.trim() ? reasoningProbeKey(p) : "";
+        if (field === "reasoningLevels") p.reasoningProbed = e.target.value.trim() ? `manual|${reasoningProbeKey(p)}` : "";
         persistServerProfile(p);
         saveStoreSoon();
       })
@@ -503,17 +503,29 @@ function bindSettingsEvents() {
       .forEach(button => (button.onclick = () => handleProfileAction(p, button.dataset.profileAction, card)));
   });
 }
-// 选定模型后探它认哪几档，结果写在卡片的状态行上，高级配置里的「思考档位」也跟着填；探不成不吭声（撞了错再学）
+// 选定模型后探它认哪几档，结果写在卡片的状态行上，高级配置里的「思考档位」也跟着填；探不成不吭声（撞了错再学）。
+// 亲手填过档位的不探（测试连接也不），状态行照实写它填的。同一张卡片连着探了两次（模型改了两回），只有最后一次能动状态行——
+// 先前那次迟到回来是作废的，不能把后一次已经写上的结果抹掉
+const probeSerial = new Map();
 /** @param {Profile} profile */
 async function reportReasoningProbe(profile, card, force = false) {
-  if (force) profile.reasoningProbed = "";
-  if (!profile.model || reasoningProbed(profile)) return;
+  if (force && !reasoningManual(profile)) profile.reasoningProbed = "";
+  if (!profile.model) return;
   const status = () => document.querySelector(`[data-profile-card="${profile.id}"] .profile-status`);
   const before = status()?.textContent || "";
+  if (reasoningProbed(profile)) {
+    if (force && status()) {
+      const levels = profileReasoningLevels(profile);
+      status().textContent = `${before ? `${before} · ` : ""}思考档位 ${levels.length ? levels.map(reasoningLabel).join(" / ") : "此模型不认"}${reasoningManual(profile) ? "（手填）" : ""}`;
+    }
+    return;
+  }
+  const serial = (probeSerial.get(profile.id) || 0) + 1;
+  probeSerial.set(profile.id, serial);
   if (status()) status().textContent = `${before ? `${before} · ` : ""}探测思考档位…`;
   const levels = await probeReasoningLevels(profile);
   const el = status();
-  if (!el) return;
+  if (!el || probeSerial.get(profile.id) !== serial) return;
   if (levels === null) el.textContent = before;
   else {
     el.textContent = `${before ? `${before} · ` : ""}思考档位 ${levels.length ? levels.map(reasoningLabel).join(" / ") : "此模型不认"}`;

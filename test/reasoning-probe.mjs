@@ -106,6 +106,30 @@ check(
   (await stored("p4")) === "low, medium, high|openai|http://127.0.0.1:8798/v1|fake-three",
   await stored("p4")
 );
+const raced = await evalJs(`document.querySelector('[data-profile-card="p4"] .profile-status').textContent`);
+check("the late probe does not wipe the status the newer one wrote", /思考档位 低 \/ 中 \/ 高$/.test(raced), raced);
+// 记过 none 的模型换成照单全收的：旧的 none 不能跟着走，按四档
+await setModel("fake-plain");
+await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningLevels === "none"`, 8000);
+await setModel("fake-mute");
+await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningProbed.endsWith("fake-mute")`, 8000);
+check(
+  "stale levels are dropped when a new model accepts the field",
+  (await stored("p4")) === "low, medium, high, max|openai|http://127.0.0.1:8798/v1|fake-mute",
+  await stored("p4")
+);
+// 亲手填的档位是定论：测试连接不重探，状态行照实写
+const levelsInput = `document.querySelector('[data-profile-card="p4"] [data-field="reasoningLevels"]')`;
+await evalJs(`${levelsInput}.value = "low, xhigh"; ${levelsInput}.dispatchEvent(new Event("input")); true`);
+await evalJs(`document.querySelector('[data-profile-card="p4"] [data-profile-action="test"]').click(); true`);
+await waitFor(`/思考档位/.test(document.querySelector('[data-profile-card="p4"] .profile-status')?.textContent || "")`, 8000);
+await sleep(500);
+const manual = await evalJs(`document.querySelector('[data-profile-card="p4"] .profile-status').textContent`);
+check(
+  "hand-filled levels survive test connection",
+  /思考档位 低 \/ 极高（手填）$/.test(manual) && (await stored("p4")).startsWith("low, xhigh|manual|"),
+  `${manual} ${await stored("p4")}`
+);
 // 改了 Base URL：模型 ID 没变也得重探
 const urlInput = `document.querySelector('[data-profile-card="p2"] [data-field="baseUrl"]')`;
 await evalJs(`${urlInput}.value = "http://127.0.0.1:8798/v1/"; ${urlInput}.dispatchEvent(new Event("input")); true`);

@@ -171,16 +171,26 @@ function learnReasoningLevels(profile, message, sent) {
 function reasoningProbeKey(profile) {
   return `${anthropicLike(profile) ? "anthropic" : "openai"}|${String(profile?.baseUrl || "").trim()}|${String(profile?.model || "").trim()}`;
 }
+// 探过、或用户亲手填过档位（记成 manual|键——手填的是定论，测试连接也不重探；换了模型才作废）
 /** @param {Profile} profile */
 function reasoningProbed(profile) {
-  return !!profile?.model && profile.reasoningProbed === reasoningProbeKey(profile);
+  const key = reasoningProbeKey(profile);
+  return !!profile?.model && (profile.reasoningProbed === key || profile.reasoningProbed === `manual|${key}`);
 }
+/** @param {Profile} profile */
+function reasoningManual(profile) {
+  return String(profile?.reasoningProbed || "").startsWith("manual|");
+}
+// 走到这里就是身份变了（或亲手要求重探）：此前记的档位是旧模型的，一律不沿用——接口照单全收就按通用四档，
+// 不然旧模型的 none 会跟着新模型走，把一个认档位的模型永远标成不认
 /** @param {Profile} profile */
 async function probeReasoningLevels(profile) {
   if (!profile?.model || reasoningProbed(profile)) return null;
   const key = reasoningProbeKey(profile);
   if (anthropicLike(profile) || /dashscope|aliyuncs/i.test(profile.baseUrl || "")) {
+    profile.reasoningLevels = "";
     profile.reasoningProbed = key;
+    persistServerProfile(profile);
     saveStoreSoon();
     return profileReasoningLevels(profile);
   }
@@ -196,7 +206,7 @@ async function probeReasoningLevels(profile) {
     // 探着探着模型被换了：这份结果是旧模型的，作废
     if (reasoningProbeKey(profile) !== key) return null;
     let learned;
-    if (response.ok) learned = profile.reasoningLevels ? profileReasoningLevels(profile) : REASONING_DEFAULT_LEVELS;
+    if (response.ok) learned = REASONING_DEFAULT_LEVELS;
     else {
       const data = await response.json().catch(() => ({})),
         message = (typeof data.error === "string" ? data.error : data.error?.message) || "";
