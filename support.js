@@ -147,7 +147,7 @@
  * @property {boolean} [enableSearch]
  * @property {number} [contextWindow]
  * @property {string} [reasoningLevels] 此模型认的思考档位，逗号分隔；none 是不认；探到的与手填的都记在这里
- * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey）；换了任一样再探
+ * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey），亲手填的前面带 manual|；换了任一样再探
  * @property {string[]} [modelList]
  */
 /** @typedef {{ id: string, text: string, createdAt: string, updatedAt: string, source: { conversationId: string, title: string }|null }} MemoryItem */
@@ -8974,16 +8974,26 @@ function learnReasoningLevels(profile, message, sent) {
 function reasoningProbeKey(profile) {
   return `${anthropicLike(profile) ? "anthropic" : "openai"}|${String(profile?.baseUrl || "").trim()}|${String(profile?.model || "").trim()}`;
 }
+// 探过、或用户亲手填过档位（记成 manual|键——手填的是定论，测试连接也不重探；换了模型才作废）
 /** @param {Profile} profile */
 function reasoningProbed(profile) {
-  return !!profile?.model && profile.reasoningProbed === reasoningProbeKey(profile);
+  const key = reasoningProbeKey(profile);
+  return !!profile?.model && (profile.reasoningProbed === key || profile.reasoningProbed === `manual|${key}`);
 }
+/** @param {Profile} profile */
+function reasoningManual(profile) {
+  return String(profile?.reasoningProbed || "").startsWith("manual|");
+}
+// 走到这里就是身份变了（或亲手要求重探）：此前记的档位是旧模型的，一律不沿用——接口照单全收就按通用四档，
+// 不然旧模型的 none 会跟着新模型走，把一个认档位的模型永远标成不认
 /** @param {Profile} profile */
 async function probeReasoningLevels(profile) {
   if (!profile?.model || reasoningProbed(profile)) return null;
   const key = reasoningProbeKey(profile);
   if (anthropicLike(profile) || /dashscope|aliyuncs/i.test(profile.baseUrl || "")) {
+    profile.reasoningLevels = "";
     profile.reasoningProbed = key;
+    persistServerProfile(profile);
     saveStoreSoon();
     return profileReasoningLevels(profile);
   }
@@ -8999,7 +9009,7 @@ async function probeReasoningLevels(profile) {
     // 探着探着模型被换了：这份结果是旧模型的，作废
     if (reasoningProbeKey(profile) !== key) return null;
     let learned;
-    if (response.ok) learned = profile.reasoningLevels ? profileReasoningLevels(profile) : REASONING_DEFAULT_LEVELS;
+    if (response.ok) learned = REASONING_DEFAULT_LEVELS;
     else {
       const data = await response.json().catch(() => ({})),
         message = (typeof data.error === "string" ? data.error : data.error?.message) || "";
@@ -9825,7 +9835,7 @@ function bindSettingsEvents() {
         p[field] = ["temperature", "maxTokens", "usedTokens", "contextWindow"].includes(field) ? Number(e.target.value) : e.target.value;
         if (field === "contextWindow") updateContextGauge();
         // 亲手填的档位就是定论，不再探；清空了下次选模型再探
-        if (field === "reasoningLevels") p.reasoningProbed = e.target.value.trim() ? reasoningProbeKey(p) : "";
+        if (field === "reasoningLevels") p.reasoningProbed = e.target.value.trim() ? `manual|${reasoningProbeKey(p)}` : "";
         persistServerProfile(p);
         saveStoreSoon();
       })
@@ -9891,17 +9901,29 @@ function bindSettingsEvents() {
       .forEach(button => (button.onclick = () => handleProfileAction(p, button.dataset.profileAction, card)));
   });
 }
-// 选定模型后探它认哪几档，结果写在卡片的状态行上，高级配置里的「思考档位」也跟着填；探不成不吭声（撞了错再学）
+// 选定模型后探它认哪几档，结果写在卡片的状态行上，高级配置里的「思考档位」也跟着填；探不成不吭声（撞了错再学）。
+// 亲手填过档位的不探（测试连接也不），状态行照实写它填的。同一张卡片连着探了两次（模型改了两回），只有最后一次能动状态行——
+// 先前那次迟到回来是作废的，不能把后一次已经写上的结果抹掉
+const probeSerial = new Map();
 /** @param {Profile} profile */
 async function reportReasoningProbe(profile, card, force = false) {
-  if (force) profile.reasoningProbed = "";
-  if (!profile.model || reasoningProbed(profile)) return;
+  if (force && !reasoningManual(profile)) profile.reasoningProbed = "";
+  if (!profile.model) return;
   const status = () => document.querySelector(`[data-profile-card="${profile.id}"] .profile-status`);
   const before = status()?.textContent || "";
+  if (reasoningProbed(profile)) {
+    if (force && status()) {
+      const levels = profileReasoningLevels(profile);
+      status().textContent = `${before ? `${before} · ` : ""}思考档位 ${levels.length ? levels.map(reasoningLabel).join(" / ") : "此模型不认"}${reasoningManual(profile) ? "（手填）" : ""}`;
+    }
+    return;
+  }
+  const serial = (probeSerial.get(profile.id) || 0) + 1;
+  probeSerial.set(profile.id, serial);
   if (status()) status().textContent = `${before ? `${before} · ` : ""}探测思考档位…`;
   const levels = await probeReasoningLevels(profile);
   const el = status();
-  if (!el) return;
+  if (!el || probeSerial.get(profile.id) !== serial) return;
   if (levels === null) el.textContent = before;
   else {
     el.textContent = `${before ? `${before} · ` : ""}思考档位 ${levels.length ? levels.map(reasoningLabel).join(" / ") : "此模型不认"}`;
