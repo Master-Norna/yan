@@ -4734,7 +4734,14 @@ textarea::placeholder,
   margin-bottom: 4px;
   color: var(--ink-3);
 }
-/* 计划卡：一行一项 */
+/* 计划卡：不是一步动作，是模型一路改着的一张单子，所以给它一张纸——纸的底色，不是专色，与差遣那枚金签不抢；
+   没有这层底，几行清单悬在行迹里就成了散页。一行一项 */
+.tool-step-plan {
+  margin: 4px 0;
+  padding-bottom: 6px;
+  border-radius: 9px;
+  background: var(--paper-2);
+}
 .plan-list {
   margin: 0 9px 8px 50px;
   padding: 0;
