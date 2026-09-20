@@ -57,14 +57,15 @@ function trailGroups(message) {
     const at = Number(step.at) || 0,
       rat = Number(step.rat) || 0,
       last = groups.at(-1);
+    // 同一轮后来的步骤把这组思绪的边界往后推，下一组的起点也得跟着走，不然推过去的那段会在下一组再显示一次
     if (last && last.at === at) {
       last.steps.push(step);
       last.rat = Math.max(last.rat, rat);
     } else {
       groups.push({ at, from: prev, rat, rfrom: rprev, steps: [step] });
       prev = at;
-      rprev = Math.max(rprev, rat);
     }
+    rprev = Math.max(rprev, rat);
   }
   return groups;
 }

@@ -208,6 +208,16 @@ test("trailGroups：同一轮的步骤归一组，记下这轮的话与思绪的
   assert.equal(groups.length, 2);
   assert.deepEqual([groups[0].from, groups[0].at, groups[0].steps.length], [0, 3, 2]);
   assert.deepEqual([groups[1].from, groups[1].at, groups[1].rfrom, groups[1].rat], [3, 9, 2, 5]);
+  // 同一轮里后来的步骤把思绪边界推到 8：下一组从 8 起，不从 2 起（否则 2..8 那段会显示两次）
+  const pushed = f.trailGroups({
+    steps: [
+      { at: 3, rat: 2 },
+      { at: 3, rat: 8 },
+      { at: 9, rat: 12 }
+    ]
+  });
+  assert.deepEqual([pushed[0].rfrom, pushed[0].rat], [0, 8]);
+  assert.deepEqual([pushed[1].rfrom, pushed[1].rat], [8, 12]);
 });
 test("repairEchartsOption：系列指到不存在的轴、轴指到不存在的格子都收回来，漏了 type 按数据补", () => {
   const fixed = f.repairEchartsOption({
