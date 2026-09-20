@@ -437,7 +437,7 @@ function bindSettingsEvents() {
         p[field] = ["temperature", "maxTokens", "usedTokens", "contextWindow"].includes(field) ? Number(e.target.value) : e.target.value;
         if (field === "contextWindow") updateContextGauge();
         // 亲手填的档位就是定论，不再探；清空了下次选模型再探
-        if (field === "reasoningLevels") p.reasoningProbed = e.target.value.trim() ? p.model : "";
+        if (field === "reasoningLevels") p.reasoningProbed = e.target.value.trim() ? reasoningProbeKey(p) : "";
         persistServerProfile(p);
         saveStoreSoon();
       })
@@ -507,7 +507,7 @@ function bindSettingsEvents() {
 /** @param {Profile} profile */
 async function reportReasoningProbe(profile, card, force = false) {
   if (force) profile.reasoningProbed = "";
-  if (!profile.model || profile.reasoningProbed === profile.model) return;
+  if (!profile.model || reasoningProbed(profile)) return;
   const status = () => document.querySelector(`[data-profile-card="${profile.id}"] .profile-status`);
   const before = status()?.textContent || "";
   if (status()) status().textContent = `${before ? `${before} · ` : ""}探测思考档位…`;

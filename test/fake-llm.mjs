@@ -100,14 +100,18 @@ http
       const lastUser = [...msgs].reverse().find(m => m.role === "user")?.content || "";
       // 探思考档位：页面故意送 reasoning_effort: "probe"。按模型 ID 装几种接口：
       // fake-three 只认三档；fake-plain 压根不认识这个字段；fake-mute 照单全收（中转站的样子）；其余按 OpenAI 的样子列四档
+      // fake-slow 认四档，但要一秒半才回——探着它的时候换了模型，这份迟到的结果不能写到新模型上
       if (payload.reasoning_effort === "probe") {
         const model = String(payload.model || "");
         if (model.includes("mute")) return sse(res, [delta({ content: "。" }), delta({}, { usage: { total_tokens: 1 } })]);
-        res.writeHead(400, { "Content-Type": "application/json" });
         const message = model.includes("plain")
           ? "Unrecognized request argument supplied: reasoning_effort"
           : `Invalid value: 'probe'. Supported values are: ${model.includes("three") ? "'low', 'medium', and 'high'" : "'low', 'medium', 'high', and 'max'"}.`;
-        return res.end(JSON.stringify({ error: { message, type: "invalid_request_error", param: "reasoning_effort" } }));
+        const reply = () => {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message, type: "invalid_request_error", param: "reasoning_effort" } }));
+        };
+        return model.includes("slow") ? setTimeout(reply, 1500) : reply();
       }
       // 带附件的一问是分段内容：正文在第一段
       const lastText = Array.isArray(lastUser) ? String(lastUser.find(part => part.type === "text")?.text || "") : lastUser;

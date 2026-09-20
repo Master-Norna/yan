@@ -144,7 +144,7 @@
  * @property {boolean} [enableSearch]
  * @property {number} [contextWindow]
  * @property {string} [reasoningLevels] 此模型认的思考档位，逗号分隔；none 是不认；探到的与手填的都记在这里
- * @property {string} [reasoningProbed] 探过档位的那个模型 ID；换了模型再探
+ * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey）；换了任一样再探
  * @property {string[]} [modelList]
  */
 /** @typedef {{ id: string, text: string, createdAt: string, updatedAt: string, source: { conversationId: string, title: string }|null }} MemoryItem */

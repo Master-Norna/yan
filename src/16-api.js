@@ -164,13 +164,23 @@ function learnReasoningLevels(profile, message, sent) {
 }
 // 选定模型时探一下它认哪几档：故意送一个不存在的档位（probe），接口若按 OpenAI 的样子报错，就把报错里列的几档记下；
 // 报错说它压根不认识 reasoning_effort，记成 none（菜单上只剩「默认」）；接口照单全收（中转站常常忽略这个字段）就按通用四档列。
-// 鉴权、网络之类别的错不算探过，下次再探。一个模型只探一次（记在 reasoningProbed 上），换了模型再探；
+// 鉴权、网络之类别的错不算探过，下次再探。探过的记在 reasoningProbed 上——记的是「接口 + 地址 + 模型」三样合成的键，
+// 换了模型、换了地址或接口类型都得重探；探测发出去之后模型被换了（探着 A 的时候切到 B），回来的结果作废，不往 B 上写。
 // Anthropic 与 DashScope 的档位是换算成预算送的，没有可探的枚举，直接算探过。回值是探到的几档，没探成给 null
+/** @param {Profile} profile 探的是这个模型此刻的身份 */
+function reasoningProbeKey(profile) {
+  return `${anthropicLike(profile) ? "anthropic" : "openai"}|${String(profile?.baseUrl || "").trim()}|${String(profile?.model || "").trim()}`;
+}
+/** @param {Profile} profile */
+function reasoningProbed(profile) {
+  return !!profile?.model && profile.reasoningProbed === reasoningProbeKey(profile);
+}
 /** @param {Profile} profile */
 async function probeReasoningLevels(profile) {
-  if (!profile?.model || profile.reasoningProbed === profile.model) return null;
+  if (!profile?.model || reasoningProbed(profile)) return null;
+  const key = reasoningProbeKey(profile);
   if (anthropicLike(profile) || /dashscope|aliyuncs/i.test(profile.baseUrl || "")) {
-    profile.reasoningProbed = profile.model;
+    profile.reasoningProbed = key;
     saveStoreSoon();
     return profileReasoningLevels(profile);
   }
@@ -183,6 +193,8 @@ async function probeReasoningLevels(profile) {
       maxTokens: 16,
       reasoning: "probe"
     });
+    // 探着探着模型被换了：这份结果是旧模型的，作废
+    if (reasoningProbeKey(profile) !== key) return null;
     let learned;
     if (response.ok) learned = profile.reasoningLevels ? profileReasoningLevels(profile) : REASONING_DEFAULT_LEVELS;
     else {
@@ -198,7 +210,7 @@ async function probeReasoningLevels(profile) {
       else return null;
     }
     profile.reasoningLevels = learned.length ? learned.join(", ") : "none";
-    profile.reasoningProbed = profile.model;
+    profile.reasoningProbed = key;
     persistServerProfile(profile);
     saveStoreSoon();
     return learned;

@@ -27,8 +27,15 @@ const pick = async id => {
 check("nothing is probed until a model is picked", (await stored("p1")) === "undefined|", await stored("p1"));
 // 只认三档的：记三档，菜单只列三档，「最高」落到「高」
 await pick("p2");
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[1].reasoningProbed === "fake-three"`, 8000);
-check("a three-level model is learned as three", (await stored("p2")) === "low, medium, high|fake-three", await stored("p2"));
+await waitFor(
+  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-three"`,
+  8000
+);
+check(
+  "a three-level model is learned as three",
+  (await stored("p2")) === "low, medium, high|openai|http://127.0.0.1:8798/v1|fake-three",
+  await stored("p2")
+);
 await evalJs(`document.querySelector("#welcome .model-trigger").click(); true`);
 await sleep(200);
 check("menu lists the three and lights the nearest to 最高", (await menu()) === "默认,低,中,高*", await menu());
@@ -40,8 +47,15 @@ check(
 await evalJs(`document.body.click(); true`);
 // 不认识 reasoning_effort 的：记 none，菜单上只剩一句话，请求里不带字段
 await pick("p3");
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[2].reasoningProbed === "fake-plain"`, 8000);
-check("a model without the field is learned as none", (await stored("p3")) === "none|fake-plain", await stored("p3"));
+await waitFor(
+  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[2].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-plain"`,
+  8000
+);
+check(
+  "a model without the field is learned as none",
+  (await stored("p3")) === "none|openai|http://127.0.0.1:8798/v1|fake-plain",
+  await stored("p3")
+);
 await evalJs(`document.querySelector("#welcome .model-trigger").click(); true`);
 await sleep(200);
 check("menu says the model has no levels", (await menu()) === "此模型不认思考档位", await menu());
@@ -53,10 +67,13 @@ check(
 await evalJs(`document.body.click(); true`);
 // 照单全收的：按通用四档
 await pick("p4");
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningProbed === "fake-mute"`, 8000);
+await waitFor(
+  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-mute"`,
+  8000
+);
 check(
   "a model that accepts anything keeps the four defaults",
-  (await stored("p4")) === "low, medium, high, max|fake-mute",
+  (await stored("p4")) === "low, medium, high, max|openai|http://127.0.0.1:8798/v1|fake-mute",
   await stored("p4")
 );
 // 再选一次不再探（探过的模型记在 reasoningProbed 上）
@@ -69,11 +86,43 @@ const callsAfter = await fetch("http://127.0.0.1:8798/calls")
   .then(r => r.text())
   .catch(() => "");
 check("a probed model is not probed again", calls === callsAfter, `${calls} → ${callsAfter}`);
-// 设置里：测试连接顺带重探，状态行报档位；高级配置里的「思考档位」跟着填
+// 设置里改模型 ID：探着 fake-slow（一秒半才回）的时候改成 fake-three，先回来的是 three，迟到的 slow 那份得作废，不能盖到 three 上
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(300);
 await evalJs(`document.querySelector('.tab-btn[data-tab="models"]').click(); true`);
 await sleep(300);
+const setModel = async model => {
+  const input = `document.querySelector('[data-profile-card="p4"] [data-field="model"]')`;
+  await evalJs(
+    `${input}.value = ${JSON.stringify(model)}; ${input}.dispatchEvent(new Event("input")); ${input}.dispatchEvent(new Event("change")); true`
+  );
+};
+await setModel("fake-slow");
+await sleep(100);
+await setModel("fake-three");
+await sleep(2200);
+check(
+  "a probe still in flight when the model changed is discarded",
+  (await stored("p4")) === "low, medium, high|openai|http://127.0.0.1:8798/v1|fake-three",
+  await stored("p4")
+);
+// 改了 Base URL：模型 ID 没变也得重探
+const urlInput = `document.querySelector('[data-profile-card="p2"] [data-field="baseUrl"]')`;
+await evalJs(`${urlInput}.value = "http://127.0.0.1:8798/v1/"; ${urlInput}.dispatchEvent(new Event("input")); true`);
+await sleep(100);
+await evalJs(`document.querySelector("#closeSettings").click(); true`);
+await sleep(300);
+await pick("p2");
+await waitFor(
+  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1/|fake-three"`,
+  8000
+);
+check("changing the base URL makes the next pick probe again", true);
+await evalJs(`document.querySelector("#openSettings").click(); true`);
+await sleep(300);
+await evalJs(`document.querySelector('.tab-btn[data-tab="models"]').click(); true`);
+await sleep(300);
+// 设置里：测试连接顺带重探，状态行报档位；高级配置里的「思考档位」跟着填
 await evalJs(`document.querySelector('[data-profile-card="p2"] [data-profile-action="test"]').click(); true`);
 await waitFor(`/思考档位/.test(document.querySelector('[data-profile-card="p2"] .profile-status')?.textContent || "")`, 8000);
 const status = await evalJs(`document.querySelector('[data-profile-card="p2"] .profile-status').textContent`);
