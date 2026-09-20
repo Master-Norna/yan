@@ -8961,6 +8961,8 @@ function learnReasoningLevels(profile, message, sent) {
   const current = profileReasoningLevels(profile);
   if (found.length === current.length && found.every(level => current.includes(level))) return false;
   profile.reasoningLevels = found.join(", ");
+  // 从报错里学到的就是这个身份的定论，不必再探
+  profile.reasoningProbed = reasoningProbeKey(profile);
   persistServerProfile(profile);
   saveStoreSoon();
   return true;
@@ -8974,15 +8976,23 @@ function learnReasoningLevels(profile, message, sent) {
 function reasoningProbeKey(profile) {
   return `${anthropicLike(profile) ? "anthropic" : "openai"}|${String(profile?.baseUrl || "").trim()}|${String(profile?.model || "").trim()}`;
 }
-// 探过、或用户亲手填过档位（记成 manual|键——手填的是定论，测试连接也不重探；换了模型才作废）
+// 探过、或用户亲手填过档位（记成 manual|键——手填的是定论，测试连接也不重探；换了模型才作废）。
+// 旧版只有 reasoningLevels、没有探过的标记（那时的档位是手填或从报错里学来的）：当手填的，绑在当前身份上，首次探测不能把它冲掉
 /** @param {Profile} profile */
 function reasoningProbed(profile) {
+  if (!profile?.model) return false;
   const key = reasoningProbeKey(profile);
-  return !!profile?.model && (profile.reasoningProbed === key || profile.reasoningProbed === `manual|${key}`);
+  if (profile.reasoningLevels && !profile.reasoningProbed) {
+    profile.reasoningProbed = `manual|${key}`;
+    persistServerProfile(profile);
+    saveStoreSoon();
+  }
+  return profile.reasoningProbed === key || profile.reasoningProbed === `manual|${key}`;
 }
+// 这个身份上的档位是亲手填的（换了模型，先前手填的就不算数了）
 /** @param {Profile} profile */
 function reasoningManual(profile) {
-  return String(profile?.reasoningProbed || "").startsWith("manual|");
+  return !!profile?.model && profile.reasoningProbed === `manual|${reasoningProbeKey(profile)}`;
 }
 // 走到这里就是身份变了（或亲手要求重探）：此前记的档位是旧模型的，一律不沿用——接口照单全收就按通用四档，
 // 不然旧模型的 none 会跟着新模型走，把一个认档位的模型永远标成不认
@@ -9006,8 +9016,8 @@ async function probeReasoningLevels(profile) {
       maxTokens: 16,
       reasoning: "probe"
     });
-    // 探着探着模型被换了：这份结果是旧模型的，作废
-    if (reasoningProbeKey(profile) !== key) return null;
+    // 探着探着模型被换了：这份结果是旧模型的，作废；探着的时候用户亲手填了档位：手填的是定论，也作废
+    if (reasoningProbeKey(profile) !== key || reasoningManual(profile)) return null;
     let learned;
     if (response.ok) learned = REASONING_DEFAULT_LEVELS;
     else {
@@ -9015,12 +9025,11 @@ async function probeReasoningLevels(profile) {
         message = (typeof data.error === "string" ? data.error : data.error?.message) || "";
       const found = parseReasoningLevels(message, "probe");
       if (found.length) learned = found;
-      else if (
-        /reasoning_effort|reasoning|effort/i.test(message) &&
-        /unknown|unrecognized|unsupported|not support|invalid|无效|不支持/i.test(message)
-      )
-        learned = [];
-      else return null;
+      // 只有明说不认识这个字段的才记成不认；「Invalid reasoning_effort value」这种只是嫌 probe 不对、又没列它认的几档——
+      // 按通用四档，撞了错再学。报错压根不提思考的（鉴权、限流）不算探过
+      else if (!/reasoning_effort|reasoning|effort/i.test(message)) return null;
+      else if (/unknown|unrecognized|unsupported|not support|不支持|不认识/i.test(message)) learned = [];
+      else learned = REASONING_DEFAULT_LEVELS;
     }
     profile.reasoningLevels = learned.length ? learned.join(", ") : "none";
     profile.reasoningProbed = key;
