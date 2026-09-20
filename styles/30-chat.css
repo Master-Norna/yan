@@ -1228,6 +1228,10 @@ sup.note-ref.active {
   text-decoration: none;
   border-bottom: 1px solid var(--accent-soft);
 }
+/* 指向本地文件的链接没有 href（点击去卷宗里找同名的那件），样子上仍是一条链接 */
+.markdown a[data-file] {
+  cursor: pointer;
+}
 .markdown hr {
   border: 0;
   border-top: 1px solid var(--line);

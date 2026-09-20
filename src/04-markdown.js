@@ -44,7 +44,16 @@ function setupMarkdown() {
     },
     extensions: [blockMath, inlineMath]
   });
-  if (window.DOMPurify)
+  if (window.DOMPurify) {
+    // 模型写「下载《x.docx》」时常把链接指向 sandbox:/、file:/// 或一个裸文件名——页面上没有这样的路。
+    // 把文件名记在 data-file 上、去掉 href，点击时到卷宗里找同名的那件来下载（见 boot 里的处理）；找不到才说没有
+    DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
+      if (node.tagName !== "A" || data.attrName !== "href") return;
+      const name = localFileName(data.attrValue);
+      if (!name) return;
+      node.setAttribute("data-file", name);
+      data.keepAttr = false;
+    });
     DOMPurify.addHook("afterSanitizeAttributes", node => {
       if (node.tagName === "A" && node.hasAttribute("href")) {
         node.setAttribute("target", "_blank");
@@ -52,6 +61,20 @@ function setupMarkdown() {
       }
       if (node.tagName === "INPUT") node.setAttribute("disabled", "");
     });
+  }
+}
+// 不是网址、末段像个文件名的链接：取出文件名。网址、邮件、页内锚点都不算
+function localFileName(href) {
+  const raw = String(href || "").trim();
+  if (!raw || /^(?:https?|mailto|tel|data|blob):/i.test(raw) || raw.startsWith("#")) return "";
+  let name = raw
+    .replace(/[?#].*$/, "")
+    .split(/[\\/]/)
+    .pop();
+  try {
+    name = decodeURIComponent(name);
+  } catch {}
+  return /^[^<>:"|?*\u0000-\u001f]+\.[a-z0-9]{1,8}$/i.test(name) ? name : "";
 }
 function renderMath(tex, display) {
   // KaTeX 未加载时先放一个占位，库到位后由 renderPendingMath 就地替换；流式尾段每帧重绘，加载完成后自然变成正式渲染
