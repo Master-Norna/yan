@@ -756,7 +756,7 @@ function serveBundle(req, res, urlPath) {
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, `http://${HOST}`).pathname);
   if (serveBundle(req, res, urlPath)) return;
-  const requested = urlPath === "/" ? "Lumen Chat.dc.html" : urlPath.slice(1);
+  const requested = urlPath === "/" ? "index.html" : urlPath.slice(1);
   const file = path.resolve(ROOT, requested);
   const stat = file.startsWith(ROOT + path.sep) && fs.existsSync(file) ? fs.statSync(file) : null;
   if (!stat || stat.isDirectory()) {
