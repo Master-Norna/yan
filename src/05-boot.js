@@ -576,9 +576,16 @@ function bindEvents() {
     if (stack && !stack.open) setProcessDetails(stack, true);
     scrollChatTo(card, "center");
   };
-  // 点遮罩、按 Esc 都关得掉，与设置、文件查看器一个脾气
+  // 点遮罩、按 Esc 都关得掉，与设置、文件查看器一个脾气。纸张之外的空白由 .helper-stage 铺满，点在它上面也算点了遮罩；
+  // 按下与松开都得落在空白处——在纸上选字、拖到纸外松手，click 会落到两者的共同祖先上，那不是要关窗
+  const helperBackdrop = target => target === $("#helperModal") || target === $("#helperScroll");
+  let helperPressedBackdrop = false;
+  $("#helperModal").addEventListener("pointerdown", event => {
+    helperPressedBackdrop = helperBackdrop(event.target);
+  });
   $("#helperModal").addEventListener("click", event => {
-    if (event.target === $("#helperModal")) closeHelperPanel();
+    if (helperPressedBackdrop && helperBackdrop(event.target)) closeHelperPanel();
+    helperPressedBackdrop = false;
   });
   // ‹ › 翻帮手；中间的计数点开是一张列表——帮手多了一个个翻就难受
   $("#helperNav").addEventListener("click", event => {

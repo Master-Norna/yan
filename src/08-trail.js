@@ -513,6 +513,9 @@ function openHelperPanel(stepId) {
   $("#helperList").classList.add("hidden");
   showNow($("#helperModal"));
   renderHelperPanel(true);
+  // 换一名帮手是换一张纸，从头看起；不然上一张滚到多深，这张就从多深打开
+  const stage = $("#helperScroll");
+  if (stage) stage.scrollTop = 0;
 }
 function closeHelperPanel() {
   helperStepId = null;
