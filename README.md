@@ -43,7 +43,7 @@ npm start
 | `src/` | 页面脚本，按领域分段（状态与存储、对话数据、Markdown 与图表、渲染、行迹时间线、旁注、记忆、文件与卷宗、对话引擎、工具执行、接口、设置），拼进同一个闭包。数据模型（Store / Conversation / Message / Step / Profile…）以 JSDoc typedef 写在 `00-state.js` 顶部，`types.d.ts` 是给类型检查用的全局声明（随项目分发的库、宽松的 DOM），运行时不加载 |
 | `styles/` | 样式，按层次分段（基础与主题、布局、欢迎页、对话、正文内容、文件、输入区、设置、行迹、组件、动效与响应式、纸墨皮肤）；顺序即层叠顺序 |
 | `prompts/` | 内置提示词与工具说明，见其 README |
-| `server.js` · `server/work.js` · `server/sandbox.js` | 本机桥接：转发、联网、静态与拼接；执事接口（目录、指令、文件、检索、目录选择框）与卷宗目录接口（列、收、取、删）；沙箱的三道筛（指令、路径、环境变量）是纯函数，单独一段 |
+| `server.js` · `server/work.js` · `server/sandbox.js` · `server/computer.js` | 本机桥接：转发、联网、静态与拼接；执事接口（目录、指令、文件、检索、目录选择框）与卷宗目录接口（列、收、取、删）；沙箱的三道筛（指令、路径、环境变量）是纯函数，单独一段；本机检查的固定只读探针也单独一段 |
 | `test/` | `npm test` 先跑 `test/unit/`（Node 自带的 `node --test`，把 `src/` 拼起来在 Node 里测纯函数：工具参数救治、流式分段、diff 计数、余墨、思考档位、只读指令、输出裁行、沙箱筛查……几百毫秒跑完），再跑端到端：起假模型接口、测试桥接与无头 Edge / Chrome，逐个跑用例（对谈、执事、言行合一与卷宗、差遣、旁注、记忆、余墨与历史、表单、健壮性、桥接安全）；面向 Windows，其他平台未做适配 |
 | `build.js` | 拼接产出；`npm run format` 用 Prettier 统一格式，`npm run check` 用 `tsc --checkJs`（按 `jsconfig.json`）做类型检查——两者都经 npx 临时取用，只在开发时，不进运行时、不进依赖 |
 
