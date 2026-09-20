@@ -14,6 +14,8 @@ const f = load([
   "parseTokenLimit",
   "formatTokens",
   "nearestReasoning",
+  "reasoningChoices",
+  "reasoningFields",
   "learnReasoningLevels",
   "isReadOnlyCommand",
   "clampLines",
@@ -119,8 +121,12 @@ test("nearestReasoning：认的原样用，不认取最近的一档，同样近�
   assert.equal(f.nearestReasoning(p, "medium"), "medium");
   assert.equal(f.nearestReasoning(p, "high"), "xhigh");
   assert.equal(f.nearestReasoning(p, "minimal"), "low");
-  assert.equal(f.nearestReasoning({}, "xhigh"), "high");
-  assert.equal(f.nearestReasoning(p, "off"), "off");
+  assert.equal(f.nearestReasoning({}, "xhigh"), "max");
+  assert.equal(f.nearestReasoning({}, "high"), "high");
+  // 旧版菜单上的「关」：按「默认」看
+  assert.equal(f.nearestReasoning(p, "off"), "");
+  assert.equal(f.reasoningChoices({}).join(), ",low,medium,high,max");
+  assert.deepEqual(f.reasoningFields({ baseUrl: "https://example.com/v1" }, "off"), {});
 });
 test("learnReasoningLevels：从报错里认出接口支持的几档，被拒的那档不算", () => {
   const p = { id: "p", reasoningLevels: "" };

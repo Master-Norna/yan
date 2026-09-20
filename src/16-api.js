@@ -80,15 +80,21 @@ function formatTokens(value) {
         : String(n);
 }
 // 思考强度：OpenAI 系接口走 reasoning_effort；DashScope 兼容模式走 enable_thinking / thinking_budget。留空则不带字段，由接口自己定。
-// 各家接受的档位不一样（有的只有 low / medium / xhigh，有的多一个 minimal 或 max）：模型配置里可填「思考档位」，没填就用通用的低 / 中 / 高；
-// 接口拒绝某个档位时，从它的报错里读出它认的那几档记到模型上，把这一问换成最接近的一档重发一次
+// 各家接受的档位不一样（有的只有 low / medium / xhigh，有的多一个 minimal 或 max）：模型配置里可填「思考档位」，
+// 没填就按四档（低 / 中 / 高 / 最高）列；只认三档的接口拒绝某个档位时，从它的报错里读出它认的那几档记到模型上，
+// 把这一问换成最接近的一档重发一次，此后菜单只列它认的。菜单上没有「关」：愿意接 Key 的人不至于连思考都不愿开，
+// 要它少想就选「低」，旧数据里存的「关」按「默认」看
 const REASONING_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
-  REASONING_NAMES = { "": "默认", none: "关", off: "关", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" },
-  REASONING_DEFAULT_LEVELS = ["low", "medium", "high"];
+  REASONING_NAMES = { "": "默认", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" },
+  REASONING_DEFAULT_LEVELS = ["low", "medium", "high", "max"];
 function reasoningLabel(level) {
   return REASONING_NAMES[level || ""] || level;
 }
-// 模型认的档位（不含「关」）：配置里填的优先，否则通用三档；一律按由低到高排，不管填写或报错里是什么顺序
+// 旧版菜单上有「关」（off / none）：现在按「默认」看，不带字段
+function normalizeReasoning(level) {
+  return level === "off" || level === "none" ? "" : String(level || "");
+}
+// 模型认的档位（不含「关」）：配置里填的优先，否则通用四档；一律按由低到高排，不管填写或报错里是什么顺序
 /** @param {Profile} profile */
 function profileReasoningLevels(profile) {
   const listed = String(profile?.reasoningLevels || "")
@@ -99,15 +105,16 @@ function profileReasoningLevels(profile) {
     ? [...new Set(listed)].sort((a, b) => REASONING_ORDER.indexOf(a) - REASONING_ORDER.indexOf(b))
     : REASONING_DEFAULT_LEVELS;
 }
-// 菜单上的档位：默认 + 模型认的几档 + 关
+// 菜单上的档位：默认 + 模型认的几档
 /** @param {Profile} profile */
 function reasoningChoices(profile) {
-  return ["", ...profileReasoningLevels(profile), "off"];
+  return ["", ...profileReasoningLevels(profile)];
 }
 // 把用户选的档位落到模型认的档位上：认就原样用；不认则取最接近的一档，同样近时取高的那档（选「高」是想它多想，别给它降成「中」）
 /** @param {Profile} profile */
 function nearestReasoning(profile, level) {
-  if (!level || level === "off") return level;
+  level = normalizeReasoning(level);
+  if (!level) return level;
   const levels = profileReasoningLevels(profile);
   if (levels.includes(level)) return level;
   const want = REASONING_ORDER.indexOf(level);
@@ -119,15 +126,14 @@ function nearestReasoning(profile, level) {
 }
 /** @param {Profile} profile */
 function reasoningFields(profile, level) {
+  level = normalizeReasoning(level);
   if (!level) return {};
   if (/dashscope|aliyuncs/i.test(profile.baseUrl || ""))
-    return level === "off"
-      ? { enable_thinking: false }
-      : {
-          enable_thinking: true,
-          thinking_budget: { minimal: 1024, low: 2048, medium: 8192, high: 32768, xhigh: 65536, max: 81920 }[level] || 8192
-        };
-  return { reasoning_effort: level === "off" ? "none" : nearestReasoning(profile, level) };
+    return {
+      enable_thinking: true,
+      thinking_budget: { minimal: 1024, low: 2048, medium: 8192, high: 32768, xhigh: 65536, max: 81920 }[level] || 8192
+    };
+  return { reasoning_effort: nearestReasoning(profile, level) };
 }
 // 接口拒绝了思考档位：从报错里认出它支持的几档（如 Supported values are: 'low', 'medium', and 'xhigh'），记到模型上；认不出来就不动
 // sent 是这次发出去、被拒的那一档：报错里通常会把它也复述一遍（Invalid value: 'high'），不能当成它认的

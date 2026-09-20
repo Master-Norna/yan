@@ -14,7 +14,7 @@ await sleep(200);
 const before = await evalJs(
   `[...document.querySelectorAll("#modelMenu [data-reasoning]")].map(b => b.textContent + (b.classList.contains("active") ? "*" : "")).join(",")`
 );
-check("menu shows generic levels with 高 active", before === "默认,低,中,高*,关", before);
+check("menu shows generic levels with 高 active", before === "默认,低,中,高*,最高", before);
 await evalJs(`document.body.click(); true`);
 await evalJs(
   `document.querySelector("#welcomeInput").value = "EFFORT"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
@@ -48,7 +48,7 @@ await sleep(200);
 const after = await evalJs(
   `[...document.querySelectorAll("#modelMenu [data-reasoning]")].map(b => b.textContent + (b.classList.contains("active") ? "*" : "")).join(",")`
 );
-check("menu now shows the model's own levels with 极高 active", after === "默认,低,中,极高*,关", after);
+check("menu now shows the model's own levels with 极高 active", after === "默认,低,中,极高*", after);
 // 再问一次：直接按学到的档位发，不再撞错
 await evalJs(`document.querySelector('#modelMenu [data-reasoning="medium"]').click(); true`);
 await evalJs(`document.body.click(); true`);

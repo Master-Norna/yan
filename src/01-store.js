@@ -44,12 +44,15 @@ function loadStore() {
       settings: {
         ...defaultStore.settings,
         ...(data.settings || {}),
+        // 旧版思考菜单上有「关」，现在没有了：按「默认」看
+        reasoning: normalizeReasoning(data.settings?.reasoning),
         serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) }
       },
       profiles: Array.isArray(data.profiles) ? data.profiles : [],
       conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(({ ended, workAuto, ...c }) => ({
         ...c,
         commandPolicy: normalizeCommandPolicy(c.commandPolicy, workAuto ? "auto" : "ask"),
+        reasoning: normalizeReasoning(c.reasoning),
         // 旧版在压缩开始时就先落一个 compacting 分隔：页面若在摘要生成前关掉，它会留下来把历史长期截断；启动时清掉
         messages: (Array.isArray(c.messages) ? c.messages : []).filter(m => !(m?.role === "context" && m.compacting)),
         forks: Array.isArray(c.forks) ? c.forks : [],
