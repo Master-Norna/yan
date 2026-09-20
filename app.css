@@ -5038,22 +5038,27 @@ textarea::placeholder,
   color: var(--keep);
 }
 /* 会在别处留下痕迹的，另加一道左线——扫一眼就知道这一答动了什么：
-   写入与修改落在磁盘上，记入与忘却落进长期记忆，下载把外头的东西搬了进来 */
+   写入与修改落在磁盘上，记入与忘却落进长期记忆，下载把外头的东西搬了进来。
+   色与线各管一件事：色说「在哪儿动」，线说「有没有留痕」。9px 的标签承不住颜色，它本就只是耳语——
+   检索、翻记忆这些只看不改的不需要喊；要喊的交给线，所以线得有分量：2px、六成五，
+   比过去的 1.5px、三成四重一档，与差遣那枚签的金线同粗（签另有底色，仍在它上头）。
+   试过的别的路都不如它：带色的都挂线，13 步里 9 步有线就成了花纹；标题铺底色像选中的行，还抢了签的独门；
+   标签前加印是第三套符号；9px 的粗体糊成一团 */
 .tool-step[data-tool="write_file"],
 .tool-step[data-tool="edit_file"],
 .tool-step[data-tool="run_command"] {
-  border-left: 1.5px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
   border-radius: 0 9px 9px 0;
   padding-left: 7px;
 }
 .tool-step[data-tool="download_file"] {
-  border-left: 1.5px solid color-mix(in srgb, var(--reach) 40%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--reach) 68%, transparent);
   border-radius: 0 9px 9px 0;
   padding-left: 7px;
 }
 .tool-step[data-tool="remember"],
 .tool-step[data-tool="forget"] {
-  border-left: 1.5px solid color-mix(in srgb, var(--keep) 40%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--keep) 68%, transparent);
   border-radius: 0 9px 9px 0;
   padding-left: 7px;
 }
