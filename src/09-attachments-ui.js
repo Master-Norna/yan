@@ -40,11 +40,15 @@ function attachmentCard(file, index, sent = false) {
   const save = file.id
     ? `<button class="attachment-tool attachment-save" data-save-attachment="${escapeHtml(file.id)}" title="收入卷宗" aria-label="收入卷宗">藏</button>`
     : "";
+  // 发出去的附件点开是看：图进图片查看器，文、表、PDF、网页进预览器——自己刚发的东西再下载一遍没有道理；
+  // 只有预览不了的（压缩包之类）才落到下载
   if (sent && file.id) {
     const action =
       file.kind === "image"
         ? `data-open-image="${escapeHtml(file.id)}" title="查看 ${escapeHtml(title)}"`
-        : `data-download-attachment="${escapeHtml(file.id)}" title="下载 ${escapeHtml(title)}"`;
+        : previewKind(file.name) !== "none"
+          ? `data-open-attachment="${escapeHtml(file.id)}" data-name="${escapeHtml(file.name)}" title="预览 ${escapeHtml(title)}"`
+          : `data-download-attachment="${escapeHtml(file.id)}" title="下载 ${escapeHtml(title)}"`;
     return `<div class="attachment-card sent" role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}${save}</div>`;
   }
   return `<div class="attachment-card pending" data-kind="${file.kind}" title="${escapeHtml(title)}">${body}${save}${index !== null ? `<button class="attachment-tool attachment-remove" data-remove-attachment="${index}" title="移除 ${escapeHtml(file.name)}" aria-label="移除 ${escapeHtml(file.name)}">×</button>` : ""}</div>`;

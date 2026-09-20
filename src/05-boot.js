@@ -155,9 +155,9 @@ function bindEvents() {
     }
   });
   $("#fileViewerClose").onclick = closeFileViewer;
-  $("#fileViewerDownload").onclick = () => viewerPath && downloadArchiveFile(viewerPath);
+  $("#fileViewerDownload").onclick = downloadViewerFile;
   $("#fileViewer").addEventListener("click", e => {
-    if (e.target.closest("[data-viewer-download]")) return viewerPath && downloadArchiveFile(viewerPath);
+    if (e.target.closest("[data-viewer-download]")) return downloadViewerFile();
     if (e.target === $("#fileViewer") || e.target === $("#fileViewerStage")) closeFileViewer();
   });
   $("#imageViewerClose").onclick = closeImageViewer;
@@ -276,6 +276,8 @@ function bindEvents() {
       return;
     }
     if (action === "place") placeFromLibrary(id);
+    else if (action === "view")
+      void openFileViewer({ attachmentId: id }, button.closest(".library-card")?.querySelector("strong")?.textContent || "");
     else if (action === "download") void downloadAttachment(id);
     else if (action === "remove") void removeFromLibrary(id);
   });
@@ -733,6 +735,11 @@ function bindEvents() {
       void openImageViewer(preview.dataset.openImage, preview);
       return;
     }
+    const open = e.target.closest("[data-open-attachment]");
+    if (open) {
+      void openFileViewer({ attachmentId: open.dataset.openAttachment }, open.dataset.name || "");
+      return;
+    }
     const download = e.target.closest("[data-download-attachment]");
     if (download) void downloadAttachment(download.dataset.downloadAttachment);
   });
@@ -741,6 +748,9 @@ function bindEvents() {
     if (e.target.matches?.("[data-open-image]")) {
       e.preventDefault();
       void openImageViewer(e.target.dataset.openImage, e.target);
+    } else if (e.target.matches?.("[data-open-attachment]")) {
+      e.preventDefault();
+      void openFileViewer({ attachmentId: e.target.dataset.openAttachment }, e.target.dataset.name || "");
     } else if (e.target.matches?.("[data-download-attachment]")) {
       e.preventDefault();
       void downloadAttachment(e.target.dataset.downloadAttachment);

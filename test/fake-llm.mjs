@@ -92,6 +92,8 @@ http
       const msgs = payload.messages || [],
         toolResults = msgs.filter(m => m.role === "tool");
       const lastUser = [...msgs].reverse().find(m => m.role === "user")?.content || "";
+      // 带附件的一问是分段内容：正文在第一段
+      const lastText = Array.isArray(lastUser) ? String(lastUser.find(part => part.type === "text")?.text || "") : lastUser;
       if (typeof lastUser === "string" && lastUser.startsWith("请为下面这段对话拟")) {
         // TITLEFAIL：头一次拟题时装作网络出错，页面不该就此把这段对话标成「已拟题」
         if (lastUser.includes("TITLEFAIL") && !titleFailed) {
@@ -196,12 +198,12 @@ http
         ]);
       if (typeof lastUser === "string" && lastUser.includes("SAMEWORD"))
         return sse(res, [delta({ content: "甲说 StructRAG 好；乙说 StructRAG 更好。" }), delta({}, { usage: { total_tokens: 4 } })]);
-      if (typeof lastUser === "string" && lastUser.includes("PLAIN")) {
+      if (typeof lastText === "string" && lastText.includes("PLAIN")) {
         const leaked =
           msgs.some(m => typeof m.content === "string" && /SIDE|旁注追问/.test(m.content)) ||
           /旁注追问/.test(String(msgs[0]?.content || ""));
         return sse(res, [
-          delta({ content: `正文回答：这里有一个术语 X 需要留意。${lastUser.includes("check") ? `｜leak:${leaked ? "yes" : "no"}` : ""}` }),
+          delta({ content: `正文回答：这里有一个术语 X 需要留意。${lastText.includes("check") ? `｜leak:${leaked ? "yes" : "no"}` : ""}` }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
@@ -643,7 +645,10 @@ http
                   index: 0,
                   id: `call_chat_${turnToolResults.length}`,
                   type: "function",
-                  function: { name: "run_command", arguments: JSON.stringify({ command: `Write-Output 'chat-${turnToolResults.length + 1}'` }) }
+                  function: {
+                    name: "run_command",
+                    arguments: JSON.stringify({ command: `Write-Output 'chat-${turnToolResults.length + 1}'` })
+                  }
                 }
               ]
             }),
@@ -657,14 +662,18 @@ http
           n = turnToolResults.length,
           call = (name, args) =>
             sse(res, [
-              delta({ tool_calls: [{ index: 0, id: `call_review_${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] }),
+              delta({
+                tool_calls: [{ index: 0, id: `call_review_${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }]
+              }),
               delta({}, { usage: { total_tokens: 5 } })
             ]);
         if (n === 0) return call("run_command", { command: "Set-Content review-ok.txt ok" });
         if (n === 1) return call("run_command", { command: "Set-ExecutionPolicy Unrestricted" });
         if (n === 2) return call("inspect_computer", { sections: ["overview", "storage"], detail: "summary" });
         return sse(res, [
-          delta({ content: `POLICY-REVIEW done｜${turnToolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 100)).join(" ▸ ")}` }),
+          delta({
+            content: `POLICY-REVIEW done｜${turnToolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 100)).join(" ▸ ")}`
+          }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
