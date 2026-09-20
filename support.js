@@ -360,12 +360,15 @@ function loadStore() {
       settings: {
         ...defaultStore.settings,
         ...(data.settings || {}),
+        // 旧版思考菜单上有「关」，现在没有了：按「默认」看
+        reasoning: normalizeReasoning(data.settings?.reasoning),
         serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) }
       },
       profiles: Array.isArray(data.profiles) ? data.profiles : [],
       conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(({ ended, workAuto, ...c }) => ({
         ...c,
         commandPolicy: normalizeCommandPolicy(c.commandPolicy, workAuto ? "auto" : "ask"),
+        reasoning: normalizeReasoning(c.reasoning),
         // 旧版在压缩开始时就先落一个 compacting 分隔：页面若在摘要生成前关掉，它会留下来把历史长期截断；启动时清掉
         messages: (Array.isArray(c.messages) ? c.messages : []).filter(m => !(m?.role === "context" && m.compacting)),
         forks: Array.isArray(c.forks) ? c.forks : [],
@@ -8870,15 +8873,21 @@ function formatTokens(value) {
         : String(n);
 }
 // 思考强度：OpenAI 系接口走 reasoning_effort；DashScope 兼容模式走 enable_thinking / thinking_budget。留空则不带字段，由接口自己定。
-// 各家接受的档位不一样（有的只有 low / medium / xhigh，有的多一个 minimal 或 max）：模型配置里可填「思考档位」，没填就用通用的低 / 中 / 高；
-// 接口拒绝某个档位时，从它的报错里读出它认的那几档记到模型上，把这一问换成最接近的一档重发一次
+// 各家接受的档位不一样（有的只有 low / medium / xhigh，有的多一个 minimal 或 max）：模型配置里可填「思考档位」，
+// 没填就按四档（低 / 中 / 高 / 最高）列；只认三档的接口拒绝某个档位时，从它的报错里读出它认的那几档记到模型上，
+// 把这一问换成最接近的一档重发一次，此后菜单只列它认的。菜单上没有「关」：愿意接 Key 的人不至于连思考都不愿开，
+// 要它少想就选「低」，旧数据里存的「关」按「默认」看
 const REASONING_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
-  REASONING_NAMES = { "": "默认", none: "关", off: "关", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" },
-  REASONING_DEFAULT_LEVELS = ["low", "medium", "high"];
+  REASONING_NAMES = { "": "默认", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" },
+  REASONING_DEFAULT_LEVELS = ["low", "medium", "high", "max"];
 function reasoningLabel(level) {
   return REASONING_NAMES[level || ""] || level;
 }
-// 模型认的档位（不含「关」）：配置里填的优先，否则通用三档；一律按由低到高排，不管填写或报错里是什么顺序
+// 旧版菜单上有「关」（off / none）：现在按「默认」看，不带字段
+function normalizeReasoning(level) {
+  return level === "off" || level === "none" ? "" : String(level || "");
+}
+// 模型认的档位（不含「关」）：配置里填的优先，否则通用四档；一律按由低到高排，不管填写或报错里是什么顺序
 /** @param {Profile} profile */
 function profileReasoningLevels(profile) {
   const listed = String(profile?.reasoningLevels || "")
@@ -8889,15 +8898,16 @@ function profileReasoningLevels(profile) {
     ? [...new Set(listed)].sort((a, b) => REASONING_ORDER.indexOf(a) - REASONING_ORDER.indexOf(b))
     : REASONING_DEFAULT_LEVELS;
 }
-// 菜单上的档位：默认 + 模型认的几档 + 关
+// 菜单上的档位：默认 + 模型认的几档
 /** @param {Profile} profile */
 function reasoningChoices(profile) {
-  return ["", ...profileReasoningLevels(profile), "off"];
+  return ["", ...profileReasoningLevels(profile)];
 }
 // 把用户选的档位落到模型认的档位上：认就原样用；不认则取最接近的一档，同样近时取高的那档（选「高」是想它多想，别给它降成「中」）
 /** @param {Profile} profile */
 function nearestReasoning(profile, level) {
-  if (!level || level === "off") return level;
+  level = normalizeReasoning(level);
+  if (!level) return level;
   const levels = profileReasoningLevels(profile);
   if (levels.includes(level)) return level;
   const want = REASONING_ORDER.indexOf(level);
@@ -8909,15 +8919,14 @@ function nearestReasoning(profile, level) {
 }
 /** @param {Profile} profile */
 function reasoningFields(profile, level) {
+  level = normalizeReasoning(level);
   if (!level) return {};
   if (/dashscope|aliyuncs/i.test(profile.baseUrl || ""))
-    return level === "off"
-      ? { enable_thinking: false }
-      : {
-          enable_thinking: true,
-          thinking_budget: { minimal: 1024, low: 2048, medium: 8192, high: 32768, xhigh: 65536, max: 81920 }[level] || 8192
-        };
-  return { reasoning_effort: level === "off" ? "none" : nearestReasoning(profile, level) };
+    return {
+      enable_thinking: true,
+      thinking_budget: { minimal: 1024, low: 2048, medium: 8192, high: 32768, xhigh: 65536, max: 81920 }[level] || 8192
+    };
+  return { reasoning_effort: nearestReasoning(profile, level) };
 }
 // 接口拒绝了思考档位：从报错里认出它支持的几档（如 Supported values are: 'low', 'medium', and 'xhigh'），记到模型上；认不出来就不动
 // sent 是这次发出去、被拒的那一档：报错里通常会把它也复述一遍（Invalid value: 'high'），不能当成它认的
@@ -9584,7 +9593,7 @@ function profileCardHtml(p) {
   ]
     .map(([v, label]) => `<option value="${v}"${quota.unit === v ? " selected" : ""}>${label}</option>`)
     .join("")}</select></div>`;
-  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${locked ? `<span class="profile-badge">服务端</span>` : ""}${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}" ${locked ? "disabled" : ""}></label><label>用量限制${quotaField}<small>必填；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}" ${locked ? "disabled" : ""}>OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}" ${locked ? "disabled" : ""}>Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}" ${locked ? "disabled" : ""}></label>${locked ? "" : `<label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label>`}<label class="profile-full">模型${modelField}${locked ? "" : `<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small>`}</label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${[p.tools === false ? "本机工具关" : "", modelSearchEnabled(p) ? "接口原生联网开" : "", p.systemPrompt ? "已设 system prompt" : ""].filter(Boolean).join(" · ")}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label>接口原生联网（实验）<div class="segmented"><button data-toggle-field="enableSearch" data-value="true" class="${modelSearchEnabled(p) ? "active" : ""}">开</button><button data-toggle-field="enableSearch" data-value="false" class="${modelSearchEnabled(p) ? "" : "active"}">关</button></div><small>仅当接口文档明确支持时开启，仅附加 <code>enable_search: true</code>；普通 OpenAI 兼容服务通常会忽略该字段，不能替代本机联网</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label><label><code>max_tokens</code><input type="number" min="16" max="65536" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens || DEFAULT_MAX_TOKENS)}"><small>单次回复的输出上限，默认 ${DEFAULT_MAX_TOKENS}</small></label><label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；留空用低 / 中 / 高，接口拒绝某档时会自动记下</small></label><label class="profile-full"><code>system prompt</code><textarea class="field wide field-area" data-field="systemPrompt" placeholder="可选。设定模型的身份与应答方式">${escapeHtml(p.systemPrompt || "")}</textarea></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}${locked ? "" : `<button class="danger-btn" data-profile-action="delete">删除</button>`}<span class="profile-status">${invalidQuota ? "请先设定用量上限" : ""}</span></div></div>`;
+  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${locked ? `<span class="profile-badge">服务端</span>` : ""}${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}" ${locked ? "disabled" : ""}></label><label>用量限制${quotaField}<small>必填；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}" ${locked ? "disabled" : ""}>OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}" ${locked ? "disabled" : ""}>Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}" ${locked ? "disabled" : ""}></label>${locked ? "" : `<label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label>`}<label class="profile-full">模型${modelField}${locked ? "" : `<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small>`}</label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${[p.tools === false ? "本机工具关" : "", modelSearchEnabled(p) ? "接口原生联网开" : "", p.systemPrompt ? "已设 system prompt" : ""].filter(Boolean).join(" · ")}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label>接口原生联网（实验）<div class="segmented"><button data-toggle-field="enableSearch" data-value="true" class="${modelSearchEnabled(p) ? "active" : ""}">开</button><button data-toggle-field="enableSearch" data-value="false" class="${modelSearchEnabled(p) ? "" : "active"}">关</button></div><small>仅当接口文档明确支持时开启，仅附加 <code>enable_search: true</code>；普通 OpenAI 兼容服务通常会忽略该字段，不能替代本机联网</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label><label><code>max_tokens</code><input type="number" min="16" max="65536" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens || DEFAULT_MAX_TOKENS)}"><small>单次回复的输出上限，默认 ${DEFAULT_MAX_TOKENS}</small></label><label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；留空按 low / medium / high / max 四档列，接口拒绝某档时会自动记下它认的几档</small></label><label class="profile-full"><code>system prompt</code><textarea class="field wide field-area" data-field="systemPrompt" placeholder="可选。设定模型的身份与应答方式">${escapeHtml(p.systemPrompt || "")}</textarea></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}${locked ? "" : `<button class="danger-btn" data-profile-action="delete">删除</button>`}<span class="profile-status">${invalidQuota ? "请先设定用量上限" : ""}</span></div></div>`;
 }
 function storageSize() {
   const bytes = new Blob([JSON.stringify(store)]).size;
