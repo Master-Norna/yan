@@ -16,6 +16,7 @@ const f = load([
   "nearestReasoning",
   "reasoningChoices",
   "reasoningFields",
+  "parseReasoningLevels",
   "learnReasoningLevels",
   "isReadOnlyCommand",
   "clampLines",
@@ -127,6 +128,21 @@ test("nearestReasoning：认的原样用，不认取最近的一档，同样近�
   assert.equal(f.nearestReasoning(p, "off"), "");
   assert.equal(f.reasoningChoices({}).join(), ",low,medium,high,max");
   assert.deepEqual(f.reasoningFields({ baseUrl: "https://example.com/v1" }, "off"), {});
+  // 探过是 none：不认思考档位，菜单只剩「默认」，选了什么都不带字段
+  const none = { reasoningLevels: "none", baseUrl: "https://example.com/v1" };
+  assert.equal(f.reasoningChoices(none).join(), "");
+  assert.equal(f.nearestReasoning(none, "high"), "");
+  assert.deepEqual(f.reasoningFields(none, "high"), {});
+});
+test("parseReasoningLevels：报错里列的几档由低到高排；不提档位的报错、只提一档的都给空", () => {
+  assert.deepEqual(f.parseReasoningLevels("Invalid value: 'probe'. Supported values are: 'high', 'low', and 'medium'.", "probe"), [
+    "low",
+    "medium",
+    "high"
+  ]);
+  assert.deepEqual(f.parseReasoningLevels("Unrecognized request argument supplied: reasoning_effort", "probe"), []);
+  assert.deepEqual(f.parseReasoningLevels("Invalid value: 'probe'. Supported values are: 'high'.", "probe"), []);
+  assert.deepEqual(f.parseReasoningLevels("rate limited", "probe"), []);
 });
 test("learnReasoningLevels：从报错里认出接口支持的几档，被拒的那档不算", () => {
   const p = { id: "p", reasoningLevels: "" };

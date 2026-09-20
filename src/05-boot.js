@@ -429,6 +429,14 @@ function bindEvents() {
     const item = e.target.closest("[data-profile]");
     if (!item) return;
     selectProfile(item.dataset.profile);
+    // 这个模型还没探过认哪几档：探一下，发送键旁的标签与菜单跟着换（探不成就按通用四档，撞了错再学）
+    const picked = activeProfile();
+    if (picked && picked.reasoningProbed !== picked.model)
+      void probeReasoningLevels(picked).then(levels => {
+        if (levels === null || activeProfile() !== picked) return;
+        renderModelTriggers();
+        if ($("#modelMenu")?.classList.contains("hidden") === false) renderModelMenu();
+      });
   });
   $("#messages").addEventListener("click", handleMessageAction);
   document.addEventListener("keydown", e => {

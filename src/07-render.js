@@ -60,11 +60,11 @@ function renderModelTriggers() {
   const p = activeProfile(),
     c = currentConversation(),
     level = (c ? c.reasoning : store.settings.reasoning) || "";
+  // 标签写实际会送出的那一档：模型不认所选的就落到最接近的；模型不认思考档位（探过是 none）就不写
+  const used = level ? nearestReasoning(p, level) : "";
   document.querySelectorAll(".model-trigger").forEach(button => {
     button.querySelector(".model-name").textContent = p?.name || "尚未接入模型";
-    button.querySelector(".model-extra").textContent = level
-      ? `· 思考 ${reasoningLabel(nearestReasoning(activeProfile(), level) || level)}`
-      : "";
+    button.querySelector(".model-extra").textContent = used ? `· 思考 ${reasoningLabel(used)}` : "";
   });
 }
 function closeModelMenu() {
@@ -106,7 +106,7 @@ function renderModelMenu() {
   if (all.length)
     $("#modelMenu").insertAdjacentHTML(
       "beforeend",
-      `<div class="menu-section"><div class="menu-section-title"><span>思考深度</span><span title="留空由接口决定；各模型所认的档位不同，可在模型高级配置中填写，接口拒绝时亦会自动记下">${c ? "本段对话" : "新对话默认"}</span></div><div class="segmented">${choices.map(value => `<button type="button" data-reasoning="${value}" class="${value === shown ? "active" : ""}">${reasoningLabel(value)}</button>`).join("")}</div></div><button class="model-option model-manage" data-manage>模型设置</button>`
+      `<div class="menu-section"><div class="menu-section-title"><span>思考深度</span><span title="留空由接口决定；各模型所认的档位不同，可在模型高级配置中填写，接口拒绝时亦会自动记下">${c ? "本段对话" : "新对话默认"}</span></div>${choices.length > 1 ? `<div class="segmented">${choices.map(value => `<button type="button" data-reasoning="${value}" class="${value === shown ? "active" : ""}">${reasoningLabel(value)}</button>`).join("")}</div>` : `<div class="menu-section-note">此模型不认思考档位</div>`}</div><button class="model-option model-manage" data-manage>模型设置</button>`
     );
   $("#configureFirst")?.addEventListener("click", () => openSettings("models"));
   $("#modelMenu [data-manage]")?.addEventListener("click", e => {

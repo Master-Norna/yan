@@ -128,6 +128,7 @@ function persistServerProfile(p) {
       maxTokens: p.maxTokens,
       systemPrompt: p.systemPrompt,
       reasoningLevels: p.reasoningLevels,
+      reasoningProbed: p.reasoningProbed,
       quota: p.quota,
       usedTokens: p.usedTokens
     };

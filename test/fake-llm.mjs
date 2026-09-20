@@ -84,6 +84,11 @@ http
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ data: [{ id: "claude-test", type: "model" }] }));
     }
+    // 用例读一下到目前为止收到过几次请求（探档位只探一次之类的断言）
+    if (req.url.endsWith("/calls") && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      return res.end(String(calls));
+    }
     let body = "";
     req.on("data", c => (body += c));
     req.on("end", () => {
@@ -93,6 +98,17 @@ http
       const msgs = payload.messages || [],
         toolResults = msgs.filter(m => m.role === "tool");
       const lastUser = [...msgs].reverse().find(m => m.role === "user")?.content || "";
+      // 探思考档位：页面故意送 reasoning_effort: "probe"。按模型 ID 装几种接口：
+      // fake-three 只认三档；fake-plain 压根不认识这个字段；fake-mute 照单全收（中转站的样子）；其余按 OpenAI 的样子列四档
+      if (payload.reasoning_effort === "probe") {
+        const model = String(payload.model || "");
+        if (model.includes("mute")) return sse(res, [delta({ content: "。" }), delta({}, { usage: { total_tokens: 1 } })]);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        const message = model.includes("plain")
+          ? "Unrecognized request argument supplied: reasoning_effort"
+          : `Invalid value: 'probe'. Supported values are: ${model.includes("three") ? "'low', 'medium', and 'high'" : "'low', 'medium', 'high', and 'max'"}.`;
+        return res.end(JSON.stringify({ error: { message, type: "invalid_request_error", param: "reasoning_effort" } }));
+      }
       // 带附件的一问是分段内容：正文在第一段
       const lastText = Array.isArray(lastUser) ? String(lastUser.find(part => part.type === "text")?.text || "") : lastUser;
       if (typeof lastUser === "string" && lastUser.startsWith("请为下面这段对话拟")) {
