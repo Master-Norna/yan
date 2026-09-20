@@ -695,6 +695,13 @@ button.history-repo:hover .history-repo-name {
 .menu-section .segmented {
   padding: 2px;
 }
+/* 探到模型不认思考档位：这一节只留一句话 */
+.menu-section-note {
+  padding: 4px 2px 3px;
+  color: var(--ink-3);
+  font: 11px var(--title);
+  letter-spacing: 0.06em;
+}
 .menu-section .segmented button {
   min-width: 0;
   flex: 1;
