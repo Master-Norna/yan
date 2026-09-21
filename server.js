@@ -267,7 +267,8 @@ function isPrivateAddress(value) {
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && b === 168) ||
-      (a === 198 && (b === 18 || b === 19)) ||
+      // 198.18.0.0/15 不算：Clash / Mihomo 之类代理开 TUN 的 fake-ip 模式时，所有域名都解析到这一段，真正去哪由代理定；
+      // 拦了它，开着代理时翻阅网页、检索一律失败。内网主机名（localhost、*.local、*.internal）与真正的内网 IP 照旧拒
       a >= 224
     );
   }
@@ -294,7 +295,8 @@ async function assertPublicUrl(url, { allowLoopback = false } = {}) {
   if (blocked(host)) throw Error(allowLoopback ? "不允许访问内网地址（本机 127.0.0.1 / localhost 除外）" : "不允许访问本机或内网地址");
   if (net.isIP(host) || (allowLoopback && host === "localhost")) return;
   const addresses = await dns.lookup(host, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some(item => blocked(item.address))) throw Error("网址解析到了本机或内网地址");
+  const hit = addresses.find(item => blocked(item.address));
+  if (!addresses.length || hit) throw Error(`网址解析到了本机或内网地址${hit ? `（${hit.address}）` : ""}`);
 }
 // 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读
 async function fetchPublicResponse(url, { method = "GET", headers = {}, body = null, timeout = 30000, allowLoopback = false } = {}) {
