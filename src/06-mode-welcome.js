@@ -462,9 +462,11 @@ function selectProfile(id, shouldRender = true) {
   if (!profiles().some(p => p.id === id)) return;
   const c = currentConversation(),
     wasDry = conversationDry(c);
+  // 开旧对话时也走这里，多半什么都没变：没变就不整份存一遍
+  const changed = store.settings.activeProfileId !== id || (!!c && c.profileId !== id);
   store.settings.activeProfileId = id;
   if (c) c.profileId = id;
-  saveStore();
+  if (changed) saveStore();
   closeModelMenu();
   if (shouldRender) {
     renderHeader();

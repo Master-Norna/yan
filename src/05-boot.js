@@ -798,7 +798,10 @@ function bindEvents() {
       closeHelperPanel();
       return;
     }
-    closeModelMenu();
+    // 浮着的小菜单（附件签、历史条目的「⋯」、目录签的弹层、模型菜单）：Esc 只收它，别连带把底下的旁注面板也关了
+    if (document.querySelector(".chip-pop")) return closeChipPop();
+    const modelMenu = $("#modelMenu");
+    if (!modelMenu.classList.contains("hidden") && !modelMenu.classList.contains("leaving")) return closeModelMenu();
     if (confirmResolve) settleConfirm(false);
     else if (!$("#settingsModal").classList.contains("hidden")) closeSettings();
     else if (editingMessageId) {

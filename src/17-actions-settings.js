@@ -126,6 +126,12 @@ function openSettings(tab = settingsTab) {
 }
 function closeSettings() {
   hideWithFade($("#settingsModal"));
+  // 「手记一条」后没写字就关了窗：那条空的不留（文本框随窗撤掉时未必触发 blur）
+  const kept = store.memory.items.filter(item => String(item.text || "").trim());
+  if (kept.length !== store.memory.items.length) {
+    store.memory.items = kept;
+    saveStore();
+  }
   render();
 }
 function renderSettings() {

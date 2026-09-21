@@ -2,12 +2,17 @@
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 function render(shouldScroll = false) {
   rememberPlace();
+  const c = currentConversation(),
+    library = view === "library";
+  // 人在卷宗页时这段对话的一答写完了，记了「有新回复」；回到它眼前就算看过了，不必再点一次侧栏
+  if (c && !library && c.unread) {
+    c.unread = false;
+    saveStoreSoon();
+  }
   renderHeader();
   renderHistory();
   syncDocumentTitle();
   requestAnimationFrame(() => syncJumpBottom());
-  const c = currentConversation(),
-    library = view === "library";
   $("#library").classList.toggle("hidden", !library);
   $("#welcome").classList.toggle("hidden", library || !!c);
   $("#chat").classList.toggle("hidden", library || !c);
