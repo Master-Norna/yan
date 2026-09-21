@@ -663,36 +663,34 @@ async function importData(file) {
     const data = JSON.parse(await readFile(file, "text"));
     if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations))
       throw Error("不是言的备份文件，或版本不兼容");
+    // 旧版备份先按启动时同一套迁移与规整过一遍（workAuto → commandPolicy、去掉半成品的压缩分隔……），别等下次刷新才对
+    const incoming = normalizeStoreData(data);
     const known = new Set(store.conversations.map(c => c.id));
     let conversations = 0,
       added = 0,
       library = 0,
       drafts = 0,
       files = 0;
-    for (const c of data.conversations)
+    for (const c of incoming.conversations)
       if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) {
-        store.conversations.push({
-          ...c,
-          forks: Array.isArray(c.forks) ? c.forks : [],
-          threads: Array.isArray(c.threads) ? c.threads : []
-        });
+        store.conversations.push(c);
         conversations += 1;
       }
     const profileIds = new Set(profiles().map(p => p.id));
-    for (const p of Array.isArray(data.profiles) ? data.profiles : [])
+    for (const p of incoming.profiles)
       if (p?.id && p.source !== "server" && !profileIds.has(p.id)) {
         store.profiles.push({ ...p, apiKey: p.apiKey || "" });
         added += 1;
       }
     const libraryIds = new Set(store.library.map(f => f.id));
-    for (const f of Array.isArray(data.library) ? data.library : [])
+    for (const f of incoming.library)
       if (f?.id && !libraryIds.has(f.id)) {
         store.library.push(f);
         library += 1;
       }
-    for (const [key, draft] of Object.entries(data.drafts && typeof data.drafts === "object" ? data.drafts : {}))
-      if (!store.drafts[key] && (typeof draft === "string" || (draft && typeof draft === "object"))) {
-        store.drafts[key] = normalizeDraft(draft);
+    for (const [key, draft] of Object.entries(incoming.drafts))
+      if (!store.drafts[key] && (draft.text || draft.attachments.length || draft.quote)) {
+        store.drafts[key] = draft;
         drafts += 1;
       }
     for (const record of Array.isArray(data.attachments) ? data.attachments : [])
@@ -703,7 +701,7 @@ async function importData(file) {
     const memoryIds = new Set(store.memory.items.map(item => item.id)),
       memoryTexts = new Set(store.memory.items.map(item => item.text));
     let memories = 0;
-    for (const item of normalizeMemory(data.memory).items)
+    for (const item of incoming.memory.items)
       if (!memoryIds.has(item.id) && !memoryTexts.has(item.text) && store.memory.items.length < MAX_MEMORY_ITEMS) {
         store.memory.items.push(item);
         memoryIds.add(item.id);

@@ -51,4 +51,41 @@ check(
   "the lightweight mirror stays small instead of copying conversations back",
   await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations.length === 0`)
 );
+// 导入旧版（v4）备份：workAuto 要立刻换成 commandPolicy、半成品的压缩分隔要去掉，不必等下次刷新
+const backup = {
+  version: 4,
+  settings: {},
+  profiles: [],
+  conversations: [
+    {
+      id: "imported-old",
+      title: "旧备份里的对话",
+      createdAt: "2025-06-01T00:00:00.000Z",
+      updatedAt: "2025-06-01T00:00:00.000Z",
+      profileId: "",
+      workAuto: true,
+      reasoning: "off",
+      messages: [
+        { id: "iu1", role: "user", content: "旧话", timestamp: "2025-06-01T00:00:00.000Z" },
+        { id: "ic1", role: "context", content: "", compacting: true, timestamp: "2025-06-01T00:00:01.000Z" }
+      ]
+    }
+  ],
+  library: [],
+  drafts: { "imported-old": "旧版草稿只是一段字" }
+};
+await evalJs(`document.querySelector("#openSettings").click(); true`);
+await sleep(200);
+await evalJs(
+  `(() => { const input = document.querySelector("#importInput"), dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(JSON.stringify(backup))}], "备份.json", { type: "application/json" })); input.files = dt.files; input.dispatchEvent(new Event("change")); return true; })()`
+);
+await waitFor(`document.querySelector("#history").textContent.includes("旧备份里的对话")`, 5000);
+const imported = await evalJs(
+  `(async () => { const s = JSON.parse((await (${readRecord})).json), c = s.conversations.find(c => c.id === "imported-old"); return { policy: c.commandPolicy, workAuto: "workAuto" in c, reasoning: c.reasoning, messages: c.messages.length, forks: Array.isArray(c.forks), draft: s.drafts["imported-old"] }; })()`
+);
+check(
+  "an old backup is migrated on import: workAuto → commandPolicy, dangling compacting marker dropped, string draft wrapped",
+  imported.policy === "auto" && !imported.workAuto && imported.reasoning === "" && imported.messages === 1 && imported.forks && imported.draft?.text === "旧版草稿只是一段字",
+  JSON.stringify(imported)
+);
 close();
