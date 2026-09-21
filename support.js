@@ -3866,6 +3866,49 @@ function trailReasoningHtml(message, group) {
     ? `<details class="reasoning trail-reasoning" data-state="done"><summary>思绪</summary><div class="reasoning-body">${escapeHtml(text)}</div></details>`
     : "";
 }
+// 一组没有夹着正文、只是「想一阵 → 调工具 → 再想」时，后半段思绪仍属于同一组。
+// 沿用组里原来的那枚签，重新切回 live；否则旧签一直打勾，下面又短暂冒出一枚新签，看起来像没有继续思考。
+/** @param {Element} block @param {Message} message @param {string} visible */
+function reusableTrailReasoning(block, message, visible) {
+  if (!trailWork(message) || message.status !== "streaming") return null;
+  const groups = trailGroups(message),
+    active = block.querySelector('.tool-stack.is-work .trail-group > .reasoning[data-round-live="true"]');
+  const group = active ? groups.find(item => active.parentElement?.dataset.at === String(item.at)) : groups.at(-1);
+  if (!group) return null;
+  const details =
+    active ||
+    [...block.querySelectorAll(".tool-stack.is-work .tool-stack-body > .trail-group")]
+      .find(host => host.dataset.at === String(group.at))
+      ?.querySelector(":scope > .reasoning");
+  if (!details) return null;
+  if (!active) {
+    if (String(visible || "").slice(group.at).trim()) return null;
+    if (!String(message.reasoning || "").slice(group.rat).trim()) return null;
+    details.dataset.roundLive = "true";
+    // 生成中切去别处再回来时，整页渲染会先把尾段思绪画在行迹之后；既然能归回上一组，就撤掉那份临时副本。
+    block.querySelector(":scope > .reasoning")?.remove();
+  }
+  return {
+    details,
+    text: String(message.reasoning || "")
+      .slice(group.rfrom)
+      .trim()
+  };
+}
+/** @param {Element} host @param {Message} message @param {ReturnType<typeof trailGroups>[number]} group */
+function syncTrailGroupReasoning(host, message, group) {
+  const text = String(message.reasoning || "")
+      .slice(group.rfrom, group.rat)
+      .trim(),
+    details = host.querySelector(":scope > .reasoning");
+  if (!text) return details?.remove();
+  if (!details) return host.insertAdjacentHTML("afterbegin", trailReasoningHtml(message, group));
+  const body = details.querySelector(".reasoning-body");
+  if (body.textContent !== text) body.textContent = text;
+  details.dataset.state = "done";
+  delete details.dataset.roundLive;
+  if (details.open && !details.dataset.touched) settleDetails(details, false);
+}
 /** @param {Message|SubAgent} message */
 function trailNoteHtml(message, group) {
   const text = String(message.content || "")
@@ -4515,7 +4558,13 @@ function refreshSteps(assistant) {
       groups = work ? trailGroups(assistant) : [];
     if (work)
       for (const group of groups) {
-        if (bodyHost.querySelector(`.trail-group[data-at="${group.at}"]`)) continue;
+        const existing = [...bodyHost.querySelectorAll(":scope > .trail-group")].find(
+          host => !host.classList.contains("trail-live") && host.dataset.at === String(group.at)
+        );
+        if (existing) {
+          syncTrailGroupReasoning(existing, assistant, group);
+          continue;
+        }
         // 正在承接这一轮话的「进行中」分组就地转正：话按最终文本重画一遍（流式可能还差几个字），再挂上步骤容器
         const live = bodyHost.querySelector(":scope > .trail-group.trail-live");
         if (live) {
@@ -9392,11 +9441,13 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     }
     const visible = paced ? assistant.content.slice(0, shown) : assistant.content;
     const base = trailBase(assistant),
-      host = trailLiveHost(block, assistant) || block,
+      reusedReasoning = reusableTrailReasoning(block, assistant, visible),
+      // 还只有思绪时直接沿用上一组，不先在下面造一枚重复的签；正文起笔才需要新的进行中容器。
+      host = reusedReasoning && !visible.slice(base).trim() ? null : trailLiveHost(block, assistant) || block,
       rbase = trailReasoningBase(assistant),
-      thought = String(assistant.reasoning || "").slice(rbase);
+      thought = reusedReasoning?.text ?? String(assistant.reasoning || "").slice(rbase);
     if (thought.trim()) {
-      let details = host.querySelector(":scope > .reasoning");
+      let details = reusedReasoning?.details || host?.querySelector(":scope > .reasoning");
       if (!details) {
         host.insertAdjacentHTML("afterbegin", reasoningHtml(assistant, thought));
         details = host.querySelector(":scope > .reasoning");
@@ -9408,14 +9459,14 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
       const live = reasoningLive({ ...assistant, content: visible });
       details.dataset.state = live ? "live" : "done";
       if (details.open && body._follow !== false) body.scrollTop = body.scrollHeight; // 软跟踪：没往上翻就跟着最新一行走
-      if (!assistant.reasoningTouched) {
+      if (!(reusedReasoning ? details.dataset.touched : assistant.reasoningTouched)) {
         if (!live && details.open) settleDetails(details, false);
         else if (live && !details.open) settleDetails(details, true);
       }
     }
     if (!visible) {
       if (!block.querySelector(".thinking")) insertAboveChangeBar(block, `<div class="thinking">正在凝神</div>`);
-    } else if (visible.length <= base) {
+    } else if (!visible.slice(base).trim()) {
       /* 新一轮尚未起笔 */
     } else {
       let markdown = host.querySelector(":scope > .markdown");
@@ -9450,7 +9501,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
         freshGroups.map(group => ({ count: group.count, age: at - group.at }))
       );
     }
-    paintDrafting(host, assistant);
+    paintDrafting(host || block, assistant);
     if (onFrame) onFrame();
     else if (followBottom) scrollBottom();
     else syncJumpBottom();

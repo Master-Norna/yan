@@ -363,11 +363,13 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     }
     const visible = paced ? assistant.content.slice(0, shown) : assistant.content;
     const base = trailBase(assistant),
-      host = trailLiveHost(block, assistant) || block,
+      reusedReasoning = reusableTrailReasoning(block, assistant, visible),
+      // 还只有思绪时直接沿用上一组，不先在下面造一枚重复的签；正文起笔才需要新的进行中容器。
+      host = reusedReasoning && !visible.slice(base).trim() ? null : trailLiveHost(block, assistant) || block,
       rbase = trailReasoningBase(assistant),
-      thought = String(assistant.reasoning || "").slice(rbase);
+      thought = reusedReasoning?.text ?? String(assistant.reasoning || "").slice(rbase);
     if (thought.trim()) {
-      let details = host.querySelector(":scope > .reasoning");
+      let details = reusedReasoning?.details || host?.querySelector(":scope > .reasoning");
       if (!details) {
         host.insertAdjacentHTML("afterbegin", reasoningHtml(assistant, thought));
         details = host.querySelector(":scope > .reasoning");
@@ -379,14 +381,14 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
       const live = reasoningLive({ ...assistant, content: visible });
       details.dataset.state = live ? "live" : "done";
       if (details.open && body._follow !== false) body.scrollTop = body.scrollHeight; // 软跟踪：没往上翻就跟着最新一行走
-      if (!assistant.reasoningTouched) {
+      if (!(reusedReasoning ? details.dataset.touched : assistant.reasoningTouched)) {
         if (!live && details.open) settleDetails(details, false);
         else if (live && !details.open) settleDetails(details, true);
       }
     }
     if (!visible) {
       if (!block.querySelector(".thinking")) insertAboveChangeBar(block, `<div class="thinking">正在凝神</div>`);
-    } else if (visible.length <= base) {
+    } else if (!visible.slice(base).trim()) {
       /* 新一轮尚未起笔 */
     } else {
       let markdown = host.querySelector(":scope > .markdown");
@@ -421,7 +423,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
         freshGroups.map(group => ({ count: group.count, age: at - group.at }))
       );
     }
-    paintDrafting(host, assistant);
+    paintDrafting(host || block, assistant);
     if (onFrame) onFrame();
     else if (followBottom) scrollBottom();
     else syncJumpBottom();

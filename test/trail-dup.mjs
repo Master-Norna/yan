@@ -19,7 +19,12 @@ let leaks = [],
   hopped = false;
 for (;;) {
   // 第二轮思绪流到一半时翻去欢迎页再翻回来：生成期间页面上没有「当前对话」，时间线也不该乱
-  if (!hopped && (await evalJs(`!!document.querySelector('.message.assistant .trail-group.trail-live .reasoning')`))) {
+  if (
+    !hopped &&
+    (await evalJs(
+      `!!document.querySelector('.message.assistant .trail-group.trail-live .reasoning, .message.assistant .reasoning[data-round-live="true"]')`
+    ))
+  ) {
     hopped = true;
     await evalJs(`document.querySelector("#newChat").click(); true`);
     await sleep(300);

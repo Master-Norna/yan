@@ -143,4 +143,30 @@ check(
   JSON.stringify(par.cost)
 );
 check("digest not shown in UI", !(await evalJs(`document.querySelector('.message.assistant .markdown').textContent`)).includes("［行迹］"));
+// 绑定目录的时间线里，请示前后的两轮思考若复用同一组，原来打勾的那枚「思绪」要重新变成呼吸点；
+// 不能只在后面临时画一枚新的，让旧的勾看起来像模型没有继续思考。
+await evalJs(
+  `document.querySelector("#chatInput").value = "ASK"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
+);
+await waitFor(`!!document.querySelector('#approvalBar .ask-form')`, 10000);
+check(
+  "work trail stamps the pre-tool thought done while the form waits",
+  await evalJs(`(() => { const a = [...document.querySelectorAll('.message.assistant')].at(-1), d = a.querySelector('.tool-stack.is-work .trail-group .reasoning'); if (!d || d.dataset.state !== 'done') return false; d.dataset.reuseProbe = 'true'; return true; })()`)
+);
+await evalJs(`document.querySelector('#approvalBar .ask-q[data-q="0"] .ask-opt[data-opt="0"]').click(); true`);
+await evalJs(`document.querySelector('#approvalBar [data-form="next"]').click(); true`);
+await sleep(80);
+await evalJs(`document.querySelector('#approvalBar .ask-q[data-q="1"] .ask-opt[data-opt="0"]').click(); true`);
+await evalJs(`document.querySelector('#approvalBar [data-form="submit"]').click(); true`);
+let reusedThought = false;
+try {
+  await waitFor(`!!document.querySelector('.reasoning[data-reuse-probe="true"][data-state="live"]')`, 4000);
+  reusedThought = true;
+} catch {}
+check(
+  "the same work-trail thought marker resumes as a breathing dot after the tool",
+  reusedThought,
+  await evalJs(`JSON.stringify([...[...document.querySelectorAll('.message.assistant')].at(-1).querySelectorAll('.reasoning')].map(d => ({ state: d.dataset.state, reused: d.dataset.reuseProbe || '', text: d.querySelector('.reasoning-body')?.textContent.slice(0, 30) })))`)
+);
+await waitFor(`[...document.querySelectorAll('.message.assistant')].at(-1)?.dataset.status === "complete"`, 15000);
 close();
