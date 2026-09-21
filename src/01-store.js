@@ -201,7 +201,7 @@ function queueStateWrite(revision, json, localSaved) {
   stateWritePending = { revision, json, localSaved };
   void flushStateWrites();
 }
-// 启动时以 IndexedDB 为主；旧版 localStorage、测试显式塞进来的无标记数据，以及尚未落盘的较新完整镜像优先一次并迁入。
+// 启动时以 IndexedDB 为主；旧版 localStorage、显式写入的无标记数据，以及同版或较新的完整镜像优先一次并迁入。
 async function hydrateStore() {
   const local = readLocalStoreRecord();
   let record = null;
@@ -214,7 +214,7 @@ async function hydrateStore() {
   stateDbOnly = local?.dbOnly === true;
   const localOverrides =
     !!local &&
-    (!local.managed || !record || (!local.dbOnly && Number(local.revision || 0) > Number(record.revision || 0)));
+    (!local.managed || !record || (!local.dbOnly && Number(local.revision || 0) >= Number(record.revision || 0)));
   if (!localOverrides && record?.json) {
     try {
       store = normalizeStoreData(JSON.parse(record.json));
