@@ -1053,10 +1053,15 @@ button.history-repo:hover .history-repo-name {
 }
 .chat-scroll-grabber.active {
   pointer-events: auto;
-  cursor: ns-resize;
+  cursor: default; /* 与原生滚动条一样，指针不变形 */
 }
 html.work-mode .chat-scroll-grabber {
   pointer-events: none;
+}
+/* 命中层盖着滑块，原生的 :hover 到不了它；指针在命中层上（或正拖着）时把滑块加深，手感与直接悬在滑块上一致 */
+.main:has(.chat-scroll-grabber.active:hover) .chat-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink-3) 46%, transparent);
+  background-clip: padding-box;
 }
 .chat-inner {
   width: min(100%, var(--read));
@@ -6402,6 +6407,10 @@ button:focus:not(:focus-visible) {
 }
 @media (max-width: 760px) {
   .chat-scroll-grabber {
+    display: none;
+  }
+  /* 窄窗里居中的快捷键提示会与右下角的上下文计数撞在一起；窄了就只留计数 */
+  .hint {
     display: none;
   }
   .outline {

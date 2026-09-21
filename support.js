@@ -2500,7 +2500,10 @@ function bindEvents() {
       closeHelperPanel();
       return;
     }
-    closeModelMenu();
+    // 浮着的小菜单（附件签、历史条目的「⋯」、目录签的弹层、模型菜单）：Esc 只收它，别连带把底下的旁注面板也关了
+    if (document.querySelector(".chip-pop")) return closeChipPop();
+    const modelMenu = $("#modelMenu");
+    if (!modelMenu.classList.contains("hidden") && !modelMenu.classList.contains("leaving")) return closeModelMenu();
     if (confirmResolve) settleConfirm(false);
     else if (!$("#settingsModal").classList.contains("hidden")) closeSettings();
     else if (editingMessageId) {
@@ -3195,9 +3198,11 @@ function selectProfile(id, shouldRender = true) {
   if (!profiles().some(p => p.id === id)) return;
   const c = currentConversation(),
     wasDry = conversationDry(c);
+  // 开旧对话时也走这里，多半什么都没变：没变就不整份存一遍
+  const changed = store.settings.activeProfileId !== id || (!!c && c.profileId !== id);
   store.settings.activeProfileId = id;
   if (c) c.profileId = id;
-  saveStore();
+  if (changed) saveStore();
   closeModelMenu();
   if (shouldRender) {
     renderHeader();
@@ -3227,12 +3232,17 @@ function syncDocumentTitle() {
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 function render(shouldScroll = false) {
   rememberPlace();
+  const c = currentConversation(),
+    library = view === "library";
+  // 人在卷宗页时这段对话的一答写完了，记了「有新回复」；回到它眼前就算看过了，不必再点一次侧栏
+  if (c && !library && c.unread) {
+    c.unread = false;
+    saveStoreSoon();
+  }
   renderHeader();
   renderHistory();
   syncDocumentTitle();
   requestAnimationFrame(() => syncJumpBottom());
-  const c = currentConversation(),
-    library = view === "library";
   $("#library").classList.toggle("hidden", !library);
   $("#welcome").classList.toggle("hidden", library || !!c);
   $("#chat").classList.toggle("hidden", library || !c);
@@ -3373,9 +3383,15 @@ function renderHistory() {
   const buckets = new Map([["置顶", pinned.map(c => ({ kind: "chat", c }))]]);
   for (const label of ["今天", "过去七天", "更早"]) buckets.set(label, []);
   for (const node of nodes) buckets.get(dayBucket(node.at)).push(node);
+  // 正改着名时侧栏也可能重画（别的对话拟好了题、后台一答收尾）：改到一半的字与光标得留住，不能被原标题冲掉
+  const editing = $("#history .history-rename"),
+    typed =
+      editing && renamingId && editing.closest("[data-conversation]")?.dataset.conversation === renamingId
+        ? { value: editing.value, start: editing.selectionStart, end: editing.selectionEnd }
+        : null;
   const item = c => {
     if (renamingId === c.id)
-      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
+      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed ? typed.value : c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
     const job = requestJob(c.id),
       running = !!job,
       waiting = job?.label === "等待确认";
@@ -3406,7 +3422,8 @@ function renderHistory() {
   const input = $("#history .history-rename");
   if (input) {
     input.focus();
-    input.select();
+    if (typed) input.setSelectionRange(typed.start, typed.end);
+    else input.select();
   }
 }
 function scrollSnapshot() {
@@ -3444,7 +3461,8 @@ function renderConversation(shouldScroll = false) {
   const c = currentConversation();
   if (!c) return;
   const snapshot = c.id === lastRenderedConvId ? scrollSnapshot() : scrollPositions.get(c.id);
-  $("#chatTitle").textContent = c.title;
+  // 同一段对话原地重画（换主题、压缩收尾）时，正改着的标题不动
+  if (c.id !== lastRenderedConvId || document.activeElement !== $("#chatTitle")) $("#chatTitle").textContent = c.title;
   renderChatMeta(c);
   renderWorkAuto();
   renderModelTriggers();
@@ -7767,8 +7785,9 @@ async function maybeAutoTitle(conversation, profile) {
     delete conversation.titleTries;
     saveStore();
     renderHistory();
+    // 用户正在页面上方改着标题：不把拟好的题写进去盖掉他的字，他落笔（blur）时以他写的为准
     if (currentId === conversation.id) {
-      $("#chatTitle").textContent = title;
+      if (document.activeElement !== $("#chatTitle")) $("#chatTitle").textContent = title;
       syncDocumentTitle();
     }
   } catch {
@@ -9084,6 +9103,7 @@ function estimateText(text) {
 }
 // 上下文过重的门槛：每一答的用量标注超过它就转为印色提醒
 const CONTEXT_HEAVY = 24000;
+const SSE_IDLE_MS = 300000;
 function estimateTokens(messages) {
   let score = 0;
   for (const message of messages) {
@@ -9560,16 +9580,27 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     think.held = "";
     think.mode = "body";
   };
+  // 直连时流静默太久没人管（桥接那头 Node 自带五分钟的读超时）：五分钟一个字节都没有就当断了，按中断处理、可续写
+  const readChunk = () =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reader.cancel().catch(() => {});
+        reject(Error("接口静默超过五分钟，连接已中断"));
+      }, SSE_IDLE_MS);
+      reader.read().then(resolve, reject).finally(() => clearTimeout(timer));
+    });
   // 流被掐断（停止、补言改道）时这一段的帧循环到此为止：接下来的一轮另起一个，两个循环不能同时画一条消息
   try {
     await pump();
   } catch (error) {
     closed = true;
+    // 半途出错（流里的报错事件）：把还开着的连接收掉，别让桥接那头替一个没人读的流继续转发
+    reader.cancel().catch(() => {});
     throw error;
   }
   async function pump() {
     while (true) {
-      const { value, done } = await reader.read();
+      const { value, done } = await readChunk();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || "";
@@ -9582,8 +9613,12 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
         if (!data || data === "[DONE]") continue;
+        let failure = "";
         try {
           const json = JSON.parse(data);
+          // 流里夹着的报错（限流、上游掐线、桥接补的「连接中断」）：不能当没看见让半截话冒充写完了——按中断处理，已写的留着、可续写
+          if (json.error && !json.choices)
+            failure = (typeof json.error === "string" ? json.error : json.error?.message) || "接口在作答途中返回了错误";
           const delta = json.choices?.[0]?.delta;
           const text = normalizeContent(delta?.content),
             reasoning = normalizeContent(delta?.reasoning_content ?? delta?.reasoning);
@@ -9608,6 +9643,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
           }
           if (json.usage) assistant.usage = json.usage;
         } catch {}
+        if (failure) throw Error(failure);
       }
       if (done) break;
     }
@@ -9810,6 +9846,12 @@ function openSettings(tab = settingsTab) {
 }
 function closeSettings() {
   hideWithFade($("#settingsModal"));
+  // 「手记一条」后没写字就关了窗：那条空的不留（文本框随窗撤掉时未必触发 blur）
+  const kept = store.memory.items.filter(item => String(item.text || "").trim());
+  if (kept.length !== store.memory.items.length) {
+    store.memory.items = kept;
+    saveStore();
+  }
   render();
 }
 function renderSettings() {
@@ -10347,36 +10389,34 @@ async function importData(file) {
     const data = JSON.parse(await readFile(file, "text"));
     if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations))
       throw Error("不是言的备份文件，或版本不兼容");
+    // 旧版备份先按启动时同一套迁移与规整过一遍（workAuto → commandPolicy、去掉半成品的压缩分隔……），别等下次刷新才对
+    const incoming = normalizeStoreData(data);
     const known = new Set(store.conversations.map(c => c.id));
     let conversations = 0,
       added = 0,
       library = 0,
       drafts = 0,
       files = 0;
-    for (const c of data.conversations)
+    for (const c of incoming.conversations)
       if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) {
-        store.conversations.push({
-          ...c,
-          forks: Array.isArray(c.forks) ? c.forks : [],
-          threads: Array.isArray(c.threads) ? c.threads : []
-        });
+        store.conversations.push(c);
         conversations += 1;
       }
     const profileIds = new Set(profiles().map(p => p.id));
-    for (const p of Array.isArray(data.profiles) ? data.profiles : [])
+    for (const p of incoming.profiles)
       if (p?.id && p.source !== "server" && !profileIds.has(p.id)) {
         store.profiles.push({ ...p, apiKey: p.apiKey || "" });
         added += 1;
       }
     const libraryIds = new Set(store.library.map(f => f.id));
-    for (const f of Array.isArray(data.library) ? data.library : [])
+    for (const f of incoming.library)
       if (f?.id && !libraryIds.has(f.id)) {
         store.library.push(f);
         library += 1;
       }
-    for (const [key, draft] of Object.entries(data.drafts && typeof data.drafts === "object" ? data.drafts : {}))
-      if (!store.drafts[key] && (typeof draft === "string" || (draft && typeof draft === "object"))) {
-        store.drafts[key] = normalizeDraft(draft);
+    for (const [key, draft] of Object.entries(incoming.drafts))
+      if (!store.drafts[key] && (draft.text || draft.attachments.length || draft.quote)) {
+        store.drafts[key] = draft;
         drafts += 1;
       }
     for (const record of Array.isArray(data.attachments) ? data.attachments : [])
@@ -10387,7 +10427,7 @@ async function importData(file) {
     const memoryIds = new Set(store.memory.items.map(item => item.id)),
       memoryTexts = new Set(store.memory.items.map(item => item.text));
     let memories = 0;
-    for (const item of normalizeMemory(data.memory).items)
+    for (const item of incoming.memory.items)
       if (!memoryIds.has(item.id) && !memoryTexts.has(item.text) && store.memory.items.length < MAX_MEMORY_ITEMS) {
         store.memory.items.push(item);
         memoryIds.add(item.id);
