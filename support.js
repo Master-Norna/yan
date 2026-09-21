@@ -190,8 +190,10 @@
 const STORAGE_KEY = "yan-chat-v1";
 const STORAGE_META_KEY = "__yanStorage";
 const STATE_DB_NAME = "yan-chat-state-v1";
-const STATE_STORE_NAME = "state";
+const STATE_STORE_NAME = "state"; // 旧版整份记录的表（main 一条），迁走后就空着
 const STATE_RECORD_KEY = "main";
+const CHATS_STORE_NAME = "conversations"; // 没桥接时对话存这里，一段一条
+const CHAT_DISK_INTERVAL = 1200; // 同一段对话写进目录的最短间隔（毫秒）
 // 内置提示词都在 prompts/ 目录里，这里只做取值与填空；{{名字}} 由 vars 填入，缺文件时报错并给空串，不让请求整个失败
 const PROMPTS = window.YAN_PROMPTS || {};
 function prompt(path, vars = {}) {
@@ -266,6 +268,9 @@ const defaultStore = {
 };
 /** @type {Store} */
 let store = loadStore();
+// 给端到端测试看内存里的记录（对话不再整份镜像在 localStorage 里，测试没别的地方读）
+window.__yanState = () => store;
+window.__yanSave = () => saveStore();
 let bootstrap = { serverProfile: null, configError: "" };
 let apiBase = null;
 /** @type {string|null} 正在看的对话 */
@@ -296,12 +301,24 @@ const requestJobs = new Map();
 let settingsTab = "general";
 let toastTimer = null;
 let fileDbPromise = null;
-let stateDbPromise = null;
-let stateRevision = 0,
-  stateDbOnly = false,
-  stateWriteActive = false,
-  stateWritePending = null,
-  stateSaveWarned = false;
+let stateDbPromise = null,
+  stateDb = null;
+let metaRevision = 0,
+  metaSaveWarned = false,
+  metaMirrorTimer = null;
+// 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store.js 开头的说明）
+let chatsBroken = false,
+  chatsSyncing = false,
+  freshBrowser = false,
+  chatSaveWarned = false,
+  unloading = false;
+const dirtyChatIds = new Set(),
+  chatHashes = new Map(),
+  chatStamps = new Map(),
+  pendingChatWrites = new Map(),
+  writingChatIds = new Set(),
+  chatDiskWrites = new Map(),
+  pendingChatDeletes = new Set();
 let libraryQuery = "",
   libraryKind = "all";
 const advancedOpen = new Set();
@@ -377,15 +394,7 @@ function normalizeStoreData(value) {
         serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) }
       },
       profiles: Array.isArray(data.profiles) ? data.profiles : [],
-      conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(({ ended, workAuto, ...c }) => ({
-        ...c,
-        commandPolicy: normalizeCommandPolicy(c.commandPolicy, workAuto ? "auto" : "ask"),
-        reasoning: normalizeReasoning(c.reasoning),
-        // 旧版在压缩开始时就先落一个 compacting 分隔：页面若在摘要生成前关掉，它会留下来把历史长期截断；启动时清掉
-        messages: (Array.isArray(c.messages) ? c.messages : []).filter(m => !(m?.role === "context" && m.compacting)),
-        forks: Array.isArray(c.forks) ? c.forks : [],
-        threads: Array.isArray(c.threads) ? c.threads : []
-      })),
+      conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(normalizeConversation),
       library: Array.isArray(data.library) ? data.library : [],
       drafts: normalizeDrafts(data.drafts),
       memory: normalizeMemory(data.memory)
@@ -394,6 +403,19 @@ function normalizeStoreData(value) {
     return structuredClone(defaultStore);
   }
 }
+/** @param {any} value @returns {Conversation} */
+function normalizeConversation({ ended, workAuto, ...c }) {
+  return /** @type {Conversation} */ ({
+    ...c,
+    commandPolicy: normalizeCommandPolicy(c.commandPolicy, workAuto ? "auto" : "ask"),
+    reasoning: normalizeReasoning(c.reasoning),
+    // 旧版在压缩开始时就先落一个 compacting 分隔：页面若在摘要生成前关掉，它会留下来把历史长期截断；启动时清掉
+    messages: (Array.isArray(c.messages) ? c.messages : []).filter(m => !(m?.role === "context" && m.compacting)),
+    forks: Array.isArray(c.forks) ? c.forks : [],
+    threads: Array.isArray(c.threads) ? c.threads : []
+  });
+}
+// localStorage 里那份：新版只有配置（split 标记），旧版是整份记录（带 revision / dbOnly 的是 IndexedDB 时期的镜像，什么都没带的是更老的版本或测试灌的）
 function readLocalStoreRecord() {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -403,6 +425,8 @@ function readLocalStoreRecord() {
       data,
       revision: Number(meta?.revision) || 0,
       dbOnly: meta?.dbOnly === true,
+      split: meta?.split === true,
+      pendingDeletes: Array.isArray(meta?.pendingDeletes) ? meta.pendingDeletes.map(String) : [],
       managed: !!meta
     };
   } catch {
@@ -452,143 +476,407 @@ function normalizeMemory(memory) {
       }))
   };
 }
+// ---------- 记录怎么存 ----------
+// 记录分两半。「配置」（设置、模型、浏览器内卷宗、记忆、草稿）小而常改，整份存在 localStorage，桥接在线时另镜像一份到对话目录
+// （设置.json，不含 API Key），换浏览器、清了站点数据后开页可从它恢复。
+// 「对话」各自一份：桥接在线时落在本机的对话目录（bootstrap.work.chats，一段一个 JSON 文件，像卷宗一样是个普通目录，复制即备份）；
+// 没桥接时存在 IndexedDB 的 conversations 表，桥接接上后推到目录里去、表里的清掉——目录是正本，表只是没桥接时的暂存。
+// 保存只写改过的那几段（当前这段、正在生成的、明确标过脏的，且内容的哈希与上次写的不同）；另有一趟低频的全量巡检兜底，
+// 谁改了哪段没标到也逃不过。旧版把整份记录（含所有对话）塞在 localStorage / IndexedDB 的一条记录里，启动时拆开迁走。
 function openStateDb() {
   if (stateDbPromise) return stateDbPromise;
   stateDbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(STATE_DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STATE_STORE_NAME, { keyPath: "id" });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || Error("对话存储不可用"));
+    const request = indexedDB.open(STATE_DB_NAME, 2);
+    // 另一处窗口还开着旧版页面时，升级表结构会被它挡住，open 永远不回来：等几秒就当没有 IndexedDB，页面照常开（对话从目录来）
+    const timer = setTimeout(() => {
+      stateDbPromise = null;
+      reject(Error("对话存储被另一处窗口占着"));
+    }, 5000);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STATE_STORE_NAME)) db.createObjectStore(STATE_STORE_NAME, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(CHATS_STORE_NAME)) db.createObjectStore(CHATS_STORE_NAME, { keyPath: "id" });
+    };
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      stateDb = request.result;
+      // 别的窗口要升级或删库：把自己的连接让开，下次用到再重开，不然它那头会一直等
+      stateDb.onversionchange = () => {
+        stateDb.close();
+        stateDb = null;
+        stateDbPromise = null;
+      };
+      resolve(stateDb);
+    };
+    request.onerror = () => {
+      clearTimeout(timer);
+      stateDbPromise = null;
+      reject(request.error || Error("对话存储不可用"));
+    };
   });
   return stateDbPromise;
 }
-async function stateStoreRequest(mode, action) {
-  const db = await openStateDb();
+function dbRequest(db, storeName, mode, action) {
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STATE_STORE_NAME, mode),
-      request = action(transaction.objectStore(STATE_STORE_NAME));
+    const transaction = db.transaction(storeName, mode),
+      request = action(transaction.objectStore(storeName));
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || Error("对话存储失败"));
     transaction.onabort = () => reject(transaction.error || Error("对话存储已中止"));
   });
 }
-function nextStateRevision() {
-  stateRevision = Math.max(Date.now(), stateRevision + 1);
-  return stateRevision;
+async function stateStoreRequest(storeName, mode, action) {
+  return dbRequest(await openStateDb(), storeName, mode, action);
 }
-function serializedStore(revision, dbOnly = false) {
-  return JSON.stringify({ ...store, [STORAGE_META_KEY]: { revision, dbOnly } });
-}
-// localStorage 只在数据尚小时保留完整镜像，供首屏主题与旧版/测试直接读取；一旦装不下就缩成很小的启动镜像。
-// 完整对话始终写进 IndexedDB，因此 localStorage 的 5–10 MB 上限不再决定能留多少聊天。
-function localStoreShell(revision) {
-  return JSON.stringify({
-    version: store.version,
-    settings: store.settings,
-    profiles: store.profiles,
-    conversations: [],
-    library: [],
-    memory: { enabled: store.memory?.enabled !== false, items: [] },
-    drafts: {},
-    [STORAGE_META_KEY]: { revision, dbOnly: true }
+// 一个事务里做一批（迁移几百段对话时一段一个事务太慢）
+function dbBatch(db, storeName, fill) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, "readwrite");
+    fill(transaction.objectStore(storeName));
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || Error("对话存储失败"));
+    transaction.onabort = () => reject(transaction.error || Error("对话存储已中止"));
   });
 }
-function writeLocalShell(revision) {
-  try {
-    localStorage.setItem(STORAGE_KEY, localStoreShell(revision));
-    return true;
-  } catch {
-    return false;
-  }
+// 内容的指纹：长度加一遍 FNV-1a，够用来判断「和上次写的一不一样」
+function hashText(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return `${text.length}:${hash.toString(16)}`;
 }
-async function flushStateWrites() {
-  if (stateWriteActive) return;
-  stateWriteActive = true;
-  while (stateWritePending) {
-    const pending = stateWritePending;
-    stateWritePending = null;
-    try {
-      await stateStoreRequest("readwrite", db =>
-        db.put({ id: STATE_RECORD_KEY, revision: pending.revision, json: pending.json })
-      );
-      if (stateDbOnly) writeLocalShell(pending.revision);
-      stateSaveWarned = false;
-    } catch {
-      // 完整 localStorage 镜像写成了就仍有退路；两边都没写成才打扰用户
-      if (!pending.localSaved && !stateSaveWarned) {
-        stateSaveWarned = true;
-        toast("本机对话存储失败，请先导出备份");
-      }
+function metaOf(data = store) {
+  return {
+    version: data.version,
+    settings: data.settings,
+    profiles: data.profiles,
+    library: data.library,
+    memory: data.memory,
+    drafts: data.drafts
+  };
+}
+function nextMetaRevision() {
+  metaRevision = Math.max(Date.now(), metaRevision + 1);
+  return metaRevision;
+}
+function writeMeta() {
+  const json = JSON.stringify({
+    ...metaOf(),
+    [STORAGE_META_KEY]: { revision: nextMetaRevision(), split: true, pendingDeletes: [...pendingChatDeletes] }
+  });
+  try {
+    localStorage.setItem(STORAGE_KEY, json);
+    metaSaveWarned = false;
+  } catch {
+    if (!metaSaveWarned) {
+      metaSaveWarned = true;
+      toast("设置未能存下（浏览器存储已满），请先导出备份");
     }
   }
-  stateWriteActive = false;
+  scheduleMetaMirror();
 }
-function queueStateWrite(revision, json, localSaved) {
-  // 正在写时只留最新快照；长对话不必把中间每一帧都排进磁盘队列
-  stateWritePending = { revision, json, localSaved };
-  void flushStateWrites();
+// 设置镜像到对话目录：不带 API Key（与导出备份同一规矩），改动后两秒内写一次
+function metaForDisk() {
+  const meta = metaOf();
+  return { ...meta, profiles: meta.profiles.map(({ apiKey, ...rest }) => rest) };
 }
-// 启动时以 IndexedDB 为主；旧版 localStorage、显式写入的无标记数据，以及同版或较新的完整镜像优先一次并迁入。
+function scheduleMetaMirror() {
+  if (!chatsOnline()) return;
+  clearTimeout(metaMirrorTimer);
+  metaMirrorTimer = setTimeout(writeMetaMirror, 2000);
+}
+function writeMetaMirror() {
+  clearTimeout(metaMirrorTimer);
+  metaMirrorTimer = null;
+  if (!chatsOnline()) return;
+  const body = JSON.stringify({ meta: metaForDisk() });
+  // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再镜像）
+  fetch(`${apiBase}/api/chats/meta`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: unloading && body.length < 60000,
+    signal: unloading ? undefined : AbortSignal.timeout(20000)
+  }).catch(() => {});
+}
+// 对话目录可用：桥接在线、桥接报了目录、上次读它没出错
+function chatsOnline() {
+  return apiBase !== null && !!bootstrap.work?.chats && !chatsBroken;
+}
+function chatsDir() {
+  return chatsOnline() ? bootstrap.work.chats : "";
+}
+// 标记这段对话有改动（改名、置顶、后台一答收尾这些不在「当前对话」上的改动要亲手标；当前这段与正在生成的自动算在内）
+function markDirty(id) {
+  if (id) dirtyChatIds.add(id);
+}
+function conversationsToSave() {
+  const ids = new Set(dirtyChatIds);
+  if (currentId) ids.add(currentId);
+  for (const [key, job] of requestJobs) ids.add(job.conversationId || key);
+  for (const id of titlingIds) ids.add(id);
+  for (const id of compactingIds) ids.add(id);
+  return ids;
+}
+function nextChatStamp(id) {
+  const stamp = Math.max(Date.now(), (chatStamps.get(id) || 0) + 1);
+  chatStamps.set(id, stamp);
+  return stamp;
+}
+// 把这几段写下去：内容与上次写的一样就跳过；写是异步的，同一段正在写时只留最新一份
+function flushConversations(ids, { force = false } = {}) {
+  for (const id of ids) {
+    const c = store.conversations.find(item => item.id === id);
+    if (!c) continue;
+    dirtyChatIds.delete(id);
+    const json = JSON.stringify(c),
+      hash = hashText(json);
+    if (!force && chatHashes.get(id) === hash) continue;
+    chatHashes.set(id, hash);
+    pendingChatWrites.set(id, { json, savedAt: nextChatStamp(id), title: c.title });
+  }
+  void drainChatWrites();
+}
+function drainChatWrites() {
+  for (const id of pendingChatWrites.keys()) if (!writingChatIds.has(id)) void writeConversation(id);
+}
+async function writeConversation(id) {
+  writingChatIds.add(id);
+  try {
+    while (pendingChatWrites.has(id)) {
+      // 同一段连着写别太密：流式期间每三百毫秒存一次，磁盘上一秒多一次就够了；页面要关时不等。
+      // 等的时候那份仍留在待写表里：又来了更新的就换成新的，页面这时要关也能把它暂存进库
+      const wait = unloading || !chatsOnline() ? 0 : CHAT_DISK_INTERVAL - (performance.now() - (chatDiskWrites.get(id) || -CHAT_DISK_INTERVAL));
+      if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+      const pending = pendingChatWrites.get(id);
+      pendingChatWrites.delete(id);
+      // 目录在线：先落盘；写成了表里的暂存就没用了。落盘不成（桥接刚停了）就暂存进表里，接上后再推
+      let spilled = !chatsOnline();
+      if (!spilled)
+        try {
+          chatDiskWrites.set(id, performance.now());
+          await bridge("/api/chats/save", { savedAt: pending.savedAt, conversation: JSON.parse(pending.json) }, AbortSignal.timeout(60000));
+          chatSaveWarned = false;
+          await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+          continue;
+        } catch (error) {
+          spilled = true;
+          if (!chatSaveWarned) {
+            chatSaveWarned = true;
+            toast(`对话未能落盘，先暂存在浏览器里：${String(error.message || error).slice(0, 60)}`);
+          }
+        }
+      try {
+        await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.put({ id, savedAt: pending.savedAt, json: pending.json }));
+        if (spilled && !chatsOnline()) chatSaveWarned = false;
+      } catch {
+        if (!chatSaveWarned) {
+          chatSaveWarned = true;
+          toast("本机对话存储失败，请先导出备份");
+        }
+      }
+    }
+  } finally {
+    writingChatIds.delete(id);
+  }
+}
+// 删一段：表里的记录与目录里的文件都去掉；目录那头没删成（桥接刚停了）记下来，接上后补删
+async function deleteConversationStorage(id) {
+  chatHashes.delete(id);
+  chatStamps.delete(id);
+  pendingChatWrites.delete(id);
+  dirtyChatIds.delete(id);
+  await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+  if (!chatsOnline()) return;
+  try {
+    await bridge("/api/chats/delete", { id }, AbortSignal.timeout(20000));
+  } catch {
+    pendingChatDeletes.add(id);
+    writeMeta();
+  }
+}
+// 全量巡检：每段都算一遍指纹，变了的写下去。低频跑（定时、页面要关时），哪处改了没标脏也兜得住
+function sweepConversations() {
+  flushConversations(store.conversations.map(c => c.id));
+}
+// 页面要关了：该写的都立刻写。落盘走的是 fetch，卸载时未必来得及，所以同时也暂存进表里——下次开页表里那份若比目录新就会推过去
+function flushOnUnload() {
+  unloading = true;
+  if (metaMirrorTimer) writeMetaMirror();
+  sweepConversations();
+  const db = stateDb;
+  if (!db) return;
+  for (const [id, pending] of pendingChatWrites)
+    try {
+      db.transaction(CHATS_STORE_NAME, "readwrite").objectStore(CHATS_STORE_NAME).put({ id, savedAt: pending.savedAt, json: pending.json });
+    } catch {}
+}
+function saveStore() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  writeMeta();
+  flushConversations(conversationsToSave());
+}
+function saveStoreSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveStore, 300);
+}
+// 表里读回一段：记下它的时间戳与指纹
+function adoptRecord(record) {
+  try {
+    const c = normalizeConversation(JSON.parse(record.json));
+    chatStamps.set(c.id, Number(record.savedAt) || 0);
+    chatHashes.set(c.id, hashText(JSON.stringify(c)));
+    return c;
+  } catch {
+    return null;
+  }
+}
+// 启动：配置从 localStorage 来，对话从 IndexedDB 的表里来；旧版整份记录（localStorage 或表里的 main 记录）先拆开迁走。
+// 桥接接上后再与对话目录合一次（见 syncChatsWithDisk）
 async function hydrateStore() {
   const local = readLocalStoreRecord();
-  let record = null;
+  freshBrowser = !local;
+  for (const id of local?.pendingDeletes || []) pendingChatDeletes.add(id);
+  let db = null;
   try {
-    record = await stateStoreRequest("readonly", db => db.get(STATE_RECORD_KEY));
+    db = await openStateDb();
   } catch {
+    // IndexedDB 不可用：只剩 localStorage 里的配置；对话要等桥接接上从目录里来
     return;
   }
-  stateRevision = Math.max(Number(record?.revision) || 0, local?.revision || 0, Date.now());
-  stateDbOnly = local?.dbOnly === true;
-  const localOverrides =
-    !!local &&
-    (!local.managed || !record || (!local.dbOnly && Number(local.revision || 0) >= Number(record.revision || 0)));
-  if (!localOverrides && record?.json) {
-    try {
-      store = normalizeStoreData(JSON.parse(record.json));
-    } catch {
-      // IndexedDB 里的单条记录若意外损坏，仍沿用 localStorage 的镜像
+  let legacy = null;
+  try {
+    legacy = await dbRequest(db, STATE_STORE_NAME, "readonly", s => s.get(STATE_RECORD_KEY));
+  } catch {}
+  metaRevision = Math.max(Number(legacy?.revision) || 0, local?.revision || 0, Date.now());
+  if (!local?.split) {
+    // 旧版：整份记录在 localStorage（没标记的是更老的版本或测试灌的数据）与 / 或表里的 main 记录，按原来的规矩取一份
+    const localWins = !!local && (!local.managed || !legacy || (!local.dbOnly && Number(local.revision || 0) >= Number(legacy.revision || 0)));
+    let full = localWins ? local?.data : null;
+    if (!full && legacy?.json)
+      try {
+        full = JSON.parse(legacy.json);
+      } catch {}
+    if (full) {
+      store = normalizeStoreData(full);
+      // 旧记录是那时的全部：表里的对话以它为准，时间戳按它上次保存的算——别拿开页的时刻冒充，免得盖掉目录里更新的
+      const stamp = (localWins ? local?.revision : Number(legacy?.revision)) || Date.now();
+      try {
+        await dbBatch(db, CHATS_STORE_NAME, s => {
+          s.clear();
+          for (const c of store.conversations) {
+            const json = JSON.stringify(c);
+            chatStamps.set(c.id, stamp);
+            chatHashes.set(c.id, hashText(json));
+            s.put({ id: c.id, savedAt: stamp, json });
+          }
+        });
+        await dbRequest(db, STATE_STORE_NAME, "readwrite", s => s.delete(STATE_RECORD_KEY)).catch(() => {});
+      } catch {}
+      writeMeta();
     }
   }
-  if (localOverrides || !record) {
-    const revision = nextStateRevision(),
-      json = serializedStore(revision);
+  if (local?.split || !store.conversations.length) {
+    let records = [];
     try {
-      await stateStoreRequest("readwrite", db => db.put({ id: STATE_RECORD_KEY, revision, json }));
-      try {
-        localStorage.setItem(STORAGE_KEY, json);
-        stateDbOnly = false;
-      } catch {
-        stateDbOnly = true;
-        writeLocalShell(revision);
-      }
-    } catch {
-      // IndexedDB 不可用时保留原有 localStorage 行为；之后保存若两边都失败会给出提示
+      records = await dbRequest(db, CHATS_STORE_NAME, "readonly", s => s.getAll());
+    } catch {}
+    const known = new Set(store.conversations.map(c => c.id));
+    for (const record of records) {
+      const c = adoptRecord(record);
+      if (c && !known.has(c.id)) store.conversations.push(c);
     }
-  } else if (stateDbOnly) writeLocalShell(Number(record.revision) || stateRevision);
+  }
   // 尽量让浏览器把这份本机数据视作持久存储；不支持或不准时静默退回普通 IndexedDB
   try {
     const persistence = navigator.storage?.persist?.();
     persistence?.catch?.(() => {});
   } catch {}
 }
-function saveStore() {
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  const revision = nextStateRevision(),
-    json = serializedStore(revision);
-  let localSaved = false;
-  if (!stateDbOnly)
-    try {
-      localStorage.setItem(STORAGE_KEY, json);
-      localSaved = true;
-    } catch {
-      stateDbOnly = true;
+// 与对话目录合一次：开页接上桥接时、桥接中途断了又接上时都来一遍。
+// 目录里没有的推过去，目录里更新的换进来（正在生成的、改了还没存的不换），两边一样的把表里的暂存清掉；先前没删成的补删；
+// 全新的浏览器（localStorage 空着）从设置镜像里把配置捡回来
+async function syncChatsWithDisk() {
+  if (apiBase === null || !bootstrap.work?.chats || chatsSyncing) return;
+  chatsSyncing = true;
+  try {
+    const data = await bridge("/api/chats/load", {}, AbortSignal.timeout(120000));
+    chatsBroken = false;
+    if (data.dir) bootstrap.work.chats = data.dir;
+    for (const id of [...pendingChatDeletes])
+      try {
+        await bridge("/api/chats/delete", { id }, AbortSignal.timeout(20000));
+        pendingChatDeletes.delete(id);
+      } catch {}
+    const disk = new Map();
+    for (const item of data.items || []) if (item?.id && !pendingChatDeletes.has(item.id)) disk.set(item.id, item);
+    const push = new Set(),
+      settled = new Set();
+    let changed = false,
+      currentReplaced = false;
+    store.conversations = store.conversations.map(c => {
+      const item = disk.get(c.id),
+        stamp = chatStamps.get(c.id) || 0,
+        hash = hashText(JSON.stringify(c)),
+        unsaved = chatHashes.get(c.id) !== hash,
+        busy = conversationRunning(c.id) || titlingIds.has(c.id) || compactingIds.has(c.id);
+      if (!item) {
+        push.add(c.id);
+        return c;
+      }
+      if (item.savedAt > stamp && !unsaved && !busy) {
+        const next = normalizeConversation(item.conversation);
+        chatStamps.set(c.id, item.savedAt);
+        chatHashes.set(c.id, hashText(JSON.stringify(next)));
+        settled.add(c.id);
+        changed = true;
+        if (c.id === currentId) currentReplaced = true;
+        return next;
+      }
+      if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
+      else settled.add(c.id);
+      return c;
+    });
+    const known = new Set(store.conversations.map(c => c.id));
+    for (const item of disk.values())
+      if (!known.has(item.id)) {
+        const c = normalizeConversation(item.conversation);
+        chatStamps.set(c.id, item.savedAt);
+        chatHashes.set(c.id, hashText(JSON.stringify(c)));
+        store.conversations.push(c);
+        settled.add(c.id);
+        changed = true;
+      }
+    for (const id of settled) void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+    if (push.size) flushConversations(push, { force: true });
+    if (freshBrowser && data.meta && typeof data.meta === "object") {
+      freshBrowser = false;
+      const meta = normalizeStoreData({ ...data.meta, conversations: [] });
+      store.settings = { ...meta.settings, activeProfileId: store.settings.activeProfileId || meta.settings.activeProfileId };
+      store.profiles = meta.profiles;
+      store.library = meta.library;
+      store.memory = meta.memory;
+      store.drafts = meta.drafts;
+      if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+      applyAppearance();
+      changed = true;
     }
-  queueStateWrite(revision, json, localSaved);
-}
-function saveStoreSoon() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveStore, 300);
+    writeMeta();
+    if (changed) {
+      renderHeader();
+      renderHistory();
+      if (currentReplaced && view === "chat") renderConversation(false);
+      if (currentId && !known.has(currentId) && !store.conversations.some(c => c.id === currentId)) {
+        currentId = null;
+        render();
+      }
+    }
+  } catch (error) {
+    chatsBroken = true;
+    toast(`对话目录不可用，先存在浏览器里：${String(error.message || error).slice(0, 60)}`);
+  } finally {
+    chatsSyncing = false;
+  }
 }
 function openFileDb() {
   if (fileDbPromise) return fileDbPromise;
@@ -1744,6 +2032,7 @@ async function ensureLocalBridge() {
     if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
     renderHeader();
     void refreshArchive();
+    void syncChatsWithDisk();
     if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
     toast("本机桥接已接通，联网可用");
   }
@@ -1758,6 +2047,7 @@ function recoverInterruptedMessages() {
         message.error = "页面刷新或连接中断，已生成的内容已保留";
         message.interruptedAt = now();
         settleSteps(message, "连接中断");
+        markDirty(conversation.id);
         changed = true;
       }
   for (const conversation of store.conversations)
@@ -1766,6 +2056,7 @@ function recoverInterruptedMessages() {
         if (message.status === "streaming") {
           message.status = message.content ? "stopped" : "error";
           message.error = "页面刷新或连接中断";
+          markDirty(conversation.id);
           changed = true;
         }
   if (changed) saveStore();
@@ -1778,6 +2069,8 @@ async function boot() {
   setupVizObserver();
   const candidates = ["", LOCAL_BRIDGE].filter((value, index, array) => array.indexOf(value) === index);
   await connectBridge(candidates);
+  // 桥接在线：对话正本在本机的对话目录里，先与它合一次再画页面
+  if (apiBase !== null) await syncChatsWithDisk();
   if (apiBase === null) {
     bootstrap.configError = servedByBridge()
       ? "正在连接本机桥接…若始终连不上，请重新运行 start.cmd。"
@@ -1796,6 +2089,11 @@ async function boot() {
   delete document.documentElement.dataset.sidebar;
   restorePlace();
   render();
+  // 低频的全量巡检：哪段改了没标到也兜得住；页面藏起来时也巡一趟（手机切走常常就不回来了）
+  setInterval(sweepConversations, 45000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) sweepConversations();
+  });
 }
 
 function bindEvents() {
@@ -2654,6 +2952,7 @@ function bindEvents() {
   window.addEventListener("pagehide", () => {
     persistDraft();
     saveStore();
+    flushOnUnload();
   });
   window.addEventListener("offline", () => setConnection("error", "连接中断"));
   window.addEventListener("online", refreshConnection);
@@ -3152,6 +3451,7 @@ async function deleteConversation(id) {
   void cleanScratch(removed);
   void deleteAttachments([...attachmentIds(allMessages(removed)), ...draftFiles]);
   store.conversations = store.conversations.filter(c => c.id !== id);
+  void deleteConversationStorage(id);
   if (currentId === id) {
     currentId = null;
     pendingAttachments = [];
@@ -3164,6 +3464,7 @@ function togglePin(id) {
   const c = store.conversations.find(item => item.id === id);
   if (!c) return;
   c.pinned = !c.pinned;
+  markDirty(id);
   saveStore();
   renderHistory();
 }
@@ -3186,6 +3487,7 @@ function renameConversation(id, value) {
   if (c && title && title !== c.title) {
     c.title = title;
     c.titleAuto = false;
+    markDirty(id);
     saveStore();
   }
   renderHistory();
@@ -5511,6 +5813,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     assistant.usage = usageKnown ? usage : null;
     accountUsage(profile, assistant, history, conversation, { opened });
     if (requestJobs.get(key) === job) requestJobs.delete(key);
+    markDirty(conversation.id);
     saveStore();
     if (sideThreadId === thread.id && currentId === conversation.id) renderSidePanel();
     else renderSideSend();
@@ -7377,6 +7680,7 @@ function stopGeneration(id = currentId) {
   const job = requestJob(id);
   if (!job) return;
   requestJobs.delete(id);
+  markDirty(id);
   job.controller.abort();
   const conversation = store.conversations.find(item => item.id === id),
     assistant =
@@ -7402,6 +7706,7 @@ function stopAllGenerations() {
       assistant.status = "stopped";
       settleSteps(assistant, "已停止");
     }
+    markDirty(conversation?.id);
   }
   requestJobs.clear();
 }
@@ -7595,6 +7900,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     if (requestJobs.get(conversation.id) === job) requestJobs.delete(conversation.id);
     settleSupplements(conversation, assistant, job, profile);
     if (currentId !== conversation.id || view !== "chat") conversation.unread = true;
+    markDirty(conversation.id);
     saveStore();
     renderHistory();
     if (currentId === conversation.id && view === "chat") {
@@ -7783,6 +8089,7 @@ async function maybeAutoTitle(conversation, profile) {
     conversation.titleAuto = true;
     conversation.titled = true;
     delete conversation.titleTries;
+    markDirty(conversation.id);
     saveStore();
     renderHistory();
     // 用户正在页面上方改着标题：不把拟好的题写进去盖掉他的字，他落笔（blur）时以他写的为准
@@ -9941,7 +10248,10 @@ function aboutSettingsHtml() {
   return (
     `<div class="about-head"><h2>言</h2><span class="about-version">v${escapeHtml(version)} · ${bridged ? "本机桥接" : "浏览器直连"}</span></div><p class="about-ethos">清简为骨，纸墨为意。<br>长问慢答，尽付纸墨；言毕，即行。</p>` +
     `<div class="about-section"><h3>数据与边界</h3>${rows([
-      ["存放", "对话、模型配置与草稿存于此浏览器的 IndexedDB，localStorage 只留小型启动镜像；附件原件另存 IndexedDB，不经任何云端"],
+      [
+        "存放",
+        "桥接在线时对话落在本机的对话目录（~/言/对话，一段一个文件，复制即备份）；设置、模型配置与草稿存于此浏览器，并镜像一份到该目录（不含 API Key）。没桥接时对话暂存于浏览器的 IndexedDB；附件原件另存 IndexedDB。不经任何云端"
+      ],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
       ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
       [
@@ -10095,6 +10405,7 @@ function bindSettingsEvents() {
         .flatMap(([, draft]) => (Array.isArray(draft?.attachments) ? draft.attachments.map(file => file.id) : []));
     const currentDraftFiles = currentId ? pendingAttachments.map(file => file.id) : [];
     void deleteAttachments([...attachmentIds(store.conversations.flatMap(allMessages)), ...draftFiles, ...currentDraftFiles]);
+    for (const c of store.conversations) void deleteConversationStorage(c.id);
     store.conversations = [];
     store.drafts = store.drafts?.[NEW_DRAFT_ID] ? { [NEW_DRAFT_ID]: store.drafts[NEW_DRAFT_ID] } : {};
     scrollPositions.clear();
@@ -10400,6 +10711,7 @@ async function importData(file) {
     for (const c of incoming.conversations)
       if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) {
         store.conversations.push(c);
+        markDirty(c.id);
         conversations += 1;
       }
     const profileIds = new Set(profiles().map(p => p.id));
