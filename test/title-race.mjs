@@ -14,10 +14,10 @@ await evalJs(
 await waitFor(`document.querySelector(".message.assistant")?.dataset.status === "complete"`, 10000);
 check(
   "the first reply completes while the first title request is still pending",
-  (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].titled`)) !== true
+  (await evalJs(`__yanState().conversations[0].titled`)) !== true
 );
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].titled === true`, 5000);
-const state = JSON.parse(await evalJs(`localStorage.getItem("yan-chat-v1")`));
+await waitFor(`__yanState().conversations[0].titled === true`, 5000);
+const state = await evalJs(`__yanState()`);
 check(
   "a late title failure is retried after the completed first reply",
   state.conversations[0].title === "测试标题" && state.conversations[0].titleTries === undefined,

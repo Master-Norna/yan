@@ -356,6 +356,7 @@ function stopGeneration(id = currentId) {
   const job = requestJob(id);
   if (!job) return;
   requestJobs.delete(id);
+  markDirty(id);
   job.controller.abort();
   const conversation = store.conversations.find(item => item.id === id),
     assistant =
@@ -381,6 +382,7 @@ function stopAllGenerations() {
       assistant.status = "stopped";
       settleSteps(assistant, "已停止");
     }
+    markDirty(conversation?.id);
   }
   requestJobs.clear();
 }
@@ -574,6 +576,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     if (requestJobs.get(conversation.id) === job) requestJobs.delete(conversation.id);
     settleSupplements(conversation, assistant, job, profile);
     if (currentId !== conversation.id || view !== "chat") conversation.unread = true;
+    markDirty(conversation.id);
     saveStore();
     renderHistory();
     if (currentId === conversation.id && view === "chat") {
@@ -762,6 +765,7 @@ async function maybeAutoTitle(conversation, profile) {
     conversation.titleAuto = true;
     conversation.titled = true;
     delete conversation.titleTries;
+    markDirty(conversation.id);
     saveStore();
     renderHistory();
     // 用户正在页面上方改着标题：不把拟好的题写进去盖掉他的字，他落笔（blur）时以他写的为准

@@ -93,7 +93,7 @@ await sleep(400);
 check(
   "thread persists across reload",
   await evalJs(
-    `(() => { const s = JSON.parse(localStorage.getItem("yan-chat-v1")); const c = s.conversations[0]; return c.threads.length === 1 && c.threads[0].messages.length === 2 && c.messages.length === 6; })()`
+    `(() => { const s = __yanState(); const c = s.conversations[0]; return c.threads.length === 1 && c.threads[0].messages.length === 2 && c.messages.length === 6; })()`
   )
 );
 check(
@@ -135,7 +135,7 @@ check(
 // 同一条回复上可以起几条
 await evalJs(`document.querySelector("#sideClose").click(); true`);
 await sleep(200);
-const before = await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.length`);
+const before = await evalJs(`__yanState().conversations[0].threads.length`);
 await evalJs(`[...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector('[data-action="note"]').click(); true`);
 await sleep(300);
 check(
@@ -156,7 +156,7 @@ check(
   "＋ without a selection starts a whole-reply note on that reply: thread mode, no anchor bar",
   (await evalJs(
     `document.querySelector("#sidePanel").dataset.mode === "thread" && document.querySelector("#sideAnchor").classList.contains("hidden") && !!document.querySelector(".side-empty")`
-  )) && (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.at(-1).anchor.text === ""`))
+  )) && (await evalJs(`__yanState().conversations[0].threads.at(-1).anchor.text === ""`))
 );
 await evalJs(`document.querySelector("#sideInput").value = "SIDE whole"; document.querySelector("#sideSend").click(); true`);
 await waitFor(`[...document.querySelectorAll('#sideMessages .message.assistant')].at(-1)?.dataset.status === "complete"`);
@@ -174,7 +174,7 @@ await evalJs(`document.querySelector("#sideMessages [data-side-new]").click(); t
 await sleep(300);
 check(
   "a second whole-reply note on the same reply is allowed; the reply's mark counts 2",
-  (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.length`)) === before + 2 &&
+  (await evalJs(`__yanState().conversations[0].threads.length`)) === before + 2 &&
     (await evalJs(`[...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector(".note-mark").textContent`)) ===
       "注 2"
 );
@@ -253,7 +253,7 @@ await waitFor(
 check(
   "after edit: notes bound to the replaced messages are out of sight (no marks, no 旁注 count)",
   await evalJs(
-    `document.querySelectorAll("#messages .note-mark").length === 0 && !document.querySelector("#chatMeta [data-open-notes]") && JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.length === 4`
+    `document.querySelectorAll("#messages .note-mark").length === 0 && !document.querySelector("#chatMeta [data-open-notes]") && __yanState().conversations[0].threads.length === 4`
   )
 );
 await evalJs(`document.querySelector('#messages [data-action="branch-prev"]').click(); true`);
@@ -336,7 +336,7 @@ check(
   JSON.stringify(look)
 );
 const lookCost = await evalJs(
-  `(() => { const s = JSON.parse(localStorage.getItem("yan-chat-v1")); const t = s.conversations[0].threads.find(t => t.messages.some(m => m.content && m.content.includes("SIDELOOK|"))); return t.messages.at(-1).tokenCount; })()`
+  `(() => { const s = __yanState(); const t = s.conversations[0].threads.find(t => t.messages.some(m => m.content && m.content.includes("SIDELOOK|"))); return t.messages.at(-1).tokenCount; })()`
 );
 check("side note cost sums both rounds", lookCost === 16, JSON.stringify(lookCost));
 // 旁注的「寄」：没写字时素色，写了字才上印色；思绪在写时亲手收起，不会被下一帧再打开
@@ -374,7 +374,7 @@ await waitFor(`!document.querySelector("#quoteTip").classList.contains("hidden")
 await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').click(); true`);
 await sleep(300);
 const twice = await evalJs(
-  `(p => { const m = p.querySelector("mark.note-anchor"); const r = document.createRange(); r.setStart(p, 0); r.setEnd(m, 0); return { before: r.toString(), mark: m.textContent, occurrence: JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].threads.at(-1).anchor.occurrence }; })([...document.querySelectorAll('#messages .message.assistant .markdown p')].at(-1))`
+  `(p => { const m = p.querySelector("mark.note-anchor"); const r = document.createRange(); r.setStart(p, 0); r.setEnd(m, 0); return { before: r.toString(), mark: m.textContent, occurrence: __yanState().conversations[0].threads.at(-1).anchor.occurrence }; })([...document.querySelectorAll('#messages .message.assistant .markdown p')].at(-1))`
 );
 check(
   "note on the second occurrence lands on the second occurrence after re-render",

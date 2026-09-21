@@ -614,6 +614,7 @@ function handleBootstrap(req, res) {
   const work = {
     home: WORK.WORK_HOME,
     archive: WORK.ARCHIVE_HOME,
+    chats: CHATS.CHATS_HOME,
     scratch: WORK.SCRATCH_DIR,
     platform: process.platform,
     shell: WORK.WORK_SHELL
@@ -738,6 +739,7 @@ async function handleChat(req, res) {
 }
 const WORK = require("./server/work.js")({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes });
 const COMPUTER = require("./server/computer.js")({ sendJson, readJson });
+const CHATS = require("./server/chats.js")({ sendJson, readJson });
 
 const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>此页不存在 · 言</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#fbfaf6;color:#292724;font-family:"Noto Serif SC","Songti SC","STSong",serif}@media(prefers-color-scheme:dark){body{background:#1e1c19;color:#e6e1d6}}main{text-align:center;letter-spacing:.06em}.seal{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #9b5540;color:#9b5540;font-size:18px;transform:rotate(-3deg)}h1{margin:18px 0 8px;font-weight:500;font-size:24px}p{margin:0 0 22px;opacity:.6;font-size:13px}a{color:#9b5540;text-decoration:none;font-size:13px;border-bottom:1px solid currentColor}</style></head><body><main><span class="seal">空</span><h1>此页不存在</h1><p>所寻之处并无一字</p><a href="/">回到案前</a></main></body></html>`;
 // 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
@@ -804,8 +806,11 @@ const server = http.createServer(async (req, res) => {
   try {
     securityHeaders(req, res);
     const urlPath = new URL(req.url, `http://${HOST}`).pathname;
-    // 能打到本机服务的接口（执事、卷宗、http_request）只受理本站页面与 VS Code Webview
-    if ((urlPath.startsWith("/api/work/") || urlPath.startsWith("/api/archive/") || urlPath === "/api/http") && !trustedWorkRequest(req))
+    // 能打到本机服务的接口（执事、卷宗、对话目录、http_request）只受理本站页面与 VS Code Webview
+    if (
+      (urlPath.startsWith("/api/work/") || urlPath.startsWith("/api/archive/") || urlPath.startsWith("/api/chats/") || urlPath === "/api/http") &&
+      !trustedWorkRequest(req)
+    )
       return sendJson(res, 403, { error: "此页面无权调用本机执事接口，请从桥接地址或 VS Code 打开「言」" });
     corsHeaders(req, res);
     if (req.method === "OPTIONS") {
@@ -833,6 +838,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/archive/put") return await WORK.handleArchivePut(req, res);
     if (req.method === "POST" && req.url === "/api/archive/remove") return await WORK.handleArchiveRemove(req, res);
     if (req.method === "POST" && req.url === "/api/archive/clean") return await WORK.handleArchiveClean(req, res);
+    if (req.method === "POST" && req.url === "/api/chats/load") return await CHATS.handleLoad(req, res);
+    if (req.method === "POST" && req.url === "/api/chats/save") return await CHATS.handleSave(req, res);
+    if (req.method === "POST" && req.url === "/api/chats/delete") return await CHATS.handleDelete(req, res);
+    if (req.method === "POST" && req.url === "/api/chats/meta") return await CHATS.handleMeta(req, res);
     if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/api/archive/file")
       return await WORK.handleArchiveFile(req, res, new URL(req.url, `http://${HOST}`).searchParams);
     if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res);
@@ -866,7 +875,7 @@ server.listen(PORT, HOST, () => {
     console.log(`  （产出 support.js / app.css 失败：${error.message}）`);
   }
   console.log(
-    `\n  言 · 本机桥接${APP_VERSION ? `  v${APP_VERSION}` : ""}\n  页面    ${address}\n  执事    ${WORK.WORK_HOME}\n  卷宗    ${WORK.ARCHIVE_HOME}\n`
+    `\n  言 · 本机桥接${APP_VERSION ? `  v${APP_VERSION}` : ""}\n  页面    ${address}\n  执事    ${WORK.WORK_HOME}\n  卷宗    ${WORK.ARCHIVE_HOME}\n  对话    ${CHATS.CHATS_HOME}\n`
   );
   console.log("  请保持此窗口开启；关闭后页面刷新、模型转发、联网与执事都会停止。按 Ctrl+C 退出。");
   console.log("  此窗口不会显示 API Key。\n");

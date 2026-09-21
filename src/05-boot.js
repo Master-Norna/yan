@@ -42,6 +42,7 @@ async function ensureLocalBridge() {
     if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
     renderHeader();
     void refreshArchive();
+    void syncChatsWithDisk();
     if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
     toast("本机桥接已接通，联网可用");
   }
@@ -56,6 +57,7 @@ function recoverInterruptedMessages() {
         message.error = "页面刷新或连接中断，已生成的内容已保留";
         message.interruptedAt = now();
         settleSteps(message, "连接中断");
+        markDirty(conversation.id);
         changed = true;
       }
   for (const conversation of store.conversations)
@@ -64,6 +66,7 @@ function recoverInterruptedMessages() {
         if (message.status === "streaming") {
           message.status = message.content ? "stopped" : "error";
           message.error = "页面刷新或连接中断";
+          markDirty(conversation.id);
           changed = true;
         }
   if (changed) saveStore();
@@ -76,6 +79,8 @@ async function boot() {
   setupVizObserver();
   const candidates = ["", LOCAL_BRIDGE].filter((value, index, array) => array.indexOf(value) === index);
   await connectBridge(candidates);
+  // 桥接在线：对话正本在本机的对话目录里，先与它合一次再画页面
+  if (apiBase !== null) await syncChatsWithDisk();
   if (apiBase === null) {
     bootstrap.configError = servedByBridge()
       ? "正在连接本机桥接…若始终连不上，请重新运行 start.cmd。"
@@ -94,6 +99,11 @@ async function boot() {
   delete document.documentElement.dataset.sidebar;
   restorePlace();
   render();
+  // 低频的全量巡检：哪段改了没标到也兜得住；页面藏起来时也巡一趟（手机切走常常就不回来了）
+  setInterval(sweepConversations, 45000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) sweepConversations();
+  });
 }
 
 function bindEvents() {
@@ -952,6 +962,7 @@ function bindEvents() {
   window.addEventListener("pagehide", () => {
     persistDraft();
     saveStore();
+    flushOnUnload();
   });
   window.addEventListener("offline", () => setConnection("error", "连接中断"));
   window.addEventListener("online", refreshConnection);

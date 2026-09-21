@@ -620,6 +620,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     assistant.usage = usageKnown ? usage : null;
     accountUsage(profile, assistant, history, conversation, { opened });
     if (requestJobs.get(key) === job) requestJobs.delete(key);
+    markDirty(conversation.id);
     saveStore();
     if (sideThreadId === thread.id && currentId === conversation.id) renderSidePanel();
     else renderSideSend();

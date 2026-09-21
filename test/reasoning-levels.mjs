@@ -36,7 +36,7 @@ try {
 const text = await evalJs(`document.querySelector(".message.assistant .markdown").textContent.trim()`);
 check("request retried with the nearest accepted level (high → xhigh)", text === "EFFORT|xhigh", text);
 check("no error shown on the reply", await evalJs(`!document.querySelector(".message.assistant .message-error")`));
-const stored = await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[0].reasoningLevels`);
+const stored = await evalJs(`__yanState().profiles[0].reasoningLevels`);
 check("levels learned onto the model", stored === "low, medium, xhigh", String(stored));
 check(
   "trigger label shows the level actually used",

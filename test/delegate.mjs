@@ -94,7 +94,7 @@ check(
 check("marker meta counts helper steps and files", /2 步 · 改 1 个文件 · \d+ 秒/.test(card.meta), card.meta);
 // 一答收尾时步骤的 at 会前移，分组的键随之变。页面若不撤掉落单的旧分组，同一次差遣就画两遍
 const painted = await evalJs(
-  `JSON.stringify({ markers: document.querySelectorAll(".message.assistant .tool-step-delegate").length, groups: document.querySelectorAll(".message.assistant .tool-stack-body > .trail-group").length, steps: JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].messages.at(-1).steps.length })`
+  `JSON.stringify({ markers: document.querySelectorAll(".message.assistant .tool-step-delegate").length, groups: document.querySelectorAll(".message.assistant .tool-stack-body > .trail-group").length, steps: __yanState().conversations[0].messages.at(-1).steps.length })`
 );
 check(
   "each step is painted once — stale groups are dropped when offsets shift",

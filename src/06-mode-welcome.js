@@ -416,6 +416,7 @@ async function deleteConversation(id) {
   void cleanScratch(removed);
   void deleteAttachments([...attachmentIds(allMessages(removed)), ...draftFiles]);
   store.conversations = store.conversations.filter(c => c.id !== id);
+  void deleteConversationStorage(id);
   if (currentId === id) {
     currentId = null;
     pendingAttachments = [];
@@ -428,6 +429,7 @@ function togglePin(id) {
   const c = store.conversations.find(item => item.id === id);
   if (!c) return;
   c.pinned = !c.pinned;
+  markDirty(id);
   saveStore();
   renderHistory();
 }
@@ -450,6 +452,7 @@ function renameConversation(id, value) {
   if (c && title && title !== c.title) {
     c.title = title;
     c.titleAuto = false;
+    markDirty(id);
     saveStore();
   }
   renderHistory();

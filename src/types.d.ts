@@ -19,6 +19,8 @@ interface Window {
   echarts: any;
   pdfjsLib: any;
   YAN_PROMPTS: any;
+  __yanState: () => any; // 端到端测试读内存里的记录
+  __yanSave: () => void;
 }
 
 // ---- 宽松的 DOM：代码里 querySelector / closest / e.target 拿到的节点直接当表单控件、details、文本节点用，

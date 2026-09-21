@@ -187,8 +187,10 @@
 const STORAGE_KEY = "yan-chat-v1";
 const STORAGE_META_KEY = "__yanStorage";
 const STATE_DB_NAME = "yan-chat-state-v1";
-const STATE_STORE_NAME = "state";
+const STATE_STORE_NAME = "state"; // 旧版整份记录的表（main 一条），迁走后就空着
 const STATE_RECORD_KEY = "main";
+const CHATS_STORE_NAME = "conversations"; // 没桥接时对话存这里，一段一条
+const CHAT_DISK_INTERVAL = 1200; // 同一段对话写进目录的最短间隔（毫秒）
 // 内置提示词都在 prompts/ 目录里，这里只做取值与填空；{{名字}} 由 vars 填入，缺文件时报错并给空串，不让请求整个失败
 const PROMPTS = window.YAN_PROMPTS || {};
 function prompt(path, vars = {}) {
@@ -263,6 +265,9 @@ const defaultStore = {
 };
 /** @type {Store} */
 let store = loadStore();
+// 给端到端测试看内存里的记录（对话不再整份镜像在 localStorage 里，测试没别的地方读）
+window.__yanState = () => store;
+window.__yanSave = () => saveStore();
 let bootstrap = { serverProfile: null, configError: "" };
 let apiBase = null;
 /** @type {string|null} 正在看的对话 */
@@ -293,12 +298,24 @@ const requestJobs = new Map();
 let settingsTab = "general";
 let toastTimer = null;
 let fileDbPromise = null;
-let stateDbPromise = null;
-let stateRevision = 0,
-  stateDbOnly = false,
-  stateWriteActive = false,
-  stateWritePending = null,
-  stateSaveWarned = false;
+let stateDbPromise = null,
+  stateDb = null;
+let metaRevision = 0,
+  metaSaveWarned = false,
+  metaMirrorTimer = null;
+// 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store.js 开头的说明）
+let chatsBroken = false,
+  chatsSyncing = false,
+  freshBrowser = false,
+  chatSaveWarned = false,
+  unloading = false;
+const dirtyChatIds = new Set(),
+  chatHashes = new Map(),
+  chatStamps = new Map(),
+  pendingChatWrites = new Map(),
+  writingChatIds = new Set(),
+  chatDiskWrites = new Map(),
+  pendingChatDeletes = new Set();
 let libraryQuery = "",
   libraryKind = "all";
 const advancedOpen = new Set();

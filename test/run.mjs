@@ -1,6 +1,7 @@
 // 端到端测试运行器（零依赖）：起一个假模型接口、一个测试桥接、一个无头 Edge / Chrome，逐个跑 test/ 下的用例，按 PASS / FAIL 行统计
 // 用法：node test/run.mjs [用例名…]      例：node test/run.mjs memory side-notes
 import { spawn, spawnSync } from "node:child_process";
+import { connect } from "./lib.mjs";
 import { existsSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -155,6 +156,7 @@ try {
         ...process.env,
         YAN_PORT: String(SECURITY_PORT),
         YAN_ARCHIVE: path.join(TMP, "archive-security"),
+        YAN_CHATS: path.join(TMP, "chats-security"),
         YAN_TEST_SECRET_TOKEN: "leak-me"
       }
     });
@@ -169,7 +171,7 @@ try {
     // 卷宗目录指到临时目录，别把测试文件写进用户的 ~/言/卷宗
     start(process.execPath, ["server.js"], {
       cwd: ROOT,
-      env: { ...process.env, YAN_PORT: String(BRIDGE_PORT), YAN_ARCHIVE: path.join(TMP, "archive") }
+      env: { ...process.env, YAN_PORT: String(BRIDGE_PORT), YAN_ARCHIVE: path.join(TMP, "archive"), YAN_CHATS: path.join(TMP, "chats") }
     });
     start(process.execPath, [path.join(HERE, "fake-llm.mjs")], { cwd: ROOT });
     await waitPort(BRIDGE_PORT);
@@ -186,8 +188,23 @@ try {
     ]);
     await waitPort(DEBUG_PORT, 15000);
     for (const spec of specs) {
+      // 上一个用例的页面还开着，会接着往对话目录写（巡检、卸载时的补写）：先把它领到空白页，再清目录
+      try {
+        const { send, close } = await connect();
+        await send("Page.navigate", { url: "about:blank" });
+        await sleep(300);
+        close();
+      } catch {}
       tryRm(path.join(TMP, "work"));
       tryRm(path.join(TMP, "archive"));
+      // 对话目录也清：上一个用例落盘的对话不能混进下一个。旧页面离开时补写的那一笔可能正落在桥接手里，
+      // 删的时候文件还占着或刚写出来；删不干净就等等再删，直到目录真的没了
+      for (let i = 0; i < 20 && existsSync(path.join(TMP, "chats")); i++) {
+        tryRm(path.join(TMP, "chats"));
+        if (existsSync(path.join(TMP, "chats"))) await sleep(150);
+      }
+      await sleep(400);
+      tryRm(path.join(TMP, "chats"));
       await runSpec(spec);
     }
   }

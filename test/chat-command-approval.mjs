@@ -35,7 +35,7 @@ check(
 );
 check(
   "answer-scoped approval was not persisted on the conversation",
-  (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].commandPolicy`)) === "ask"
+  (await evalJs(`__yanState().conversations[0].commandPolicy`)) === "ask"
 );
 
 await evalJs(

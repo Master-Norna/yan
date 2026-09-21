@@ -21,7 +21,7 @@ await evalJs(
 );
 await waitFor(`document.querySelector('.message.assistant')?.dataset.status === "complete"`, 30000);
 const state = await evalJs(
-  `(c => ({ policy: c.commandPolicy, steps: c.messages.at(-1).steps.map(s => ({ name: s.name, status: s.status, result: s.result, output: s.output })) }))(JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`
+  `(c => ({ policy: c.commandPolicy, steps: c.messages.at(-1).steps.map(s => ({ name: s.name, status: s.status, result: s.result, output: s.output })) }))(__yanState().conversations[0])`
 );
 check(
   "automatic review persisted on the conversation and never opened an approval request",

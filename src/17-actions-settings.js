@@ -221,7 +221,10 @@ function aboutSettingsHtml() {
   return (
     `<div class="about-head"><h2>言</h2><span class="about-version">v${escapeHtml(version)} · ${bridged ? "本机桥接" : "浏览器直连"}</span></div><p class="about-ethos">清简为骨，纸墨为意。<br>长问慢答，尽付纸墨；言毕，即行。</p>` +
     `<div class="about-section"><h3>数据与边界</h3>${rows([
-      ["存放", "对话、模型配置与草稿存于此浏览器的 IndexedDB，localStorage 只留小型启动镜像；附件原件另存 IndexedDB，不经任何云端"],
+      [
+        "存放",
+        "桥接在线时对话落在本机的对话目录（~/言/对话，一段一个文件，复制即备份）；设置、模型配置与草稿存于此浏览器，并镜像一份到该目录（不含 API Key）。没桥接时对话暂存于浏览器的 IndexedDB；附件原件另存 IndexedDB。不经任何云端"
+      ],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
       ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
       [
@@ -375,6 +378,7 @@ function bindSettingsEvents() {
         .flatMap(([, draft]) => (Array.isArray(draft?.attachments) ? draft.attachments.map(file => file.id) : []));
     const currentDraftFiles = currentId ? pendingAttachments.map(file => file.id) : [];
     void deleteAttachments([...attachmentIds(store.conversations.flatMap(allMessages)), ...draftFiles, ...currentDraftFiles]);
+    for (const c of store.conversations) void deleteConversationStorage(c.id);
     store.conversations = [];
     store.drafts = store.drafts?.[NEW_DRAFT_ID] ? { [NEW_DRAFT_ID]: store.drafts[NEW_DRAFT_ID] } : {};
     scrollPositions.clear();
@@ -680,6 +684,7 @@ async function importData(file) {
     for (const c of incoming.conversations)
       if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) {
         store.conversations.push(c);
+        markDirty(c.id);
         conversations += 1;
       }
     const profileIds = new Set(profiles().map(p => p.id));

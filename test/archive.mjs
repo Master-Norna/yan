@@ -38,7 +38,7 @@ check(
   "file landed in the configured archive directory",
   existsSync(`${ARCHIVE}/报表.csv`) && readFileSync(`${ARCHIVE}/报表.csv`, "utf8") === "a,b\n1,2\n"
 );
-const convId = await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].id`);
+const convId = await evalJs(`__yanState().conversations[0].id`);
 const scratch = `${ARCHIVE}/.草稿/${convId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 12)}`;
 check("scratch directory prepared for the conversation", existsSync(scratch), scratch);
 check(
@@ -151,7 +151,7 @@ const text2 = await evalJs(`document.querySelectorAll(".message.assistant")[2].q
 check("after binding the prompt is the 执事 one and history is intact", /work:yes\|archive:no\|n:6/.test(text2), text2);
 check(
   "stored conversation carries the workdir",
-  await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].workdir.toLowerCase().endsWith("work")`)
+  await evalJs(`__yanState().conversations[0].workdir.toLowerCase().endsWith("work")`)
 );
 
 // ---- 解开：回到言
@@ -186,7 +186,7 @@ await sleep(150);
 check(
   "clearing it goes back to 言",
   (await evalJs(
-    `document.querySelector("#welcomeMode").textContent + "|" + document.querySelector("#workdirChip .chip-text").textContent + "|" + document.querySelector("#modeSeal").dataset.mode + "|" + (JSON.parse(localStorage.getItem("yan-chat-v1")).settings.pendingWorkdir || "")`
+    `document.querySelector("#welcomeMode").textContent + "|" + document.querySelector("#workdirChip .chip-text").textContent + "|" + document.querySelector("#modeSeal").dataset.mode + "|" + (__yanState().settings.pendingWorkdir || "")`
   )) === "对谈|卷宗|chat|"
 );
 check("pop closed after going back", await evalJs(`!document.querySelector(".chip-pop")`));
@@ -254,7 +254,7 @@ await evalJs(
 await sleep(1200);
 check(
   "changed directory is stored and created",
-  (await evalJs(`(JSON.parse(localStorage.getItem("yan-chat-v1")).settings.archiveDir || "").toLowerCase()`)).includes("archive3") &&
+  (await evalJs(`(__yanState().settings.archiveDir || "").toLowerCase()`)).includes("archive3") &&
     existsSync(`${TMP}/archive3`)
 );
 // 页内起手的拖动（卷宗里的图、案上的附件）不当作外来文件：不掀落件幕布；拖完之后外来的照常

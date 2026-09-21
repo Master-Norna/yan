@@ -47,7 +47,7 @@ await waitFor(
   20000
 );
 const turns = await evalJs(
-  `(c => ({ users: c.messages.filter(m => m.role === "user").map(m => m.content), notes: (c.messages[1].steps || []).map(s => [s.name, s.status, s.result]), reply: c.messages.at(-1).content }))(JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`
+  `(c => ({ users: c.messages.filter(m => m.role === "user").map(m => m.content), notes: (c.messages[1].steps || []).map(s => [s.name, s.status, s.result]), reply: c.messages.at(-1).content }))(__yanState().conversations[0])`
 );
 check(
   "inside the fence the reply is not stopped; the supplement is handed over at the fence close (same reply) or, if the stream ended first, as the next question",
@@ -72,7 +72,7 @@ await waitFor(
   30000
 );
 const steer = await evalJs(
-  `(c => ({ users: c.messages.filter(m => m.role === "user").map(m => m.content), notes: (c.messages.at(-1).steps || []).map(s => [s.name, s.status, s.result]), reply: c.messages.at(-1).content }))(JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`
+  `(c => ({ users: c.messages.filter(m => m.role === "user").map(m => m.content), notes: (c.messages.at(-1).steps || []).map(s => [s.name, s.status, s.result]), reply: c.messages.at(-1).content }))(__yanState().conversations[0])`
 );
 const cutParagraphs = (steer.reply.match(/第\d+段/g) || []).length;
 check(

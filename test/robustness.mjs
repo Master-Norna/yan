@@ -13,7 +13,7 @@ await evalJs(
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
 const lastAssistant = `[...document.querySelectorAll(".message.assistant")].at(-1)`;
-const store = async () => JSON.parse(await evalJs(`localStorage.getItem("yan-chat-v1")`));
+const store = async () => evalJs(`__yanState()`);
 
 // ---- 截断 / 缺项的参数：两次 write_file 都不许执行，list_files 截断了照样跑。同时头一次拟题装作失败
 await evalJs(
@@ -40,7 +40,7 @@ check(
 await shot("robust-trunc.png");
 
 // ---- 拟题：发问时就拟，头一次失败不该把 titled 锁死，那一答收尾时再试并成功
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].titled === true`, 8000).catch(() => {});
+await waitFor(`__yanState().conversations[0].titled === true`, 8000).catch(() => {});
 let s1 = await store();
 check(
   "first titling failed at send time, retried at the end of the first reply and succeeded",
@@ -103,7 +103,7 @@ await evalJs(
 await waitFor(`document.querySelectorAll(".message.assistant").length === 5 && ${lastAssistant}.dataset.status === "complete"`, 20000);
 const text2 = await evalJs(`${lastAssistant}.querySelector(".assistant-block > .markdown").textContent`);
 check("text after the last newline-less data: line is kept", text2.trim() === "开头，结尾在此", text2);
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].titled === true`, 8000).catch(() => {});
+await waitFor(`__yanState().conversations[0].titled === true`, 8000).catch(() => {});
 s1 = await store();
 check(
   "usage from the final unterminated frame is accounted",

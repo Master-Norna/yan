@@ -68,8 +68,8 @@ await evalJs(
 await sleep(400);
 check(
   "stored ended flag is dropped on load",
-  (await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations.every(c => !("ended" in c))`)) ||
-    (await evalJs(`!("ended" in JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`))
+  (await evalJs(`__yanState().conversations.every(c => !("ended" in c))`)) ||
+    (await evalJs(`!("ended" in __yanState().conversations[0])`))
 );
 check(
   "dry notice with a switch button; input paused",
@@ -139,7 +139,7 @@ check(
     `(g => g.classList.contains("collapsed") && !g.querySelector(".history-open"))(document.querySelector("#history .history-repo-group"))`
   )
 );
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).settings.collapsedRepos?.length === 1`, 5000);
+await waitFor(`__yanState().settings.collapsedRepos?.length === 1`, 5000);
 check("collapse remembered", true);
 await evalJs(`document.querySelector("#history .history-repo").click(); true`);
 await sleep(200);
@@ -169,7 +169,7 @@ await sleep(400);
 check(
   "＋ on a folder starts a new sheet in that folder",
   await evalJs(
-    `!document.querySelector("#welcome").classList.contains("hidden") && JSON.parse(localStorage.getItem("yan-chat-v1")).settings.pendingWorkdir === "D:\\\\code\\\\别处" && document.querySelector("#workdirChip")?.textContent.includes("别处")`
+    `!document.querySelector("#welcome").classList.contains("hidden") && __yanState().settings.pendingWorkdir === "D:\\\\code\\\\别处" && document.querySelector("#workdirChip")?.textContent.includes("别处")`
   )
 );
 await evalJs(`document.querySelector("#workdirChip").click(); true`);
@@ -200,7 +200,7 @@ await sleep(200);
 check(
   "pin from the menu pins the row and closes the menu",
   await evalJs(
-    `!document.querySelector(".chip-pop") && JSON.parse(localStorage.getItem("yan-chat-v1")).conversations.find(c => c.id === "w2").pinned === true`
+    `!document.querySelector(".chip-pop") && __yanState().conversations.find(c => c.id === "w2").pinned === true`
   )
 );
 await evalJs(`document.querySelector('#history [data-conversation="w2"] .history-more').click(); true`);
@@ -357,7 +357,7 @@ check(
 check(
   "supplement persists in the trail and in the digest for the next turn",
   await evalJs(
-    `(c => c.messages.at(-1).steps.some(s => s.name === "user_note" && s.status === "done" && s.note === "补一句：ASK 顺便看看卷宗"))(JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`
+    `(c => c.messages.at(-1).steps.some(s => s.name === "user_note" && s.status === "done" && s.note === "补一句：ASK 顺便看看卷宗"))(__yanState().conversations[0])`
   )
 );
 check(

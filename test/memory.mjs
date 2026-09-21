@@ -7,7 +7,7 @@ const lastText = () =>
   evalJs(
     `[...[...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelectorAll('.markdown')].map(n => n.textContent.trim()).join(" ")`
   );
-const memory = () => evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).memory`);
+const memory = () => evalJs(`__yanState().memory`);
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 // 预置一段旧对话，供 search_conversations / read_conversation 查
@@ -37,7 +37,7 @@ await send("Page.navigate", { url: PAGE });
 await sleep(1200);
 check(
   "memory defaults to enabled with no items",
-  await evalJs(`(m => !m || (m.enabled === true && m.items.length === 0))(JSON.parse(localStorage.getItem("yan-chat-v1")).memory)`)
+  await evalJs(`(m => !m || (m.enabled === true && m.items.length === 0))(__yanState().memory)`)
 );
 const sendMain = async (text, n, input = "#chatInput", button = "#chatSend") => {
   await evalJs(

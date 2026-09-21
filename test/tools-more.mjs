@@ -16,7 +16,7 @@ await evalJs(
 );
 await waitFor(`${lastAssistant}?.dataset.status === "complete"`, 30000);
 const steps = await evalJs(
-  `(c => (c.messages.at(-1).steps || []).map(s => ({ name: s.name, status: s.status, result: s.result, title: s.title, output: s.output, plan: s.plan })))(JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0])`
+  `(c => (c.messages.at(-1).steps || []).map(s => ({ name: s.name, status: s.status, result: s.result, title: s.title, output: s.output, plan: s.plan })))(__yanState().conversations[0])`
 );
 const byName = name => steps.filter(s => s.name === name);
 check(

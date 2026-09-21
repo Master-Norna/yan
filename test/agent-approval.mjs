@@ -15,7 +15,7 @@ check("boot: bridge connected", (await evalJs(`document.querySelector("#connecti
 console.log(
   "  debug:",
   await evalJs(
-    `JSON.stringify({ mode: JSON.parse(localStorage.getItem("yan-chat-v1")).settings.mode, welcomeMode: document.querySelector("#welcomeMode").textContent, chipHidden: document.querySelector("#workdirChip").className, chipText: document.querySelector("#workdirChip .chip-text").textContent, seal: document.querySelector("#modeSeal")?.dataset.mode })`
+    `JSON.stringify({ mode: __yanState().settings.mode, welcomeMode: document.querySelector("#welcomeMode").textContent, chipHidden: document.querySelector("#workdirChip").className, chipText: document.querySelector("#workdirChip .chip-text").textContent, seal: document.querySelector("#modeSeal")?.dataset.mode })`
   )
 );
 check(
@@ -86,7 +86,7 @@ console.log(
   )
 );
 const layout = await evalJs(
-  `({ note: document.querySelector(".trail-group .trail-note")?.textContent.trim(), main: document.querySelector(".assistant-block > .markdown")?.textContent.trim(), groups: document.querySelectorAll(".trail-group").length, at: JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].messages.at(-1).steps.map(s => s.at) })`
+  `({ note: document.querySelector(".trail-group .trail-note")?.textContent.trim(), main: document.querySelector(".assistant-block > .markdown")?.textContent.trim(), groups: document.querySelectorAll(".trail-group").length, at: __yanState().conversations[0].messages.at(-1).steps.map(s => s.at) })`
 );
 check(
   "narration before the call sits inside the timeline, summary outside",
@@ -215,16 +215,15 @@ check(
   )
 );
 
-// ---- 场景 5：刷新后恢复（把一条消息伪造成 streaming + pending 再刷新）
-await send("Page.navigate", { url: PAGE + "preview.html" });
-await sleep(600);
+// ---- 场景 5：刷新后恢复（把一条消息伪造成 streaming + pending，存下再刷新）
 await evalJs(
-  `(() => { const s = JSON.parse(localStorage.getItem("yan-chat-v1")); const c = s.conversations[0]; c.messages.push({ id: "u9", role: "user", content: "x", timestamp: new Date().toISOString() }, { id: "a9", role: "assistant", content: "", timestamp: new Date().toISOString(), status: "streaming", modelName: "假模型", steps: [{ id: "s9", name: "run_command", arguments: "{}", title: "dir", status: "pending" }] }); localStorage.setItem("yan-chat-v1", JSON.stringify(s)); return true; })()`
+  `(() => { const s = __yanState(); const c = s.conversations[0]; c.messages.push({ id: "u9", role: "user", content: "x", timestamp: new Date().toISOString() }, { id: "a9", role: "assistant", content: "", timestamp: new Date().toISOString(), status: "streaming", modelName: "假模型", steps: [{ id: "s9", name: "run_command", arguments: "{}", title: "dir", status: "pending" }] }); __yanSave(); return true; })()`
 );
+await sleep(1500);
 await send("Page.navigate", { url: PAGE });
 await sleep(1500);
 const recovered = await evalJs(
-  `(() => { const s = JSON.parse(localStorage.getItem("yan-chat-v1")); const m = s.conversations[0].messages.find(m => m.id === "a9"); return { status: m.status, step: m.steps[0].status, result: m.steps[0].result }; })()`
+  `(() => { const s = __yanState(); const m = s.conversations[0].messages.find(m => m.id === "a9"); return { status: m.status, step: m.steps[0].status, result: m.steps[0].result }; })()`
 );
 check(
   "reload settles pending step",

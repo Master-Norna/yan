@@ -24,7 +24,7 @@ check(
   JSON.stringify(got)
 );
 check("thinking shown as 思绪", got.thought.includes("想一想先看目录"), got.thought);
-const usage = await evalJs(`JSON.parse(localStorage.getItem("yan-chat-v1")).conversations[0].messages.at(-1).tokenCount`);
+const usage = await evalJs(`__yanState().conversations[0].messages.at(-1).tokenCount`);
 check("usage summed from both rounds (12+9 + 30+11)", usage === 62, JSON.stringify(usage));
 // 设置页：接口类型可选；测试连接走 /v1/models
 await evalJs(`document.querySelector("#openSettings").click(); true`);

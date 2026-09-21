@@ -12,7 +12,7 @@ await send("Page.navigate", { url: PAGE });
 await sleep(1200);
 const stored = id =>
   evalJs(
-    `(p => p.reasoningLevels + "|" + (p.reasoningProbed || ""))(JSON.parse(localStorage.getItem("yan-chat-v1")).profiles.find(p => p.id === ${JSON.stringify(id)}))`
+    `(p => p.reasoningLevels + "|" + (p.reasoningProbed || ""))(__yanState().profiles.find(p => p.id === ${JSON.stringify(id)}))`
   );
 const menu = () =>
   evalJs(
@@ -28,7 +28,7 @@ check("nothing is probed until a model is picked", (await stored("p1")) === "und
 // 只认三档的：记三档，菜单只列三档，「最高」落到「高」
 await pick("p2");
 await waitFor(
-  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-three"`,
+  `__yanState().profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-three"`,
   8000
 );
 check(
@@ -48,7 +48,7 @@ await evalJs(`document.body.click(); true`);
 // 不认识 reasoning_effort 的：记 none，菜单上只剩一句话，请求里不带字段
 await pick("p3");
 await waitFor(
-  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[2].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-plain"`,
+  `__yanState().profiles[2].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-plain"`,
   8000
 );
 check(
@@ -68,7 +68,7 @@ await evalJs(`document.body.click(); true`);
 // 照单全收的：按通用四档
 await pick("p4");
 await waitFor(
-  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-mute"`,
+  `__yanState().profiles[3].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-mute"`,
   8000
 );
 check(
@@ -122,7 +122,7 @@ check("the late probe does not wipe the status the newer one wrote", /思考档�
 check("the status line carries one report, not a chain of them", raced === "思考档位 低 / 中 / 高", raced);
 // 只嫌 probe 不对、又不列它认的几档：不能记成不认，按四档
 await setModel("fake-vague");
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningProbed.endsWith("fake-vague")`, 8000);
+await waitFor(`__yanState().profiles[3].reasoningProbed.endsWith("fake-vague")`, 8000);
 check(
   "a vague rejection is not mistaken for no support",
   (await stored("p4")) === "low, medium, high, max|openai|http://127.0.0.1:8798/v1|fake-vague",
@@ -141,9 +141,9 @@ check(
 );
 // 记过 none 的模型换成照单全收的：旧的 none 不能跟着走，按四档
 await setModel("fake-plain");
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningLevels === "none"`, 8000);
+await waitFor(`__yanState().profiles[3].reasoningLevels === "none"`, 8000);
 await setModel("fake-mute");
-await waitFor(`JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[3].reasoningProbed.endsWith("fake-mute")`, 8000);
+await waitFor(`__yanState().profiles[3].reasoningProbed.endsWith("fake-mute")`, 8000);
 check(
   "stale levels are dropped when a new model accepts the field",
   (await stored("p4")) === "low, medium, high, max|openai|http://127.0.0.1:8798/v1|fake-mute",
@@ -169,7 +169,7 @@ await evalJs(`document.querySelector("#closeSettings").click(); true`);
 await sleep(300);
 await pick("p2");
 await waitFor(
-  `JSON.parse(localStorage.getItem("yan-chat-v1")).profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1/|fake-three"`,
+  `__yanState().profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1/|fake-three"`,
   8000
 );
 check("changing the base URL makes the next pick probe again", true);
