@@ -58,6 +58,19 @@ check(
   "last question active when scrolled to bottom",
   await evalJs(`[...document.querySelectorAll("#outline .outline-item")].at(-1).classList.contains("active")`)
 );
+const grabber = await evalJs(`(() => {
+  const host = document.querySelector("#chatScroll"), rail = document.querySelector("#chatScrollGrabber"), composer = document.querySelector("#composerArea");
+  host.scrollTop = 0;
+  const r = rail.getBoundingClientRect(), c = composer.getBoundingClientRect();
+  rail.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 77, clientX: r.right - 2, clientY: r.bottom - 3 }));
+  rail.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 77, clientX: r.right - 2, clientY: r.bottom - 3 }));
+  return { active: rail.classList.contains("active"), width: r.width, overlapsComposer: r.bottom > c.top, top: host.scrollTop, max: host.scrollHeight - host.clientHeight };
+})()`);
+check(
+  "transparent right-edge grabber reaches past the composer and drags to the bottom",
+  grabber.active && grabber.width >= 12 && grabber.overlapsComposer && grabber.max > 0 && grabber.top >= grabber.max - 2,
+  JSON.stringify(grabber)
+);
 await evalJs(`document.querySelector("#outline .outline-item").click(); true`);
 let jumped = false;
 try {

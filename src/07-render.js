@@ -11,6 +11,7 @@ function render(shouldScroll = false) {
   $("#library").classList.toggle("hidden", !library);
   $("#welcome").classList.toggle("hidden", library || !!c);
   $("#chat").classList.toggle("hidden", library || !c);
+  $("#chatScrollGrabber").classList.toggle("hidden", library || !c);
   $("#composerArea").classList.toggle("hidden", library || !c);
   $("#openLibrary").classList.toggle("active", library);
   if (library) renderLibrary();
@@ -21,6 +22,7 @@ function render(shouldScroll = false) {
   renderSendButtons();
   renderApprovalBar();
   renderHelperBar();
+  requestAnimationFrame(syncChatScrollGrabber);
 }
 function renderHeader() {
   renderModelTriggers();

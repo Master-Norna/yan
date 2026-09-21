@@ -527,6 +527,9 @@ button:focus:not(:focus-visible) {
   }
 }
 @media (max-width: 760px) {
+  .chat-scroll-grabber {
+    display: none;
+  }
   .outline {
     display: none;
   }
@@ -624,6 +627,11 @@ button:focus:not(:focus-visible) {
   }
   .message.user .message-actions {
     margin-right: 0;
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  .chat-scroll-grabber {
+    display: none;
   }
 }
 body {

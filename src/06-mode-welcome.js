@@ -478,6 +478,12 @@ function syncJumpBottom(gap) {
   if (gap === undefined) gap = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
   $("#jumpBottom").classList.toggle("hidden", view !== "chat" || !currentId || gap < 260);
 }
+function syncChatScrollGrabber() {
+  const host = $("#chatScroll"),
+    grabber = $("#chatScrollGrabber");
+  if (!host || !grabber) return;
+  grabber.classList.toggle("active", view === "chat" && !!currentId && host.scrollHeight > host.clientHeight + 1);
+}
 function syncDocumentTitle() {
   const c = currentConversation();
   document.title = view === "library" ? "卷宗 · 言" : c ? `${c.title} · 言` : "言";

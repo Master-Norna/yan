@@ -2322,6 +2322,7 @@ function bindEvents() {
       if (area && !area.classList.contains("hidden")) {
         $("#chatScroll").style.paddingBottom = `${area.offsetHeight + 16}px`;
         document.documentElement.style.setProperty("--composer-h", `${area.offsetHeight}px`);
+        syncChatScrollGrabber();
       }
     }).observe($("#composerArea"));
   $("#workAuto").onclick = () => {
@@ -2532,6 +2533,7 @@ function bindEvents() {
   if (typeof ResizeObserver === "function")
     new ResizeObserver(() => {
       if (followBottom && view === "chat" && currentId) scrollBottom();
+      syncChatScrollGrabber();
     }).observe($("#messages"));
   $("#messages").addEventListener("click", event => {
     const button = event.target.closest("[data-toggle-compacted]");
@@ -2587,6 +2589,65 @@ function bindEvents() {
     },
     { passive: true }
   );
+  // 右侧透明命中层把细滚动条的可抓宽度放大，也越过输入框覆盖区一直延伸到底部。
+  // 按下轨道会把滑块移到指针处；按住近似滑块则保留抓取点，拖动手感与原生滚动条一致。
+  const scrollGrabber = $("#chatScrollGrabber"),
+    chatScroll = $("#chatScroll");
+  let scrollDrag = null;
+  const scrollGeometry = () => {
+    const max = Math.max(0, chatScroll.scrollHeight - chatScroll.clientHeight),
+      track = chatScroll.clientHeight,
+      thumb = Math.min(track, Math.max(28, (track * track) / Math.max(chatScroll.scrollHeight, 1)));
+    return { rect: chatScroll.getBoundingClientRect(), max, track, thumb, travel: Math.max(1, track - thumb) };
+  };
+  const moveScrollGrabber = event => {
+    if (!scrollDrag || event.pointerId !== scrollDrag.pointerId) return;
+    const geometry = scrollGeometry(),
+      pointer = Math.max(0, Math.min(geometry.track, event.clientY - geometry.rect.top));
+    chatScroll.scrollTop = Math.max(
+      0,
+      Math.min(geometry.max, ((pointer - scrollDrag.offset) / geometry.travel) * geometry.max)
+    );
+  };
+  const stopScrollGrabber = event => {
+    if (!scrollDrag || event.pointerId !== scrollDrag.pointerId) return;
+    try {
+      scrollGrabber.releasePointerCapture(event.pointerId);
+    } catch {}
+    scrollDrag = null;
+  };
+  scrollGrabber.addEventListener("pointerdown", event => {
+    const geometry = scrollGeometry();
+    if (event.button !== 0 || !geometry.max || getComputedStyle(chatScroll).overflowY === "hidden") return;
+    event.preventDefault();
+    autoScrolling = false;
+    followBottom = false;
+    const pointer = Math.max(0, Math.min(geometry.track, event.clientY - geometry.rect.top)),
+      thumbTop = (chatScroll.scrollTop / geometry.max) * geometry.travel,
+      withinThumb = pointer >= thumbTop && pointer <= thumbTop + geometry.thumb;
+    scrollDrag = {
+      pointerId: event.pointerId,
+      offset: withinThumb ? pointer - thumbTop : geometry.thumb / 2
+    };
+    try {
+      scrollGrabber.setPointerCapture(event.pointerId);
+    } catch {}
+    moveScrollGrabber(event);
+  });
+  scrollGrabber.addEventListener("pointermove", moveScrollGrabber);
+  scrollGrabber.addEventListener("pointerup", stopScrollGrabber);
+  scrollGrabber.addEventListener("pointercancel", stopScrollGrabber);
+  scrollGrabber.addEventListener(
+    "wheel",
+    event => {
+      if (!scrollGrabber.classList.contains("active")) return;
+      const scale = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? chatScroll.clientHeight : 1;
+      if (event.deltaY < 0) followBottom = false;
+      chatScroll.scrollTop += event.deltaY * scale;
+      event.preventDefault();
+    },
+    { passive: false }
+  );
   window.addEventListener("pagehide", () => {
     persistDraft();
     saveStore();
@@ -2616,6 +2677,7 @@ function bindEvents() {
     if (mobile && !wasMobile) toggleSidebar(true);
     wasMobile = mobile;
     syncScrim();
+    syncChatScrollGrabber();
   });
   $("#sidebarScrim").onclick = () => toggleSidebar(true);
   // 生成时向上翻阅后，给一枚「回到最新」；贴近底部自动隐去
@@ -3149,6 +3211,12 @@ function syncJumpBottom(gap) {
   if (gap === undefined) gap = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
   $("#jumpBottom").classList.toggle("hidden", view !== "chat" || !currentId || gap < 260);
 }
+function syncChatScrollGrabber() {
+  const host = $("#chatScroll"),
+    grabber = $("#chatScrollGrabber");
+  if (!host || !grabber) return;
+  grabber.classList.toggle("active", view === "chat" && !!currentId && host.scrollHeight > host.clientHeight + 1);
+}
 function syncDocumentTitle() {
   const c = currentConversation();
   document.title = view === "library" ? "卷宗 · 言" : c ? `${c.title} · 言` : "言";
@@ -3168,6 +3236,7 @@ function render(shouldScroll = false) {
   $("#library").classList.toggle("hidden", !library);
   $("#welcome").classList.toggle("hidden", library || !!c);
   $("#chat").classList.toggle("hidden", library || !c);
+  $("#chatScrollGrabber").classList.toggle("hidden", library || !c);
   $("#composerArea").classList.toggle("hidden", library || !c);
   $("#openLibrary").classList.toggle("active", library);
   if (library) renderLibrary();
@@ -3178,6 +3247,7 @@ function render(shouldScroll = false) {
   renderSendButtons();
   renderApprovalBar();
   renderHelperBar();
+  requestAnimationFrame(syncChatScrollGrabber);
 }
 function renderHeader() {
   renderModelTriggers();
