@@ -148,9 +148,15 @@ function renderHistory() {
   const buckets = new Map([["置顶", pinned.map(c => ({ kind: "chat", c }))]]);
   for (const label of ["今天", "过去七天", "更早"]) buckets.set(label, []);
   for (const node of nodes) buckets.get(dayBucket(node.at)).push(node);
+  // 正改着名时侧栏也可能重画（别的对话拟好了题、后台一答收尾）：改到一半的字与光标得留住，不能被原标题冲掉
+  const editing = $("#history .history-rename"),
+    typed =
+      editing && renamingId && editing.closest("[data-conversation]")?.dataset.conversation === renamingId
+        ? { value: editing.value, start: editing.selectionStart, end: editing.selectionEnd }
+        : null;
   const item = c => {
     if (renamingId === c.id)
-      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
+      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed ? typed.value : c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
     const job = requestJob(c.id),
       running = !!job,
       waiting = job?.label === "等待确认";
@@ -181,7 +187,8 @@ function renderHistory() {
   const input = $("#history .history-rename");
   if (input) {
     input.focus();
-    input.select();
+    if (typed) input.setSelectionRange(typed.start, typed.end);
+    else input.select();
   }
 }
 function scrollSnapshot() {
@@ -219,7 +226,8 @@ function renderConversation(shouldScroll = false) {
   const c = currentConversation();
   if (!c) return;
   const snapshot = c.id === lastRenderedConvId ? scrollSnapshot() : scrollPositions.get(c.id);
-  $("#chatTitle").textContent = c.title;
+  // 同一段对话原地重画（换主题、压缩收尾）时，正改着的标题不动
+  if (c.id !== lastRenderedConvId || document.activeElement !== $("#chatTitle")) $("#chatTitle").textContent = c.title;
   renderChatMeta(c);
   renderWorkAuto();
   renderModelTriggers();

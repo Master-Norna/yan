@@ -764,8 +764,9 @@ async function maybeAutoTitle(conversation, profile) {
     delete conversation.titleTries;
     saveStore();
     renderHistory();
+    // 用户正在页面上方改着标题：不把拟好的题写进去盖掉他的字，他落笔（blur）时以他写的为准
     if (currentId === conversation.id) {
-      $("#chatTitle").textContent = title;
+      if (document.activeElement !== $("#chatTitle")) $("#chatTitle").textContent = title;
       syncDocumentTitle();
     }
   } catch {
