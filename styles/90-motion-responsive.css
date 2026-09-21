@@ -530,6 +530,10 @@ button:focus:not(:focus-visible) {
   .chat-scroll-grabber {
     display: none;
   }
+  /* 窄窗里居中的快捷键提示会与右下角的上下文计数撞在一起；窄了就只留计数 */
+  .hint {
+    display: none;
+  }
   .outline {
     display: none;
   }
