@@ -69,6 +69,8 @@ function recoverInterruptedMessages() {
   if (changed) saveStore();
 }
 async function boot() {
+  // 对话主体在 IndexedDB；先把旧 localStorage 数据迁入/把最新快照读回，再接桥接与绘制页面
+  await hydrateStore();
   setupMarkdown();
   setupMermaid();
   setupVizObserver();

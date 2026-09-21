@@ -215,7 +215,7 @@ function aboutSettingsHtml() {
   return (
     `<div class="about-head"><h2>言</h2><span class="about-version">v${escapeHtml(version)} · ${bridged ? "本机桥接" : "浏览器直连"}</span></div><p class="about-ethos">清简为骨，纸墨为意。<br>长问慢答，尽付纸墨；言毕，即行。</p>` +
     `<div class="about-section"><h3>数据与边界</h3>${rows([
-      ["存放", "对话、模型配置与草稿存于此浏览器的本地存储，附件原件存于 IndexedDB；不经任何云端"],
+      ["存放", "对话、模型配置与草稿存于此浏览器的 IndexedDB，localStorage 只留小型启动镜像；附件原件另存 IndexedDB，不经任何云端"],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
       ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
       [

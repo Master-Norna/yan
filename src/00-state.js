@@ -175,7 +175,7 @@
  * @property {string} [lastConversationId]
  */
 /**
- * @typedef {Object} Store 整个本地存储（localStorage 里的一份 JSON）
+ * @typedef {Object} Store 整个本地存储（主体在 IndexedDB；localStorage 只留启动镜像）
  * @property {number} version
  * @property {Settings} settings
  * @property {Profile[]} profiles
@@ -185,6 +185,10 @@
  * @property {Record<string, Draft>} drafts
  */
 const STORAGE_KEY = "yan-chat-v1";
+const STORAGE_META_KEY = "__yanStorage";
+const STATE_DB_NAME = "yan-chat-state-v1";
+const STATE_STORE_NAME = "state";
+const STATE_RECORD_KEY = "main";
 // 内置提示词都在 prompts/ 目录里，这里只做取值与填空；{{名字}} 由 vars 填入，缺文件时报错并给空串，不让请求整个失败
 const PROMPTS = window.YAN_PROMPTS || {};
 function prompt(path, vars = {}) {
@@ -289,6 +293,12 @@ const requestJobs = new Map();
 let settingsTab = "general";
 let toastTimer = null;
 let fileDbPromise = null;
+let stateDbPromise = null;
+let stateRevision = 0,
+  stateDbOnly = false,
+  stateWriteActive = false,
+  stateWritePending = null,
+  stateSaveWarned = false;
 let libraryQuery = "",
   libraryKind = "all";
 const advancedOpen = new Set();

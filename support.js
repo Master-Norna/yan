@@ -178,7 +178,7 @@
  * @property {string} [lastConversationId]
  */
 /**
- * @typedef {Object} Store 整个本地存储（localStorage 里的一份 JSON）
+ * @typedef {Object} Store 整个本地存储（主体在 IndexedDB；localStorage 只留启动镜像）
  * @property {number} version
  * @property {Settings} settings
  * @property {Profile[]} profiles
@@ -188,6 +188,10 @@
  * @property {Record<string, Draft>} drafts
  */
 const STORAGE_KEY = "yan-chat-v1";
+const STORAGE_META_KEY = "__yanStorage";
+const STATE_DB_NAME = "yan-chat-state-v1";
+const STATE_STORE_NAME = "state";
+const STATE_RECORD_KEY = "main";
 // 内置提示词都在 prompts/ 目录里，这里只做取值与填空；{{名字}} 由 vars 填入，缺文件时报错并给空串，不让请求整个失败
 const PROMPTS = window.YAN_PROMPTS || {};
 function prompt(path, vars = {}) {
@@ -292,6 +296,12 @@ const requestJobs = new Map();
 let settingsTab = "general";
 let toastTimer = null;
 let fileDbPromise = null;
+let stateDbPromise = null;
+let stateRevision = 0,
+  stateDbOnly = false,
+  stateWriteActive = false,
+  stateWritePending = null,
+  stateSaveWarned = false;
 let libraryQuery = "",
   libraryKind = "all";
 const advancedOpen = new Set();
@@ -344,11 +354,12 @@ function migrateStoreV4(data) {
 function normalizeCommandPolicy(value, fallback = "ask") {
   return ["ask", "review", "auto"].includes(value) ? value : fallback;
 }
-function loadStore() {
+function normalizeStoreData(value) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (!parsed || typeof parsed !== "object") return structuredClone(defaultStore);
-    let data = parsed;
+    if (!value || typeof value !== "object") return structuredClone(defaultStore);
+    // 启动镜像自己的元数据不进入业务状态，也不随备份导出
+    const { [STORAGE_META_KEY]: _storageMeta, ...plain } = value;
+    let data = plain;
     if (!Number.isInteger(data.version)) data.version = 1;
     if (data.version === 1) migrateStoreV1(data);
     if (data.version === 2) migrateStoreV2(data);
@@ -382,6 +393,24 @@ function loadStore() {
   } catch {
     return structuredClone(defaultStore);
   }
+}
+function readLocalStoreRecord() {
+  try {
+    const data = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (!data || typeof data !== "object") return null;
+    const meta = data[STORAGE_META_KEY];
+    return {
+      data,
+      revision: Number(meta?.revision) || 0,
+      dbOnly: meta?.dbOnly === true,
+      managed: !!meta
+    };
+  } catch {
+    return null;
+  }
+}
+function loadStore() {
+  return normalizeStoreData(readLocalStoreRecord()?.data);
 }
 // 旧版草稿只存一段字符串；统一成 { text, attachments, quote }，此后各处只认对象
 /** @returns {Draft} */
@@ -423,14 +452,139 @@ function normalizeMemory(memory) {
       }))
   };
 }
+function openStateDb() {
+  if (stateDbPromise) return stateDbPromise;
+  stateDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(STATE_DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(STATE_STORE_NAME, { keyPath: "id" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || Error("对话存储不可用"));
+  });
+  return stateDbPromise;
+}
+async function stateStoreRequest(mode, action) {
+  const db = await openStateDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STATE_STORE_NAME, mode),
+      request = action(transaction.objectStore(STATE_STORE_NAME));
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || Error("对话存储失败"));
+    transaction.onabort = () => reject(transaction.error || Error("对话存储已中止"));
+  });
+}
+function nextStateRevision() {
+  stateRevision = Math.max(Date.now(), stateRevision + 1);
+  return stateRevision;
+}
+function serializedStore(revision, dbOnly = false) {
+  return JSON.stringify({ ...store, [STORAGE_META_KEY]: { revision, dbOnly } });
+}
+// localStorage 只在数据尚小时保留完整镜像，供首屏主题与旧版/测试直接读取；一旦装不下就缩成很小的启动镜像。
+// 完整对话始终写进 IndexedDB，因此 localStorage 的 5–10 MB 上限不再决定能留多少聊天。
+function localStoreShell(revision) {
+  return JSON.stringify({
+    version: store.version,
+    settings: store.settings,
+    profiles: store.profiles,
+    conversations: [],
+    library: [],
+    memory: { enabled: store.memory?.enabled !== false, items: [] },
+    drafts: {},
+    [STORAGE_META_KEY]: { revision, dbOnly: true }
+  });
+}
+function writeLocalShell(revision) {
+  try {
+    localStorage.setItem(STORAGE_KEY, localStoreShell(revision));
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function flushStateWrites() {
+  if (stateWriteActive) return;
+  stateWriteActive = true;
+  while (stateWritePending) {
+    const pending = stateWritePending;
+    stateWritePending = null;
+    try {
+      await stateStoreRequest("readwrite", db =>
+        db.put({ id: STATE_RECORD_KEY, revision: pending.revision, json: pending.json })
+      );
+      if (stateDbOnly) writeLocalShell(pending.revision);
+      stateSaveWarned = false;
+    } catch {
+      // 完整 localStorage 镜像写成了就仍有退路；两边都没写成才打扰用户
+      if (!pending.localSaved && !stateSaveWarned) {
+        stateSaveWarned = true;
+        toast("本机对话存储失败，请先导出备份");
+      }
+    }
+  }
+  stateWriteActive = false;
+}
+function queueStateWrite(revision, json, localSaved) {
+  // 正在写时只留最新快照；长对话不必把中间每一帧都排进磁盘队列
+  stateWritePending = { revision, json, localSaved };
+  void flushStateWrites();
+}
+// 启动时以 IndexedDB 为主；旧版 localStorage、测试显式塞进来的无标记数据，以及尚未落盘的较新完整镜像优先一次并迁入。
+async function hydrateStore() {
+  const local = readLocalStoreRecord();
+  let record = null;
+  try {
+    record = await stateStoreRequest("readonly", db => db.get(STATE_RECORD_KEY));
+  } catch {
+    return;
+  }
+  stateRevision = Math.max(Number(record?.revision) || 0, local?.revision || 0, Date.now());
+  stateDbOnly = local?.dbOnly === true;
+  const localOverrides =
+    !!local &&
+    (!local.managed || !record || (!local.dbOnly && Number(local.revision || 0) > Number(record.revision || 0)));
+  if (!localOverrides && record?.json) {
+    try {
+      store = normalizeStoreData(JSON.parse(record.json));
+    } catch {
+      // IndexedDB 里的单条记录若意外损坏，仍沿用 localStorage 的镜像
+    }
+  }
+  if (localOverrides || !record) {
+    const revision = nextStateRevision(),
+      json = serializedStore(revision);
+    try {
+      await stateStoreRequest("readwrite", db => db.put({ id: STATE_RECORD_KEY, revision, json }));
+      try {
+        localStorage.setItem(STORAGE_KEY, json);
+        stateDbOnly = false;
+      } catch {
+        stateDbOnly = true;
+        writeLocalShell(revision);
+      }
+    } catch {
+      // IndexedDB 不可用时保留原有 localStorage 行为；之后保存若两边都失败会给出提示
+    }
+  } else if (stateDbOnly) writeLocalShell(Number(record.revision) || stateRevision);
+  // 尽量让浏览器把这份本机数据视作持久存储；不支持或不准时静默退回普通 IndexedDB
+  try {
+    const persistence = navigator.storage?.persist?.();
+    persistence?.catch?.(() => {});
+  } catch {}
+}
 function saveStore() {
   clearTimeout(saveTimer);
   saveTimer = null;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    toast("浏览器存储已满，请导出备份后清理旧对话");
-  }
+  const revision = nextStateRevision(),
+    json = serializedStore(revision);
+  let localSaved = false;
+  if (!stateDbOnly)
+    try {
+      localStorage.setItem(STORAGE_KEY, json);
+      localSaved = true;
+    } catch {
+      stateDbOnly = true;
+    }
+  queueStateWrite(revision, json, localSaved);
 }
 function saveStoreSoon() {
   clearTimeout(saveTimer);
@@ -1617,6 +1771,8 @@ function recoverInterruptedMessages() {
   if (changed) saveStore();
 }
 async function boot() {
+  // 对话主体在 IndexedDB；先把旧 localStorage 数据迁入/把最新快照读回，再接桥接与绘制页面
+  await hydrateStore();
   setupMarkdown();
   setupMermaid();
   setupVizObserver();
@@ -9622,7 +9778,7 @@ function aboutSettingsHtml() {
   return (
     `<div class="about-head"><h2>言</h2><span class="about-version">v${escapeHtml(version)} · ${bridged ? "本机桥接" : "浏览器直连"}</span></div><p class="about-ethos">清简为骨，纸墨为意。<br>长问慢答，尽付纸墨；言毕，即行。</p>` +
     `<div class="about-section"><h3>数据与边界</h3>${rows([
-      ["存放", "对话、模型配置与草稿存于此浏览器的本地存储，附件原件存于 IndexedDB；不经任何云端"],
+      ["存放", "对话、模型配置与草稿存于此浏览器的 IndexedDB，localStorage 只留小型启动镜像；附件原件另存 IndexedDB，不经任何云端"],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
       ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
       [
