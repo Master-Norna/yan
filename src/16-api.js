@@ -6,6 +6,7 @@ function estimateText(text) {
 }
 // 上下文过重的门槛：每一答的用量标注超过它就转为印色提醒
 const CONTEXT_HEAVY = 24000;
+const SSE_IDLE_MS = 300000;
 function estimateTokens(messages) {
   let score = 0;
   for (const message of messages) {
@@ -482,16 +483,27 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     think.held = "";
     think.mode = "body";
   };
+  // 直连时流静默太久没人管（桥接那头 Node 自带五分钟的读超时）：五分钟一个字节都没有就当断了，按中断处理、可续写
+  const readChunk = () =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reader.cancel().catch(() => {});
+        reject(Error("接口静默超过五分钟，连接已中断"));
+      }, SSE_IDLE_MS);
+      reader.read().then(resolve, reject).finally(() => clearTimeout(timer));
+    });
   // 流被掐断（停止、补言改道）时这一段的帧循环到此为止：接下来的一轮另起一个，两个循环不能同时画一条消息
   try {
     await pump();
   } catch (error) {
     closed = true;
+    // 半途出错（流里的报错事件）：把还开着的连接收掉，别让桥接那头替一个没人读的流继续转发
+    reader.cancel().catch(() => {});
     throw error;
   }
   async function pump() {
     while (true) {
-      const { value, done } = await reader.read();
+      const { value, done } = await readChunk();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || "";
@@ -504,8 +516,12 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
         if (!data || data === "[DONE]") continue;
+        let failure = "";
         try {
           const json = JSON.parse(data);
+          // 流里夹着的报错（限流、上游掐线、桥接补的「连接中断」）：不能当没看见让半截话冒充写完了——按中断处理，已写的留着、可续写
+          if (json.error && !json.choices)
+            failure = (typeof json.error === "string" ? json.error : json.error?.message) || "接口在作答途中返回了错误";
           const delta = json.choices?.[0]?.delta;
           const text = normalizeContent(delta?.content),
             reasoning = normalizeContent(delta?.reasoning_content ?? delta?.reasoning);
@@ -530,6 +546,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
           }
           if (json.usage) assistant.usage = json.usage;
         } catch {}
+        if (failure) throw Error(failure);
       }
       if (done) break;
     }

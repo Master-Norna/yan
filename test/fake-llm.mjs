@@ -195,6 +195,22 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      if (typeof lastUser === "string" && lastUser.includes("STREAMERR"))
+        // 写了半截后流里夹一条报错（限流之类）就收：页面该按「连接中断」处理、已写的留着，而不是当写完了
+        return sse(res, [
+          delta({ content: "先写半句，" }),
+          delta({ content: "再写半句。" }),
+          { error: { message: "rate limited (fake)", type: "rate_limit_error" } }
+        ]);
+      if (typeof lastUser === "string" && lastUser.includes("STREAMCUT")) {
+        // 写了半截上游就掐线：桥接得补一条报错事件给页面，页面按中断处理，而不是把半截当写完
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify(delta({ content: "写到一半" }))}
+
+`);
+        setTimeout(() => res.destroy(), 60);
+        return;
+      }
       if (typeof lastUser === "string" && lastUser.includes("NOEOL"))
         return sseNoEol(res, [delta({ content: "开头，" }), delta({ content: "结尾在此" }), delta({}, { usage: { total_tokens: 77 } })]);
       if (typeof lastUser === "string" && lastUser.includes("TRUNC")) {

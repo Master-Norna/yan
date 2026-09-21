@@ -723,7 +723,15 @@ async function handleChat(req, res) {
     );
   } catch (error) {
     if (!res.headersSent) sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
-    else if (!res.writableEnded && !res.destroyed) res.end();
+    else if (!res.writableEnded && !res.destroyed) {
+      // 流开了头才断的（上游掐线、读超时）：不能就这么静静结束——页面会把半截话当成写完了。
+      // 补一条带 error 的事件再收，页面据此按「连接中断」处理，留着续写的余地；页面自己先走了的不必补
+      if (!res.destroyed && error?.name !== "AbortError")
+        try {
+          res.write(`data: ${JSON.stringify({ error: { message: `上游连接中断：${String(error.message || error).slice(0, 200)}` } })}\n\n`);
+        } catch {}
+      res.end();
+    }
   }
 }
 const WORK = require("./server/work.js")({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes });
