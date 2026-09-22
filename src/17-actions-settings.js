@@ -474,7 +474,6 @@ function bindSettingsEvents() {
       baseUrl: "",
       apiKey: "",
       temperature: 0.7,
-      maxTokens: DEFAULT_MAX_TOKENS,
       quota: "",
       usedTokens: 0,
       systemPrompt: ""

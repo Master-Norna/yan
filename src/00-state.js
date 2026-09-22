@@ -136,12 +136,11 @@
  * @property {string} [apiKey]
  * @property {"openai"|"anthropic"} [api] 接口类型；没写按地址认（anthropic.com）
  * @property {number} temperature
- * @property {number} maxTokens
- * @property {string} quota 用量上限，如 "100k"
+ * @property {number} [maxTokens] 只对 Anthropic 有意义（Messages API 必填）；OpenAI 兼容接口不传，由服务端定
+ * @property {string} quota 用量上限，如 "100k"；空则不限
  * @property {number} usedTokens
  * @property {string} systemPrompt
  * @property {boolean} [tools] 本机工具，默认开
- * @property {boolean} [enableSearch]
  * @property {number} [contextWindow]
  * @property {string} [reasoningLevels] 此模型认的思考档位，逗号分隔；none 是不认；探到的与手填的都记在这里
  * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey），亲手填的前面带 manual|；换了任一样再探
@@ -217,7 +216,8 @@ const limitLabel = bytes => (bytes >= 1024 * MB ? `${bytes / (1024 * MB)} GB` : 
 const MAX_EXTRACTED_CHARS = 300000;
 const HISTORY_TEXT_CHARS = 3000;
 const FOLLOW_THRESHOLD = 80;
-const DEFAULT_MAX_TOKENS = 8192;
+// Anthropic 的 max_tokens 没填时的值：今日的 Claude 都认得下这个数；OpenAI 兼容接口根本不传这个字段
+const DEFAULT_MAX_TOKENS = 32000;
 const MIN_TOOL_STATUS_MS = 240;
 // 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；默认值在这里，实际值在「设置 → 通用」里可改
 const DEFAULT_TOOL_ROUNDS = 80,

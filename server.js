@@ -695,14 +695,14 @@ async function handleChat(req, res) {
       messages,
       stream: true,
       stream_options: { include_usage: true },
-      temperature: Math.max(0, Math.min(2, Number(body.temperature ?? 0.7))),
-      max_tokens: Math.max(16, Math.min(65536, Number(body.maxTokens || 8192)))
+      temperature: Math.max(0, Math.min(2, Number(body.temperature ?? 0.7)))
     };
+    // 页面给了才带 max_tokens（Anthropic 与拟题、压缩这几处）；没给就不传，让接口用自己的默认
+    if (Number(body.maxTokens) > 0) payload.max_tokens = Math.max(16, Math.round(Number(body.maxTokens)));
     if (Array.isArray(body.tools) && body.tools.length) {
       if (body.tools.length > TOOLS_LIMIT) throw Error(`工具定义过多：${body.tools.length} 件，一次最多 ${TOOLS_LIMIT} 件`);
       payload.tools = body.tools;
     }
-    if (body.enable_search === true) payload.enable_search = true;
     // 思考强度：只透传这几个字段
     for (const key of ["reasoning_effort", "enable_thinking", "thinking_budget"]) if (body[key] !== undefined) payload[key] = body[key];
     const abort = new AbortController();

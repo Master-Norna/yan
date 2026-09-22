@@ -433,7 +433,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     history = summaryMessages(contextIndex >= 0 ? conversation.messages[contextIndex] : null);
     history.push(...(await historyForApi(source, lastUserId, budget)));
     // 先把这一答预计的用量记到预留里（提示 + 最大输出），别的对话同时开工时看得见；收尾时换成实际用量
-    releaseQuota = reserveTokens(profile, estimateTokens(history) + Number(profile.maxTokens || DEFAULT_MAX_TOKENS));
+    // 预留只是估个数：一答的输出按八千算，不必与接口实际的上限一致
+    releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
     if (resume && assistant.content) {
       history.push({ role: "assistant", content: assistant.content });
       history.push({ role: "user", content: "上一条回复在此处因连接中断。请仅从中断处继续，不要重复已生成的内容。" });

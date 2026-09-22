@@ -97,7 +97,7 @@ function anthropicRequest(payload) {
   if (!messages.length || messages[0].role !== "user") messages.unshift({ role: "user", content: [{ type: "text", text: "（接上文）" }] });
   const level = String(payload.reasoning_effort || "").toLowerCase(),
     budget = level && level !== "none" && level !== "off" ? ANTHROPIC_BUDGETS[level] || 8192 : 0;
-  const maxTokens = Math.max(16, Number(payload.max_tokens) || 8192);
+  const maxTokens = Math.max(16, Number(payload.max_tokens) || 32000);
   const body = {
     model: payload.model,
     max_tokens: budget ? Math.max(maxTokens, budget + 4096) : maxTokens,

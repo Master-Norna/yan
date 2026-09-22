@@ -116,14 +116,12 @@ async function compactContext(c, { auto = false } = {}) {
   compactingIds.add(c.id);
   renderConversation();
   try {
-    // 转写可能很长、模型可能先思考再写：超时给足五分钟；输出上限不能只按摘要本身的六百字算——会思考的模型把思考也计在 max_tokens 里，
-    // 给少了就只见思考不见摘要。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
+    // 转写可能很长、模型可能先思考再写：超时给足五分钟；输出上限不另给，随平时的走。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
     const response = await requestChat(
       profile,
       [{ role: "user", content: prompt("assistant.compact", { transcript }) }],
       AbortSignal.timeout(300000),
       {
-        maxTokens: Math.max(6000, Number(profile.maxTokens) || 0),
         temperature: 0.2,
         systemPrompt: "",
         reasoning: c.reasoning ? "low" : ""
