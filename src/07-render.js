@@ -161,7 +161,7 @@ function renderHistory() {
         : null;
   const item = c => {
     if (renamingId === c.id)
-      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed ? typed.value : c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
+      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed && renamingDirty ? typed.value : c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
     const job = requestJob(c.id),
       running = !!job,
       waiting = job?.label === "等待确认";
@@ -181,19 +181,24 @@ function renderHistory() {
       running = node.items.filter(c => c.id !== currentId && requestJob(c.id)).length;
     return `<div class="history-repo-group${fold ? " collapsed" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><button type="button" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? "展开" : "收起"}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">工</span><span class="history-repo-name">${escapeHtml(name)}</span><small>${node.items.length}${fold && running ? ` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></button><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="在此目录翻页">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
-  $("#history").innerHTML =
-    [...buckets]
-      .filter(([, items]) => items.length)
-      .map(
-        ([label, items]) =>
-          `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : item(node.c))).join("")}</div>`
-      )
-      .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
-  const input = $("#history .history-rename");
-  if (input) {
-    input.focus();
-    if (typed) input.setSelectionRange(typed.start, typed.end);
-    else input.select();
+  renderingHistory = true;
+  try {
+    $("#history").innerHTML =
+      [...buckets]
+        .filter(([, items]) => items.length)
+        .map(
+          ([label, items]) =>
+            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : item(node.c))).join("")}</div>`
+        )
+        .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
+    const input = $("#history .history-rename");
+    if (input) {
+      input.focus();
+      if (typed) input.setSelectionRange(typed.start, typed.end);
+      else input.select();
+    }
+  } finally {
+    renderingHistory = false;
   }
 }
 function scrollSnapshot() {

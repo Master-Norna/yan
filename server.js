@@ -267,8 +267,7 @@ function isPrivateAddress(value) {
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && b === 168) ||
-      // 198.18.0.0/15 不算：Clash / Mihomo 之类代理开 TUN 的 fake-ip 模式时，所有域名都解析到这一段，真正去哪由代理定；
-      // 拦了它，开着代理时翻阅网页、检索一律失败。内网主机名（localhost、*.local、*.internal）与真正的内网 IP 照旧拒
+      (a === 198 && (b === 18 || b === 19)) ||
       a >= 224
     );
   }
@@ -279,6 +278,16 @@ function isPrivateAddress(value) {
     return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || /^64:ff9b:/.test(host);
   }
   return false;
+}
+// Clash / Mihomo 的 TUN fake-ip 会让正常域名解析到 198.18.0.0/15：DNS 结果允许这段交给代理接管；
+// 用户直接写 http://198.18.x.x 则仍按保留内网段拒绝，免得把「代理兼容」变成字面地址绕过。
+function isFakeIpAddress(value) {
+  const host = hostLiteral(value),
+    mapped = net.isIPv6(host) ? unmapIpv4(host) : null;
+  if (mapped) return isFakeIpAddress(mapped);
+  if (!net.isIPv4(host)) return false;
+  const [a, b] = host.split(".").map(Number);
+  return a === 198 && (b === 18 || b === 19);
 }
 // 本机回环：127.0.0.0/8、::1、localhost。http_request / download_file 对它放行（模型开的本机服务本就该能测，run_command 里 curl 本机也放行），
 // 局域网等别的内网地址照旧拒；fetch_page / search_web 仍一律不碰本机
@@ -295,7 +304,7 @@ async function assertPublicUrl(url, { allowLoopback = false } = {}) {
   if (blocked(host)) throw Error(allowLoopback ? "不允许访问内网地址（本机 127.0.0.1 / localhost 除外）" : "不允许访问本机或内网地址");
   if (net.isIP(host) || (allowLoopback && host === "localhost")) return;
   const addresses = await dns.lookup(host, { all: true, verbatim: true });
-  const hit = addresses.find(item => blocked(item.address));
+  const hit = addresses.find(item => blocked(item.address) && !isFakeIpAddress(item.address));
   if (!addresses.length || hit) throw Error(`网址解析到了本机或内网地址${hit ? `（${hit.address}）` : ""}`);
 }
 // 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读

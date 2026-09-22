@@ -391,29 +391,39 @@ function bindEvents() {
     if (!input) return;
     if (e.key === "Enter") {
       e.preventDefault();
+      // Enter 本身就是明确提交；也照顾脚本/输入法最后一拍尚未来得及冒 input 事件的情形。
+      renamingDirty = true;
       commitRename(input.value);
     } else if (e.key === "Escape") {
       e.stopPropagation();
       renamingId = null;
+      renamingDirty = false;
       renderHistory();
     }
   });
+  $("#history").addEventListener("input", e => {
+    if (e.target.closest(".history-rename") && renamingId) renamingDirty = true;
+  });
   $("#history").addEventListener("focusout", e => {
     const input = e.target.closest(".history-rename");
-    if (input && renamingId) commitRename(input.value);
+    if (input && renamingId && !renderingHistory) commitRename(input.value);
   });
   const title = $("#chatTitle");
-  let titleBefore = "";
+  let titleDirty = false,
+    titleCanceled = false;
   title.addEventListener("focus", () => {
-    titleBefore = title.textContent;
+    titleDirty = false;
+    titleCanceled = false;
   });
+  title.addEventListener("input", () => (titleDirty = true));
   title.addEventListener("keydown", e => {
     if (e.key === "Enter") {
       e.preventDefault();
       title.blur();
     } else if (e.key === "Escape") {
       e.stopPropagation();
-      title.textContent = titleBefore;
+      titleCanceled = true;
+      title.textContent = currentConversation()?.title || "";
       title.blur();
     }
   });
@@ -421,8 +431,10 @@ function bindEvents() {
     const c = currentConversation();
     if (!c) return;
     const value = title.textContent.replace(/\s+/g, " ").trim();
-    if (value && value !== c.title) renameConversation(c.id, value);
+    if (!titleCanceled && titleDirty && value && value !== c.title) renameConversation(c.id, value);
     else title.textContent = c.title;
+    titleDirty = false;
+    titleCanceled = false;
   });
   $("#modelMenu").addEventListener("click", e => {
     const level = e.target.closest("[data-reasoning]");
@@ -959,10 +971,17 @@ function bindEvents() {
     },
     { passive: false }
   );
-  window.addEventListener("pagehide", () => {
+  const flushPageState = () => {
     persistDraft();
-    saveStore();
     flushOnUnload();
+  };
+  // beforeunload 比 pagehide 早，给 IndexedDB 事务多一点提交时间；pagehide 仍兜住不派 beforeunload 的移动端 / 缓存路径。
+  // flushOnUnload 自身幂等，不会因为两者都到而重复写。
+  window.addEventListener("beforeunload", flushPageState);
+  window.addEventListener("pagehide", flushPageState);
+  // 从前进 / 后退缓存回来仍是同一份 JS 状态：允许它在下一次离页时再次落盘。
+  window.addEventListener("pageshow", event => {
+    if (event.persisted) unloading = false;
   });
   window.addEventListener("offline", () => setConnection("error", "连接中断"));
   window.addEventListener("online", refreshConnection);

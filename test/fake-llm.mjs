@@ -132,6 +132,9 @@ http
             res.end(JSON.stringify({ error: { message: "slow bad gateway" } }));
           }, 800);
         }
+        // TITLEEDITRACE：给用户留出正在标题框里编辑的窗口，检查迟到的自动拟题不会被 blur / Esc 用旧字反盖。
+        if (lastUser.includes("TITLEEDITRACE"))
+          return setTimeout(() => sse(res, [delta({ content: "测试标题" }), delta({}, { usage: { total_tokens: 10 } })]), 1500);
         return sse(res, [delta({ content: "测试标题" }), delta({}, { usage: { total_tokens: 10 } })]);
       }
       if (typeof lastUser === "string" && lastUser.includes("SLOWHTML")) {

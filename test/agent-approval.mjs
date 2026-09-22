@@ -221,9 +221,9 @@ await evalJs(
 );
 await sleep(1500);
 await send("Page.navigate", { url: PAGE });
-await sleep(1500);
+await waitFor(`typeof __yanState === "function" && __yanState().conversations.some(c => c.messages.some(m => m.id === "a9"))`, 5000);
 const recovered = await evalJs(
-  `(() => { const s = __yanState(); const m = s.conversations[0].messages.find(m => m.id === "a9"); return { status: m.status, step: m.steps[0].status, result: m.steps[0].result }; })()`
+  `(() => { const m = __yanState().conversations.flatMap(c => c.messages).find(m => m.id === "a9"); return { status: m.status, step: m.steps[0].status, result: m.steps[0].result }; })()`
 );
 check(
   "reload settles pending step",

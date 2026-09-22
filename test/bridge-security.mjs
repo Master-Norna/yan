@@ -239,6 +239,12 @@ check(
   r.status === 400 && /本机或内网/.test(r.data?.error || ""),
   `${r.status} ${r.data?.error}`
 );
+r = await post("/api/fetch", { url: "http://198.18.0.1:1/" });
+check(
+  "a literal fake-ip address is still refused as a reserved private range",
+  r.status === 400 && /本机或内网/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error}`
+);
 r = await post("/api/fetch", { url: "http://[2001:db8::1]:1/" });
 check(
   "public IPv6 literal passes the address check",

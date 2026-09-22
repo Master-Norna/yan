@@ -193,7 +193,8 @@ const STATE_DB_NAME = "yan-chat-state-v1";
 const STATE_STORE_NAME = "state"; // 旧版整份记录的表（main 一条），迁走后就空着
 const STATE_RECORD_KEY = "main";
 const CHATS_STORE_NAME = "conversations"; // 没桥接时对话存这里，一段一条
-const CHAT_DISK_INTERVAL = 1200; // 同一段对话写进目录的最短间隔（毫秒）
+const CHAT_DISK_INTERVAL = 1200, // 静止时同一段对话连续落盘的最短间隔（毫秒）
+  CHAT_STREAM_DISK_INTERVAL = 3000; // 流式生成时少改几遍整份 JSON；收尾会恢复上面的短间隔
 // 内置提示词都在 prompts/ 目录里，这里只做取值与填空；{{名字}} 由 vars 填入，缺文件时报错并给空串，不让请求整个失败
 const PROMPTS = window.YAN_PROMPTS || {};
 function prompt(path, vars = {}) {
@@ -277,7 +278,9 @@ let apiBase = null;
 let currentId = null;
 let view = "chat";
 let editingMessageId = null;
-let renamingId = null;
+let renamingId = null,
+  renamingDirty = false,
+  renderingHistory = false;
 let historyQuery = "";
 /** @type {Attachment[]} 案上待发的附件 */
 let pendingAttachments = [];
@@ -316,7 +319,9 @@ const dirtyChatIds = new Set(),
   chatHashes = new Map(),
   chatStamps = new Map(),
   pendingChatWrites = new Map(),
-  writingChatIds = new Set(),
+  activeChatWrites = new Map(),
+  chatWritePromises = new Map(),
+  deletedChatIds = new Set(),
   chatDiskWrites = new Map(),
   pendingChatDeletes = new Set();
 let libraryQuery = "",
@@ -622,93 +627,137 @@ function nextChatStamp(id) {
   chatStamps.set(id, stamp);
   return stamp;
 }
-// 把这几段写下去：内容与上次写的一样就跳过；写是异步的，同一段正在写时只留最新一份
+// 把这几段排进写队列。这里故意不 stringify：流式期间 saveStore 每 300ms 会来一次，真正到落盘间隔时才复制整段，
+// 这样长对话不会为了最后几个字反复序列化；同一段正在写时也只留一个「再看一次最新状态」的记号。
 function flushConversations(ids, { force = false } = {}) {
   for (const id of ids) {
-    const c = store.conversations.find(item => item.id === id);
-    if (!c) continue;
-    dirtyChatIds.delete(id);
-    const json = JSON.stringify(c),
-      hash = hashText(json);
-    if (!force && chatHashes.get(id) === hash) continue;
-    chatHashes.set(id, hash);
-    pendingChatWrites.set(id, { json, savedAt: nextChatStamp(id), title: c.title });
+    if (deletedChatIds.has(id) || !store.conversations.some(item => item.id === id)) continue;
+    const queued = pendingChatWrites.get(id);
+    pendingChatWrites.set(id, { force: force || !!queued?.force });
   }
   void drainChatWrites();
 }
 function drainChatWrites() {
-  for (const id of pendingChatWrites.keys()) if (!writingChatIds.has(id)) void writeConversation(id);
+  for (const id of pendingChatWrites.keys()) {
+    if (deletedChatIds.has(id) || chatWritePromises.has(id)) continue;
+    const task = writeConversation(id).finally(() => {
+      if (chatWritePromises.get(id) === task) chatWritePromises.delete(id);
+      if (pendingChatWrites.has(id) && !deletedChatIds.has(id)) drainChatWrites();
+    });
+    chatWritePromises.set(id, task);
+  }
 }
 async function writeConversation(id) {
-  writingChatIds.add(id);
-  try {
-    while (pendingChatWrites.has(id)) {
-      // 同一段连着写别太密：流式期间每三百毫秒存一次，磁盘上一秒多一次就够了；页面要关时不等。
-      // 等的时候那份仍留在待写表里：又来了更新的就换成新的，页面这时要关也能把它暂存进库
-      const wait = unloading || !chatsOnline() ? 0 : CHAT_DISK_INTERVAL - (performance.now() - (chatDiskWrites.get(id) || -CHAT_DISK_INTERVAL));
-      if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
-      const pending = pendingChatWrites.get(id);
-      pendingChatWrites.delete(id);
-      // 目录在线：先落盘；写成了表里的暂存就没用了。落盘不成（桥接刚停了）就暂存进表里，接上后再推
-      let spilled = !chatsOnline();
-      if (!spilled)
-        try {
-          chatDiskWrites.set(id, performance.now());
-          await bridge("/api/chats/save", { savedAt: pending.savedAt, conversation: JSON.parse(pending.json) }, AbortSignal.timeout(60000));
-          chatSaveWarned = false;
-          await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
-          continue;
-        } catch (error) {
-          spilled = true;
-          if (!chatSaveWarned) {
-            chatSaveWarned = true;
-            toast(`对话未能落盘，先暂存在浏览器里：${String(error.message || error).slice(0, 60)}`);
-          }
+  while (pendingChatWrites.has(id) && !deletedChatIds.has(id)) {
+    // 先等、后 stringify。生成中三秒一份，收尾与普通编辑最多等一秒多；离页另有同步入 IndexedDB 的兜底，不靠这里抢时间。
+    const interval = conversationRunning(id) || titlingIds.has(id) || compactingIds.has(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
+      wait = unloading ? 0 : interval - (performance.now() - (chatDiskWrites.get(id) || -interval));
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    if (deletedChatIds.has(id)) break;
+    const queued = pendingChatWrites.get(id);
+    pendingChatWrites.delete(id);
+    const conversation = store.conversations.find(item => item.id === id);
+    if (!conversation) continue;
+    const json = JSON.stringify(conversation),
+      hash = hashText(json);
+    if (!queued?.force && chatHashes.get(id) === hash) {
+      if (!pendingChatWrites.has(id)) dirtyChatIds.delete(id);
+      continue;
+    }
+    const pending = { json, hash, savedAt: nextChatStamp(id), title: conversation.title };
+    activeChatWrites.set(id, pending);
+    chatDiskWrites.set(id, performance.now());
+    // 目录在线：先落盘；写成了表里的暂存就没用了。落盘不成（桥接刚停了）就暂存进表里，接上后再推
+    let spilled = !chatsOnline(),
+      persisted = false;
+    if (!spilled)
+      try {
+        await bridge("/api/chats/save", { savedAt: pending.savedAt, conversation: JSON.parse(pending.json) }, AbortSignal.timeout(60000));
+        chatSaveWarned = false;
+        if (!deletedChatIds.has(id)) {
+          persisted = true;
+          // pagehide 已把最新状态写进表时，旧的在途请求即使成功也不能把那份离页兜底删掉。
+          if (!unloading && !pendingChatWrites.has(id))
+            await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
         }
+      } catch (error) {
+        spilled = true;
+        if (!chatSaveWarned) {
+          chatSaveWarned = true;
+          toast(`对话未能落盘，先暂存在浏览器里：${String(error.message || error).slice(0, 60)}`);
+        }
+      }
+    if (spilled && !deletedChatIds.has(id))
       try {
         await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.put({ id, savedAt: pending.savedAt, json: pending.json }));
-        if (spilled && !chatsOnline()) chatSaveWarned = false;
+        persisted = true;
+        if (!chatsOnline()) chatSaveWarned = false;
       } catch {
         if (!chatSaveWarned) {
           chatSaveWarned = true;
           toast("本机对话存储失败，请先导出备份");
         }
       }
+    if (activeChatWrites.get(id) === pending) activeChatWrites.delete(id);
+    if (persisted && !deletedChatIds.has(id)) {
+      chatHashes.set(id, hash);
+      if (!pendingChatWrites.has(id)) dirtyChatIds.delete(id);
     }
-  } finally {
-    writingChatIds.delete(id);
   }
 }
-// 删一段：表里的记录与目录里的文件都去掉；目录那头没删成（桥接刚停了）记下来，接上后补删
+// 删一段：先立墓碑并等已经发出的保存收尾，再删文件，保证「旧保存」绝不可能排在删除之后把它复活。
+// 墓碑先写进配置；哪怕这时桥接已断，下次接上也会先补删，不会从目录把它捡回来。
 async function deleteConversationStorage(id) {
-  chatHashes.delete(id);
-  chatStamps.delete(id);
+  deletedChatIds.add(id);
+  pendingChatDeletes.add(id);
   pendingChatWrites.delete(id);
   dirtyChatIds.delete(id);
-  await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
-  if (!chatsOnline()) return;
+  writeMeta();
   try {
-    await bridge("/api/chats/delete", { id }, AbortSignal.timeout(20000));
-  } catch {
-    pendingChatDeletes.add(id);
-    writeMeta();
+    await chatWritePromises.get(id)?.catch(() => {});
+    pendingChatWrites.delete(id);
+    activeChatWrites.delete(id);
+    await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+    if (!chatsOnline()) return;
+    try {
+      await bridge("/api/chats/delete", { id }, AbortSignal.timeout(20000));
+      pendingChatDeletes.delete(id);
+      writeMeta();
+    } catch {}
+  } finally {
+    chatHashes.delete(id);
+    chatStamps.delete(id);
+    deletedChatIds.delete(id);
   }
 }
 // 全量巡检：每段都算一遍指纹，变了的写下去。低频跑（定时、页面要关时），哪处改了没标脏也兜得住
 function sweepConversations() {
   flushConversations(store.conversations.map(c => c.id));
 }
-// 页面要关了：该写的都立刻写。落盘走的是 fetch，卸载时未必来得及，所以同时也暂存进表里——下次开页表里那份若比目录新就会推过去
+// 页面要关了：不再新发普通 fetch（卸载时它不可靠），而是在一个同步开启的 IndexedDB 事务里把所有未落稳的最新状态兜住；
+// 包括已经从待写表拿走、正在 fetch 的那份。下次开页若它比目录新，会自动推回目录。
 function flushOnUnload() {
+  if (unloading) return;
   unloading = true;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  writeMeta();
   if (metaMirrorTimer) writeMetaMirror();
-  sweepConversations();
   const db = stateDb;
   if (!db) return;
-  for (const [id, pending] of pendingChatWrites)
-    try {
-      db.transaction(CHATS_STORE_NAME, "readwrite").objectStore(CHATS_STORE_NAME).put({ id, savedAt: pending.savedAt, json: pending.json });
-    } catch {}
+  const records = [];
+  for (const conversation of store.conversations) {
+    if (deletedChatIds.has(conversation.id)) continue;
+    const json = JSON.stringify(conversation),
+      hash = hashText(json);
+    if (!pendingChatWrites.has(conversation.id) && !activeChatWrites.has(conversation.id) && chatHashes.get(conversation.id) === hash) continue;
+    records.push({ id: conversation.id, savedAt: nextChatStamp(conversation.id), json });
+  }
+  if (!records.length) return;
+  try {
+    const table = db.transaction(CHATS_STORE_NAME, "readwrite").objectStore(CHATS_STORE_NAME);
+    for (const record of records) table.put(record);
+  } catch {}
 }
 function saveStore() {
   clearTimeout(saveTimer);
@@ -803,11 +852,14 @@ async function syncChatsWithDisk() {
     const data = await bridge("/api/chats/load", {}, AbortSignal.timeout(120000));
     chatsBroken = false;
     if (data.dir) bootstrap.work.chats = data.dir;
-    for (const id of [...pendingChatDeletes])
+    for (const id of [...pendingChatDeletes]) {
+      // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
+      if (deletedChatIds.has(id)) continue;
       try {
         await bridge("/api/chats/delete", { id }, AbortSignal.timeout(20000));
         pendingChatDeletes.delete(id);
       } catch {}
+    }
     const disk = new Map();
     for (const item of data.items || []) if (item?.id && !pendingChatDeletes.has(item.id)) disk.set(item.id, item);
     const push = new Set(),
@@ -2381,29 +2433,39 @@ function bindEvents() {
     if (!input) return;
     if (e.key === "Enter") {
       e.preventDefault();
+      // Enter 本身就是明确提交；也照顾脚本/输入法最后一拍尚未来得及冒 input 事件的情形。
+      renamingDirty = true;
       commitRename(input.value);
     } else if (e.key === "Escape") {
       e.stopPropagation();
       renamingId = null;
+      renamingDirty = false;
       renderHistory();
     }
   });
+  $("#history").addEventListener("input", e => {
+    if (e.target.closest(".history-rename") && renamingId) renamingDirty = true;
+  });
   $("#history").addEventListener("focusout", e => {
     const input = e.target.closest(".history-rename");
-    if (input && renamingId) commitRename(input.value);
+    if (input && renamingId && !renderingHistory) commitRename(input.value);
   });
   const title = $("#chatTitle");
-  let titleBefore = "";
+  let titleDirty = false,
+    titleCanceled = false;
   title.addEventListener("focus", () => {
-    titleBefore = title.textContent;
+    titleDirty = false;
+    titleCanceled = false;
   });
+  title.addEventListener("input", () => (titleDirty = true));
   title.addEventListener("keydown", e => {
     if (e.key === "Enter") {
       e.preventDefault();
       title.blur();
     } else if (e.key === "Escape") {
       e.stopPropagation();
-      title.textContent = titleBefore;
+      titleCanceled = true;
+      title.textContent = currentConversation()?.title || "";
       title.blur();
     }
   });
@@ -2411,8 +2473,10 @@ function bindEvents() {
     const c = currentConversation();
     if (!c) return;
     const value = title.textContent.replace(/\s+/g, " ").trim();
-    if (value && value !== c.title) renameConversation(c.id, value);
+    if (!titleCanceled && titleDirty && value && value !== c.title) renameConversation(c.id, value);
     else title.textContent = c.title;
+    titleDirty = false;
+    titleCanceled = false;
   });
   $("#modelMenu").addEventListener("click", e => {
     const level = e.target.closest("[data-reasoning]");
@@ -2949,10 +3013,17 @@ function bindEvents() {
     },
     { passive: false }
   );
-  window.addEventListener("pagehide", () => {
+  const flushPageState = () => {
     persistDraft();
-    saveStore();
     flushOnUnload();
+  };
+  // beforeunload 比 pagehide 早，给 IndexedDB 事务多一点提交时间；pagehide 仍兜住不派 beforeunload 的移动端 / 缓存路径。
+  // flushOnUnload 自身幂等，不会因为两者都到而重复写。
+  window.addEventListener("beforeunload", flushPageState);
+  window.addEventListener("pagehide", flushPageState);
+  // 从前进 / 后退缓存回来仍是同一份 JS 状态：允许它在下一次离页时再次落盘。
+  window.addEventListener("pageshow", event => {
+    if (event.persisted) unloading = false;
   });
   window.addEventListener("offline", () => setConnection("error", "连接中断"));
   window.addEventListener("online", refreshConnection);
@@ -3470,12 +3541,15 @@ function togglePin(id) {
 }
 function startRename(id) {
   renamingId = id;
+  renamingDirty = false;
   renderHistory();
 }
 function commitRename(value) {
   const id = renamingId;
   renamingId = null;
-  if (id) renameConversation(id, value);
+  const changed = renamingDirty;
+  renamingDirty = false;
+  if (id && changed) renameConversation(id, value);
   else renderHistory();
 }
 function renameConversation(id, value) {
@@ -3693,7 +3767,7 @@ function renderHistory() {
         : null;
   const item = c => {
     if (renamingId === c.id)
-      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed ? typed.value : c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
+      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed && renamingDirty ? typed.value : c.title)}" maxlength="60" aria-label="重命名对话"></div>`;
     const job = requestJob(c.id),
       running = !!job,
       waiting = job?.label === "等待确认";
@@ -3713,19 +3787,24 @@ function renderHistory() {
       running = node.items.filter(c => c.id !== currentId && requestJob(c.id)).length;
     return `<div class="history-repo-group${fold ? " collapsed" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><button type="button" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? "展开" : "收起"}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">工</span><span class="history-repo-name">${escapeHtml(name)}</span><small>${node.items.length}${fold && running ? ` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></button><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="在此目录翻页">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
-  $("#history").innerHTML =
-    [...buckets]
-      .filter(([, items]) => items.length)
-      .map(
-        ([label, items]) =>
-          `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : item(node.c))).join("")}</div>`
-      )
-      .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
-  const input = $("#history .history-rename");
-  if (input) {
-    input.focus();
-    if (typed) input.setSelectionRange(typed.start, typed.end);
-    else input.select();
+  renderingHistory = true;
+  try {
+    $("#history").innerHTML =
+      [...buckets]
+        .filter(([, items]) => items.length)
+        .map(
+          ([label, items]) =>
+            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : item(node.c))).join("")}</div>`
+        )
+        .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
+    const input = $("#history .history-rename");
+    if (input) {
+      input.focus();
+      if (typed) input.setSelectionRange(typed.start, typed.end);
+      else input.select();
+    }
+  } finally {
+    renderingHistory = false;
   }
 }
 function scrollSnapshot() {

@@ -435,12 +435,15 @@ function togglePin(id) {
 }
 function startRename(id) {
   renamingId = id;
+  renamingDirty = false;
   renderHistory();
 }
 function commitRename(value) {
   const id = renamingId;
   renamingId = null;
-  if (id) renameConversation(id, value);
+  const changed = renamingDirty;
+  renamingDirty = false;
+  if (id && changed) renameConversation(id, value);
   else renderHistory();
 }
 function renameConversation(id, value) {

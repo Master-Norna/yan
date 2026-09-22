@@ -220,13 +220,24 @@ check(
 );
 // 刷新后从存储重画：差遣卡片与嵌套步骤仍在
 await send("Page.navigate", { url: PAGE });
-await sleep(1500);
+await waitFor(`[...document.querySelectorAll("#history .history-item")].some(n => n.textContent.includes("DELEGATE"))`, 5000);
 await evalJs(
   `[...document.querySelectorAll("#history .history-item")].find(n => n.textContent.includes("DELEGATE"))?.querySelector(".history-open").click(); true`
 );
-await sleep(600);
+const markerRestored = await waitFor(`!!document.querySelector(".message.assistant .tool-step-delegate")`, 5000).catch(() => false);
+check(
+  "the delegate marker is restored before opening its panel",
+  markerRestored,
+  markerRestored
+    ? ""
+    : JSON.stringify(
+        await evalJs(
+          `__yanState().conversations.filter(c => c.title.includes("DELEGATE")).map(c => ({ title: c.title, messages: c.messages.map(m => ({ role: m.role, status: m.status, steps: (m.steps || []).map(s => s.name) })) }))`
+        )
+      )
+);
 // 重载后：签还在，点开面板帮手那两步与回报也还在（都存在步骤上，不靠内存）；做完的那一轮折着，步骤仍在折叠区里
-await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
+if (markerRestored) await evalJs(`document.querySelector(".message.assistant .tool-step-delegate > .tool-step-head").click(); true`);
 await sleep(300);
 const after = await evalJs(
   `(d => d ? { marker: !!d, report: !!document.querySelector("#helperModal .sub-report"), nested: document.querySelectorAll("#helperModal .tool-step").length, folds: [...document.querySelectorAll("#helperModal .sub-steps")].map(f => (f.open ? "open" : "closed") + ":" + f.querySelector(".tool-stack-label").textContent) } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`

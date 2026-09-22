@@ -78,6 +78,37 @@ t = Date.now();
 while (Date.now() - t < 8000 && !(files().length === 1 && files()[0].startsWith("改过名的对话·"))) await sleep(150);
 check("renaming renames the file and the old name is gone", files().length === 1 && files()[0].startsWith("改过名的对话·"), JSON.stringify(files()));
 check("the change is on disk with a newer stamp", readFile(files()[0]).savedAt > before && readFile(files()[0]).conversation.messages.length === 2);
+// ---- 保存请求已经从待写队列取走、却还没返回时离页：最新状态仍同步兜进 IndexedDB，下次开页再推回目录
+await evalJs(
+  `(() => { const real = window.fetch.bind(window), gate = {}; gate.promise = new Promise(resolve => gate.release = resolve); window.__storageRealFetch = real; window.__storageSaveGate = gate; window.__storageSaveStarted = false; window.fetch = (...args) => { if (!window.__storageSaveStarted && String(args[0]).includes("/api/chats/save")) { window.__storageSaveStarted = true; return gate.promise.then(() => real(...args)); } return real(...args); }; const c = __yanState().conversations.find(c => c.id === "stored-chat"); c.messages.push({ id: "u3", role: "user", content: "离页前最后一句", timestamp: new Date().toISOString() }); __yanSave(); return true; })()`
+);
+await waitFor(`window.__storageSaveStarted === true`, 5000);
+await evalJs(`window.dispatchEvent(new PageTransitionEvent("pagehide")); true`);
+await send("Page.navigate", { url: PAGE + "preview.html" });
+await sleep(400);
+const leftRecords = await evalJs(`(async () => await (${readRecords}))()`);
+check(
+  "pagehide keeps the newest conversation even after its payload left the pending queue",
+  leftRecords.some(record => JSON.parse(record.json).messages.some(message => message.content === "离页前最后一句")),
+  JSON.stringify(leftRecords.map(record => record.id))
+);
+await send("Page.navigate", { url: PAGE });
+await sleep(1200);
+t = Date.now();
+while (Date.now() - t < 8000 && !files().some(name => readFile(name).conversation.messages.some(message => message.content === "离页前最后一句"))) await sleep(150);
+check(
+  "the unload fallback is pushed back to the chats directory on the next page",
+  files().some(name => readFile(name).conversation.messages.some(message => message.content === "离页前最后一句"))
+);
+await evalJs(
+  `(() => { window.dispatchEvent(new PageTransitionEvent("pagehide")); window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })); const c = __yanState().conversations.find(c => c.id === "stored-chat"); c.messages.push({ id: "u-bfcache", role: "user", content: "缓存恢复后再次离页", timestamp: new Date().toISOString() }); __yanSave(); window.dispatchEvent(new PageTransitionEvent("pagehide")); return true; })()`
+);
+await sleep(400);
+const resumedRecords = await evalJs(`(async () => await (${readRecords}))()`);
+check(
+  "a page restored from the back-forward cache may flush again",
+  resumedRecords.some(record => JSON.parse(record.json).messages.some(message => message.content === "缓存恢复后再次离页"))
+);
 // ---- 全新的浏览器（站点数据清空）：对话与设置都从目录回来
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(400);
@@ -90,15 +121,23 @@ check(
   "a fresh browser restores conversations and settings from the directory",
   await evalJs(`document.querySelector("#history").textContent.includes("改过名的对话") && __yanState().settings.name === "测" && __yanState().memory.items[0]?.text === "用户爱喝茶" && __yanState().profiles[0]?.model === "fake"`)
 );
-// ---- 删对话：文件没了
+// ---- 删对话：即使旧保存已经发出、尚未返回，删除也等它收尾后最后落锤，文件不会复活
+await evalJs(`document.querySelector('[data-conversation="stored-chat"] .history-open').click(); true`);
+await sleep(150);
+await evalJs(
+  `(() => { const real = window.fetch.bind(window), gate = {}; gate.promise = new Promise(resolve => gate.release = resolve); window.__storageRealFetch = real; window.__storageSaveGate = gate; window.__storageSaveStarted = false; window.fetch = (...args) => { if (!window.__storageSaveStarted && String(args[0]).includes("/api/chats/save")) { window.__storageSaveStarted = true; return gate.promise.then(() => real(...args)); } return real(...args); }; const c = __yanState().conversations.find(c => c.id === "stored-chat"); c.messages.push({ id: "u4", role: "user", content: "将与删除竞速", timestamp: new Date().toISOString() }); __yanSave(); return true; })()`
+);
+await waitFor(`window.__storageSaveStarted === true`, 5000);
 await evalJs(`document.querySelector('[data-conversation="stored-chat"] [data-history-action="menu"]').click(); true`);
 await sleep(150);
 await evalJs(`document.querySelector('.chip-pop [data-menu="delete"]').click(); true`);
 await sleep(150);
 await evalJs(`document.querySelector("#confirmOk").click(); true`);
+await sleep(150);
+await evalJs(`window.__storageSaveGate.release(); window.fetch = window.__storageRealFetch; true`);
 t = Date.now();
 while (Date.now() - t < 5000 && files().length) await sleep(150);
-check("deleting a conversation removes its file", files().length === 0, JSON.stringify(files()));
+check("deleting waits out an in-flight save and still removes the file", files().length === 0, JSON.stringify(files()));
 // ---- 导入旧版（v4）备份：workAuto 要立刻换成 commandPolicy、半成品的压缩分隔要去掉，不必等下次刷新；导入的也落盘
 const backup = {
   version: 4,
