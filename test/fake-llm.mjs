@@ -719,7 +719,6 @@ http
             ]);
         if (n === 0) return call("run_command", { command: "Set-Content review-ok.txt ok" });
         if (n === 1) return call("run_command", { command: "Set-ExecutionPolicy Unrestricted" });
-        if (n === 2) return call("inspect_computer", { sections: ["overview", "storage"], detail: "summary" });
         return sse(res, [
           delta({
             content: `POLICY-REVIEW done｜${turnToolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 100)).join(" ▸ ")}`

@@ -69,16 +69,18 @@ check(
   r.status === 200 && r.data.workdir.toLowerCase() === workdir.toLowerCase(),
   `${r.status} ${JSON.stringify(r.data).slice(0, 120)}`
 );
-r = await post("/api/work/inspect", { sections: ["overview"] });
-check(
-  "native computer inspection returns the requested read-only section",
-  r.status === 200 && r.data?.sections?.length === 1 && r.data.sections[0].name === "overview" && r.data.sections[0].ok,
-  `${r.status} ${JSON.stringify(r.data).slice(0, 180)}`
-);
 r = await post("/api/chats/load", { root: "relative-chats" });
-check("custom chats directory requires an absolute path", r.status === 500 && /完整的绝对路径/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+check(
+  "custom chats directory requires an absolute path",
+  r.status === 500 && /完整的绝对路径/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error}`
+);
 r = await post("/api/chats/load", { root: win ? "C:\\" : "/" });
-check("custom chats directory refuses a disk root", r.status === 500 && /整个磁盘/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+check(
+  "custom chats directory refuses a disk root",
+  r.status === 500 && /整个磁盘/.test(r.data?.error || ""),
+  `${r.status} ${r.data?.error}`
+);
 // 工作目录必须完整限定
 for (const bad of win ? ["\\yan-drive-relative", "/yan-drive-relative", "C:yan-relative", "foo", "./foo"] : ["foo", "./foo"]) {
   r = await post("/api/work/prepare", { workdir: bad });

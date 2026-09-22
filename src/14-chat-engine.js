@@ -786,17 +786,11 @@ function availableDocuments(conversation) {
     }
   return [...seen.values()];
 }
-// 通义千问（DashScope）接口默认打开模型自带联网；其他接口不发送该参数，除非用户手动开启
-/** @param {Profile} profile */
-function modelSearchEnabled(profile) {
-  if (typeof profile.enableSearch === "boolean") return profile.enableSearch;
-  return /dashscope\.aliyuncs\.com/i.test(String(profile.baseUrl || ""));
-}
 // sub：给帮手的一套——同样的工具，但不再差遣、也不请示用户
 /** @param {Conversation} conversation */
 function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   // 描述与参数说明在 prompts/tools.js；这里只决定哪些工具在此对话里可用
-  // 言（对谈）的文件工具只为产出；电脑检查是一件多路复用工具。带 brief 的用短说明，且不带 edit_file / search_files
+  // 言（对谈）的文件工具只为产出。带 brief 的用短说明，且不带 edit_file / search_files
   // lookup：旁注用的只查不改的一套——检索、翻网页、翻文档、翻记忆与旧谈；不动文件、不请示、不差遣、不记不忘
   const work = isWork(conversation) && !lookup;
   const define = (name, vars = {}) => {
@@ -813,8 +807,6 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   // 调接口能发 POST，不算纯查阅，旁注不给；算一段 JS 在浏览器里的隔离沙箱跑，不经桥接，谁都有
   if (apiBase !== null && !lookup) tools.push(define("http_request"));
   tools.push(define("run_js"));
-  // 固定只读探针不依赖工作目录；与通用 shell 是两条路，某条受限时仍能完成本机诊断
-  if (apiBase !== null && !lookup) tools.push(define("inspect_computer"));
   // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线。下载也落在同一处
   if (workRoot(conversation) && !lookup)
     tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));

@@ -5,7 +5,6 @@ const TOOL_LABELS = {
   fetch_page: "翻阅网页",
   read_document: "翻阅文档",
   run_command: "运行",
-  inspect_computer: "检查电脑",
   write_file: "写入",
   edit_file: "修改",
   read_file: "读取",

@@ -274,7 +274,6 @@ async function runTool(step, conversation, assistant, signal) {
     }
     if (step.name === "read_document") return await readDocumentTool(step, args, conversation);
     if (step.name === "run_js") return await runJsTool(step, args, signal);
-    if (step.name === "inspect_computer") return await inspectComputerTool(step, args, signal);
     if (step.name === "http_request") return await httpRequestTool(step, args, signal);
     if (step.name === "download_file") return await downloadFileTool(step, args, conversation, signal);
     if (step.name === "update_plan") return updatePlanTool(step, args);
@@ -291,24 +290,6 @@ async function runTool(step, conversation, assistant, signal) {
       display: friendlyError(String(error.message || error)).slice(0, 60)
     };
   }
-}
-async function inspectComputerTool(step, args, signal) {
-  const sections = Array.isArray(args.sections) ? args.sections : args.sections ? [args.sections] : [],
-    data = await bridge("/api/work/inspect", { sections, detail: args.detail === "full" ? "full" : "summary" }, signal),
-    rows = (data.sections || []).map(section =>
-      section.ok
-        ? `## ${section.title}\n${section.output || "（无结果）"}`
-        : `## ${section.title}\n检查失败：${section.error || "未知错误"}`
-    ),
-    ok = (data.sections || []).filter(section => section.ok).length;
-  step.title = sections.length ? (data.sections || []).map(section => section.title).join("、") : "常规体检";
-  step.output = rows.join("\n\n");
-  step.note = `${ok}/${(data.sections || []).length} 项 · ${(Number(data.durationMs || 0) / 1000).toFixed(1)}s`;
-  return {
-    ok: ok > 0,
-    content: step.output || "没有可用的检查结果",
-    display: step.note
-  };
 }
 // ---- run_js：在隔离沙箱里算一段 JS。沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；
 // 每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉；直连没桥接也能用
