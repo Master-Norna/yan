@@ -9,11 +9,11 @@
 | `side.js` | 旁注追问的聚焦句 | 仅旁注面板里的请求 |
 | `memory.js` | 录（记忆）：有多少条、两条分寸 | 记忆启用时；条目内容本身不进提示 |
 | `delegate.js` | 差遣（子 Agent）：帮手自己的系统提示；回报的格式 | 帮手的请求另拼一段 |
-| `tools.js` | 各工具的 description 与参数说明；带 `brief` 的在言里用 brief（短说明） | 随工具一并交给模型；言不带 edit_file / search_files / update_plan；旁注不带 http_request / inspect_computer；run_js 谁都有 |
+| `tools.js` | 各工具的 description 与参数说明；带 `brief` 的在言里用 brief（短说明） | 随工具一并交给模型；言不带 edit_file / search_files / update_plan；旁注不带 http_request；run_js 谁都有 |
 
-拼接顺序（系统提示）：用户在模型设置里填的 system prompt → `assistant.today` → `assistant.judgement` → `work.hint`（行）/ `work.archive`（言，桥接在线）→ `assistant.search`（桥接在线）→ `assistant.asking`（ask_user 可用）→ `assistant.delegating`（delegate 可用）→ `memory.hint`（记忆启用）→ `assistant.drawing` → `assistant.manner`（言）→ `side.*`（旁注）/ `delegate.system`（帮手）。
+拼接顺序（系统提示）：用户在模型设置里填的 system prompt → `assistant.today` → `assistant.judgement` → `work.hint`（行）/ `work.archive`（言，桥接在线）→ `assistant.search`（桥接在线）→ `assistant.asking`（ask_user 可用）→ `assistant.delegating`（行且 delegate 可用；只是一句提醒，何时差遣写在工具说明里）→ `memory.hint`（记忆启用）→ `assistant.drawing` → `assistant.manner`（言）→ `side.*`（旁注）/ `delegate.system`（帮手）。
 
-轻重之分：行（执事）的提示可以重一些——它在干活，规矩多是应该的；言（对谈）的每一问都背着系统提示与工具定义，多一句都是开销、也在稀释模型对问题本身的注意，所以言只留三件事：主动问（asking）、画在正文里（drawing）、克制的答法（manner），文件工具只带产出所需的四件并用短说明；电脑检查只加一件多路复用的 inspect_computer，不把十个检查项拆成十份 schema。改提示词后跑 `node test/prompt-size.cjs` 看言那一行有没有涨回去。
+轻重之分：行（执事）的提示可以重一些——它在干活，规矩多是应该的；言（对谈）的每一问都背着系统提示与工具定义，多一句都是开销、也在稀释模型对问题本身的注意，所以言只留三件事：主动问（asking）、画在正文里（drawing）、克制的答法（manner），文件工具只带产出所需的四件并用短说明。行文文白相杂、能省则省：今日能接工具的模型读「便」「亦」「者」不费力，省下的字都是每一问的开销，顺带让它答得也雅一点；但不用生僻的文言，读不懂或读歪了就得不偿失。改提示词后跑 `node test/prompt-size.cjs` 看言那一行有没有涨回去。
 
 分工原则：模型是把系统提示和工具定义一起读的，同一件事只说一遍——每件工具做什么、何时用、有什么不能猜的规矩，写在 `tools.js` 的 description 里；系统提示只放环境事实（日期、目录、平台、shell）、跨工具的做法（先读再改、改后验证、确认规则）和页面的呈现约定（画图）。改提示词后跑 `node test/prompt-size.cjs` 看各模式的总量（`--dump` 打印模型读到的全文），再跑 `npm test` 过一遍用例。
 

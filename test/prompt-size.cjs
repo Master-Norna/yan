@@ -23,12 +23,14 @@ const WORK = ["run_command", "write_file", "edit_file", "read_file", "list_files
   CHAT_FILES = ["run_command", "write_file", "read_file", "list_files"],
   MEM = ["remember", "forget", "recall", "search_conversations", "read_conversation"];
 function sys(names, { work = false, archive = false, sub = false } = {}) {
-  const lines = [prompt("assistant.today", { day: "九月十六日", iso: "2026-09-16" })];
+  // 与 src/14-chat-engine.js 的 assistantHint 同序；那边加了段落这里也要加，否则表上的数是假的
+  const lines = [prompt("assistant.today", { day: "九月十六日", iso: "2026-09-16" }), prompt("assistant.judgement")];
   const env = { platform: "Windows", shell: "PowerShell", shellNote: prompt("work.windowsShell") };
   if (work) lines.push(prompt("work.hint", { workdir: "E:\\项目\\demo", ...env }));
   else if (archive) lines.push(prompt("work.archive", { workdir: "C:\\Users\\我\\言\\卷宗", scratch: ".草稿/8f3a2c1b", ...env }));
   if (names.has("search_web")) lines.push(prompt("assistant.search"));
   if (names.has("ask_user")) lines.push(prompt("assistant.asking"));
+  if (names.has("delegate") && work) lines.push(prompt("assistant.delegating"));
   if (names.has("remember")) lines.push(prompt("memory.hint", { count: 12 }));
   lines.push(prompt("assistant.drawing"));
   if (!work) lines.push(prompt("assistant.manner"));
@@ -37,38 +39,15 @@ function sys(names, { work = false, archive = false, sub = false } = {}) {
 }
 const modes = {
   "言（桥接+记忆，工具落卷宗）": {
-    tools: [
-      "search_web",
-      "fetch_page",
-      "http_request",
-      "run_js",
-      "inspect_computer",
-      ...CHAT_FILES,
-      "download_file",
-      "ask_user",
-      ...MEM,
-      "delegate"
-    ],
+    tools: ["search_web", "fetch_page", "http_request", "run_js", ...CHAT_FILES, "download_file", "ask_user", ...MEM, "delegate"],
     archive: true
   },
   "行（桥接+记忆）": {
-    tools: [
-      "search_web",
-      "fetch_page",
-      "http_request",
-      "run_js",
-      "inspect_computer",
-      ...WORK,
-      "download_file",
-      "update_plan",
-      "ask_user",
-      ...MEM,
-      "delegate"
-    ],
+    tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", "update_plan", "ask_user", ...MEM, "delegate"],
     work: true
   },
   "行·帮手": {
-    tools: ["search_web", "fetch_page", "http_request", "run_js", "inspect_computer", ...WORK, "download_file", ...MEM],
+    tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", ...MEM],
     work: true,
     sub: true
   },

@@ -4,7 +4,7 @@
 // search_web / fetch_page / http_request 在桥接在线时提供；run_js 一律提供（在浏览器里的隔离沙箱跑，直连也有）；六件文件工具在桥接在线时提供（绑了目录落在工作目录，没绑落在卷宗），
 // download_file 随之；update_plan 只给行的主模型；delegate 在桥接在线且有别的工具可交给帮手时提供（帮手自己不再差遣）；
 // ask_user 对谈与执事都提供（帮手没有）；五件记忆工具在记忆启用时提供（帮手只有 recall / search_conversations / read_conversation，不能 remember / forget）；read_document 在对话带有可读文档时提供。
-// 言（对谈）的文件工具只为产出文件，不带 edit_file / search_files；电脑检查另走 inspect_computer。带 brief 的工具用短说明——对谈的每一问都背着这份定义，越轻越好。
+// 言（对谈）的文件工具只为产出文件，不带 edit_file / search_files。带 brief 的工具用短说明——对谈的每一问都背着这份定义，越轻越好；文白相杂、能省则省。
 // 参数在页面上按这里的 schema 核对：必填项缺了不执行；有副作用的工具（run_command / write_file / edit_file / remember / forget / delegate）参数 JSON 被截断时也不执行。
 (window.YAN_PROMPTS ||= {}).tools = {
   search_web: {
@@ -13,14 +13,14 @@
   },
 
   fetch_page: {
-    description: "读取网页正文（已去 HTML），通常用于查看某条搜索结果的详情。",
+    description: "读网页正文（已去 HTML），多用于看某条搜索结果的详情。",
     parameters: { type: "object", properties: { url: { type: "string", description: "完整的 http/https 地址" } }, required: ["url"] }
   },
 
   http_request: {
     description:
-      "向公网接口发一个 HTTP 请求（GET / POST / PUT / PATCH / DELETE / HEAD），返回状态码、响应头与正文（文本或 JSON，过长截断）。读普通网页用 fetch_page；这件用于调 API、看原始响应，也可以测本机 127.0.0.1 上的服务。局域网等内网地址不可访问。",
-    brief: "向公网接口发 HTTP 请求（调 API、看原始响应），返回状态码、响应头与正文；读网页用 fetch_page。",
+      "向接口发一个 HTTP 请求（GET / POST / PUT / PATCH / DELETE / HEAD），返回状态码、响应头与正文（过长截断）。读网页用 fetch_page；这件用于调 API、看原始响应，本机 127.0.0.1 亦可，别的内网地址不可。",
+    brief: "向接口发 HTTP 请求（调 API、看原始响应），返回状态码、响应头与正文；读网页用 fetch_page。",
     parameters: {
       type: "object",
       properties: {
@@ -36,7 +36,7 @@
   // 计算：在浏览器里的隔离沙箱（沙箱 iframe 里的 Worker）跑，没有网络、文件与页面；直连没桥接时也有
   run_js: {
     description:
-      "在隔离的 JavaScript 沙箱里跑一段代码做计算与数据处理：算术与统计、单位换算、日期与时间（new Date() 即当前时间）、正则、JSON 与文本变换、排序去重——凡是心算容易错的都交给它。只有标准 JS，没有网络、文件与页面。单个表达式直接写；多条语句用 return 交回结果，console.log 的输出也一并返回。",
+      "在隔离的 JS 沙箱里跑一段代码：算术统计、单位换算、日期（new Date() 即当前时刻）、正则、JSON 与文本变换、排序去重——心算易错的都交给它。只有标准 JS，无网络、文件与页面。单个表达式直接写；多条语句用 return 交回，console.log 亦一并返回。",
     brief: "在隔离的 JS 沙箱里跑一段代码（算术、日期、正则、JSON 变换），返回 return 的值与 console 输出；心算易错的交给它。",
     parameters: {
       type: "object",
@@ -50,7 +50,7 @@
 
   download_file: {
     description:
-      "把网上的文件下载到工作目录里（图片、PDF、压缩包、数据文件……最大 64 MB）。path 是相对工作目录的文件路径；给目录或省略则按网址里的文件名存。本机 127.0.0.1 可访问，局域网等内网地址不可。",
+      "把网上的文件下载到工作目录（图片、PDF、压缩包、数据文件……最大 64 MB）。path 相对工作目录；给目录或省略则按网址里的文件名存。本机 127.0.0.1 可，别的内网地址不可。",
     brief: "把网上的文件下载进卷宗（最大 64 MB）；path 省略则按网址里的文件名存。",
     parameters: {
       type: "object",
@@ -65,7 +65,7 @@
   // 计划：行里给用户看的任务清单，每次给完整清单；只给主模型
   update_plan: {
     description:
-      "任务不止三五步时，先把计划列给用户看，做的过程中随时更新各项状态；每次给出完整的清单（不是增量），项目不宜多于十条。状态：pending（待做）、doing（正在做，同时至多一项）、done（做完）、skipped（不做了，text 里说明为何）。一两步的小事不必用。",
+      "任务不止三五步时先把计划列给用户看，过程中随时更新；每次给完整清单（非增量），不多于十条。状态：pending / doing（同时至多一项）/ done / skipped（text 里说明为何）。一两步的小事不必用。",
     parameters: {
       type: "object",
       properties: {
@@ -92,28 +92,9 @@
       type: "object",
       properties: {
         command: { type: "string", description: "要执行的指令" },
-        timeout: { type: "number", description: "超时秒数，默认 120，最大 600；耗时长的指令记得给" }
+        timeout: { type: "number", description: "超时秒数，默认 120，不设上限；耗时长的指令记得给足" }
       },
       required: ["command"]
-    }
-  },
-
-  inspect_computer: {
-    description:
-      "用固定的只读探针检查本机，不接收脚本、不修改状态。各检查项独立，某项失败仍返回其余结果；体检先用它起底，要更深的再用 run_command 直查。",
-    parameters: {
-      type: "object",
-      properties: {
-        sections: {
-          type: "array",
-          description: "要检查的项目；省略时查概况、资源、磁盘、网络、开发环境",
-          items: {
-            type: "string",
-            enum: ["overview", "resources", "storage", "network", "services", "startup", "software", "development", "security", "events"]
-          }
-        },
-        detail: { type: "string", enum: ["summary", "full"], description: "摘要或较完整结果，默认 summary" }
-      }
     }
   },
 
@@ -129,7 +110,7 @@
 
   edit_file: {
     description:
-      "把文件中的一段文本精确替换：old 须与文件逐字一致（含缩进）且只出现一次，从 read_file 的结果复制（去掉行号）。本段对话里没读过的文件不能编辑。",
+      "精确替换文件中的一段：old 须与文件逐字一致（含缩进）且只出现一次，从 read_file 的结果复制（去掉行号）。本段对话里没读过的文件不能编辑。",
     parameters: {
       type: "object",
       properties: {
@@ -186,9 +167,9 @@
 
   delegate: {
     description:
-      "差遣一名帮手独立完成一件自成一段的子任务，做完回报给你。该用就用：通读一批文件并归纳、多路检索比对、在某个不熟的模块里排查一个问题、按已定方案实现互不相干的一部分、改完后独立验证复查——凡是量大、独立、或会读入大量与主线无关内容的活，先想差遣再想自己做；一两步的事直接做。帮手有与你相同的工具与工作目录，但看不到这段对话：task 里要写全背景、目标、边界、完成标准与要回报的内容。同一轮里可差遣多名帮手并行，分派时让他们改的文件互不重叠。",
+      "差遣一名帮手独立完成一件自成一段的子任务，做完回报。该用便用：通读一批文件并归纳、多路检索比对、在不熟的模块里排查、按已定方案实现互不相干的一部分、改后独立复查——量大、独立、或会读进大量与主线无关内容的活，先想差遣；一两步的事直接做。帮手有与你相同的工具与目录，但看不到这段对话：task 里写全背景、目标、边界、完成标准与回报内容。同一轮可差遣多名并行，所改文件互不重叠。",
     brief:
-      "把一件自成一段的大活（通读一批资料并归纳、多路检索比对、生成一份复杂文件）交给帮手另起一段对话独立做完后回报。帮手工具与你相同但看不到这段对话：task 里写全背景、目标、边界与要回报的内容。一两步的事直接做。",
+      "把一件自成一段的大活（通读一批资料并归纳、多路检索比对、生成一份复杂文件）交给帮手另起一段对话独立做完后回报。帮手工具与你相同但看不到这段对话：task 里写全背景、目标、边界与回报内容。一两步的事直接做。",
     parameters: {
       type: "object",
       properties: {
@@ -202,7 +183,7 @@
   // 请示：下一步取决于用户的选择时弹一张小表单；对谈与执事都提供，在浏览器里完成
   ask_user: {
     description:
-      "下一步取决于用户的选择时（几种做法各有取舍、缺信息、需求有歧义）弹一张小表单请用户选，比在正文里连问省事。1–8 题（通常 1–3），每题给 2–4 个简短选项，可并存的选择给 multi: true；用户也可自填。得到答复后直接继续，不复述选择。",
+      "下一步取决于用户选择时（做法各有取舍、缺信息、需求有歧义）弹一张小表单请用户选，比正文里连问省事。1–8 题（常 1–3），每题 2–4 个短选项，可并存者 multi: true；用户亦可自填。得到答复后直接继续，不复述。",
     parameters: {
       type: "object",
       properties: {
@@ -231,7 +212,7 @@
   // 录（记忆）：五件都在浏览器里完成，不经桥接；记忆启用时提供
   remember: {
     description:
-      "记一句长期有效的信息进跨对话的记忆（偏好、身份、约定、日后还会用到的结论）：一句话、脱离本次对话也能看懂；临时细节不记；已有相近条目给 replaces 合并。",
+      "记一句长期有效的信息进跨对话的记忆（偏好、身份、约定、日后还会用到的结论）：一句话、脱离本次对话也看得懂；临时细节不记；已有相近条目给 replaces 合并。",
     parameters: {
       type: "object",
       properties: {
@@ -253,7 +234,7 @@
   },
 
   search_conversations: {
-    description: "按关键词在旧对话里查找（标题与正文，须同时命中），返回对话 id、标题、日期与命中片段；追溯记忆里没有的细节时用。",
+    description: "按关键词查旧对话（标题与正文，须同时命中），返回对话 id、标题、日期与命中片段；追溯记忆里没有的细节时用。",
     parameters: {
       type: "object",
       properties: {
@@ -278,7 +259,7 @@
   },
 
   read_document: {
-    description: "读对话附件或卷宗里的文档全文或片段。可读文档：{{docs}}。长文档按页码或关键词只取片段。",
+    description: "读对话附件或卷宗里的文档，全文或片段。可读文档：{{docs}}。长文档按页码或关键词只取片段。",
     parameters: {
       type: "object",
       properties: {

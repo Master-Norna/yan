@@ -72,7 +72,7 @@ const anthropicMessages = (payload, res) => {
   return anthropicSse(res, [
     ["message_start", { message: { id: "msg_2", model: payload.model, usage: { input_tokens: 30 } } }],
     ...text(
-      `ANTHROPIC|sys:${String(payload.system || "").includes("今天") ? "yes" : "no"}|think:${thought?.signature === "sig-1" ? "yes" : "no"}|tools:${(payload.tools || []).length}|schema:${payload.tools?.[0]?.input_schema ? "yes" : "no"}|result:${String(results.at(-1).content).replace(/\s+/g, " ").slice(0, 30)}`
+      `ANTHROPIC|sys:${String(payload.system || "").includes("今日") ? "yes" : "no"}|think:${thought?.signature === "sig-1" ? "yes" : "no"}|tools:${(payload.tools || []).length}|schema:${payload.tools?.[0]?.input_schema ? "yes" : "no"}|result:${String(results.at(-1).content).replace(/\s+/g, " ").slice(0, 30)}`
     ),
     ["message_delta", { delta: { stop_reason: "end_turn" }, usage: { output_tokens: 11 } }],
     ["message_stop", {}]
@@ -117,7 +117,7 @@ http
       }
       // 带附件的一问是分段内容：正文在第一段
       const lastText = Array.isArray(lastUser) ? String(lastUser.find(part => part.type === "text")?.text || "") : lastUser;
-      if (typeof lastUser === "string" && lastUser.startsWith("请为下面这段对话拟")) {
+      if (typeof lastUser === "string" && lastUser.startsWith("为下面这段对话拟")) {
         // TITLEFAIL：头一次拟题时装作网络出错，页面不该就此把这段对话标成「已拟题」
         if (lastUser.includes("TITLEFAIL") && !titleFailed) {
           titleFailed = true;
@@ -241,7 +241,7 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
-      if (typeof lastUser === "string" && lastUser.startsWith("请把下面这段对话压成一份摘要"))
+      if (typeof lastUser === "string" && lastUser.startsWith("把下面这段对话压成一份摘要"))
         return sse(res, [
           delta({ content: `- 用户在测试压缩，此前 ${(lastUser.match(/\n用户：/g) || []).length} 问\n- 结论：术语 X 需留意` }),
           delta({}, { usage: { total_tokens: 12 } })
@@ -419,7 +419,7 @@ http
         if (n === 1) return sse(res, call("edit_file", { path: "src/a.js", old: "return 1;", new: "return 2;" }));
         return sse(res, [
           delta({
-            content: `回报：已把 return 1 改为 return 2。｜sys:${sys.includes("被差遣") ? "yes" : "no"}|delegate:${names.includes("delegate") ? "yes" : "no"}|ask:${names.includes("ask_user") ? "yes" : "no"}|memw:${names.filter(x => ["remember", "forget"].includes(x)).length}|memr:${names.filter(x => ["recall", "search_conversations"].includes(x)).length}|n:${msgs.length}`
+            content: `回报：已把 return 1 改为 return 2。｜sys:${sys.includes("子任务的帮手") ? "yes" : "no"}|delegate:${names.includes("delegate") ? "yes" : "no"}|ask:${names.includes("ask_user") ? "yes" : "no"}|memw:${names.filter(x => ["remember", "forget"].includes(x)).length}|memr:${names.filter(x => ["recall", "search_conversations"].includes(x)).length}|n:${msgs.length}`
           }),
           delta({}, { usage: { total_tokens: 7 } })
         ]);
