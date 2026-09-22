@@ -148,8 +148,7 @@ function ensureLib(name) {
   return vendorLoads.get(name);
 }
 // 弹层与提示的收场：先淡出再 hidden，别硬切
-const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)"),
-  touchInput = matchMedia("(hover: none) and (pointer: coarse)");
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const inkMotionOff = () => document.documentElement.dataset.inkMotion === "off";
 function showNow(el) {
   clearTimeout(el._leaveTimer);
