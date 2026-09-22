@@ -4560,17 +4560,17 @@ textarea::placeholder,
   width: 72px;
   text-align: right;
 }
-.setting-archive {
+.setting-directory {
   flex: 1;
   max-width: 420px;
 }
-.setting-archive .field {
+.setting-directory .field {
   flex: 1;
   min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
 }
-.setting-archive .outline-btn {
+.setting-directory .outline-btn {
   flex: none;
   white-space: nowrap;
 }

@@ -135,7 +135,7 @@ function normalizeMemory(memory) {
 // ---------- 记录怎么存 ----------
 // 记录分两半。「配置」（设置、模型、浏览器内卷宗、记忆、草稿）小而常改，整份存在 localStorage，桥接在线时另镜像一份到对话目录
 // （设置.json，不含 API Key），换浏览器、清了站点数据后开页可从它恢复。
-// 「对话」各自一份：桥接在线时落在本机的对话目录（bootstrap.work.chats，一段一个 JSON 文件，像卷宗一样是个普通目录，复制即备份）；
+// 「对话」各自一份：桥接在线时落在本机的对话目录（设置里改过就用改过的，否则 bootstrap.work.chats；一段一个 JSON 文件，复制即备份）；
 // 没桥接时存在 IndexedDB 的 conversations 表，桥接接上后推到目录里去、表里的清掉——目录是正本，表只是没桥接时的暂存。
 // 保存只写改过的那几段（当前这段、正在生成的、明确标过脏的，且内容的哈希与上次写的不同）；另有一趟低频的全量巡检兜底，
 // 谁改了哪段没标到也逃不过。旧版把整份记录（含所有对话）塞在 localStorage / IndexedDB 的一条记录里，启动时拆开迁走。
@@ -244,7 +244,7 @@ function writeMetaMirror() {
   clearTimeout(metaMirrorTimer);
   metaMirrorTimer = null;
   if (!chatsOnline()) return;
-  const body = JSON.stringify({ meta: metaForDisk() });
+  const body = JSON.stringify({ root: chatsDir(), meta: metaForDisk() });
   // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再镜像）
   fetch(`${apiBase}/api/chats/meta`, {
     method: "POST",
@@ -256,10 +256,14 @@ function writeMetaMirror() {
 }
 // 对话目录可用：桥接在线、桥接报了目录、上次读它没出错
 function chatsOnline() {
-  return apiBase !== null && !!bootstrap.work?.chats && !chatsBroken;
+  return apiBase !== null && !!chatsDir() && !chatsBroken;
 }
 function chatsDir() {
-  return chatsOnline() ? bootstrap.work.chats : "";
+  if (apiBase === null) return "";
+  const custom = (store.settings.chatsDir || "").trim();
+  // 页面脚本会随刷新热更新，桥接模块却要重启才会更新。旧桥接不认识 root 时先继续用默认目录，
+  // 但保留用户选过的路径；重启成支持 customChats 的桥接后自动切过去同步，不能静默假装已经切换。
+  return (custom && bootstrap.work?.customChats === true ? custom : "") || bootstrap.work?.chats || "";
 }
 // 标记这段对话有改动（改名、置顶、后台一答收尾这些不在「当前对话」上的改动要亲手标；当前这段与正在生成的自动算在内）
 function markDirty(id) {
@@ -323,7 +327,11 @@ async function writeConversation(id) {
       persisted = false;
     if (!spilled)
       try {
-        await bridge("/api/chats/save", { savedAt: pending.savedAt, conversation: JSON.parse(pending.json) }, AbortSignal.timeout(60000));
+        await bridge(
+          "/api/chats/save",
+          { root: chatsDir(), savedAt: pending.savedAt, conversation: JSON.parse(pending.json) },
+          AbortSignal.timeout(60000)
+        );
         chatSaveWarned = false;
         if (!deletedChatIds.has(id)) {
           persisted = true;
@@ -371,7 +379,7 @@ async function deleteConversationStorage(id) {
     await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
     if (!chatsOnline()) return;
     try {
-      await bridge("/api/chats/delete", { id }, AbortSignal.timeout(20000));
+      await bridge("/api/chats/delete", { root: chatsDir(), id }, AbortSignal.timeout(20000));
       pendingChatDeletes.delete(id);
       writeMeta();
     } catch {}
@@ -497,17 +505,18 @@ async function hydrateStore() {
 // 目录里没有的推过去，目录里更新的换进来（正在生成的、改了还没存的不换），两边一样的把表里的暂存清掉；先前没删成的补删；
 // 全新的浏览器（localStorage 空着）从设置镜像里把配置捡回来
 async function syncChatsWithDisk() {
-  if (apiBase === null || !bootstrap.work?.chats || chatsSyncing) return;
+  if (apiBase === null || !chatsDir() || chatsSyncing) return;
   chatsSyncing = true;
   try {
-    const data = await bridge("/api/chats/load", {}, AbortSignal.timeout(120000));
+    const selectedDir = (store.settings.chatsDir || "").trim(),
+      data = await bridge("/api/chats/load", { root: chatsDir() }, AbortSignal.timeout(120000));
     chatsBroken = false;
-    if (data.dir) bootstrap.work.chats = data.dir;
+    if (selectedDir && data.dir && bootstrap.work?.customChats === true) store.settings.chatsDir = data.dir;
     for (const id of [...pendingChatDeletes]) {
       // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
       if (deletedChatIds.has(id)) continue;
       try {
-        await bridge("/api/chats/delete", { id }, AbortSignal.timeout(20000));
+        await bridge("/api/chats/delete", { root: chatsDir(), id }, AbortSignal.timeout(20000));
         pendingChatDeletes.delete(id);
       } catch {}
     }
@@ -556,6 +565,9 @@ async function syncChatsWithDisk() {
       freshBrowser = false;
       const meta = normalizeStoreData({ ...data.meta, conversations: [] });
       store.settings = { ...meta.settings, activeProfileId: store.settings.activeProfileId || meta.settings.activeProfileId };
+      // 设置镜像可能连同整个目录被复制到了新位置；用户这次明确选的目录才是准的，不能被镜像里的旧绝对路径带回去。
+      if (selectedDir) store.settings.chatsDir = bootstrap.work?.customChats === true ? data.dir || selectedDir : selectedDir;
+      else delete store.settings.chatsDir;
       store.profiles = meta.profiles;
       store.library = meta.library;
       store.memory = meta.memory;

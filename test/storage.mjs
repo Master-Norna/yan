@@ -3,19 +3,22 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const CHATS = `${TMP}/chats`;
+const CUSTOM_CHATS = `${TMP}/chats-custom`;
 const { send, evalJs, waitFor, close } = await connect();
-const files = () => (existsSync(CHATS) ? readdirSync(CHATS).filter(name => name.endsWith(".json") && name !== "设置.json") : []);
+const filesAt = dir => (existsSync(dir) ? readdirSync(dir).filter(name => name.endsWith(".json") && name !== "设置.json") : []);
+const files = () => filesAt(CHATS);
 const readFile = name => JSON.parse(readFileSync(`${CHATS}/${name}`, "utf8"));
 const readRecords = `new Promise((resolve, reject) => { const q = indexedDB.open("yan-chat-state-v1", 2); q.onerror = () => reject(q.error); q.onsuccess = () => { const r = q.result.transaction("conversations", "readonly").objectStore("conversations").getAll(); r.onerror = () => reject(r.error); r.onsuccess = () => { q.result.close(); resolve(r.result); }; }; })`;
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 // 上一个用例的页面离开时还会补写一两笔（对话、设置镜像），到这里它已经卸载了：把目录清干净再开始
-for (let i = 0; i < 20 && existsSync(CHATS); i++) {
-  try {
-    rmSync(CHATS, { recursive: true, force: true });
-  } catch {}
-  if (existsSync(CHATS)) await sleep(150);
-}
+for (const dir of [CHATS, CUSTOM_CHATS])
+  for (let i = 0; i < 20 && existsSync(dir); i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    if (existsSync(dir)) await sleep(150);
+  }
 const seed = {
   version: 5,
   settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false },
@@ -69,6 +72,35 @@ check(
   mirrored?.settings?.name === "测" && mirrored?.profiles?.[0]?.model === "fake" && !("apiKey" in (mirrored?.profiles?.[0] || {})) && mirrored?.memory?.items?.[0]?.text === "用户爱喝茶",
   JSON.stringify(mirrored && Object.keys(mirrored))
 );
+// ---- 设置里的对话目录：当前对话复制到新目录；切回默认后仍能继续用，旧目录不被删除
+const customNative = CUSTOM_CHATS.split("/").join(process.platform === "win32" ? "\\" : "/");
+await evalJs(`document.querySelector("#openSettings").click(); true`);
+await sleep(200);
+await evalJs(
+  `(i => { i.value = ${JSON.stringify(customNative)}; i.dispatchEvent(new Event("input")); })(document.querySelector("#settingChats")); true`
+);
+t = Date.now();
+while (
+  Date.now() - t < 10000 &&
+  (!filesAt(CUSTOM_CHATS).some(name => name.startsWith("数据库里的长对话·")) || !existsSync(`${CUSTOM_CHATS}/设置.json`))
+)
+  await sleep(150);
+check(
+  "changing the chats directory copies current conversations there",
+  filesAt(CUSTOM_CHATS).some(name => name.startsWith("数据库里的长对话·")) &&
+    (await evalJs(`__yanState().settings.chatsDir`)).toLowerCase() === customNative.toLowerCase(),
+  JSON.stringify(filesAt(CUSTOM_CHATS))
+);
+const customMirror = JSON.parse(readFileSync(`${CUSTOM_CHATS}/设置.json`, "utf8"));
+check(
+  "the custom chats directory receives the settings mirror without API keys",
+  customMirror.settings?.chatsDir?.toLowerCase() === customNative.toLowerCase() && !customMirror.profiles?.some(profile => "apiKey" in profile)
+);
+await evalJs(`(i => { i.value = ""; i.dispatchEvent(new Event("input")); })(document.querySelector("#settingChats")); true`);
+await waitFor(`!__yanState().settings.chatsDir`, 10000);
+check("clearing the custom chats directory restores the default without deleting the old copy", existsSync(CUSTOM_CHATS));
+await evalJs(`document.querySelector("#closeSettings").click(); true`);
+await sleep(200);
 // ---- 改名：文件跟着改名；对话内容变了：落盘的时间戳往前走
 const before = readFile(files()[0]).savedAt;
 await evalJs(`document.querySelector('[data-conversation="stored-chat"] .history-open').click(); true`);

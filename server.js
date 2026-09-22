@@ -624,6 +624,7 @@ function handleBootstrap(req, res) {
     home: WORK.WORK_HOME,
     archive: WORK.ARCHIVE_HOME,
     chats: CHATS.CHATS_HOME,
+    customChats: true,
     scratch: WORK.SCRATCH_DIR,
     platform: process.platform,
     shell: WORK.WORK_SHELL
@@ -757,6 +758,36 @@ const BUNDLES = {
   "/support.js": { build: bundler.bundleScript, type: "application/javascript; charset=utf-8" },
   "/app.css": { build: bundler.bundleStyles, type: "text/css; charset=utf-8" }
 };
+// 静态服务只开放页面运行真正需要的文件。仓库根目录里还有桥接源码、测试、.git 与用户可能临时放入的配置，
+// 不能因为它们恰好位于 ROOT 下就一并交给浏览器；vendor/ 是随页面分发的纯前端资源，提示词则逐个列出。
+const PUBLIC_STATIC_FILES = new Set([
+  "index.html",
+  "theme-boot.js",
+  "preview.html",
+  "preview-runtime.js",
+  "prompts/assistant.js",
+  "prompts/work.js",
+  "prompts/side.js",
+  "prompts/memory.js",
+  "prompts/delegate.js",
+  "prompts/tools.js"
+]);
+const REAL_ROOT = fs.realpathSync(ROOT);
+function publicStaticTarget(requested) {
+  // URL 路径里的反斜杠在 Windows 上也是目录分隔符；先统一再规范化，vendor/../server.js 不能借前缀混进来。
+  const webPath = requested.replace(/\\/g, "/"),
+    normalized = path.posix.normalize(webPath);
+  if (normalized !== webPath || normalized.startsWith("../") || path.posix.isAbsolute(normalized)) return null;
+  if (!PUBLIC_STATIC_FILES.has(normalized) && !normalized.startsWith("vendor/")) return null;
+  const candidate = path.resolve(ROOT, ...normalized.split("/"));
+  if (!fs.existsSync(candidate)) return null;
+  // 白名单目录中若出现指向仓库外的符号链接，也不能跟出去。
+  const file = fs.realpathSync(candidate),
+    relative = path.relative(REAL_ROOT, file);
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  const stat = fs.statSync(file);
+  return stat.isFile() ? { file, stat } : null;
+}
 function serveBundle(req, res, urlPath) {
   const entry = BUNDLES[urlPath];
   if (!entry) return false;
@@ -778,13 +809,13 @@ function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, `http://${HOST}`).pathname);
   if (serveBundle(req, res, urlPath)) return;
   const requested = urlPath === "/" ? "index.html" : urlPath.slice(1);
-  const file = path.resolve(ROOT, requested);
-  const stat = file.startsWith(ROOT + path.sep) && fs.existsSync(file) ? fs.statSync(file) : null;
-  if (!stat || stat.isDirectory()) {
+  const target = publicStaticTarget(requested);
+  if (!target) {
     if (urlPath.startsWith("/api/")) return sendJson(res, 404, { error: "未找到接口" });
     res.writeHead(404, { "Content-Type": MIME[".html"], "Cache-Control": "no-store" });
     return res.end(NOT_FOUND_PAGE);
   }
+  const { file, stat } = target;
   // 带上 ETag / Last-Modified：no-cache 只要求重新验证，有了校验值浏览器才会真正拿到改动后的文件，而不是沿用旧缓存
   const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
   const headers = {

@@ -35,6 +35,25 @@ for (let i = 0; i < 40; i++) {
 }
 const win = process.platform === "win32",
   workdir = WORK.split("/").join(win ? "\\" : "/");
+// 静态服务只给页面资源：仓库源码、测试与 .git 即使同在服务根目录，也不能被其他本地网页读走。
+for (const publicPath of ["/", "/support.js", "/app.css", "/theme-boot.js", "/preview.html", "/prompts/assistant.js", "/vendor/marked.umd.js"]) {
+  const response = await fetch(BASE + publicPath, { headers: { Origin: "http://127.0.0.1:9999" } });
+  check(`public static asset ${publicPath} is served`, response.status === 200, String(response.status));
+  await response.body?.cancel();
+}
+for (const privatePath of [
+  "/server.js",
+  "/server/chats.js",
+  "/test/bridge-security.mjs",
+  "/prompts/README.md",
+  "/.git/config",
+  "/package.json",
+  "/vendor%5c..%5cserver.js"
+]) {
+  const response = await fetch(BASE + privatePath, { headers: { Origin: "http://127.0.0.1:9999" } });
+  check(`private repository path ${privatePath} is hidden`, response.status === 404, String(response.status));
+  await response.body?.cancel();
+}
 // Origin 门禁
 let r = await post("/api/work/run", { workdir, command: "echo hi" }, { Origin: "null" });
 check("Origin: null cannot reach the work API", r.status === 403, `${r.status} ${JSON.stringify(r.data)}`);
@@ -56,6 +75,10 @@ check(
   r.status === 200 && r.data?.sections?.length === 1 && r.data.sections[0].name === "overview" && r.data.sections[0].ok,
   `${r.status} ${JSON.stringify(r.data).slice(0, 180)}`
 );
+r = await post("/api/chats/load", { root: "relative-chats" });
+check("custom chats directory requires an absolute path", r.status === 500 && /完整的绝对路径/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
+r = await post("/api/chats/load", { root: win ? "C:\\" : "/" });
+check("custom chats directory refuses a disk root", r.status === 500 && /整个磁盘/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
 // 工作目录必须完整限定
 for (const bad of win ? ["\\yan-drive-relative", "/yan-drive-relative", "C:yan-relative", "foo", "./foo"] : ["foo", "./foo"]) {
   r = await post("/api/work/prepare", { workdir: bad });
@@ -179,7 +202,7 @@ check(
 b = await (await fetch(BASE + "/api/bootstrap", { headers: { Origin: `http://127.0.0.1:${PORT}` } })).json();
 check(
   "bootstrap from the bridge's own page carries the session token",
-  typeof b.token === "string" && b.token.length >= 32,
+  typeof b.token === "string" && b.token.length >= 32 && b.work?.customChats === true,
   String(b.token).slice(0, 8)
 );
 r = await post("/api/chat", { profile: { source: "server" }, messages: [{ role: "user", content: "hi" }] });

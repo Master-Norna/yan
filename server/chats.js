@@ -11,13 +11,23 @@ const crypto = require("node:crypto");
 
 module.exports = function createChats({ sendJson, readJson }) {
   const CHATS_HOME = process.env.YAN_CHATS
-    ? path.resolve(String(process.env.YAN_CHATS).replace(/^~(?=$|[\/])/, os.homedir()))
+    ? path.resolve(String(process.env.YAN_CHATS).replace(/^~(?=$|[\\/])/, os.homedir()))
     : path.join(os.homedir(), "言", "对话");
   const META_FILE = "设置.json",
     FILE_LIMIT = 256 * 1024 * 1024;
-  function ensureDir() {
-    fs.mkdirSync(CHATS_HOME, { recursive: true });
-    return CHATS_HOME;
+  // 请求可像卷宗一样带来自定义目录；留空仍用 YAN_CHATS / ~/言/对话 这个启动默认值。
+  function ensureDir(raw) {
+    const value = String(raw || "").trim();
+    let home = CHATS_HOME;
+    if (value) {
+      const expanded = value.replace(/^~(?=$|[\\/])/, os.homedir());
+      if (!path.isAbsolute(expanded)) throw Error("对话目录需填写完整的绝对路径");
+      home = path.resolve(expanded);
+      if (home.toLowerCase() === path.parse(home).root.toLowerCase()) throw Error("不能把整个磁盘当作对话目录");
+    }
+    fs.mkdirSync(home, { recursive: true });
+    if (!fs.statSync(home).isDirectory()) throw Error(`路径已被文件占用，不是目录：${home}`);
+    return home;
   }
   function describe(error, target = "") {
     const code = error?.code,
@@ -43,9 +53,9 @@ module.exports = function createChats({ sendJson, readJson }) {
     return `${safeTitle(title)}·${codeOf(id)}.json`;
   }
   // 目录里这段对话现有的文件（正常只有一个；标题改过后旧名留着的也一并算上）
-  function filesFor(id) {
+  function filesFor(home, id) {
     const suffix = `·${codeOf(id)}.json`;
-    return fs.readdirSync(CHATS_HOME).filter(name => name.endsWith(suffix));
+    return fs.readdirSync(home).filter(name => name.endsWith(suffix));
   }
   // 先写临时文件再改名，写到一半断电也不会留下半个文件顶替原件
   function writeAtomic(file, text) {
@@ -53,8 +63,8 @@ module.exports = function createChats({ sendJson, readJson }) {
     fs.writeFileSync(temp, text, "utf8");
     fs.renameSync(temp, file);
   }
-  function readConversationFile(name) {
-    const file = path.join(CHATS_HOME, name);
+  function readConversationFile(home, name) {
+    const file = path.join(home, name);
     if (fs.statSync(file).size > FILE_LIMIT) throw Error("文件过大");
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
     const conversation = data?.conversation;
@@ -63,22 +73,24 @@ module.exports = function createChats({ sendJson, readJson }) {
   }
   // 整个目录读回来：所有对话 + 设置镜像。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
   async function handleLoad(req, res) {
+    let home = CHATS_HOME;
     try {
-      ensureDir();
+      const body = await readJson(req);
+      home = ensureDir(body.root);
       const items = [],
         seen = new Map();
       let skipped = 0;
-      for (const name of fs.readdirSync(CHATS_HOME)) {
+      for (const name of fs.readdirSync(home)) {
         if (!name.endsWith(".json") || name === META_FILE) continue;
         try {
-          const item = readConversationFile(name);
+          const item = readConversationFile(home, name);
           // 同一段对话若留了两个文件（改名时旧的没删成），以较新的为准，旧的顺手清掉
           const prior = seen.get(item.id);
           if (prior && prior.savedAt >= item.savedAt) {
-            fs.rmSync(path.join(CHATS_HOME, name), { force: true });
+            fs.rmSync(path.join(home, name), { force: true });
             continue;
           }
-          if (prior) fs.rmSync(path.join(CHATS_HOME, prior.file), { force: true });
+          if (prior) fs.rmSync(path.join(home, prior.file), { force: true });
           seen.set(item.id, item);
         } catch {
           skipped += 1;
@@ -87,11 +99,11 @@ module.exports = function createChats({ sendJson, readJson }) {
       for (const item of seen.values()) items.push(item);
       let meta = null;
       try {
-        meta = JSON.parse(fs.readFileSync(path.join(CHATS_HOME, META_FILE), "utf8"));
+        meta = JSON.parse(fs.readFileSync(path.join(home, META_FILE), "utf8"));
       } catch {}
-      sendJson(res, 200, { dir: CHATS_HOME, items, meta: meta && typeof meta === "object" ? meta : null, skipped });
+      sendJson(res, 200, { dir: home, items, meta: meta && typeof meta === "object" ? meta : null, skipped });
     } catch (error) {
-      sendJson(res, 500, { error: `对话目录不可用：${describe(error, CHATS_HOME)}` });
+      sendJson(res, 500, { error: `对话目录不可用：${describe(error, home)}` });
     }
   }
   async function handleSave(req, res) {
@@ -99,13 +111,13 @@ module.exports = function createChats({ sendJson, readJson }) {
       const body = await readJson(req),
         conversation = body.conversation;
       if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("缺少对话内容");
-      ensureDir();
+      const home = ensureDir(body.root);
       const id = String(conversation.id),
         savedAt = Number(body.savedAt) || Date.now(),
         name = fileNameFor(id, conversation.title);
-      writeAtomic(path.join(CHATS_HOME, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
+      writeAtomic(path.join(home, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
       // 标题改过：旧名的文件不留
-      for (const stale of filesFor(id)) if (stale !== name) fs.rmSync(path.join(CHATS_HOME, stale), { force: true });
+      for (const stale of filesFor(home, id)) if (stale !== name) fs.rmSync(path.join(home, stale), { force: true });
       sendJson(res, 200, { file: name, savedAt });
     } catch (error) {
       sendJson(res, 400, { error: `对话未能落盘：${describe(error)}` });
@@ -116,10 +128,10 @@ module.exports = function createChats({ sendJson, readJson }) {
       const body = await readJson(req),
         id = String(body.id || "");
       if (!id) throw Error("缺少对话 id");
-      ensureDir();
+      const home = ensureDir(body.root);
       let removed = 0;
-      for (const name of filesFor(id)) {
-        fs.rmSync(path.join(CHATS_HOME, name), { force: true });
+      for (const name of filesFor(home, id)) {
+        fs.rmSync(path.join(home, name), { force: true });
         removed += 1;
       }
       sendJson(res, 200, { removed });
@@ -131,8 +143,8 @@ module.exports = function createChats({ sendJson, readJson }) {
     try {
       const body = await readJson(req);
       if (!body.meta || typeof body.meta !== "object") throw Error("缺少设置内容");
-      ensureDir();
-      writeAtomic(path.join(CHATS_HOME, META_FILE), JSON.stringify({ 言: "设置", version: 1, savedAt: Date.now(), ...body.meta }));
+      const home = ensureDir(body.root);
+      writeAtomic(path.join(home, META_FILE), JSON.stringify({ 言: "设置", version: 1, savedAt: Date.now(), ...body.meta }));
       sendJson(res, 200, { ok: true });
     } catch (error) {
       sendJson(res, 400, { error: `设置未能落盘：${describe(error)}` });
