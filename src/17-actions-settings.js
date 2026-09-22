@@ -45,7 +45,6 @@ async function handleMessageAction(event) {
       await ensureLocalBridge();
       profile = activeProfile() || profile;
     }
-    if (parseTokenLimit(profile.quota) === null) return toast("请先为该模型设置用量上限");
     if (quotaBlocked(profile)) return toast("余墨已尽，请调高上限或更换模型");
     if (!(await ensureWorkReady(c))) return;
     message.status = "streaming";
@@ -61,7 +60,6 @@ async function handleMessageAction(event) {
   if (userIndex < 0) return;
   const profile = activeProfile();
   if (!profile) return openSettings("models");
-  if (parseTokenLimit(profile.quota) === null) return toast("请先为该模型设置用量上限");
   if (quotaBlocked(profile)) return toast("余墨已尽，请调高上限或更换模型");
   if (!(await ensureWorkReady(c))) return;
   forkTail(c, userIndex + 1);
@@ -78,7 +76,6 @@ async function saveEditedMessage(conversation, index, value) {
   if (!text) return toast("尚未落笔");
   const profile = activeProfile();
   if (!profile) return openSettings("models");
-  if (parseTokenLimit(profile.quota) === null) return toast("请先为该模型设置用量上限");
   if (quotaBlocked(profile)) return toast("余墨已尽，请调高上限或更换模型");
   const old = conversation.messages[index];
   if (text === old.content) {

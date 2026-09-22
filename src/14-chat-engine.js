@@ -137,12 +137,6 @@ async function sendOrStop() {
     await ensureLocalBridge();
     profile = activeProfile() || profile;
   }
-  if (parseTokenLimit(profile.quota) === null) {
-    toast("请先为该模型设置用量上限");
-    openSettings("models");
-    setTimeout(() => document.querySelector(`[data-profile-card="${profile.id}"] [data-quota-amount]`)?.focus(), 0);
-    return;
-  }
   if (quotaBlocked(profile)) {
     if (currentConversation()) renderConversation();
     toast(quotaExhausted(profile) ? "余墨已尽，请调高上限或更换模型" : "余墨不足：进行中的对话已占去余量，请稍候或调高上限");
@@ -448,7 +442,6 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     const overrides = {
       systemPrompt: assistantHint(profile, tools, conversation),
       tools,
-      enableSearch: modelSearchEnabled(profile),
       reasoning: conversation.reasoning || ""
     };
     const toolCache = new Map();

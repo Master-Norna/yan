@@ -20,7 +20,7 @@
 npm start
 ```
 
-浏览器会打开 `http://127.0.0.1:8787`。首次使用时，在「设置 → 模型」中填写显示名称、模型 ID、Base URL 与 API Key，并设置用量限制；项目不会读取或内置开发者电脑上的任何配置。可以添加多个接口并切换默认模型；每个模型可选「接口」是 OpenAI 兼容（chat/completions）还是 Anthropic（Messages API），Base URL 带 anthropic.com 的不选也认。接 Anthropic 时页面与桥接内部仍是 OpenAI 的格式，只在最外面换一层：请求换成 Messages API 的（system 单列、工具结果并进 user、工具定义换成 input_schema、思考档位换算成思考预算，开了思考时不传 temperature），事件流换回 OpenAI 风格的分块（思考块带签名回传给下一轮，带工具调用的那一轮 Anthropic 要求如此）；图片与 PDF 原件照送，别的文件只留一行说明。
+浏览器会打开 `http://127.0.0.1:8787`。首次使用时，在「设置 → 模型」中填写显示名称、模型 ID、Base URL 与 API Key 即可开始；项目不会读取或内置开发者电脑上的任何配置。可以添加多个接口并切换默认模型；每个模型可选「接口」是 OpenAI 兼容（chat/completions）还是 Anthropic（Messages API），Base URL 带 anthropic.com 的不选也认。接 Anthropic 时页面与桥接内部仍是 OpenAI 的格式，只在最外面换一层：请求换成 Messages API 的（system 单列、工具结果并进 user、工具定义换成 input_schema、思考档位换算成思考预算，开了思考时不传 temperature），事件流换回 OpenAI 风格的分块（思考块带签名回传给下一轮，带工具调用的那一轮 Anthropic 要求如此）；图片与 PDF 原件照送，别的文件只留一行说明。
 
 `start.cmd` 打开的 CMD 窗口即本机桥接进程，必须保持开启；关闭后已加载的页面暂时仍在，但刷新、模型转发、联网与执事都会停止。浏览器开了、页面却报「本机桥接已停止」时，先看这个窗口：桥接退出会停在那里并打出原因（端口被占、缺 node 等），不会一闪而过。
 

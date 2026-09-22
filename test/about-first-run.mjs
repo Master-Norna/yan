@@ -37,9 +37,9 @@ await evalJs(
 );
 await sleep(200);
 check(
-  "quota field invalid via attribute",
+  "empty quota means unlimited, not invalid",
   await evalJs(
-    `getComputedStyle(document.querySelector('[data-quota-amount]')).borderColor === getComputedStyle(document.documentElement).getPropertyValue("--danger") || document.querySelector('[data-quota-amount]').getAttribute("aria-invalid") === "true"`
+    `document.querySelector('[data-quota-amount]').getAttribute("aria-invalid") !== "true" && document.querySelector('[data-quota-amount]').placeholder === "不限"`
   )
 );
 check(

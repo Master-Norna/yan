@@ -710,7 +710,7 @@ async function handleChat(req, res) {
       if (!res.writableEnded) abort.abort();
     });
     console.log(
-      `${new Date().toLocaleTimeString("zh-CN", { hour12: false })} → ${config.model}：${messages.length} 条消息${payload.tools ? `，工具 ${payload.tools.length} 个` : ""}${payload.enable_search ? "，enable_search" : ""}`
+      `${new Date().toLocaleTimeString("zh-CN", { hour12: false })} → ${config.model}：${messages.length} 条消息${payload.tools ? `，工具 ${payload.tools.length} 个` : ""}`
     );
     // Anthropic：请求换成 Messages API 的，回来的事件流换回 OpenAI 风格再给页面；OpenAI 兼容的原样透传（thinking_blocks 是 Anthropic 才要的，去掉）
     const anthropic = ANTHROPIC.anthropicLike(config);

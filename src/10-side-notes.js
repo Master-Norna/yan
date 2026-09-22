@@ -476,10 +476,6 @@ async function sendSide() {
     toast("请先接入模型");
     return openSettings("models");
   }
-  if (parseTokenLimit(profile.quota) === null) {
-    toast("请先为该模型设置用量上限");
-    return openSettings("models");
-  }
   if (quotaBlocked(profile))
     return toast(quotaExhausted(profile) ? "余墨已尽，请调高上限或更换模型" : "余墨不足：进行中的对话已占去余量，请稍候");
   /** @type {Message} */
@@ -503,7 +499,6 @@ async function sendSide() {
 async function askSideAgain(c, thread, from) {
   const profile = activeProfile();
   if (!profile) return openSettings("models");
-  if (parseTokenLimit(profile.quota) === null) return toast("请先为该模型设置用量上限");
   if (quotaBlocked(profile)) return toast(quotaExhausted(profile) ? "余墨已尽，请调高上限或更换模型" : "余墨不足，请稍候");
   /** @type {Message} */
   const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
@@ -554,7 +549,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     // 没有工具可用时（模型关了本机工具、没桥接）在提示里说明，免得它许诺去查
     const tools = profile.tools !== false ? toolDefinitions(conversation, { lookup: true }) : null;
     const systemPrompt = `${assistantHint(profile, tools, conversation)}\n\n${prompt(thread.anchor.text ? "side.passage" : "side.whole")}${tools ? "" : `\n${prompt("side.noTools")}`}`;
-    const overrides = { systemPrompt, tools, enableSearch: false, reasoning: conversation.reasoning || "" };
+    const overrides = { systemPrompt, tools, reasoning: conversation.reasoning || "" };
     const onFrame = () => {
       if (sideThreadId !== thread.id || !sideFollow) return;
       const el = $("#sideScroll");

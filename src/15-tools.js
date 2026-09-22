@@ -815,7 +815,6 @@ async function runDelegate(step, args, conversation, assistant, signal) {
   const overrides = {
     systemPrompt: `${assistantHint(profile, tools, conversation)}\n\n${prompt("delegate.system")}`,
     tools,
-    enableSearch: modelSearchEnabled(profile),
     reasoning: conversation.reasoning || ""
   };
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },

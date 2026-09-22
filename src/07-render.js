@@ -46,21 +46,26 @@ function renderHeader() {
   renderLibraryCount();
   refreshConnection();
 }
+// 余墨：设了上限时显示还剩多少、墨池随之见底；没设（不限）时墨池常满，改报已耗多少
 function renderQuota() {
   const p = activeProfile(),
-    parsed = p ? parseTokenLimit(p.quota) : null,
-    cap = parsed === null ? 0 : parsed,
+    cap = p ? parseTokenLimit(p.quota) : null,
     used = Math.max(0, Number(p?.usedTokens || 0));
   const remaining = cap ? Math.max(0, cap - used) : 0,
-    ratio = p && parsed !== null ? (cap ? remaining / cap : 1) : 0,
+    ratio = !p ? 0 : cap ? remaining / cap : 1,
     status = $("#quotaStatus");
   const percent = Math.min(100, Math.round(ratio * 100));
   $("#quotaFill").style.width = `${percent}%`;
   status.style.setProperty("--ink-level", `${percent}%`);
-  $("#quotaText").textContent = !p ? "—" : parsed === null ? "未设" : formatTokens(remaining);
-  status.classList.toggle("dry", cap > 0 && remaining === 0);
-  status.classList.toggle("empty", !p || parsed === null);
-  status.title = !p ? "尚未接入模型" : parsed === null ? "尚未设定用量上限" : `余墨 ${formatTokens(remaining)} · 上限 ${formatTokens(cap)}`;
+  status.querySelector(".quota-label").textContent = p && cap === null ? "耗墨" : "余墨";
+  status.title = !p
+    ? "尚未接入模型"
+    : cap === null
+      ? `不限用量，已耗 ${formatTokens(used)}`
+      : `余墨 ${formatTokens(remaining)} / ${formatTokens(cap)}`;
+  $("#quotaText").textContent = !p ? "—" : cap === null ? formatTokens(used) : formatTokens(remaining);
+  status.classList.toggle("dry", !!cap && remaining === 0);
+  status.classList.toggle("empty", !p);
   status.setAttribute("aria-label", status.title);
 }
 function renderModelTriggers() {
