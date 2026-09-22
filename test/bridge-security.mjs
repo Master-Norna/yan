@@ -192,43 +192,6 @@ check(
   r.status === 200 && existsSync(`${OUTSIDE}/secret.txt`),
   `${r.status} ${r.data?.error}`
 );
-// ---- 服务端预设模型要会话令牌：只发给本站页面；别的页面（file://、其他端口）没有令牌就不能借桥接消耗额度
-let b = await (await fetch(BASE + "/api/bootstrap", { headers: { Origin: "null" } })).json();
-check(
-  "bootstrap from a null origin carries no session token and no server profile",
-  !b.token && !b.serverProfile,
-  JSON.stringify(b).slice(0, 120)
-);
-b = await (await fetch(BASE + "/api/bootstrap", { headers: { Origin: `http://127.0.0.1:${PORT}` } })).json();
-check(
-  "bootstrap from the bridge's own page carries the session token",
-  typeof b.token === "string" && b.token.length >= 32 && b.work?.customChats === true,
-  String(b.token).slice(0, 8)
-);
-r = await post("/api/chat", { profile: { source: "server" }, messages: [{ role: "user", content: "hi" }] });
-check(
-  "server profile without the token is refused",
-  r.status === 400 && /无权使用桥接预设/.test(r.data?.error || ""),
-  `${r.status} ${r.data?.error}`
-);
-r = await post(
-  "/api/chat",
-  { profile: { source: "server" }, messages: [{ role: "user", content: "hi" }] },
-  { "X-Yan-Session": "0".repeat(48) }
-);
-check("a wrong token is refused too", r.status === 400 && /无权使用桥接预设/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
-r = await post("/api/chat", { profile: { source: "server" }, messages: [{ role: "user", content: "hi" }] }, { "X-Yan-Session": b.token });
-check(
-  "the right token passes the gate (then fails only for lack of a preset)",
-  r.status === 400 && /没有预设模型/.test(r.data?.error || ""),
-  `${r.status} ${r.data?.error}`
-);
-r = await post("/api/models", { profile: { source: "server" } });
-check(
-  "models endpoint gates the server profile as well",
-  r.status === 400 && /无权使用桥接预设/.test(r.data?.error || ""),
-  `${r.status} ${r.data?.error}`
-);
 // ---- 工具定义过多不再静默截断
 r = await post("/api/chat", {
   profile: { source: "custom", baseUrl: "http://127.0.0.1:9/v1", model: "x", apiKey: "k" },

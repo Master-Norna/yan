@@ -12,21 +12,10 @@ const bundler = require("./build.js");
 require("./src/19-anthropic.js");
 const ANTHROPIC = globalThis.YAN_ANTHROPIC;
 const { pipeline } = require("node:stream/promises");
-const crypto = require("node:crypto");
 
 const ROOT = __dirname;
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.YAN_PORT || 8787);
-const CONFIG_CANDIDATES = [process.env.YAN_API_CONFIG].filter(Boolean);
-// 会话令牌：桥接每次启动随机生成，只发给本站页面与 VS Code Webview（见 handleBootstrap）。
-// 服务端预设模型的 Key 在桥接手里，转发时须带上这枚令牌，别的本地页面（file:// 或其他端口）拿不到令牌就不能借它消耗额度；
-// 用户自己填 Key 的模型不受此限——Key 本就是页面自己的
-const SESSION_TOKEN = crypto.randomBytes(24).toString("hex");
-const SESSION_HEADER = "x-yan-session";
-function sessionOk(req) {
-  const given = String(req.headers[SESSION_HEADER] || "");
-  return given.length === SESSION_TOKEN.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(SESSION_TOKEN));
-}
 // 工具定义一次最多带多少件：超过不再静默截掉后面的，明确报错，接入更多工具时一眼能看出来
 const TOOLS_LIMIT = 128;
 const MIME = {
@@ -43,33 +32,6 @@ const MIME = {
   ".pfb": "application/octet-stream",
   ".bcmap": "application/octet-stream"
 };
-
-function loadServerConfig() {
-  const file = CONFIG_CANDIDATES.find(candidate => fs.existsSync(candidate));
-  if (!file) return { unconfigured: true };
-  const lines = fs
-    .readFileSync(file, "utf8")
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean);
-  const read = label => {
-    const index = lines.findIndex(line => new RegExp(`^${label}\\s*:`, "i").test(line));
-    if (index < 0) return "";
-    const inline = lines[index].replace(new RegExp(`^${label}\\s*:\\s*`, "i"), "");
-    return inline || lines[index + 1] || "";
-  };
-  const config = {
-    baseUrl: read("Base URL"),
-    model: read("Model"),
-    apiKey: read("API Key"),
-    api: read("API").toLowerCase(),
-    sourceFile: file
-  };
-  if (!config.baseUrl || !config.model || !config.apiKey) return { error: "API 配置缺少 Base URL、Model 或 API Key" };
-  if (config.api && !["openai", "anthropic"].includes(config.api))
-    return { error: `API 配置里的 API 只认 openai 或 anthropic（现在是 ${config.api}）` };
-  return config;
-}
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -99,7 +61,7 @@ function corsHeaders(req, res) {
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Yan-Session");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.headers["access-control-request-private-network"] === "true") res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
 // 执事接口能执行本机指令，不能只依赖 CORS：不可信页面即使读不到响应，也可能用简单请求触发副作用。
@@ -147,14 +109,7 @@ function endpoint(baseUrl, suffix) {
   if (!/^https?:$/.test(url.protocol)) throw Error("Base URL 只支持 http 或 https");
   return /\/chat\/completions\/?$/.test(url.pathname) ? url.href : `${url.href.replace(/\/$/, "")}${suffix}`;
 }
-function resolveProfile(input, requireModel = true, req = null) {
-  if (input?.source === "server") {
-    if (req && !sessionOk(req)) throw Error("此页面无权使用桥接预设的模型，请从桥接地址或 VS Code 打开「言」");
-    const config = loadServerConfig();
-    if (config.error) throw Error(config.error);
-    if (config.unconfigured) throw Error("服务端没有预设模型，请在页面中手动添加");
-    return config;
-  }
+function resolveProfile(input, requireModel = true) {
   const config = {
     baseUrl: String(input?.baseUrl || "").trim(),
     model: String(input?.model || "").trim(),
@@ -616,47 +571,24 @@ try {
   APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8")).version || "";
 } catch {}
 function handleBootstrap(req, res) {
-  const config = loadServerConfig();
-  // 令牌与预设模型只给本站页面与 VS Code Webview；别的页面（file:// 预览、其他端口）照常拿到目录信息，但没有预设模型可用
-  const trusted = trustedWorkRequest(req),
-    token = trusted ? SESSION_TOKEN : "";
-  const work = {
-    home: WORK.WORK_HOME,
-    archive: WORK.ARCHIVE_HOME,
-    chats: CHATS.CHATS_HOME,
-    customChats: true,
-    scratch: WORK.SCRATCH_DIR,
-    platform: process.platform,
-    shell: WORK.WORK_SHELL
-  };
-  if (config.unconfigured || !trusted)
-    return sendJson(res, 200, { version: APP_VERSION, work, token, serverProfile: null, configError: "" });
-  if (config.error) return sendJson(res, 200, { version: APP_VERSION, work, token, serverProfile: null, configError: config.error });
-  const lower = config.model.toLowerCase();
-  const name = lower.includes("qwen") ? "Qwen" : lower.includes("claude") ? "Claude" : lower.includes("gpt") ? "GPT" : "预设模型";
   sendJson(res, 200, {
     version: APP_VERSION,
-    work,
-    token,
-    serverProfile: {
-      id: "server-preset",
-      source: "server",
-      name,
-      model: config.model,
-      baseUrl: config.baseUrl,
-      api: config.api || (ANTHROPIC.anthropicLike(config) ? "anthropic" : "openai"),
-      temperature: 0.7,
-      maxTokens: 8192,
-      systemPrompt: ""
-    },
-    configError: ""
+    work: {
+      home: WORK.WORK_HOME,
+      archive: WORK.ARCHIVE_HOME,
+      chats: CHATS.CHATS_HOME,
+      customChats: true,
+      scratch: WORK.SCRATCH_DIR,
+      platform: process.platform,
+      shell: WORK.WORK_SHELL
+    }
   });
 }
 async function handleTest(req, res) {
   const started = Date.now();
   try {
     const body = await readJson(req),
-      config = resolveProfile(body.profile, true, req);
+      config = resolveProfile(body.profile, true);
     const response = await fetch(upstreamModelsUrl(config), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw Error(await upstreamError(response));
     const data = await response.json();
@@ -672,7 +604,7 @@ async function handleTest(req, res) {
 async function handleModels(req, res) {
   try {
     const body = await readJson(req),
-      config = resolveProfile(body.profile, false, req);
+      config = resolveProfile(body.profile, false);
     const response = await fetch(upstreamModelsUrl(config), { headers: upstreamHeaders(config), signal: AbortSignal.timeout(20000) });
     if (!response.ok) throw Error(await upstreamError(response));
     const data = await response.json();
@@ -685,7 +617,7 @@ async function handleModels(req, res) {
 async function handleChat(req, res) {
   try {
     const body = await readJson(req),
-      config = resolveProfile(body.profile, true, req);
+      config = resolveProfile(body.profile, true);
     if (!Array.isArray(body.messages) || !body.messages.length) throw Error("消息不能为空");
     const messages = body.systemPrompt
       ? [{ role: "system", content: String(body.systemPrompt).slice(0, 20000) }, ...body.messages]

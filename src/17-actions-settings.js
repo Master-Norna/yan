@@ -269,7 +269,7 @@ function modelsSettingsHtml() {
     apiBase !== null
       ? `本机桥接已接通${apiBase ? "（VS Code 预览）" : ""}，联网与转发均可用。`
       : "当前由浏览器直连模型，联网检索不可用；本机桥接启动后将自动接通。";
-  return `<h2>模型</h2><p class="settings-lead">任何 OpenAI 兼容接口均可接入，API Key 仅存于当前浏览器。${transport}</p>${bootstrap.configError ? `<div class="server-notice">${escapeHtml(bootstrap.configError)}</div>` : ""}<div id="profileList">${profiles().map(profileCardHtml).join("")}</div><button id="addProfile" class="outline-btn profile-add">＋ 接入模型</button>`;
+  return `<h2>模型</h2><p class="settings-lead">任何 OpenAI 兼容接口均可接入，API Key 仅存于当前浏览器。${transport}</p>${bootstrap.notice ? `<div class="server-notice">${escapeHtml(bootstrap.notice)}</div>` : ""}<div id="profileList">${profiles().map(profileCardHtml).join("")}</div><button id="addProfile" class="outline-btn profile-add">＋ 接入模型</button>`;
 }
 function quotaParts(value) {
   const match = String(value ?? "")
@@ -280,22 +280,19 @@ function quotaParts(value) {
 }
 /** @param {Profile} p */
 function profileCardHtml(p) {
-  const locked = p.source === "server",
-    invalidQuota = parseTokenLimit(p.quota) === null,
+  const invalidQuota = !!String(p.quota || "").trim() && parseTokenLimit(p.quota) === null,
     quota = quotaParts(p.quota),
     models = Array.isArray(p.modelList) ? p.modelList : [],
     listed = models.includes(p.model);
-  const modelField = locked
-    ? `<input class="field wide" value="${escapeHtml(p.model)}" disabled>`
-    : `<div class="field-row">${models.length ? `<select class="field wide select" data-model-select>${models.map(m => `<option value="${escapeHtml(m)}"${m === p.model ? " selected" : ""}>${escapeHtml(m)}</option>`).join("")}<option value="__custom__"${listed ? "" : " selected"}>手动输入…</option></select>` : ""}<input class="field wide${models.length && listed ? " hidden" : ""}" data-field="model" value="${escapeHtml(p.model)}" placeholder="如 gpt-4o-mini"><button class="outline-btn" data-profile-action="models" title="从接口的 /models 获取可用模型">${models.length ? "刷新" : "获取列表"}</button></div>`;
-  const quotaField = `<div class="field-row"><input type="number" min="0" step="any" class="field wide" data-quota-amount value="${escapeHtml(quota.amount)}" placeholder="如 100" ${invalidQuota ? `aria-invalid="true"` : ""}><select class="field select" data-quota-unit>${[
+  const modelField = `<div class="field-row">${models.length ? `<select class="field wide select" data-model-select>${models.map(m => `<option value="${escapeHtml(m)}"${m === p.model ? " selected" : ""}>${escapeHtml(m)}</option>`).join("")}<option value="__custom__"${listed ? "" : " selected"}>手动输入…</option></select>` : ""}<input class="field wide${models.length && listed ? " hidden" : ""}" data-field="model" value="${escapeHtml(p.model)}" placeholder="如 gpt-4o-mini"><button class="outline-btn" data-profile-action="models" title="从接口的 /models 获取可用模型">${models.length ? "刷新" : "获取列表"}</button></div>`;
+  const quotaField = `<div class="field-row"><input type="number" min="0" step="any" class="field wide" data-quota-amount value="${escapeHtml(quota.amount)}" placeholder="不限" ${invalidQuota ? `aria-invalid="true"` : ""}><select class="field select" data-quota-unit>${[
     ["k", "千 (k)"],
     ["m", "百万 (m)"],
     ["e", "亿 (e)"]
   ]
     .map(([v, label]) => `<option value="${v}"${quota.unit === v ? " selected" : ""}>${label}</option>`)
     .join("")}</select></div>`;
-  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${locked ? `<span class="profile-badge">服务端</span>` : ""}${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}" ${locked ? "disabled" : ""}></label><label>用量限制${quotaField}<small>必填；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}" ${locked ? "disabled" : ""}>OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}" ${locked ? "disabled" : ""}>Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}" ${locked ? "disabled" : ""}></label>${locked ? "" : `<label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label>`}<label class="profile-full">模型${modelField}${locked ? "" : `<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small>`}</label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${[p.tools === false ? "本机工具关" : "", modelSearchEnabled(p) ? "接口原生联网开" : "", p.systemPrompt ? "已设 system prompt" : ""].filter(Boolean).join(" · ")}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label>接口原生联网（实验）<div class="segmented"><button data-toggle-field="enableSearch" data-value="true" class="${modelSearchEnabled(p) ? "active" : ""}">开</button><button data-toggle-field="enableSearch" data-value="false" class="${modelSearchEnabled(p) ? "" : "active"}">关</button></div><small>仅当接口文档明确支持时开启，仅附加 <code>enable_search: true</code>；普通 OpenAI 兼容服务通常会忽略该字段，不能替代本机联网</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label><label><code>max_tokens</code><input type="number" min="16" max="65536" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens || DEFAULT_MAX_TOKENS)}"><small>单次回复的输出上限，默认 ${DEFAULT_MAX_TOKENS}</small></label><label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；选定模型时会自动探测并填在这里（none 是不认）；留空按 low / medium / high / max 四档列，接口拒绝某档时也会记下</small></label><label class="profile-full"><code>system prompt</code><textarea class="field wide field-area" data-field="systemPrompt" placeholder="可选。设定模型的身份与应答方式">${escapeHtml(p.systemPrompt || "")}</textarea></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}${locked ? "" : `<button class="danger-btn" data-profile-action="delete">删除</button>`}<span class="profile-status">${invalidQuota ? "请先设定用量上限" : ""}</span></div></div>`;
+  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}"></label><label>用量上限${quotaField}<small>留空不限，只计已耗；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}">OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}">Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}"></label><label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label><label class="profile-full">模型${modelField}<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small></label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${[p.tools === false ? "本机工具关" : "", p.systemPrompt ? "已设 system prompt" : ""].filter(Boolean).join(" · ")}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label>${anthropicLike(p) ? `<label><code>max_tokens</code><input type="number" min="16" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens) || ""}" placeholder="${DEFAULT_MAX_TOKENS}"><small>Messages API 必填的输出上限；留空按 ${DEFAULT_MAX_TOKENS}，模型嫌大会报错，照报错调小即可</small></label>` : ""}<label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；选定模型时会自动探测并填在这里（none 是不认）；留空按 low / medium / high / max 四档列，接口拒绝某档时也会记下</small></label><label class="profile-full"><code>system prompt</code><textarea class="field wide field-area" data-field="systemPrompt" placeholder="可选。设定模型的身份与应答方式">${escapeHtml(p.systemPrompt || "")}</textarea></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}<button class="danger-btn" data-profile-action="delete">删除</button><span class="profile-status">${invalidQuota ? "请填写大于 0 的数值，或留空不限" : ""}</span></div></div>`;
 }
 function storageSize() {
   const bytes = new Blob([JSON.stringify(store)]).size;
@@ -493,13 +490,10 @@ function bindSettingsEvents() {
     card.querySelectorAll("[data-field]").forEach(input =>
       input.addEventListener("input", e => {
         const field = e.target.dataset.field;
-        if (p.source === "server" && !["temperature", "maxTokens", "systemPrompt", "reasoningLevels", "contextWindow"].includes(field))
-          return;
         p[field] = ["temperature", "maxTokens", "usedTokens", "contextWindow"].includes(field) ? Number(e.target.value) : e.target.value;
         if (field === "contextWindow") updateContextGauge();
         // 亲手填的档位就是定论，不再探；清空了下次选模型再探
         if (field === "reasoningLevels") p.reasoningProbed = e.target.value.trim() ? `manual|${reasoningProbeKey(p)}` : "";
-        persistServerProfile(p);
         saveStoreSoon();
       })
     );
@@ -509,15 +503,14 @@ function bindSettingsEvents() {
       unit = card.querySelector("[data-quota-unit]");
     const applyQuota = () => {
       const value = amount.value.trim() ? `${amount.value.trim()}${unit.value}` : "",
-        valid = parseTokenLimit(value) !== null;
+        valid = !value || parseTokenLimit(value) !== null;
       if (valid) amount.removeAttribute("aria-invalid");
       else amount.setAttribute("aria-invalid", "true");
-      card.querySelector(".profile-status").textContent = valid ? "" : "请填写大于 0 的数值";
+      card.querySelector(".profile-status").textContent = valid ? "" : "请填写大于 0 的数值，或留空不限";
       if (!valid) return;
       if (p.quota !== value) {
         p.quota = value;
         p.usedTokens = 0;
-        persistServerProfile(p);
         saveStoreSoon();
         if (p.id === store.settings.activeProfileId) renderQuota();
       }
@@ -663,7 +656,7 @@ async function handleProfileAction(profile, action, card) {
         apiBase !== null
           ? await fetch(`${apiBase}/api/test`, {
               method: "POST",
-              headers: bridgeHeaders(profile),
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ profile: profileForRequest(profile) })
             })
           : await fetch(directModelsRequest(profile).url, { headers: directModelsRequest(profile).headers });
@@ -686,7 +679,7 @@ async function fetchModelList(profile) {
   if (apiBase !== null) {
     response = await fetch(`${apiBase}/api/models`, {
       method: "POST",
-      headers: bridgeHeaders(profile),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ profile: profileForRequest(profile) })
     });
     data = await response.json().catch(() => ({}));

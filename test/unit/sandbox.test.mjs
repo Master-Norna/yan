@@ -248,7 +248,6 @@ test("sandboxEnv：名字像机密的环境变量不给指令，其余照传", (
     OPENAI_API_KEY: "x",
     GITHUB_TOKEN: "y",
     TEMP: "z",
-    YAN_API_CONFIG: "c",
     YAN_PORT: "1",
     DB_PASSWORD: "p",
     AWS_SECRET_ACCESS_KEY: "s"

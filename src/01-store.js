@@ -46,8 +46,7 @@ function normalizeStoreData(value) {
         ...defaultStore.settings,
         ...(data.settings || {}),
         // 旧版思考菜单上有「关」，现在没有了：按「默认」看
-        reasoning: normalizeReasoning(data.settings?.reasoning),
-        serverProfile: { ...defaultStore.settings.serverProfile, ...(data.settings?.serverProfile || {}) }
+        reasoning: normalizeReasoning(data.settings?.reasoning)
       },
       profiles: Array.isArray(data.profiles) ? data.profiles : [],
       conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(normalizeConversation),

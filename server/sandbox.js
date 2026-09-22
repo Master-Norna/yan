@@ -10,7 +10,7 @@
 "use strict";
 const path = require("node:path");
 
-const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE|^YAN_API_CONFIG$/i;
+const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 // 「指令位」：一行的开头，或 ; & | ( { 之后（& 调用、脚本块也算），只有站在这个位置上的词才算在执行它——
 // 「npm run format」「echo shutdown」里的 format / shutdown 不是。
 // 套一层壳的也算：cmd /c、powershell -Command、pwsh -c 后面跟的整段都在执行——指令本就由 PowerShell 跑，

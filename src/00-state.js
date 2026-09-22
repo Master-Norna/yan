@@ -169,7 +169,6 @@
  * @property {number} subRounds
  * @property {string} [archiveDir]
  * @property {string} [chatsDir]
- * @property {Partial<Profile>} serverProfile 桥接预设模型上用户可改的几项
  * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
  * @property {string} [lastConversationId]
  */
@@ -255,8 +254,7 @@ const defaultStore = {
     toolReach: "anywhere",
     archiveRead: true,
     toolRounds: DEFAULT_TOOL_ROUNDS,
-    subRounds: DEFAULT_SUB_ROUNDS,
-    serverProfile: { temperature: 0.7, maxTokens: DEFAULT_MAX_TOKENS, systemPrompt: "", quota: "", usedTokens: 0 }
+    subRounds: DEFAULT_SUB_ROUNDS
   },
   profiles: [],
   conversations: [],
@@ -269,7 +267,8 @@ let store = loadStore();
 // 给端到端测试看内存里的记录（对话不再整份镜像在 localStorage 里，测试没别的地方读）
 window.__yanState = () => store;
 window.__yanSave = () => saveStore();
-let bootstrap = { serverProfile: null, configError: "" };
+// 桥接的引导信息（目录、平台、shell）；notice 是页面自己写的桥接状态提示，在设置 → 模型顶部显示
+let bootstrap = { notice: "" };
 let apiBase = null;
 /** @type {string|null} 正在看的对话 */
 let currentId = null;

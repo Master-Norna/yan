@@ -74,7 +74,7 @@ function branchNavHtml(branch) {
     : "";
 }
 function profiles() {
-  return [...(bootstrap.serverProfile ? [bootstrap.serverProfile] : []), ...store.profiles];
+  return store.profiles;
 }
 function activeProfile() {
   return profiles().find(p => p.id === store.settings.activeProfileId) || profiles()[0] || null;
@@ -119,17 +119,4 @@ function draftAttachmentIds() {
     .flatMap(value => (Array.isArray(value?.attachments) ? value.attachments : []))
     .map(file => file?.id)
     .filter(Boolean);
-}
-/** @param {Profile} p */
-function persistServerProfile(p) {
-  if (p.source === "server")
-    store.settings.serverProfile = {
-      temperature: p.temperature,
-      maxTokens: p.maxTokens,
-      systemPrompt: p.systemPrompt,
-      reasoningLevels: p.reasoningLevels,
-      reasoningProbed: p.reasoningProbed,
-      quota: p.quota,
-      usedTokens: p.usedTokens
-    };
 }

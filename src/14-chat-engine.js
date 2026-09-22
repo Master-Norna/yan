@@ -690,7 +690,6 @@ function accountUsage(
   profile.usedTokens = Math.max(0, Number(profile.usedTokens || 0)) + consumed;
   assistant.tokenCount = consumed;
   assistant.tokenEstimated = !(exact > 0) || partialRound || steered;
-  persistServerProfile(profile);
   if (quotaExhausted(profile)) toast("此答写毕，余墨已尽；换个模型可续");
   renderQuota();
 }
@@ -743,7 +742,6 @@ async function maybeAutoTitle(conversation, profile) {
     }
     const spent = Number(temp.usage?.total_tokens || 0) || estimateTokens([{ content: ask }, { content: temp.content }]);
     profile.usedTokens = Math.max(0, Number(profile.usedTokens || 0)) + spent;
-    persistServerProfile(profile);
     renderQuota();
     const title =
       temp.content

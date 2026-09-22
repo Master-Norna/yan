@@ -12,7 +12,6 @@ async function connectBridge(candidates, timeout = 1400) {
       const response = await fetch(`${candidate}/api/bootstrap`, { signal: AbortSignal.timeout(wait) });
       if (!response.ok || !(response.headers.get("content-type") || "").includes("application/json")) continue;
       const next = await response.json();
-      if (next.serverProfile) Object.assign(next.serverProfile, store.settings.serverProfile);
       bootstrap = next;
       apiBase = candidate;
       return true;
@@ -82,7 +81,7 @@ async function boot() {
   // 桥接在线：对话正本在本机的对话目录里，先与它合一次再画页面
   if (apiBase !== null) await syncChatsWithDisk();
   if (apiBase === null) {
-    bootstrap.configError = servedByBridge()
+    bootstrap.notice = servedByBridge()
       ? "正在连接本机桥接…若始终连不上，请重新运行 start.cmd。"
       : "未检测到本机桥接，当前为浏览器直连。若接口未开放 CORS，请运行 start.cmd 或 VS Code 任务「言：启动模型桥接」。";
     if (servedByBridge()) retryBridgeLater();
