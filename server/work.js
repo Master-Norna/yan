@@ -86,16 +86,11 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
   async function assertReachable(workdir, target) {
     if (pathIsInside(workdir, target)) await assertNoEscapingLink(workdir, target);
   }
-  // 各文件接口的落点：沙箱里不认「全盘」，目录内的机密文件、.git 内部（写）也拦下
+  // 各文件接口的落点：沙箱里不认「全盘」，目录内的机密文件、.git 内部（写）也拦下；审而后行不管文件工具，可及范围只由「全盘 / 目录内」定
   async function targetOf(workdir, body, { write = false } = {}) {
     const boxed = body.sandbox === true,
       target = resolveTarget(workdir, body.path, body.roam === true && !boxed);
     await assertReachable(workdir, target);
-    if (body.permission === "review") {
-      const why = sandbox.screenPath(relPath(workdir, target), { write });
-      if (why) throw Error(why.replace(/^沙箱拒绝：/, "审查拒绝："));
-      if (write && !pathIsInside(workdir, target)) throw Error(`审查拒绝：改动的路径越出了工作目录（${target}）`);
-    }
     if (boxed) {
       const why = sandbox.screenPath(relPath(workdir, target), { write });
       if (why) throw Error(why);
@@ -461,10 +456,11 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         if (why) throw Error(why);
       }
       if (body.permission === "review") {
-        const why = sandbox.screenAutoReview(command, workdir);
+        const why = sandbox.screenAutoReview(command);
         if (why) throw Error(why);
       }
-      const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 600000);
+      // 超时只有默认值没有上限：长测试、大装包、跑数据都可能超过十分钟，页面上本就有「停止」
+      const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, Number.MAX_SAFE_INTEGER);
       console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })} $ ${command.slice(0, 120)}`);
       // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉
       const abort = new AbortController();
@@ -687,10 +683,6 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       const stat = await fs.promises.stat(target).catch(() => null);
       if (!given || /[\\/]$/.test(given) || stat?.isDirectory()) {
         target = path.join(target, path.basename(fromUrl));
-        if (body.permission === "review") {
-          const why = sandbox.screenPath(relPath(workdir, target), { write: true });
-          if (why) throw Error(why.replace(/^沙箱拒绝：/, "审查拒绝："));
-        }
         if (body.sandbox === true) {
           const why = sandbox.screenPath(relPath(workdir, target), { write: true });
           if (why) throw Error(why);
@@ -771,7 +763,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
             continue;
           }
           if (filter && !filter.test(rel)) continue;
-          if ((boxed || body.permission === "review") && sandbox.screenPath(rel)) continue; // 沙箱与审而后行都不借检索带出机密文件
+          if (boxed && sandbox.screenPath(rel)) continue; // 沙箱不借检索带出机密文件
           if (++scanned > SEARCH_FILE_LIMIT) {
             truncated = true;
             return;

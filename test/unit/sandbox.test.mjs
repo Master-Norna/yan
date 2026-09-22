@@ -85,14 +85,12 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
     String.raw`git clone https://github.com/a/b C:\Users\me\b`
   ]) {
     assert.match(screen(command), /越出了工作目录|用户目录|系统目录/, command);
-    assert.match(screenAutoReview(command, wd, win), /越出了工作目录|用户目录|系统目录/, command);
   }
   // 别名定义与注册表别名：给写动词换个名字就认不出来了，一律拒
   assert.match(screen("sal zz Remove-Item; zz C:\\Windows\\x"), /别名/);
   assert.match(screen("Set-Alias zz Remove-Item"), /别名/);
   assert.match(screen("sp HKCU:\\Software\\x -Name a -Value 1"), /注册表/);
   assert.match(screen('powershell -c "reg add HKLM\\Software\\x"'), /注册表/);
-  assert.match(screenAutoReview("sal zz Remove-Item", wd, win), /别名/);
   // 同名的别的东西照常：sc query 是看服务，Get-Process powershell 只是列进程，gcc -o 写在目录内
   for (const command of [
     "sc query spooler",
@@ -118,7 +116,6 @@ test("screenCommand：只读的来源不受目录限——拷进来、读出来�
     "Copy-Item ../other/x ."
   ]) {
     assert.equal(screen(command), null, command);
-    assert.equal(screenAutoReview(command, wd, win), null, command);
   }
   // 搬走会删掉源头，robocopy /MOV 同理；目标在外面、通过管道去删外面的，都不放
   for (const command of [
@@ -139,7 +136,6 @@ test("screenCommand：只读的来源不受目录限——拷进来、读出来�
     "Copy-Item ../other/x .; Remove-Item ../other/x"
   ]) {
     assert.match(screen(command), /越出了工作目录|用户目录|系统目录|上溯/, command);
-    assert.match(screenAutoReview(command, wd, win), /越出了工作目录|用户目录|系统目录|上溯/, command);
   }
   // TEMP / TMP 要留在进程环境里供程序使用，但显式文件指令不能借它们写出工作目录
   for (const command of [
@@ -149,7 +145,6 @@ test("screenCommand：只读的来源不受目录限——拷进来、读出来�
     String.raw`Set-Content %TMP%\yan.txt x`
   ]) {
     assert.match(screen(command), /用户目录|系统目录/, command);
-    assert.match(screenAutoReview(command, wd, win), /用户目录|系统目录/, command);
   }
 });
 test("screenCommand：查看可及整台机器——电脑检查要翻系统目录、注册表与进程，读不设目录限", () => {
@@ -198,29 +193,40 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("curl $url"), /外联/);
   assert.match(screen("(New-Object Net.WebClient).DownloadString('http://x')"), /外联/);
 });
-test("screenAutoReview：常规开发直接放行，明确宿主机风险才拒绝", () => {
+test("screenAutoReview：只拦伤及系统与难以恢复的；目录、机密、Git 回退、别名都放行", () => {
   for (const command of [
     "npm install",
     "git commit -m test",
+    "git reset --hard",
+    "git clean -fdx",
     "Start-Process notepad",
     "Stop-Process -Id 1234",
     "curl https://example.com",
     "Set-Content src/out.txt ok",
     "Remove-Item build -Recurse -Force",
-    "rmdir /s /q build"
+    "rmdir /s /q build",
+    "Get-Content .env",
+    "Set-Content .git/config x",
+    "sal zz Remove-Item",
+    String.raw`Move-Item .\dist D:\code\other\dist`,
+    String.raw`Set-Content C:\Users\me\note.txt x`,
+    String.raw`Set-Content $env:TEMP\yan.txt x`,
+    String.raw`Copy-Item C:\Windows\System32\drivers\etc\hosts .\hosts.bak`,
+    String.raw`Get-ChildItem C:\Windows`
   ])
-    assert.equal(screenAutoReview(command, wd, win), null, command);
+    assert.equal(screenAutoReview(command), null, command);
   for (const command of [
     "Set-ExecutionPolicy Unrestricted",
     "Stop-Service WinDefend",
     "shutdown /s",
-    "git reset --hard",
     "Remove-Item . -Recurse -Force",
-    "Get-Content .env",
-    "Set-Content .git/config x",
-    String.raw`Set-Content C:\Windows\temp\x.txt x`
+    'iex "dir"',
+    String.raw`Set-Content C:\Windows\temp\x.txt x`,
+    String.raw`Copy-Item .\a.dll "C:\Program Files\x\a.dll"`,
+    String.raw`Set-Content $env:ProgramData\x.txt x`,
+    String.raw`echo x > %windir%\x.txt`
   ])
-    assert.match(screenAutoReview(command, wd, win), /审查拒绝/, command);
+    assert.match(screenAutoReview(command), /审查拒绝/, command);
 });
 test("screenCommand：指令通道也不许显式碰机密文件或直接改 .git 内部", () => {
   for (const command of [

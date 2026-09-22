@@ -55,7 +55,6 @@
  * @property {Array<{ text: string, status: string }>} [plan] update_plan 的清单
  * @property {number} [exitCode]
  * @property {boolean} [readOnly] 只读指令，免确认
- * @property {"conversation"|"answer"} [approvalScope] 指令确认的放行范围：行可对整段对话径行，言只可放行本答
  * @property {{ old: string, new: string }} [diff]
  * @property {{ path: string, added: number, removed: number, created?: boolean }} [change]
  * @property {number} [at] 调用发起时正文的长度（时间线分组、思绪按轮切分都靠它）

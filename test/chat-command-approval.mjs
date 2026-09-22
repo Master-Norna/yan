@@ -1,4 +1,4 @@
-// 言里的 shell 同样不是进程隔离：首条非只读指令须确认；可只放行本答，下一答重新询问
+// 言里的指令也走请示条：首条非只读指令须确认；按「径行」即把整段对话切成径行，下一答不再问
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 
 const ARCHIVE = `${TMP}/chat-command-archive`.split("/").join(process.platform === "win32" ? "\\" : "/");
@@ -22,8 +22,8 @@ check(
   (await evalJs(`document.querySelector("#approvalBar .approval-title").textContent`)) === "本机请示 · 运行此指令"
 );
 check(
-  "chat can only auto-approve the current answer",
-  (await evalJs(`document.querySelector('#approvalBar [data-approve="auto"]').textContent`)) === "本答径行"
+  "chat offers the same conversation-wide auto-approve as work",
+  (await evalJs(`document.querySelector('#approvalBar [data-approve="auto"]').textContent`)) === "径行"
 );
 await evalJs(`document.querySelector('#approvalBar [data-approve="auto"]').click(); true`);
 await waitFor(`document.querySelector('.message.assistant')?.dataset.status === "complete"`);
@@ -33,24 +33,19 @@ check(
     `document.querySelectorAll('.tool-step[data-status="done"] .tool-label').length === 2 && document.querySelector("#approvalBar").classList.contains("hidden")`
   )
 );
-check(
-  "answer-scoped approval was not persisted on the conversation",
-  (await evalJs(`__yanState().conversations[0].commandPolicy`)) === "ask"
-);
+check("auto-approve was persisted on the conversation", (await evalJs(`__yanState().conversations[0].commandPolicy`)) === "auto");
 
 await evalJs(
   `document.querySelector("#chatInput").value = "CHAT-AUTO again"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
 await waitFor(
-  `!document.querySelector("#approvalBar").classList.contains("hidden") && !!document.querySelector('#approvalBar [data-approve="run"]')`
+  `document.querySelectorAll('.message.assistant').length === 2 && [...document.querySelectorAll('.message.assistant')].at(-1).dataset.status === "complete"`
 );
 check(
-  "the next answer asks again",
-  (await evalJs(`document.querySelector("#approvalBar .approval-title").textContent`)) === "本机请示 · 运行此指令"
-);
-await evalJs(`document.querySelector('#approvalBar [data-approve="auto"]').click(); true`);
-await waitFor(
-  `document.querySelectorAll('.message.assistant').length === 2 && [...document.querySelectorAll('.message.assistant')].at(-1).dataset.status === "complete"`
+  "the next answer ran its commands without asking",
+  await evalJs(
+    `document.querySelector("#approvalBar").classList.contains("hidden") && document.querySelectorAll('.tool-step[data-status="done"] .tool-label').length === 4`
+  )
 );
 
 close();

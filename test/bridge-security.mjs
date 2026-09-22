@@ -394,10 +394,11 @@ r = await post("/api/work/run", {
   command: win ? `Set-Content "${outsideReviewFile}" x` : `printf x > "${outsideReviewFile}"`
 });
 check(
-  "automatic review does not mutate an explicit path outside the workdir",
-  r.status === 400 && /越出了工作目录/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
+  "automatic review lets a command write outside the workdir",
+  r.status === 200 && existsSync(outsideReviewFile),
   `${r.status} ${r.data?.error || ""}`
 );
+rmSync(outsideReviewFile, { force: true });
 r = await post("/api/work/write", {
   workdir,
   sandbox: false,
@@ -407,16 +408,13 @@ r = await post("/api/work/write", {
   content: "x"
 });
 check(
-  "automatic review also keeps file tools inside the workdir",
-  r.status === 400 && /越出了工作目录/.test(r.data?.error || "") && !existsSync(outsideReviewFile),
+  "automatic review leaves file-tool reach to the roam setting",
+  r.status === 200 && existsSync(outsideReviewFile),
   `${r.status} ${r.data?.error || ""}`
 );
+rmSync(outsideReviewFile, { force: true });
 r = await post("/api/work/read", { workdir, sandbox: false, permission: "review", path: ".env" });
-check(
-  "automatic review keeps file tools from reading secret files",
-  r.status === 400 && /审查拒绝.*机密文件/.test(r.data?.error || ""),
-  `${r.status} ${r.data?.error || ""}`
-);
+check("automatic review does not guard secret files (that is the sandbox's job)", r.status === 200, `${r.status} ${r.data?.error || ""}`);
 if (win) {
   r = await post("/api/work/run", {
     workdir,

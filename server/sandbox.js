@@ -71,8 +71,9 @@ const DIRECT_FILE_MUTATION = new RegExp(
   "im"
 );
 
-// 审而后行不是第二个沙箱：常规开发、安装、Git 提交、本机进程、联网与整机查看都放行，只拦明确可能伤及宿主机或难以恢复的动作。
-// 它不向用户请示；拿不准而确实需要做时，模型可以换用结构化工具，或用户切到「问而后行 / 径行」。
+// 审而后行不是第二个沙箱：常规开发、安装、Git（含回退与清理）、本机进程、联网、整机查看、写到目录之外都放行，
+// 只拦明确会伤及宿主机或难以恢复的动作：改系统、提权、藏字的指令、整目录与磁盘级删除、往系统目录里写。
+// 它不向用户请示；拿不准而确实需要做时，模型可以换用结构化工具，或用户切到「问而后行 / 径行」。沙箱开着时沙箱先筛，这一档再筛。
 const REVIEW_FORBIDDEN = [
   [cmd("reg", String.raw`(?:\.exe)?\s+(?:add|delete|import|restore|load|unload|copy|save)\b`), "不代为修改注册表"],
   [
@@ -91,10 +92,11 @@ const REVIEW_FORBIDDEN = [
   [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不代为格式化磁盘"],
   [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不代为修改执行策略与安全设置"],
   [/\bInvoke-Expression\b|(^|[\s;&|(])iex\s|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}/i, "不代为执行隐藏或动态拼接的指令"],
-  [ALIASING, "不代为定义别名，请直接写出指令"],
-  [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不代为通过 WMI 修改系统"],
-  [/\bgit\s+(?:reset\s+--hard|clean\s+-[^\s]*[fdx]|checkout\s+--\s|restore\b[^\n]*\s--source\b)/i, "不代为执行难以恢复的 Git 清理或回退"]
+  [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不代为通过 WMI 修改系统"]
 ];
+// 审而后行只守系统目录：Windows、Program Files、ProgramData。用户目录、临时目录、别的项目都是用户自己的地方，写就写
+const REVIEW_SYSTEM_PATH =
+  /\$env:(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)\b|%(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)%|(?<![A-Za-z0-9_])[a-z]:[\\/](?:windows|program files(?: \(x86\))?|programdata)(?=[\\/\s"']|$)/i;
 const BROAD_DELETE =
   /\bRemove-Item\b(?=[^\n]*(?:-Recurse|-Force))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
 
@@ -193,18 +195,15 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
 }
 /**
  * 「审而后行」这一档的筛查，不向用户请示。通过返回 null；明确高风险返回拒绝原因。
- * 规则刻意比沙箱宽：常规开发、诊断与整机查看都不拦。
+ * 规则刻意比沙箱宽得多：目录、机密文件、.git 内部、Git 回退都不管，只看会不会伤到系统本身。
  * @param {string} command
- * @param {string} workdir
  */
-function screenAutoReview(command, workdir, { platform = process.platform } = {}) {
-  const text = String(command || ""),
-    win = platform === "win32";
+function screenAutoReview(command) {
+  const text = String(command || "");
   for (const [pattern, why] of REVIEW_FORBIDDEN) if (pattern.test(text)) return `审查拒绝：${why}`;
-  if (SECRET_PATH_IN_COMMAND.test(text)) return "审查拒绝：不代为读取或改写 .env、密钥与凭据文件";
-  if (GIT_INTERNAL_PATH.test(text) && DIRECT_FILE_MUTATION.test(text)) return "审查拒绝：不直接修改 .git 内部，请使用 git 指令";
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
-  if (DIRECT_FILE_MUTATION.test(text)) return screenWritePaths(text, workdir, win, "审查拒绝");
+  if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
+    return "审查拒绝：不往 Windows、Program Files 这类系统目录里写";
   return null;
 }
 /**
