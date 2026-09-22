@@ -779,7 +779,10 @@ const server = http.createServer(async (req, res) => {
     const urlPath = new URL(req.url, `http://${HOST}`).pathname;
     // 能打到本机服务的接口（执事、卷宗、对话目录、http_request）只受理本站页面与 VS Code Webview
     if (
-      (urlPath.startsWith("/api/work/") || urlPath.startsWith("/api/archive/") || urlPath.startsWith("/api/chats/") || urlPath === "/api/http") &&
+      (urlPath.startsWith("/api/work/") ||
+        urlPath.startsWith("/api/archive/") ||
+        urlPath.startsWith("/api/chats/") ||
+        urlPath === "/api/http") &&
       !trustedWorkRequest(req)
     )
       return sendJson(res, 403, { error: "此页面无权调用本机执事接口，请从桥接地址或 VS Code 打开「言」" });

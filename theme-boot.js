@@ -3,7 +3,7 @@
   try {
     const settings = JSON.parse(localStorage.getItem("yan-chat-v1") || "{}").settings || {},
       html = document.documentElement;
-    const theme = settings.theme || "system",
+    const theme = settings.theme || "light",
       dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
     const inkMotion = settings.inkMotion || "on",
       motionOff = inkMotion === "off" || (inkMotion === "system" && matchMedia("(prefers-reduced-motion: reduce)").matches);

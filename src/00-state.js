@@ -238,7 +238,7 @@ const defaultStore = {
   version: STORE_VERSION,
   settings: {
     name: "访客",
-    theme: "system",
+    theme: "light",
     inkMotion: "on",
     font: "mixed",
     width: 760,

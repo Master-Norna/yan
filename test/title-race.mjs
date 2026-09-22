@@ -33,20 +33,34 @@ const begin = async suffix => {
     `document.querySelector("#welcomeInput").value = ${JSON.stringify(`PLAIN TITLEEDITRACE ${suffix}`)}; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
   );
   await waitFor(`__yanState().conversations.length === ${count + 1}`, 5000);
-  await waitFor(`__yanState().conversations[0].messages.some(message => message.role === "assistant" && message.status === "complete")`, 5000);
+  await waitFor(
+    `__yanState().conversations[0].messages.some(message => message.role === "assistant" && message.status === "complete")`,
+    5000
+  );
 };
 
 // 只把光标放进标题、没有真正输入：自动拟题回来后，blur 不能拿聚焦前的旧题覆盖它并误标成手改。
 await begin("FOCUS");
 const oldTitle = await evalJs(`document.querySelector("#chatTitle").textContent`);
-await evalJs(`(() => { const t = document.querySelector("#chatTitle"); window.__titleEvents = []; for (const name of ["focus", "input", "blur"]) t.addEventListener(name, () => window.__titleEvents.push(name)); t.tabIndex = 0; window.focus(); t.focus(); return document.activeElement === t; })()`);
+await evalJs(
+  `(() => { const t = document.querySelector("#chatTitle"); window.__titleEvents = []; for (const name of ["focus", "input", "blur"]) t.addEventListener(name, () => window.__titleEvents.push(name)); t.tabIndex = 0; window.focus(); t.focus(); return document.activeElement === t; })()`
+);
 await waitFor(`__yanState().conversations[0].titled === true`, 5000);
-check("auto title does not overwrite the title DOM while it is focused", (await evalJs(`document.querySelector("#chatTitle").textContent`)) === oldTitle);
+check(
+  "auto title does not overwrite the title DOM while it is focused",
+  (await evalJs(`document.querySelector("#chatTitle").textContent`)) === oldTitle
+);
 await evalJs(`document.querySelector("#chatTitle").blur(); true`);
 check(
   "blur without an edit keeps the late auto title",
-  await evalJs(`__yanState().conversations[0].title === "测试标题" && __yanState().conversations[0].titleAuto === true && document.querySelector("#chatTitle").textContent === "测试标题"`),
-  JSON.stringify(await evalJs(`({ title: __yanState().conversations[0].title, titleAuto: __yanState().conversations[0].titleAuto, dom: document.querySelector("#chatTitle").textContent, active: document.activeElement?.id, events: window.__titleEvents })`))
+  await evalJs(
+    `__yanState().conversations[0].title === "测试标题" && __yanState().conversations[0].titleAuto === true && document.querySelector("#chatTitle").textContent === "测试标题"`
+  ),
+  JSON.stringify(
+    await evalJs(
+      `({ title: __yanState().conversations[0].title, titleAuto: __yanState().conversations[0].titleAuto, dom: document.querySelector("#chatTitle").textContent, active: document.activeElement?.id, events: window.__titleEvents })`
+    )
+  )
 );
 
 // 真写了半截又按 Esc：应放弃半截，回到此刻状态里的自动题，而不是聚焦前的旧题。
@@ -58,7 +72,9 @@ await waitFor(`__yanState().conversations[0].titled === true`, 5000);
 await evalJs(`document.querySelector("#chatTitle").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
 check(
   "Escape during the race restores the late auto title without marking it manual",
-  await evalJs(`__yanState().conversations[0].title === "测试标题" && __yanState().conversations[0].titleAuto === true && document.querySelector("#chatTitle").textContent === "测试标题"`)
+  await evalJs(
+    `__yanState().conversations[0].title === "测试标题" && __yanState().conversations[0].titleAuto === true && document.querySelector("#chatTitle").textContent === "测试标题"`
+  )
 );
 
 // 真正写完并离开：人的标题仍应赢过同一时刻回来的自动题。
@@ -71,7 +87,11 @@ await evalJs(`document.querySelector("#chatTitle").blur(); true`);
 check(
   "an actual edit still wins over the late auto title",
   await evalJs(`__yanState().conversations[0].title === "亲手定题" && __yanState().conversations[0].titleAuto === false`),
-  JSON.stringify(await evalJs(`({ title: __yanState().conversations[0].title, titleAuto: __yanState().conversations[0].titleAuto, dom: document.querySelector("#chatTitle").textContent, active: document.activeElement?.id, events: window.__titleEvents })`))
+  JSON.stringify(
+    await evalJs(
+      `({ title: __yanState().conversations[0].title, titleAuto: __yanState().conversations[0].titleAuto, dom: document.querySelector("#chatTitle").textContent, active: document.activeElement?.id, events: window.__titleEvents })`
+    )
+  )
 );
 
 // 侧栏重命名框同理：只打开、没输入，迟到的自动题不能被旧 value 在 focusout 时反盖。
@@ -84,6 +104,8 @@ await waitFor(`__yanState().conversations[0].titled === true`, 5000);
 await evalJs(`document.querySelector("#history .history-rename").blur(); true`);
 check(
   "sidebar focusout without input also keeps the late auto title",
-  await evalJs(`__yanState().conversations[0].title === "测试标题" && __yanState().conversations[0].titleAuto === true && document.querySelector('#history [data-conversation="' + CSS.escape(__yanState().conversations[0].id) + '"]').textContent.includes("测试标题")`)
+  await evalJs(
+    `__yanState().conversations[0].title === "测试标题" && __yanState().conversations[0].titleAuto === true && document.querySelector('#history [data-conversation="' + CSS.escape(__yanState().conversations[0].id) + '"]').textContent.includes("测试标题")`
+  )
 );
 close();

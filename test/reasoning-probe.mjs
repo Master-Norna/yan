@@ -11,9 +11,7 @@ await evalJs(
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
 const stored = id =>
-  evalJs(
-    `(p => p.reasoningLevels + "|" + (p.reasoningProbed || ""))(__yanState().profiles.find(p => p.id === ${JSON.stringify(id)}))`
-  );
+  evalJs(`(p => p.reasoningLevels + "|" + (p.reasoningProbed || ""))(__yanState().profiles.find(p => p.id === ${JSON.stringify(id)}))`);
 const menu = () =>
   evalJs(
     `[...document.querySelectorAll("#modelMenu [data-reasoning]")].map(b => b.textContent + (b.classList.contains("active") ? "*" : "")).join(",") || document.querySelector("#modelMenu .menu-section-note")?.textContent`
@@ -27,10 +25,7 @@ const pick = async id => {
 check("nothing is probed until a model is picked", (await stored("p1")) === "undefined|", await stored("p1"));
 // 只认三档的：记三档，菜单只列三档，「最高」落到「高」
 await pick("p2");
-await waitFor(
-  `__yanState().profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-three"`,
-  8000
-);
+await waitFor(`__yanState().profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-three"`, 8000);
 check(
   "a three-level model is learned as three",
   (await stored("p2")) === "low, medium, high|openai|http://127.0.0.1:8798/v1|fake-three",
@@ -47,10 +42,7 @@ check(
 await evalJs(`document.body.click(); true`);
 // 不认识 reasoning_effort 的：记 none，菜单上只剩一句话，请求里不带字段
 await pick("p3");
-await waitFor(
-  `__yanState().profiles[2].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-plain"`,
-  8000
-);
+await waitFor(`__yanState().profiles[2].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-plain"`, 8000);
 check(
   "a model without the field is learned as none",
   (await stored("p3")) === "none|openai|http://127.0.0.1:8798/v1|fake-plain",
@@ -67,10 +59,7 @@ check(
 await evalJs(`document.body.click(); true`);
 // 照单全收的：按通用四档
 await pick("p4");
-await waitFor(
-  `__yanState().profiles[3].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-mute"`,
-  8000
-);
+await waitFor(`__yanState().profiles[3].reasoningProbed === "openai|http://127.0.0.1:8798/v1|fake-mute"`, 8000);
 check(
   "a model that accepts anything keeps the four defaults",
   (await stored("p4")) === "low, medium, high, max|openai|http://127.0.0.1:8798/v1|fake-mute",
@@ -168,10 +157,7 @@ await sleep(100);
 await evalJs(`document.querySelector("#closeSettings").click(); true`);
 await sleep(300);
 await pick("p2");
-await waitFor(
-  `__yanState().profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1/|fake-three"`,
-  8000
-);
+await waitFor(`__yanState().profiles[1].reasoningProbed === "openai|http://127.0.0.1:8798/v1/|fake-three"`, 8000);
 check("changing the base URL makes the next pick probe again", true);
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(300);

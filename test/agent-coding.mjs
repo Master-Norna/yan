@@ -151,7 +151,9 @@ await evalJs(
 await waitFor(`!!document.querySelector('#approvalBar .ask-form')`, 10000);
 check(
   "work trail stamps the pre-tool thought done while the form waits",
-  await evalJs(`(() => { const a = [...document.querySelectorAll('.message.assistant')].at(-1), d = a.querySelector('.tool-stack.is-work .trail-group .reasoning'); if (!d || d.dataset.state !== 'done') return false; d.dataset.reuseProbe = 'true'; return true; })()`)
+  await evalJs(
+    `(() => { const a = [...document.querySelectorAll('.message.assistant')].at(-1), d = a.querySelector('.tool-stack.is-work .trail-group .reasoning'); if (!d || d.dataset.state !== 'done') return false; d.dataset.reuseProbe = 'true'; return true; })()`
+  )
 );
 await evalJs(`document.querySelector('#approvalBar .ask-q[data-q="0"] .ask-opt[data-opt="0"]').click(); true`);
 await evalJs(`document.querySelector('#approvalBar [data-form="next"]').click(); true`);
@@ -166,7 +168,9 @@ try {
 check(
   "the same work-trail thought marker resumes as a breathing dot after the tool",
   reusedThought,
-  await evalJs(`JSON.stringify([...[...document.querySelectorAll('.message.assistant')].at(-1).querySelectorAll('.reasoning')].map(d => ({ state: d.dataset.state, reused: d.dataset.reuseProbe || '', text: d.querySelector('.reasoning-body')?.textContent.slice(0, 30) })))`)
+  await evalJs(
+    `JSON.stringify([...[...document.querySelectorAll('.message.assistant')].at(-1).querySelectorAll('.reasoning')].map(d => ({ state: d.dataset.state, reused: d.dataset.reuseProbe || '', text: d.querySelector('.reasoning-body')?.textContent.slice(0, 30) })))`
+  )
 );
 await waitFor(`[...document.querySelectorAll('.message.assistant')].at(-1)?.dataset.status === "complete"`, 15000);
 close();

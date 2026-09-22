@@ -36,7 +36,15 @@ for (let i = 0; i < 40; i++) {
 const win = process.platform === "win32",
   workdir = WORK.split("/").join(win ? "\\" : "/");
 // 静态服务只给页面资源：仓库源码、测试与 .git 即使同在服务根目录，也不能被其他本地网页读走。
-for (const publicPath of ["/", "/support.js", "/app.css", "/theme-boot.js", "/preview.html", "/prompts/assistant.js", "/vendor/marked.umd.js"]) {
+for (const publicPath of [
+  "/",
+  "/support.js",
+  "/app.css",
+  "/theme-boot.js",
+  "/preview.html",
+  "/prompts/assistant.js",
+  "/vendor/marked.umd.js"
+]) {
   const response = await fetch(BASE + publicPath, { headers: { Origin: "http://127.0.0.1:9999" } });
   check(`public static asset ${publicPath} is served`, response.status === 200, String(response.status));
   await response.body?.cancel();

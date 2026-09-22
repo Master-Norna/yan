@@ -149,10 +149,7 @@ await waitFor(
 );
 const text2 = await evalJs(`document.querySelectorAll(".message.assistant")[2].querySelector(".assistant-block > .markdown").textContent`);
 check("after binding the prompt is the 执事 one and history is intact", /work:yes\|archive:no\|n:6/.test(text2), text2);
-check(
-  "stored conversation carries the workdir",
-  await evalJs(`__yanState().conversations[0].workdir.toLowerCase().endsWith("work")`)
-);
+check("stored conversation carries the workdir", await evalJs(`__yanState().conversations[0].workdir.toLowerCase().endsWith("work")`));
 
 // ---- 解开：回到言
 await evalJs(`document.querySelector("#chatMeta .chat-meta-path").click(); true`);
@@ -254,8 +251,7 @@ await evalJs(
 await sleep(1200);
 check(
   "changed directory is stored and created",
-  (await evalJs(`(__yanState().settings.archiveDir || "").toLowerCase()`)).includes("archive3") &&
-    existsSync(`${TMP}/archive3`)
+  (await evalJs(`(__yanState().settings.archiveDir || "").toLowerCase()`)).includes("archive3") && existsSync(`${TMP}/archive3`)
 );
 // 页内起手的拖动（卷宗里的图、案上的附件）不当作外来文件：不掀落件幕布；拖完之后外来的照常
 await evalJs(`document.querySelector("#closeSettings")?.click(); true`);

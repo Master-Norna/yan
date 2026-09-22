@@ -68,8 +68,7 @@ await evalJs(
 await sleep(400);
 check(
   "stored ended flag is dropped on load",
-  (await evalJs(`__yanState().conversations.every(c => !("ended" in c))`)) ||
-    (await evalJs(`!("ended" in __yanState().conversations[0])`))
+  (await evalJs(`__yanState().conversations.every(c => !("ended" in c))`)) || (await evalJs(`!("ended" in __yanState().conversations[0])`))
 );
 check(
   "dry notice with a switch button; input paused",
@@ -199,9 +198,7 @@ await evalJs(`document.querySelector('.chip-pop[data-kind=history] [data-menu="p
 await sleep(200);
 check(
   "pin from the menu pins the row and closes the menu",
-  await evalJs(
-    `!document.querySelector(".chip-pop") && __yanState().conversations.find(c => c.id === "w2").pinned === true`
-  )
+  await evalJs(`!document.querySelector(".chip-pop") && __yanState().conversations.find(c => c.id === "w2").pinned === true`)
 );
 await evalJs(`document.querySelector('#history [data-conversation="w2"] .history-more').click(); true`);
 await sleep(150);

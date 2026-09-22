@@ -304,7 +304,8 @@ function drainChatWrites() {
 async function writeConversation(id) {
   while (pendingChatWrites.has(id) && !deletedChatIds.has(id)) {
     // 先等、后 stringify。生成中三秒一份，收尾与普通编辑最多等一秒多；离页另有同步入 IndexedDB 的兜底，不靠这里抢时间。
-    const interval = conversationRunning(id) || titlingIds.has(id) || compactingIds.has(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
+    const interval =
+        conversationRunning(id) || titlingIds.has(id) || compactingIds.has(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
       wait = unloading ? 0 : interval - (performance.now() - (chatDiskWrites.get(id) || -interval));
     if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
     if (deletedChatIds.has(id)) break;
@@ -408,7 +409,8 @@ function flushOnUnload() {
     if (deletedChatIds.has(conversation.id)) continue;
     const json = JSON.stringify(conversation),
       hash = hashText(json);
-    if (!pendingChatWrites.has(conversation.id) && !activeChatWrites.has(conversation.id) && chatHashes.get(conversation.id) === hash) continue;
+    if (!pendingChatWrites.has(conversation.id) && !activeChatWrites.has(conversation.id) && chatHashes.get(conversation.id) === hash)
+      continue;
     records.push({ id: conversation.id, savedAt: nextChatStamp(conversation.id), json });
   }
   if (!records.length) return;
@@ -458,7 +460,8 @@ async function hydrateStore() {
   metaRevision = Math.max(Number(legacy?.revision) || 0, local?.revision || 0, Date.now());
   if (!local?.split) {
     // 旧版：整份记录在 localStorage（没标记的是更老的版本或测试灌的数据）与 / 或表里的 main 记录，按原来的规矩取一份
-    const localWins = !!local && (!local.managed || !legacy || (!local.dbOnly && Number(local.revision || 0) >= Number(legacy.revision || 0)));
+    const localWins =
+      !!local && (!local.managed || !legacy || (!local.dbOnly && Number(local.revision || 0) >= Number(legacy.revision || 0)));
     let full = localWins ? local?.data : null;
     if (!full && legacy?.json)
       try {

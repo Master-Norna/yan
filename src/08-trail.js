@@ -97,8 +97,18 @@ function reusableTrailReasoning(block, message, visible) {
       ?.querySelector(":scope > .reasoning");
   if (!details) return null;
   if (!active) {
-    if (String(visible || "").slice(group.at).trim()) return null;
-    if (!String(message.reasoning || "").slice(group.rat).trim()) return null;
+    if (
+      String(visible || "")
+        .slice(group.at)
+        .trim()
+    )
+      return null;
+    if (
+      !String(message.reasoning || "")
+        .slice(group.rat)
+        .trim()
+    )
+      return null;
     details.dataset.roundLive = "true";
     // 生成中切去别处再回来时，整页渲染会先把尾段思绪画在行迹之后；既然能归回上一组，就撤掉那份临时副本。
     block.querySelector(":scope > .reasoning")?.remove();

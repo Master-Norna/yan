@@ -926,10 +926,7 @@ function bindEvents() {
     if (!scrollDrag || event.pointerId !== scrollDrag.pointerId) return;
     const geometry = scrollGeometry(),
       pointer = Math.max(0, Math.min(geometry.track, event.clientY - geometry.rect.top));
-    chatScroll.scrollTop = Math.max(
-      0,
-      Math.min(geometry.max, ((pointer - scrollDrag.offset) / geometry.travel) * geometry.max)
-    );
+    chatScroll.scrollTop = Math.max(0, Math.min(geometry.max, ((pointer - scrollDrag.offset) / geometry.travel) * geometry.max));
   };
   const stopScrollGrabber = event => {
     if (!scrollDrag || event.pointerId !== scrollDrag.pointerId) return;

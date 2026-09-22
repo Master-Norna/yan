@@ -316,8 +316,21 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
   // 杀整棵进程树：PowerShell 起的子进程（node、python、构建脚本）不能只杀 shell 本身，否则用户点了停止，脚本还在后台改文件
   function killTree(child) {
     if (!child.pid || child.exitCode !== null || child.signalCode) return;
-    if (process.platform === "win32") spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, stdio: "ignore" });
-    else child.kill("SIGKILL");
+    if (process.platform !== "win32") return child.kill("SIGKILL");
+    // taskkill 能把孙进程一起收掉，但受限环境里可能被系统拒绝；那时至少要终止直属 shell，不能让指令继续写文件。
+    const killShell = () => {
+      if (child.exitCode !== null || child.signalCode) return;
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+    };
+    const killer = spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, stdio: "ignore" }),
+      fallback = setTimeout(killShell, 750);
+    killer.once("error", killShell);
+    killer.once("close", code => {
+      clearTimeout(fallback);
+      if (code) killShell();
+    });
   }
   // ---- 并行帮手共用一个目录时的写锁：同一文件的写入 / 修改按先后排队（edit 的读—改—写在锁内，不会互相覆盖），不同文件照常并行；
   // run_command 可能改任意文件，拿的是整个工作目录的独占锁——指令跑着的时候文件写入等它，文件写着的时候指令等它们

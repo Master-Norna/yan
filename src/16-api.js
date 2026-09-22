@@ -480,7 +480,10 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
         reader.cancel().catch(() => {});
         reject(Error("接口静默超过五分钟，连接已中断"));
       }, SSE_IDLE_MS);
-      reader.read().then(resolve, reject).finally(() => clearTimeout(timer));
+      reader
+        .read()
+        .then(resolve, reject)
+        .finally(() => clearTimeout(timer));
     });
   // 流被掐断（停止、补言改道）时这一段的帧循环到此为止：接下来的一轮另起一个，两个循环不能同时画一条消息
   try {
