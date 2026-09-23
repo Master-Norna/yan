@@ -573,11 +573,12 @@ try {
 function handleBootstrap(req, res) {
   sendJson(res, 200, {
     version: APP_VERSION,
+    // store：存储根的位置，fresh 是这个根还没立起来（页面据此把旧数据迁进来）
+    store: STORE.describe(),
     work: {
       home: WORK.WORK_HOME,
-      archive: WORK.ARCHIVE_HOME,
-      chats: CHATS.CHATS_HOME,
-      customChats: true,
+      archive: STORE.paths().archive,
+      chats: STORE.paths().chats,
       scratch: WORK.SCRATCH_DIR,
       platform: process.platform,
       shell: WORK.WORK_SHELL
@@ -691,8 +692,17 @@ async function handleChat(req, res) {
     }
   }
 }
-const WORK = require("./server/work.js")({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes });
-const CHATS = require("./server/chats.js")({ sendJson, readJson });
+// 存储根（默认 ~/.yan）：对话、卷宗、配置都在里面，换位置后下面两处跟着走
+const STORE = require("./server/store.js")({ sendJson, readJson });
+const WORK = require("./server/work.js")({
+  sendJson,
+  readJson,
+  decodeEntities,
+  fetchPublicResponse,
+  readLimitedBytes,
+  archiveHome: () => STORE.paths().archive
+});
+const CHATS = require("./server/chats.js")({ sendJson, readJson, chatsHome: () => STORE.paths().chats });
 
 const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>此页不存在 · 言</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#fbfaf6;color:#292724;font-family:"Noto Serif SC","Songti SC","STSong",serif}@media(prefers-color-scheme:dark){body{background:#1e1c19;color:#e6e1d6}}main{text-align:center;letter-spacing:.06em}.seal{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #9b5540;color:#9b5540;font-size:18px;transform:rotate(-3deg)}h1{margin:18px 0 8px;font-weight:500;font-size:24px}p{margin:0 0 22px;opacity:.6;font-size:13px}a{color:#9b5540;text-decoration:none;font-size:13px;border-bottom:1px solid currentColor}</style></head><body><main><span class="seal">空</span><h1>此页不存在</h1><p>所寻之处并无一字</p><a href="/">回到案前</a></main></body></html>`;
 // 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
@@ -794,6 +804,7 @@ const server = http.createServer(async (req, res) => {
       (urlPath.startsWith("/api/work/") ||
         urlPath.startsWith("/api/archive/") ||
         urlPath.startsWith("/api/chats/") ||
+        urlPath.startsWith("/api/store/") ||
         urlPath === "/api/http") &&
       !trustedWorkRequest(req)
     )
@@ -828,7 +839,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/chats/load") return await CHATS.handleLoad(req, res);
     if (req.method === "POST" && req.url === "/api/chats/save") return await CHATS.handleSave(req, res);
     if (req.method === "POST" && req.url === "/api/chats/delete") return await CHATS.handleDelete(req, res);
-    if (req.method === "POST" && req.url === "/api/chats/meta") return await CHATS.handleMeta(req, res);
+    if (req.method === "POST" && req.url === "/api/store/config/load") return await STORE.handleConfigLoad(req, res);
+    if (req.method === "POST" && req.url === "/api/store/config/save") return await STORE.handleConfigSave(req, res);
+    if (req.method === "POST" && req.url === "/api/store/adopt") return await STORE.handleAdopt(req, res);
+    if (req.method === "POST" && req.url === "/api/store/move") return await STORE.handleMove(req, res);
     if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/api/archive/file")
       return await WORK.handleArchiveFile(req, res, new URL(req.url, `http://${HOST}`).searchParams);
     if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res);
@@ -862,7 +876,7 @@ server.listen(PORT, HOST, () => {
     console.log(`  （产出 support.js / app.css 失败：${error.message}）`);
   }
   console.log(
-    `\n  言 · 本机桥接${APP_VERSION ? `  v${APP_VERSION}` : ""}\n  页面    ${address}\n  执事    ${WORK.WORK_HOME}\n  卷宗    ${WORK.ARCHIVE_HOME}\n  对话    ${CHATS.CHATS_HOME}\n`
+    `\n  言 · 本机桥接${APP_VERSION ? `  v${APP_VERSION}` : ""}\n  页面    ${address}\n  执事    ${WORK.WORK_HOME}\n  存储    ${STORE.paths().root}\n`
   );
   console.log("  请保持此窗口开启；关闭后页面刷新、模型转发、联网与执事都会停止。按 Ctrl+C 退出。");
   console.log("  此窗口不会显示 API Key。\n");

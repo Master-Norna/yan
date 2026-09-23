@@ -7,18 +7,15 @@ const os = require("node:os");
 const { spawn, spawnSync } = require("node:child_process");
 const sandbox = require("./sandbox.js");
 
-module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes }) {
+module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes, archiveHome }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
   // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见，并按问而后行 / 审而后行 / 径行三档处理。
   // 请求带 sandbox: true 时再加一道沙箱（server/sandbox.js）：路径不出目录、机密文件不碰、指令先筛、环境变量去掉机密——在桥接这头守，页面与模型都绕不过
   const WORK_HOME = path.join(os.homedir(), "言", "工作");
   // 卷宗：对话没绑工作目录时，模型的工具就落在这里——写出的表格、文档都收在卷宗里；页面上的卷宗即这个目录的视图。
-  // 这里只是默认位置（测试用 YAN_ARCHIVE 指到临时目录）；用户在设置里改过的路径存在浏览器配置里，随每个请求的 root 传来，桥接不记状态。
+  // 位置在存储根里（archiveHome()，见 server/store.js），随每个请求的 root 传来的也认。
   // 脚本与中间文件放在卷宗里的隐藏目录 .草稿/<对话id>/，页面不列它
-  const ARCHIVE_HOME = process.env.YAN_ARCHIVE
-    ? path.resolve(String(process.env.YAN_ARCHIVE).replace(/^~(?=$|[\/])/, os.homedir()))
-    : path.join(os.homedir(), "言", "卷宗");
   const SCRATCH_DIR = ".草稿";
   const WORK_SHELL = process.platform === "win32" ? "PowerShell" : "sh";
   const WORK_OUTPUT_LIMIT = 20000,
@@ -952,7 +949,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
   }
   // 卷宗根：请求里带 root 就用它（须是完整限定的绝对路径，与工作目录同一套规矩），否则默认位置
   async function archiveRoot(raw) {
-    const root = String(raw || "").trim() ? resolveWorkdir(raw) : ARCHIVE_HOME;
+    const root = String(raw || "").trim() ? resolveWorkdir(raw) : archiveHome();
     const existing = await fs.promises.stat(root).catch(() => null);
     if (existing && !existing.isDirectory()) throw Error(`卷宗路径已被文件占用：${root}`);
     if (!existing)
@@ -1107,7 +1104,6 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
 
   return {
     WORK_HOME,
-    ARCHIVE_HOME,
     SCRATCH_DIR,
     WORK_SHELL,
     handleArchiveList,

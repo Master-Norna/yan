@@ -40,8 +40,10 @@ async function ensureLocalBridge() {
   if (connected) {
     if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
     renderHeader();
-    void refreshArchive();
-    void syncChatsWithDisk();
+    void syncConfigWithDisk().then(() => {
+      void refreshArchive();
+      void syncChatsWithDisk();
+    });
     if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
     toast("本机桥接已接通，联网可用");
   }
@@ -76,8 +78,11 @@ async function boot() {
   setupMarkdown();
   const candidates = ["", LOCAL_BRIDGE].filter((value, index, array) => array.indexOf(value) === index);
   await connectBridge(candidates);
-  // 桥接在线：对话正本在本机的对话目录里，先与它合一次再画页面
-  if (apiBase !== null) await syncChatsWithDisk();
+  // 桥接在线：配置与对话的正本在存储根里（默认 ~/.yan），先与它合一次再画页面
+  if (apiBase !== null) {
+    await syncConfigWithDisk();
+    await syncChatsWithDisk();
+  }
   if (apiBase === null) {
     bootstrap.notice = servedByBridge()
       ? "正在连接本机桥接…若始终连不上，请重新运行 start.cmd。"
@@ -100,6 +105,7 @@ async function boot() {
   setInterval(sweepConversations, 45000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) sweepConversations();
+    else void refreshConfigFromDisk();
   });
 }
 

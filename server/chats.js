@@ -1,24 +1,21 @@
 // 言 · 桥接的对话目录：对话像卷宗一样落在本机的一个目录里，一段对话一个 JSON 文件，页面经桥接读、写、删
 // 由 server.js 装配：require("./server/chats.js")({ sendJson, readJson })
-// 目录默认在 ~/言/对话（测试用 YAN_CHATS 指到临时目录）。文件名带标题便于翻看，末尾缀上按对话 id 算的短码来认身份：
-// 「关于滚动条·3f9a2c1b0e.json」；标题改了文件跟着改名，删对话就删文件。另有一份「设置.json」是浏览器里配置的镜像（不含 API Key），
-// 换浏览器或清了站点数据后开页可从它恢复
+// 目录在存储根里（chatsHome()，默认 ~/.yan/对话，见 server/store.js）。文件名带标题便于翻看，末尾缀上按对话 id 算的短码来认身份：
+// 「关于滚动条·3f9a2c1b0e.json」；标题改了文件跟着改名，删对话就删文件。配置不在这里，在存储根的 配置.json
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
 
-module.exports = function createChats({ sendJson, readJson }) {
-  const CHATS_HOME = process.env.YAN_CHATS
-    ? path.resolve(String(process.env.YAN_CHATS).replace(/^~(?=$|[\\/])/, os.homedir()))
-    : path.join(os.homedir(), "言", "对话");
+module.exports = function createChats({ sendJson, readJson, chatsHome }) {
+  // 旧版的设置镜像：迁进来的目录里可能还躺着一份，读目录时跳过它
   const META_FILE = "设置.json",
     FILE_LIMIT = 256 * 1024 * 1024;
-  // 请求可像卷宗一样带来自定义目录；留空仍用 YAN_CHATS / ~/言/对话 这个启动默认值。
+  // 请求可带来目录；留空用存储根里的对话目录
   function ensureDir(raw) {
     const value = String(raw || "").trim();
-    let home = CHATS_HOME;
+    let home = chatsHome();
     if (value) {
       const expanded = value.replace(/^~(?=$|[\\/])/, os.homedir());
       if (!path.isAbsolute(expanded)) throw Error("对话目录需填写完整的绝对路径");
@@ -71,9 +68,9 @@ module.exports = function createChats({ sendJson, readJson }) {
     if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("不是言的对话文件");
     return { id: String(conversation.id), savedAt: Number(data.savedAt) || 0, file: name, conversation };
   }
-  // 整个目录读回来：所有对话 + 设置镜像。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
+  // 整个目录读回来。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
   async function handleLoad(req, res) {
-    let home = CHATS_HOME;
+    let home = chatsHome();
     try {
       const body = await readJson(req);
       home = ensureDir(body.root);
@@ -97,11 +94,7 @@ module.exports = function createChats({ sendJson, readJson }) {
         }
       }
       for (const item of seen.values()) items.push(item);
-      let meta = null;
-      try {
-        meta = JSON.parse(fs.readFileSync(path.join(home, META_FILE), "utf8"));
-      } catch {}
-      sendJson(res, 200, { dir: home, items, meta: meta && typeof meta === "object" ? meta : null, skipped });
+      sendJson(res, 200, { dir: home, items, skipped });
     } catch (error) {
       sendJson(res, 500, { error: `对话目录不可用：${describe(error, home)}` });
     }
@@ -139,16 +132,5 @@ module.exports = function createChats({ sendJson, readJson }) {
       sendJson(res, 400, { error: `对话未能删除：${describe(error)}` });
     }
   }
-  async function handleMeta(req, res) {
-    try {
-      const body = await readJson(req);
-      if (!body.meta || typeof body.meta !== "object") throw Error("缺少设置内容");
-      const home = ensureDir(body.root);
-      writeAtomic(path.join(home, META_FILE), JSON.stringify({ 言: "设置", version: 1, savedAt: Date.now(), ...body.meta }));
-      sendJson(res, 200, { ok: true });
-    } catch (error) {
-      sendJson(res, 400, { error: `设置未能落盘：${describe(error)}` });
-    }
-  }
-  return { CHATS_HOME, handleLoad, handleSave, handleDelete, handleMeta };
+  return { handleLoad, handleSave, handleDelete };
 };

@@ -1,9 +1,10 @@
-// 对话的正本在本机的对话目录里（一段一个 JSON 文件）：旧版整份 localStorage 记录拆开迁走；改了会落盘、改名文件跟着改名、删了文件就没了；
-// 清空浏览器后从目录恢复对话与设置；导入旧版备份先按启动时同一套迁移规整
+// 存储根（测试里是 .tmp/.yan）：对话一段一个 JSON 文件落在 对话/，配置（含 API Key）落在 配置.json，几个浏览器共用。
+// 旧版整份 localStorage 记录拆开迁走；改了会落盘、改名文件跟着改名、删了文件就没了；清空浏览器后从存储根恢复对话与配置；
+// 另一个浏览器头一回碰上这个根，两边的模型配置并起来；存储位置换到别处整份拷过去、再换回来用回原来的；导入旧版备份先按启动时同一套迁移规整
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
-const CHATS = `${TMP}/chats`;
-const CUSTOM_CHATS = `${TMP}/chats-custom`;
+import { connect, check, sleep, PAGE, TMP, HOME, CHATS } from "./lib.mjs";
+const ELSEWHERE = `${TMP}/elsewhere`;
+const native = p => p.split("/").join(process.platform === "win32" ? "\\" : "/");
 const { send, evalJs, waitFor, close } = await connect();
 const filesAt = dir => (existsSync(dir) ? readdirSync(dir).filter(name => name.endsWith(".json") && name !== "设置.json") : []);
 const files = () => filesAt(CHATS);
@@ -12,7 +13,7 @@ const readRecords = `new Promise((resolve, reject) => { const q = indexedDB.open
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 // 上一个用例的页面离开时还会补写一两笔（对话、设置镜像），到这里它已经卸载了：把目录清干净再开始
-for (const dir of [CHATS, CUSTOM_CHATS])
+for (const dir of [CHATS, ELSEWHERE])
   for (let i = 0; i < 20 && existsSync(dir); i++) {
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -84,52 +85,52 @@ check(
   (await evalJs(`(async () => (await (${readRecords})).length)()`)) === 0
 );
 check("history shows it", await evalJs(`document.querySelector("#history").textContent.includes("数据库里的长对话")`));
-const readMirror = () => {
+const readConfig = (root = HOME) => {
   try {
-    return JSON.parse(readFileSync(`${CHATS}/设置.json`, "utf8"));
+    return JSON.parse(readFileSync(`${root}/配置.json`, "utf8"));
   } catch {
     return null;
   }
 };
 t = Date.now();
-while (Date.now() - t < 6000 && readMirror()?.memory?.items?.[0]?.text !== "用户爱喝茶") await sleep(150);
-const mirrored = readMirror();
+while (Date.now() - t < 6000 && readConfig()?.memory?.items?.[0]?.text !== "用户爱喝茶") await sleep(150);
+const config = readConfig();
 check(
-  "settings are mirrored to the directory without API keys",
-  mirrored?.settings?.name === "测" &&
-    mirrored?.profiles?.[0]?.model === "fake" &&
-    !("apiKey" in (mirrored?.profiles?.[0] || {})) &&
-    mirrored?.memory?.items?.[0]?.text === "用户爱喝茶",
-  JSON.stringify(mirrored && Object.keys(mirrored))
+  "the config lands in 配置.json with the API key (browsers share it)",
+  config?.settings?.name === "测" &&
+    config?.profiles?.[0]?.model === "fake" &&
+    config?.profiles?.[0]?.apiKey === "k" &&
+    config?.memory?.items?.[0]?.text === "用户爱喝茶",
+  JSON.stringify(config && Object.keys(config))
 );
-// ---- 设置里的对话目录：当前对话复制到新目录；切回默认后仍能继续用，旧目录不被删除
-const customNative = CUSTOM_CHATS.split("/").join(process.platform === "win32" ? "\\" : "/");
+// ---- 存储位置：换到别处，整份（对话与配置）拷过去；再换回来，用回原来的那份；拷走的那份原样留着
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(200);
 await evalJs(
-  `(i => { i.value = ${JSON.stringify(customNative)}; i.dispatchEvent(new Event("input")); })(document.querySelector("#settingChats")); true`
+  `(i => { i.value = ${JSON.stringify(native(ELSEWHERE))}; i.dispatchEvent(new Event("change")); })(document.querySelector("#settingStore")); true`
 );
+const moved = `${ELSEWHERE}/.yan`;
 t = Date.now();
-while (
-  Date.now() - t < 10000 &&
-  (!filesAt(CUSTOM_CHATS).some(name => name.startsWith("数据库里的长对话·")) || !existsSync(`${CUSTOM_CHATS}/设置.json`))
-)
+while (Date.now() - t < 10000 && !(filesAt(`${moved}/对话`).some(name => name.startsWith("数据库里的长对话·")) && readConfig(moved)))
   await sleep(150);
 check(
-  "changing the chats directory copies current conversations there",
-  filesAt(CUSTOM_CHATS).some(name => name.startsWith("数据库里的长对话·")) &&
-    (await evalJs(`__yanState().settings.chatsDir`)).toLowerCase() === customNative.toLowerCase(),
-  JSON.stringify(filesAt(CUSTOM_CHATS))
+  "moving the storage copies conversations and config under <place>/.yan",
+  filesAt(`${moved}/对话`).some(name => name.startsWith("数据库里的长对话·")) && readConfig(moved)?.profiles?.[0]?.apiKey === "k",
+  JSON.stringify(filesAt(`${moved}/对话`))
 );
-const customMirror = JSON.parse(readFileSync(`${CUSTOM_CHATS}/设置.json`, "utf8"));
+await waitFor(`(document.querySelector("#settingStore")?.value || "").toLowerCase().includes("elsewhere")`, 5000).catch(() => {});
 check(
-  "the custom chats directory receives the settings mirror without API keys",
-  customMirror.settings?.chatsDir?.toLowerCase() === customNative.toLowerCase() &&
-    !customMirror.profiles?.some(profile => "apiKey" in profile)
+  "settings now show the new place",
+  (await evalJs(`document.querySelector("#settingStore").value`)).toLowerCase().includes("elsewhere")
 );
-await evalJs(`(i => { i.value = ""; i.dispatchEvent(new Event("input")); })(document.querySelector("#settingChats")); true`);
-await waitFor(`!__yanState().settings.chatsDir`, 10000);
-check("clearing the custom chats directory restores the default without deleting the old copy", existsSync(CUSTOM_CHATS));
+await evalJs(
+  `(i => { i.value = ${JSON.stringify(native(TMP))}; i.dispatchEvent(new Event("change")); })(document.querySelector("#settingStore")); true`
+);
+await waitFor(`!(document.querySelector("#settingStore")?.value || "").toLowerCase().includes("elsewhere")`, 10000).catch(() => {});
+check(
+  "moving back uses the original storage and leaves the copy in place",
+  !(await evalJs(`document.querySelector("#settingStore").value`)).toLowerCase().includes("elsewhere") && existsSync(`${moved}/配置.json`)
+);
 await evalJs(`document.querySelector("#closeSettings").click(); true`);
 await sleep(200);
 // ---- 改名：文件跟着改名；对话内容变了：落盘的时间戳往前走
@@ -199,6 +200,54 @@ check(
     `document.querySelector("#history").textContent.includes("改过名的对话") && __yanState().settings.name === "测" && __yanState().memory.items[0]?.text === "用户爱喝茶" && __yanState().profiles[0]?.model === "fake"`
   )
 );
+// ---- 另一个浏览器：本地有自己的一套模型（带版本标记，是正常用过的），头一回碰上这个存储根——两边并起来，写回 配置.json
+await send("Page.navigate", { url: PAGE + "preview.html" });
+await sleep(400);
+const other = {
+  version: 5,
+  settings: { name: "另一处", theme: "light", inkMotion: "off", activeProfileId: "p2", autoTitle: false },
+  profiles: [
+    {
+      id: "p2",
+      source: "custom",
+      name: "另一个模型",
+      model: "other",
+      baseUrl: "http://127.0.0.1:8798/v1",
+      apiKey: "k2",
+      temperature: 0.7,
+      quota: "",
+      usedTokens: 0,
+      systemPrompt: ""
+    }
+  ],
+  library: [],
+  memory: {
+    enabled: true,
+    items: [{ id: "m2", text: "另一处记下的", createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z", source: null }]
+  },
+  drafts: {},
+  __yanStorage: { revision: 1, split: true, pendingDeletes: [] }
+};
+await evalJs(
+  `(async () => { localStorage.clear(); localStorage.setItem("yan-chat-v1", ${JSON.stringify(JSON.stringify(other))}); await new Promise(r => { const q = indexedDB.deleteDatabase("yan-chat-state-v1"); q.onsuccess = q.onerror = q.onblocked = r; }); return true; })()`
+);
+await send("Page.navigate", { url: PAGE });
+await sleep(1500);
+t = Date.now();
+while (Date.now() - t < 6000 && (readConfig()?.profiles || []).length < 2) await sleep(150);
+const joined = await evalJs(
+  `(s => ({ profiles: s.profiles.map(p => p.id).sort().join(), memory: s.memory.items.map(m => m.id).sort().join() }))(__yanState())`
+);
+check(
+  "a second browser meeting this storage merges its own models and memory with the shared config",
+  joined.profiles === "p1,p2" &&
+    joined.memory === "m1,m2" &&
+    (readConfig()?.profiles || [])
+      .map(p => p.id)
+      .sort()
+      .join() === "p1,p2",
+  JSON.stringify([joined, (readConfig()?.profiles || []).map(p => p.id)])
+);
 // ---- 删对话：即使旧保存已经发出、尚未返回，删除也等它收尾后最后落锤，文件不会复活
 await evalJs(`document.querySelector('[data-conversation="stored-chat"] .history-open').click(); true`);
 await sleep(150);
@@ -265,4 +314,5 @@ check(
   files().some(name => name.startsWith("旧备份里的对话·")),
   JSON.stringify(files())
 );
+rmSync(ELSEWHERE, { recursive: true, force: true });
 close();

@@ -172,8 +172,8 @@
  * @property {boolean} archiveRead
  * @property {number} toolRounds
  * @property {number} subRounds
- * @property {string} [archiveDir]
- * @property {string} [chatsDir]
+ * @property {string} [archiveDir] 旧版的卷宗目录；只在头一回迁入存储根时读一次，此后删去
+ * @property {string} [chatsDir] 旧版的对话目录；同上
  * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
  * @property {string} [lastConversationId]
  */
@@ -344,11 +344,14 @@ let stateDbPromise = null,
   stateDb = null;
 let metaRevision = 0,
   metaSaveWarned = false,
-  metaMirrorTimer = null;
+  configSaveTimer = null,
+  configSyncedAt = 0;
 // 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store.js 开头的说明）
 let chatsBroken = false,
   chatsSyncing = false,
   freshBrowser = false,
+  // 开页时浏览器里是一份没带版本标记的记录（更老的版本，或测试灌进来的）：与 配置.json 对齐时以它为准
+  localSeeded = false,
   chatSaveWarned = false,
   unloading = false;
 const dirtyChatIds = new Set(),
@@ -523,9 +526,9 @@ function normalizeMemory(memory) {
   };
 }
 // ---------- 记录怎么存 ----------
-// 记录分两半。「配置」（设置、模型、浏览器内卷宗、记忆、草稿）小而常改，整份存在 localStorage，桥接在线时另镜像一份到对话目录
-// （设置.json，不含 API Key），换浏览器、清了站点数据后开页可从它恢复。
-// 「对话」各自一份：桥接在线时落在本机的对话目录（设置里改过就用改过的，否则 bootstrap.work.chats；一段一个 JSON 文件，复制即备份）；
+// 记录分两半。「配置」（设置、模型含 API Key、浏览器内卷宗、记忆、草稿）小而常改：正本在存储根的 配置.json（默认 ~/.yan，
+// 几个浏览器共用这一份，见 syncConfigWithDisk），localStorage 里那份是缓存，也是没桥接时的暂存。
+// 「对话」各自一份：桥接在线时落在存储根的 对话/（bootstrap.work.chats；一段一个 JSON 文件，复制即备份）；
 // 没桥接时存在 IndexedDB 的 conversations 表，桥接接上后推到目录里去、表里的清掉——目录是正本，表只是没桥接时的暂存。
 // 保存只写改过的那几段（当前这段、正在生成的、明确标过脏的，且内容的哈希与上次写的不同）；另有一趟低频的全量巡检兜底，
 // 谁改了哪段没标到也逃不过。旧版把整份记录（含所有对话）塞在 localStorage / IndexedDB 的一条记录里，启动时拆开迁走。
@@ -604,7 +607,8 @@ function nextMetaRevision() {
   metaRevision = Math.max(Date.now(), metaRevision + 1);
   return metaRevision;
 }
-function writeMeta() {
+/** @param {{ disk?: boolean }} [options] disk: 顺带排一次写 配置.json（从磁盘刚取回的就不必再写回去） */
+function writeMeta({ disk = true } = {}) {
   const json = JSON.stringify({
     ...metaOf(),
     [STORAGE_META_KEY]: { revision: nextMetaRevision(), split: true, pendingDeletes: [...pendingChatDeletes] }
@@ -618,25 +622,24 @@ function writeMeta() {
       toast("设置未能存下（浏览器存储已满），请先导出备份");
     }
   }
-  scheduleMetaMirror();
+  if (disk) scheduleConfigSave();
 }
-// 设置镜像到对话目录：不带 API Key（与导出备份同一规矩），改动后两秒内写一次
-function metaForDisk() {
-  const meta = metaOf();
-  return { ...meta, profiles: meta.profiles.map(({ apiKey, ...rest }) => rest) };
+// ---------- 配置.json ----------
+// 改动后一秒内写一次（含 API Key：这是自己机器上的文件，几个浏览器共用一套模型配置靠的就是它；导出的备份仍不含）
+function scheduleConfigSave() {
+  if (apiBase === null) return;
+  clearTimeout(configSaveTimer);
+  configSaveTimer = setTimeout(saveConfigNow, 1000);
 }
-function scheduleMetaMirror() {
-  if (!chatsOnline()) return;
-  clearTimeout(metaMirrorTimer);
-  metaMirrorTimer = setTimeout(writeMetaMirror, 2000);
-}
-function writeMetaMirror() {
-  clearTimeout(metaMirrorTimer);
-  metaMirrorTimer = null;
-  if (!chatsOnline()) return;
-  const body = JSON.stringify({ root: chatsDir(), meta: metaForDisk() });
-  // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再镜像）
-  fetch(`${apiBase}/api/chats/meta`, {
+function saveConfigNow() {
+  clearTimeout(configSaveTimer);
+  configSaveTimer = null;
+  if (apiBase === null) return;
+  const savedAt = metaRevision || nextMetaRevision(),
+    body = JSON.stringify({ config: metaOf(), savedAt });
+  configSyncedAt = Math.max(configSyncedAt, savedAt);
+  // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再推）
+  fetch(`${apiBase}/api/store/config/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
@@ -644,16 +647,97 @@ function writeMetaMirror() {
     signal: unloading ? undefined : AbortSignal.timeout(20000)
   }).catch(() => {});
 }
+// 磁盘上的一份配置换进来：设置、模型、卷宗、记忆、草稿；这台浏览器自己的对话目录暂存与墓碑不动
+function adoptConfig(config, savedAt) {
+  const meta = normalizeStoreData({ ...config, conversations: [] });
+  store.settings = meta.settings;
+  store.profiles = meta.profiles;
+  store.library = meta.library;
+  store.memory = meta.memory;
+  store.drafts = meta.drafts;
+  if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+  metaRevision = Math.max(metaRevision, savedAt);
+  configSyncedAt = savedAt;
+  writeMeta({ disk: false });
+  applyAppearance();
+  renderHeader();
+  renderHistory();
+  renderQuota();
+  if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
+}
+// 这台浏览器头一回碰上这个存储根、两边又各有一套：并起来——同一 id 的以磁盘上的为准，这边独有的模型、记忆、卷宗、草稿补进去
+function mergeConfig(config) {
+  const disk = normalizeStoreData({ ...config, conversations: [] }),
+    union = (theirs, mine) => [...theirs, ...mine.filter(item => !theirs.some(other => other.id === item.id))];
+  store.settings = { ...store.settings, ...disk.settings };
+  store.profiles = union(disk.profiles, store.profiles);
+  store.library = union(disk.library, store.library);
+  store.memory = { enabled: disk.memory.enabled, items: union(disk.memory.items, store.memory.items) };
+  store.drafts = { ...store.drafts, ...disk.drafts };
+  if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+}
+const STORE_ROOT_KEY = "yan-store-root";
+// 与 配置.json 对一次：开页接上桥接时、桥接断了又接上时、页面从后台切回来时。
+// 存储根头一回立起来：先把旧的对话与卷宗拷进来（旧处留着）。然后看两边谁新：
+// 全新的浏览器取磁盘那份；灌进来的（没带版本标记的旧记录）以浏览器为准；这台浏览器头一回碰上这个根就合并；其余按时间戳，新的为准
+async function syncConfigWithDisk() {
+  if (apiBase === null) return;
+  const info = bootstrap.store || {};
+  try {
+    // 根头一回立起来，或这台浏览器还记着旧版自己的对话 / 卷宗目录（另一个浏览器先立了根）：把旧的拷进来，只补缺的、不覆盖
+    if (info.fresh || store.settings.chatsDir || store.settings.archiveDir) {
+      const moved = await bridge(
+        "/api/store/adopt",
+        { chatsDir: store.settings.chatsDir || "", archiveDir: store.settings.archiveDir || "" },
+        AbortSignal.timeout(600000)
+      );
+      info.fresh = false;
+      if (moved.chats || moved.archive) toast(`旧的对话与卷宗已拷进 ${pathTail(info.root || "")}；旧处原样留着`);
+    }
+    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000)),
+      local = readLocalStoreRecord();
+    let met = "";
+    try {
+      met = localStorage.getItem(STORE_ROOT_KEY) || "";
+    } catch {}
+    delete store.settings.chatsDir;
+    delete store.settings.archiveDir;
+    if (!disk.config || localSeeded) {
+      writeMeta({ disk: false });
+      saveConfigNow();
+    } else if (freshBrowser) adoptConfig(disk.config, disk.savedAt);
+    else if (met !== (info.root || "")) {
+      mergeConfig(disk.config);
+      writeMeta({ disk: false });
+      saveConfigNow();
+      renderHeader();
+      renderQuota();
+    } else if ((local?.revision || 0) > disk.savedAt) saveConfigNow();
+    else if (disk.savedAt > configSyncedAt) adoptConfig(disk.config, disk.savedAt);
+    configSyncedAt = Math.max(configSyncedAt, Number(disk.savedAt) || 0);
+    freshBrowser = localSeeded = false;
+    try {
+      localStorage.setItem(STORE_ROOT_KEY, info.root || "");
+    } catch {}
+  } catch (error) {
+    toast(`配置未能与存储目录对齐：${String(error.message || error).slice(0, 60)}`);
+  }
+}
+// 从后台切回来：另一个浏览器可能改过配置，磁盘上的更新就换进来（这边正有没写下去的改动时不换）
+async function refreshConfigFromDisk() {
+  if (apiBase === null || configSaveTimer) return;
+  try {
+    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
+    if (disk.config && disk.savedAt > configSyncedAt && !configSaveTimer) adoptConfig(disk.config, disk.savedAt);
+  } catch {}
+}
 // 对话目录可用：桥接在线、桥接报了目录、上次读它没出错
 function chatsOnline() {
   return apiBase !== null && !!chatsDir() && !chatsBroken;
 }
 function chatsDir() {
   if (apiBase === null) return "";
-  const custom = (store.settings.chatsDir || "").trim();
-  // 页面脚本会随刷新热更新，桥接模块却要重启才会更新。旧桥接不认识 root 时先继续用默认目录，
-  // 但保留用户选过的路径；重启成支持 customChats 的桥接后自动切过去同步，不能静默假装已经切换。
-  return (custom && bootstrap.work?.customChats === true ? custom : "") || bootstrap.work?.chats || "";
+  return bootstrap.work?.chats || "";
 }
 // 标记这段对话有改动（改名、置顶、后台一答收尾这些不在「当前对话」上的改动要亲手标；当前这段与正在生成的自动算在内）
 function markDirty(id) {
@@ -791,8 +875,8 @@ function flushOnUnload() {
   unloading = true;
   clearTimeout(saveTimer);
   saveTimer = null;
-  writeMeta();
-  if (metaMirrorTimer) writeMetaMirror();
+  writeMeta({ disk: false });
+  if (configSaveTimer) saveConfigNow();
   const db = stateDb;
   if (!db) return;
   const records = [];
@@ -836,6 +920,7 @@ function adoptRecord(record) {
 async function hydrateStore() {
   const local = readLocalStoreRecord();
   freshBrowser = !local;
+  localSeeded = !!local && !local.managed;
   for (const id of local?.pendingDeletes || []) pendingChatDeletes.add(id);
   let db = null;
   try {
@@ -895,16 +980,13 @@ async function hydrateStore() {
   } catch {}
 }
 // 与对话目录合一次：开页接上桥接时、桥接中途断了又接上时都来一遍。
-// 目录里没有的推过去，目录里更新的换进来（正在生成的、改了还没存的不换），两边一样的把表里的暂存清掉；先前没删成的补删；
-// 全新的浏览器（localStorage 空着）从设置镜像里把配置捡回来
+// 目录里没有的推过去，目录里更新的换进来（正在生成的、改了还没存的不换），两边一样的把表里的暂存清掉；先前没删成的补删
 async function syncChatsWithDisk() {
   if (apiBase === null || !chatsDir() || chatsSyncing) return;
   chatsSyncing = true;
   try {
-    const selectedDir = (store.settings.chatsDir || "").trim(),
-      data = await bridge("/api/chats/load", { root: chatsDir() }, AbortSignal.timeout(120000));
+    const data = await bridge("/api/chats/load", { root: chatsDir() }, AbortSignal.timeout(120000));
     chatsBroken = false;
-    if (selectedDir && data.dir && bootstrap.work?.customChats === true) store.settings.chatsDir = data.dir;
     for (const id of [...pendingChatDeletes]) {
       // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
       if (deletedChatIds.has(id)) continue;
@@ -954,22 +1036,7 @@ async function syncChatsWithDisk() {
       }
     for (const id of settled) void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
     if (push.size) flushConversations(push, { force: true });
-    if (freshBrowser && data.meta && typeof data.meta === "object") {
-      freshBrowser = false;
-      const meta = normalizeStoreData({ ...data.meta, conversations: [] });
-      store.settings = { ...meta.settings, activeProfileId: store.settings.activeProfileId || meta.settings.activeProfileId };
-      // 设置镜像可能连同整个目录被复制到了新位置；用户这次明确选的目录才是准的，不能被镜像里的旧绝对路径带回去。
-      if (selectedDir) store.settings.chatsDir = bootstrap.work?.customChats === true ? data.dir || selectedDir : selectedDir;
-      else delete store.settings.chatsDir;
-      store.profiles = meta.profiles;
-      store.library = meta.library;
-      store.memory = meta.memory;
-      store.drafts = meta.drafts;
-      if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
-      applyAppearance();
-      changed = true;
-    }
-    writeMeta();
+    writeMeta({ disk: false });
     if (changed) {
       renderHeader();
       renderHistory();
@@ -1908,8 +1975,10 @@ async function ensureLocalBridge() {
   if (connected) {
     if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
     renderHeader();
-    void refreshArchive();
-    void syncChatsWithDisk();
+    void syncConfigWithDisk().then(() => {
+      void refreshArchive();
+      void syncChatsWithDisk();
+    });
     if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
     toast("本机桥接已接通，联网可用");
   }
@@ -1944,8 +2013,11 @@ async function boot() {
   setupMarkdown();
   const candidates = ["", LOCAL_BRIDGE].filter((value, index, array) => array.indexOf(value) === index);
   await connectBridge(candidates);
-  // 桥接在线：对话正本在本机的对话目录里，先与它合一次再画页面
-  if (apiBase !== null) await syncChatsWithDisk();
+  // 桥接在线：配置与对话的正本在存储根里（默认 ~/.yan），先与它合一次再画页面
+  if (apiBase !== null) {
+    await syncConfigWithDisk();
+    await syncChatsWithDisk();
+  }
   if (apiBase === null) {
     bootstrap.notice = servedByBridge()
       ? "正在连接本机桥接…若始终连不上，请重新运行 start.cmd。"
@@ -1968,6 +2040,7 @@ async function boot() {
   setInterval(sweepConversations, 45000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) sweepConversations();
+    else void refreshConfigFromDisk();
   });
 }
 
@@ -2927,10 +3000,10 @@ function workMode() {
   const c = currentConversation();
   return c ? isWork(c) : !!(store.settings.pendingWorkdir || "").trim();
 }
-// 卷宗目录：设置里改过就用改过的，否则桥接给的默认位置；没绑目录的对话，工具都落在这里
+// 卷宗目录：存储根里的 卷宗/（桥接报来的位置）；没绑目录的对话，工具都落在这里
 function archiveDir() {
   if (apiBase === null) return "";
-  return (store.settings.archiveDir || "").trim() || bootstrap.work?.archive || "";
+  return bootstrap.work?.archive || "";
 }
 // 言里的草稿：卷宗下的隐藏目录 .草稿/<对话id>/，脚本与中间文件放那里，成品放根目录；卷宗页不列它
 /** @param {Conversation} c */
@@ -6617,7 +6690,7 @@ function renderLibrary() {
   const lead = $("#libraryLead");
   if (lead)
     lead.innerHTML = disk
-      ? `常用的文件收于此处；置于案上，便随下一问送出。卷宗即本机的一个目录：<code title="${escapeHtml(archiveDir())}">${escapeHtml(archiveDir())}</code>（可在设置里更换）；未绑目录的对话里，模型写出的文件亦落于此。${
+      ? `常用的文件收于此处；置于案上，便随下一问送出。卷宗即本机的一个目录：<code title="${escapeHtml(archiveDir())}">${escapeHtml(archiveDir())}</code>（在存储位置里，可在设置里更换）；未绑目录的对话里，模型写出的文件亦落于此。${
           archiveScratch?.count
             ? `<span class="library-scratch">草稿 ${archiveScratch.count} 处 · ${formatFileSize(archiveScratch.bytes)}<button type="button" id="libraryCleanScratch" title="清理模型留下的脚本与中间文件（${escapeHtml(bootstrap.work?.scratch || ".草稿")}）">清理</button></span>`
             : ""
@@ -10167,20 +10240,15 @@ function renderSettings() {
     host.classList.add("tab-fade");
   }
 }
-function chatsDirectorySettingsHtml() {
+// 存储位置：对话、卷宗、配置（含模型配置）都在这一个 .yan 目录里，几个浏览器共用；换位置时整份拷过去，旧处留着
+function storageSettingsHtml() {
   if (apiBase === null) return "";
-  const value = store.settings.chatsDir || "",
-    fallback = bootstrap.work?.chats || "";
-  if (bootstrap.work?.customChats !== true)
-    return `<div class="setting-row"><div class="setting-copy"><strong>对话目录</strong><small>当前桥接是更新前启动的，尚不能切换目录；请关闭并重新运行 start.cmd。${value ? "已记下所选路径，重启后会自动同步。" : "重启后即可选择。"}</small></div><div class="setting-actions setting-directory"><input class="field" spellcheck="false" value="${escapeHtml(value)}" placeholder="${escapeHtml(fallback)}" disabled></div></div>`;
-  return `<div class="setting-row"><div class="setting-copy"><strong>对话目录</strong><small>一段对话一个 JSON 文件；更换后会把当前对话同步到新目录，原目录不自动删除。留空则用默认 ${escapeHtml(fallback)}</small></div><div class="setting-actions setting-directory"><input id="settingChats" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(fallback)}" value="${escapeHtml(value)}"><button id="settingChatsPick" class="outline-btn" type="button">选择…</button></div></div>`;
+  const info = bootstrap.store || {},
+    parent = info.parent || "";
+  return `<div class="setting-row"><div class="setting-copy"><strong>存储位置</strong><small>对话、卷宗与配置（含模型配置）都在 <code title="${escapeHtml(info.root || "")}">${escapeHtml(info.root || "")}</code> 里，几个浏览器共用这一份。填一个目录，就在它下面立 .yan 并把整份拷过去，旧处原样留着；那里已有言的数据则直接用它</small></div><div class="setting-actions setting-directory"><input id="settingStore" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(parent)}" value="${escapeHtml(parent)}"><button id="settingStorePick" class="outline-btn" type="button">选择…</button></div></div>`;
 }
 function generalSettingsHtml() {
-  return `<h2>通用</h2><p class="settings-lead">数据只存于本机；桥接在线时，对话与卷宗可落到你指定的目录。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div>${
-    apiBase !== null
-      ? `${chatsDirectorySettingsHtml()}<div class="setting-row"><div class="setting-copy"><strong>卷宗目录</strong><small>卷宗在本机的位置；未绑目录的对话里，模型写出的文件与草稿皆落于此。留空则用默认 ${escapeHtml(bootstrap.work?.archive || "")}</small></div><div class="setting-actions setting-directory"><input id="settingArchive" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(bootstrap.work?.archive || "")}" value="${escapeHtml(store.settings.archiveDir || "")}"><button id="settingArchivePick" class="outline-btn" type="button">选择…</button></div></div>`
-      : ""
-  }<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
+  return `<h2>通用</h2><p class="settings-lead">数据只存于本机；桥接在线时，对话、卷宗与配置都落在存储位置里。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div>${storageSettingsHtml()}<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
 }
 // 工具：沙箱、三档指令权限、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
 function toolsSettingsHtml() {
@@ -10331,85 +10399,57 @@ function bindSettingsEvents() {
       store.settings[key] = !text ? 0 : value >= 1 ? value : fallback;
       saveStoreSoon();
     });
-  // 对话目录：切换后以浏览器里的当前对话为准同步一份过去；旧目录不删，避免一次改路径就造成不可恢复的数据移动。
-  const chatsInput = $("#settingChats");
-  let chatsTimer = null;
-  const commitChats = value => {
-    clearTimeout(chatsTimer);
-    chatsTimer = setTimeout(async () => {
+  // 存储位置：桥接把整份拷到新处（那里已有言的数据就直接用），页面换上新路径后把对话与配置对一遍、卷宗重翻；旧处不删
+  const storeInput = $("#settingStore");
+  let storeTimer = null;
+  const commitStore = value => {
+    clearTimeout(storeTimer);
+    storeTimer = setTimeout(async () => {
       const next = String(value || "").trim();
-      let prepared = "";
-      if (next)
-        try {
-          prepared = (await bridge("/api/work/prepare", { workdir: next }, AbortSignal.timeout(8000))).workdir;
-        } catch (error) {
-          return toast(`对话目录不可用：${String(error.message || error).slice(0, 80)}`);
-        }
-      if (prepared === (store.settings.chatsDir || "")) return;
-      if (prepared) store.settings.chatsDir = prepared;
-      else delete store.settings.chatsDir;
-      if (chatsInput && document.activeElement !== chatsInput) chatsInput.value = prepared;
+      if (!next || next === (bootstrap.store?.parent || "")) return;
+      let data;
+      try {
+        data = await bridge("/api/store/move", { parent: next }, AbortSignal.timeout(600000));
+      } catch (error) {
+        return toast(String(error.message || error).slice(0, 80));
+      }
+      if (!data.moved) return;
+      bootstrap.store = { root: data.root, parent: data.parent, fresh: false };
+      bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive };
       chatsBroken = false;
       chatHashes.clear();
       chatStamps.clear();
       chatDiskWrites.clear();
-      writeMeta();
+      // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
+      if (data.adopted) {
+        configSyncedAt = 0;
+        await refreshConfigFromDisk();
+      } else saveConfigNow();
       await syncChatsWithDisk();
       const ids = store.conversations.map(conversation => conversation.id);
       flushConversations(ids, { force: true });
-      await Promise.allSettled(ids.map(id => chatWritePromises.get(id)).filter(Boolean));
-      writeMetaMirror();
-      toast(prepared ? `对话已同步到 ${pathTail(prepared)}；原目录仍保留` : "对话目录已恢复默认位置；原目录仍保留");
-    }, 500);
-  };
-  chatsInput?.addEventListener("input", e => commitChats(e.target.value));
-  $("#settingChatsPick")?.addEventListener("click", async () => {
-    const button = $("#settingChatsPick");
-    button.disabled = true;
-    try {
-      const data = await bridge("/api/work/pick", { current: chatsInput.value.trim() || chatsDir() }, AbortSignal.timeout(300000));
-      if (data.path) {
-        chatsInput.value = data.path;
-        commitChats(data.path);
-      }
-    } catch (error) {
-      toast(String(error.message || error).slice(0, 80));
-    } finally {
-      button.disabled = false;
-    }
-  });
-  // 卷宗目录：改完立刻按新目录重新翻卷宗；路径不合法（相对路径、整个磁盘）桥接会拒绝，提示后仍保留输入以便改正
-  const archiveInput = $("#settingArchive");
-  let archiveTimer = null;
-  const commitArchive = value => {
-    clearTimeout(archiveTimer);
-    archiveTimer = setTimeout(async () => {
-      const next = String(value || "").trim();
-      if (next === (store.settings.archiveDir || "")) return;
-      if (next)
-        try {
-          const prepared = await bridge("/api/work/prepare", { workdir: next }, AbortSignal.timeout(8000));
-          store.settings.archiveDir = prepared.workdir;
-          if (archiveInput && document.activeElement !== archiveInput) archiveInput.value = prepared.workdir;
-        } catch (error) {
-          return toast(`卷宗目录不可用：${String(error.message || error).slice(0, 80)}`);
-        }
-      else delete store.settings.archiveDir;
-      saveStore();
       archiveEntries = null;
       await refreshArchive();
-      toast(next ? `卷宗已改到 ${pathTail(store.settings.archiveDir)}` : "卷宗已恢复默认位置");
-    }, 500);
+      try {
+        localStorage.setItem(STORE_ROOT_KEY, data.root);
+      } catch {}
+      renderSettings();
+      toast(`存储已换到 ${pathTail(data.root)}；${data.adopted ? "用的是那里原有的数据" : "旧处原样留着"}`);
+    }, 600);
   };
-  archiveInput?.addEventListener("input", e => commitArchive(e.target.value));
-  $("#settingArchivePick")?.addEventListener("click", async () => {
-    const button = $("#settingArchivePick");
+  storeInput?.addEventListener("change", e => commitStore(e.target.value));
+  $("#settingStorePick")?.addEventListener("click", async () => {
+    const button = $("#settingStorePick");
     button.disabled = true;
     try {
-      const data = await bridge("/api/work/pick", { current: archiveInput.value.trim() || archiveDir() }, AbortSignal.timeout(300000));
+      const data = await bridge(
+        "/api/work/pick",
+        { current: storeInput.value.trim() || bootstrap.store?.parent || "" },
+        AbortSignal.timeout(300000)
+      );
       if (data.path) {
-        archiveInput.value = data.path;
-        commitArchive(data.path);
+        storeInput.value = data.path;
+        commitStore(data.path);
       }
     } catch (error) {
       toast(String(error.message || error).slice(0, 80));

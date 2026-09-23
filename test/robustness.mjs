@@ -1,14 +1,13 @@
 // 健壮性：截断的参数不许写文件（只读工具照跑）、缺必填项不执行、SSE 末尾没换行也不丢字与 usage、拟题失败下次再试、
 // 卷宗里删掉的成品在答末标成「已移出卷宗」
 import { existsSync, rmSync, unlinkSync } from "node:fs";
-import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
-const ARCHIVE = `${TMP}/archive3`;
+import { connect, check, sleep, PAGE, ARCHIVE } from "./lib.mjs";
 rmSync(ARCHIVE, { recursive: true, force: true });
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: true, archiveDir: ${JSON.stringify(ARCHIVE.split("/").join(process.platform === "win32" ? "\\" : "/"))} }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: true }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);

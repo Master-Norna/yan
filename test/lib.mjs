@@ -10,7 +10,10 @@ export const TMP = path
   .split(path.sep)
   .join("/");
 export const WORK = `${TMP}/work`;
-export const ARCHIVE = `${TMP}/archive`;
+// 测试桥接的存储根（YAN_HOME）：对话、卷宗、配置都在这里
+export const HOME = `${TMP}/.yan`;
+export const ARCHIVE = `${HOME}/卷宗`;
+export const CHATS = `${HOME}/对话`;
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const check = (label, ok, detail = "") => console.log(`${ok ? "PASS" : "FAIL"} ${label}${detail ? " — " + detail : ""}`);
 

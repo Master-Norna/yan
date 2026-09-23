@@ -14,10 +14,10 @@ function workMode() {
   const c = currentConversation();
   return c ? isWork(c) : !!(store.settings.pendingWorkdir || "").trim();
 }
-// 卷宗目录：设置里改过就用改过的，否则桥接给的默认位置；没绑目录的对话，工具都落在这里
+// 卷宗目录：存储根里的 卷宗/（桥接报来的位置）；没绑目录的对话，工具都落在这里
 function archiveDir() {
   if (apiBase === null) return "";
-  return (store.settings.archiveDir || "").trim() || bootstrap.work?.archive || "";
+  return bootstrap.work?.archive || "";
 }
 // 言里的草稿：卷宗下的隐藏目录 .草稿/<对话id>/，脚本与中间文件放那里，成品放根目录；卷宗页不列它
 /** @param {Conversation} c */

@@ -1,12 +1,11 @@
 // 言里的指令也走请示条：首条非只读指令须确认；按「径行」即把整段对话切成径行，下一答不再问
-import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
+import { connect, check, sleep, PAGE } from "./lib.mjs";
 
-const ARCHIVE = `${TMP}/chat-command-archive`.split("/").join(process.platform === "win32" ? "\\" : "/");
 const { send, evalJs, waitFor, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(500);
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false, archiveDir: ${JSON.stringify(ARCHIVE)} }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], memory: { enabled: true, items: [] }, drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], memory: { enabled: true, items: [] }, drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(900);

@@ -229,7 +229,7 @@ function renderLibrary() {
   const lead = $("#libraryLead");
   if (lead)
     lead.innerHTML = disk
-      ? `常用的文件收于此处；置于案上，便随下一问送出。卷宗即本机的一个目录：<code title="${escapeHtml(archiveDir())}">${escapeHtml(archiveDir())}</code>（可在设置里更换）；未绑目录的对话里，模型写出的文件亦落于此。${
+      ? `常用的文件收于此处；置于案上，便随下一问送出。卷宗即本机的一个目录：<code title="${escapeHtml(archiveDir())}">${escapeHtml(archiveDir())}</code>（在存储位置里，可在设置里更换）；未绑目录的对话里，模型写出的文件亦落于此。${
           archiveScratch?.count
             ? `<span class="library-scratch">草稿 ${archiveScratch.count} 处 · ${formatFileSize(archiveScratch.bytes)}<button type="button" id="libraryCleanScratch" title="清理模型留下的脚本与中间文件（${escapeHtml(bootstrap.work?.scratch || ".草稿")}）">清理</button></span>`
             : ""

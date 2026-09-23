@@ -1,13 +1,12 @@
-// 言 / 行合一：没绑目录的对话是言——桥接在线时工具落在卷宗目录（设置里改过的位置），脚本落在隐藏的草稿目录、非只读指令先问；
+// 言 / 行合一：没绑目录的对话是言——桥接在线时工具落在卷宗目录（存储根里的 卷宗/），脚本落在隐藏的草稿目录、非只读指令先问；
 // 中途绑上目录即为行，提示词随之而变，解开又回到言；卷宗页面即目录的视图，不列草稿
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { connect, check, sleep, PAGE, WORK, TMP } from "./lib.mjs";
-const ARCHIVE = `${TMP}/archive2`;
+import { connect, check, sleep, PAGE, WORK, ARCHIVE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false, archiveDir: ${JSON.stringify(ARCHIVE.split("/").join(process.platform === "win32" ? "\\" : "/"))} }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
@@ -197,8 +196,8 @@ check(
   await evalJs(`document.querySelector('#libraryGrid [data-library-disk="报表.csv"] strong').textContent === "报表.csv"`)
 );
 check(
-  "library lead names the configured directory",
-  (await evalJs(`document.querySelector("#libraryLead").textContent`)).includes("archive2")
+  "library lead names the archive inside the storage root",
+  (await evalJs(`document.querySelector("#libraryLead").textContent`)).includes(".yan")
 );
 check(
   "scratch is hidden from the library but counted in the lead",
@@ -238,20 +237,12 @@ await waitFor(`!document.querySelector("#confirmModal").classList.contains("hidd
 await evalJs(`document.querySelector("#confirmOk").click(); true`);
 await waitFor(`!document.querySelector('#libraryGrid [data-library-disk="报表.csv"]')`);
 check("remove deletes the file on disk", !existsSync(`${ARCHIVE}/报表.csv`));
-// 设置里的卷宗目录：改到另一处后，卷宗页跟着换
+// 设置里的存储位置：卷宗就在它下面
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(300);
 check(
-  "settings show the archive directory",
-  (await evalJs(`document.querySelector("#settingArchive")?.value || ""`)).toLowerCase().includes("archive2")
-);
-await evalJs(
-  `(i => { i.value = ${JSON.stringify(`${TMP}/archive3`.split("/").join(process.platform === "win32" ? "\\" : "/"))}; i.dispatchEvent(new Event("input")); })(document.querySelector("#settingArchive")); true`
-);
-await sleep(1200);
-check(
-  "changed directory is stored and created",
-  (await evalJs(`(__yanState().settings.archiveDir || "").toLowerCase()`)).includes("archive3") && existsSync(`${TMP}/archive3`)
+  "settings show the storage location",
+  (await evalJs(`document.querySelector("#settingStore")?.value || ""`)).toLowerCase().includes(".tmp")
 );
 // 页内起手的拖动（卷宗里的图、案上的附件）不当作外来文件：不掀落件幕布；拖完之后外来的照常
 await evalJs(`document.querySelector("#closeSettings")?.click(); true`);

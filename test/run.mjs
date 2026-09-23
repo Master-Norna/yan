@@ -155,8 +155,7 @@ try {
       env: {
         ...process.env,
         YAN_PORT: String(SECURITY_PORT),
-        YAN_ARCHIVE: path.join(TMP, "archive-security"),
-        YAN_CHATS: path.join(TMP, "chats-security"),
+        YAN_HOME: path.join(TMP, "security", ".yan"),
         YAN_TEST_SECRET_TOKEN: "leak-me"
       }
     });
@@ -168,10 +167,10 @@ try {
     .filter(wants)
     .sort();
   if (specs.length) {
-    // 卷宗目录指到临时目录，别把测试文件写进用户的 ~/言/卷宗
+    // 存储根指到临时目录，别把测试的对话、卷宗与配置写进用户的 ~/.yan
     start(process.execPath, ["server.js"], {
       cwd: ROOT,
-      env: { ...process.env, YAN_PORT: String(BRIDGE_PORT), YAN_ARCHIVE: path.join(TMP, "archive"), YAN_CHATS: path.join(TMP, "chats") }
+      env: { ...process.env, YAN_PORT: String(BRIDGE_PORT), YAN_HOME: path.join(TMP, ".yan") }
     });
     start(process.execPath, [path.join(HERE, "fake-llm.mjs")], { cwd: ROOT });
     await waitPort(BRIDGE_PORT);
@@ -196,15 +195,14 @@ try {
         close();
       } catch {}
       tryRm(path.join(TMP, "work"));
-      tryRm(path.join(TMP, "archive"));
-      // 对话目录也清：上一个用例落盘的对话不能混进下一个。旧页面离开时补写的那一笔可能正落在桥接手里，
+      // 存储根整个清掉（对话、卷宗、配置）：上一个用例落盘的不能混进下一个。旧页面离开时补写的那一笔可能正落在桥接手里，
       // 删的时候文件还占着或刚写出来；删不干净就等等再删，直到目录真的没了
-      for (let i = 0; i < 20 && existsSync(path.join(TMP, "chats")); i++) {
-        tryRm(path.join(TMP, "chats"));
-        if (existsSync(path.join(TMP, "chats"))) await sleep(150);
+      for (let i = 0; i < 20 && existsSync(path.join(TMP, ".yan")); i++) {
+        tryRm(path.join(TMP, ".yan"));
+        if (existsSync(path.join(TMP, ".yan"))) await sleep(150);
       }
       await sleep(400);
-      tryRm(path.join(TMP, "chats"));
+      tryRm(path.join(TMP, ".yan"));
       await runSpec(spec);
     }
   }

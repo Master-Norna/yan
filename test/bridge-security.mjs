@@ -52,6 +52,7 @@ for (const publicPath of [
 for (const privatePath of [
   "/server.js",
   "/server/chats.js",
+  "/server/store.js",
   "/test/bridge-security.mjs",
   "/prompts/README.md",
   "/.git/config",
@@ -156,7 +157,7 @@ check(
   `${r.status} ${r.data?.error}`
 );
 // ---- 卷宗接口
-const ARCHIVE = `${TMP}/archive-security`;
+const ARCHIVE = `${TMP}/security/.yan/卷宗`;
 r = await post("/api/archive/put", { name: "../escaped.txt", data: "data:text/plain;base64,aGk=" });
 check(
   "archive put keeps only the basename",
@@ -486,6 +487,23 @@ check("screen: a harmless command passes", r.status === 200 && r.data.why === nu
   check("background: stop ends it", r.status === 200 && !r.data.running, JSON.stringify(r.data));
   r = await post("/api/work/check", { id: "bg-nope" });
   check("background: an unknown id is explained", r.status === 400 && /没有编号/.test(r.data?.error || ""), JSON.stringify(r.data));
+}
+// ---- 存储目录：配置（含 API Key）只给本站页面读写；存进去的原样读回来
+{
+  const outsider = await fetch(`${BASE}/api/store/config/load`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://evil.example" },
+    body: "{}"
+  });
+  check("store config is refused to other origins", outsider.status === 403, String(outsider.status));
+  r = await post("/api/store/config/save", { config: { settings: { name: "测" }, profiles: [{ id: "p", apiKey: "k" }] }, savedAt: 42 });
+  check("store config saves", r.status === 200 && r.data.savedAt === 42, JSON.stringify(r.data));
+  r = await post("/api/store/config/load", {});
+  check(
+    "store config reads back what was saved, key included",
+    r.status === 200 && r.data.savedAt === 42 && r.data.config?.profiles?.[0]?.apiKey === "k",
+    JSON.stringify(r.data)
+  );
 }
 rmSync(ARCHIVE, { recursive: true, force: true });
 rmSync(WORK, { recursive: true, force: true });

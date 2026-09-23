@@ -169,8 +169,8 @@
  * @property {boolean} archiveRead
  * @property {number} toolRounds
  * @property {number} subRounds
- * @property {string} [archiveDir]
- * @property {string} [chatsDir]
+ * @property {string} [archiveDir] 旧版的卷宗目录；只在头一回迁入存储根时读一次，此后删去
+ * @property {string} [chatsDir] 旧版的对话目录；同上
  * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
  * @property {string} [lastConversationId]
  */
@@ -341,11 +341,14 @@ let stateDbPromise = null,
   stateDb = null;
 let metaRevision = 0,
   metaSaveWarned = false,
-  metaMirrorTimer = null;
+  configSaveTimer = null,
+  configSyncedAt = 0;
 // 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store.js 开头的说明）
 let chatsBroken = false,
   chatsSyncing = false,
   freshBrowser = false,
+  // 开页时浏览器里是一份没带版本标记的记录（更老的版本，或测试灌进来的）：与 配置.json 对齐时以它为准
+  localSeeded = false,
   chatSaveWarned = false,
   unloading = false;
 const dirtyChatIds = new Set(),

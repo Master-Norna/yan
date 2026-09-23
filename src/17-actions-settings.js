@@ -150,20 +150,15 @@ function renderSettings() {
     host.classList.add("tab-fade");
   }
 }
-function chatsDirectorySettingsHtml() {
+// 存储位置：对话、卷宗、配置（含模型配置）都在这一个 .yan 目录里，几个浏览器共用；换位置时整份拷过去，旧处留着
+function storageSettingsHtml() {
   if (apiBase === null) return "";
-  const value = store.settings.chatsDir || "",
-    fallback = bootstrap.work?.chats || "";
-  if (bootstrap.work?.customChats !== true)
-    return `<div class="setting-row"><div class="setting-copy"><strong>对话目录</strong><small>当前桥接是更新前启动的，尚不能切换目录；请关闭并重新运行 start.cmd。${value ? "已记下所选路径，重启后会自动同步。" : "重启后即可选择。"}</small></div><div class="setting-actions setting-directory"><input class="field" spellcheck="false" value="${escapeHtml(value)}" placeholder="${escapeHtml(fallback)}" disabled></div></div>`;
-  return `<div class="setting-row"><div class="setting-copy"><strong>对话目录</strong><small>一段对话一个 JSON 文件；更换后会把当前对话同步到新目录，原目录不自动删除。留空则用默认 ${escapeHtml(fallback)}</small></div><div class="setting-actions setting-directory"><input id="settingChats" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(fallback)}" value="${escapeHtml(value)}"><button id="settingChatsPick" class="outline-btn" type="button">选择…</button></div></div>`;
+  const info = bootstrap.store || {},
+    parent = info.parent || "";
+  return `<div class="setting-row"><div class="setting-copy"><strong>存储位置</strong><small>对话、卷宗与配置（含模型配置）都在 <code title="${escapeHtml(info.root || "")}">${escapeHtml(info.root || "")}</code> 里，几个浏览器共用这一份。填一个目录，就在它下面立 .yan 并把整份拷过去，旧处原样留着；那里已有言的数据则直接用它</small></div><div class="setting-actions setting-directory"><input id="settingStore" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(parent)}" value="${escapeHtml(parent)}"><button id="settingStorePick" class="outline-btn" type="button">选择…</button></div></div>`;
 }
 function generalSettingsHtml() {
-  return `<h2>通用</h2><p class="settings-lead">数据只存于本机；桥接在线时，对话与卷宗可落到你指定的目录。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div>${
-    apiBase !== null
-      ? `${chatsDirectorySettingsHtml()}<div class="setting-row"><div class="setting-copy"><strong>卷宗目录</strong><small>卷宗在本机的位置；未绑目录的对话里，模型写出的文件与草稿皆落于此。留空则用默认 ${escapeHtml(bootstrap.work?.archive || "")}</small></div><div class="setting-actions setting-directory"><input id="settingArchive" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(bootstrap.work?.archive || "")}" value="${escapeHtml(store.settings.archiveDir || "")}"><button id="settingArchivePick" class="outline-btn" type="button">选择…</button></div></div>`
-      : ""
-  }<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
+  return `<h2>通用</h2><p class="settings-lead">数据只存于本机；桥接在线时，对话、卷宗与配置都落在存储位置里。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div>${storageSettingsHtml()}<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
 }
 // 工具：沙箱、三档指令权限、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
 function toolsSettingsHtml() {
@@ -314,85 +309,57 @@ function bindSettingsEvents() {
       store.settings[key] = !text ? 0 : value >= 1 ? value : fallback;
       saveStoreSoon();
     });
-  // 对话目录：切换后以浏览器里的当前对话为准同步一份过去；旧目录不删，避免一次改路径就造成不可恢复的数据移动。
-  const chatsInput = $("#settingChats");
-  let chatsTimer = null;
-  const commitChats = value => {
-    clearTimeout(chatsTimer);
-    chatsTimer = setTimeout(async () => {
+  // 存储位置：桥接把整份拷到新处（那里已有言的数据就直接用），页面换上新路径后把对话与配置对一遍、卷宗重翻；旧处不删
+  const storeInput = $("#settingStore");
+  let storeTimer = null;
+  const commitStore = value => {
+    clearTimeout(storeTimer);
+    storeTimer = setTimeout(async () => {
       const next = String(value || "").trim();
-      let prepared = "";
-      if (next)
-        try {
-          prepared = (await bridge("/api/work/prepare", { workdir: next }, AbortSignal.timeout(8000))).workdir;
-        } catch (error) {
-          return toast(`对话目录不可用：${String(error.message || error).slice(0, 80)}`);
-        }
-      if (prepared === (store.settings.chatsDir || "")) return;
-      if (prepared) store.settings.chatsDir = prepared;
-      else delete store.settings.chatsDir;
-      if (chatsInput && document.activeElement !== chatsInput) chatsInput.value = prepared;
+      if (!next || next === (bootstrap.store?.parent || "")) return;
+      let data;
+      try {
+        data = await bridge("/api/store/move", { parent: next }, AbortSignal.timeout(600000));
+      } catch (error) {
+        return toast(String(error.message || error).slice(0, 80));
+      }
+      if (!data.moved) return;
+      bootstrap.store = { root: data.root, parent: data.parent, fresh: false };
+      bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive };
       chatsBroken = false;
       chatHashes.clear();
       chatStamps.clear();
       chatDiskWrites.clear();
-      writeMeta();
+      // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
+      if (data.adopted) {
+        configSyncedAt = 0;
+        await refreshConfigFromDisk();
+      } else saveConfigNow();
       await syncChatsWithDisk();
       const ids = store.conversations.map(conversation => conversation.id);
       flushConversations(ids, { force: true });
-      await Promise.allSettled(ids.map(id => chatWritePromises.get(id)).filter(Boolean));
-      writeMetaMirror();
-      toast(prepared ? `对话已同步到 ${pathTail(prepared)}；原目录仍保留` : "对话目录已恢复默认位置；原目录仍保留");
-    }, 500);
-  };
-  chatsInput?.addEventListener("input", e => commitChats(e.target.value));
-  $("#settingChatsPick")?.addEventListener("click", async () => {
-    const button = $("#settingChatsPick");
-    button.disabled = true;
-    try {
-      const data = await bridge("/api/work/pick", { current: chatsInput.value.trim() || chatsDir() }, AbortSignal.timeout(300000));
-      if (data.path) {
-        chatsInput.value = data.path;
-        commitChats(data.path);
-      }
-    } catch (error) {
-      toast(String(error.message || error).slice(0, 80));
-    } finally {
-      button.disabled = false;
-    }
-  });
-  // 卷宗目录：改完立刻按新目录重新翻卷宗；路径不合法（相对路径、整个磁盘）桥接会拒绝，提示后仍保留输入以便改正
-  const archiveInput = $("#settingArchive");
-  let archiveTimer = null;
-  const commitArchive = value => {
-    clearTimeout(archiveTimer);
-    archiveTimer = setTimeout(async () => {
-      const next = String(value || "").trim();
-      if (next === (store.settings.archiveDir || "")) return;
-      if (next)
-        try {
-          const prepared = await bridge("/api/work/prepare", { workdir: next }, AbortSignal.timeout(8000));
-          store.settings.archiveDir = prepared.workdir;
-          if (archiveInput && document.activeElement !== archiveInput) archiveInput.value = prepared.workdir;
-        } catch (error) {
-          return toast(`卷宗目录不可用：${String(error.message || error).slice(0, 80)}`);
-        }
-      else delete store.settings.archiveDir;
-      saveStore();
       archiveEntries = null;
       await refreshArchive();
-      toast(next ? `卷宗已改到 ${pathTail(store.settings.archiveDir)}` : "卷宗已恢复默认位置");
-    }, 500);
+      try {
+        localStorage.setItem(STORE_ROOT_KEY, data.root);
+      } catch {}
+      renderSettings();
+      toast(`存储已换到 ${pathTail(data.root)}；${data.adopted ? "用的是那里原有的数据" : "旧处原样留着"}`);
+    }, 600);
   };
-  archiveInput?.addEventListener("input", e => commitArchive(e.target.value));
-  $("#settingArchivePick")?.addEventListener("click", async () => {
-    const button = $("#settingArchivePick");
+  storeInput?.addEventListener("change", e => commitStore(e.target.value));
+  $("#settingStorePick")?.addEventListener("click", async () => {
+    const button = $("#settingStorePick");
     button.disabled = true;
     try {
-      const data = await bridge("/api/work/pick", { current: archiveInput.value.trim() || archiveDir() }, AbortSignal.timeout(300000));
+      const data = await bridge(
+        "/api/work/pick",
+        { current: storeInput.value.trim() || bootstrap.store?.parent || "" },
+        AbortSignal.timeout(300000)
+      );
       if (data.path) {
-        archiveInput.value = data.path;
-        commitArchive(data.path);
+        storeInput.value = data.path;
+        commitStore(data.path);
       }
     } catch (error) {
       toast(String(error.message || error).slice(0, 80));
