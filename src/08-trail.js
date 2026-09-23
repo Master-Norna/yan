@@ -564,13 +564,16 @@ function renderHelperBar() {
     bar.innerHTML = helpers
       .map(
         h =>
-          `<span class="helper-row" data-helper="${escapeHtml(h.id)}"><span class="seal helper-seal" aria-hidden="true">帮</span><span class="helper-title">差遣「${escapeHtml(h.title || "")}」</span><span class="helper-doing"></span><span class="helper-count"></span></span>`
+          `<span class="helper-row" data-helper="${escapeHtml(h.id)}"><span class="seal helper-seal" aria-hidden="true">帮</span><span class="helper-title"></span><span class="helper-doing"></span><span class="helper-count"></span></span>`
       )
       .join("");
   }
   for (const h of helpers) {
     const row = bar.querySelector(`.helper-row[data-helper="${CSS.escape(h.id)}"]`);
     if (!row) continue;
+    // 题目逐次写：条子常在步骤刚入册、runDelegate 还没把题目填上时就搭好了，只在搭时写一次会一直是空的「」
+    const title = `差遣「${String(h.title || "").slice(0, 40)}」`;
+    if (row.querySelector(".helper-title").textContent !== title) row.querySelector(".helper-title").textContent = title;
     row.querySelector(".helper-doing").textContent = delegateDoing(h);
     rollText(row.querySelector(".helper-count"), `${h.sub?.steps.length || 0} 步`);
   }

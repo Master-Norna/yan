@@ -295,7 +295,39 @@ function renderSuggestions(work) {
     : chatSuggestionsHtml;
   bindSuggestions();
 }
-const requestJobs = new Map();
+// 进行中的请求（主答、旁注）。有活在跑就攥着一把 Web Lock：熄屏、窗口被挡住时页面算「藏起来」，
+// 浏览器的睡眠标签页 / 节能模式会把藏久了的页面冻住——流不读、工具不跑，亮屏才接着动；持锁的页面不在冻结之列。
+// 用共享锁：开着几个言的标签页也各自攥得住
+class JobMap extends Map {
+  set(key, value) {
+    super.set(key, value);
+    holdAwake();
+    return this;
+  }
+  delete(key) {
+    const had = super.delete(key);
+    holdAwake();
+    return had;
+  }
+  clear() {
+    super.clear();
+    holdAwake();
+  }
+}
+const requestJobs = new JobMap();
+/** @type {{ release: () => void }|null} */
+let awakeHold = null;
+function holdAwake() {
+  if (requestJobs.size && !awakeHold && globalThis.navigator?.locks) {
+    const hold = { release: () => {} },
+      done = new Promise(resolve => (hold.release = () => resolve(null)));
+    awakeHold = hold;
+    navigator.locks.request("yan-at-work", { mode: "shared" }, () => done).catch(() => {});
+  } else if (!requestJobs.size && awakeHold) {
+    awakeHold.release();
+    awakeHold = null;
+  }
+}
 let settingsTab = "general";
 let toastTimer = null;
 let fileDbPromise = null;
