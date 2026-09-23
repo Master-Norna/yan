@@ -1,5 +1,8 @@
 (() => {
   "use strict";
+  // 言 · 页内交互预览的运行时：跑在 sandbox iframe（origin 为 null、CSP 不许联网）里。
+  // 正文里的 ```html 就地渲染成可交互的一块：与正文同一张纸——色板与字体取自言，底色透明，高度随内容；
+  // 数据图表用 yan:echarts、流程与结构图用 <pre class="mermaid">，库随项目本地分发，按需才载
   let scriptUrls = [];
   const previewId = location.hash.slice(1);
   const notify = (state, detail = "") =>
@@ -8,6 +11,232 @@
     for (const url of scriptUrls) URL.revokeObjectURL(url);
     scriptUrls = [];
   }
+
+  // ---- 主题：父页送来言的色板、字体与明暗，写进 :root 的变量；换主题时再送一次，图表与流程图跟着换色
+  /** @type {{ dark: boolean, scheme: string, vars: Record<string, string> }} */
+  let theme = { dark: false, scheme: "light", vars: {} };
+  const tokenSheet = document.createElement("style"),
+    kitSheet = document.createElement("style");
+  // 常用元素的底子与几个小件（.card .row .grid .tag .muted）：模型不必从零写样式，写了的照样盖过它
+  kitSheet.textContent = `html,body{margin:0;background:transparent}
+body{color:var(--ink);font:14px/1.7 var(--body);padding:2px;overflow-wrap:anywhere}
+h1,h2,h3,h4{font-family:var(--title);font-weight:600;line-height:1.4;margin:.3em 0 .5em}
+h1{font-size:20px}h2{font-size:17px}h3,h4{font-size:15px}
+p{margin:.45em 0}a{color:var(--accent)}small,.muted{color:var(--ink-2)}
+hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left}
+th{color:var(--ink-2);font-weight:500}
+button{font:inherit;font-size:13px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 12px;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+input,select,textarea{font:inherit;font-size:13px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+input[type=range],input[type=checkbox],input[type=radio]{accent-color:var(--accent);padding:0}
+code{font:12.5px ui-monospace,Consolas,monospace;background:color-mix(in srgb,var(--ink) 6%,transparent);padding:1px 4px;border-radius:4px}
+.card{background:var(--paper-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+svg{max-width:100%}
+pre.mermaid{margin:0;background:none;text-align:center;font:inherit;white-space:pre}`;
+  document.head.prepend(tokenSheet, kitSheet);
+  const cssVar = name => theme.vars[name] || getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
+  function applyTheme(next) {
+    if (next?.vars) theme = next;
+    const defs = Object.entries(theme.vars)
+      .map(([name, value]) => `--${name}:${value}`)
+      .join(";");
+    // 明暗与父页一致：color-scheme 不同的 iframe 会被浏览器垫一层不透明的底
+    tokenSheet.textContent = `:root{${defs};color-scheme:${theme.scheme || (theme.dark ? "dark" : "light")}}`;
+    if (window.echarts?.__yan) rethemeCharts();
+    if (window.mermaid && mermaidNodes().length) void drawMermaid(true);
+  }
+
+  // ---- 高度随内容：内容一变就报给父页，父页据此定这一块的高
+  let lastHeight = 0;
+  function reportSize() {
+    const body = document.body;
+    if (!body) return;
+    // 溢出了就按整页的滚动高度报（一截也不能藏在滚动条后面）；没溢出时按 body 的高报，内容变矮才缩得回去
+    // 只在明显变矮（差 8px 以上）时才缩：body 与整页常差几像素，否则会一缩一溢来回抖
+    const page = document.documentElement.scrollHeight,
+      fit = Math.max(body.scrollHeight, body.getBoundingClientRect().height),
+      height = Math.ceil(page > innerHeight ? page : fit < innerHeight - 8 ? fit : innerHeight);
+    if (Math.abs(height - lastHeight) < 2) return;
+    lastHeight = height;
+    parent.postMessage({ type: "yan-preview-size", id: previewId, height }, "*");
+  }
+  const sizeObserver = new ResizeObserver(reportSize);
+  addEventListener("resize", reportSize);
+
+  // ---- 本地的库：<script src="yan:echarts"> / yan:mermaid 换成随项目分发的那份，只载一次
+  const LIBS = { echarts: "./vendor/echarts.min.js", mermaid: "./vendor/mermaid.min.js" },
+    loading = {};
+  function loadLib(name) {
+    if (!LIBS[name]) return Promise.reject(Error(`没有名为 yan:${name} 的库，可用的是 yan:echarts、yan:mermaid`));
+    return (loading[name] ||= new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = LIBS[name];
+      script.onload = () => {
+        if (name === "echarts") setupEcharts();
+        resolve(null);
+      };
+      script.onerror = () => reject(Error(`库 yan:${name} 未能载入`));
+      document.head.append(script);
+    }));
+  }
+
+  // ---- ECharts：注册一套取自言的主题并设为默认；容器没给高的给个默认高，宽度变了自己重排；
+  // 模型写 option 常见的几处失手（系列指到不存在的坐标轴、坐标轴指到不存在的格子、漏了 type）画之前先扶正
+  const charts = new Set(),
+    chartObserver = new ResizeObserver(entries => {
+      for (const entry of entries) for (const chart of charts) if (chart.getDom() === entry.target) chart.resize();
+    });
+  function echartsTheme() {
+    const ink = cssVar("ink"),
+      muted = cssVar("ink-2"),
+      line = cssVar("line"),
+      axis = {
+        axisLine: { lineStyle: { color: line } },
+        axisTick: { lineStyle: { color: line } },
+        axisLabel: { color: muted },
+        splitLine: { lineStyle: { color: line } }
+      };
+    return {
+      color: [
+        cssVar("accent"),
+        cssVar("code-green"),
+        cssVar("code-blue"),
+        cssVar("gold") || "#a4823a",
+        cssVar("keep") || "#4f6470",
+        cssVar("reach") || "#4e6b5c"
+      ],
+      backgroundColor: "transparent",
+      textStyle: { color: muted, fontFamily: cssVar("body") },
+      title: { textStyle: { color: ink, fontFamily: cssVar("title") }, subtextStyle: { color: muted } },
+      legend: { textStyle: { color: muted } },
+      tooltip: { backgroundColor: cssVar("paper-2"), borderColor: line, textStyle: { color: ink } },
+      categoryAxis: axis,
+      valueAxis: axis,
+      timeAxis: axis,
+      logAxis: axis
+    };
+  }
+  function repairEchartsOption(option) {
+    const list = value => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]);
+    const clamp = (item, key, count) => {
+      if (typeof item?.[key] !== "number" || item[key] < count) return;
+      if (count > 0) item[key] = count - 1;
+      else delete item[key];
+    };
+    const grids = list(option.grid).length,
+      xs = list(option.xAxis),
+      ys = list(option.yAxis);
+    for (const axis of [...xs, ...ys]) if (axis && typeof axis === "object") clamp(axis, "gridIndex", grids);
+    const polar = list(option.polar).length,
+      radius = list(option.radiusAxis).length,
+      angle = list(option.angleAxis).length;
+    if (option.series !== undefined)
+      option.series = list(option.series)
+        .filter(item => item && typeof item === "object")
+        .map(item => {
+          const series = { ...item };
+          clamp(series, "xAxisIndex", xs.length);
+          clamp(series, "yAxisIndex", ys.length);
+          clamp(series, "polarIndex", polar);
+          clamp(series, "radiusAxisIndex", radius);
+          clamp(series, "angleAxisIndex", angle);
+          if (!series.type) {
+            const sample = Array.isArray(series.data) ? series.data[0] : null;
+            series.type =
+              !xs.length && !ys.length && sample && typeof sample === "object" && "value" in sample
+                ? "pie"
+                : xs.length || ys.length
+                  ? "bar"
+                  : "line";
+          }
+          return series;
+        });
+    return option;
+  }
+  function setupEcharts() {
+    const ec = window.echarts;
+    if (!ec || ec.__yan) return;
+    ec.__yan = true;
+    ec.registerTheme("yan", echartsTheme());
+    const init = ec.init.bind(ec);
+    ec.init = (dom, name, opts) => {
+      if (dom instanceof HTMLElement && dom.clientHeight < 40 && !dom.style.height) dom.style.height = "320px";
+      const chart = init(dom, name ?? "yan", opts);
+      const set = chart.setOption.bind(chart);
+      chart.setOption = (option, ...rest) =>
+        set(option && typeof option === "object" ? repairEchartsOption({ ...option }) : option, ...rest);
+      charts.add(chart);
+      chartObserver.observe(dom);
+      return chart;
+    };
+  }
+  // 换了主题：已画的图就地换字色与线色（系列的颜色是图的内容，不动），之后新起的图用新主题
+  function rethemeCharts() {
+    const ec = window.echarts,
+      next = echartsTheme();
+    ec.registerTheme("yan", next);
+    const axisPatch = axes => (axes || []).map(() => next.valueAxis);
+    for (const chart of charts) {
+      if (chart.isDisposed()) {
+        charts.delete(chart);
+        continue;
+      }
+      const option = chart.getOption() || {};
+      try {
+        chart.setOption({
+          textStyle: next.textStyle,
+          title: (option.title || []).map(() => next.title),
+          legend: (option.legend || []).map(() => next.legend),
+          tooltip: (option.tooltip || []).map(() => next.tooltip),
+          xAxis: axisPatch(option.xAxis),
+          yAxis: axisPatch(option.yAxis)
+        });
+      } catch {}
+    }
+  }
+
+  // ---- Mermaid：页里有 <pre class="mermaid"> 就载库、按言的色板成图；换主题时用记下的原文重画
+  const mermaidNodes = () => [...document.querySelectorAll("pre.mermaid, div.mermaid")];
+  async function drawMermaid(again = false) {
+    const nodes = mermaidNodes();
+    if (!nodes.length) return;
+    await loadLib("mermaid");
+    window.mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      fontFamily: cssVar("title") || cssVar("body"),
+      themeVariables: {
+        background: "transparent",
+        primaryColor: cssVar("paper-2"),
+        primaryTextColor: cssVar("ink"),
+        primaryBorderColor: cssVar("ink-3"),
+        lineColor: cssVar("ink-2"),
+        secondaryColor: cssVar("paper-3"),
+        tertiaryColor: cssVar("paper"),
+        noteBkgColor: cssVar("accent-soft"),
+        noteTextColor: cssVar("ink"),
+        fontSize: "14px",
+        darkMode: theme.dark
+      }
+    });
+    for (const node of nodes) {
+      if (!("source" in node.dataset)) node.dataset.source = node.textContent;
+      if (again || node.dataset.processed) {
+        node.removeAttribute("data-processed");
+        node.textContent = node.dataset.source;
+      }
+    }
+    await window.mermaid.run({ nodes });
+    reportSize();
+  }
+
   function showError(error) {
     let box = document.querySelector("#yan-preview-error");
     if (!box) {
@@ -37,10 +266,20 @@
   async function run(source) {
     clearScriptUrls();
     const parsed = new DOMParser().parseFromString(String(source || ""), "text/html");
+    // yan:echarts / yan:mermaid 是随项目分发的库，照写的顺序先载；别的外部脚本一律不认（沙箱本就不许联网）
     const scripts = [...parsed.querySelectorAll("script")]
-      .map(node => ({ code: node.textContent || "", type: (node.type || "text/javascript").toLowerCase(), external: !!node.src }))
+      .map(node => {
+        const src = node.getAttribute("src") || "";
+        return {
+          code: node.textContent || "",
+          type: (node.type || "text/javascript").toLowerCase(),
+          src,
+          lib: src.match(/^yan:([\w-]+)$/)?.[1] || ""
+        };
+      })
       .filter(item => ["text/javascript", "application/javascript", "module"].includes(item.type));
-    if (scripts.some(item => item.external)) throw Error("交互内容含外部脚本；请把 JavaScript 直接写在 HTML 内");
+    if (scripts.some(item => item.src && !item.lib))
+      throw Error("交互内容含外部脚本；请把 JavaScript 直接写在 HTML 内，库只可用 yan:echarts、yan:mermaid");
     parsed.querySelectorAll("script,base,meta[http-equiv],iframe,object,embed").forEach(node => node.remove());
     document.head.querySelectorAll("[data-preview-style]").forEach(node => node.remove());
     for (const style of parsed.head.querySelectorAll("style")) {
@@ -58,6 +297,10 @@
     for (const { name, value } of [...parsed.body.attributes]) if (!/^on/i.test(name)) document.body.setAttribute(name, value);
     document.body.innerHTML = parsed.body.innerHTML || source;
     for (const item of scripts) {
+      if (item.lib) {
+        await loadLib(item.lib);
+        continue;
+      }
       if (!item.code.trim()) continue;
       const url = URL.createObjectURL(new Blob([item.code], { type: "text/javascript" }));
       scriptUrls.push(url);
@@ -72,6 +315,9 @@
     }
     document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
     window.dispatchEvent(new Event("load"));
+    await drawMermaid();
+    sizeObserver.observe(document.body);
+    reportSize();
     notify("ready");
   }
   // run_js：在一个 Worker 里跑模型给的代码，收集 console 输出与返回值；超时就把 Worker 整个杀掉。
@@ -144,7 +390,10 @@ self.postMessage({ type: "loaded" });
   }
   window.addEventListener("message", event => {
     if (event.source !== parent || event.data?.id !== previewId) return;
-    if (event.data.type === "yan-preview-render") run(event.data.html).catch(showError);
+    if (event.data.type === "yan-preview-render") {
+      applyTheme(event.data.theme);
+      run(event.data.html).catch(showError);
+    } else if (event.data.type === "yan-preview-theme") applyTheme(event.data.theme);
     else if (event.data.type === "yan-compute") compute(event.data);
   });
   parent.postMessage({ type: "yan-preview-ready", id: previewId }, "*");

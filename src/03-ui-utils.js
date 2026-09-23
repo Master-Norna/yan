@@ -115,12 +115,10 @@ function settleConfirm(value) {
   resolve(value);
 }
 
-// ---------- 大体积库按需加载：mermaid / echarts / KaTeX / pdf.js 只在真正用到时才拉，首屏只带 marked + purify + hljs ----------
+// ---------- 大体积库按需加载：KaTeX / pdf.js 只在真正用到时才拉，首屏只带 marked + purify + hljs（图表与流程图的库在交互预览里按需载） ----------
 const VENDOR = {
   pdf: { src: "./vendor/pdf.min.js", ready: () => window.pdfjsLib },
-  katex: { src: "./vendor/katex/katex.min.js", ready: () => window.katex },
-  mermaid: { src: "./vendor/mermaid.min.js", ready: () => window.mermaid },
-  echarts: { src: "./vendor/echarts.min.js", ready: () => window.echarts }
+  katex: { src: "./vendor/katex/katex.min.js", ready: () => window.katex }
 };
 const vendorLoads = new Map();
 function ensureLib(name) {
@@ -133,10 +131,7 @@ function ensureLib(name) {
       new Promise(resolve => {
         const script = document.createElement("script");
         script.src = lib.src;
-        script.onload = () => {
-          if (name === "mermaid") setupMermaid();
-          resolve(!!lib.ready());
-        };
+        script.onload = () => resolve(!!lib.ready());
         script.onerror = () => {
           vendorLoads.delete(name);
           script.remove();

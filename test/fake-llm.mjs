@@ -217,6 +217,34 @@ http
         }
         return sse(res, [delta({ content: "重试后接通。" }), delta({}, { usage: { total_tokens: 6 } })]);
       }
+      // VIZDEMO：页内可视化只剩 HTML 一条路——新写法的 yan:echarts 与 <pre class="mermaid">，旧对话里的 mermaid / echarts 围栏照样成图
+      if (typeof lastUser === "string" && lastUser.includes("VIZDEMO"))
+        return sse(res, [
+          delta({
+            content: [
+              "四种画法：",
+              "",
+              "```html",
+              '<div class="card"><h3>季度营收</h3><div id="c" style="height:240px"></div><p class="muted">单位：万元</p></div>',
+              '<script src="yan:echarts"></script>',
+              '<script>echarts.init(document.getElementById("c")).setOption({ xAxis: { data: ["一", "二", "三", "四"] }, yAxis: {}, series: [{ data: [5, 8, 6, 9] }] });</script>',
+              "```",
+              "",
+              "```html",
+              '<pre class="mermaid">graph LR; A[落墨] --> B[成图] --> C[可交互]</pre>',
+              "```",
+              "",
+              "```mermaid",
+              "graph TD; 甲-->乙; 甲-->丙",
+              "```",
+              "",
+              "```echarts",
+              '{ "xAxis": { "data": ["a", "b", "c"] }, "yAxis": {}, "series": [{ "type": "line", "data": [1, 3, 2] }], }',
+              "```"
+            ].join("\n")
+          }),
+          delta({}, { usage: { total_tokens: 9 } })
+        ]);
       if (typeof lastUser === "string" && lastUser.includes("STREAMERR"))
         // 写了半截后流里夹一条报错（限流之类）就收：页面该按「连接中断」处理、已写的留着，而不是当写完了
         return sse(res, [

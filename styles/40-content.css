@@ -35,6 +35,7 @@
   border-radius: 0;
   background: none;
 }
+/* .viz 只剩流式时的占位框（成图都在 .html-app 里） */
 .viz {
   margin: 1em 0;
   overflow: hidden;
@@ -48,40 +49,6 @@
 .viz .code-head > span:last-child {
   display: flex;
   gap: 2px;
-}
-.viz-canvas {
-  padding: 14px 16px;
-  overflow-x: auto;
-  text-align: center;
-}
-.viz-canvas svg {
-  max-width: 100%;
-  height: auto;
-}
-.viz[data-viz="mermaid"] .viz-canvas svg {
-  font-family: var(--body);
-  font-size: 14px;
-  line-height: 1.5;
-}
-.viz[data-viz="mermaid"] .viz-canvas foreignObject {
-  font: 14px/1.5 var(--body) !important;
-}
-.viz .viz-source {
-  margin: 0;
-  padding: 14px 16px;
-  overflow: auto;
-  background: var(--paper-2);
-  font:
-    85% ui-monospace,
-    SFMono-Regular,
-    Consolas,
-    monospace;
-  line-height: 1.65;
-}
-.viz-fail {
-  color: var(--danger);
-  font: 13px/1.6 var(--body);
-  text-align: left;
 }
 .viz-pending-body {
   position: relative;

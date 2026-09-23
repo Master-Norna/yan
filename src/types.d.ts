@@ -8,15 +8,11 @@ declare const marked: any;
 declare const DOMPurify: any;
 declare const hljs: any;
 declare const katex: any;
-declare const mermaid: any;
-declare const echarts: any;
 interface Window {
   marked: any;
   DOMPurify: any;
   hljs: any;
   katex: any;
-  mermaid: any;
-  echarts: any;
   pdfjsLib: any;
   YAN_PROMPTS: any;
   __yanState: () => any; // 端到端测试读内存里的记录

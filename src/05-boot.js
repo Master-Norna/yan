@@ -74,8 +74,6 @@ async function boot() {
   // 对话主体在 IndexedDB；先把旧 localStorage 数据迁入/把最新快照读回，再接桥接与绘制页面
   await hydrateStore();
   setupMarkdown();
-  setupMermaid();
-  setupVizObserver();
   const candidates = ["", LOCAL_BRIDGE].filter((value, index, array) => array.indexOf(value) === index);
   await connectBridge(candidates);
   // 桥接在线：对话正本在本机的对话目录里，先与它合一次再画页面
@@ -141,7 +139,6 @@ function bindEvents() {
   document.addEventListener("click", closeModelMenu);
   $("#themeToggle").onclick = e => switchTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", e.currentTarget);
   window.addEventListener("resize", () => {
-    disposeOrphanCharts();
     const trigger = document.querySelector('.model-trigger[aria-expanded="true"]');
     if (trigger) positionModelMenu(trigger);
   });
@@ -707,24 +704,9 @@ function bindEvents() {
   document.addEventListener("click", e => {
     const copy = e.target.closest("[data-copy-code]");
     if (copy) {
-      void copyText(copy.closest(".code-block, .viz, .html-app")?.querySelector("code")?.textContent || "");
+      void copyText(copy.closest(".code-block, .html-app")?.querySelector("code")?.textContent || "");
       copy.textContent = "已复制";
       setTimeout(() => (copy.textContent = "复制"), 1200);
-      return;
-    }
-    const vizToggle = e.target.closest("[data-viz-toggle]");
-    if (vizToggle) {
-      const viz = vizToggle.closest(".viz"),
-        source = viz.querySelector(".viz-source"),
-        showSource = source.classList.contains("hidden");
-      source.classList.toggle("hidden", !showSource);
-      viz.querySelector(".viz-canvas").classList.toggle("hidden", showSource);
-      vizToggle.textContent = showSource ? "图形" : "源码";
-      return;
-    }
-    const vizDownload = e.target.closest("[data-viz-download]");
-    if (vizDownload) {
-      downloadVisualization(vizDownload.closest(".viz"));
       return;
     }
     const appToggle = e.target.closest("[data-app-toggle]");
@@ -749,7 +731,7 @@ function bindEvents() {
     }
     const expand = e.target.closest("[data-work-expand]");
     if (expand) {
-      toggleWorkExpanded(expand.closest(".viz, .html-app"), expand);
+      toggleWorkExpanded(expand.closest(".html-app"), expand);
       return;
     }
     const remove = e.target.closest("[data-remove-attachment]");
@@ -985,12 +967,13 @@ function bindEvents() {
   window.addEventListener("online", refreshConnection);
   window.addEventListener("message", event => {
     const data = event.data;
-    if (!data || !["yan-preview-ready", "yan-preview-state"].includes(data.type)) return;
+    if (!data || !["yan-preview-ready", "yan-preview-state", "yan-preview-size"].includes(data.type)) return;
     const app = [...document.querySelectorAll(".html-app[data-app-id]")].find(
       el => el.dataset.appId === data.id && el.querySelector("iframe")?.contentWindow === event.source
     );
     if (!app) return;
     if (data.type === "yan-preview-ready") return sendHtmlApp(app);
+    if (data.type === "yan-preview-size") return sizeHtmlApp(app, Number(data.height) || 0);
     app.dataset.appState = data.state;
     app.classList.toggle("html-app-error", data.state === "error");
     const label = app.querySelector(".code-lang");

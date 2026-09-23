@@ -113,7 +113,9 @@ function textNodesIn(root) {
   const nodes = [],
     walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: node =>
-        node.parentElement?.closest(".viz, .html-app, .math-pending, sup.note-ref") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+        node.parentElement?.closest(".viz-pending, .html-app, .math-pending, sup.note-ref")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT
     });
   while (walker.nextNode()) nodes.push(walker.currentNode);
   return nodes;

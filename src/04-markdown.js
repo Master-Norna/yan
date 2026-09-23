@@ -92,39 +92,20 @@ function renderMath(tex, display) {
 }
 // 占位框里的动效在逐帧重画的尾段里会随节点重建从头再来，看着像定住了：把相位记在节点上（负的 animation-delay），重建也接着原来的拍子走
 const vizPhase = () => `-${Math.round(performance.now())}ms`;
-// 占位框里是一页草图：将要画的东西的底稿——图表是轴、柱与一条折线，流程图是三个框两支箭，网页是一页版式——
+// 占位框里是一页草图：将要画的东西的底稿（一页版式）——
 // 用淡墨一笔一笔勾出来，勾完停一停、淡去、再勾（pathLength 归一，stroke-dashoffset 从 1 走到 0 就是「画出来」，各笔按 --i 错开）。
 // 每来一行，草图上有一笔蘸朱（见 pulseInkStroke，由 paintTail 点）：流着时朱笔此起彼伏，流停了草图只剩自己勾着，看得出还在写还是卡住了
-const VIZ_SKETCHES = {
-  echarts: [
-    "M16 6v56h136",
-    "M32 62V42",
-    "M52 62V30",
-    "M72 62V48",
-    "M92 62V20",
-    "M112 62V36",
-    "M132 62V28",
-    "M24 46C40 22 56 50 72 36S104 14 136 24"
-  ],
-  mermaid: [
-    "M10 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z",
-    "M46 36h14M56 32l4 4-4 4",
-    "M64 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H64a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z",
-    "M100 36h14M110 32l4 4-4 4",
-    "M118 24h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4h-32a4 4 0 0 1-4-4V28a4 4 0 0 1 4-4z"
-  ],
-  html: [
-    "M8 6h144a3 3 0 0 1 3 3v54a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z",
-    "M5 18h150",
-    "M12 25h30a2 2 0 0 1 2 2v30a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V27a2 2 0 0 1 2-2z",
-    "M52 28h92",
-    "M52 36h72",
-    "M52 44h84",
-    "M52 52h26a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H52a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z"
-  ]
-};
-function pendingSketchHtml(language) {
-  const strokes = VIZ_SKETCHES[language] || VIZ_SKETCHES.html;
+const VIZ_SKETCH = [
+  "M8 6h144a3 3 0 0 1 3 3v54a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z",
+  "M5 18h150",
+  "M12 25h30a2 2 0 0 1 2 2v30a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V27a2 2 0 0 1 2-2z",
+  "M52 28h92",
+  "M52 36h72",
+  "M52 44h84",
+  "M52 52h26a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H52a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z"
+];
+function pendingSketchHtml() {
+  const strokes = VIZ_SKETCH;
   return `<svg class="viz-sketch" viewBox="0 0 160 72" aria-hidden="true">${strokes.map((d, i) => `<path d="${d}" pathLength="1" style="--i:${i}"/>`).join("")}</svg>`;
 }
 // 新来一行：草图上轮到的那一笔蘸一口朱墨，随即褪回淡墨
@@ -175,16 +156,20 @@ function codeBlockHtml(text, lang) {
       .split(/\s+/)[0]
       .toLowerCase(),
     known = !!(window.hljs && language && hljs.getLanguage(language));
-  const htmlApp = ["html", "interactive", "app"].includes(language);
-  // mermaid / echarts 代码块在页内直接出图；流式尾段尚未闭合时先立一个占位框，框里是将要画的东西的草图（见 pendingSketchHtml）
-  if (suppressViz && (htmlApp || language === "mermaid" || language === "echarts")) {
+  // 页内可视化只有一条路：自足的 HTML 在隔离沙箱里就地渲染（数据图表、流程图也在里面画，见 preview-runtime.js）。
+  // 旧对话里的 ```mermaid / ```echarts 换成等价的一页 HTML 照样成图
+  const legacy = language === "mermaid" || language === "echarts",
+    htmlApp = ["html", "interactive", "app"].includes(language) || legacy;
+  // 流式尾段尚未闭合时先立一个占位框，框里是一页草图（见 pendingSketchHtml）
+  if (suppressViz && htmlApp) {
     const lines = String(text || "").split("\n").length;
-    return `<div class="viz viz-pending" data-viz-pending="${language}" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="${htmlApp ? "交互内容" : "图形"}仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml(htmlApp ? "html" : language)}</div></div>\n`;
+    return `<div class="viz viz-pending" data-viz-pending="html" data-lines="${lines}" style="--phase:${vizPhase()}" role="status" aria-label="交互内容仍在生成，已写 ${lines} 行"><div class="code-head"><span class="code-lang">${language}</span><span class="viz-pending-signal" aria-hidden="true"></span></div><div class="viz-pending-body" aria-hidden="true">${pendingSketchHtml()}</div></div>\n`;
   }
-  if (!suppressViz && (language === "mermaid" || language === "echarts"))
-    return `<div class="viz" data-viz="${language}"><div class="code-head"><span class="code-lang">${language}</span><span><button type="button" class="code-copy" data-viz-toggle>源码</button><button type="button" class="code-copy" data-viz-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="viz-canvas"></div><pre class="viz-source hidden"><code>${escapeHtml(text)}</code></pre></div>\n`;
-  if (!suppressViz && htmlApp)
-    return `<div class="html-app" data-html-app><div class="code-head"><span class="code-lang">html · 正在载入</span><span><button type="button" class="code-copy" data-app-toggle>源码</button><button type="button" class="code-copy" data-app-restart>重启</button><button type="button" class="code-copy" data-app-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="html-app-stage"><span>正在载入交互内容</span></div><pre class="html-app-source hidden"><code>${escapeHtml(text)}</code></pre></div>\n`;
+  if (!suppressViz && htmlApp) {
+    const source = legacy ? legacyVizHtml(language, text) : text;
+    if (source !== null)
+      return `<div class="html-app" data-html-app><div class="code-head"><span class="code-lang">html · 正在载入</span><span><button type="button" class="code-copy" data-app-toggle>源码</button><button type="button" class="code-copy" data-app-restart>重启</button><button type="button" class="code-copy" data-app-download>下载</button><button type="button" class="code-copy" data-work-expand>全屏</button><button type="button" class="code-copy" data-copy-code>复制</button></span></div><div class="html-app-stage"><span>正在载入交互内容</span></div><pre class="html-app-source hidden"><code>${escapeHtml(source)}</code></pre></div>\n`;
+  }
   let html;
   try {
     html = known ? hljs.highlight(text, { language, ignoreIllegals: true }).value : escapeHtml(text);
@@ -193,124 +178,23 @@ function codeBlockHtml(text, lang) {
   }
   return `<div class="code-block"><div class="code-head"><span class="code-lang">${escapeHtml(language || "text")}</span><button type="button" class="code-copy" data-copy-code>复制</button></div><pre><code class="hljs${known ? ` language-${escapeHtml(language)}` : ""}">${html}</code></pre></div>\n`;
 }
+/** 旧对话里的 mermaid / echarts 围栏 → 等价的一页 HTML；echarts 的 option 解不开时回 null（按代码块显示） */
+function legacyVizHtml(language, text) {
+  if (language === "mermaid") return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
+  try {
+    const option = parseVizJson(text),
+      height = Math.min(560, Math.max(220, Number(option.height) || 320));
+    delete option.height;
+    const json = JSON.stringify(option).replace(/</g, "\\u003c");
+    return `<div id="chart" style="height:${height}px"></div>\n<script src="yan:echarts"></script>\n<script>echarts.init(document.getElementById("chart")).setOption(${json});</script>`;
+  } catch {
+    return null;
+  }
+}
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
-function setupMermaid() {
-  if (!window.mermaid) return;
-  const dark = document.documentElement.dataset.theme === "dark";
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: "base",
-    fontFamily: cssVar("--body"),
-    flowchart: { htmlLabels: false, curve: "basis" },
-    themeVariables: {
-      background: "transparent",
-      primaryColor: cssVar("--paper-2"),
-      primaryTextColor: cssVar("--ink"),
-      primaryBorderColor: cssVar("--ink-3"),
-      lineColor: cssVar("--ink-2"),
-      secondaryColor: cssVar("--paper-3"),
-      tertiaryColor: cssVar("--paper"),
-      noteBkgColor: cssVar("--accent-soft"),
-      noteTextColor: cssVar("--ink"),
-      fontSize: "14px",
-      darkMode: dark
-    }
-  });
-}
-function mapOptionPart(value, transform) {
-  if (Array.isArray(value)) return value.map(item => transform(item || {}));
-  return transform(value && typeof value === "object" ? value : {});
-}
-// 模型写 ECharts option 常见的几处失手，画之前先扶正——否则 ECharts 只抛一句 "reading 'coordinateSystem'"，图就白写了：
-// 系列指到不存在的坐标轴 / 坐标轴指到不存在的格子（多图并排时最常见）→ 收到最后一个；系列漏了 type → 按数据形状补
-function repairEchartsOption(option) {
-  const list = value => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]);
-  const clamp = (item, key, count) => {
-    if (typeof item?.[key] !== "number" || item[key] < count) return;
-    if (count > 0) item[key] = count - 1;
-    else delete item[key];
-  };
-  const grids = list(option.grid).length,
-    xs = list(option.xAxis),
-    ys = list(option.yAxis);
-  for (const axis of [...xs, ...ys]) if (axis && typeof axis === "object") clamp(axis, "gridIndex", grids);
-  const polar = list(option.polar).length,
-    radius = list(option.radiusAxis).length,
-    angle = list(option.angleAxis).length;
-  if (option.series !== undefined)
-    option.series = list(option.series)
-      .filter(item => item && typeof item === "object")
-      .map(item => {
-        const series = { ...item };
-        clamp(series, "xAxisIndex", xs.length);
-        clamp(series, "yAxisIndex", ys.length);
-        clamp(series, "polarIndex", polar);
-        clamp(series, "radiusAxisIndex", radius);
-        clamp(series, "angleAxisIndex", angle);
-        if (!series.type) {
-          const sample = Array.isArray(series.data) ? series.data[0] : null;
-          series.type =
-            !xs.length && !ys.length && sample && typeof sample === "object" && "value" in sample
-              ? "pie"
-              : xs.length || ys.length
-                ? "bar"
-                : "line";
-        }
-        return series;
-      });
-  return option;
-}
-function themedEchartsOption(raw, canvas) {
-  const option = repairEchartsOption({ ...raw });
-  delete option.height;
-  const ink = cssVar("--ink"),
-    muted = cssVar("--ink-2"),
-    line = cssVar("--line"),
-    paper = cssVar("--paper-2");
-  const narrow = canvas.clientWidth < 520,
-    titleShown = Array.isArray(option.title) ? option.title.some(item => item?.text) : !!option.title?.text;
-  const textPart = (value, defaults) =>
-    mapOptionPart(value, item => ({ ...defaults, ...item, textStyle: { ...defaults.textStyle, ...(item.textStyle || {}) } }));
-  const axisPart = value =>
-    mapOptionPart(value, item => ({
-      ...item,
-      axisLabel: { color: muted, ...(item.axisLabel || {}) },
-      axisLine: { ...(item.axisLine || {}), lineStyle: { color: line, ...(item.axisLine?.lineStyle || {}) } },
-      axisTick: { ...(item.axisTick || {}), lineStyle: { color: line, ...(item.axisTick?.lineStyle || {}) } },
-      splitLine: { ...(item.splitLine || {}), lineStyle: { color: line, ...(item.splitLine?.lineStyle || {}) } }
-    }));
-  if (option.title !== undefined)
-    option.title = textPart(option.title, {
-      ...(narrow ? { left: 8, top: 7 } : {}),
-      textStyle: { color: ink, fontFamily: cssVar("--title"), fontSize: narrow ? 16 : 18 }
-    });
-  if (option.legend !== undefined)
-    option.legend = textPart(option.legend, {
-      ...(narrow ? { left: 8, top: titleShown ? 48 : 10, itemWidth: 16, itemHeight: 9, itemGap: 12 } : {}),
-      textStyle: { color: muted, fontFamily: cssVar("--body"), fontSize: narrow ? 11 : 12 }
-    });
-  if (option.tooltip !== undefined)
-    option.tooltip = textPart(option.tooltip, {
-      backgroundColor: paper,
-      borderColor: line,
-      textStyle: { color: ink, fontFamily: cssVar("--body") }
-    });
-  if (option.xAxis !== undefined) option.xAxis = axisPart(option.xAxis);
-  if (option.yAxis !== undefined) option.yAxis = axisPart(option.yAxis);
-  // 窄处给单个格子套一份默认边距；多图并排（grid 是数组）的布局是模型算好的，不动——把数组摊进对象会只剩一个格子，系列全找不着坐标系
-  if (narrow && !Array.isArray(option.grid))
-    option.grid = { top: titleShown ? 94 : 58, left: 12, right: 12, bottom: 28, containLabel: true, ...(option.grid || {}) };
-  return {
-    ...option,
-    backgroundColor: option.backgroundColor ?? "transparent",
-    textStyle: { color: muted, fontFamily: cssVar("--body"), ...(option.textStyle || {}) },
-    color: option.color || [cssVar("--accent"), cssVar("--code-green"), cssVar("--code-blue"), "#c9a227", "#8a6f8e", "#5f8ba0"]
-  };
-}
-// 模型给的 JSON 常有小滑头（尾逗号、注释、单引号、裸键名）；逐层尝试修补，实在补不上再抛原始错误
+// 旧对话里 echarts 围栏的 option：模型给的 JSON 常有小滑头（尾逗号、注释、单引号、裸键名）；逐层尝试修补，实在补不上再抛原始错误
 const skipTrivia = (text, i) => {
   while (i < text.length) {
     const ch = text[i],
@@ -390,95 +274,54 @@ function parseVizJson(source) {
   } catch {}
   throw error;
 }
-// 渲染过的 mermaid SVG 按 消息+序号+内容哈希 缓存；整列重绘时同步回填，不再等二次渲染闪空白
-const vizKeyHash = text => {
-  let h = 5381;
-  for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
-  return h.toString(36);
-};
-function rememberMermaidSvg(key, svg) {
-  mermaidSvgCache.set(key, svg);
-  if (mermaidSvgCache.size > 48) mermaidSvgCache.delete(mermaidSvgCache.keys().next().value);
-}
-function stabilizeMermaidSvg(canvas) {
-  const svg = canvas.querySelector("svg");
-  if (!svg) return "";
-  const font = cssVar("--body") || '"Microsoft YaHei UI",system-ui,sans-serif';
-  svg.style.fontFamily = font;
-  svg.style.fontSize = "14px";
-  svg.style.lineHeight = "1.5";
-  // DOMPurify 会保留 foreignObject 的安全纯文字，但会剥掉 Mermaid 用来固定行高的 HTML 包装。
-  // 将 Mermaid 计算节点时使用的 14px / 1.5 直接写回 SVG，避免正文的 1.85 行高把末行裁掉；内联样式也随下载保留。
-  for (const label of svg.querySelectorAll("foreignObject")) {
-    label.style.fontFamily = font;
-    label.style.fontSize = "14px";
-    label.style.lineHeight = "1.5";
-  }
-  return svg.outerHTML;
-}
-async function renderViz(root) {
-  const list = Array.isArray(root) ? root : [...root.querySelectorAll(".viz[data-viz]:not([data-rendered])")];
-  for (const el of list) {
-    if (el.dataset.rendered || !el.isConnected) continue; // 两次渲染请求在 await 间隔里可能点到同一张图，只画一次
-    el.dataset.rendered = "1";
-    const source = el.querySelector(".viz-source")?.textContent || "",
-      canvas = el.querySelector(".viz-canvas");
-    const viewport = followBottom ? null : scrollSnapshot();
-    try {
-      if (!(await ensureLib(el.dataset.viz))) throw Error("图形库未能加载，请刷新页面重试");
-      if (el.dataset.viz === "mermaid") {
-        const message = el.closest(".message"),
-          siblings = message ? [...message.querySelectorAll(".viz[data-viz]")] : [el];
-        const key = `${vizThemeKey()}:${message?.dataset.message || "anon"}:${siblings.indexOf(el)}:${vizKeyHash(source)}`;
-        const cached = mermaidSvgCache.get(key);
-        if (cached) canvas.innerHTML = cached;
-        else {
-          const { svg } = await mermaid.render(`mmd${uid().replace(/[^a-z0-9]/gi, "")}`, source);
-          const clean = window.DOMPurify
-            ? DOMPurify.sanitize(svg, {
-                USE_PROFILES: { svg: true, svgFilters: true },
-                ADD_TAGS: ["foreignObject"],
-                ADD_ATTR: ["dominant-baseline"]
-              })
-            : "";
-          canvas.innerHTML = clean;
-          const stable = stabilizeMermaidSvg(canvas);
-          if (!stable) throw Error("图形清洗后为空");
-          canvas.innerHTML = stable;
-          rememberMermaidSvg(key, stable);
-        }
-      } else if (el.dataset.viz === "echarts") {
-        const option = parseVizJson(source);
-        canvas.style.height = `${Math.min(560, Math.max(220, Number(option.height) || 320))}px`;
-        const chart = echarts.init(canvas, null, { renderer: "canvas" });
-        canvas.style.width = ""; // 别把宽度钉死在创建时刻，让容器宽度跟随外层布局
-        canvas.dataset.vizWidth = String(canvas.clientWidth);
-        chart.setOption(themedEchartsOption(option, canvas));
-        vizCharts.add(chart);
-        vizObserver?.observe(canvas);
-      }
-      el.classList.add("viz-ok");
-      if (followBottom) requestAnimationFrame(scrollBottom);
-      else restoreScrollPosition(viewport);
-    } catch (error) {
-      el.classList.add("viz-error");
-      canvas.innerHTML = `<div class="viz-fail">无法渲染：${escapeHtml(
-        String(error.message || error)
-          .split("\n")[0]
-          .slice(0, 200)
-      )}</div>`;
-      el.querySelector(".viz-source")?.classList.remove("hidden");
-      if (viewport) restoreScrollPosition(viewport);
-    }
-  }
-}
 function htmlAppSource(el) {
   return el.querySelector(".html-app-source code")?.textContent || "";
+}
+// 交互内容与正文同一张纸：把言的色板、字体与明暗一并送进去（见 preview-runtime.js 的 applyTheme）
+const VIZ_TOKENS = [
+  "paper",
+  "paper-2",
+  "paper-3",
+  "ink",
+  "ink-2",
+  "ink-3",
+  "line",
+  "accent",
+  "accent-soft",
+  "code-green",
+  "code-blue",
+  "gold",
+  "keep",
+  "reach",
+  "body",
+  "title"
+];
+function vizTheme() {
+  const style = getComputedStyle(document.documentElement),
+    dark = document.documentElement.dataset.theme === "dark";
+  return {
+    dark,
+    scheme: dark ? "dark" : "light",
+    vars: Object.fromEntries(VIZ_TOKENS.map(name => [name, style.getPropertyValue(`--${name}`).trim()]))
+  };
 }
 function sendHtmlApp(el) {
   const iframe = el.querySelector("iframe"),
     id = el.dataset.appId;
-  if (iframe?.contentWindow && id) iframe.contentWindow.postMessage({ type: "yan-preview-render", id, html: htmlAppSource(el) }, "*");
+  if (iframe?.contentWindow && id)
+    iframe.contentWindow.postMessage({ type: "yan-preview-render", id, html: htmlAppSource(el), theme: vizTheme() }, "*");
+}
+// 换了主题、朱色或字体：已在页上的交互内容就地换色，不重跑（里头的状态不丢）
+function rethemeHtmlApps(root = document) {
+  const theme = vizTheme();
+  for (const el of root.querySelectorAll(".html-app[data-app-id]"))
+    el.querySelector("iframe")?.contentWindow?.postMessage({ type: "yan-preview-theme", id: el.dataset.appId, theme }, "*");
+}
+// 内容报来的高度：这一块就长这么高（全屏时由样式接管）；太长的在块里滚，不把整页撑没
+function sizeHtmlApp(el, height) {
+  const stage = el.querySelector(".html-app-stage");
+  if (!stage) return;
+  stage.style.height = `${Math.round(Math.min(Math.max(height, 48), Math.max(520, innerHeight * 0.8)))}px`;
 }
 function mountHtmlApp(el) {
   const id = `app${uid().replace(/[^a-z0-9]/gi, "")}`;
@@ -511,7 +354,6 @@ async function renderPendingMath(root) {
   }
 }
 function renderEnhancements(root) {
-  void renderViz(root);
   renderHtmlApps(root);
   void renderPendingMath(root);
 }
@@ -525,27 +367,12 @@ function downloadHref(href, name, revoke = false) {
 function downloadText(text, type, name) {
   downloadHref(URL.createObjectURL(new Blob([text], { type })), name, true);
 }
-function chartFor(canvas) {
-  for (const chart of vizCharts) if (chart.getDom() === canvas) return chart;
-  return null;
-}
-function downloadVisualization(el) {
-  if (el.dataset.viz === "mermaid") {
-    const svg = el.querySelector(".viz-canvas svg");
-    if (!svg) return toast("图形尚未完成");
-    return downloadText(new XMLSerializer().serializeToString(svg), "image/svg+xml;charset=utf-8", "言-图形.svg");
-  }
-  const chart = chartFor(el.querySelector(".viz-canvas"));
-  if (!chart) return toast("图表尚未完成");
-  downloadHref(chart.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: cssVar("--paper") }), "言-图表.png");
-}
 function closeExpandedWork(except = null) {
   for (const item of document.querySelectorAll(".work-expanded"))
     if (item !== except) {
       item.classList.remove("work-expanded");
       const trigger = item.querySelector("[data-work-expand]");
       if (trigger) trigger.textContent = "全屏";
-      chartFor(item.querySelector(".viz-canvas"))?.resize();
     }
   if (!except) document.documentElement.classList.remove("work-mode");
 }
@@ -555,44 +382,6 @@ function toggleWorkExpanded(el, button) {
   el.classList.toggle("work-expanded", open);
   button.textContent = open ? "收起" : "全屏";
   document.documentElement.classList.toggle("work-mode", open);
-  setTimeout(() => {
-    if (el.matches(".viz")) chartFor(el.querySelector(".viz-canvas"))?.resize();
-  }, 40);
-}
-// ECharts 容器宽度跟随布局（收起侧栏、改阅读宽度等），不再只依赖 window resize
-let vizObserver = null;
-function setupVizObserver() {
-  if (!("ResizeObserver" in window)) return;
-  vizObserver = new ResizeObserver(entries => {
-    for (const entry of entries) {
-      const canvas = entry.target,
-        width = Math.round(entry.contentRect.width);
-      if (Math.abs(width - Number(canvas.dataset.vizWidth || -1)) < 2) continue;
-      canvas.dataset.vizWidth = String(width);
-      if (!canvas.isConnected) continue;
-      for (const chart of vizCharts) if (chart.getDom() === canvas) chart.resize();
-    }
-  });
-}
-function disposeOrphanCharts() {
-  for (const chart of [...vizCharts]) {
-    const dom = chart.getDom();
-    if (!dom?.isConnected) {
-      vizObserver?.unobserve(dom);
-      chart.dispose();
-      vizCharts.delete(chart);
-    }
-  }
-}
-function disposeChartsIn(root) {
-  for (const chart of [...vizCharts]) {
-    const dom = chart.getDom();
-    if (!dom?.isConnected || root?.contains(dom)) {
-      vizObserver?.unobserve(dom);
-      chart.dispose();
-      vizCharts.delete(chart);
-    }
-  }
 }
 function renderMarkdown(source = "") {
   const text = String(source).replace(/^\n+|\n+$/g, "");

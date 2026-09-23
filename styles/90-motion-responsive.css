@@ -5,9 +5,6 @@
   .source-grid {
     grid-template-columns: 1fr;
   }
-  .html-app-stage {
-    height: 400px;
-  }
   .work-expanded {
     inset: 6px !important;
   }
@@ -77,9 +74,6 @@
 }
 .message.is-new .markdown {
   animation: fadeIn 0.45s ease 0.06s backwards;
-}
-.message.is-new .viz:not(.viz-pending) .viz-canvas {
-  animation: fadeIn 0.4s ease 0.1s backwards;
 }
 .tool-step.is-new,
 .tool-stack.is-new,
@@ -479,7 +473,6 @@ button:focus:not(:focus-visible) {
   .tool-step.body-new .tool-results,
   .tool-step.body-new .tool-note,
   .message.is-new .markdown,
-  .message.is-new .viz:not(.viz-pending) .viz-canvas,
   .converge .message,
   .converge .markdown,
   .converge .tool-step,

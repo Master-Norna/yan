@@ -376,7 +376,6 @@ function applyAppearance() {
   if (html.classList.contains("theme-fade")) themeFadeTimer = setTimeout(() => html.classList.remove("theme-fade"), 480);
   html.dataset.theme = nextTheme;
   html.dataset.inkMotion = inkMotion === "off" || (inkMotion === "system" && reducedMotion.matches) ? "off" : "on";
-  if (window.mermaid) setupMermaid();
   document.documentElement.style.setProperty("--read", `${Number(width) || 760}px`);
   document.documentElement.style.setProperty("--accent", accent || "#9b5540");
   const root = document.documentElement.style,
@@ -384,6 +383,7 @@ function applyAppearance() {
   html.dataset.font = FONT_STACKS[font] ? font : "mixed";
   root.setProperty("--body", stacks.body);
   root.setProperty("--title", stacks.title);
+  rethemeHtmlApps();
 }
 // 字体档。--title 是读的字（回复正文、标题、印），--body 是界面的字（侧栏、输入、设置）：混排（默认）界面黑、读宋；黑与宋是通体一种；
 // 楷与仿宋只换读的字，界面仍是黑——楷与仿宋清瘦，小字号的界面用它费眼。楷与仿宋取自系统（Windows 的 KaiTi / FangSong，

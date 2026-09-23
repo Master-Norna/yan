@@ -2,7 +2,14 @@
 // 用法：node --test test/unit/    （npm test 会先跑这里，再跑 e2e）
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { load } from "./harness.mjs";
+
+// 图表 option 的修补跑在交互预览的 iframe 里（preview-runtime.js），那一段是纯函数：单独取出来测
+const runtime = readFileSync(new URL("../../preview-runtime.js", import.meta.url), "utf8");
+const repairEchartsOption = new Function(
+  `${runtime.match(/ {2}function repairEchartsOption[\s\S]*?\n {2}\}\n/)[0]}; return repairEchartsOption;`
+)();
 
 const f = load([
   "parseToolArguments",
@@ -31,7 +38,6 @@ const f = load([
   "limitLabel",
   "fileTypeLabel",
   "trailGroups",
-  "repairEchartsOption",
   "anthropicRequest",
   "anthropicToOpenAiStream",
   "anthropicEndpoint",
@@ -206,7 +212,7 @@ test("splitDelimited：引号里的分隔符与转义引号", () => {
   assert.deepEqual(f.splitDelimited('a,"b,c","d""e"', ","), ["a", "b,c", 'd"e']);
   assert.deepEqual(f.splitDelimited("a\tb", "\t"), ["a", "b"]);
 });
-test("parseVizJson：注释、尾逗号、单引号、裸键名逐层修补", () => {
+test("parseVizJson：旧对话里 echarts 围栏的 JSON——注释、尾逗号、单引号、裸键名逐层修补", () => {
   assert.deepEqual(f.parseVizJson('{"a":1}'), { a: 1 });
   assert.deepEqual(f.parseVizJson('{ /* c */ "a": 1, // x\n "b": [1,2,], }'), { a: 1, b: [1, 2] });
   assert.deepEqual(f.parseVizJson("{ title: { text: 'T' } }"), { title: { text: "T" } });
@@ -249,7 +255,7 @@ test("trailGroups：同一轮的步骤归一组，记下这轮的话与思绪的
   assert.deepEqual([pushed[1].rfrom, pushed[1].rat], [8, 12]);
 });
 test("repairEchartsOption：系列指到不存在的轴、轴指到不存在的格子都收回来，漏了 type 按数据补", () => {
-  const fixed = f.repairEchartsOption({
+  const fixed = repairEchartsOption({
     grid: [{}, {}],
     xAxis: [{ gridIndex: 0 }, { gridIndex: 3 }],
     yAxis: [{ gridIndex: 0 }, { gridIndex: 1 }],
@@ -261,7 +267,7 @@ test("repairEchartsOption：系列指到不存在的轴、轴指到不存在的�
   assert.equal(fixed.xAxis[1].gridIndex, 1);
   assert.equal(fixed.series[0].xAxisIndex, 1);
   assert.equal(fixed.series[0].type, "bar");
-  const pie = f.repairEchartsOption({ series: { data: [{ name: "a", value: 1 }] } });
+  const pie = repairEchartsOption({ series: { data: [{ name: "a", value: 1 }] } });
   assert.equal(pie.series[0].type, "pie");
   assert.equal(pie.series[0].xAxisIndex, undefined);
 });

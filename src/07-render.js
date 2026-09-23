@@ -275,11 +275,11 @@ function renderConversation(shouldScroll = false) {
     restoreScrollPosition(snapshot);
     requestAnimationFrame(() => restoreScrollPosition(snapshot));
   }
-  // 主题、朱色或字体变了：留在原地的图表就地换色，不必重画整段
+  // 主题、朱色或字体变了：留在原地的交互内容就地换色，不必重画整段
   const themeKey = vizThemeKey();
   if (themeKey !== lastVizThemeKey) {
     lastVizThemeKey = themeKey;
-    rethemeViz($("#messages"));
+    rethemeHtmlApps($("#messages"));
   }
   for (const node of added) {
     void loadThumbnails(node);
@@ -377,7 +377,6 @@ function syncNodes(host, items, converged) {
     }
     if (node && next !== node) {
       if (node === cursor) cursor = cursor.nextElementSibling;
-      disposeChartsIn(node);
       node.remove();
     }
     if (next === cursor) cursor = cursor.nextElementSibling;
@@ -387,28 +386,12 @@ function syncNodes(host, items, converged) {
   while (cursor) {
     const stale = cursor;
     cursor = cursor.nextElementSibling;
-    disposeChartsIn(stale);
     stale.remove();
   }
   return { added };
 }
 function vizThemeKey() {
   return `${document.documentElement.dataset.theme}|${cssVar("--accent")}|${cssVar("--body")}`;
-}
-function rethemeViz(root) {
-  for (const chart of vizCharts) {
-    const canvas = chart.getDom(),
-      el = canvas?.closest('.viz[data-viz="echarts"]');
-    if (!el || !root.contains(canvas)) continue;
-    try {
-      chart.setOption(themedEchartsOption(parseVizJson(el.querySelector(".viz-source")?.textContent || ""), canvas), true);
-    } catch {}
-  }
-  const stale = [...root.querySelectorAll('.viz[data-viz="mermaid"][data-rendered].viz-ok')];
-  if (stale.length) {
-    for (const el of stale) delete el.dataset.rendered;
-    void renderViz(stale);
-  }
 }
 /** @param {Message} message */
 function noteMarkHtml(message) {
@@ -545,7 +528,7 @@ function finalizeAssistant(conversation, assistant, leadTrim = 0) {
     markdown?.remove();
     block.insertAdjacentHTML("beforeend", assistantMainHtml(assistant));
   } else if (markdown?.querySelector(".md-tail")) {
-    // 已渲染的稳定段保持不动，只把尾段按最终文本重绘一次——此时 mermaid / echarts / html 才真正成图
+    // 已渲染的稳定段保持不动，只把尾段按最终文本重绘一次——此时交互内容才真正挂载
     const cut = Math.max(trailBase(assistant), Math.min(Number(markdown.dataset.cut || 0) - leadTrim, assistant.content.length)),
       tail = markdown.querySelector(".md-tail");
     markdown.dataset.cut = String(cut);
