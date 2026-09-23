@@ -48,11 +48,11 @@ check(
   JSON.stringify([s1.conversations[0].titled, s1.conversations[0].title])
 );
 
-// ---- 流里夹着的报错：不能让半截话冒充写完——按中断处理，已写的留着，给「继续生成」
+// ---- 流里夹着的报错：不能让半截话冒充写完。先自动接着写两回，仍断才按中断处理，已写的留着，给「继续生成」
 await evalJs(
   `document.querySelector("#chatInput").value = "STREAMERR 试试"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
-await waitFor(`document.querySelectorAll(".message.assistant").length === 2 && ${lastAssistant}.dataset.status !== "streaming"`, 20000);
+await waitFor(`document.querySelectorAll(".message.assistant").length === 2 && ${lastAssistant}.dataset.status !== "streaming"`, 30000);
 const streamErr = await evalJs(
   `(a => ({ status: a.dataset.status, text: a.querySelector(".markdown")?.textContent.trim(), note: a.querySelector(".resume-note")?.textContent || "", resume: !!a.querySelector('[data-action="resume"]') }))(${lastAssistant})`
 );
@@ -61,25 +61,42 @@ check(
   streamErr.status === "interrupted" && streamErr.text === "先写半句，再写半句。" && streamErr.resume,
   JSON.stringify(streamErr)
 );
-// ---- 上游在流中途掐线：桥接补一条报错事件，页面同样按中断处理
+// ---- 上游在流中途掐线：桥接补一条报错事件，页面稍候自动请它从断处接着写，接上了就照常写完
 await evalJs(
   `document.querySelector("#chatInput").value = "STREAMCUT 试试"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
 await waitFor(`document.querySelectorAll(".message.assistant").length === 3 && ${lastAssistant}.dataset.status !== "streaming"`, 20000);
 const streamCut = await evalJs(
-  `(a => ({ status: a.dataset.status, text: a.querySelector(".markdown")?.textContent.trim(), resume: !!a.querySelector('[data-action="resume"]') }))(${lastAssistant})`
+  `(a => ({ status: a.dataset.status, text: a.querySelector(".markdown")?.textContent.trim() }))(${lastAssistant})`
 );
 check(
-  "upstream cutting the stream mid-way is reported by the bridge and marked interrupted",
-  streamCut.status === "interrupted" && streamCut.text === "写到一半" && streamCut.resume,
+  "upstream cutting the stream mid-way is resumed automatically from where it stopped",
+  streamCut.status === "complete" && streamCut.text === "写到一半接着写完。",
   JSON.stringify(streamCut)
+);
+// ---- 开口前上游忙（503）：等一等再试，状态栏说一声第几次重试，第三回接通照常作答
+await evalJs(
+  `document.querySelector("#chatInput").value = "FLAKY503 试试"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
+);
+const retryLabel = await waitFor(`/网络不稳 · 第 \\d 次重试/.test(document.querySelector("#connectionText").textContent)`, 5000).then(
+  () => true,
+  () => false
+);
+await waitFor(`document.querySelectorAll(".message.assistant").length === 4 && ${lastAssistant}.dataset.status !== "streaming"`, 20000);
+const flaky = await evalJs(
+  `(a => ({ status: a.dataset.status, text: a.querySelector(".markdown")?.textContent.trim() }))(${lastAssistant})`
+);
+check(
+  "503 before the stream opens is retried with backoff and the retry is shown",
+  retryLabel && flaky.status === "complete" && flaky.text === "重试后接通。",
+  JSON.stringify([retryLabel, flaky])
 );
 
 // ---- 页内可视化流式未闭合时的占位框：一页草图（网页是一页版式），行数记在节点上，每来一行草图上蘸一笔朱，不像卡住
 await evalJs(
   `document.querySelector("#chatInput").value = "SLOWHTML 画个页"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
-await waitFor(`document.querySelectorAll(".message.assistant").length === 4 && !!${lastAssistant}.querySelector(".viz-sketch")`, 20000);
+await waitFor(`document.querySelectorAll(".message.assistant").length === 5 && !!${lastAssistant}.querySelector(".viz-sketch")`, 20000);
 const lines1 = await evalJs(`Number(${lastAssistant}.querySelector(".viz-pending")?.dataset.lines)`);
 await waitFor(`Number(${lastAssistant}.querySelector(".viz-pending")?.dataset.lines || 0) > ${lines1}`, 5000);
 const sketch = await evalJs(
@@ -100,7 +117,7 @@ check(
 await evalJs(
   `document.querySelector("#chatInput").value = "NOEOL 说一句"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
-await waitFor(`document.querySelectorAll(".message.assistant").length === 5 && ${lastAssistant}.dataset.status === "complete"`, 20000);
+await waitFor(`document.querySelectorAll(".message.assistant").length === 6 && ${lastAssistant}.dataset.status === "complete"`, 20000);
 const text2 = await evalJs(`${lastAssistant}.querySelector(".assistant-block > .markdown").textContent`);
 check("text after the last newline-less data: line is kept", text2.trim() === "开头，结尾在此", text2);
 await waitFor(`__yanState().conversations[0].titled === true`, 8000).catch(() => {});
@@ -120,7 +137,7 @@ check(
 await evalJs(
   `document.querySelector("#chatInput").value = "ARCHIVE 做个表"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
-await waitFor(`document.querySelectorAll(".message.assistant").length === 6 && ${lastAssistant}.dataset.status === "complete"`, 20000);
+await waitFor(`document.querySelectorAll(".message.assistant").length === 7 && ${lastAssistant}.dataset.status === "complete"`, 20000);
 await waitFor(`!!${lastAssistant}.querySelector(".deliver-bar")`, 5000);
 check("deliverable listed with actions", await evalJs(`${lastAssistant}.querySelectorAll(".deliver-btn").length === 2`));
 unlinkSync(`${ARCHIVE}/报表.csv`);

@@ -647,13 +647,23 @@ async function handleChat(req, res) {
     // Anthropic：请求换成 Messages API 的，回来的事件流换回 OpenAI 风格再给页面；OpenAI 兼容的原样透传（thinking_blocks 是 Anthropic 才要的，去掉）
     const anthropic = ANTHROPIC.anthropicLike(config);
     if (!anthropic) payload.messages = messages.map(m => (m.thinking_blocks ? { ...m, thinking_blocks: undefined } : m));
+    // 上游的状态码原样带回页面（连不上记作 502）：429、5xx、过载这些页面会等一等再试，参数错之类的 4xx 不试
     const response = await fetch(anthropic ? ANTHROPIC.anthropicEndpoint(config.baseUrl) : endpoint(config.baseUrl, "/chat/completions"), {
       method: "POST",
       headers: upstreamHeaders(config),
       body: JSON.stringify(anthropic ? ANTHROPIC.anthropicRequest(payload) : payload),
       signal: abort.signal
+    }).catch(error => {
+      throw Object.assign(Error(`连不上上游接口：${error.cause?.code || error.cause?.message || error.message}`), {
+        status: 502,
+        name: error.name
+      });
     });
-    if (!response.ok) throw Error(await upstreamError(response));
+    if (!response.ok)
+      throw Object.assign(Error(await upstreamError(response)), {
+        status: response.status,
+        retryAfter: response.headers.get("retry-after") || ""
+      });
     res.writeHead(200, {
       "Content-Type": anthropic
         ? "text/event-stream; charset=utf-8"
@@ -667,8 +677,10 @@ async function handleChat(req, res) {
       res
     );
   } catch (error) {
-    if (!res.headersSent) sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
-    else if (!res.writableEnded && !res.destroyed) {
+    if (!res.headersSent) {
+      if (error.retryAfter) res.setHeader("Retry-After", error.retryAfter);
+      sendJson(res, error.status >= 400 ? error.status : 400, { error: String(error.message || error).slice(0, 500) });
+    } else if (!res.writableEnded && !res.destroyed) {
       // 流开了头才断的（上游掐线、读超时）：不能就这么静静结束——页面会把半截话当成写完了。
       // 补一条带 error 的事件再收，页面据此按「连接中断」处理，留着续写的余地；页面自己先走了的不必补
       if (!res.destroyed && error?.name !== "AbortError")

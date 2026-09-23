@@ -805,13 +805,27 @@ async function runDelegate(step, args, conversation, assistant, signal) {
   };
   const ticker = setInterval(paint, 350);
   let reportStart = 0,
-    failure = "";
+    failure = "",
+    resumed = 0;
   try {
     for (;;) {
       sub.toolCalls = null;
       sub.usage = null;
-      reportStart = sub.content.length;
-      await readReply(profile, history, signal, overrides, sub);
+      const roundStart = sub.content.length;
+      if (!resumed) reportStart = roundStart;
+      try {
+        await readReply(profile, history, signal, overrides, sub);
+      } catch (error) {
+        // 与主答一样：写到一半断了，稍候接着写，最多两回
+        if (!error.midStream || signal?.aborted || resumed >= AUTO_RESUMES) throw error;
+        resumed += 1;
+        const said = sub.content.slice(roundStart);
+        sub.toolCalls = null;
+        if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: RESUME_NOTE });
+        await restFor(2000 * resumed, signal);
+        continue;
+      }
+      resumed = 0;
       if (sub.usage) for (const key of Object.keys(usage)) usage[key] += Number(sub.usage[key] || 0);
       const calls = (sub.toolCalls || []).filter(call => call.name);
       if (!calls.length || !overrides.tools) break;

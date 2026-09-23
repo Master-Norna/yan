@@ -220,13 +220,17 @@ const FOLLOW_THRESHOLD = 80;
 // Anthropic 的 max_tokens 没填时的值：今日的 Claude 都认得下这个数；OpenAI 兼容接口根本不传这个字段
 const DEFAULT_MAX_TOKENS = 32000;
 const MIN_TOOL_STATUS_MS = 240;
-// 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；默认值在这里，实际值在「设置 → 通用」里可改
+// 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；按轮计，同一轮并发的几次调用只算一轮。
+// 默认值在这里，实际值在「设置 → 工具」里可改，留空（记作 0）即不限
 const DEFAULT_TOOL_ROUNDS = 80,
   DEFAULT_SUB_ROUNDS = 40;
 function roundLimit(key, fallback) {
-  const value = Math.floor(Number(store?.settings?.[key]));
-  return value >= 1 ? Math.min(value, 500) : fallback;
+  const raw = store?.settings?.[key];
+  if (raw === 0) return Infinity;
+  const value = Math.floor(Number(raw));
+  return value >= 1 ? value : fallback;
 }
+const roundLimitText = limit => (Number.isFinite(limit) ? String(limit) : "");
 const toolRoundLimit = () => roundLimit("toolRounds", DEFAULT_TOOL_ROUNDS),
   subRoundLimit = () => roundLimit("subRounds", DEFAULT_SUB_ROUNDS);
 const REVEAL_RATE = 0.16,
@@ -7682,6 +7686,9 @@ async function startTurn(c, user, profile) {
 // 就等它说到一个自然的落点（见 watchSteer：思考写完、句尾或段落尾、代码围栏闭合）把这一轮的流停下、已写的留着，随即连同补言
 // 再请它开口——它读了这句接着写，可就此改道；正在拟工具调用或跑着工具时不停，等结果交回、模型再开口之前递上；
 // 这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出。引导是为了答得更好，从不硬掐
+// 断线后请模型接着写的那句话：手点「继续生成」与自动续写共用
+const RESUME_NOTE = "上一条回复在此处因连接中断。请仅从中断处继续，不要重复已生成的内容。",
+  AUTO_RESUMES = 2;
 const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］",
   STEER_PREFIX = "［用户在你作答途中插了一句，你写到此处暂停。读后接着作答，可据此改变方向；不必重复已写的内容］";
 function sendSupplement() {
@@ -7894,16 +7901,22 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
     if (resume && assistant.content) {
       history.push({ role: "assistant", content: assistant.content });
-      history.push({ role: "user", content: "上一条回复在此处因连接中断。请仅从中断处继续，不要重复已生成的内容。" });
+      history.push({ role: "user", content: RESUME_NOTE });
     }
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
+    let retrying = false;
     const overrides = {
       systemPrompt: assistantHint(profile, tools, conversation),
       tools,
-      reasoning: conversation.reasoning || ""
+      reasoning: conversation.reasoning || "",
+      onRetry: n => {
+        retrying = true;
+        setJobLabel(conversation, job, `网络不稳 · 第 ${n} 次重试`);
+      }
     };
     const toolCache = new Map();
-    let rounds = 0;
+    let rounds = 0,
+      resumed = 0;
     for (;;) {
       assistant.toolCalls = null;
       assistant.usage = null;
@@ -7916,8 +7929,30 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       job.controller.signal.addEventListener("abort", stopRound, { once: true });
       job.reading = true;
       try {
-        await readReply(profile, history, round.signal, overrides, assistant, false, () => (roundOpen = opened = true));
+        await readReply(profile, history, round.signal, overrides, assistant, false, () => {
+          roundOpen = opened = true;
+          if (retrying) setJobLabel(conversation, job, "生成中");
+          retrying = false;
+        });
       } catch (error) {
+        // 写到一半断了：已写的留着，稍候请它从断处接着写（半截的工具调用作废，这一轮重来），同一轮最多接两回，再断才算中断
+        if (error.midStream && !job.controller.signal.aborted && resumed < AUTO_RESUMES) {
+          resumed += 1;
+          const said = assistant.content.slice(roundStart);
+          if (roundOpen) {
+            const spent = estimateTokens(history) + estimateTokens([{ content: said }]);
+            usage.prompt_tokens += spent;
+            usage.total_tokens += spent;
+            usageKnown = steered = true;
+            roundOpen = false;
+          }
+          assistant.toolCalls = null;
+          if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: RESUME_NOTE });
+          setJobLabel(conversation, job, "网络不稳 · 稍候接着写");
+          await restFor(2000 * resumed, job.controller.signal);
+          setJobLabel(conversation, job, "生成中");
+          continue;
+        }
         if (error.name !== "AbortError" || job.controller.signal.aborted || !job.queue?.length) throw error;
         // 补言停下的：这一轮写到落点为止（花的墨按估算记上），已写的话与补言一起进历史，没执行的工具调用一律作废，随即再开一轮
         const said = trimToBoundary(assistant.content.slice(roundStart)).replace(/\n+$/, "");
@@ -7942,6 +7977,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         job.steerTimer = 0;
         job.controller.signal.removeEventListener("abort", stopRound);
       }
+      resumed = 0; // 接续的次数按轮算：长活跑上几百轮，前面断过两回不该让后面再断就没得接
       if (assistant.usage) {
         usageKnown = true;
         roundOpen = false;
@@ -8049,7 +8085,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
  */
 async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
   target.thinkingBlocks = null;
-  const response = await requestChat(profile, history, signal, overrides);
+  const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     // 桥接回的 error 是一句话；直连 Anthropic 回的是 { error: { message } }
@@ -8068,7 +8104,12 @@ async function readReply(profile, history, signal, overrides, target, retried = 
   const type = response.headers.get("content-type") || "";
   // 帮手与消息的流式字段一致（content / reasoning / toolCalls / usage），readSse 按消息处理
   const sink = /** @type {Message} */ (target);
-  if (type.includes("text/event-stream")) return readSse(response, sink, { onFrame });
+  if (type.includes("text/event-stream"))
+    return readSse(response, sink, { onFrame }).catch(error => {
+      // 开了口才断的（掉线、上游掐线、静默超时）：记一笔，streamReply 据此接着写而不是整答作废
+      if (error.name !== "AbortError") error.midStream = true;
+      throw error;
+    });
   const data = await response.json(),
     message = data?.choices?.[0]?.message;
   target.content += extractContent(data);
@@ -8082,6 +8123,48 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       name: call.function?.name || "",
       arguments: call.function?.arguments || ""
     }));
+}
+// 网络一晃就断太脆：接口没接下请求时（连不上、限流、5xx、过载）等一等再试，间隔渐长，接口给了 Retry-After 就照它等；
+// 断网时等网回来再试。参数错、鉴权错这类 4xx 试也白试，原样交回。overrides.onRetry 用来在页面上说一声「第几次重试」
+const RETRY_DELAYS = [1000, 2000, 4000, 8000];
+const retryableStatus = status => status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+/** 等 ms 毫秒（断网就等到网回来）；中途停止即抛 AbortError */
+function restFor(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(Object.assign(Error("已停止"), { name: "AbortError" }));
+    const done = () => {
+      clearTimeout(timer);
+      removeEventListener("online", wake);
+      signal?.removeEventListener("abort", stop);
+    };
+    const wake = () => {
+      done();
+      resolve(null);
+    };
+    const stop = () => {
+      done();
+      reject(Object.assign(Error("已停止"), { name: "AbortError" }));
+    };
+    const timer = setTimeout(() => (navigator.onLine ? wake() : addEventListener("online", wake, { once: true })), ms);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+/** @param {Profile} profile */
+async function requestPatiently(profile, history, signal, overrides) {
+  for (let attempt = 0; ; attempt++) {
+    let wait = RETRY_DELAYS[attempt];
+    try {
+      const response = await requestChat(profile, history, signal, overrides);
+      if (response.ok || !retryableStatus(response.status) || wait === undefined) return response;
+      const after = Number(response.headers.get("retry-after"));
+      if (after > 0) wait = Math.min(after * 1000, 60000);
+      response.body?.cancel().catch(() => {});
+    } catch (error) {
+      if (error.name === "AbortError" || wait === undefined) throw error;
+    }
+    overrides.onRetry?.(attempt + 1);
+    await restFor(wait, signal);
+  }
 }
 // 把一批工具调用跑完，返回各步回给模型的结果。相邻的只读调用一起跑（读、搜、翻网页、翻记忆彼此无关）；会改状态或要请示的按原顺序逐个来。
 // 主模型与帮手共用这一段：assistant 是页面上那条消息（帮手的步骤也画在它的行迹里）
@@ -9126,13 +9209,27 @@ async function runDelegate(step, args, conversation, assistant, signal) {
   };
   const ticker = setInterval(paint, 350);
   let reportStart = 0,
-    failure = "";
+    failure = "",
+    resumed = 0;
   try {
     for (;;) {
       sub.toolCalls = null;
       sub.usage = null;
-      reportStart = sub.content.length;
-      await readReply(profile, history, signal, overrides, sub);
+      const roundStart = sub.content.length;
+      if (!resumed) reportStart = roundStart;
+      try {
+        await readReply(profile, history, signal, overrides, sub);
+      } catch (error) {
+        // 与主答一样：写到一半断了，稍候接着写，最多两回
+        if (!error.midStream || signal?.aborted || resumed >= AUTO_RESUMES) throw error;
+        resumed += 1;
+        const said = sub.content.slice(roundStart);
+        sub.toolCalls = null;
+        if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: RESUME_NOTE });
+        await restFor(2000 * resumed, signal);
+        continue;
+      }
+      resumed = 0;
       if (sub.usage) for (const key of Object.keys(usage)) usage[key] += Number(sub.usage[key] || 0);
       const calls = (sub.toolCalls || []).filter(call => call.name);
       if (!calls.length || !overrides.tools) break;
@@ -10279,7 +10376,7 @@ function generalSettingsHtml() {
 // 工具：沙箱、三档指令权限、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
 function toolsSettingsHtml() {
   const policy = normalizeCommandPolicy(store.settings.commandPolicyDefault);
-  return `<h2>工具</h2><p class="settings-lead">模型能做什么、做到哪一步问一声，都在这里定。</p><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>言与行的指令与文件工具都套着一层：改动不出工作目录、机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；查看则可及整台机器，要它看看电脑也走得通。在桥接那头守，模型绕不过。这是静态筛查，不是进程隔离。非要让模型改目录之外的东西时再关</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">开</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>指令权限</strong><small>新对话默认档位：问而后行逐条请示，明确只读的径直跑；审而后行由桥接代审，常规改动、整机查看、写到目录之外都放行，只把伤及系统与难以恢复的当场回绝，不来打扰；径行不再审查。三档都不另调模型，沙箱开着时那道界仍在</small></div><div class="segmented"><button data-setting="commandPolicyDefault" data-value="ask" class="${policy === "ask" ? "active" : ""}">问而后行</button><button data-setting="commandPolicyDefault" data-value="review" class="${policy === "review" ? "active" : ""}">审而后行</button><button data-setting="commandPolicyDefault" data-value="auto" class="${policy === "auto" ? "active" : ""}">径行</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，到顶后收回工具请它收尾；帮手另计，大任务可放宽</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${toolRoundLimit()}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" value="${subRoundLimit()}"></label></div></div>`;
+  return `<h2>工具</h2><p class="settings-lead">模型能做什么、做到哪一步问一声，都在这里定。</p><div class="setting-row"><div class="setting-copy"><strong>沙箱</strong><small>言与行的指令与文件工具都套着一层：改动不出工作目录、机密文件不碰、动系统与直接外联的指令拒绝、指令看不到机密环境变量；查看则可及整台机器，要它看看电脑也走得通。在桥接那头守，模型绕不过。这是静态筛查，不是进程隔离。非要让模型改目录之外的东西时再关</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">开</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>指令权限</strong><small>新对话默认档位：问而后行逐条请示，明确只读的径直跑；审而后行由桥接代审，常规改动、整机查看、写到目录之外都放行，只把伤及系统与难以恢复的当场回绝，不来打扰；径行不再审查。三档都不另调模型，沙箱开着时那道界仍在</small></div><div class="segmented"><button data-setting="commandPolicyDefault" data-value="ask" class="${policy === "ask" ? "active" : ""}">问而后行</button><button data-setting="commandPolicyDefault" data-value="review" class="${policy === "review" ? "active" : ""}">审而后行</button><button data-setting="commandPolicyDefault" data-value="auto" class="${policy === "auto" ? "active" : ""}">径行</button></div></div><div class="setting-row"><div class="setting-copy"><strong>文件工具可及范围</strong><small>没套沙箱时，模型读写文件、列目录与搜索能否越出工作目录或卷宗：「全盘」可指向任何绝对路径，「目录内」一律拒绝越出；指令不受此限。沙箱开着时一律目录内</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">全盘</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">目录内</button></div></div><div class="setting-row"><div class="setting-copy"><strong>卷宗对模型可读</strong><small>开启后，模型可在任何对话中翻阅卷宗里的文档（PDF、Office、文本），用到时才取回并在本机提取正文</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">开</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>工具轮次上限</strong><small>一次回答里模型最多调几轮工具，同一轮并发的几次调用只算一轮；到顶后收回工具请它收尾。帮手另计，留空即不限</small></div><div class="setting-actions"><label class="setting-inline">一答<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不限" value="${roundLimitText(toolRoundLimit())}"></label><label class="setting-inline">帮手<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不限" value="${roundLimitText(subRoundLimit())}"></label></div></div>`;
 }
 function appearanceSettingsHtml() {
   const s = store.settings;
@@ -10419,8 +10516,10 @@ function bindSettingsEvents() {
     ["#settingSubRounds", "subRounds", DEFAULT_SUB_ROUNDS]
   ])
     $(id)?.addEventListener("input", e => {
-      const value = Math.floor(Number(e.target.value));
-      store.settings[key] = value >= 1 ? Math.min(value, 500) : fallback;
+      // 留空记作 0：不限
+      const text = e.target.value.trim(),
+        value = Math.floor(Number(text));
+      store.settings[key] = !text ? 0 : value >= 1 ? value : fallback;
       saveStoreSoon();
     });
   // 对话目录：切换后以浏览器里的当前对话为准同步一份过去；旧目录不删，避免一次改路径就造成不可恢复的数据移动。

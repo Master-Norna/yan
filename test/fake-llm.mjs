@@ -21,6 +21,7 @@ const delta = (d, extra = {}) => ({
   ...extra
 });
 let calls = 0,
+  flaky503 = 0,
   titleFailed = false,
   slowTitleFailed = false;
 // 流的末尾不带换行就结束：最后一段 data: 与 usage 都没有跟换行，页面在 EOF 时也得把它们处理掉
@@ -197,6 +198,24 @@ http
           delta({ content: `NEWTOOLS|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 90)).join(" ▸ ")}` }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
+      }
+      // 断线后页面自动请它接着写：STREAMERR 那段每回都断（接满两回仍断，才算中断），别的接上一句收尾
+      if (typeof lastUser === "string" && lastUser.startsWith("上一条回复在此处因连接中断")) {
+        const asked = [...msgs]
+          .reverse()
+          .find(m => m.role === "user" && typeof m.content === "string" && !m.content.startsWith("上一条回复在此处因连接中断"));
+        if (String(asked?.content || "").includes("STREAMERR"))
+          return sse(res, [{ error: { message: "rate limited again (fake)", type: "rate_limit_error" } }]);
+        return sse(res, [delta({ content: "接着写完。" }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
+      // FLAKY503：前两回装作上游忙（503），页面该等一等再试，第三回接通
+      if (typeof lastUser === "string" && lastUser.includes("FLAKY503")) {
+        if (flaky503 < 2) {
+          flaky503 += 1;
+          res.writeHead(503, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: { message: "overloaded (fake)" } }));
+        }
+        return sse(res, [delta({ content: "重试后接通。" }), delta({}, { usage: { total_tokens: 6 } })]);
       }
       if (typeof lastUser === "string" && lastUser.includes("STREAMERR"))
         // 写了半截后流里夹一条报错（限流之类）就收：页面该按「连接中断」处理、已写的留着，而不是当写完了

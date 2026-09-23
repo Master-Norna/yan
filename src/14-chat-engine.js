@@ -223,6 +223,9 @@ async function startTurn(c, user, profile) {
 // 就等它说到一个自然的落点（见 watchSteer：思考写完、句尾或段落尾、代码围栏闭合）把这一轮的流停下、已写的留着，随即连同补言
 // 再请它开口——它读了这句接着写，可就此改道；正在拟工具调用或跑着工具时不停，等结果交回、模型再开口之前递上；
 // 这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出。引导是为了答得更好，从不硬掐
+// 断线后请模型接着写的那句话：手点「继续生成」与自动续写共用
+const RESUME_NOTE = "上一条回复在此处因连接中断。请仅从中断处继续，不要重复已生成的内容。",
+  AUTO_RESUMES = 2;
 const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］",
   STEER_PREFIX = "［用户在你作答途中插了一句，你写到此处暂停。读后接着作答，可据此改变方向；不必重复已写的内容］";
 function sendSupplement() {
@@ -435,16 +438,22 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
     if (resume && assistant.content) {
       history.push({ role: "assistant", content: assistant.content });
-      history.push({ role: "user", content: "上一条回复在此处因连接中断。请仅从中断处继续，不要重复已生成的内容。" });
+      history.push({ role: "user", content: RESUME_NOTE });
     }
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
+    let retrying = false;
     const overrides = {
       systemPrompt: assistantHint(profile, tools, conversation),
       tools,
-      reasoning: conversation.reasoning || ""
+      reasoning: conversation.reasoning || "",
+      onRetry: n => {
+        retrying = true;
+        setJobLabel(conversation, job, `网络不稳 · 第 ${n} 次重试`);
+      }
     };
     const toolCache = new Map();
-    let rounds = 0;
+    let rounds = 0,
+      resumed = 0;
     for (;;) {
       assistant.toolCalls = null;
       assistant.usage = null;
@@ -457,8 +466,30 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       job.controller.signal.addEventListener("abort", stopRound, { once: true });
       job.reading = true;
       try {
-        await readReply(profile, history, round.signal, overrides, assistant, false, () => (roundOpen = opened = true));
+        await readReply(profile, history, round.signal, overrides, assistant, false, () => {
+          roundOpen = opened = true;
+          if (retrying) setJobLabel(conversation, job, "生成中");
+          retrying = false;
+        });
       } catch (error) {
+        // 写到一半断了：已写的留着，稍候请它从断处接着写（半截的工具调用作废，这一轮重来），同一轮最多接两回，再断才算中断
+        if (error.midStream && !job.controller.signal.aborted && resumed < AUTO_RESUMES) {
+          resumed += 1;
+          const said = assistant.content.slice(roundStart);
+          if (roundOpen) {
+            const spent = estimateTokens(history) + estimateTokens([{ content: said }]);
+            usage.prompt_tokens += spent;
+            usage.total_tokens += spent;
+            usageKnown = steered = true;
+            roundOpen = false;
+          }
+          assistant.toolCalls = null;
+          if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: RESUME_NOTE });
+          setJobLabel(conversation, job, "网络不稳 · 稍候接着写");
+          await restFor(2000 * resumed, job.controller.signal);
+          setJobLabel(conversation, job, "生成中");
+          continue;
+        }
         if (error.name !== "AbortError" || job.controller.signal.aborted || !job.queue?.length) throw error;
         // 补言停下的：这一轮写到落点为止（花的墨按估算记上），已写的话与补言一起进历史，没执行的工具调用一律作废，随即再开一轮
         const said = trimToBoundary(assistant.content.slice(roundStart)).replace(/\n+$/, "");
@@ -483,6 +514,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         job.steerTimer = 0;
         job.controller.signal.removeEventListener("abort", stopRound);
       }
+      resumed = 0; // 接续的次数按轮算：长活跑上几百轮，前面断过两回不该让后面再断就没得接
       if (assistant.usage) {
         usageKnown = true;
         roundOpen = false;
@@ -590,7 +622,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
  */
 async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
   target.thinkingBlocks = null;
-  const response = await requestChat(profile, history, signal, overrides);
+  const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     // 桥接回的 error 是一句话；直连 Anthropic 回的是 { error: { message } }
@@ -609,7 +641,12 @@ async function readReply(profile, history, signal, overrides, target, retried = 
   const type = response.headers.get("content-type") || "";
   // 帮手与消息的流式字段一致（content / reasoning / toolCalls / usage），readSse 按消息处理
   const sink = /** @type {Message} */ (target);
-  if (type.includes("text/event-stream")) return readSse(response, sink, { onFrame });
+  if (type.includes("text/event-stream"))
+    return readSse(response, sink, { onFrame }).catch(error => {
+      // 开了口才断的（掉线、上游掐线、静默超时）：记一笔，streamReply 据此接着写而不是整答作废
+      if (error.name !== "AbortError") error.midStream = true;
+      throw error;
+    });
   const data = await response.json(),
     message = data?.choices?.[0]?.message;
   target.content += extractContent(data);
@@ -623,6 +660,48 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       name: call.function?.name || "",
       arguments: call.function?.arguments || ""
     }));
+}
+// 网络一晃就断太脆：接口没接下请求时（连不上、限流、5xx、过载）等一等再试，间隔渐长，接口给了 Retry-After 就照它等；
+// 断网时等网回来再试。参数错、鉴权错这类 4xx 试也白试，原样交回。overrides.onRetry 用来在页面上说一声「第几次重试」
+const RETRY_DELAYS = [1000, 2000, 4000, 8000];
+const retryableStatus = status => status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+/** 等 ms 毫秒（断网就等到网回来）；中途停止即抛 AbortError */
+function restFor(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(Object.assign(Error("已停止"), { name: "AbortError" }));
+    const done = () => {
+      clearTimeout(timer);
+      removeEventListener("online", wake);
+      signal?.removeEventListener("abort", stop);
+    };
+    const wake = () => {
+      done();
+      resolve(null);
+    };
+    const stop = () => {
+      done();
+      reject(Object.assign(Error("已停止"), { name: "AbortError" }));
+    };
+    const timer = setTimeout(() => (navigator.onLine ? wake() : addEventListener("online", wake, { once: true })), ms);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+/** @param {Profile} profile */
+async function requestPatiently(profile, history, signal, overrides) {
+  for (let attempt = 0; ; attempt++) {
+    let wait = RETRY_DELAYS[attempt];
+    try {
+      const response = await requestChat(profile, history, signal, overrides);
+      if (response.ok || !retryableStatus(response.status) || wait === undefined) return response;
+      const after = Number(response.headers.get("retry-after"));
+      if (after > 0) wait = Math.min(after * 1000, 60000);
+      response.body?.cancel().catch(() => {});
+    } catch (error) {
+      if (error.name === "AbortError" || wait === undefined) throw error;
+    }
+    overrides.onRetry?.(attempt + 1);
+    await restFor(wait, signal);
+  }
 }
 // 把一批工具调用跑完，返回各步回给模型的结果。相邻的只读调用一起跑（读、搜、翻网页、翻记忆彼此无关）；会改状态或要请示的按原顺序逐个来。
 // 主模型与帮手共用这一段：assistant 是页面上那条消息（帮手的步骤也画在它的行迹里）
