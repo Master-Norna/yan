@@ -472,8 +472,9 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         const why = sandbox.screenAutoReview(command);
         if (why) throw Error(why);
       }
-      // 超时只有默认值没有上限：长测试、大装包、跑数据都可能超过十分钟，页面上本就有「停止」
-      const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, Number.MAX_SAFE_INTEGER);
+      // 超时只有默认值没有上限：长测试、大装包、跑数据都可能超过十分钟，页面上本就有「停止」。
+      // 封顶在 2³¹−1 毫秒（约 24 天）只因 setTimeout 超过它会溢出、当作 1 毫秒——模型给个大数，指令就被当场杀掉
+      const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 2147483647);
       console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })} $ ${command.slice(0, 120)}`);
       // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉
       const abort = new AbortController();
