@@ -217,13 +217,17 @@ const FOLLOW_THRESHOLD = 80;
 // Anthropic 的 max_tokens 没填时的值：今日的 Claude 都认得下这个数；OpenAI 兼容接口根本不传这个字段
 const DEFAULT_MAX_TOKENS = 32000;
 const MIN_TOOL_STATUS_MS = 240;
-// 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；默认值在这里，实际值在「设置 → 通用」里可改
+// 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；按轮计，同一轮并发的几次调用只算一轮。
+// 默认值在这里，实际值在「设置 → 工具」里可改，留空（记作 0）即不限
 const DEFAULT_TOOL_ROUNDS = 80,
   DEFAULT_SUB_ROUNDS = 40;
 function roundLimit(key, fallback) {
-  const value = Math.floor(Number(store?.settings?.[key]));
-  return value >= 1 ? Math.min(value, 500) : fallback;
+  const raw = store?.settings?.[key];
+  if (raw === 0) return Infinity;
+  const value = Math.floor(Number(raw));
+  return value >= 1 ? value : fallback;
 }
+const roundLimitText = limit => (Number.isFinite(limit) ? String(limit) : "");
 const toolRoundLimit = () => roundLimit("toolRounds", DEFAULT_TOOL_ROUNDS),
   subRoundLimit = () => roundLimit("subRounds", DEFAULT_SUB_ROUNDS);
 const REVEAL_RATE = 0.16,
