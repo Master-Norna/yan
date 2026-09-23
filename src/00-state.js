@@ -141,6 +141,7 @@
  * @property {string} systemPrompt
  * @property {boolean} [tools] 本机工具，默认开
  * @property {number} [contextWindow]
+ * @property {string} [reasoning] 此模型记住的思考档位；留空由接口决定
  * @property {string} [reasoningLevels] 此模型认的思考档位，逗号分隔；none 是不认；探到的与手填的都记在这里
  * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey），亲手填的前面带 manual|；换了任一样再探
  * @property {string[]} [modelList]
@@ -159,7 +160,6 @@
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
- * @property {string} reasoning 新对话默认的思考档位
  * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
  * @property {number} compactAt
@@ -247,7 +247,6 @@ const defaultStore = {
     autoTitle: true,
     pendingWorkdir: "",
     collapsedRepos: [],
-    reasoning: "",
     commandPolicyDefault: "ask",
     sandbox: true,
     compactAt: 0,

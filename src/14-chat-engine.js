@@ -169,7 +169,7 @@ async function sendOrStop() {
       messages: [],
       workdir: pending,
       commandPolicy: normalizeCommandPolicy(store.settings.commandPolicyDefault),
-      reasoning: store.settings.reasoning || ""
+      reasoning: normalizeReasoning(profile.reasoning)
     };
     if (!(await ensureWorkReady(c))) return;
     closeChipPop();

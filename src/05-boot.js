@@ -440,8 +440,10 @@ function bindEvents() {
     if (level) {
       e.stopPropagation();
       const c = currentConversation();
-      if (c) c.reasoning = level.dataset.reasoning;
-      else store.settings.reasoning = level.dataset.reasoning;
+      const profile = activeProfile();
+      if (!profile) return;
+      profile.reasoning = normalizeReasoning(level.dataset.reasoning);
+      if (c) c.reasoning = profile.reasoning;
       saveStore();
       renderModelMenu();
       renderModelTriggers();

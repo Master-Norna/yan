@@ -4,7 +4,7 @@ const { send, evalJs, waitFor, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", mode: "chat", activeProfileId: "p1", autoTitle: false, reasoning: "high" }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", mode: "chat", activeProfileId: "p1", autoTitle: false, reasoning: "high" }, profiles: [{ id: "p1", source: "custom", name: "假模型甲", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }, { id: "p2", source: "custom", name: "假模型乙", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
@@ -15,6 +15,22 @@ const before = await evalJs(
   `[...document.querySelectorAll("#modelMenu [data-reasoning]")].map(b => b.textContent + (b.classList.contains("active") ? "*" : "")).join(",")`
 );
 check("menu shows generic levels with 高 active", before === "默认,低,中,高*,最高", before);
+await evalJs(`document.querySelector('#modelMenu [data-profile="p2"]').click(); true`);
+check(
+  "switching to another model starts from its own default",
+  await evalJs(
+    `__yanState().profiles[1].reasoning === undefined && document.querySelector('#welcome .model-trigger .model-extra').textContent === ""`
+  )
+);
+await evalJs(`document.querySelector("#welcome .model-trigger").click(); true`);
+await evalJs(`document.querySelector('#modelMenu [data-reasoning="low"]').click(); true`);
+await evalJs(`document.querySelector('#modelMenu [data-profile="p1"]').click(); true`);
+check(
+  "returning to the first model restores its chosen level",
+  await evalJs(
+    `__yanState().profiles[0].reasoning === "high" && document.querySelector('#welcome .model-trigger .model-extra').textContent === "· 思考 高"`
+  )
+);
 await evalJs(`document.body.click(); true`);
 await evalJs(
   `document.querySelector("#welcomeInput").value = "EFFORT"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
@@ -61,6 +77,39 @@ await waitFor(
 );
 const second = await evalJs(`[...document.querySelectorAll(".message.assistant .markdown")].at(-1).textContent.trim()`);
 check("chosen level sent as-is once known", second === "EFFORT|medium", second);
+await evalJs(`document.querySelector("#composerArea .model-trigger").click(); true`);
+await evalJs(`document.querySelector('#modelMenu [data-profile="p2"]').click(); true`);
+check(
+  "switching models in a conversation restores that model's level",
+  await evalJs(
+    `__yanState().conversations[0].reasoning === "low" && __yanState().profiles[1].reasoning === "low" && document.querySelector('#composerArea .model-trigger .model-extra').textContent === "· 思考 低"`
+  )
+);
+await evalJs(`document.querySelector("#composerArea .model-trigger").click(); true`);
+await evalJs(`document.querySelector('#modelMenu [data-profile="p1"]').click(); true`);
+check(
+  "the original model still remembers its updated level",
+  await evalJs(`__yanState().conversations[0].reasoning === "medium" && __yanState().profiles[0].reasoning === "medium"`)
+);
+await send("Page.navigate", { url: PAGE });
+await sleep(1200);
+check(
+  "both model levels survive a reload",
+  await evalJs(
+    `__yanState().profiles.find(p => p.id === "p1").reasoning === "medium" && __yanState().profiles.find(p => p.id === "p2").reasoning === "low"`
+  )
+);
+await evalJs(`document.querySelector("#newChat").click(); document.querySelector("#welcome .model-trigger").click(); true`);
+await evalJs(`document.querySelector('#modelMenu [data-profile="p2"]').click(); true`);
+await evalJs(
+  `document.querySelector("#welcomeInput").value = "EFFORT new"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
+);
+await waitFor(
+  `__yanState().conversations.length === 2 && __yanState().conversations[0].profileId === "p2" && document.querySelector('.message.assistant')?.dataset.status === "complete"`,
+  20000
+);
+const third = await evalJs(`document.querySelector(".message.assistant .markdown").textContent.trim()`);
+check("a new conversation sends the second model's remembered level", third === "EFFORT|low", third);
 // 设置页里能看到并手改档位
 await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
 await sleep(300);

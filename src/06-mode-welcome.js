@@ -465,13 +465,21 @@ function renameConversation(id, value) {
   }
 }
 function selectProfile(id, shouldRender = true) {
-  if (!profiles().some(p => p.id === id)) return;
+  const profile = profiles().find(p => p.id === id);
+  if (!profile) return;
   const c = currentConversation(),
     wasDry = conversationDry(c);
+  // 旧对话里已有的档位首次打开时归给它自己的模型；切到另一模型时只取新模型记住的档位。
+  const initialized = c?.profileId === id && profile.reasoning === undefined;
+  if (initialized) profile.reasoning = normalizeReasoning(c.reasoning);
+  const reasoning = normalizeReasoning(profile.reasoning);
   // 开旧对话时也走这里，多半什么都没变：没变就不整份存一遍
-  const changed = store.settings.activeProfileId !== id || (!!c && c.profileId !== id);
+  const changed = initialized || store.settings.activeProfileId !== id || (!!c && (c.profileId !== id || c.reasoning !== reasoning));
   store.settings.activeProfileId = id;
-  if (c) c.profileId = id;
+  if (c) {
+    c.profileId = id;
+    c.reasoning = reasoning;
+  }
   if (changed) saveStore();
   closeModelMenu();
   if (shouldRender) {

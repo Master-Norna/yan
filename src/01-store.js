@@ -39,16 +39,24 @@ function normalizeStoreData(value) {
     if (data.version === 3) migrateStoreV3(data);
     if (data.version === 4) migrateStoreV4(data);
     if (data.version > STORE_VERSION) data.version = STORE_VERSION;
+    const settings = { ...defaultStore.settings, ...(data.settings || {}) };
+    const legacyReasoning = normalizeReasoning(settings.reasoning),
+      rawProfiles = Array.isArray(data.profiles) ? data.profiles.filter(p => p && typeof p === "object") : [],
+      legacyProfileId = data.settings?.activeProfileId || rawProfiles[0]?.id;
+    delete settings.reasoning;
     return {
       ...structuredClone(defaultStore),
       ...data,
-      settings: {
-        ...defaultStore.settings,
-        ...(data.settings || {}),
-        // 旧版思考菜单上有「关」，现在没有了：按「默认」看
-        reasoning: normalizeReasoning(data.settings?.reasoning)
-      },
-      profiles: Array.isArray(data.profiles) ? data.profiles : [],
+      settings,
+      // 旧版把新对话档位存在全局设置里；仅归给当时选中的模型，不能让它跟着切到别的模型。
+      profiles: rawProfiles.map(p => ({
+        ...p,
+        ...(p.reasoning !== undefined
+          ? { reasoning: normalizeReasoning(p.reasoning) }
+          : data.settings?.reasoning !== undefined && p.id === legacyProfileId
+            ? { reasoning: legacyReasoning }
+            : {})
+      })),
       conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(normalizeConversation),
       library: Array.isArray(data.library) ? data.library : [],
       drafts: normalizeDrafts(data.drafts),

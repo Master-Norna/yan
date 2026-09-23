@@ -33,10 +33,10 @@ check(
 );
 await evalJs(`document.querySelector("#welcome .model-trigger").click(); true`);
 await sleep(200);
-check("menu lists the three and lights the nearest to 最高", (await menu()) === "默认,低,中,高*", await menu());
+check("a different model starts at its own default", (await menu()) === "默认*,低,中,高", await menu());
 check(
   "trigger label shows the level actually used",
-  (await evalJs(`document.querySelector("#welcome .model-trigger .model-extra")?.textContent`)) === "· 思考 高",
+  (await evalJs(`document.querySelector("#welcome .model-trigger .model-extra")?.textContent`)) === "",
   await evalJs(`document.querySelector("#welcome .model-trigger .model-extra")?.textContent`)
 );
 await evalJs(`document.body.click(); true`);

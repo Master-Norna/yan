@@ -144,6 +144,7 @@
  * @property {string} systemPrompt
  * @property {boolean} [tools] 本机工具，默认开
  * @property {number} [contextWindow]
+ * @property {string} [reasoning] 此模型记住的思考档位；留空由接口决定
  * @property {string} [reasoningLevels] 此模型认的思考档位，逗号分隔；none 是不认；探到的与手填的都记在这里
  * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey），亲手填的前面带 manual|；换了任一样再探
  * @property {string[]} [modelList]
@@ -162,7 +163,6 @@
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
- * @property {string} reasoning 新对话默认的思考档位
  * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
  * @property {number} compactAt
@@ -250,7 +250,6 @@ const defaultStore = {
     autoTitle: true,
     pendingWorkdir: "",
     collapsedRepos: [],
-    reasoning: "",
     commandPolicyDefault: "ask",
     sandbox: true,
     compactAt: 0,
@@ -387,16 +386,24 @@ function normalizeStoreData(value) {
     if (data.version === 3) migrateStoreV3(data);
     if (data.version === 4) migrateStoreV4(data);
     if (data.version > STORE_VERSION) data.version = STORE_VERSION;
+    const settings = { ...defaultStore.settings, ...(data.settings || {}) };
+    const legacyReasoning = normalizeReasoning(settings.reasoning),
+      rawProfiles = Array.isArray(data.profiles) ? data.profiles.filter(p => p && typeof p === "object") : [],
+      legacyProfileId = data.settings?.activeProfileId || rawProfiles[0]?.id;
+    delete settings.reasoning;
     return {
       ...structuredClone(defaultStore),
       ...data,
-      settings: {
-        ...defaultStore.settings,
-        ...(data.settings || {}),
-        // 旧版思考菜单上有「关」，现在没有了：按「默认」看
-        reasoning: normalizeReasoning(data.settings?.reasoning)
-      },
-      profiles: Array.isArray(data.profiles) ? data.profiles : [],
+      settings,
+      // 旧版把新对话档位存在全局设置里；仅归给当时选中的模型，不能让它跟着切到别的模型。
+      profiles: rawProfiles.map(p => ({
+        ...p,
+        ...(p.reasoning !== undefined
+          ? { reasoning: normalizeReasoning(p.reasoning) }
+          : data.settings?.reasoning !== undefined && p.id === legacyProfileId
+            ? { reasoning: legacyReasoning }
+            : {})
+      })),
       conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(normalizeConversation),
       library: Array.isArray(data.library) ? data.library : [],
       drafts: normalizeDrafts(data.drafts),
@@ -2481,8 +2488,10 @@ function bindEvents() {
     if (level) {
       e.stopPropagation();
       const c = currentConversation();
-      if (c) c.reasoning = level.dataset.reasoning;
-      else store.settings.reasoning = level.dataset.reasoning;
+      const profile = activeProfile();
+      if (!profile) return;
+      profile.reasoning = normalizeReasoning(level.dataset.reasoning);
+      if (c) c.reasoning = profile.reasoning;
       saveStore();
       renderModelMenu();
       renderModelTriggers();
@@ -3566,13 +3575,21 @@ function renameConversation(id, value) {
   }
 }
 function selectProfile(id, shouldRender = true) {
-  if (!profiles().some(p => p.id === id)) return;
+  const profile = profiles().find(p => p.id === id);
+  if (!profile) return;
   const c = currentConversation(),
     wasDry = conversationDry(c);
+  // 旧对话里已有的档位首次打开时归给它自己的模型；切到另一模型时只取新模型记住的档位。
+  const initialized = c?.profileId === id && profile.reasoning === undefined;
+  if (initialized) profile.reasoning = normalizeReasoning(c.reasoning);
+  const reasoning = normalizeReasoning(profile.reasoning);
   // 开旧对话时也走这里，多半什么都没变：没变就不整份存一遍
-  const changed = store.settings.activeProfileId !== id || (!!c && c.profileId !== id);
+  const changed = initialized || store.settings.activeProfileId !== id || (!!c && (c.profileId !== id || c.reasoning !== reasoning));
   store.settings.activeProfileId = id;
-  if (c) c.profileId = id;
+  if (c) {
+    c.profileId = id;
+    c.reasoning = reasoning;
+  }
   if (changed) saveStore();
   closeModelMenu();
   if (shouldRender) {
@@ -3672,7 +3689,7 @@ function renderQuota() {
 function renderModelTriggers() {
   const p = activeProfile(),
     c = currentConversation(),
-    level = (c ? c.reasoning : store.settings.reasoning) || "";
+    level = (c ? c.reasoning : p?.reasoning) || "";
   // 标签写实际会送出的那一档：模型不认所选的就落到最接近的；模型不认思考档位（探过是 none）就不写
   const used = level ? nearestReasoning(p, level) : "";
   document.querySelectorAll(".model-trigger").forEach(button => {
@@ -3711,15 +3728,15 @@ function renderModelMenu() {
         .join("")
     : `<button class="model-option" id="configureFirst"><strong>接入模型</strong><small>任何 OpenAI 兼容接口</small></button>`;
   const c = currentConversation(),
-    level = (c ? c.reasoning : store.settings.reasoning) || "",
     profile = activeProfile(),
+    level = (c ? c.reasoning : profile?.reasoning) || "",
     choices = reasoningChoices(profile),
     // 选过的档位这个模型不认（换了模型、或刚学到它的档位）：菜单上点亮它实际会落到的那一档
     shown = choices.includes(level) ? level : nearestReasoning(profile, level) || "";
   if (all.length)
     $("#modelMenu").insertAdjacentHTML(
       "beforeend",
-      `<div class="menu-section"><div class="menu-section-title"><span>思考深度</span><span title="留空由接口决定；各模型所认的档位不同，可在模型高级配置中填写，接口拒绝时亦会自动记下">${c ? "本段对话" : "新对话默认"}</span></div>${choices.length > 1 ? `<div class="segmented">${choices.map(value => `<button type="button" data-reasoning="${value}" class="${value === shown ? "active" : ""}">${reasoningLabel(value)}</button>`).join("")}</div>` : `<div class="menu-section-note">此模型不认思考档位</div>`}</div><button class="model-option model-manage" data-manage>模型设置</button>`
+      `<div class="menu-section"><div class="menu-section-title"><span>思考深度</span><span title="每个模型分别记住所选档位；默认不带字段，由接口决定。各模型所认的档位可在高级配置中填写">当前模型</span></div>${choices.length > 1 ? `<div class="segmented">${choices.map(value => `<button type="button" data-reasoning="${value}" class="${value === shown ? "active" : ""}">${reasoningLabel(value)}</button>`).join("")}</div>` : `<div class="menu-section-note">此模型不认思考档位</div>`}</div><button class="model-option model-manage" data-manage>模型设置</button>`
     );
   $("#configureFirst")?.addEventListener("click", () => openSettings("models"));
   $("#modelMenu [data-manage]")?.addEventListener("click", e => {
@@ -7576,7 +7593,7 @@ async function sendOrStop() {
       messages: [],
       workdir: pending,
       commandPolicy: normalizeCommandPolicy(store.settings.commandPolicyDefault),
-      reasoning: store.settings.reasoning || ""
+      reasoning: normalizeReasoning(profile.reasoning)
     };
     if (!(await ensureWorkReady(c))) return;
     closeChipPop();
