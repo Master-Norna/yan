@@ -92,9 +92,26 @@
       type: "object",
       properties: {
         command: { type: "string", description: "要执行的指令" },
-        timeout: { type: "number", description: "超时秒数，默认 120，不设上限；耗时长的指令记得给足" }
+        timeout: { type: "number", description: "超时秒数，默认 120，不设上限；耗时长的指令记得给足" },
+        background: {
+          type: "boolean",
+          description: "开发服务器、监听构建这类不会自己结束的放后台：先回几秒输出与编号，之后用 check_command"
+        }
       },
       required: ["command"]
+    }
+  },
+
+  check_command: {
+    description: "看后台指令（run_command 的 background）：取上次之后的新输出，可先等几秒；stop 为 true 则结束它。",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "后台指令的编号，如 bg1" },
+        wait: { type: "number", description: "最多等几秒再取（等到结束或输出停下），默认 0" },
+        stop: { type: "boolean", description: "结束这条后台指令" }
+      },
+      required: ["id"]
     }
   },
 

@@ -140,6 +140,15 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* 沙箱会拦下的原因：一道印色细线领起，不铺底色（请示条与行迹里的请示共用） */
+.approval-sandbox {
+  margin: 8px 0 0;
+  padding: 1px 0 1px 9px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .approval-actions {
   display: flex;
   gap: 6px;

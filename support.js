@@ -58,6 +58,8 @@
  * @property {Array<{ text: string, status: string }>} [plan] update_plan 的清单
  * @property {number} [exitCode]
  * @property {boolean} [readOnly] 只读指令，免确认
+ * @property {string} [sandboxWhy] 问而后行里严的沙箱会拦下它的原因；请示时写明，批了就出沙箱跑
+ * @property {boolean} [background] 后台指令
  * @property {{ old: string, new: string }} [diff]
  * @property {{ path: string, added: number, removed: number, created?: boolean }} [change]
  * @property {number} [at] 调用发起时正文的长度（时间线分组、思绪按轮切分都靠它）
@@ -4241,6 +4243,7 @@ const TOOL_LABELS = {
   fetch_page: "翻阅网页",
   read_document: "翻阅文档",
   run_command: "运行",
+  check_command: "后台",
   write_file: "写入",
   edit_file: "修改",
   read_file: "读取",
@@ -4542,7 +4545,7 @@ function stepHtml(step) {
     return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<span>${label}</span>`;
   };
   const stepUrl = safeWebUrl(step.url);
-  if (WORK_TOOLS.has(step.name)) return workStepHtml(step, title);
+  if (WORK_TOOLS.has(step.name) || step.name === "check_command") return workStepHtml(step, title);
   if (step.name === "ask_user") return askStepHtml(step);
   if (step.name === "delegate") return delegateStepHtml(step);
   if (step.name === "user_note") return noteStepHtml(step);
@@ -4981,7 +4984,7 @@ function workStepHtml(step, title) {
     more = "";
   // 等待确认时把整条指令完整摊开，不能只靠单行省略号让用户猜着点头
   if (status === "pending")
-    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre><div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre>${sandboxWhyHtml(step)}<div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
   else if (step.diff) {
     const del = clampLines(step.diff.old, step.full),
       ins = clampLines(step.diff.new, step.full);
@@ -8176,7 +8179,7 @@ async function runSteps(steps, conversation, assistant, signal, toolCache) {
   const outcomes = new Map();
   const runOne = async step => {
     const stepStarted = performance.now();
-    const cacheable = !WORK_TOOLS.has(step.name) && !MEMORY_TOOLS.has(step.name) && step.name !== "delegate",
+    const cacheable = !WORK_TOOLS.has(step.name) && !MEMORY_TOOLS.has(step.name) && !["delegate", "check_command"].includes(step.name),
       cacheKey = toolCacheKey(step),
       cached = cacheable ? toolCache.get(cacheKey) : null;
     let outcome;
@@ -8354,6 +8357,8 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
     tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));
   // 计划：行里给用户看的清单，只有主模型维护
   if (work && !sub) tools.push(define("update_plan"));
+  // 后台指令的新输出与结束：只给行，跟着 run_command 的 background 走
+  if (work && workRoot(conversation)) tools.push(define("check_command"));
   if (!sub && !lookup) tools.push(define("ask_user"));
   // 帮手与旁注对记忆只读：翻记忆、查旧谈可以，记与忘留给主模型
   if (memoryEnabled())
@@ -8373,7 +8378,16 @@ function workHint(conversation) {
   return prompt(isWork(conversation) ? "work.hint" : "work.archive", {
     workdir: workRoot(conversation),
     scratch: scratchRel(conversation),
-    reach: prompt(sandboxed() ? "work.reachSandbox" : roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
+    // 沙箱两档：问而后行用严的（拦下的转请用户定夺），审而后行、径行用宽的（只守系统本身）
+    reach: prompt(
+      sandboxed()
+        ? commandPolicyOf(conversation) === "ask"
+          ? "work.reachSandbox"
+          : "work.reachSandboxLoose"
+        : roamAllowed()
+          ? "work.reachAnywhere"
+          : "work.reachInside"
+    ),
     platform: win ? "Windows" : bootstrap.work?.platform || "类 Unix",
     shell,
     shellNote: win ? prompt("work.windowsShell") : ""
@@ -8684,7 +8698,7 @@ async function runTool(step, conversation, assistant, signal) {
     if (MEMORY_TOOLS.has(step.name)) return runMemoryTool(step, args, conversation);
     if (step.name === "ask_user") return await askUserTool(step, args, conversation, assistant, signal);
     if (step.name === "delegate") return await runDelegate(step, args, conversation, assistant, signal);
-    if (WORK_TOOLS.has(step.name)) return await runWorkTool(step, args, conversation, assistant, signal);
+    if (WORK_TOOLS.has(step.name) || step.name === "check_command") return await runWorkTool(step, args, conversation, assistant, signal);
     return { ok: false, content: `未知工具 ${step.name}`, display: "未知工具" };
   } catch (error) {
     if (error.name === "AbortError") throw error;
@@ -9017,11 +9031,18 @@ function askStepHtml(step) {
         : "";
   return `<div class="tool-step" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">请示</span><span class="tool-title" title="${escapeHtml(step.title)}">${escapeHtml(step.title)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
+// 沙箱会拦下的指令：请示时写明原因（去掉「沙箱拒绝：」的前缀），批了这一条就出沙箱跑
+/** @param {Step} step */
+function sandboxWhyHtml(step) {
+  return step.sandboxWhy
+    ? `<div class="approval-sandbox">沙箱会拦下：${escapeHtml(String(step.sandboxWhy).replace(/^沙箱拒绝：/, ""))}。运行即在沙箱外执行这一条。</div>`
+    : "";
+}
 // 右上角只写一个快捷键：这一页按 Enter 是下一题还是提交（输入框留空时），随翻页改，见 formPage；题数与第几问在标题里
 /** @param {Step} step */
 function approvalBarHtml(step) {
   if (step.name !== "ask_user")
-    return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">${isWork(currentConversation()) ? "执事请示" : "本机请示"} · 运行此指令</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre><div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+    return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">${isWork(currentConversation()) ? "执事请示" : "本机请示"} · 运行此指令${step.background ? "（后台）" : ""}</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre>${sandboxWhyHtml(step)}<div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
   const questions = step.form?.questions || [];
   const block = (q, i) =>
     `<div class="ask-q" data-q="${i}" data-multi="${q.multi ? "true" : "false"}"><div class="ask-question">${q.header ? `<span class="ask-header">${escapeHtml(q.header)}</span>` : ""}${escapeHtml(q.question)}${q.multi ? `<span class="ask-multi">可多选</span>` : ""}</div><div class="ask-options" role="${q.multi ? "group" : "radiogroup"}">${q.options.map((o, j) => `<button type="button" class="ask-opt" role="${q.multi ? "checkbox" : "radio"}" aria-checked="false" data-opt="${j}"><span class="ask-tick" aria-hidden="true"></span><span class="ask-opt-copy"><strong>${escapeHtml(o.label)}</strong>${o.description ? `<small>${escapeHtml(o.description)}</small>` : ""}</span></button>`).join("")}</div><input class="ask-other" type="text" maxlength="200" placeholder="${q.options.length ? (q.multi ? "还可自行补充" : "或自行填写") : "请填写"}" aria-label="自行填写"></div>`;
@@ -9370,9 +9391,17 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     step.title = String(args.command || "").trim();
     if (!step.title) return { ok: false, content: "指令为空", display: "指令为空" };
     step.readOnly = isReadOnlyCommand(step.title);
+    const background = args.background === true;
+    if (background) step.background = true;
     // 言与行一样：请示条上按「径行」即把这一段对话切成径行，此后不再问
     let policy = commandPolicyOf(conversation);
-    if (policy === "ask" && !step.readOnly) {
+    // 问而后行开着沙箱：先问一声严的沙箱会不会拦。会拦的也请示（只读的也不例外），请示条写明原因；批了这一条就出沙箱跑
+    if (policy === "ask" && sandbox) {
+      const screened = await bridge("/api/work/screen", { workdir, command: step.title }, signal).catch(() => null);
+      step.sandboxWhy = screened?.why || undefined;
+    }
+    let escalated = false;
+    if (policy === "ask" && (!step.readOnly || step.sandboxWhy)) {
       step.status = "pending";
       if (job) setJobLabel(conversation, job, "等待确认");
       refreshSteps(assistant);
@@ -9387,22 +9416,52 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
         step.skipped = true;
         return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
       }
+      escalated = !!step.sandboxWhy;
     } else if (job) setJobLabel(conversation, job, "执行中");
     // 用户可能在等待条上把这一段对话切成审而后行或径行；执行前再取一次，不沿用旧档位。
     policy = commandPolicyOf(conversation);
     const data = await bridge(
       "/api/work/run",
-      { workdir, sandbox, permission: policy, command: step.title, timeout: Number(args.timeout) || 120 },
+      {
+        workdir,
+        sandbox: sandbox && !escalated,
+        permission: policy,
+        command: step.title,
+        timeout: Number(args.timeout) || 120,
+        background
+      },
       signal
     );
-    step.exitCode = data.exitCode;
+    const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0),
+      marks = `${escalated ? " · 出沙箱" : ""}${step.readOnly && policy === "ask" && !step.sandboxWhy ? " · 只读免确认" : ""}`;
     step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
-    const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0);
-    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${step.readOnly && policy === "ask" ? " · 只读免确认" : ""}`;
+    if (background) {
+      step.exitCode = data.exitCode ?? undefined;
+      return {
+        ok: data.running || data.exitCode === 0,
+        content: `${data.running ? `后台指令 ${data.id} 仍在跑（已 ${seconds} 秒），用 check_command 取新输出或结束它` : `后台指令 ${data.id} 已结束，退出码：${data.exitCode}`}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
+        display: `${data.running ? `后台 ${data.id} · 在跑` : `后台 ${data.id} · 退出码 ${data.exitCode}`}${marks}`
+      };
+    }
+    step.exitCode = data.exitCode;
+    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${marks}`;
     return {
       ok: !data.timedOut && data.exitCode === 0,
       content: `退出码：${data.exitCode}${data.timedOut ? "（超时被终止）" : ""}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
       display
+    };
+  }
+  // 后台指令：取上次之后的新输出，可顺带等一会儿，或结束它
+  if (step.name === "check_command") {
+    const id = String(args.id || "").trim();
+    step.title = `${id}${args.stop === true ? " · 结束" : ""}`;
+    const data = await bridge("/api/work/check", { id, stop: args.stop === true, wait: Number(args.wait) || 0 }, signal);
+    step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
+    if (!data.running) step.exitCode = data.exitCode;
+    return {
+      ok: true,
+      content: `${data.running ? `${data.id} 仍在跑` : `${data.id} 已结束，退出码：${data.exitCode}`}\n--- 新的 stdout ---\n${data.stdout || "(空)"}\n--- 新的 stderr ---\n${data.stderr || "(空)"}`,
+      display: data.running ? "在跑" : args.stop === true ? "已结束" : `退出码 ${data.exitCode}`
     };
   }
   if (step.name === "write_file") {

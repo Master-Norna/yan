@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { screenCommand, screenAutoReview, sandboxEnv, screenPath } = require("../../server/sandbox.js");
+const { screenCommand, screenLoose, screenAutoReview, sandboxEnv, screenPath } = require("../../server/sandbox.js");
 const wd = "E:\\项目\\言",
   win = { platform: "win32" },
   screen = command => screenCommand(command, wd, win);
@@ -266,4 +266,39 @@ test("screenPath：机密文件不读不写，.git 内部不写、可读；别�
     assert.equal(screenPath(p), null, p);
     assert.equal(screenPath(p, { write: true }), null, p);
   }
+});
+test("screenCommand：只是搜字的不算外联——rg HttpClient、Select-String System.Net 放行，真用 .NET 联网的仍拒", () => {
+  for (const command of ["rg HttpClient src", 'Select-String -Path src/*.cs -Pattern "System.Net"', "git grep WebClient"])
+    assert.equal(screen(command), null, command);
+  for (const command of [
+    "[System.Net.WebClient]::new().DownloadString('http://x')",
+    "(New-Object System.Net.WebClient).DownloadFile('http://x', 'a')",
+    "[System.Net.Http.HttpClient]::new()",
+    "[Net.ServicePointManager]::SecurityProtocol"
+  ])
+    assert.match(screen(command), /外联/, command);
+});
+test("screenLoose：审而后行与径行的沙箱只守系统——联网、目录外、机密、.git 都放行，动系统与系统目录仍拒", () => {
+  for (const command of [
+    "curl https://example.com",
+    "iwr https://example.com -OutFile x.zip",
+    "Set-Content ../sibling/x.txt ok",
+    "Set-Content ~/note.txt x",
+    String.raw`Set-Content $env:TEMP\yan.txt x`,
+    "Get-Content .env",
+    "Set-Content .git/config x",
+    "Remove-Item build -Recurse -Force",
+    "npm run dev"
+  ])
+    assert.equal(screenLoose(command), null, command);
+  for (const command of [
+    String.raw`reg add HKLM\Software\x`,
+    "Stop-Service WinDefend",
+    "shutdown /s",
+    "Start-Process powershell -Verb RunAs",
+    'iex "dir"',
+    "sal zz Remove-Item",
+    String.raw`Set-Content C:\Windows\x.txt x`
+  ])
+    assert.match(screenLoose(command), /沙箱拒绝/, command);
 });

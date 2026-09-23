@@ -5,6 +5,7 @@ const TOOL_LABELS = {
   fetch_page: "翻阅网页",
   read_document: "翻阅文档",
   run_command: "运行",
+  check_command: "后台",
   write_file: "写入",
   edit_file: "修改",
   read_file: "读取",
@@ -306,7 +307,7 @@ function stepHtml(step) {
     return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<span>${label}</span>`;
   };
   const stepUrl = safeWebUrl(step.url);
-  if (WORK_TOOLS.has(step.name)) return workStepHtml(step, title);
+  if (WORK_TOOLS.has(step.name) || step.name === "check_command") return workStepHtml(step, title);
   if (step.name === "ask_user") return askStepHtml(step);
   if (step.name === "delegate") return delegateStepHtml(step);
   if (step.name === "user_note") return noteStepHtml(step);
@@ -745,7 +746,7 @@ function workStepHtml(step, title) {
     more = "";
   // 等待确认时把整条指令完整摊开，不能只靠单行省略号让用户猜着点头
   if (status === "pending")
-    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre><div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+    body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre>${sandboxWhyHtml(step)}<div class="tool-approve"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
   else if (step.diff) {
     const del = clampLines(step.diff.old, step.full),
       ins = clampLines(step.diff.new, step.full);

@@ -5,6 +5,8 @@
 //   环境——指令看不到机密环境变量（名字里带 KEY / TOKEN / SECRET / PASSWORD 之类的一律不传；页面配置里的 API Key 本就不进桥接进程）；
 //   指令——动系统的（注册表、服务、计划任务、防火墙、账户、磁盘、关机、提权、执行策略）、藏字的（编码指令、Invoke-Expression）、
 //         直接外联的（curl / iwr / wget 之类，指向本机的除外）一律拒绝，装依赖走包管理器。
+// 以上是严的一档（screenCommand），给「问而后行」：拦下的由页面转给用户请示，批了这一条就出沙箱跑。
+// 「审而后行」「径行」用宽的一档（screenLoose），只守系统本身，见其说明。
 // 这是静态筛查，不是进程隔离：脚本里的代码仍以用户的权限跑。筛出来的每一条都带一句原因回给模型，它改一改就能过。
 // 纯函数，不碰文件系统；由 server/work.js 装配，test/unit 直接测
 "use strict";
@@ -43,7 +45,11 @@ const FORBIDDEN = [
   [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不改执行策略与安全设置"],
   [/\bInvoke-Expression\b|(^|[\s;&|(])iex\s|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}/i, "不用编码或拼接的指令，直接写出来"],
   [ALIASING, "不定义别名，直接写出指令"],
-  [/\bcertutil(\.exe)?\b[^\n]*-urlcache|\bStart-BitsTransfer\b|\bNet\.WebClient\b|\bHttpClient\b|\bSystem\.Net\b/i, "沙箱里不直接外联"]
+  // .NET 联网只认真在用的写法（[System.Net.…]、New-Object Net.…、::new）：rg HttpClient、Select-String System.Net 这类只是搜字的不算
+  [
+    /\bcertutil(\.exe)?\b[^\n]*-urlcache|\bStart-BitsTransfer\b|\[(?:System\.)?Net\.[\w.]+\]|New-Object\s+(?:-TypeName\s+)?["']?(?:System\.)?Net\.|\[(?:System\.Net\.Http\.)?HttpClient\]/i,
+    "沙箱里不直接外联"
+  ]
 ];
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
 const HOME_SYSTEM_PATH =
@@ -207,6 +213,20 @@ function screenAutoReview(command) {
   return null;
 }
 /**
+ * 宽的沙箱：给「审而后行」与「径行」。三档由严到宽是 问而后行 ≤ 审而后行 ≤ 径行——问而后行里沙箱拦下的会转给用户请示、
+ * 批了便出沙箱跑；后两档不向用户请示，沙箱就只守系统本身：注册表、服务、计划任务、账户、磁盘、提权、执行策略、
+ * 藏字与别名、往系统目录里写。联网、写目录之外、机密文件、.git 内部都放行。通过返回 null
+ * @param {string} command
+ */
+function screenLoose(command) {
+  const text = String(command || "");
+  for (const [pattern, why] of REVIEW_FORBIDDEN) if (pattern.test(text)) return `沙箱拒绝：${why.replace(/^不代为/, "不")}`;
+  if (ALIASING.test(text)) return "沙箱拒绝：不定义别名，直接写出指令";
+  if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
+    return "沙箱拒绝：不往 Windows、Program Files 这类系统目录里写";
+  return null;
+}
+/**
  * 给指令的环境变量：去掉名字像机密的；其余照传（PATH、SystemRoot、TEMP 这些没了程序起不来）
  * @param {NodeJS.ProcessEnv} env
  */
@@ -232,4 +252,4 @@ function screenPath(rel, { write = false } = {}) {
   return null;
 }
 
-module.exports = { screenCommand, screenAutoReview, sandboxEnv, screenPath, SECRET_ENV };
+module.exports = { screenCommand, screenLoose, screenAutoReview, sandboxEnv, screenPath, SECRET_ENV };

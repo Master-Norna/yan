@@ -713,7 +713,7 @@ async function runSteps(steps, conversation, assistant, signal, toolCache) {
   const outcomes = new Map();
   const runOne = async step => {
     const stepStarted = performance.now();
-    const cacheable = !WORK_TOOLS.has(step.name) && !MEMORY_TOOLS.has(step.name) && step.name !== "delegate",
+    const cacheable = !WORK_TOOLS.has(step.name) && !MEMORY_TOOLS.has(step.name) && !["delegate", "check_command"].includes(step.name),
       cacheKey = toolCacheKey(step),
       cached = cacheable ? toolCache.get(cacheKey) : null;
     let outcome;
@@ -891,6 +891,8 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
     tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));
   // 计划：行里给用户看的清单，只有主模型维护
   if (work && !sub) tools.push(define("update_plan"));
+  // 后台指令的新输出与结束：只给行，跟着 run_command 的 background 走
+  if (work && workRoot(conversation)) tools.push(define("check_command"));
   if (!sub && !lookup) tools.push(define("ask_user"));
   // 帮手与旁注对记忆只读：翻记忆、查旧谈可以，记与忘留给主模型
   if (memoryEnabled())
@@ -910,7 +912,16 @@ function workHint(conversation) {
   return prompt(isWork(conversation) ? "work.hint" : "work.archive", {
     workdir: workRoot(conversation),
     scratch: scratchRel(conversation),
-    reach: prompt(sandboxed() ? "work.reachSandbox" : roamAllowed() ? "work.reachAnywhere" : "work.reachInside"),
+    // 沙箱两档：问而后行用严的（拦下的转请用户定夺），审而后行、径行用宽的（只守系统本身）
+    reach: prompt(
+      sandboxed()
+        ? commandPolicyOf(conversation) === "ask"
+          ? "work.reachSandbox"
+          : "work.reachSandboxLoose"
+        : roamAllowed()
+          ? "work.reachAnywhere"
+          : "work.reachInside"
+    ),
     platform: win ? "Windows" : bootstrap.work?.platform || "类 Unix",
     shell,
     shellNote: win ? prompt("work.windowsShell") : ""

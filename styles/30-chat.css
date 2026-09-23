@@ -693,6 +693,9 @@ sup.note-ref.active {
   gap: 6px;
   margin: 2px 9px 9px 50px;
 }
+.tool-step > .approval-sandbox {
+  margin: 2px 9px 7px 50px;
+}
 .tool-approve button {
   padding: 4px 11px;
   border: 1px solid var(--line);

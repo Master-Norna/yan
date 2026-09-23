@@ -4,7 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const sandbox = require("./sandbox.js");
 
 module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes }) {
@@ -86,9 +86,12 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
   async function assertReachable(workdir, target) {
     if (pathIsInside(workdir, target)) await assertNoEscapingLink(workdir, target);
   }
-  // 各文件接口的落点：沙箱里不认「全盘」，目录内的机密文件、.git 内部（写）也拦下；审而后行不管文件工具，可及范围只由「全盘 / 目录内」定
+  // 沙箱分两档：问而后行（或没说档位的请求）用严的；审而后行、径行用宽的——文件工具在宽档里不设防，指令只守系统本身（见 server/sandbox.js）
+  const looseTier = body => body.permission === "review" || body.permission === "auto";
+  const strictBox = body => body.sandbox === true && !looseTier(body);
+  // 各文件接口的落点：严的沙箱里不认「全盘」，目录内的机密文件、.git 内部（写）也拦下；宽档与没开沙箱时，可及范围只由「全盘 / 目录内」定
   async function targetOf(workdir, body, { write = false } = {}) {
-    const boxed = body.sandbox === true,
+    const boxed = strictBox(body),
       target = resolveTarget(workdir, body.path, body.roam === true && !boxed);
     await assertReachable(workdir, target);
     if (boxed) {
@@ -392,30 +395,34 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
   function lockWorkdir(workdir) {
     return lockOf(dirLocks, lockKey(workdir)).acquire(true);
   }
+  // 起一个 shell 跑指令：PowerShell 默认按系统代码页输出，中文会成乱码；先把输入输出都切到 UTF-8。
+  // 原生程序的退出码在 $LASTEXITCODE；cmdlet 出错不设它，靠 $? 兜底，让模型能从退出码看出失败
+  function spawnShell(command, cwd, { boxed = false } = {}) {
+    const win = process.platform === "win32";
+    const script = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'
+  ${command}
+  $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE } elseif (-not $ok) { exit 1 }`;
+    const args = win
+      ? ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)]
+      : ["-c", command];
+    return spawn(win ? "powershell.exe" : "/bin/sh", args, {
+      cwd,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...(boxed ? sandbox.sandboxEnv(process.env) : process.env),
+        TERM: "dumb",
+        NO_COLOR: "1",
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
+        CI: "1"
+      }
+    });
+  }
   function runShell(command, cwd, timeoutMs, signal = null, { boxed = false } = {}) {
     return new Promise(resolve => {
       const win = process.platform === "win32";
-      // PowerShell 默认按系统代码页输出，中文会成乱码；先把输入输出都切到 UTF-8。
-      // 原生程序的退出码在 $LASTEXITCODE；cmdlet 出错不设它，靠 $? 兜底，让模型能从退出码看出失败
-      const script = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'
-  ${command}
-  $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE } elseif (-not $ok) { exit 1 }`;
-      const args = win
-        ? ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)]
-        : ["-c", command];
-      const child = spawn(win ? "powershell.exe" : "/bin/sh", args, {
-        cwd,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: {
-          ...(boxed ? sandbox.sandboxEnv(process.env) : process.env),
-          TERM: "dumb",
-          NO_COLOR: "1",
-          PYTHONIOENCODING: "utf-8",
-          PYTHONUTF8: "1",
-          CI: "1"
-        }
-      });
+      const child = spawnShell(command, cwd, { boxed });
       let stdout = "",
         stderr = "",
         timedOut = false;
@@ -465,12 +472,16 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       if (!fs.existsSync(workdir)) throw Error("工作目录已不存在，请重新发送以重建，或另起对话");
       const boxed = body.sandbox === true;
       if (boxed) {
-        const why = sandbox.screenCommand(command, workdir);
+        const why = looseTier(body) ? sandbox.screenLoose(command) : sandbox.screenCommand(command, workdir);
         if (why) throw Error(why);
       }
       if (body.permission === "review") {
         const why = sandbox.screenAutoReview(command);
         if (why) throw Error(why);
+      }
+      if (body.background === true) {
+        console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })} $ （后台）${command.slice(0, 120)}`);
+        return sendJson(res, 200, await backgroundReport(startBackground(command, workdir, boxed), 5000));
       }
       // 超时只有默认值没有上限：长测试、大装包、跑数据都可能超过十分钟，页面上本就有「停止」。
       // 封顶在 2³¹−1 毫秒（约 24 天）只因 setTimeout 超过它会溢出、当作 1 毫秒——模型给个大数，指令就被当场杀掉
@@ -491,6 +502,109 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       }
       if (result.aborted) console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })}   已中止：${command.slice(0, 80)}`);
       if (!res.writableEnded && !res.destroyed) sendJson(res, 200, { ...result, durationMs: Date.now() - started });
+    } catch (error) {
+      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+    }
+  }
+  // ---- 后台指令：开发服务器、监听构建这类不会自己结束的，放到后台跑，先回头几秒的输出与一个编号，之后用 check_command 取新输出或结束它。
+  // 后台指令不拿目录锁（它一直跑着，锁住了别的指令就都得排队）；桥接退出时一并收掉。只记最近的若干个，跑完的旧账先清
+  const BACKGROUND_KEEP = 24,
+    backgroundJobs = new Map();
+  let backgroundSeq = 0;
+  function startBackground(command, workdir, boxed) {
+    const child = spawnShell(command, workdir, { boxed }),
+      job = {
+        id: `bg${++backgroundSeq}`,
+        command,
+        child,
+        exitCode: null,
+        started: Date.now(),
+        grew: Date.now(),
+        // 两路输出各留最近一截；base 是已裁掉的字数、read 是已交出去的位置（都按从头算的绝对位置记，裁了也对得上）
+        text: { out: "", err: "" },
+        base: { out: 0, err: 0 },
+        read: { out: 0, err: 0 }
+      };
+    const take = (key, chunk) => {
+      job.text[key] += chunk.toString("utf8");
+      job.grew = Date.now();
+      const cut = job.text[key].length - WORK_OUTPUT_LIMIT * 4;
+      if (cut > 0) {
+        job.text[key] = job.text[key].slice(cut);
+        job.base[key] += cut;
+      }
+    };
+    child.stdout.on("data", chunk => take("out", chunk));
+    child.stderr.on("data", chunk => take("err", chunk));
+    child.on("error", error => {
+      take("err", `无法启动 shell：${error.message}`);
+      job.exitCode = -1;
+    });
+    child.on("close", code => {
+      job.exitCode = code ?? 1;
+    });
+    for (const [id, old] of backgroundJobs) if (backgroundJobs.size >= BACKGROUND_KEEP && old.exitCode !== null) backgroundJobs.delete(id);
+    backgroundJobs.set(job.id, job);
+    return job;
+  }
+  // 等到指令结束、输出停了一会儿（服务器起好了往往就不再出声）或时间到；交出去的是上次取过之后的新输出
+  async function backgroundReport(job, waitMs) {
+    const start = Date.now(),
+      until = start + waitMs;
+    while (Date.now() < until && job.exitCode === null && Date.now() - Math.max(job.grew, start) < 1500)
+      await new Promise(resolve => setTimeout(resolve, 200));
+    const fresh = key => {
+      const text = job.text[key].slice(Math.max(0, job.read[key] - job.base[key]));
+      job.read[key] = job.base[key] + job.text[key].length;
+      return text;
+    };
+    const out = fresh("out"),
+      err = fresh("err");
+    return {
+      id: job.id,
+      running: job.exitCode === null,
+      exitCode: job.exitCode,
+      stdout: tail(out, WORK_OUTPUT_LIMIT),
+      stderr: tail(process.platform === "win32" ? decodeClixml(err) : err, WORK_OUTPUT_LIMIT),
+      durationMs: Date.now() - job.started
+    };
+  }
+  // 桥接退出时把还在跑的后台指令一并收掉（退出时起不了异步的 taskkill，用同步的）
+  process.on("exit", () => {
+    for (const job of backgroundJobs.values())
+      if (job.exitCode === null && job.child.pid)
+        try {
+          if (process.platform === "win32")
+            spawnSync("taskkill", ["/T", "/F", "/PID", String(job.child.pid)], { windowsHide: true, stdio: "ignore" });
+          else job.child.kill("SIGKILL");
+        } catch {}
+  });
+  async function handleWorkCheck(req, res) {
+    try {
+      const body = await readJson(req),
+        job = backgroundJobs.get(String(body.id || ""));
+      if (!job) throw Error(`没有编号为 ${body.id} 的后台指令（桥接重启过的话，之前的后台指令已随之结束）`);
+      if (body.stop === true && job.exitCode === null) {
+        killTree(job.child);
+        await new Promise(resolve => {
+          const timer = setTimeout(resolve, 3000);
+          job.child.once("close", () => {
+            clearTimeout(timer);
+            resolve(null);
+          });
+        });
+      }
+      sendJson(res, 200, await backgroundReport(job, clampNumber(Number(body.wait) * 1000, 0, 0, 120000)));
+    } catch (error) {
+      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+    }
+  }
+  // 问而后行：发指令前先问一声严的沙箱会不会拦——会拦的照样请示，请示条上写明原因，用户批了这一条就出沙箱跑
+  async function handleWorkScreen(req, res) {
+    try {
+      const body = await readJson(req),
+        workdir = resolveWorkdir(body.workdir);
+      sendJson(res, 200, { why: sandbox.screenCommand(String(body.command || ""), workdir) });
     } catch (error) {
       sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
     }
@@ -697,7 +811,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       const stat = await fs.promises.stat(target).catch(() => null);
       if (!given || /[\\/]$/.test(given) || stat?.isDirectory()) {
         target = path.join(target, path.basename(fromUrl));
-        if (body.sandbox === true) {
+        if (strictBox(body)) {
           const why = sandbox.screenPath(relPath(workdir, target), { write: true });
           if (why) throw Error(why);
         }
@@ -743,7 +857,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       const body = await readJson(req),
         workdir = resolveWorkdir(body.workdir),
         dir = await targetOf(workdir, body),
-        boxed = body.sandbox === true;
+        boxed = strictBox(body);
       const query = String(body.query || "");
       if (!query.trim()) throw Error("query 不能为空");
       let regex;
@@ -1004,6 +1118,8 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
     handleWorkPick,
     handleWorkPrepare,
     handleWorkRun,
+    handleWorkScreen,
+    handleWorkCheck,
     handleWorkWrite,
     handleWorkRead,
     handleWorkList,

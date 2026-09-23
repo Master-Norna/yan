@@ -425,6 +425,68 @@ check(
   r.status === 400 && /越出/.test(r.data?.error || ""),
   `${r.status} ${r.data?.error}`
 );
+// ---- 沙箱的宽档：审而后行、径行只守系统本身——.. 上溯写、读 .env、改 .git 内部都放行，往系统目录写仍拒
+for (const permission of ["review", "auto"]) {
+  r = await post("/api/work/run", {
+    workdir,
+    sandbox: true,
+    permission,
+    command: win ? "Get-Content .env | Out-Null; Set-Content ../loose-probe.txt ok" : "cat .env > /dev/null; printf ok > ../loose-probe.txt"
+  });
+  check(
+    `loose sandbox (${permission}): .. writes and .env reads are allowed`,
+    r.status === 200 && r.data.exitCode === 0,
+    `${r.status} ${r.data?.error || r.data?.stderr}`
+  );
+  r = await post("/api/work/run", {
+    workdir,
+    sandbox: true,
+    permission,
+    command: win ? "Copy-Item plain.txt C:\\Windows\\yan-probe.txt" : "cp plain.txt /usr/yan-probe.txt"
+  });
+  check(
+    `loose sandbox (${permission}): writing into system dirs is still refused`,
+    r.status === 400 && /沙箱拒绝/.test(r.data?.error || ""),
+    `${r.status} ${r.data?.error}`
+  );
+  r = await post("/api/work/read", { workdir, sandbox: true, permission, path: ".env" });
+  check(`loose sandbox (${permission}): file tools may read .env`, r.status === 200, `${r.status} ${r.data?.error || ""}`);
+}
+rmSync(`${WORK}/../loose-probe.txt`, { force: true });
+// ---- 预筛：问而后行发指令前问一声严的沙箱会不会拦，拦的写明原因
+r = await post("/api/work/screen", { workdir, command: "curl https://example.com" });
+check("screen: the strict sandbox reason is reported", r.status === 200 && /外联/.test(r.data?.why || ""), JSON.stringify(r.data));
+r = await post("/api/work/screen", { workdir, command: "Get-ChildItem" });
+check("screen: a harmless command passes", r.status === 200 && r.data.why === null, JSON.stringify(r.data));
+// ---- 后台指令：先回头几秒的输出与编号，之后取新输出、结束它；跑着的时候别的指令不排队
+{
+  const loop = win
+    ? "Write-Output 'bg-start'; while ($true) { Start-Sleep -Milliseconds 300 }"
+    : "echo bg-start; while true; do sleep 0.3; done";
+  r = await post("/api/work/run", { workdir, sandbox: true, command: loop, background: true });
+  const id = r.data?.id;
+  check(
+    "background: returns an id with the first output while it keeps running",
+    r.status === 200 && !!id && r.data.running && /bg-start/.test(r.data.stdout),
+    JSON.stringify(r.data)
+  );
+  const quick = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Write-Output side" : "echo side" });
+  check(
+    "background: other commands are not blocked by it",
+    quick.status === 200 && /side/.test(quick.data.stdout),
+    JSON.stringify(quick.data)
+  );
+  r = await post("/api/work/check", { id });
+  check(
+    "background: check reports it still running with no repeated output",
+    r.status === 200 && r.data.running && !/bg-start/.test(r.data.stdout),
+    JSON.stringify(r.data)
+  );
+  r = await post("/api/work/check", { id, stop: true });
+  check("background: stop ends it", r.status === 200 && !r.data.running, JSON.stringify(r.data));
+  r = await post("/api/work/check", { id: "bg-nope" });
+  check("background: an unknown id is explained", r.status === 400 && /没有编号/.test(r.data?.error || ""), JSON.stringify(r.data));
+}
 rmSync(ARCHIVE, { recursive: true, force: true });
 rmSync(WORK, { recursive: true, force: true });
 rmSync(OUTSIDE, { recursive: true, force: true });

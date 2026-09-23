@@ -725,6 +725,32 @@ http
           ]);
         return sse(res, [delta({ content: "CHAT-AUTO done" }), delta({}, { usage: { total_tokens: 5 } })]);
       }
+      // ESCALATE：问而后行里发一条严的沙箱会拦的指令（.. 上溯写），用户批了便出沙箱跑；收尾把结果报回去
+      if (typeof lastUser === "string" && lastUser.includes("ESCALATE")) {
+        const lastUserIndex = msgs.findLastIndex(m => m.role === "user"),
+          results = msgs.slice(lastUserIndex + 1).filter(m => m.role === "tool");
+        if (!results.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_escalate",
+                  type: "function",
+                  function: {
+                    name: "run_command",
+                    arguments: JSON.stringify({ command: "Set-Content ../escalate-probe.txt ok; Write-Output wrote" })
+                  }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [
+          delta({ content: `ESCALATE done｜${String(results[0].content).replace(/\s+/g, " ").slice(0, 80)}` }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       if (typeof lastUser === "string" && lastUser.includes("POLICY-REVIEW")) {
         const lastUserIndex = msgs.findLastIndex(m => m.role === "user"),
           turnToolResults = msgs.slice(lastUserIndex + 1).filter(m => m.role === "tool"),

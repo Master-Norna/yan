@@ -813,6 +813,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/work/prepare") return await WORK.handleWorkPrepare(req, res);
     if (req.method === "POST" && req.url === "/api/work/pick") return await WORK.handleWorkPick(req, res);
     if (req.method === "POST" && req.url === "/api/work/run") return await WORK.handleWorkRun(req, res);
+    if (req.method === "POST" && req.url === "/api/work/screen") return await WORK.handleWorkScreen(req, res);
+    if (req.method === "POST" && req.url === "/api/work/check") return await WORK.handleWorkCheck(req, res);
     if (req.method === "POST" && req.url === "/api/work/write") return await WORK.handleWorkWrite(req, res);
     if (req.method === "POST" && req.url === "/api/work/read") return await WORK.handleWorkRead(req, res);
     if (req.method === "POST" && req.url === "/api/work/list") return await WORK.handleWorkList(req, res);
