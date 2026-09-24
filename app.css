@@ -89,28 +89,37 @@ input[type="number"]::-webkit-outer-spin-button {
   --body: "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif;
   --title: "Noto Serif SC", "Songti SC", "STSong", serif;
 }
-.rail-icon .archive-seal {
-  width: 19px;
-  height: 19px;
-  display: grid;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  color: var(--ink-2);
-  font: 500 11px/1 var(--title);
-  transform: rotate(-2deg);
+/* 线稿图标：与查找的放大镜同一笔性（1.3 笔、圆头），纸色衬底，一处点朱。卷宗是展开的一段手卷（墨线的轴，只四个轴头点朱，纸面一道天头），设置是三道弦上的码子。
+   落选的：卷宗一个「卷」字小印（与「工」印混在一处，认不出是入口）；两端实心朱轴的手卷（偏卡通）；半卷、挂轴、线装书、书函、一摞文书；设置的齿轮（⚙ 字符各平台字形不一，线稿的轮在 17px 下糊） */
+.line-icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transition:
-    color 0.16s,
-    transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1),
-    background-color 0.2s;
+    stroke 0.16s,
+    transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-.library-open:hover .archive-seal,
-.library-open.active .archive-seal {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+.line-icon .icon-paper {
+  fill: var(--paper);
 }
-.library-open:hover .archive-seal {
-  transform: translateY(-1px) rotate(0);
+.line-icon .icon-cap {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+}
+.line-icon .icon-zhu {
+  fill: color-mix(in srgb, var(--accent) 16%, var(--paper));
+  stroke: var(--accent);
+}
+.library-open:hover .archive-icon,
+.library-open.active .archive-icon {
+  stroke: var(--ink);
+}
+.library-open:hover .archive-icon {
+  transform: translateY(-1px);
 }
 :root {
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .085 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
@@ -413,12 +422,13 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   font: 10.5px var(--title);
   letter-spacing: 0.16em;
 }
-/* 「工」组：绑了同一目录的对话归在一起，头一行是印 + 目录名 + 件数，点了收起 / 展开，右侧「＋」在此目录另起一纸 */
+/* 「工」组：绑了同一目录的对话归在一起，头一行是印 + 目录名 + 件数，点了收起 / 展开，右侧「＋」在此目录另起一纸。
+   组不衬底，印下垂一道由浓到淡的朱线，线有多长组就有多大；每段对话之间一道弱分隔，组内组外一样。
+   落选的：组衬一层亮纸（单独的对话与成块的组并排，一块一块的突兀）；只铺底、没有线（原先那层 paper-3 的四成，几乎看不出）；
+   左缘朱边的签条（太重）；虚线针脚（碎） */
 .history-repo-group {
-  margin: 2px 0 6px;
-  padding: 3px 0 3px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--paper-3) 40%, transparent);
+  margin: 2px 0 4px;
+  padding: 2px 0 2px;
 }
 .history-repo-head {
   position: relative;
@@ -494,7 +504,23 @@ button.history-repo:hover .history-repo-name {
   opacity: 1;
 }
 .history-repo-items {
-  padding: 0 3px 0 6px;
+  position: relative;
+  padding: 0 3px 0 22px;
+}
+.history-repo-items:before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: -3px;
+  bottom: 6px;
+  width: 1.5px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 70%, transparent),
+    color-mix(in srgb, var(--accent) 16%, transparent)
+  );
+  pointer-events: none;
 }
 /* 组内的对话不再各自打「行」印，组头的「工」已说明 */
 .history-repo-items .history-item.is-work .history-open:before {
@@ -509,6 +535,21 @@ button.history-repo:hover .history-repo-name {
   align-items: center;
   border-radius: 9px;
   margin: 1px 0;
+}
+.history-item:after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: -1px;
+  height: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+.history-item:last-child:after,
+.history-item.active:after,
+.history-item:hover:after {
+  display: none;
 }
 .history-item.active,
 .history-item:hover {
@@ -601,9 +642,17 @@ button.history-repo:hover .history-repo-name {
   color: var(--ink-2);
   font-size: 12px;
 }
+.settings-open .gear-wrap {
+  display: grid;
+  padding-right: 10px;
+}
 .settings-open .gear {
-  padding-right: 12px;
-  color: var(--ink-3);
+  width: 17px;
+  height: 17px;
+  stroke: var(--ink-3);
+}
+.settings-open:hover .gear {
+  stroke: var(--ink-2);
 }
 .avatar {
   width: 25px;
@@ -4286,10 +4335,24 @@ textarea::placeholder,
   margin: 0 0 5px;
   font: 500 21px var(--title);
 }
+/* 设置是一张八行笺：题下一道「文武线」（一粗一细），行与行之间是朱丝栏，条目前一粒朱点；标题左边一方章印，每栏一字（与记忆页的「录」同一个样子）。
+   落选的：整块套朱色版框（框占宽度、内容挤）；一条设置一张纸条（歪斜的纸条一多就乱）；右下角垫一个极淡的大字（会被控件压住，单个的字也不好看） */
 .settings-lead {
-  margin: 0 0 24px;
+  position: relative;
+  margin: 0 0 10px;
+  padding-bottom: 16px;
   color: var(--ink-2);
   font-size: 12.5px;
+}
+.settings-lead:after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  border-top: 1.6px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-bottom: 0.8px solid color-mix(in srgb, var(--accent) 38%, transparent);
 }
 .setting-row {
   display: flex;
@@ -4297,12 +4360,25 @@ textarea::placeholder,
   justify-content: space-between;
   gap: 24px;
   padding: 15px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.settings-lead + .setting-row {
+  border-top: 0;
 }
 .setting-copy strong {
   display: block;
-  font-size: 13px;
-  font-weight: 500;
+  font: 600 13.5px var(--title);
+}
+.setting-copy strong:before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 8px 2px 0;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0.8;
+  transform: rotate(45deg);
 }
 .setting-copy small {
   display: block;
@@ -4861,6 +4937,179 @@ textarea::placeholder,
 }
 .env-extra .field {
   width: 150px;
+}
+/* 预设：表单里工具与 MCP 各一排勾选 */
+.preset-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.preset-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.preset-checks .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.preset-prompt {
+  min-height: 120px;
+}
+
+/* 文档：目录像古籍的目录页——卷次、题名、引线、提要；一篇是一页版心——顶上卷次与书口的鱼尾，步骤是小朱印，提醒写成右侧的眉批。
+   落选的：目录做成一排立着的线装书（好看，但题签竖排、篇目一多就挤，提要也放不下） */
+.guide-toc {
+  margin-top: 4px;
+}
+.guide-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  text-align: left;
+  transition: background-color 0.16s;
+}
+.guide-row:hover {
+  background: color-mix(in srgb, var(--paper-3) 45%, transparent);
+}
+.guide-juan {
+  flex: none;
+  width: 42px;
+  color: var(--accent);
+  font: 12px var(--title);
+  letter-spacing: 0.08em;
+}
+.guide-title {
+  flex: none;
+  color: var(--ink);
+  font: 600 14px var(--title);
+}
+.guide-lead-line {
+  flex: 1;
+  min-width: 20px;
+  border-bottom: 1px dotted var(--ink-3);
+  opacity: 0.5;
+  transform: translateY(-3px);
+}
+.guide-gist {
+  flex: none;
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.guide-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+  font: 11px var(--title);
+  letter-spacing: 0.1em;
+}
+.guide-back {
+  color: var(--ink-2);
+  letter-spacing: 0.1em;
+}
+.guide-back:hover {
+  color: var(--accent);
+}
+.guide-fish {
+  margin-left: auto;
+  padding-right: 34px;
+  color: var(--accent);
+}
+.guide-doc h2 {
+  margin: 12px 0 4px;
+  font-size: 23px;
+}
+.guide-summary {
+  margin: 0 0 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+.guide-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 18px;
+  padding-top: 6px;
+}
+.guide-main {
+  grid-column: 1;
+}
+.guide-step h4 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 10px 0 4px;
+  font: 600 14px var(--title);
+}
+.guide-no {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  color: var(--accent);
+  font: 11px var(--title);
+  transform: rotate(-3deg);
+}
+.guide-step p {
+  margin: 0 0 4px 29px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.85;
+}
+.guide-step code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--paper-2);
+  font-size: 11.5px;
+}
+.guide-step strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.guide-note {
+  grid-column: 2;
+  align-self: start;
+  margin-top: 12px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font: 11.5px/1.7 var(--title);
+}
+.guide-note b {
+  display: block;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+.guide-pager {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.guide-pager button {
+  color: var(--ink-3);
+  font: 12px var(--title);
+}
+.guide-pager button:hover {
+  color: var(--accent);
 }
 
 /* ---- 80-trail.css ---- */

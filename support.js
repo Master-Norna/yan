@@ -122,6 +122,7 @@
  * @property {string} [workdir] 绑了目录即为行
  * @property {CommandPolicy} [commandPolicy] 指令权限模式
  * @property {string} [reasoning] 思考档位
+ * @property {string} [presetId] 用的哪个预设；空即言的本色
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
  * @property {boolean} [ended] 旧版：额度尽了整段锁死；现已不再写入，读到照旧尊重
@@ -143,13 +144,22 @@
  * @property {number} [maxTokens] 只对 Anthropic 有意义（Messages API 必填）；OpenAI 兼容接口不传，由服务端定
  * @property {string} quota 用量上限，如 "100k"；空则不限
  * @property {number} usedTokens
- * @property {string} systemPrompt
  * @property {boolean} [tools] 本机工具，默认开
  * @property {number} [contextWindow]
  * @property {string} [reasoning] 此模型记住的思考档位；留空由接口决定
  * @property {string} [reasoningLevels] 此模型认的思考档位，逗号分隔；none 是不认；探到的与手填的都记在这里
  * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey），亲手填的前面带 manual|；换了任一样再探
  * @property {string[]} [modelList]
+ */
+/**
+ * @typedef {Object} Preset 预设：一套打包好的做法，选了它的对话都照这一套——提示词排在系统提示最前，工具与 MCP 只给挑中的，可带默认模型与指令权限
+ * @property {string} id
+ * @property {string} name
+ * @property {string} prompt
+ * @property {string[]|null} tools 给哪几组内置工具（见 TOOL_GROUPS）；null 即全给
+ * @property {string[]|null} mcp 给哪几个 MCP 服务；null 即全给
+ * @property {string} profileId 选它时换到这个模型；空则不换
+ * @property {CommandPolicy|""} policy 选它时的指令权限；空则照设置里的默认
  */
 /** @typedef {{ id: string, text: string, createdAt: string, updatedAt: string, source: { conversationId: string, title: string }|null }} MemoryItem */
 /** @typedef {{ text: string, attachments: Attachment[], quote?: Quote|null, updatedAt?: string }} Draft */
@@ -162,6 +172,8 @@
  * @property {number} width
  * @property {string} accent
  * @property {string} activeProfileId
+ * @property {Preset[]} presets
+ * @property {string} presetId 新对话用的预设（上回选的）；空即本色
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
@@ -259,6 +271,8 @@ const defaultStore = {
     width: 760,
     accent: "#9b5540",
     activeProfileId: "",
+    presets: [],
+    presetId: "",
     autoTitle: true,
     pendingWorkdir: "",
     collapsedRepos: [],
@@ -461,19 +475,29 @@ function normalizeStoreData(value) {
       rawProfiles = Array.isArray(data.profiles) ? data.profiles.filter(p => p && typeof p === "object") : [],
       legacyProfileId = data.settings?.activeProfileId || rawProfiles[0]?.id;
     delete settings.reasoning;
+    // 旧版把新对话档位存在全局设置里；仅归给当时选中的模型，不能让它跟着切到别的模型。
+    const profiles = rawProfiles.map(p => ({
+      ...p,
+      ...(p.reasoning !== undefined
+        ? { reasoning: normalizeReasoning(p.reasoning) }
+        : data.settings?.reasoning !== undefined && p.id === legacyProfileId
+          ? { reasoning: legacyReasoning }
+          : {})
+    }));
+    // 旧版的 system prompt 写在模型配置上：挪成一个同名预设、带着这个模型，模型配置里不再有它
+    settings.presets = normalizePresets(settings.presets);
+    for (const p of profiles) {
+      const text = String(p.systemPrompt || "").trim();
+      delete p.systemPrompt;
+      if (text && !settings.presets.some(preset => preset.id === `from-${p.id}`))
+        settings.presets.push(normalizePreset({ id: `from-${p.id}`, name: p.name || "预设", prompt: text, profileId: p.id }));
+    }
+    if (!settings.presets.some(preset => preset.id === settings.presetId)) settings.presetId = "";
     return {
       ...structuredClone(defaultStore),
       ...data,
       settings,
-      // 旧版把新对话档位存在全局设置里；仅归给当时选中的模型，不能让它跟着切到别的模型。
-      profiles: rawProfiles.map(p => ({
-        ...p,
-        ...(p.reasoning !== undefined
-          ? { reasoning: normalizeReasoning(p.reasoning) }
-          : data.settings?.reasoning !== undefined && p.id === legacyProfileId
-            ? { reasoning: legacyReasoning }
-            : {})
-      })),
+      profiles,
       conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(normalizeConversation),
       library: Array.isArray(data.library) ? data.library : [],
       drafts: normalizeDrafts(data.drafts),
@@ -482,6 +506,23 @@ function normalizeStoreData(value) {
   } catch {
     return structuredClone(defaultStore);
   }
+}
+/** @returns {Preset[]} */
+function normalizePresets(list) {
+  return (Array.isArray(list) ? list : []).filter(item => item && typeof item === "object" && item.id).map(normalizePreset);
+}
+/** @returns {Preset} */
+function normalizePreset(value) {
+  const names = list => (Array.isArray(list) ? [...new Set(list.map(String))] : null);
+  return {
+    id: String(value.id || uid()),
+    name: String(value.name || "").trim() || "未命名",
+    prompt: String(value.prompt || ""),
+    tools: names(value.tools),
+    mcp: names(value.mcp),
+    profileId: String(value.profileId || ""),
+    policy: ["ask", "review", "auto"].includes(value.policy) ? value.policy : ""
+  };
 }
 /** @param {any} value @returns {Conversation} */
 function normalizeConversation({ ended, workAuto, ...c }) {
@@ -2794,6 +2835,8 @@ function bindEvents() {
       if (trigger) positionModelMenu(trigger);
       return;
     }
+    const preset = e.target.closest("[data-preset]");
+    if (preset) return selectPreset(preset.dataset.preset);
     const item = e.target.closest("[data-profile]");
     if (!item) return;
     selectProfile(item.dataset.profile);
@@ -3787,6 +3830,8 @@ function openConversation(id) {
   const c = currentConversation();
   if (c) {
     c.unread = false;
+    // 新对话照最近看的这段用的预设，与模型一样
+    store.settings.presetId = presetOf(c)?.id || "";
     c.profileId && selectProfile(c.profileId, false);
   }
   render();
@@ -3973,12 +4018,16 @@ function renderQuota() {
 function renderModelTriggers() {
   const p = activeProfile(),
     c = currentConversation(),
-    level = (c ? c.reasoning : p?.reasoning) || "";
+    level = (c ? c.reasoning : p?.reasoning) || "",
+    preset = presetOf(c);
   // 标签写实际会送出的那一档：模型不认所选的就落到最接近的；模型不认思考档位（探过是 none）就不写
   const used = level ? nearestReasoning(p, level) : "";
   document.querySelectorAll(".model-trigger").forEach(button => {
     button.querySelector(".model-name").textContent = p?.name || "尚未接入模型";
-    button.querySelector(".model-extra").textContent = used ? `· 思考 ${reasoningLabel(used)}` : "";
+    button.querySelector(".model-extra").textContent = [preset?.name, used ? `思考 ${reasoningLabel(used)}` : ""]
+      .filter(Boolean)
+      .map(text => `· ${text}`)
+      .join(" ");
   });
 }
 function closeModelMenu() {
@@ -4020,7 +4069,7 @@ function renderModelMenu() {
   if (all.length)
     $("#modelMenu").insertAdjacentHTML(
       "beforeend",
-      `<div class="menu-section"><div class="menu-section-title"><span>思考深度</span><span title="每个模型分别记住所选档位；默认不带字段，由接口决定。各模型所认的档位可在高级配置中填写">当前模型</span></div>${choices.length > 1 ? `<div class="segmented">${choices.map(value => `<button type="button" data-reasoning="${value}" class="${value === shown ? "active" : ""}">${reasoningLabel(value)}</button>`).join("")}</div>` : `<div class="menu-section-note">此模型不认思考档位</div>`}</div><button class="model-option model-manage" data-manage>模型设置</button>`
+      `${presetMenuHtml()}<div class="menu-section"><div class="menu-section-title"><span>思考深度</span><span title="每个模型分别记住所选档位；默认不带字段，由接口决定。各模型所认的档位可在高级配置中填写">当前模型</span></div>${choices.length > 1 ? `<div class="segmented">${choices.map(value => `<button type="button" data-reasoning="${value}" class="${value === shown ? "active" : ""}">${reasoningLabel(value)}</button>`).join("")}</div>` : `<div class="menu-section-note">此模型不认思考档位</div>`}</div><button class="model-option model-manage" data-manage>模型设置</button>`
     );
   $("#configureFirst")?.addEventListener("click", () => openSettings("models"));
   $("#modelMenu [data-manage]")?.addEventListener("click", e => {
@@ -6034,8 +6083,11 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     // 没有工具可用时（模型关了本机工具、没桥接）在提示里说明，免得它许诺去查
     if (profile.tools !== false) await mcpReady();
     const tools = profile.tools !== false ? toolDefinitions(conversation, { lookup: true }) : null;
-    const systemPrompt = `${assistantHint(profile, tools, conversation)}\n\n${prompt(thread.anchor.text ? "side.passage" : "side.whole")}${tools ? "" : `\n${prompt("side.noTools")}`}`;
-    const overrides = { systemPrompt, tools, reasoning: conversation.reasoning || "" };
+    const overrides = {
+      systemPrompt: systemPrompt(conversation, tools, { role: "side", anchor: !!thread.anchor.text }),
+      tools,
+      reasoning: conversation.reasoning || ""
+    };
     const onFrame = () => {
       if (sideThreadId !== thread.id || !sideFollow) return;
       const el = $("#sideScroll");
@@ -7643,7 +7695,8 @@ async function sendOrStop() {
       profileId: profile.id,
       messages: [],
       workdir: pending,
-      commandPolicy: normalizeCommandPolicy(store.settings.commandPolicyDefault),
+      presetId: presetOf(null)?.id || "",
+      commandPolicy: normalizeCommandPolicy(presetOf(null)?.policy || store.settings.commandPolicyDefault),
       reasoning: normalizeReasoning(profile.reasoning)
     };
     if (!(await ensureWorkReady(c))) return;
@@ -7920,7 +7973,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
     const overrides = {
-      systemPrompt: assistantHint(profile, tools, conversation),
+      systemPrompt: systemPrompt(conversation, tools),
       tools,
       reasoning: conversation.reasoning || "",
       onRetry: n => {
@@ -8286,12 +8339,49 @@ async function maybeAutoTitle(conversation, profile) {
       setTimeout(() => void maybeAutoTitle(conversation, profile), 0);
   }
 }
-// 附加给模型的提示：日期、目录与做法（执事的，或言里卷宗的）、联网分寸、记忆分寸、页内可视化的写法。工具各自做什么、何时用，在工具说明里说，这里不重复
+// 系统提示：预设的提示词在最前，其后照 prompts/assistant.js 的 order 表逐段拼——每段何时带上（给了哪件工具、言还是行、主答 / 旁注 / 帮手）写在表里；
+// 要填值、或视情形不带的，在这里给出：给 null 即这回不带。工具各自做什么、何时用，在工具说明里说，这里不重复
+/** @type {Record<string, (ctx: { conversation: Conversation, tools: Set<string>, preset: Preset|null, anchor: boolean }) => Record<string, any>|null>} */
+const PROMPT_VARS = {
+  "assistant.today": () => ({ day: formatDay(now()), iso: new Date().toISOString().slice(0, 10) }),
+  "work.hint": ctx => workVars(ctx.conversation),
+  "work.archive": ctx => workVars(ctx.conversation),
+  "work.env": () => envVars(),
+  "memory.hint": () => ({ count: store.memory.items.length }),
+  "mcp.hint": ctx => mcpHintVars(ctx.tools, ctx.preset),
+  "side.passage": ctx => (ctx.anchor ? {} : null),
+  "side.whole": ctx => (ctx.anchor ? null : {}),
+  "side.noTools": ctx => (ctx.tools.size ? null : {})
+};
+/**
+ * @param {Conversation} conversation
+ * @param {any[]|null} tools 这回交给模型的工具定义
+ * @param {{ role?: "main"|"side"|"sub", anchor?: boolean }} [options] anchor：旁注注的是划选的一段（否则是整条回复）
+ */
+function systemPrompt(conversation, tools, { role = "main", anchor = false } = {}) {
+  const preset = presetOf(conversation),
+    ctx = { conversation, tools: new Set((tools || []).map(tool => tool?.function?.name)), preset, anchor },
+    mode = isWork(conversation) ? "work" : "chat",
+    lines = [];
+  for (const section of PROMPTS.order || []) {
+    if (
+      (section.tool && !ctx.tools.has(section.tool)) ||
+      (section.mode && section.mode !== mode) ||
+      (section.roles && !section.roles.includes(role))
+    )
+      continue;
+    const vars = PROMPT_VARS[section.key] ? PROMPT_VARS[section.key](ctx) : {};
+    if (vars) lines.push(prompt(section.key, vars));
+  }
+  const own = String(preset?.prompt || "").trim();
+  return own ? `${own}\n\n${lines.join("\n")}` : lines.join("\n");
+}
+// 执事（work.hint）与卷宗（work.archive）两段的值：目录、平台、可及范围
 /** @param {Conversation} conversation */
-function workHint(conversation) {
+function workVars(conversation) {
   const win = (bootstrap.work?.platform || "win32") === "win32",
     shell = bootstrap.work?.shell || (win ? "PowerShell" : "sh");
-  return prompt(isWork(conversation) ? "work.hint" : "work.archive", {
+  return {
     workdir: workRoot(conversation),
     scratch: scratchRel(conversation),
     // 沙箱两档：问而后行用严的（拦下的转请用户定夺），审而后行、径行用宽的（只守系统本身）
@@ -8307,32 +8397,7 @@ function workHint(conversation) {
     platform: win ? "Windows" : bootstrap.work?.platform || "类 Unix",
     shell,
     shellNote: win ? prompt("work.windowsShell") : ""
-  });
-}
-/**
- * @param {Profile} profile
- * @param {Conversation} conversation
- */
-function assistantHint(profile, tools, conversation = null) {
-  const lines = [
-    prompt("assistant.today", { day: formatDay(now()), iso: new Date().toISOString().slice(0, 10) }),
-    prompt("assistant.judgement")
-  ];
-  const names = new Set((tools || []).map(tool => tool?.function?.name));
-  if (names.has("run_command") && conversation) lines.push(workHint(conversation));
-  const env = names.has("run_command") ? envHint() : "";
-  if (env) lines.push(env);
-  if (names.has("search_web")) lines.push(prompt("assistant.search"));
-  if (names.has("ask_user")) lines.push(prompt("assistant.asking"));
-  // 何时差遣写在工具说明里；这一句只给行——对谈里差遣是少数，不必每问都背着
-  if (names.has("delegate") && conversation && isWork(conversation)) lines.push(prompt("assistant.delegating"));
-  if (names.has("remember")) lines.push(prompt("memory.hint", { count: store.memory.items.length }));
-  const mcpServers = mcpHint(names);
-  if (mcpServers) lines.push(mcpServers);
-  lines.push(prompt("assistant.drawing"));
-  if (!conversation || !isWork(conversation)) lines.push(prompt("assistant.manner"));
-  const base = String(profile.systemPrompt || "").trim();
-  return base ? `${base}\n\n${lines.join("\n")}` : lines.join("\n");
+  };
 }
 
   // ---- 15-tools/00-registry.js ----
@@ -8353,6 +8418,7 @@ function assistantHint(profile, tools, conversation = null) {
  * @property {boolean} files 有可落脚的目录（工作目录或卷宗）
  * @property {Array<Record<string, any>>} docs 可读的文档
  * @property {string[]} offered 登记在前、此处已经给出的工具
+ * @property {Preset|null} preset 这段对话用的预设：只给它挑中的几组与几个 MCP 服务
  *
  * @typedef {{ ok: boolean, content: string, display: string }} ToolOutcome content 回给模型，display 写在标题行右侧
  * @typedef {{ url?: string, title?: string, read?: boolean, talk?: string, date?: string, memory?: string }} Source 答末「出处」的一条：网页、旧谈或记忆
@@ -8360,6 +8426,8 @@ function assistantHint(profile, tools, conversation = null) {
  * @typedef {Object} Tool
  * @property {string} name
  * @property {string} label 行迹上的名字
+ * @property {keyof typeof TOOL_GROUPS} [group] 属哪一组：预设按组挑内置工具
+ * @property {string} [server] MCP 工具属哪个服务：预设按服务挑
  * @property {false | ((ctx: OfferContext) => boolean)} [offer] 此处给不给；不写即处处都给，false 是只登记画法、从不交给模型的步骤（补言）
  * @property {boolean} [mainOnly] 只给主模型，帮手拿不到
  * @property {boolean} [lookup] 旁注（只查不改）也给
@@ -8377,6 +8445,16 @@ function assistantHint(profile, tools, conversation = null) {
  * @property {(step: Step) => Source[]} [sources] 答末「出处」里列的条目
  * @property {boolean} [mcp] 由 MCP 服务登记的（配置一变就整批换掉）
  */
+// 内置工具的分组：预设按组挑（一件件挑太碎），设置里照这个次序列
+const TOOL_GROUPS = {
+  web: "联网",
+  compute: "计算",
+  work: "指令与文件",
+  docs: "翻文档",
+  ask: "请示",
+  memory: "记忆与旧谈",
+  delegate: "差遣"
+};
 /** @type {Map<string, Tool>} 按登记先后排，交给模型时也是这个次序 */
 const TOOLS = new Map();
 /** @param {Tool} tool */
@@ -8400,11 +8478,19 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
     bridge: apiBase !== null,
     files: !!workRoot(conversation),
     docs: availableDocuments(conversation),
-    offered: []
+    offered: [],
+    preset: presetOf(conversation)
   };
   const tools = [];
   for (const tool of TOOLS.values()) {
-    if (!tool.run || (sub && tool.mainOnly) || (lookup && !tool.lookup) || (tool.offer && !tool.offer(ctx))) continue;
+    if (
+      !tool.run ||
+      (sub && tool.mainOnly) ||
+      (lookup && !tool.lookup) ||
+      !presetAllows(ctx.preset, tool) ||
+      (tool.offer && !tool.offer(ctx))
+    )
+      continue;
     const spec = toolSpec(tool.name),
       text = !ctx.work && spec.brief ? spec.brief : spec.description,
       // 外来工具自带的说明原样给，不当模板填（里头的 {{…}} 是人家的字）
@@ -8413,6 +8499,13 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
     ctx.offered.push(tool.name);
   }
   return tools.length ? tools : null;
+}
+// 预设挑了哪几组、哪几个 MCP 服务：内置的按组，逐件摊开的 MCP 工具按服务；按需给的两件（mcp_describe / mcp_call）看目录里还剩不剩服务，由它们自己的 offer 管
+/** @param {Preset|null} preset @param {Tool} tool */
+function presetAllows(preset, tool) {
+  if (!preset) return true;
+  if (tool.server) return !preset.mcp || preset.mcp.includes(tool.server);
+  return !tool.group || !preset.tools || preset.tools.includes(tool.group);
 }
 /**
  * 跑一步：先把参数理顺（见 01-arguments.js），讲不通的原样告诉模型错在哪；理顺了交给那件工具
@@ -8806,6 +8899,7 @@ function approveByEnter(entry) {
 // 言 · 联网：检索、翻网页、调接口，都经桥接。地址门禁在桥接那头：本机 127.0.0.1 可，别的内网地址不可
 defineTool({
   name: "search_web",
+  group: "web",
   label: "检索",
   offer: ctx => ctx.bridge,
   lookup: true,
@@ -8835,6 +8929,7 @@ defineTool({
 
 defineTool({
   name: "fetch_page",
+  group: "web",
   label: "翻阅网页",
   offer: ctx => ctx.bridge,
   lookup: true,
@@ -8855,6 +8950,7 @@ defineTool({
 // 调接口能发 POST，不算纯查阅，旁注不给；只有 GET / HEAD 的结果可复用
 defineTool({
   name: "http_request",
+  group: "web",
   label: "调接口",
   offer: ctx => ctx.bridge,
   sideEffect: true,
@@ -8883,6 +8979,7 @@ defineTool({
 // 沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉
 defineTool({
   name: "run_js",
+  group: "compute",
   label: "计算",
   lookup: true,
   parallel: true,
@@ -8956,6 +9053,7 @@ function computeInSandbox(code, timeoutMs, signal) {
 // 三档权限：问而后行（只读免问）、审而后行（不请示，桥接代判放行或回绝）、径行；逐段对话设置，请示条上按「径行」即切过去
 defineTool({
   name: "run_command",
+  group: "work",
   label: "运行",
   offer: ctx => ctx.files,
   sideEffect: true,
@@ -9025,6 +9123,7 @@ defineTool({
 // 后台指令：取上次之后的新输出，可顺带等一会儿，或结束它；只给行，跟着 run_command 的 background 走
 defineTool({
   name: "check_command",
+  group: "work",
   label: "后台",
   offer: ctx => ctx.files && ctx.work,
   html: workStepHtml,
@@ -9088,6 +9187,7 @@ function commandApprovalHtml(step) {
 // 路径与沙箱在桥接那头管（server/work.js）；这里只管呈现与「改之前先读过」这条规矩
 defineTool({
   name: "write_file",
+  group: "work",
   label: "写入",
   offer: ctx => ctx.files,
   sideEffect: true,
@@ -9110,6 +9210,7 @@ defineTool({
 
 defineTool({
   name: "edit_file",
+  group: "work",
   label: "修改",
   offer: ctx => ctx.files && ctx.work,
   sideEffect: true,
@@ -9139,6 +9240,7 @@ defineTool({
 
 defineTool({
   name: "read_file",
+  group: "work",
   label: "读取",
   offer: ctx => ctx.files,
   parallel: true,
@@ -9167,6 +9269,7 @@ defineTool({
 
 defineTool({
   name: "list_files",
+  group: "work",
   label: "列目录",
   offer: ctx => ctx.files,
   parallel: true,
@@ -9194,6 +9297,7 @@ defineTool({
 
 defineTool({
   name: "search_files",
+  group: "work",
   label: "搜索",
   offer: ctx => ctx.files && ctx.work,
   parallel: true,
@@ -9229,6 +9333,7 @@ defineTool({
 // 下载：桥接把网上的文件存进工作目录或卷宗，沙箱照常管路径
 defineTool({
   name: "download_file",
+  group: "web",
   label: "下载",
   offer: ctx => ctx.files,
   sideEffect: true,
@@ -9415,6 +9520,7 @@ const PLAN_STATUSES = new Set(["pending", "doing", "done", "skipped"]),
   PLAN_MARKS = { done: "✓", doing: "▶", skipped: "–" };
 defineTool({
   name: "update_plan",
+  group: "work",
   label: "计划",
   offer: ctx => ctx.work,
   mainOnly: true,
@@ -9461,6 +9567,7 @@ function planStepHtml(step) {
 // 言 · 请示用户：下一步取决于用户的选择时弹一张小表单，从输入框上方浮出，一页一题；对谈与执事都有，帮手没有
 defineTool({
   name: "ask_user",
+  group: "ask",
   label: "请示",
   mainOnly: true,
   // 同一答里同样的一问不再打扰用户第二回
@@ -9584,6 +9691,7 @@ function collectForm(bar) {
 const CONVERSATION_MESSAGE_CHARS = 1500; // read_conversation 每条消息最多给这么多字
 defineTool({
   name: "remember",
+  group: "memory",
   label: "记入",
   offer: () => memoryEnabled(),
   mainOnly: true,
@@ -9615,6 +9723,7 @@ defineTool({
 
 defineTool({
   name: "forget",
+  group: "memory",
   label: "忘却",
   offer: () => memoryEnabled(),
   mainOnly: true,
@@ -9633,6 +9742,7 @@ defineTool({
 
 defineTool({
   name: "recall",
+  group: "memory",
   label: "翻记忆",
   offer: () => memoryEnabled(),
   lookup: true,
@@ -9651,6 +9761,7 @@ defineTool({
 // 查旧谈：同一工作目录的执事对话排在前面，其余按新近
 defineTool({
   name: "search_conversations",
+  group: "memory",
   label: "查旧谈",
   offer: () => memoryEnabled(),
   lookup: true,
@@ -9701,6 +9812,7 @@ defineTool({
 
 defineTool({
   name: "read_conversation",
+  group: "memory",
   label: "翻旧谈",
   offer: () => memoryEnabled(),
   lookup: true,
@@ -9737,6 +9849,7 @@ defineTool({
 // 长文档按页码或关键词只取片段；可读的文档名写进说明里（{{docs}}），对话里有可读文档时才给
 defineTool({
   name: "read_document",
+  group: "docs",
   label: "翻阅文档",
   offer: ctx => ctx.docs.length > 0,
   vars: ctx => ({ docs: ctx.docs.map(d => d.name).join("、") }),
@@ -9924,6 +10037,7 @@ function mcpInlineTool(server, spec) {
     name: mcpFunctionName(server, spec.name),
     label: server,
     mcp: true,
+    server,
     schema: { description: spec.description || spec.title || spec.name, parameters: spec.inputSchema },
     offer: ctx => ctx.bridge,
     lookup: readOnly,
@@ -9946,12 +10060,12 @@ const MCP_LAZY_TOOLS = [
     name: "mcp_describe",
     label: "MCP",
     mcp: true,
-    offer: ctx => ctx.bridge,
-    vars: () => ({ directory: mcpDirectory() }),
+    offer: ctx => ctx.bridge && mcpLazyServers(ctx.preset).length > 0,
+    vars: ctx => ({ directory: mcpDirectory(ctx.preset) }),
     parallel: true,
     cache: true,
-    run(step, args) {
-      const state = mcp.servers[args.server];
+    run(step, args, ctx) {
+      const state = mcpLazyServers(presetOf(ctx.conversation)).includes(args.server) ? mcp.servers[args.server] : null;
       step.title = `${args.server} · ${args.tools.join("、")}`;
       if (!state?.ok) return mcpUnknown(args.server, "");
       const found = args.tools.map(name => state.tools.find(tool => tool.name === name)).filter(Boolean);
@@ -9970,7 +10084,7 @@ const MCP_LAZY_TOOLS = [
     name: "mcp_call",
     label: "MCP",
     mcp: true,
-    offer: ctx => ctx.bridge,
+    offer: ctx => ctx.bridge && mcpLazyServers(ctx.preset).length > 0,
     sideEffect: true,
     approval: mcpApprovalHtml,
     digest: true,
@@ -9995,9 +10109,15 @@ const MCP_LAZY_TOOLS = [
     }
   }
 ];
+// 按需给的服务里，预设挑中的那几个
+/** @param {Preset|null} preset */
+function mcpLazyServers(preset) {
+  return mcp.lazy.filter(server => !preset?.mcp || preset.mcp.includes(server));
+}
 // 目录：一服务一段，一件一行（名字与说明的头一句）；只读的标出来
-function mcpDirectory() {
-  return mcp.lazy
+/** @param {Preset|null} preset */
+function mcpDirectory(preset) {
+  return mcpLazyServers(preset)
     .map(server => {
       const state = mcp.servers[server],
         head = [state.server?.title || state.server?.name, state.server?.description].filter(Boolean).join("：");
@@ -10031,7 +10151,8 @@ function mcpUnknown(server, tool) {
 async function runMcpTool(step, server, tool, args, ctx) {
   const config = mcpConfigs()[server],
     spec = mcp.servers[server]?.tools?.find(item => item.name === tool);
-  if (!config || !spec) return mcpUnknown(server, tool);
+  // 预设没挑这个服务：照着名字调来的也不跑
+  if (!config || !spec || !presetAllows(presetOf(ctx.conversation), /** @type {Tool} */ ({ server }))) return mcpUnknown(server, tool);
   step.title ||= spec.title || tool;
   step.code = JSON.stringify(args, null, 2);
   const ask = !mcpReadOnly(spec) && commandPolicyOf(ctx.conversation) === "ask" && !(config.autoApprove || []).includes(tool);
@@ -10068,19 +10189,19 @@ function mcpResultText(result) {
   if (!parts.length && result.structuredContent) parts.push(JSON.stringify(result.structuredContent, null, 2));
   return parts.join("\n\n") || "（无输出）";
 }
-// 系统提示里的一段：交给模型的工具里有哪几个服务的，就附上那几个服务自带的用法
-function mcpHint(names) {
+// 系统提示里 mcp.hint 那一段的值：交给模型的工具里有哪几个服务的，就附上那几个服务自带的用法；一个都没有就不带这段
+/** @param {Set<string>} names @param {Preset|null} preset */
+function mcpHintVars(names, preset) {
+  const lazy = names.has("mcp_call") ? mcpLazyServers(preset) : [];
   const servers = Object.entries(mcp.servers).filter(
     ([server, state]) =>
       state.ok &&
       state.instructions &&
-      (mcp.lazy.includes(server) ? names.has("mcp_call") : state.tools.some(tool => names.has(mcpFunctionName(server, tool.name))))
+      (mcp.lazy.includes(server) ? lazy.includes(server) : state.tools.some(tool => names.has(mcpFunctionName(server, tool.name))))
   );
   return servers.length
-    ? prompt("mcp.hint", {
-        servers: servers.map(([server, state]) => `【${server}】${state.instructions.trim().slice(0, 1500)}`).join("\n")
-      })
-    : "";
+    ? { servers: servers.map(([server, state]) => `【${server}】${state.instructions.trim().slice(0, 1500)}`).join("\n") }
+    : null;
 }
 
   // ---- 15-tools/90-delegate.js ----
@@ -10089,6 +10210,7 @@ function mcpHint(names) {
 // 行迹里只留一枚签，帮手自己的那条时间线开在差遣面板里（见 08-trail.js）
 defineTool({
   name: "delegate",
+  group: "delegate",
   label: "差遣",
   offer: ctx => ctx.bridge && ctx.offered.some(name => name !== "ask_user"),
   mainOnly: true,
@@ -10126,7 +10248,7 @@ async function runDelegate(step, args, ctx) {
   step.sub = sub;
   const history = [{ role: "user", content: task }];
   const overrides = {
-    systemPrompt: `${assistantHint(profile, tools, conversation)}\n\n${prompt("delegate.system")}`,
+    systemPrompt: systemPrompt(conversation, tools, { role: "sub" }),
     tools,
     reasoning: conversation.reasoning || ""
   };
@@ -10514,7 +10636,7 @@ async function probeReasoningLevels(profile) {
 async function requestChat(profile, messages, signal, overrides = {}) {
   const parameters = {
     messages,
-    systemPrompt: overrides.systemPrompt ?? (profile.systemPrompt || ""),
+    systemPrompt: overrides.systemPrompt ?? "",
     temperature: Number(overrides.temperature ?? profile.temperature ?? 0.7),
     // 输出上限：拟题、压缩、探档位这几处自己给；平时 OpenAI 兼容接口不传（服务端的默认就是模型的上限，
     // 手写一个反而常常把长回答截断），Anthropic 必填、按模型设置或默认值
@@ -11021,6 +11143,7 @@ function closeSettings() {
   }
   render();
 }
+const SETTINGS_SEALS = { general: "常", appearance: "妆", models: "模", presets: "身", tools: "具", env: "境", mcp: "接", guide: "典" };
 function renderSettings() {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === settingsTab));
   const host = $("#settingsContent");
@@ -11029,15 +11152,29 @@ function renderSettings() {
   if (settingsTab === "general") host.innerHTML = generalSettingsHtml();
   if (settingsTab === "appearance") host.innerHTML = appearanceSettingsHtml();
   if (settingsTab === "models") host.innerHTML = modelsSettingsHtml();
+  if (settingsTab === "presets") host.innerHTML = presetsSettingsHtml();
   if (settingsTab === "tools") host.innerHTML = toolsSettingsHtml();
   if (settingsTab === "env") host.innerHTML = envSettingsHtml();
   if (settingsTab === "mcp") host.innerHTML = mcpSettingsHtml();
   if (settingsTab === "memory") host.innerHTML = memorySettingsHtml();
+  if (settingsTab === "guide") host.innerHTML = guideSettingsHtml();
   if (settingsTab === "about") host.innerHTML = aboutSettingsHtml();
+  // 每栏标题左边一方章印（记忆页自带「录」）；文档里翻开的一篇有自己的书口，不加
+  const seal = SETTINGS_SEALS[settingsTab],
+    title = host.querySelector("h2");
+  if (seal && title && !title.previousElementSibling && !title.parentElement.classList.contains("about-head")) {
+    const head = document.createElement("div");
+    head.className = "about-head memory-head";
+    head.innerHTML = `<span class="seal memory-seal" aria-hidden="true">${seal}</span>`;
+    title.before(head);
+    head.append(title);
+  }
   bindSettingsEvents();
   bindMemoryEvents();
   bindMcpEvents();
   bindEnvEvents();
+  bindPresetEvents();
+  bindGuideEvents();
   if (tabChanged) {
     host.classList.remove("tab-fade");
     void host.offsetWidth;
@@ -11188,7 +11325,7 @@ function profileCardHtml(p) {
   ]
     .map(([v, label]) => `<option value="${v}"${quota.unit === v ? " selected" : ""}>${label}</option>`)
     .join("")}</select></div>`;
-  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}"></label><label>用量上限${quotaField}<small>留空不限，只计已耗；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}">OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}">Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}"></label><label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label><label class="profile-full">模型${modelField}<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small></label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${[p.tools === false ? "本机工具关" : "", p.systemPrompt ? "已设 system prompt" : ""].filter(Boolean).join(" · ")}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label>${anthropicLike(p) ? `<label><code>max_tokens</code><input type="number" min="16" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens) || ""}" placeholder="${DEFAULT_MAX_TOKENS}"><small>Messages API 必填的输出上限；留空按 ${DEFAULT_MAX_TOKENS}，模型嫌大会报错，照报错调小即可</small></label>` : ""}<label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；选定模型时会自动探测并填在这里（none 是不认）；留空按 low / medium / high / max 四档列，接口拒绝某档时也会记下</small></label><label class="profile-full"><code>system prompt</code><textarea class="field wide field-area" data-field="systemPrompt" placeholder="可选。设定模型的身份与应答方式">${escapeHtml(p.systemPrompt || "")}</textarea></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}<button class="danger-btn" data-profile-action="delete">删除</button><span class="profile-status">${invalidQuota ? "请填写大于 0 的数值，或留空不限" : ""}</span></div></div>`;
+  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}"></label><label>用量上限${quotaField}<small>留空不限，只计已耗；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}">OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}">Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}"></label><label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label><label class="profile-full">模型${modelField}<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small></label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${p.tools === false ? "本机工具关" : ""}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label>${anthropicLike(p) ? `<label><code>max_tokens</code><input type="number" min="16" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens) || ""}" placeholder="${DEFAULT_MAX_TOKENS}"><small>Messages API 必填的输出上限；留空按 ${DEFAULT_MAX_TOKENS}，模型嫌大会报错，照报错调小即可</small></label>` : ""}<label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；选定模型时会自动探测并填在这里（none 是不认）；留空按 low / medium / high / max 四档列，接口拒绝某档时也会记下</small></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}<button class="danger-btn" data-profile-action="delete">删除</button><span class="profile-status">${invalidQuota ? "请填写大于 0 的数值，或留空不限" : ""}</span></div></div>`;
 }
 function storageSize() {
   const bytes = new Blob([JSON.stringify(store)]).size;
@@ -11348,8 +11485,7 @@ function bindSettingsEvents() {
       apiKey: "",
       temperature: 0.7,
       quota: "",
-      usedTokens: 0,
-      systemPrompt: ""
+      usedTokens: 0
     };
     store.profiles.push(p);
     store.settings.activeProfileId ||= p.id;
@@ -11737,7 +11873,7 @@ function contextEstimate(c, draft = "", pending = null) {
   let n = 0;
   if (profile) {
     const tools = profile.tools !== false ? toolDefinitions(c) : null;
-    n += estimateText(assistantHint(profile, tools, c));
+    n += estimateText(systemPrompt(c, tools));
     if (tools) n += estimateText(JSON.stringify(tools));
   }
   const contextIndex = c.messages.map(m => m.role).lastIndexOf("context"),
@@ -12678,15 +12814,449 @@ function bindEnvEvents() {
     }
   });
 }
-// 系统提示里的一句：环境备好了，告诉模型有哪些、缺的往哪装
-function envHint() {
+// 系统提示里 work.env 那一句的值：环境备好了，告诉模型有哪些、缺的往哪装；没备好不带
+function envVars() {
   const state = envStatus?.state;
-  if (!state) return "";
+  if (!state) return null;
   const kits = (envStatus.packs || [])
     .filter(pack => !pack.base && state.packs.includes(pack.id))
     .map(pack => `${pack.name}（${pack.hint || [...pack.pip, ...pack.npm].slice(0, 6).join("、")}）`);
   const extra = [...state.pip, ...state.npm];
-  return prompt("work.env", { kits: [state.python, ...kits, ...(extra.length ? [`另装 ${extra.join("、")}`] : [])].join("；") });
+  return { kits: [state.python, ...kits, ...(extra.length ? [`另装 ${extra.join("、")}`] : [])].join("；") };
+}
+
+  // ---- 22-presets.js ----
+// 言 · 预设：一套打包好的做法——提示词、给哪几组工具与哪几个 MCP 服务、用哪个模型、指令权限。
+// 在模型菜单里选用：选了的对话都照这一套（提示词排在系统提示最前，工具只给挑中的，见 systemPrompt 与 toolDefinitions）；
+// 新对话照上回选的。不选即言的本色。设置 → 预设里一张卡一个，就地改、改了即存
+/** @type {string|null} 正在改的那张卡 */
+let presetEditing = null;
+
+/** @param {Conversation|null} conversation @returns {Preset|null} */
+function presetOf(conversation) {
+  const id = conversation ? conversation.presetId || "" : store.settings.presetId;
+  return (id && store.settings.presets.find(preset => preset.id === id)) || null;
+}
+// 选一个预设：记在这段对话上，新对话也照它；带了模型的换过去，带了权限的换上
+function selectPreset(id) {
+  const preset = store.settings.presets.find(item => item.id === id) || null,
+    c = currentConversation();
+  store.settings.presetId = preset?.id || "";
+  if (c) {
+    c.presetId = preset?.id || "";
+    if (preset?.policy) c.commandPolicy = preset.policy;
+    markDirty(c.id);
+  }
+  saveStore();
+  if (preset?.profileId && profiles().some(p => p.id === preset.profileId)) selectProfile(preset.profileId);
+  else closeModelMenu();
+  renderHeader();
+  renderSendButtons();
+}
+// 模型菜单里的一段：本色与各个预设；一个预设都没有时不占地方
+function presetMenuHtml() {
+  const presets = store.settings.presets;
+  if (!presets.length) return "";
+  const current = presetOf(currentConversation())?.id || "";
+  const option = (id, name, note) =>
+    `<button class="model-option preset-option${id === current ? " active" : ""}" data-preset="${escapeHtml(id)}"${id === current ? ' aria-current="true"' : ""} title="${escapeHtml(note)}"><strong><span class="model-dot"></span><span class="model-option-name">${escapeHtml(name)}</span></strong></button>`;
+  return `<div class="menu-section"><div class="menu-section-title"><span>预设</span></div></div>${option("", "本色", "言本来的样子")}${presets.map(preset => option(preset.id, preset.name, preset.prompt.split("\n")[0].slice(0, 80))).join("")}`;
+}
+
+function presetsSettingsHtml() {
+  const presets = store.settings.presets;
+  return `<div id="presetPage"><h2>预设</h2><p class="settings-lead">一套做法打包成一个预设：提示词、给哪些工具与 MCP 服务、用哪个模型、指令权限。在输入框旁的模型菜单里选用，选了的对话都照这一套；不选即本色。</p><div class="card-list">${
+    presets.map(preset => (preset.id === presetEditing ? presetFormHtml(preset) : presetCardHtml(preset))).join("") ||
+    `<p class="card-note">尚无预设。</p>`
+  }</div><div class="card-foot"><button id="presetAdd" class="outline-btn" type="button">＋ 新添预设</button></div></div>`;
+}
+/** @param {Preset} preset */
+function presetCardHtml(preset) {
+  const profile = profiles().find(p => p.id === preset.profileId),
+    groups = preset.tools ? preset.tools.map(id => TOOL_GROUPS[id]).filter(Boolean) : null,
+    parts = [
+      groups ? (groups.length ? `工具：${groups.join("、")}` : "不带工具") : "工具全给",
+      preset.mcp ? (preset.mcp.length ? `MCP：${preset.mcp.join("、")}` : "不接 MCP") : ""
+    ].filter(Boolean);
+  const first = preset.prompt.trim().split("\n")[0] || "（未写提示词）";
+  return `<div class="card" data-preset-card="${escapeHtml(preset.id)}"><div class="card-head"><span class="card-name">${escapeHtml(preset.name)}</span>${profile ? `<span class="card-tag">${escapeHtml(profile.name)}</span>` : ""}${preset.policy ? `<span class="card-tag">${policyName(preset.policy)}</span>` : ""}<span class="card-state"></span><span class="card-actions"><button type="button" class="outline-btn" data-preset-action="edit">编辑</button><button type="button" class="outline-btn" data-preset-action="use">选用</button></span></div><div class="card-note" title="${escapeHtml(preset.prompt)}">${escapeHtml(first.slice(0, 120))}</div><div class="card-sub">${escapeHtml(parts.join(" · "))}</div></div>`;
+}
+/** @param {Preset} preset */
+function presetFormHtml(preset) {
+  const servers = Object.keys(mcpConfigs());
+  const checks = (kind, entries, chosen) =>
+    `<div class="preset-checks">${entries
+      .map(
+        ([id, label]) =>
+          `<label class="check"><input type="checkbox" data-preset-${kind}="${escapeHtml(id)}"${!chosen || chosen.includes(id) ? " checked" : ""}>${escapeHtml(label)}</label>`
+      )
+      .join("")}</div>`;
+  const policies = [
+    ["", "照设置"],
+    ["ask", "问而后行"],
+    ["review", "审而后行"],
+    ["auto", "径行"]
+  ];
+  return `<div class="card editing" data-preset-card="${escapeHtml(preset.id)}"><div class="profile-grid"><label class="profile-full">名称<input class="field wide" data-preset-field="name" value="${escapeHtml(preset.name)}" maxlength="24"></label><label class="profile-full">提示词<textarea class="field wide field-area preset-prompt" data-preset-field="prompt" placeholder="它是谁、做什么、怎么答；排在系统提示最前" spellcheck="false">${escapeHtml(preset.prompt)}</textarea></label><label>模型<select class="field wide select" data-preset-field="profileId"><option value="">不换，用当前的</option>${profiles()
+    .map(p => `<option value="${escapeHtml(p.id)}"${p.id === preset.profileId ? " selected" : ""}>${escapeHtml(p.name)}</option>`)
+    .join(
+      ""
+    )}</select></label><label>指令权限<div class="segmented">${policies.map(([value, label]) => `<button type="button" data-preset-policy="${value}" class="${preset.policy === value ? "active" : ""}">${label}</button>`).join("")}</div></label><div class="profile-full"><span class="preset-label">工具</span>${checks("tool", Object.entries(TOOL_GROUPS), preset.tools)}</div>${
+    servers.length
+      ? `<div class="profile-full"><span class="preset-label">MCP 服务</span>${checks(
+          "mcp",
+          servers.map(name => [name, name]),
+          preset.mcp
+        )}</div>`
+      : ""
+  }</div><div class="card-form-foot"><button type="button" class="outline-btn" data-preset-action="done">完成</button><button type="button" class="outline-btn" data-preset-action="use">选用</button><button type="button" class="danger-btn" data-preset-action="delete">删除</button></div></div>`;
+}
+function policyName(policy) {
+  return { ask: "问而后行", review: "审而后行", auto: "径行" }[policy] || "";
+}
+function renderPresetSettings() {
+  if (settingsTab !== "presets" || $("#settingsModal").classList.contains("hidden")) return;
+  renderSettings();
+}
+function bindPresetEvents() {
+  if (settingsTab !== "presets") return;
+  const page = $("#presetPage"),
+    presetIn = el => store.settings.presets.find(preset => preset.id === el.closest("[data-preset-card]")?.dataset.presetCard);
+  $("#presetAdd").addEventListener("click", () => {
+    const preset = normalizePreset({ id: uid(), name: "新预设", prompt: "" });
+    store.settings.presets.push(preset);
+    presetEditing = preset.id;
+    saveStore();
+    renderPresetSettings();
+    /** @type {HTMLInputElement|null} */ (page.ownerDocument.querySelector('#presetPage [data-preset-field="name"]'))?.select();
+  });
+  // 文字与模型：边改边存，不重画（重画会丢光标）
+  page.addEventListener("input", event => {
+    const el = /** @type {HTMLInputElement} */ (event.target),
+      preset = presetIn(el),
+      key = el.dataset.presetField;
+    if (!preset || !key) return;
+    preset[key] = key === "name" ? el.value.trim() || "未命名" : el.value;
+    saveStoreSoon();
+    renderHeader();
+  });
+  // 勾选：全勾上存成 null（往后新添的组与服务也跟着给），否则存勾中的那几个
+  page.addEventListener("change", event => {
+    const el = /** @type {HTMLInputElement} */ (event.target),
+      preset = presetIn(el);
+    if (!preset || el.type !== "checkbox") return;
+    const kind = el.dataset.presetTool !== undefined ? "tool" : "mcp",
+      boxes = [...el.closest(".preset-checks").querySelectorAll("input")],
+      chosen = boxes.filter(box => box.checked).map(box => box.dataset[kind === "tool" ? "presetTool" : "presetMcp"]);
+    preset[kind === "tool" ? "tools" : "mcp"] = chosen.length === boxes.length ? null : chosen;
+    saveStore();
+  });
+  page.addEventListener("click", async event => {
+    const button = /** @type {HTMLElement} */ (event.target).closest("button"),
+      preset = button && presetIn(button);
+    if (!button || !preset) return;
+    if (button.dataset.presetPolicy !== undefined) {
+      preset.policy = /** @type {Preset["policy"]} */ (button.dataset.presetPolicy);
+      saveStore();
+      return button.parentElement.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === button));
+    }
+    const action = button.dataset.presetAction;
+    if (action === "edit") presetEditing = preset.id;
+    if (action === "done") presetEditing = null;
+    if (action === "use") {
+      selectPreset(preset.id);
+      toast(`已选用「${preset.name}」`);
+    }
+    if (action === "delete") {
+      if (!(await askConfirm({ title: `删除预设「${preset.name}」？`, body: "用着它的对话回到本色。", ok: "删除" }))) return;
+      store.settings.presets = store.settings.presets.filter(item => item !== preset);
+      if (store.settings.presetId === preset.id) store.settings.presetId = "";
+      for (const c of store.conversations)
+        if (c.presetId === preset.id) {
+          c.presetId = "";
+          markDirty(c.id);
+        }
+      presetEditing = null;
+      saveStore();
+      renderHeader();
+    }
+    renderPresetSettings();
+  });
+}
+
+  // ---- 23-guide.js ----
+// 言 · 设置 → 文档：言的用法，一事一篇。目录像古籍的目录页（卷次、题名、引线、提要），点开一篇是一页版心：
+// 顶上卷次与书口的鱼尾，步骤是小朱印，提醒写成右侧的眉批，底下翻前后篇。
+// 正文只认两样记号：`代码` 与 **加重**；要加一篇，往 GUIDE 里添一条
+/**
+ * @typedef {{ h: string, body: string, note?: string, noteLabel?: string }} GuideStep
+ * @typedef {{ id: string, title: string, lead: string, summary: string, steps: GuideStep[] }} GuideTopic
+ */
+/** @type {GuideTopic[]} */
+const GUIDE = [
+  {
+    id: "start",
+    title: "起步",
+    lead: "接模型、问第一句",
+    summary: "接上一个模型，便能落笔；顶栏右侧三件，看一眼就知道言此刻的样子。",
+    steps: [
+      {
+        h: "接一个模型",
+        body: "设置 → 模型 → 新增：填显示名称、Base URL、API Key，再点「获取列表」挑模型，或手填模型 ID。接口选 **OpenAI 兼容**（大多数服务与中转站）或 **Anthropic**。填完点「测试连接」。",
+        noteLabel: "留意",
+        note: "API Key 只存在本机的 配置.json 里，导出的备份不带它。"
+      },
+      {
+        h: "落笔",
+        body: "在输入框写下问题，Enter 寄出，Shift + Enter 换行；图片可直接粘贴。作答途中还能再写一句，它会等模型说到一个落点再递上。"
+      },
+      {
+        h: "认顶栏",
+        body: "右上三件：一点印泥是连接——静时空心，作答时朱色呼吸，断了转赤；中间一方砚台，点它明暗互换；右边一笔墨是用量，没设上限时记已耗，设了便是余墨，随用随减。",
+        note: "印泥转赤，多半是 start.cmd 的窗口被关了：重新打开它，下一回寄出时页面自会接上。"
+      }
+    ]
+  },
+  {
+    id: "modes",
+    title: "言与行",
+    lead: "对谈与执事，绑一个目录",
+    summary: "同一段对话，不绑目录是「言」，照常聊；绑上一个目录是「行」，在那里读写文件、跑指令。",
+    steps: [
+      {
+        h: "言 · 对谈",
+        body: "不绑目录即对谈。要一份表格、文档、PDF 时，模型把成品落进卷宗，答末列出「成品 n 件」，可预览、可下载。"
+      },
+      {
+        h: "行 · 执事",
+        body: "欢迎页点「目录」签，选一个工作目录，这段对话就是执事：检索、读懂、修改、运行、验证，一步步记在行迹里。",
+        note: "执事只在这个目录里动手；要它碰目录外的东西，先在设置 → 工具里看清沙箱与可及范围。"
+      },
+      {
+        h: "按目录归组",
+        body: "侧栏里绑了同一目录的对话归成一组，头上一方「工」印；组头的「＋」在此目录另起一段。"
+      }
+    ]
+  },
+  {
+    id: "safety",
+    title: "权限沙箱",
+    lead: "三档权限与沙箱的边界",
+    summary: "指令逐条可见。做到哪一步问你一声，由三档权限定；沙箱在桥接那头守着系统。",
+    steps: [
+      {
+        h: "三档权限",
+        body: "**问而后行**：会改动东西的指令逐条请示，只读的径直跑。**审而后行**：由桥接代审，常规改动放行，只拦伤及系统与难以恢复的。**径行**：不再审查。输入框旁可随时换。"
+      },
+      {
+        h: "沙箱",
+        body: "问而后行里从严：改动不出工作目录，机密文件不碰，动系统与直接外联的指令拦下、转请你定夺。审而后行与径行只守系统本身。总开关在设置 → 工具。",
+        noteLabel: "留意",
+        note: "沙箱是静态筛查，不是进程隔离；MCP 服务以你的权限运行，不受它约束。"
+      },
+      {
+        h: "停下",
+        body: "寄出键在作答时变成「止」，按下即停；正在跑的指令连同它起的子进程一起收掉。"
+      }
+    ]
+  },
+  {
+    id: "files",
+    title: "卷宗附件",
+    lead: "文件怎么进来、成品落在哪",
+    summary: "附件随一问送出；卷宗是跨对话的书架，常用的文件收在这里。",
+    steps: [
+      {
+        h: "附件",
+        body: "点「＋」、拖进来或粘贴：图片、文本、代码、PDF、Office 都行。文档先在本机抽出正文；单件 32 MB，一次最多 10 件。"
+      },
+      {
+        h: "卷宗",
+        body: "侧栏的「卷宗」即存储位置里的 `卷宗/` 目录。拖进去、或在附件上按「藏」收入；要随消息送出，从「＋」里选「卷宗」。",
+        note: "卷宗里的文档对每段对话都可读，模型用到时才取回；设置 → 工具里可关。"
+      },
+      {
+        h: "成品",
+        body: "模型做出的文件挂在答末的「成品」卡上：预览就地看，Word、Excel、PPT 也能抽出正文来看；之后在卷宗里删了的，那一行标「已移出」。"
+      }
+    ]
+  },
+  {
+    id: "notes",
+    title: "旁注引用",
+    lead: "就地追问，不入正文",
+    summary: "读到一处有疑问，不必把主线打断：引它追问，或在旁边另开一条小对话。",
+    steps: [
+      {
+        h: "引用",
+        body: "在回复里划选一段，浮出「引用」，那段便作为引文带进输入框，随下一问送出。"
+      },
+      {
+        h: "旁注",
+        body: "划选后选「旁注」，右侧开一条附在这一处的小对话。它读得到正文，正文读不到它；只查不改，不会动文件。",
+        note: "同一条回复上可起几条旁注；「旁注 n」打开目录，‹ › 在各条间切换，「阔」铺满整页。"
+      },
+      {
+        h: "跟着分支走",
+        body: "旁注跟着它所注的那一问一答走：换到另一个版本，注在旧版上的旁注暂不在眼前，换回来就回来。"
+      }
+    ]
+  },
+  {
+    id: "delegate",
+    title: "差遣",
+    lead: "帮手：分出去的活",
+    summary: "量大、独立的活，模型会差遣帮手另起一段去做，做完回报。",
+    steps: [
+      {
+        h: "何时差遣",
+        body: "通读一批资料并归纳、多路检索比对、在不熟的模块里排查——这类活由模型自己决定分出去，几件互不相干的还能并行。"
+      },
+      {
+        h: "看它做什么",
+        body: "行迹里的差遣卡片可以点开：帮手领的任务、走的每一步、最后的回报都在里面。输入框上方的帮手条也能直达。",
+        noteLabel: "留意",
+        note: "帮手看不到这段对话，只凭任务说明做事；它不向你请示，也不改记忆。"
+      }
+    ]
+  },
+  {
+    id: "presets",
+    title: "预设",
+    lead: "做一个自己的 Agent",
+    summary: "把提示词、工具、MCP 服务、模型与权限打包成一套，选用即换上。",
+    steps: [
+      {
+        h: "新添",
+        body: "设置 → 预设 → 新添：起个名字，写一段提示词——它是谁、做什么、怎么答。提示词排在系统提示的最前面。"
+      },
+      {
+        h: "挑工具",
+        body: "工具按组勾选：联网、计算、指令与文件、翻文档、请示、记忆与旧谈、差遣；接了 MCP 的，再勾用哪几个服务。全勾上即「全给」，往后新添的也跟着给。",
+        note: "工具越少，每一问背的定义越轻；只聊天的预设，工具可以全不勾。"
+      },
+      {
+        h: "选用",
+        body: "输入框旁的模型菜单里多了「预设」一段，点一个即换上；模型按钮上标着它的名字。带了模型或权限的，一并换上。不选即本色。"
+      }
+    ]
+  },
+  {
+    id: "mcp",
+    title: "MCP",
+    lead: "接外部服务：GitHub、自家项目",
+    summary: "MCP 让言调用别处的能力：GitHub 的仓库与议题、你自己项目里的工具。只改配置，不动代码。",
+    steps: [
+      {
+        h: "找到服务的接法",
+        body: "服务的说明里通常给出一段 JSON：本机程序写 `command` 与 `args`，远端服务写一个 `url`。",
+        note: "项目里现成的 `.mcp.json`，整段粘进「以 JSON 编辑」即可，写法与 Claude、Cursor 通用。"
+      },
+      {
+        h: "在设置里添上",
+        body: "设置 → MCP → 新增服务，填命令或地址；令牌放在环境变量或请求头里，页面上遮着。"
+      },
+      {
+        h: "让模型用起来",
+        body: "接通后卡上亮出工具件数。对话里直说要做的事，模型会挑合用的工具，行迹里记着它调了哪件；工具多的服务只给模型一张目录，按需取用。",
+        noteLabel: "留意",
+        note: "标了只读的工具径直调用，其余在问而后行下逐次请示。"
+      }
+    ]
+  },
+  {
+    id: "env",
+    title: "环境",
+    lead: "Python、C、Go 装在哪、怎么用",
+    summary: "给模型备一套自带的开发环境，装在存储位置的 `环境/` 里，不改动系统。",
+    steps: [
+      {
+        h: "勾选",
+        body: "设置 → 环境：一组工具一张卡，名称在左、状态在右——空框没选，朱色实心待装，一笔勾已装。有数据处理、办公文档、图像、音视频，也有 C / C++、Go、Rust、Java 几套工具链。"
+      },
+      {
+        h: "准备",
+        body: "点「准备环境」，环境便对齐到勾选：勾上的装，取消的卸。国内镜像下得快，工具链大些，卡上写着约多少。",
+        note: "模型的指令与 MCP 服务都接着这套环境；它缺什么库，自己装进来即可。"
+      }
+    ]
+  },
+  {
+    id: "memory",
+    title: "记忆",
+    lead: "录下什么、怎么忘",
+    summary: "录是一份跨对话的记忆：你的偏好、身份、约定，下回不必再说。",
+    steps: [
+      {
+        h: "记与翻",
+        body: "模型觉得值得记的，一句话记入；新话题里用得上时再翻。行迹里「记入」「翻记忆」用一点冷色标着。"
+      },
+      {
+        h: "改与忘",
+        body: "设置 → 记忆里每条都可改可删，也可手记一条；整份记忆可以关掉。",
+        noteLabel: "留意",
+        note: "记忆的内容不进系统提示，只告诉模型有几条；用到时它才去翻。"
+      }
+    ]
+  },
+  {
+    id: "storage",
+    title: "存储备份",
+    lead: "~/.yan、换位置、导入导出",
+    summary: "对话、卷宗、附件与配置都在一个存储目录里，复制即备份。",
+    steps: [
+      {
+        h: "在哪",
+        body: "默认 `~/.yan/`：`对话/` 一段一个文件，`卷宗/` 是成品与收进来的文件，`附件/` 是附件原件，`配置.json` 是设置与模型。几个浏览器共用这一份。"
+      },
+      {
+        h: "换位置",
+        body: "设置 → 通用 → 存储位置，填一个目录，整份拷过去，旧处原样留着。",
+        note: "环境不随之拷走，到新处重新准备一遍即可。"
+      },
+      {
+        h: "备份",
+        body: "设置 → 通用里导出备份（可含附件原件），导入时按 id 合并，已有的跳过。备份不含 API Key。"
+      }
+    ]
+  }
+];
+/** @type {string|null} 正看的那一篇；空即目录 */
+let guideTopic = null;
+const guideText = text =>
+  escapeHtml(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+function guideSettingsHtml() {
+  const index = GUIDE.findIndex(topic => topic.id === guideTopic);
+  if (index < 0)
+    return `<div id="guidePage"><h2>文档</h2><p class="settings-lead">言的用法，一事一篇。</p><div class="guide-toc">${GUIDE.map(
+      (topic, i) =>
+        `<button type="button" class="guide-row" data-guide="${topic.id}"><span class="guide-juan">卷${chineseNumber(i + 1)}</span><span class="guide-title">${escapeHtml(topic.title)}</span><span class="guide-lead-line" aria-hidden="true"></span><span class="guide-gist">${escapeHtml(topic.lead)}</span></button>`
+    ).join("")}</div></div>`;
+  const topic = GUIDE[index],
+    prev = GUIDE[index - 1],
+    next = GUIDE[index + 1];
+  return `<div id="guidePage" class="guide-doc"><div class="guide-top"><button type="button" class="guide-back" data-guide="">‹ 目录</button><span>·</span><span>卷${chineseNumber(index + 1)} · ${escapeHtml(topic.title)}</span><span class="guide-fish" aria-hidden="true">◆ 言 · 文档</span></div><h2>${escapeHtml(topic.lead)}</h2><p class="guide-summary">${guideText(topic.summary)}</p><div class="guide-steps">${topic.steps
+    .map(
+      (step, i) =>
+        `<section class="guide-step"><div class="guide-main"><h4><span class="guide-no" aria-hidden="true">${chineseNumber(i + 1)}</span>${escapeHtml(step.h)}</h4><p>${guideText(step.body)}</p></div>${
+          step.note ? `<aside class="guide-note"><b>${escapeHtml(step.noteLabel || "眉批")}</b>${guideText(step.note)}</aside>` : ""
+        }</section>`
+    )
+    .join(
+      ""
+    )}</div><div class="guide-pager">${prev ? `<button type="button" data-guide="${prev.id}">‹ 卷${chineseNumber(index)} · ${escapeHtml(prev.title)}</button>` : "<span></span>"}${next ? `<button type="button" data-guide="${next.id}">卷${chineseNumber(index + 2)} · ${escapeHtml(next.title)} ›</button>` : "<span></span>"}</div></div>`;
+}
+function bindGuideEvents() {
+  if (settingsTab !== "guide") return;
+  $("#guidePage").addEventListener("click", event => {
+    const target = /** @type {HTMLElement} */ (event.target).closest("[data-guide]");
+    if (!target) return;
+    guideTopic = target.dataset.guide || null;
+    renderSettings();
+    $("#settingsContent").scrollTop = 0;
+  });
 }
 
   // ---- 99-start.js ----
