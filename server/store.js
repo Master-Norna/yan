@@ -54,6 +54,7 @@ module.exports = function createStore({ sendJson, readJson }) {
     archive: path.join(root, "卷宗"),
     files: path.join(root, "附件"),
     env: path.join(root, "环境"),
+    work: path.join(root, "工作"),
     config: path.join(root, CONFIG_FILE)
   });
   function ensureRoot() {

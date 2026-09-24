@@ -8,12 +8,21 @@ const { spawn, spawnSync } = require("node:child_process");
 const vm = require("node:vm");
 const sandbox = require("./sandbox.js");
 
-module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes, archiveHome, toolEnv }) {
+module.exports = function createWork({
+  sendJson,
+  readJson,
+  decodeEntities,
+  fetchPublicResponse,
+  readLimitedBytes,
+  archiveHome,
+  workHome,
+  toolEnv
+}) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
   // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见，并按问而后行 / 审而后行 / 径行三档处理。
   // 请求带 sandbox: true 时再加一道沙箱（server/sandbox.js）：路径不出目录、机密文件不碰、指令先筛、环境变量去掉机密——在桥接这头守，页面与模型都绕不过
-  const WORK_HOME = path.join(os.homedir(), "言", "工作");
+  // 执事没给目录时的退路：存储根里的 工作/（workHome()，见 server/store.js），与卷宗、对话同在一处
   // 卷宗：对话没绑工作目录时，模型的工具就落在这里——写出的表格、文档都收在卷宗里；页面上的卷宗即这个目录的视图。
   // 位置在存储根里（archiveHome()，见 server/store.js），随每个请求的 root 传来的也认。
   // 脚本与中间文件放在卷宗里的隐藏目录 .草稿/<对话id>/，页面不列它
@@ -29,7 +38,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
   // 工作目录必须是完整限定的路径：path.isAbsolute 在 Windows 上会把「\foo」「/foo」也算作绝对，实际却跟着桥接进程所在的盘符走；
   // 「C:foo」则是相对当前目录。只认 resolve 前后一致的写法（盘符 / UNC / POSIX 根），其余一律拒绝
   function resolveWorkdir(raw) {
-    const expanded = expandHome(raw) || WORK_HOME;
+    const expanded = expandHome(raw) || workHome();
     const dir = path.resolve(expanded),
       plain = path.normalize(expanded).replace(/(?<=.)[\\/]+$/, "");
     const root = path.parse(dir).root;
@@ -283,7 +292,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         workdir,
         platform: process.platform,
         shell: WORK_SHELL,
-        home: WORK_HOME,
+        home: workHome(),
         entries: entries.length,
         created: !existing
       });
@@ -1179,7 +1188,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
   }
 
   return {
-    WORK_HOME,
+    workHome,
     SCRATCH_DIR,
     WORK_SHELL,
     // 都碰本机磁盘或本机进程：只受理本站页面与 VS Code Webview（见 server.js 的接口表）

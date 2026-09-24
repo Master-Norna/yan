@@ -612,7 +612,7 @@ function handleBootstrap(req, res) {
     // store：存储根的位置，fresh 是这个根还没立起来（页面据此把旧数据迁进来）
     store: STORE.describe(),
     work: {
-      home: WORK.WORK_HOME,
+      home: WORK.workHome(),
       archive: STORE.paths().archive,
       chats: STORE.paths().chats,
       files: STORE.paths().files,
@@ -738,6 +738,7 @@ const WORK = require("./server/work.js")({
   fetchPublicResponse,
   readLimitedBytes,
   archiveHome: () => STORE.paths().archive,
+  workHome: () => STORE.paths().work,
   toolEnv: ENV.apply
 });
 const CHATS = require("./server/chats.js")({ sendJson, readJson, chatsHome: () => STORE.paths().chats });
@@ -755,7 +756,15 @@ const OPEN_ROUTES = {
     "POST /api/fetch": handleFetch,
     "POST /api/chat": handleChat
   },
-  TRUSTED_ROUTES = { "POST /api/http": handleHttp, ...WORK.routes, ...CHATS.routes, ...STORE.routes, ...FILES.routes, ...MCP.routes, ...ENV.routes };
+  TRUSTED_ROUTES = {
+    "POST /api/http": handleHttp,
+    ...WORK.routes,
+    ...CHATS.routes,
+    ...STORE.routes,
+    ...FILES.routes,
+    ...MCP.routes,
+    ...ENV.routes
+  };
 const ROUTES = new Map(Object.entries({ ...OPEN_ROUTES, ...TRUSTED_ROUTES }));
 const TRUSTED_PATHS = new Set(Object.keys(TRUSTED_ROUTES).map(key => key.split(" ")[1]));
 
@@ -903,9 +912,7 @@ server.listen(PORT, HOST, () => {
   } catch (error) {
     console.log(`  （产出 support.js / app.css 失败：${error.message}）`);
   }
-  console.log(
-    `\n  言 · 本机桥接${APP_VERSION ? `  v${APP_VERSION}` : ""}\n  页面    ${address}\n  执事    ${WORK.WORK_HOME}\n  存储    ${STORE.paths().root}\n`
-  );
+  console.log(`\n  言 · 本机桥接${APP_VERSION ? `  v${APP_VERSION}` : ""}\n  页面    ${address}\n  存储    ${STORE.paths().root}\n`);
   console.log("  请保持此窗口开启；关闭后页面刷新、模型转发、联网与执事都会停止。按 Ctrl+C 退出。");
   console.log("  此窗口不会显示 API Key。\n");
   if (process.argv.includes("--open") && process.platform === "win32") {
