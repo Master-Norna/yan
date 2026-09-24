@@ -140,12 +140,14 @@ function renderSettings() {
   if (settingsTab === "appearance") host.innerHTML = appearanceSettingsHtml();
   if (settingsTab === "models") host.innerHTML = modelsSettingsHtml();
   if (settingsTab === "tools") host.innerHTML = toolsSettingsHtml();
+  if (settingsTab === "env") host.innerHTML = envSettingsHtml();
   if (settingsTab === "mcp") host.innerHTML = mcpSettingsHtml();
   if (settingsTab === "memory") host.innerHTML = memorySettingsHtml();
   if (settingsTab === "about") host.innerHTML = aboutSettingsHtml();
   bindSettingsEvents();
   bindMemoryEvents();
   bindMcpEvents();
+  bindEnvEvents();
   if (tabChanged) {
     host.classList.remove("tab-fade");
     void host.offsetWidth;

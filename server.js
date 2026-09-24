@@ -729,18 +729,21 @@ async function handleChat(req, res) {
 }
 // 存储根（默认 ~/.yan）：对话、卷宗、配置都在里面，换位置后下面两处跟着走
 const STORE = require("./server/store.js")({ sendJson, readJson });
+// 沙箱环境：存储根里的 环境/，桥接起的进程（指令、MCP 服务）都接上它
+const ENV = require("./server/env/index.js")({ sendJson, readJson, envHome: () => STORE.paths().env });
 const WORK = require("./server/work.js")({
   sendJson,
   readJson,
   decodeEntities,
   fetchPublicResponse,
   readLimitedBytes,
-  archiveHome: () => STORE.paths().archive
+  archiveHome: () => STORE.paths().archive,
+  toolEnv: ENV.apply
 });
 const CHATS = require("./server/chats.js")({ sendJson, readJson, chatsHome: () => STORE.paths().chats });
 const FILES = require("./server/files.js")({ sendJson, readJson, filesHome: () => STORE.paths().files });
 // MCP：按设置里的配置起、连外部的 MCP 服务，把它们的工具交给页面
-const MCP = require("./server/mcp/index.js")({ sendJson, readJson, version: APP_VERSION });
+const MCP = require("./server/mcp/index.js")({ sendJson, readJson, version: APP_VERSION, toolEnv: ENV.apply });
 
 // 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件，以及能打本机的 http_request），
 // 只受理本站页面与 VS Code Webview；另一半（引导、转发、检索、翻网页）凡是本机桥接认得的来源都可调
@@ -752,7 +755,7 @@ const OPEN_ROUTES = {
     "POST /api/fetch": handleFetch,
     "POST /api/chat": handleChat
   },
-  TRUSTED_ROUTES = { "POST /api/http": handleHttp, ...WORK.routes, ...CHATS.routes, ...STORE.routes, ...FILES.routes, ...MCP.routes };
+  TRUSTED_ROUTES = { "POST /api/http": handleHttp, ...WORK.routes, ...CHATS.routes, ...STORE.routes, ...FILES.routes, ...MCP.routes, ...ENV.routes };
 const ROUTES = new Map(Object.entries({ ...OPEN_ROUTES, ...TRUSTED_ROUTES }));
 const TRUSTED_PATHS = new Set(Object.keys(TRUSTED_ROUTES).map(key => key.split(" ")[1]));
 

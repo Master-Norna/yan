@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const vm = require("node:vm");
 const sandbox = require("./sandbox.js");
 
-module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes, archiveHome }) {
+module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes, archiveHome, toolEnv }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
   // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见，并按问而后行 / 审而后行 / 径行三档处理。
@@ -432,7 +432,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
-        ...(boxed ? sandbox.sandboxEnv(process.env) : process.env),
+        ...toolEnv(boxed ? sandbox.sandboxEnv(process.env) : process.env),
         TERM: "dumb",
         NO_COLOR: "1",
         PYTHONIOENCODING: "utf-8",

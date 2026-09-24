@@ -53,6 +53,7 @@ module.exports = function createStore({ sendJson, readJson }) {
     chats: path.join(root, "对话"),
     archive: path.join(root, "卷宗"),
     files: path.join(root, "附件"),
+    env: path.join(root, "环境"),
     config: path.join(root, CONFIG_FILE)
   });
   function ensureRoot() {
@@ -157,7 +158,8 @@ module.exports = function createStore({ sendJson, readJson }) {
       const existing = fs.existsSync(path.join(next, CONFIG_FILE));
       if (!existing) {
         fs.mkdirSync(next, { recursive: true });
-        copyInto(root, next, new Set(["位置.json"]));
+        // 环境不拷：虚拟环境里记着绝对路径，搬过去就坏了；到新处重新准备一遍（有缓存时很快）
+        copyInto(root, next, new Set(["位置.json", "环境"]));
       }
       const previous = root;
       root = next;

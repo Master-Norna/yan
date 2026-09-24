@@ -832,6 +832,8 @@ function assistantHint(profile, tools, conversation = null) {
   ];
   const names = new Set((tools || []).map(tool => tool?.function?.name));
   if (names.has("run_command") && conversation) lines.push(workHint(conversation));
+  const env = names.has("run_command") ? envHint() : "";
+  if (env) lines.push(env);
   if (names.has("search_web")) lines.push(prompt("assistant.search"));
   if (names.has("ask_user")) lines.push(prompt("assistant.asking"));
   // 何时差遣写在工具说明里；这一句只给行——对谈里差遣是少数，不必每问都背着

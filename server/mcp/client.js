@@ -9,11 +9,12 @@ const PROTOCOL = "2025-06-18",
 let nextId = 1;
 
 class McpClient {
-  /** @param {{ name: string, config: Record<string, any>, version: string }} options */
-  constructor({ name, config, version }) {
+  /** @param {{ name: string, config: Record<string, any>, version: string, toolEnv: (env: Record<string, string>) => Record<string, string> }} options */
+  constructor({ name, config, version, toolEnv }) {
     this.name = name;
     this.config = config;
     this.version = version;
+    this.toolEnv = toolEnv;
     this.pending = new Map();
     this.tools = [];
     this.instructions = "";
@@ -23,7 +24,7 @@ class McpClient {
   }
   async connect() {
     try {
-      await this.open(createTransport(this.config));
+      await this.open(createTransport(this.config, this.toolEnv));
     } catch (error) {
       // 只写了 url、没说 type 的：可流式 HTTP 握手被拒（多是 4xx），退回旧式 SSE 再试一次
       if (!this.config.url || this.config.type || !(error.status >= 400 && error.status < 500)) throw error;

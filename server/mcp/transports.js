@@ -13,7 +13,8 @@ const path = require("node:path");
 const STDERR_KEEP = 4000;
 
 class StdioTransport {
-  constructor({ command, args = [], cwd, env = {} }) {
+  constructor({ command, args = [], cwd, env = {} }, toolEnv = base => base) {
+    this.toolEnv = toolEnv;
     this.command = command;
     this.args = args;
     this.cwd = cwd;
@@ -23,11 +24,13 @@ class StdioTransport {
     this.onclose = () => {};
   }
   start() {
-    const { file, args, shell } = resolveCommand(this.command, this.args);
+    // 先接上沙箱环境（环境里的 Python、uvx、npm 装的工具都找得到），配置里写的 env 最后盖上；
+    // Python 写的服务在中文 Windows 上默认按 GBK 写 stdout：统一成 UTF-8，且不缓冲
+    const env = { PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", ...this.toolEnv(process.env), ...this.env },
+      { file, args, shell } = resolveCommand(this.command, this.args, env);
     this.child = spawn(file, args, {
       cwd: this.cwd || undefined,
-      // Python 写的服务在中文 Windows 上默认按 GBK 写 stdout：统一成 UTF-8，且不缓冲
-      env: { PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", ...process.env, ...this.env },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       shell
@@ -88,17 +91,18 @@ class StdioTransport {
   }
 }
 // Windows 上 npx、uvx 这类是 .cmd：得经 cmd 才起得来。先按 PATH 与 PATHEXT 找到真身，是 .cmd / .bat 就交给 shell（参数逐个加引号）
-function resolveCommand(command, args) {
+function resolveCommand(command, args, env) {
   if (process.platform !== "win32") return { file: command, args, shell: false };
-  const found = findOnPath(command);
+  const found = findOnPath(command, env);
   if (!/\.(cmd|bat)$/i.test(found)) return { file: found, args, shell: false };
   const quote = value => (/[\s"&|<>^()]/.test(value) ? `"${String(value).replace(/"/g, '""')}"` : String(value));
   return { file: [found, ...args].map(quote).join(" "), args: [], shell: true };
 }
-function findOnPath(command) {
+function findOnPath(command, env) {
   if (path.isAbsolute(command) || /[\\/]/.test(command)) return command;
-  const exts = path.extname(command) ? [""] : (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";");
-  for (const dir of (process.env.PATH || "").split(path.delimiter))
+  const exts = path.extname(command) ? [""] : (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";"),
+    pathKey = Object.keys(env).find(name => name.toUpperCase() === "PATH");
+  for (const dir of String(env[pathKey] || "").split(path.delimiter))
     for (const ext of exts) {
       const file = path.join(dir, command + ext);
       if (dir && fs.existsSync(file)) return file;
@@ -235,8 +239,8 @@ class SseTransport {
 }
 
 // 按配置挑传输：有 command 是本机进程；有 url 的，type 写了 sse 走旧式，否则走可流式的 HTTP
-function createTransport(config) {
-  if (config.command) return new StdioTransport(config);
+function createTransport(config, toolEnv) {
+  if (config.command) return new StdioTransport(config, toolEnv);
   if (config.url) return /sse/i.test(config.type || config.transport || "") ? new SseTransport(config) : new HttpTransport(config);
   throw Error("配置里既没有 command 也没有 url");
 }

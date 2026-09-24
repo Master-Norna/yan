@@ -8,7 +8,7 @@ const { McpClient } = require("./client.js");
 
 const CONNECTION_KEYS = ["command", "args", "cwd", "env", "url", "headers", "type", "transport"];
 
-module.exports = function createMcp({ sendJson, readJson, version }) {
+module.exports = function createMcp({ sendJson, readJson, version, toolEnv }) {
   /** @type {Map<string, { key: string, client: McpClient, ready: Promise<McpClient> }>} */
   const clients = new Map();
   const keyOf = config => JSON.stringify(CONNECTION_KEYS.map(key => config[key]));
@@ -21,7 +21,7 @@ module.exports = function createMcp({ sendJson, readJson, version }) {
       entry = null;
     }
     if (!entry) {
-      const client = new McpClient({ name, config, version });
+      const client = new McpClient({ name, config, version, toolEnv });
       entry = { key, client, ready: client.connect() };
       // 连不上的收掉，下次用到时重来
       entry.ready.catch(() => client.close());
