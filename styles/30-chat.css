@@ -1218,7 +1218,6 @@ sup.note-ref.active {
 }
 .markdown input[type="checkbox"] {
   margin: 0 0.5em 0 0;
-  accent-color: var(--accent);
   vertical-align: -1px;
 }
 .markdown blockquote {
