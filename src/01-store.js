@@ -76,6 +76,13 @@ function normalizeStoreData(value) {
         settings.presets.push(normalizePreset({ id: `from-${p.id}`, name: p.name || "预设", prompt: text, profileId: p.id }));
     }
     if (!settings.presets.some(preset => preset.id === settings.presetId)) settings.presetId = "";
+    settings.groups = (Array.isArray(settings.groups) ? settings.groups : [])
+      .filter(group => group && typeof group === "object" && group.id)
+      .map(group => ({
+        id: String(group.id),
+        name: String(group.name || "").trim() || "未命名",
+        createdAt: String(group.createdAt || new Date().toISOString())
+      }));
     return {
       ...structuredClone(defaultStore),
       ...data,

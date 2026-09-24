@@ -120,6 +120,7 @@
  * @property {CommandPolicy} [commandPolicy] 指令权限模式
  * @property {string} [reasoning] 思考档位
  * @property {string} [presetId] 用的哪个预设；空即言的本色
+ * @property {string} [groupId] 归在哪个分组；空即散列
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
  * @property {boolean} [ended] 旧版：额度尽了整段锁死；现已不再写入，读到照旧尊重
@@ -171,6 +172,8 @@
  * @property {string} activeProfileId
  * @property {Preset[]} presets
  * @property {string} presetId 新对话用的预设（上回选的）；空即本色
+ * @property {{ id: string, name: string, createdAt: string }[]} groups 分组：侧栏里自立的几组，对话各记 groupId
+ * @property {string} [pendingGroupId] 从组首「＋」另起的新对话归进这一组（用过即清）
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
@@ -270,6 +273,7 @@ const defaultStore = {
     activeProfileId: "",
     presets: [],
     presetId: "",
+    groups: [],
     autoTitle: true,
     pendingWorkdir: "",
     collapsedRepos: [],

@@ -110,6 +110,11 @@ function renderChips(work, bridged) {
   approve.querySelector(".chip-text").textContent = meta[0];
   approve.classList.toggle("on", policy !== "ask");
   approve.title = `${meta[0]}：${meta[1]}（新对话默认）`;
+  // 从组首「＋」来的：新对话归进那一组
+  const group = pendingGroup(),
+    groupChip = $("#groupChip");
+  groupChip.classList.toggle("hidden", !group);
+  groupChip.querySelector(".chip-text").textContent = group?.name || "";
 }
 function closeChipPop() {
   document.querySelectorAll(".chip-pop").forEach(pop => pop.remove());
@@ -222,7 +227,7 @@ function openHistoryMenu(id, anchor) {
   if (document.querySelector(`.chip-pop[data-kind=history][data-for="${CSS.escape(id)}"]`)) return closeChipPop();
   const pop = openFloatingPop(
     anchor,
-    `<button type="button" data-menu="pin">${c.pinned ? "取消置顶" : "置顶"}</button><button type="button" data-menu="rename">改名</button><button type="button" data-menu="bind">${isWork(c) ? "更换目录" : "绑定目录"}</button><button type="button" data-menu="export"><span>导出</span><small>${archiveOnline() ? "存入卷宗" : "Markdown"}</small></button><button type="button" class="danger" data-menu="delete">删除</button>`,
+    `<button type="button" data-menu="pin">${c.pinned ? "取消置顶" : "置顶"}</button><button type="button" data-menu="rename">改名</button><button type="button" data-menu="bind">${isWork(c) ? "更换目录" : "绑定目录"}</button><button type="button" data-menu="group">${groupOf(c) ? "换个分组" : "移入分组"}</button><button type="button" data-menu="export"><span>导出</span><small>${archiveOnline() ? "存入卷宗" : "Markdown"}</small></button><button type="button" class="danger" data-menu="delete">删除</button>`,
     { align: "right" }
   );
   pop.dataset.kind = "history";
@@ -236,6 +241,7 @@ function openHistoryMenu(id, anchor) {
     else if (action === "rename") startRename(id);
     else if (action === "delete") deleteConversation(id);
     else if (action === "export") void exportConversationMarkdown(c);
+    else if (action === "group") openMoveMenu(c, anchor.closest(".history-item") || anchor);
     else if (action === "bind") {
       if (c.ended) return toast("此对话已收尾，请翻页后再绑定目录");
       openWorkdirPop({
@@ -344,6 +350,11 @@ function setupChips() {
         renderHistory();
       }
     });
+  $("#groupChip").onclick = () => {
+    delete store.settings.pendingGroupId;
+    saveStore();
+    renderChips(workMode(), apiBase !== null);
+  };
   $("#approveChip").onclick = () => {
     store.settings.commandPolicyDefault = nextCommandPolicy(store.settings.commandPolicyDefault);
     saveStore();

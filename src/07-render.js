@@ -139,13 +139,21 @@ function renderHistory() {
     (c.messages || []).some(m => typeof m.content === "string" && m.content.toLowerCase().includes(query));
   const sorted = [...store.conversations].filter(matches).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   // 一条时间线：绑了目录的对话归在各自的「工」组里，组按组内最近动过的那条排（一条有动静，整组靠前），组内按时间；
-  // 没绑目录的对话按自己的时间散在其间；置顶另列。组可收起，收起时只露出当前打开的那条；查找时不收
+  // 没绑目录的对话按自己的时间散在其间；置顶另列；自立的分组（「集」）在置顶之下自成一段，空组也列着。
+  // 组可收起，收起时只露出当前打开的那条；查找时不收，也不列没有命中的组
   const collapsed = new Set(store.settings.collapsedRepos || []),
     pinned = sorted.filter(c => c.pinned),
     repos = new Map(),
+    sets = new Map(groupsList().map(group => [group.id, { kind: "set", group, at: group.createdAt, items: [] }])),
     nodes = [];
   for (const c of sorted) {
     if (c.pinned) continue;
+    const set = c.groupId && sets.get(c.groupId);
+    if (set) {
+      if (!set.items.length || c.updatedAt > set.at) set.at = c.updatedAt;
+      set.items.push(c);
+      continue;
+    }
     if (!isWork(c)) {
       nodes.push({ kind: "chat", at: c.updatedAt, c });
       continue;
@@ -159,7 +167,16 @@ function renderHistory() {
     node.items.push(c);
   }
   nodes.sort((a, b) => b.at.localeCompare(a.at));
-  const buckets = new Map([["置顶", pinned.map(c => ({ kind: "chat", c }))]]);
+  /** @type {Map<string, any[]>} */
+  const buckets = new Map();
+  buckets.set(
+    "置顶",
+    pinned.map(c => ({ kind: "chat", c }))
+  );
+  buckets.set(
+    "分组",
+    [...sets.values()].filter(node => !query || node.items.length).sort((a, b) => b.at.localeCompare(a.at))
+  );
   for (const label of ["今天", "过去七天", "更早"]) buckets.set(label, []);
   for (const node of nodes) buckets.get(dayBucket(node.at)).push(node);
   // 正改着名时侧栏也可能重画（别的对话拟好了题、后台一答收尾）：改到一半的字与光标得留住，不能被原标题冲掉
@@ -190,6 +207,18 @@ function renderHistory() {
       running = node.items.filter(c => c.id !== currentId && requestJob(c.id)).length;
     return `<div class="history-repo-group${fold ? " collapsed" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><button type="button" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? "展开" : "收起"}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">工</span><span class="history-repo-name">${escapeHtml(name)}</span><small>${node.items.length}${fold && running ? ` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></button><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="在此目录翻页">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
+  // 分组：画法同「工」组，印文是「集」；组首右侧「＋」在此组另起一段、「⋯」改名或解散；改名时组名换成输入框
+  const setHtml = node => {
+    const { group } = node,
+      key = `group:${group.id}`,
+      fold = collapsed.has(key) && !query,
+      shown = fold ? node.items.filter(c => c.id === currentId) : node.items,
+      renaming = renamingGroupId === group.id;
+    const name = renaming
+      ? `<input class="history-rename group-rename" value="${escapeHtml(group.name)}" maxlength="40" aria-label="分组改名">`
+      : `<span class="history-repo-name">${escapeHtml(group.name)}</span>`;
+    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">集</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="在此组翻页">＋</button><button type="button" class="history-tool repo-new" data-group-menu="${escapeHtml(group.id)}" title="分组" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
+  };
   renderingHistory = true;
   try {
     $("#history").innerHTML =
@@ -197,7 +226,7 @@ function renderHistory() {
         .filter(([, items]) => items.length)
         .map(
           ([label, items]) =>
-            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : item(node.c))).join("")}</div>`
+            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : node.kind === "set" ? setHtml(node) : item(node.c))).join("")}</div>`
         )
         .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
     const input = $("#history .history-rename");

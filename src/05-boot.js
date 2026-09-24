@@ -131,7 +131,11 @@ async function boot() {
 function bindEvents() {
   $("#collapseSidebar").onclick = () => toggleSidebar();
   $("#mobileMenu").onclick = () => toggleSidebar(false);
-  $("#newChat").onclick = newChat;
+  // 侧栏的翻页是散列的一段；要归进某组从组首「＋」起
+  $("#newChat").onclick = () => {
+    delete store.settings.pendingGroupId;
+    newChat();
+  };
   $("#openLibrary").onclick = () => (view === "library" ? closeLibrary() : openLibrary());
   $("#openSettings").onclick = () => openSettings("general");
   $("#closeSettings").onclick = closeSettings;

@@ -190,9 +190,9 @@ check(
 await evalJs(`document.querySelector('#history [data-conversation="w2"] .history-more').click(); true`);
 await sleep(150);
 check(
-  "⋯ opens a floating menu with the five actions",
+  "⋯ opens a floating menu with the six actions",
   (await evalJs(`[...document.querySelectorAll(".chip-pop[data-kind=history] [data-menu]")].map(b => b.textContent).join()`)) ===
-    "置顶,改名,更换目录,导出存入卷宗,删除"
+    "置顶,改名,更换目录,移入分组,导出存入卷宗,删除"
 );
 await evalJs(`document.querySelector('.chip-pop[data-kind=history] [data-menu="pin"]').click(); true`);
 await sleep(200);

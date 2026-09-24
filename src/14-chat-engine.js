@@ -156,10 +156,12 @@ async function sendOrStop() {
       messages: [],
       workdir: pending,
       presetId: presetOf(null)?.id || "",
+      groupId: pendingGroup()?.id || "",
       commandPolicy: normalizeCommandPolicy(presetOf(null)?.policy || store.settings.commandPolicyDefault),
       reasoning: normalizeReasoning(profile.reasoning)
     };
     if (!(await ensureWorkReady(c))) return;
+    delete store.settings.pendingGroupId;
     closeChipPop();
     store.conversations.unshift(c);
     currentId = c.id;
