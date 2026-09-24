@@ -50,11 +50,11 @@ function securityHeaders(req, res) {
       : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
   );
 }
-// 能调桥接的页面：本机的（file:// 预览的来源是 "null"）与 VS Code Webview。别的网站连模型转发、列模型也不许借道——
-// 那等于让任意网页经桥接往局域网里发请求
+// 能调桥接的页面：本机的与 VS Code Webview。别的网站连模型转发、列模型也不许借道——那等于让任意网页经桥接往局域网里发请求。
+// 来源为 "null" 的一概不认：file:// 打开的页面是它，可任何网站嵌一个开了沙箱的 iframe 也是它，分不出来；
+// file:// 打开的页面因此接不上桥接，只能直连，要用桥接就从 http://127.0.0.1:端口 打开
 function allowedOrigin(origin) {
   return (
-    origin === "null" ||
     /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin || "") ||
     /^vscode-webview:\/\//i.test(origin || "") ||
     /^https:\/\/[a-z0-9-]+\.(vscode-cdn|vscode-webview)\.net$/i.test(origin || "")
@@ -76,7 +76,7 @@ function corsHeaders(req, res) {
   if (req.headers["access-control-request-private-network"] === "true") res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
 // 执事接口能执行本机指令，不能只依赖 CORS：不可信页面即使读不到响应，也可能用简单请求触发副作用。
-// 无 Origin 的本机脚本仍可调用；浏览器只接受本站页面与 VS Code Webview。file:// 预览可对谈，但不开放执事。
+// 无 Origin 的本机脚本仍可调用；浏览器只接受本站页面与 VS Code Webview（别的本机端口可对谈，但不开放执事）。
 function trustedWorkRequest(req) {
   const origin = req.headers.origin;
   if (!origin) return true;

@@ -2268,7 +2268,9 @@ async function boot() {
   if (apiBase === null) {
     bootstrap.notice = servedByBridge()
       ? "正在连接本机桥接…若始终连不上，请重新运行 start.cmd。"
-      : "未检测到本机桥接，当前为浏览器直连。若接口未开放 CORS，请运行 start.cmd 或 VS Code 任务「言：启动模型桥接」。";
+      : location.protocol === "file:"
+        ? `从文件直接打开的页面接不上本机桥接（分不清它与别处网页嵌进来的沙箱页），当前为浏览器直连。要用联网、执事与存储目录，请运行 start.cmd 后打开 ${LOCAL_BRIDGE}。`
+        : "未检测到本机桥接，当前为浏览器直连。若接口未开放 CORS，请运行 start.cmd 或 VS Code 任务「言：启动模型桥接」。";
     if (servedByBridge()) retryBridgeLater();
   }
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";

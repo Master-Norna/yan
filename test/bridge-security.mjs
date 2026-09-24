@@ -73,6 +73,15 @@ r = await post("/api/work/run", { workdir, command: "echo hi" }, { Origin: "http
 check("foreign origin is rejected", r.status === 403, String(r.status));
 r = await fetch(BASE + "/api/work/run", { method: "OPTIONS", headers: { Origin: "null", "Access-Control-Request-Method": "POST" } });
 check("preflight from null origin is refused too", r.status === 403, String(r.status));
+// 来源 null 也可能是别处网页嵌进来的沙箱 iframe：连模型转发与检索也不给它
+r = await post(
+  "/api/chat",
+  { profile: { baseUrl: "http://192.168.1.1/v1", model: "x" }, messages: [{ role: "user", content: "x" }] },
+  { Origin: "null" }
+);
+check("Origin: null cannot relay through the model endpoint either", r.status === 403, String(r.status));
+r = await post("/api/search", { query: "x" }, { Origin: "null" });
+check("Origin: null cannot use search either", r.status === 403, String(r.status));
 r = await post("/api/work/prepare", { workdir }, { Origin: `http://127.0.0.1:${PORT}` });
 check(
   "own origin passes",
