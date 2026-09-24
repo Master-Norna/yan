@@ -40,6 +40,7 @@ function envStatusHtml() {
       : "";
   return `<div class="card"><div class="card-head"><span class="card-name">${running ? "准备中" : state ? "已备好" : "尚未准备"}</span><span class="card-state${state ? " ok" : ""}" title="${escapeHtml(summary)}">${escapeHtml(summary)}</span><span class="card-actions"><button id="envPrepare" type="button" class="outline-btn"${running ? " disabled" : ""}>${running ? "准备中…" : state ? "更新环境" : "准备环境"}</button>${state && !running ? `<button id="envClear" type="button" class="danger-btn">清空</button>` : ""}</span></div><div class="card-sub" title="${escapeHtml(home)}">${escapeHtml(home)}</div>${log}</div>`;
 }
+// 一组一张卡：名称与说明在左，状态在右——没选是空框，选了待装是朱色实心，装好了是一笔勾；装了又取消的标「待卸」，下回准备时卸掉
 function envPacksHtml() {
   const packs = envStatus?.packs || [],
     chosen = new Set(envSettings().packs),
@@ -48,8 +49,10 @@ function envPacksHtml() {
   return packs
     .map(pack => {
       const on = pack.base || chosen.has(pack.id),
-        contents = [...pack.pip, ...pack.npm].join(" · ");
-      return `<button type="button" class="card pickable" role="checkbox" aria-checked="${on}"${pack.base ? ' aria-disabled="true"' : ""} data-env-pack="${escapeHtml(pack.id)}"><span class="card-tick" aria-hidden="true"></span><span class="card-body"><span class="card-head"><span class="card-name">${escapeHtml(pack.name)}</span><span class="card-tag">${pack.npm.length ? "Node" : "Python"}</span><span class="card-state${installed.has(pack.id) ? " ok" : ""}">${installed.has(pack.id) ? "已装" : on ? "待装" : ""}</span></span><span class="card-note">${escapeHtml(pack.note)}</span>${contents ? `<span class="card-sub" title="${escapeHtml(contents)}">${escapeHtml(contents)}</span>` : ""}</span></button>`;
+        state = installed.has(pack.id) ? (on ? "done" : "drop") : on ? "pick" : "",
+        word = { done: "已装", pick: "待装", drop: "待卸" }[state] || "",
+        contents = [...pack.pip, ...pack.npm].join(" · ") || pack.hint;
+      return `<button type="button" class="card pickable env-pack" role="checkbox" aria-checked="${on}"${pack.base ? ' aria-disabled="true"' : ""} data-env-pack="${escapeHtml(pack.id)}" data-state="${state}"><span class="card-body"><span class="card-head"><span class="card-name">${escapeHtml(pack.name)}</span><span class="card-tag">${escapeHtml(pack.tag)}</span></span><span class="card-note">${escapeHtml(pack.note)}</span>${contents ? `<span class="card-sub" title="${escapeHtml(contents)}">${escapeHtml(contents)}</span>` : ""}</span><span class="env-pack-word">${word}</span><span class="card-tick" aria-hidden="true">${state === "done" ? `<svg viewBox="0 0 22 22"><path d="M4.5 11.8c1.6 1.2 3 2.6 4.3 4.3C11 11.4 14 7.6 18 4.8"/></svg>` : ""}</span></button>`;
     })
     .join("");
 }
@@ -121,7 +124,7 @@ function envHint() {
   if (!state) return "";
   const kits = (envStatus.packs || [])
     .filter(pack => !pack.base && state.packs.includes(pack.id))
-    .map(pack => `${pack.name}（${[...pack.pip, ...pack.npm].slice(0, 6).join("、")}）`);
+    .map(pack => `${pack.name}（${pack.hint || [...pack.pip, ...pack.npm].slice(0, 6).join("、")}）`);
   const extra = [...state.pip, ...state.npm];
   return prompt("work.env", { kits: [state.python, ...kits, ...(extra.length ? [`另装 ${extra.join("、")}`] : [])].join("；") });
 }

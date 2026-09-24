@@ -29,5 +29,20 @@ test("环境备好了：接在原来的 Path 前面，不另起 PATH；pip、uv�
   assert.equal(out.npm_config_prefix, path.join(home, "node"));
   assert.equal(out.UV_PYTHON_INSTALL_DIR, path.join(home, "python"));
   assert.equal(out.HOME, "x");
+  assert.equal(out.UV_PYTHON_BIN_DIR, path.join(home, "bin"));
+  assert.equal(out.UV_PYTHON_INSTALL_REGISTRY, "0");
+});
+test("装了的工具链：PATH 接上它的几处，另设它的环境变量；没装的不接", () => {
+  writeFileSync(
+    path.join(home, "已备.json"),
+    JSON.stringify({ python: "Python 3.12", packs: ["python", "go"], pip: [], npm: [], mirror: "china" })
+  );
+  const out = env.apply({ Path: "C:\\Windows" });
+  const parts = out.Path.split(path.delimiter);
+  assert.ok(parts.includes(path.join(home, "go", "bin")));
+  assert.ok(!parts.includes(path.join(home, "java", "bin")));
+  assert.equal(out.GOROOT, path.join(home, "go"));
+  assert.match(out.GOPROXY, /goproxy\.cn/);
+  assert.equal(out.JAVA_HOME, undefined);
   rmSync(home, { recursive: true, force: true });
 });
