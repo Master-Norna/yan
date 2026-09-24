@@ -1776,6 +1776,13 @@ function detailsInView(details) {
     frame = host.getBoundingClientRect();
   return rect.bottom > frame.top && rect.top < frame.bottom;
 }
+// 滚轮落在里层自己能滚的框里（思绪、代码、指令输出）且那框还能往上滚：滚的是它，对话没动，不算离开底部。
+// 不然边看边往上翻思绪，页面就当读者停下来读了：不再跟着底部，思绪也不收
+function wheelScrollsInner(event) {
+  for (let el = event.target; el && el !== event.currentTarget; el = el.parentElement)
+    if (el.scrollTop > 0 && el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY)) return true;
+  return false;
+}
 // force：做完就收，不看读者是否正停在这块、用户是否亲手开过——运行中摊开、运行完收起，是行迹与帮手时间线的定例
 function settleDetails(details, open, onClose = null, force = false) {
   if (!details) return;
@@ -3219,7 +3226,7 @@ function bindEvents() {
   $("#chatScroll").addEventListener(
     "wheel",
     e => {
-      if (e.deltaY < 0) followBottom = false;
+      if (e.deltaY < 0 && !wheelScrollsInner(e)) followBottom = false;
     },
     { passive: true }
   );
@@ -4406,6 +4413,8 @@ function finalizeAssistant(conversation, assistant, leadTrim = 0) {
   if (reasoning && thought.trim()) {
     reasoning.querySelector(".reasoning-body").textContent = thought;
     reasoning.dataset.state = "done";
+    // 做完就收，与行迹同一个定例：流式期间读者往上翻着看时没收成的，这里补上；用户亲手开合过的不动
+    if (!assistant.reasoningTouched) settleDetails(reasoning, false, null, true);
   } else if (reasoning) reasoning.remove();
   else if (thought.trim()) {
     const stack = block.querySelector(":scope > .tool-stack");

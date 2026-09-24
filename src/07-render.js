@@ -515,6 +515,8 @@ function finalizeAssistant(conversation, assistant, leadTrim = 0) {
   if (reasoning && thought.trim()) {
     reasoning.querySelector(".reasoning-body").textContent = thought;
     reasoning.dataset.state = "done";
+    // 做完就收，与行迹同一个定例：流式期间读者往上翻着看时没收成的，这里补上；用户亲手开合过的不动
+    if (!assistant.reasoningTouched) settleDetails(reasoning, false, null, true);
   } else if (reasoning) reasoning.remove();
   else if (thought.trim()) {
     const stack = block.querySelector(":scope > .tool-stack");

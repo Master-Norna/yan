@@ -898,7 +898,7 @@ function bindEvents() {
   $("#chatScroll").addEventListener(
     "wheel",
     e => {
-      if (e.deltaY < 0) followBottom = false;
+      if (e.deltaY < 0 && !wheelScrollsInner(e)) followBottom = false;
     },
     { passive: true }
   );

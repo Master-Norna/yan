@@ -573,6 +573,17 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      // LONGTHINK：一长串思绪慢慢写（思绪框装不下、自己会滚），随后一句很短的正文就收尾
+      if (typeof lastUser === "string" && lastUser.includes("LONGTHINK"))
+        return sse(
+          res,
+          [
+            ...Array.from({ length: 40 }, (_, i) => delta({ reasoning_content: `第 ${i + 1} 行思绪，慢慢想。\n` })),
+            delta({ content: "LONGTHINK done" }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ],
+          60
+        );
       if (typeof lastUser === "string" && lastUser.includes("EDIT")) {
         const n = toolResults.length,
           call = (name, args) => [

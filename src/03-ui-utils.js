@@ -172,6 +172,13 @@ function detailsInView(details) {
     frame = host.getBoundingClientRect();
   return rect.bottom > frame.top && rect.top < frame.bottom;
 }
+// 滚轮落在里层自己能滚的框里（思绪、代码、指令输出）且那框还能往上滚：滚的是它，对话没动，不算离开底部。
+// 不然边看边往上翻思绪，页面就当读者停下来读了：不再跟着底部，思绪也不收
+function wheelScrollsInner(event) {
+  for (let el = event.target; el && el !== event.currentTarget; el = el.parentElement)
+    if (el.scrollTop > 0 && el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY)) return true;
+  return false;
+}
 // force：做完就收，不看读者是否正停在这块、用户是否亲手开过——运行中摊开、运行完收起，是行迹与帮手时间线的定例
 function settleDetails(details, open, onClose = null, force = false) {
   if (!details) return;
