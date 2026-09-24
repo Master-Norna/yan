@@ -23,6 +23,47 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
+/* 原生控件的明暗跟言的主题走，不跟系统：页头的 color-scheme 写的是 light dark，系统暗色时勾选框、下拉、滚动条会变成黑块 */
+:root {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+/* 勾选框与环境卡、MCP 卡上的勾同一个样子：空框，勾上是一枚朱色实心 */
+input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid var(--ink-3);
+  border-radius: 3px;
+  background: transparent;
+  vertical-align: -2px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+input[type="checkbox"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2.5px var(--paper);
+}
+input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+/* 数字框不要上下箭头：值都是手填的，箭头在暗色里是两块黑 */
+input[type="number"] {
+  appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
 :root {
   --paper: #fbfaf6;
   --paper-2: #f3f0e8;
@@ -2247,7 +2288,6 @@ sup.note-ref.active {
 }
 .markdown input[type="checkbox"] {
   margin: 0 0.5em 0 0;
-  accent-color: var(--accent);
   vertical-align: -1px;
 }
 .markdown blockquote {
@@ -4295,7 +4335,6 @@ textarea::placeholder,
 }
 .check input {
   margin: 0;
-  accent-color: var(--accent);
 }
 .field {
   width: 250px;
@@ -4316,9 +4355,14 @@ textarea::placeholder,
   min-height: 86px;
   resize: vertical;
 }
+/* 下拉框：去掉原生的箭头，右侧一道淡墨的折线；展开的列表仍是系统的，随 color-scheme 换明暗 */
 .select {
-  appearance: auto;
-  padding-right: 6px;
+  appearance: none;
+  padding-right: 26px;
+  background: var(--paper-2)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a847a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 10px center / 9px 6px;
+  cursor: pointer;
 }
 .profile-advanced {
   margin-top: 12px;
@@ -4692,12 +4736,13 @@ textarea::placeholder,
   gap: 8px;
   margin-bottom: 14px;
 }
-/* 可勾选的卡：整张可点，左边一枚勾 */
+/* 可勾选的卡：整张可点；名称与说明在左，状态在右——空框、朱色实心（待装）、一笔勾（已装） */
 .card.pickable {
   display: flex;
-  gap: 11px;
-  align-items: flex-start;
+  gap: 12px;
+  align-items: center;
   width: 100%;
+  padding-left: 16px;
   text-align: left;
   cursor: pointer;
 }
@@ -4709,16 +4754,47 @@ textarea::placeholder,
 }
 .card-tick {
   flex: none;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
   border: 1px solid var(--ink-3);
   border-radius: 4px;
+  transition:
+    border-color 0.18s,
+    background-color 0.18s;
 }
 .card.pickable[aria-checked="true"] .card-tick {
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: inset 0 0 0 3px var(--paper);
+}
+.card.pickable[data-state="done"] {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+.card.pickable[data-state="done"] .card-tick {
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.card-tick svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.env-pack-word {
+  flex: none;
+  min-width: 2.4em;
+  color: var(--accent);
+  font-size: 11px;
+  text-align: right;
+}
+.card.pickable[data-state="drop"] .env-pack-word {
+  color: var(--ink-3);
 }
 .card-body {
   flex: 1;
