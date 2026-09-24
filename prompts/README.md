@@ -9,6 +9,7 @@
 | `side.js` | 旁注追问的聚焦句 | 仅旁注面板里的请求 |
 | `memory.js` | 录（记忆）：有多少条、两条分寸 | 记忆启用时；条目内容本身不进提示 |
 | `delegate.js` | 差遣（子 Agent）：帮手自己的系统提示；回报的格式 | 帮手的请求另拼一段 |
+| `mcp.js` | 接入的 MCP 服务自带的用法（接在系统提示末尾）；请示被拒、工具不存在、参数不合时回给模型的话 | 有 MCP 工具交给模型时 |
 | `tools.js` | 各工具的 description 与参数说明；带 `brief` 的在言里用 brief（短说明） | 随工具一并交给模型；言不带 edit_file / search_files / update_plan；旁注不带 http_request；run_js 谁都有 |
 
 拼接顺序（系统提示）：用户在模型设置里填的 system prompt → `assistant.today` → `assistant.judgement` → `work.hint`（行）/ `work.archive`（言，桥接在线）→ `assistant.search`（桥接在线）→ `assistant.asking`（ask_user 可用）→ `assistant.delegating`（行且 delegate 可用；只是一句提醒，何时差遣写在工具说明里）→ `memory.hint`（记忆启用）→ `assistant.drawing` → `assistant.manner`（言）→ `side.*`（旁注）/ `delegate.system`（帮手）。

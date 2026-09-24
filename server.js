@@ -597,8 +597,11 @@ try {
 // 否则新页面对着旧桥接，接口对不上时的毛病无从查起
 const STARTED_AT = Date.now();
 function bridgeStale() {
-  const server = path.join(ROOT, "server");
-  return [__filename, path.join(ROOT, "src", "19-anthropic.js"), ...fs.readdirSync(server).map(name => path.join(server, name))].some(
+  const under = dir =>
+    fs
+      .readdirSync(dir, { withFileTypes: true })
+      .flatMap(entry => (entry.isDirectory() ? under(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
+  return [__filename, path.join(ROOT, "src", "19-anthropic.js"), ...under(path.join(ROOT, "server"))].some(
     file => fs.statSync(file).mtimeMs > STARTED_AT
   );
 }
@@ -736,6 +739,8 @@ const WORK = require("./server/work.js")({
 });
 const CHATS = require("./server/chats.js")({ sendJson, readJson, chatsHome: () => STORE.paths().chats });
 const FILES = require("./server/files.js")({ sendJson, readJson, filesHome: () => STORE.paths().files });
+// MCP：按设置里的配置起、连外部的 MCP 服务，把它们的工具交给页面
+const MCP = require("./server/mcp/index.js")({ sendJson, readJson, version: APP_VERSION });
 
 // 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件，以及能打本机的 http_request），
 // 只受理本站页面与 VS Code Webview；另一半（引导、转发、检索、翻网页）凡是本机桥接认得的来源都可调
@@ -747,7 +752,7 @@ const OPEN_ROUTES = {
     "POST /api/fetch": handleFetch,
     "POST /api/chat": handleChat
   },
-  TRUSTED_ROUTES = { "POST /api/http": handleHttp, ...WORK.routes, ...CHATS.routes, ...STORE.routes, ...FILES.routes };
+  TRUSTED_ROUTES = { "POST /api/http": handleHttp, ...WORK.routes, ...CHATS.routes, ...STORE.routes, ...FILES.routes, ...MCP.routes };
 const ROUTES = new Map(Object.entries({ ...OPEN_ROUTES, ...TRUSTED_ROUTES }));
 const TRUSTED_PATHS = new Set(Object.keys(TRUSTED_ROUTES).map(key => key.split(" ")[1]));
 
@@ -770,6 +775,7 @@ const PUBLIC_STATIC_FILES = new Set([
   "prompts/side.js",
   "prompts/memory.js",
   "prompts/delegate.js",
+  "prompts/mcp.js",
   "prompts/tools.js"
 ]);
 const REAL_ROOT = fs.realpathSync(ROOT);

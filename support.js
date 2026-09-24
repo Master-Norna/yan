@@ -176,6 +176,7 @@
  * @property {string} [chatsDir] 旧版的对话目录；同上
  * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
  * @property {string} [lastConversationId]
+ * @property {Record<string, Record<string, any>>} mcpServers 接入的 MCP 服务，照通行的 mcpServers 写法：{ 名字: { command, args, cwd, env } 或 { url, headers, type } }
  */
 /**
  * @typedef {Object} Store 整个本地存储（主体在 IndexedDB；localStorage 只留启动镜像）
@@ -266,7 +267,8 @@ const defaultStore = {
     toolReach: "anywhere",
     archiveRead: true,
     toolRounds: DEFAULT_TOOL_ROUNDS,
-    subRounds: DEFAULT_SUB_ROUNDS
+    subRounds: DEFAULT_SUB_ROUNDS,
+    mcpServers: {}
   },
   profiles: [],
   conversations: [],
@@ -2363,6 +2365,7 @@ async function ensureLocalBridge() {
     void syncConfigWithDisk().then(() => {
       void refreshArchive();
       void syncChatsWithDisk();
+      void mcpReady();
     });
     if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
     toast("本机桥接已接通，联网可用");
@@ -2410,6 +2413,8 @@ async function boot() {
   if (apiBase !== null) {
     await syncConfigWithDisk();
     await syncChatsWithDisk();
+    // MCP 服务起得慢（起进程、握手）：先起着，头一问发出前会等它
+    void mcpReady();
   }
   if (apiBase === null) {
     bootstrap.notice = servedByBridge()
@@ -6014,6 +6019,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     );
     // 旁注带只查不改的工具（检索、翻网页、翻文档、翻记忆）：模型说「我去查一下」就真能查，不会说完就断在那里；
     // 没有工具可用时（模型关了本机工具、没桥接）在提示里说明，免得它许诺去查
+    if (profile.tools !== false) await mcpReady();
     const tools = profile.tools !== false ? toolDefinitions(conversation, { lookup: true }) : null;
     const systemPrompt = `${assistantHint(profile, tools, conversation)}\n\n${prompt(thread.anchor.text ? "side.passage" : "side.whole")}${tools ? "" : `\n${prompt("side.noTools")}`}`;
     const overrides = { systemPrompt, tools, reasoning: conversation.reasoning || "" };
@@ -7889,6 +7895,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       history.push({ role: "assistant", content: assistant.content });
       history.push({ role: "user", content: prompt("assistant.resume") });
     }
+    if (profile.tools !== false) await mcpReady();
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
     const overrides = {
@@ -8293,6 +8300,8 @@ function assistantHint(profile, tools, conversation = null) {
   // 何时差遣写在工具说明里；这一句只给行——对谈里差遣是少数，不必每问都背着
   if (names.has("delegate") && conversation && isWork(conversation)) lines.push(prompt("assistant.delegating"));
   if (names.has("remember")) lines.push(prompt("memory.hint", { count: store.memory.items.length }));
+  const mcpServers = mcpHint(names);
+  if (mcpServers) lines.push(mcpServers);
   lines.push(prompt("assistant.drawing"));
   if (!conversation || !isWork(conversation)) lines.push(prompt("assistant.manner"));
   const base = String(profile.systemPrompt || "").trim();
@@ -8339,6 +8348,7 @@ function assistantHint(profile, tools, conversation = null) {
  * @property {(step: Step) => string} [approval] 请示条的内容
  * @property {true | ((step: Step) => string)} [digest] 带给下一问的一行；true 用通用写法，不写即不带
  * @property {(step: Step) => Source[]} [sources] 答末「出处」里列的条目
+ * @property {boolean} [mcp] 由 MCP 服务登记的（配置一变就整批换掉）
  */
 /** @type {Map<string, Tool>} 按登记先后排，交给模型时也是这个次序 */
 const TOOLS = new Map();
@@ -8369,11 +8379,10 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   for (const tool of TOOLS.values()) {
     if (!tool.run || (sub && tool.mainOnly) || (lookup && !tool.lookup) || (tool.offer && !tool.offer(ctx))) continue;
     const spec = toolSpec(tool.name),
-      text = !ctx.work && spec.brief ? spec.brief : spec.description;
-    tools.push({
-      type: "function",
-      function: { name: tool.name, description: fillTemplate(text, tool.vars?.(ctx)), parameters: spec.parameters }
-    });
+      text = !ctx.work && spec.brief ? spec.brief : spec.description,
+      // 外来工具自带的说明原样给，不当模板填（里头的 {{…}} 是人家的字）
+      description = tool.schema ? text : fillTemplate(text, tool.vars?.(ctx));
+    tools.push({ type: "function", function: { name: tool.name, description, parameters: spec.parameters } });
     ctx.offered.push(tool.name);
   }
   return tools.length ? tools : null;
@@ -8629,8 +8638,11 @@ function coerceToolValue(value, rule) {
   return value;
 }
 function normalizeToolArguments(name, raw) {
-  const spec = toolSpec(name)?.parameters,
-    args = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
+  return normalizeArguments(toolSpec(name)?.parameters, raw);
+}
+// 对着一份 JSON Schema 理顺：内置工具用自己的 parameters，mcp_call 用目标工具的 inputSchema
+function normalizeArguments(spec, raw) {
+  const args = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
   if (!spec?.properties) return { args, problems: [] };
   const known = new Set(Object.keys(spec.properties));
   // 别名归位：schema 里没有这个键、参数里也没给正名时，把别名的值挪过来
@@ -8657,7 +8669,9 @@ function normalizeToolArguments(name, raw) {
 }
 // 参数出错时回给模型的一行 schema 摘要
 function toolSchemaHint(name) {
-  const spec = toolSpec(name)?.parameters;
+  return schemaHint(toolSpec(name)?.parameters);
+}
+function schemaHint(spec) {
   if (!spec?.properties) return "见工具定义";
   const required = new Set(spec.required || []);
   return Object.entries(spec.properties)
@@ -9801,6 +9815,236 @@ function noteStepHtml(step) {
   return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
 
+  // ---- 15-tools/60-mcp.js ----
+// 言 · MCP：把设置里接入的 MCP 服务的工具登记进注册表。连接、握手与协议细节都在桥接那头（server/mcp/），这里只管三件事：
+// 拉来各服务的工具、按体量决定怎么交给模型、调用时照三档权限请示。
+// 小服务逐件摊开，与内置工具无异；工具多、定义重的按需给——模型只见一张目录，外加 mcp_describe（查参数）与 mcp_call（调用）两件，
+// 每一问只多背一张目录。接一个没见过的服务只需在设置里添一条配置，这里不用改
+/**
+ * @typedef {{ name: string, title?: string, description?: string, inputSchema: Record<string, any>, annotations?: Record<string, any> }} McpToolSpec
+ * @typedef {{ ok: boolean, error?: string, tools?: McpToolSpec[], instructions?: string, server?: Record<string, any> }} McpServerState
+ */
+// 一个服务的工具定义超过这么多字就按需给（配置里写 load: "inline" 或 "lazy" 可以指定）
+const MCP_INLINE_LIMIT = 12000;
+/** @type {{ key: string, loading: Promise<void>|null, servers: Record<string, McpServerState>, lazy: string[] }} */
+const mcp = { key: "", loading: null, servers: {}, lazy: [] };
+
+/** 设置里的全部配置：{ 名字: { command, args, cwd, env } 或 { url, headers, type }，另可带 disabled / autoApprove / timeout / load } */
+function mcpConfigs() {
+  return store.settings.mcpServers;
+}
+function mcpActiveConfigs() {
+  return Object.fromEntries(Object.entries(mcpConfigs()).filter(([, config]) => !config.disabled));
+}
+// 配置变了（或还没拉过）就去桥接那头拉一遍；发请求前先等它，头一问就带得上。restart 里的服务断开重连
+function mcpReady(restart = []) {
+  if (apiBase === null) return Promise.resolve();
+  const servers = mcpActiveConfigs(),
+    key = JSON.stringify(servers);
+  if (key === mcp.key && !restart.length) return mcp.loading || Promise.resolve();
+  mcp.key = key;
+  const loading = bridge("/api/mcp/list", { servers, restart }, AbortSignal.timeout(90000))
+    .then(
+      data => (mcp.servers = data.servers),
+      error => {
+        // 桥接本身不认（旧桥接没有这个接口）或没回话：记下原因，下次再试
+        mcp.key = "";
+        mcp.servers = Object.fromEntries(Object.keys(servers).map(name => [name, { ok: false, error: String(error.message || error) }]));
+      }
+    )
+    .then(() => {
+      if (mcp.loading !== loading) return;
+      registerMcpTools();
+      renderMcpStatus();
+    });
+  mcp.loading = loading;
+  return loading;
+}
+function registerMcpTools() {
+  for (const [name, tool] of TOOLS) if (tool.mcp) TOOLS.delete(name);
+  mcp.lazy = [];
+  for (const [server, state] of Object.entries(mcp.servers)) {
+    if (!state.ok) continue;
+    const load = mcpConfigs()[server]?.load;
+    if (load === "lazy" || (load !== "inline" && JSON.stringify(state.tools).length > MCP_INLINE_LIMIT)) mcp.lazy.push(server);
+    else for (const spec of state.tools) defineTool(mcpInlineTool(server, spec));
+  }
+  if (mcp.lazy.length) MCP_LAZY_TOOLS.forEach(defineTool);
+}
+/** @param {McpToolSpec} spec */
+function mcpReadOnly(spec) {
+  return spec.annotations?.readOnlyHint === true;
+}
+// 逐件摊开的：名字写成 mcp__服务__工具（接口只认字母数字与 _-，最长 64），说明与参数用服务端自带的
+/**
+ * @param {McpToolSpec} spec
+ * @returns {Tool}
+ */
+function mcpInlineTool(server, spec) {
+  const readOnly = mcpReadOnly(spec);
+  return {
+    name: mcpFunctionName(server, spec.name),
+    label: server,
+    mcp: true,
+    schema: { description: spec.description || spec.title || spec.name, parameters: spec.inputSchema },
+    offer: ctx => ctx.bridge,
+    lookup: readOnly,
+    parallel: readOnly,
+    sideEffect: !readOnly,
+    approval: mcpApprovalHtml,
+    digest: /** @type {true} */ (true),
+    run: (step, args, ctx) => runMcpTool(step, server, spec.name, args, ctx)
+  };
+}
+function mcpFunctionName(server, tool) {
+  const clean = text => text.replace(/[^A-Za-z0-9_-]/g, "");
+  const name = `mcp__${clean(server) || `s${hashText(server).slice(0, 6)}`}__${clean(tool) || hashText(tool).slice(0, 6)}`;
+  return name.length <= 64 ? name : `${name.slice(0, 57)}_${hashText(name).slice(0, 6)}`;
+}
+
+/** @type {Tool[]} 按需给的两件：目录写在 mcp_describe 的说明里 */
+const MCP_LAZY_TOOLS = [
+  {
+    name: "mcp_describe",
+    label: "MCP",
+    mcp: true,
+    offer: ctx => ctx.bridge,
+    vars: () => ({ directory: mcpDirectory() }),
+    parallel: true,
+    cache: true,
+    run(step, args) {
+      const state = mcp.servers[args.server];
+      step.title = `${args.server} · ${args.tools.join("、")}`;
+      if (!state?.ok) return mcpUnknown(args.server, "");
+      const found = args.tools.map(name => state.tools.find(tool => tool.name === name)).filter(Boolean);
+      if (!found.length) return mcpUnknown(args.server, args.tools.join("、"));
+      const text = found
+        .map(
+          tool =>
+            `## ${tool.name}${mcpReadOnly(tool) ? "（只读）" : ""}\n${tool.description || tool.title || ""}\n参数：${JSON.stringify(tool.inputSchema)}`
+        )
+        .join("\n\n");
+      step.output = trimOutput(text);
+      return { ok: true, content: text, display: `${found.length} 件` };
+    }
+  },
+  {
+    name: "mcp_call",
+    label: "MCP",
+    mcp: true,
+    offer: ctx => ctx.bridge,
+    sideEffect: true,
+    approval: mcpApprovalHtml,
+    digest: true,
+    run(step, args, ctx) {
+      const spec = mcp.servers[args.server]?.tools?.find(tool => tool.name === args.tool);
+      step.title = `${args.server} · ${args.tool}`;
+      if (!spec) return mcpUnknown(args.server, args.tool);
+      // 外层只核了 server / tool；arguments 对着目标工具自己的参数表再理一遍
+      const { args: inner, problems } = normalizeArguments(spec.inputSchema, args.arguments);
+      if (problems.length)
+        return {
+          ok: false,
+          content: prompt("mcp.badArgs", {
+            server: args.server,
+            tool: args.tool,
+            problems: problems.join("；"),
+            hint: schemaHint(spec.inputSchema)
+          }),
+          display: "参数不合要求"
+        };
+      return runMcpTool(step, args.server, args.tool, inner, ctx);
+    }
+  }
+];
+// 目录：一服务一段，一件一行（名字与说明的头一句）；只读的标出来
+function mcpDirectory() {
+  return mcp.lazy
+    .map(server => {
+      const state = mcp.servers[server],
+        head = [state.server?.title || state.server?.name, state.server?.description].filter(Boolean).join("：");
+      const lines = state.tools.map(tool => {
+        const first = String(tool.description || tool.title || "")
+          .split("\n")[0]
+          .trim()
+          .slice(0, 60);
+        return `- ${tool.name}${mcpReadOnly(tool) ? "（只读）" : ""}${first ? `：${first}` : ""}`;
+      });
+      return `【${server}】${head}\n${lines.join("\n")}`;
+    })
+    .join("\n");
+}
+function mcpUnknown(server, tool) {
+  const state = mcp.servers[server];
+  const known = state?.ok
+    ? `${server} 有：${state.tools.map(t => t.name).join("、")}`
+    : `已接入的服务：${
+        Object.keys(mcp.servers)
+          .filter(name => mcp.servers[name].ok)
+          .join("、") || "无"
+      }`;
+  return { ok: false, content: prompt("mcp.unknown", { server, tool, known }), display: "未找到" };
+}
+// 调一件：服务标了只读的径直跑；其余在「问而后行」里请示一声（配置 autoApprove 里列了的免问），另两档照跑
+/**
+ * @param {Step} step
+ * @param {ToolContext} ctx
+ */
+async function runMcpTool(step, server, tool, args, ctx) {
+  const config = mcpConfigs()[server],
+    spec = mcp.servers[server]?.tools?.find(item => item.name === tool);
+  if (!config || !spec) return mcpUnknown(server, tool);
+  step.title ||= spec.title || tool;
+  step.code = JSON.stringify(args, null, 2);
+  const ask = !mcpReadOnly(spec) && commandPolicyOf(ctx.conversation) === "ask" && !(config.autoApprove || []).includes(tool);
+  if (ask && !(await askApproval(step, ctx, "执行中"))) {
+    step.skipped = true;
+    return { ok: false, content: prompt("mcp.skipped"), display: "已跳过" };
+  }
+  const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal);
+  // 服务说工具变了：下一问前重拉
+  if (data.toolsChanged) mcp.key = "";
+  const text = mcpResultText(data.result);
+  step.output = trimOutput(text);
+  return { ok: !data.result.isError, content: text, display: data.result.isError ? "出错" : `${text.length} 字` };
+}
+// 请示条：哪个服务的哪件工具、带什么参数；按钮与指令的请示同一套（径行即此对话此后不再问）
+/** @param {Step} step */
+function mcpApprovalHtml(step) {
+  const where = step.name === "mcp_call" ? step.title : `${toolLabel(step.name)} · ${step.title}`;
+  return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">MCP 请示 · ${escapeHtml(where)}</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.code || "{}")}</pre><div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续调用不再询问">径行</button></div>`;
+}
+// 结果的几种内容合成一段文字：文本照录；图片、音频、资源只写一行说明（不把 base64 塞给模型）；只有结构化结果的给 JSON
+function mcpResultText(result) {
+  const parts = (result.content || []).map(item =>
+    item.type === "text"
+      ? item.text
+      : item.type === "image" || item.type === "audio"
+        ? `[${item.type === "image" ? "图片" : "音频"} ${item.mimeType}，约 ${formatFileSize(Math.round(item.data.length * 0.75))}，未随结果转交]`
+        : item.type === "resource_link"
+          ? `[资源 ${item.name || ""} ${item.uri}]`
+          : item.type === "resource"
+            ? (item.resource.text ?? `[资源 ${item.resource.uri}（${item.resource.mimeType || "二进制"}）]`)
+            : JSON.stringify(item)
+  );
+  if (!parts.length && result.structuredContent) parts.push(JSON.stringify(result.structuredContent, null, 2));
+  return parts.join("\n\n") || "（无输出）";
+}
+// 系统提示里的一段：交给模型的工具里有哪几个服务的，就附上那几个服务自带的用法
+function mcpHint(names) {
+  const servers = Object.entries(mcp.servers).filter(
+    ([server, state]) =>
+      state.ok &&
+      state.instructions &&
+      (mcp.lazy.includes(server) ? names.has("mcp_call") : state.tools.some(tool => names.has(mcpFunctionName(server, tool.name))))
+  );
+  return servers.length
+    ? prompt("mcp.hint", {
+        servers: servers.map(([server, state]) => `【${server}】${state.instructions.trim().slice(0, 1500)}`).join("\n")
+      })
+    : "";
+}
+
   // ---- 15-tools/90-delegate.js ----
 // 言 · 差遣：主模型把一件自成一段的子任务交给帮手，帮手另起一段对话做完后回报。桥接在线、且有别的活能交出去时才给；帮手自己不再差遣。
 // 同一轮派出的几名帮手同时开工（parallel），活是主模型分的，不重叠靠它分派时留意（工具说明里有交代）。
@@ -10748,10 +10992,12 @@ function renderSettings() {
   if (settingsTab === "appearance") host.innerHTML = appearanceSettingsHtml();
   if (settingsTab === "models") host.innerHTML = modelsSettingsHtml();
   if (settingsTab === "tools") host.innerHTML = toolsSettingsHtml();
+  if (settingsTab === "mcp") host.innerHTML = mcpSettingsHtml();
   if (settingsTab === "memory") host.innerHTML = memorySettingsHtml();
   if (settingsTab === "about") host.innerHTML = aboutSettingsHtml();
   bindSettingsEvents();
   bindMemoryEvents();
+  bindMcpEvents();
   if (tabChanged) {
     host.classList.remove("tab-fade");
     void host.offsetWidth;
@@ -11292,8 +11538,15 @@ async function fetchModelList(profile) {
   ].sort();
 }
 async function exportData(includeFiles) {
-  /** @type {Store & { exportedAt: string, attachments?: Attachment[] }} 备份：去掉 API Key，可选带上附件原件 */
-  const safeStore = { ...store, profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })), exportedAt: now() };
+  // 备份不带密钥：模型的 API Key，MCP 配置里的环境变量与请求头（令牌多在这两处）；可选带上附件原件
+  const mcpServers = Object.fromEntries(Object.entries(store.settings.mcpServers).map(([name, { env, headers, ...rest }]) => [name, rest]));
+  /** @type {Store & { exportedAt: string, attachments?: Attachment[] }} */
+  const safeStore = {
+    ...store,
+    settings: { ...store.settings, mcpServers },
+    profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })),
+    exportedAt: now()
+  };
   let blob,
     files = 0;
   if (includeFiles) {
@@ -12005,6 +12258,84 @@ function anthropicToOpenAiStream(model = "") {
 }
 // 桥接 require 这一段后从 globalThis.YAN_ANTHROPIC 取；不写 module.exports——那会让类型检查把这一段当成独立模块，页面里就找不到这些名字
 globalThis.YAN_ANTHROPIC = { anthropicLike, anthropicEndpoint, anthropicHeaders, anthropicRequest, anthropicToOpenAiStream };
+
+  // ---- 20-mcp-settings.js ----
+// 言 · 设置 → MCP：接入外部 MCP 服务的配置与各服务的状态。配置照通用的 mcpServers 写法，服务说明里给的片段整段粘进来即可；
+// 怎么连、怎么交给模型在 15-tools/60-mcp.js 与 server/mcp/
+function mcpSettingsHtml() {
+  const bridged = apiBase !== null;
+  return `<h2>MCP</h2><p class="settings-lead">接入外部的 MCP 服务，它们的工具便归模型所用。配置照通用写法：本机程序填 command、args（可带 cwd、env），远端服务填 url、headers；服务说明里给的配置片段，整段粘进来即可。${bridged ? "" : "MCP 服务由本机桥接起、连，桥接接通后才可用。"}</p><div id="mcpStatus" class="mcp-list">${mcpStatusHtml()}</div><textarea id="mcpConfig" class="field field-area mcp-editor" spellcheck="false" autocomplete="off">${escapeHtml(JSON.stringify({ mcpServers: mcpConfigs() }, null, 2))}</textarea><div class="mcp-foot"><button id="mcpSave" class="outline-btn" type="button">保存并连接</button><span id="mcpError" class="mcp-error"></span></div><p class="mcp-note">可选字段：<code>disabled</code> 停用；<code>autoApprove</code> 列出免请示的工具名；<code>timeout</code> 单次调用最多等几秒（默认 600）；<code>load</code> 写 "inline" 逐件交给模型、"lazy" 只给目录按需取用，不写则按工具的多少自动定。服务标为只读的工具径直调用，其余在「问而后行」下逐次请示。MCP 服务以你的权限运行在本机，不受沙箱约束。</p>`;
+}
+function mcpStatusHtml() {
+  const names = Object.keys(mcpConfigs());
+  if (!names.length) return `<p class="mcp-empty">尚未接入任何服务。</p>`;
+  return names
+    .map(name => {
+      const config = mcpConfigs()[name],
+        state = mcp.servers[name];
+      const [kind, text] = config.disabled
+        ? ["off", "已停用"]
+        : !state
+          ? ["", apiBase === null ? "等桥接接通" : "连接中…"]
+          : state.ok
+            ? [
+                "ok",
+                `${state.tools.length} 件工具 · ${mcp.lazy.includes(name) ? "按需" : "逐件"}${state.server?.version ? ` · v${state.server.version}` : ""}`
+              ]
+            : ["err", `连不上：${state.error}`];
+      return `<div class="mcp-row" data-mcp="${escapeHtml(name)}"><span class="mcp-name">${escapeHtml(name)}</span><span class="mcp-state ${kind}" title="${escapeHtml(text)}">${escapeHtml(text)}</span><button type="button" class="outline-btn" data-mcp-action="toggle">${config.disabled ? "启用" : "停用"}</button>${config.disabled ? "" : `<button type="button" class="outline-btn" data-mcp-action="restart">重连</button>`}</div>`;
+    })
+    .join("");
+}
+// 连接状态变了：只换状态列表，正在改的配置不动
+function renderMcpStatus() {
+  if (settingsTab !== "mcp" || $("#settingsModal").classList.contains("hidden")) return;
+  $("#mcpStatus").innerHTML = mcpStatusHtml();
+}
+// 粘进来的可能是整份 { mcpServers: {…} }，也可能只是里面那一层
+function parseMcpConfig(text) {
+  const parsed = JSON.parse(text || "{}");
+  const servers = parsed.mcpServers ?? parsed;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw Error('应是 { "mcpServers": { 名字: 配置 } }');
+  for (const [name, config] of Object.entries(servers))
+    if (!config || typeof config !== "object" || !(typeof config.command === "string" || typeof config.url === "string"))
+      throw Error(`「${name}」要有 command（本机程序）或 url（远端服务）`);
+  return servers;
+}
+function bindMcpEvents() {
+  if (settingsTab !== "mcp") return;
+  const reconnect = (restart = []) => {
+    saveStore();
+    renderMcpStatus();
+    void mcpReady(restart);
+  };
+  $("#mcpSave").addEventListener("click", () => {
+    try {
+      store.settings.mcpServers = parseMcpConfig($("#mcpConfig").value);
+    } catch (error) {
+      $("#mcpError").textContent = String(error.message || error);
+      return;
+    }
+    $("#mcpError").textContent = "";
+    $("#mcpConfig").value = JSON.stringify({ mcpServers: mcpConfigs() }, null, 2);
+    // 改过的服务重连：状态先回到「连接中」
+    mcp.servers = {};
+    reconnect();
+  });
+  $("#mcpStatus").addEventListener("click", event => {
+    const button = event.target.closest("[data-mcp-action]");
+    if (!button) return;
+    const name = button.closest("[data-mcp]").dataset.mcp,
+      config = mcpConfigs()[name];
+    delete mcp.servers[name];
+    if (button.dataset.mcpAction === "toggle") {
+      if (config.disabled) delete config.disabled;
+      else config.disabled = true;
+      $("#mcpConfig").value = JSON.stringify({ mcpServers: mcpConfigs() }, null, 2);
+      reconnect();
+    } else reconnect([name]);
+  });
+}
 
   // ---- 99-start.js ----
 // 言 · 启动

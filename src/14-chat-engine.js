@@ -424,6 +424,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       history.push({ role: "assistant", content: assistant.content });
       history.push({ role: "user", content: prompt("assistant.resume") });
     }
+    if (profile.tools !== false) await mcpReady();
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
     const overrides = {
@@ -828,6 +829,8 @@ function assistantHint(profile, tools, conversation = null) {
   // 何时差遣写在工具说明里；这一句只给行——对谈里差遣是少数，不必每问都背着
   if (names.has("delegate") && conversation && isWork(conversation)) lines.push(prompt("assistant.delegating"));
   if (names.has("remember")) lines.push(prompt("memory.hint", { count: store.memory.items.length }));
+  const mcpServers = mcpHint(names);
+  if (mcpServers) lines.push(mcpServers);
   lines.push(prompt("assistant.drawing"));
   if (!conversation || !isWork(conversation)) lines.push(prompt("assistant.manner"));
   const base = String(profile.systemPrompt || "").trim();

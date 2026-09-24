@@ -283,5 +283,31 @@
       },
       required: ["name"]
     }
+  },
+
+  // MCP 里工具多、定义重的服务按需给：模型只见目录，用时先查参数、再调用。{{directory}} 是各服务的目录
+  mcp_describe: {
+    description: "查 MCP 工具的说明与参数，调用前先查；可一次查几件。已接入、按需取用的服务与工具：\n{{directory}}",
+    parameters: {
+      type: "object",
+      properties: {
+        server: { type: "string", description: "服务名，见目录" },
+        tools: { type: "array", items: { type: "string" }, description: "要查的工具名" }
+      },
+      required: ["server", "tools"]
+    }
+  },
+
+  mcp_call: {
+    description: "调用一件 MCP 工具（服务与工具见 mcp_describe 的目录），arguments 照查得的参数给。",
+    parameters: {
+      type: "object",
+      properties: {
+        server: { type: "string", description: "服务名" },
+        tool: { type: "string", description: "工具名" },
+        arguments: { type: "object", description: "那件工具的参数" }
+      },
+      required: ["server", "tool"]
+    }
   }
 };

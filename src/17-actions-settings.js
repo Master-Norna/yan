@@ -140,10 +140,12 @@ function renderSettings() {
   if (settingsTab === "appearance") host.innerHTML = appearanceSettingsHtml();
   if (settingsTab === "models") host.innerHTML = modelsSettingsHtml();
   if (settingsTab === "tools") host.innerHTML = toolsSettingsHtml();
+  if (settingsTab === "mcp") host.innerHTML = mcpSettingsHtml();
   if (settingsTab === "memory") host.innerHTML = memorySettingsHtml();
   if (settingsTab === "about") host.innerHTML = aboutSettingsHtml();
   bindSettingsEvents();
   bindMemoryEvents();
+  bindMcpEvents();
   if (tabChanged) {
     host.classList.remove("tab-fade");
     void host.offsetWidth;
@@ -684,8 +686,15 @@ async function fetchModelList(profile) {
   ].sort();
 }
 async function exportData(includeFiles) {
-  /** @type {Store & { exportedAt: string, attachments?: Attachment[] }} 备份：去掉 API Key，可选带上附件原件 */
-  const safeStore = { ...store, profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })), exportedAt: now() };
+  // 备份不带密钥：模型的 API Key，MCP 配置里的环境变量与请求头（令牌多在这两处）；可选带上附件原件
+  const mcpServers = Object.fromEntries(Object.entries(store.settings.mcpServers).map(([name, { env, headers, ...rest }]) => [name, rest]));
+  /** @type {Store & { exportedAt: string, attachments?: Attachment[] }} */
+  const safeStore = {
+    ...store,
+    settings: { ...store.settings, mcpServers },
+    profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })),
+    exportedAt: now()
+  };
   let blob,
     files = 0;
   if (includeFiles) {

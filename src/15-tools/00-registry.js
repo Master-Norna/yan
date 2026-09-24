@@ -37,6 +37,7 @@
  * @property {(step: Step) => string} [approval] 请示条的内容
  * @property {true | ((step: Step) => string)} [digest] 带给下一问的一行；true 用通用写法，不写即不带
  * @property {(step: Step) => Source[]} [sources] 答末「出处」里列的条目
+ * @property {boolean} [mcp] 由 MCP 服务登记的（配置一变就整批换掉）
  */
 /** @type {Map<string, Tool>} 按登记先后排，交给模型时也是这个次序 */
 const TOOLS = new Map();
@@ -67,11 +68,10 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
   for (const tool of TOOLS.values()) {
     if (!tool.run || (sub && tool.mainOnly) || (lookup && !tool.lookup) || (tool.offer && !tool.offer(ctx))) continue;
     const spec = toolSpec(tool.name),
-      text = !ctx.work && spec.brief ? spec.brief : spec.description;
-    tools.push({
-      type: "function",
-      function: { name: tool.name, description: fillTemplate(text, tool.vars?.(ctx)), parameters: spec.parameters }
-    });
+      text = !ctx.work && spec.brief ? spec.brief : spec.description,
+      // 外来工具自带的说明原样给，不当模板填（里头的 {{…}} 是人家的字）
+      description = tool.schema ? text : fillTemplate(text, tool.vars?.(ctx));
+    tools.push({ type: "function", function: { name: tool.name, description, parameters: spec.parameters } });
     ctx.offered.push(tool.name);
   }
   return tools.length ? tools : null;

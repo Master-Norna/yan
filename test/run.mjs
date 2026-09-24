@@ -163,7 +163,7 @@ try {
     await runSpec("bridge-security.mjs", { YAN_PORT: String(SECURITY_PORT) });
   }
   const specs = readdirSync(HERE)
-    .filter(f => f.endsWith(".mjs") && !["run.mjs", "lib.mjs", "fake-llm.mjs", "bridge-security.mjs"].includes(f))
+    .filter(f => f.endsWith(".mjs") && !["run.mjs", "lib.mjs", "fake-llm.mjs", "fake-mcp.mjs", "bridge-security.mjs"].includes(f))
     .filter(wants)
     .sort();
   if (specs.length) {

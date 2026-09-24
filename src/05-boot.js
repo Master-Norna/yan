@@ -44,6 +44,7 @@ async function ensureLocalBridge() {
     void syncConfigWithDisk().then(() => {
       void refreshArchive();
       void syncChatsWithDisk();
+      void mcpReady();
     });
     if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
     toast("本机桥接已接通，联网可用");
@@ -91,6 +92,8 @@ async function boot() {
   if (apiBase !== null) {
     await syncConfigWithDisk();
     await syncChatsWithDisk();
+    // MCP 服务起得慢（起进程、握手）：先起着，头一问发出前会等它
+    void mcpReady();
   }
   if (apiBase === null) {
     bootstrap.notice = servedByBridge()

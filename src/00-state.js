@@ -173,6 +173,7 @@
  * @property {string} [chatsDir] 旧版的对话目录；同上
  * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
  * @property {string} [lastConversationId]
+ * @property {Record<string, Record<string, any>>} mcpServers 接入的 MCP 服务，照通行的 mcpServers 写法：{ 名字: { command, args, cwd, env } 或 { url, headers, type } }
  */
 /**
  * @typedef {Object} Store 整个本地存储（主体在 IndexedDB；localStorage 只留启动镜像）
@@ -263,7 +264,8 @@ const defaultStore = {
     toolReach: "anywhere",
     archiveRead: true,
     toolRounds: DEFAULT_TOOL_ROUNDS,
-    subRounds: DEFAULT_SUB_ROUNDS
+    subRounds: DEFAULT_SUB_ROUNDS,
+    mcpServers: {}
   },
   profiles: [],
   conversations: [],

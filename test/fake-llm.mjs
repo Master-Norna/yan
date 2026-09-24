@@ -160,6 +160,40 @@ http
         const paragraphs = Array.from({ length: 20 }, (_, i) => `第${i + 1}段，先说一句。再说一句。\n\n`);
         return sse(res, [...paragraphs.map(content => delta({ content })), delta({}, { usage: { total_tokens: 20 } })], 400);
       }
+      // MCPTEST：接入的 MCP 服务一轮全用上——逐件给的 echo（stdio）、按需给的先查再调（stdio，工具多）、HTTP 服务上会写的 write_note（要请示）；
+      // 第二轮把看到的报回去：系统提示里有没有服务自带的用法、拿到了哪几件、各结果是什么
+      if (typeof lastUser === "string" && lastUser.includes("MCPTEST")) {
+        const n = toolResults.length,
+          names = (payload.tools || []).map(t => t.function.name);
+        const tool = (index, name, args) => ({
+          index,
+          id: `call_mcp${index}`,
+          type: "function",
+          function: { name, arguments: JSON.stringify(args) }
+        });
+        if (n === 0)
+          return sse(res, [
+            delta({ content: "用一下 MCP。" }),
+            delta({
+              tool_calls: [
+                tool(0, "mcp__local__echo", { text: "你好" }),
+                tool(1, "mcp_describe", { server: "big", tools: ["tool_07"] }),
+                tool(2, "mcp_call", { server: "big", tool: "tool_07", arguments: { n: "7" } }),
+                tool(3, "mcp_call", { server: "big", tool: "nope", arguments: {} }),
+                tool(4, "mcp__web__write_note", { text: "记下" })
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        const system = String(msgs.find(m => m.role === "system")?.content || "");
+        const describe = payload.tools.find(t => t.function.name === "mcp_describe")?.function.description || "";
+        return sse(res, [
+          delta({
+            content: `MCPTEST|hint:${system.includes("FAKE-MCP-HINT")}|inline:${names.filter(x => x.startsWith("mcp__")).join(",")}|lazy:${names.includes("mcp_call")}|dir:${/tool_39/.test(describe)}|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 80)).join(" ▸ ")}`
+          }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       if (typeof lastUser === "string" && lastUser.includes("NEWTOOLS")) {
         // 新工具一轮全用上：算一段 JS、调本机服务（放行）与内网地址（该拒）、下载本机文件与内网地址、列一份计划；第二轮把各结果回显
         const n = toolResults.length;

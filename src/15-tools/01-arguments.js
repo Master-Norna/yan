@@ -110,8 +110,11 @@ function coerceToolValue(value, rule) {
   return value;
 }
 function normalizeToolArguments(name, raw) {
-  const spec = toolSpec(name)?.parameters,
-    args = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
+  return normalizeArguments(toolSpec(name)?.parameters, raw);
+}
+// 对着一份 JSON Schema 理顺：内置工具用自己的 parameters，mcp_call 用目标工具的 inputSchema
+function normalizeArguments(spec, raw) {
+  const args = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
   if (!spec?.properties) return { args, problems: [] };
   const known = new Set(Object.keys(spec.properties));
   // 别名归位：schema 里没有这个键、参数里也没给正名时，把别名的值挪过来
@@ -138,7 +141,9 @@ function normalizeToolArguments(name, raw) {
 }
 // 参数出错时回给模型的一行 schema 摘要
 function toolSchemaHint(name) {
-  const spec = toolSpec(name)?.parameters;
+  return schemaHint(toolSpec(name)?.parameters);
+}
+function schemaHint(spec) {
   if (!spec?.properties) return "见工具定义";
   const required = new Set(spec.required || []);
   return Object.entries(spec.properties)

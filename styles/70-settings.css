@@ -679,3 +679,67 @@
   flex: none;
   white-space: nowrap;
 }
+
+/* 设置 → MCP：各服务一行状态，下面是整份配置 */
+.mcp-list {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 16px;
+}
+.mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.mcp-name {
+  font-weight: 500;
+  color: var(--ink);
+}
+.mcp-state {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mcp-state.err {
+  color: var(--danger);
+}
+.mcp-state.off {
+  color: var(--ink-3);
+}
+.mcp-empty {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.mcp-editor {
+  width: 100%;
+  min-height: 220px;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.mcp-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.mcp-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+.mcp-note {
+  margin-top: 14px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.8;
+}
