@@ -58,19 +58,29 @@ function normalizeStoreData(value) {
       rawProfiles = Array.isArray(data.profiles) ? data.profiles.filter(p => p && typeof p === "object") : [],
       legacyProfileId = data.settings?.activeProfileId || rawProfiles[0]?.id;
     delete settings.reasoning;
+    // 旧版把新对话档位存在全局设置里；仅归给当时选中的模型，不能让它跟着切到别的模型。
+    const profiles = rawProfiles.map(p => ({
+      ...p,
+      ...(p.reasoning !== undefined
+        ? { reasoning: normalizeReasoning(p.reasoning) }
+        : data.settings?.reasoning !== undefined && p.id === legacyProfileId
+          ? { reasoning: legacyReasoning }
+          : {})
+    }));
+    // 旧版的 system prompt 写在模型配置上：挪成一个同名预设、带着这个模型，模型配置里不再有它
+    settings.presets = normalizePresets(settings.presets);
+    for (const p of profiles) {
+      const text = String(p.systemPrompt || "").trim();
+      delete p.systemPrompt;
+      if (text && !settings.presets.some(preset => preset.id === `from-${p.id}`))
+        settings.presets.push(normalizePreset({ id: `from-${p.id}`, name: p.name || "预设", prompt: text, profileId: p.id }));
+    }
+    if (!settings.presets.some(preset => preset.id === settings.presetId)) settings.presetId = "";
     return {
       ...structuredClone(defaultStore),
       ...data,
       settings,
-      // 旧版把新对话档位存在全局设置里；仅归给当时选中的模型，不能让它跟着切到别的模型。
-      profiles: rawProfiles.map(p => ({
-        ...p,
-        ...(p.reasoning !== undefined
-          ? { reasoning: normalizeReasoning(p.reasoning) }
-          : data.settings?.reasoning !== undefined && p.id === legacyProfileId
-            ? { reasoning: legacyReasoning }
-            : {})
-      })),
+      profiles,
       conversations: (Array.isArray(data.conversations) ? data.conversations : []).map(normalizeConversation),
       library: Array.isArray(data.library) ? data.library : [],
       drafts: normalizeDrafts(data.drafts),
@@ -79,6 +89,23 @@ function normalizeStoreData(value) {
   } catch {
     return structuredClone(defaultStore);
   }
+}
+/** @returns {Preset[]} */
+function normalizePresets(list) {
+  return (Array.isArray(list) ? list : []).filter(item => item && typeof item === "object" && item.id).map(normalizePreset);
+}
+/** @returns {Preset} */
+function normalizePreset(value) {
+  const names = list => (Array.isArray(list) ? [...new Set(list.map(String))] : null);
+  return {
+    id: String(value.id || uid()),
+    name: String(value.name || "").trim() || "未命名",
+    prompt: String(value.prompt || ""),
+    tools: names(value.tools),
+    mcp: names(value.mcp),
+    profileId: String(value.profileId || ""),
+    policy: ["ask", "review", "auto"].includes(value.policy) ? value.policy : ""
+  };
 }
 /** @param {any} value @returns {Conversation} */
 function normalizeConversation({ ended, workAuto, ...c }) {

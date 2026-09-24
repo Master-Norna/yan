@@ -551,8 +551,11 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     // 没有工具可用时（模型关了本机工具、没桥接）在提示里说明，免得它许诺去查
     if (profile.tools !== false) await mcpReady();
     const tools = profile.tools !== false ? toolDefinitions(conversation, { lookup: true }) : null;
-    const systemPrompt = `${assistantHint(profile, tools, conversation)}\n\n${prompt(thread.anchor.text ? "side.passage" : "side.whole")}${tools ? "" : `\n${prompt("side.noTools")}`}`;
-    const overrides = { systemPrompt, tools, reasoning: conversation.reasoning || "" };
+    const overrides = {
+      systemPrompt: systemPrompt(conversation, tools, { role: "side", anchor: !!thread.anchor.text }),
+      tools,
+      reasoning: conversation.reasoning || ""
+    };
     const onFrame = () => {
       if (sideThreadId !== thread.id || !sideFollow) return;
       const el = $("#sideScroll");

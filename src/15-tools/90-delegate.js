@@ -3,6 +3,7 @@
 // 行迹里只留一枚签，帮手自己的那条时间线开在差遣面板里（见 08-trail.js）
 defineTool({
   name: "delegate",
+  group: "delegate",
   label: "差遣",
   offer: ctx => ctx.bridge && ctx.offered.some(name => name !== "ask_user"),
   mainOnly: true,
@@ -40,7 +41,7 @@ async function runDelegate(step, args, ctx) {
   step.sub = sub;
   const history = [{ role: "user", content: task }];
   const overrides = {
-    systemPrompt: `${assistantHint(profile, tools, conversation)}\n\n${prompt("delegate.system")}`,
+    systemPrompt: systemPrompt(conversation, tools, { role: "sub" }),
     tools,
     reasoning: conversation.reasoning || ""
   };

@@ -118,13 +118,13 @@ function bindEnvEvents() {
     }
   });
 }
-// 系统提示里的一句：环境备好了，告诉模型有哪些、缺的往哪装
-function envHint() {
+// 系统提示里 work.env 那一句的值：环境备好了，告诉模型有哪些、缺的往哪装；没备好不带
+function envVars() {
   const state = envStatus?.state;
-  if (!state) return "";
+  if (!state) return null;
   const kits = (envStatus.packs || [])
     .filter(pack => !pack.base && state.packs.includes(pack.id))
     .map(pack => `${pack.name}（${pack.hint || [...pack.pip, ...pack.npm].slice(0, 6).join("、")}）`);
   const extra = [...state.pip, ...state.npm];
-  return prompt("work.env", { kits: [state.python, ...kits, ...(extra.length ? [`另装 ${extra.join("、")}`] : [])].join("；") });
+  return { kits: [state.python, ...kits, ...(extra.length ? [`另装 ${extra.join("、")}`] : [])].join("；") };
 }

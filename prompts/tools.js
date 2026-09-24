@@ -11,7 +11,7 @@
 
   fetch_page: {
     description: "读网页正文（已去 HTML），多用于看某条搜索结果的详情。",
-    parameters: { type: "object", properties: { url: { type: "string", description: "完整的 http/https 地址" } }, required: ["url"] }
+    parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] }
   },
 
   http_request: {
@@ -21,7 +21,7 @@
     parameters: {
       type: "object",
       properties: {
-        url: { type: "string", description: "完整的 http/https 地址" },
+        url: { type: "string" },
         method: { type: "string", description: "GET（默认）/ POST / PUT / PATCH / DELETE / HEAD" },
         headers: { type: "object", description: '请求头，如 { "Accept": "application/json" }' },
         body: { type: "string", description: "请求体原文（JSON 请自行序列化并给 Content-Type）" }
@@ -52,8 +52,8 @@
     parameters: {
       type: "object",
       properties: {
-        url: { type: "string", description: "完整的 http/https 地址" },
-        path: { type: "string", description: "存成的文件路径，相对工作目录；省略则按网址里的文件名" }
+        url: { type: "string" },
+        path: { type: "string", description: "相对工作目录；省略则按网址里的文件名" }
       },
       required: ["url"]
     }
@@ -117,7 +117,7 @@
     brief: "写一个文本文件（新建或整份覆盖），目录自动创建。",
     parameters: {
       type: "object",
-      properties: { path: { type: "string", description: "相对工作目录的路径" }, content: { type: "string", description: "文件全文" } },
+      properties: { path: { type: "string", description: "相对工作目录" }, content: { type: "string" } },
       required: ["path", "content"]
     }
   },
@@ -128,9 +128,9 @@
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "相对工作目录的路径" },
-        old: { type: "string", description: "要被替换的原文" },
-        new: { type: "string", description: "替换后的文本" },
+        path: { type: "string", description: "相对工作目录" },
+        old: { type: "string", description: "原文" },
+        new: { type: "string" },
         replace_all: { type: "boolean", description: "old 出现多处时全部替换，默认 false" }
       },
       required: ["path", "old", "new"]
@@ -181,7 +181,7 @@
 
   delegate: {
     description:
-      "差遣一名帮手独立完成一件自成一段的子任务，做完回报。宜于量大、独立、或会读进大量与主线无关内容的活：通读一批文件并归纳、多路检索比对、在不熟的模块里排查、按已定方案实现互不相干的一部分、改后独立复查；一两步的事直接做。帮手的目录与工具同你（请示用户、记与忘除外），但看不到这段对话：task 里写全背景、目标、边界、完成标准与回报内容。同一轮可差遣多名并行，所改文件互不重叠。",
+      "差遣一名帮手独立完成一件自成一段的子任务，做完回报。宜于量大、独立、或会读进大量与主线无关内容的活：通读一批文件并归纳、多路检索比对、在不熟的模块里排查、按已定方案实现互不相干的一部分、改后独立复查；一两步的事直接做。帮手的目录与工具同你（请示用户、记与忘除外），但看不到这段对话：task 里写全背景、目标、边界、完成标准与回报内容。活能拆成互不相干的几块时，同一轮差遣多名并行（所改文件互不重叠），差遣前一句话说拆法。",
     brief:
       "把一件自成一段的大活（通读一批资料并归纳、多路检索比对、生成一份复杂文件）交给帮手另起一段对话独立做完后回报。帮手看不到这段对话：task 里写全背景、目标、边界与回报内容。一两步的事直接做。",
     parameters: {
@@ -197,7 +197,7 @@
   // 请示：下一步取决于用户的选择时弹一张小表单；对谈与执事都提供，在浏览器里完成
   ask_user: {
     description:
-      "下一步取决于用户选择时（做法各有取舍、缺信息、需求有歧义）弹一张小表单请用户选，比正文里连问省事。1–8 题（常 1–3），每题 2–4 个短选项，可并存者 multi: true；用户亦可自填。得到答复后直接继续，不复述。",
+      "拿不准便先弹一张小表单请用户选，再动手——范围、风格、交付形式、方案取舍、缺关键信息、需求有歧义；答案显然者不问。1–8 题（常 1–3），每题 2–4 个短选项，可并存者 multi: true；用户亦可自填。得到答复后照做，不复述。",
     parameters: {
       type: "object",
       properties: {
@@ -239,7 +239,7 @@
 
   forget: {
     description: "删除一条过时或有误的记忆。",
-    parameters: { type: "object", properties: { id: { type: "string", description: "条目 id（见 recall 的结果）" } }, required: ["id"] }
+    parameters: { type: "object", properties: { id: { type: "string", description: "recall 结果里的条目 id" } }, required: ["id"] }
   },
 
   recall: {

@@ -155,7 +155,8 @@ async function sendOrStop() {
       profileId: profile.id,
       messages: [],
       workdir: pending,
-      commandPolicy: normalizeCommandPolicy(store.settings.commandPolicyDefault),
+      presetId: presetOf(null)?.id || "",
+      commandPolicy: normalizeCommandPolicy(presetOf(null)?.policy || store.settings.commandPolicyDefault),
       reasoning: normalizeReasoning(profile.reasoning)
     };
     if (!(await ensureWorkReady(c))) return;
@@ -432,7 +433,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
     const overrides = {
-      systemPrompt: assistantHint(profile, tools, conversation),
+      systemPrompt: systemPrompt(conversation, tools),
       tools,
       reasoning: conversation.reasoning || "",
       onRetry: n => {
@@ -798,12 +799,49 @@ async function maybeAutoTitle(conversation, profile) {
       setTimeout(() => void maybeAutoTitle(conversation, profile), 0);
   }
 }
-// 附加给模型的提示：日期、目录与做法（执事的，或言里卷宗的）、联网分寸、记忆分寸、页内可视化的写法。工具各自做什么、何时用，在工具说明里说，这里不重复
+// 系统提示：预设的提示词在最前，其后照 prompts/assistant.js 的 order 表逐段拼——每段何时带上（给了哪件工具、言还是行、主答 / 旁注 / 帮手）写在表里；
+// 要填值、或视情形不带的，在这里给出：给 null 即这回不带。工具各自做什么、何时用，在工具说明里说，这里不重复
+/** @type {Record<string, (ctx: { conversation: Conversation, tools: Set<string>, preset: Preset|null, anchor: boolean }) => Record<string, any>|null>} */
+const PROMPT_VARS = {
+  "assistant.today": () => ({ day: formatDay(now()), iso: new Date().toISOString().slice(0, 10) }),
+  "work.hint": ctx => workVars(ctx.conversation),
+  "work.archive": ctx => workVars(ctx.conversation),
+  "work.env": () => envVars(),
+  "memory.hint": () => ({ count: store.memory.items.length }),
+  "mcp.hint": ctx => mcpHintVars(ctx.tools, ctx.preset),
+  "side.passage": ctx => (ctx.anchor ? {} : null),
+  "side.whole": ctx => (ctx.anchor ? null : {}),
+  "side.noTools": ctx => (ctx.tools.size ? null : {})
+};
+/**
+ * @param {Conversation} conversation
+ * @param {any[]|null} tools 这回交给模型的工具定义
+ * @param {{ role?: "main"|"side"|"sub", anchor?: boolean }} [options] anchor：旁注注的是划选的一段（否则是整条回复）
+ */
+function systemPrompt(conversation, tools, { role = "main", anchor = false } = {}) {
+  const preset = presetOf(conversation),
+    ctx = { conversation, tools: new Set((tools || []).map(tool => tool?.function?.name)), preset, anchor },
+    mode = isWork(conversation) ? "work" : "chat",
+    lines = [];
+  for (const section of PROMPTS.order || []) {
+    if (
+      (section.tool && !ctx.tools.has(section.tool)) ||
+      (section.mode && section.mode !== mode) ||
+      (section.roles && !section.roles.includes(role))
+    )
+      continue;
+    const vars = PROMPT_VARS[section.key] ? PROMPT_VARS[section.key](ctx) : {};
+    if (vars) lines.push(prompt(section.key, vars));
+  }
+  const own = String(preset?.prompt || "").trim();
+  return own ? `${own}\n\n${lines.join("\n")}` : lines.join("\n");
+}
+// 执事（work.hint）与卷宗（work.archive）两段的值：目录、平台、可及范围
 /** @param {Conversation} conversation */
-function workHint(conversation) {
+function workVars(conversation) {
   const win = (bootstrap.work?.platform || "win32") === "win32",
     shell = bootstrap.work?.shell || (win ? "PowerShell" : "sh");
-  return prompt(isWork(conversation) ? "work.hint" : "work.archive", {
+  return {
     workdir: workRoot(conversation),
     scratch: scratchRel(conversation),
     // 沙箱两档：问而后行用严的（拦下的转请用户定夺），审而后行、径行用宽的（只守系统本身）
@@ -819,30 +857,5 @@ function workHint(conversation) {
     platform: win ? "Windows" : bootstrap.work?.platform || "类 Unix",
     shell,
     shellNote: win ? prompt("work.windowsShell") : ""
-  });
-}
-/**
- * @param {Profile} profile
- * @param {Conversation} conversation
- */
-function assistantHint(profile, tools, conversation = null) {
-  const lines = [
-    prompt("assistant.today", { day: formatDay(now()), iso: new Date().toISOString().slice(0, 10) }),
-    prompt("assistant.judgement")
-  ];
-  const names = new Set((tools || []).map(tool => tool?.function?.name));
-  if (names.has("run_command") && conversation) lines.push(workHint(conversation));
-  const env = names.has("run_command") ? envHint() : "";
-  if (env) lines.push(env);
-  if (names.has("search_web")) lines.push(prompt("assistant.search"));
-  if (names.has("ask_user")) lines.push(prompt("assistant.asking"));
-  // 何时差遣写在工具说明里；这一句只给行——对谈里差遣是少数，不必每问都背着
-  if (names.has("delegate") && conversation && isWork(conversation)) lines.push(prompt("assistant.delegating"));
-  if (names.has("remember")) lines.push(prompt("memory.hint", { count: store.memory.items.length }));
-  const mcpServers = mcpHint(names);
-  if (mcpServers) lines.push(mcpServers);
-  lines.push(prompt("assistant.drawing"));
-  if (!conversation || !isWork(conversation)) lines.push(prompt("assistant.manner"));
-  const base = String(profile.systemPrompt || "").trim();
-  return base ? `${base}\n\n${lines.join("\n")}` : lines.join("\n");
+  };
 }

@@ -2,6 +2,7 @@
 // 沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉
 defineTool({
   name: "run_js",
+  group: "compute",
   label: "计算",
   lookup: true,
   parallel: true,

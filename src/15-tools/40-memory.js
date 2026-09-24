@@ -3,6 +3,7 @@
 const CONVERSATION_MESSAGE_CHARS = 1500; // read_conversation 每条消息最多给这么多字
 defineTool({
   name: "remember",
+  group: "memory",
   label: "记入",
   offer: () => memoryEnabled(),
   mainOnly: true,
@@ -34,6 +35,7 @@ defineTool({
 
 defineTool({
   name: "forget",
+  group: "memory",
   label: "忘却",
   offer: () => memoryEnabled(),
   mainOnly: true,
@@ -52,6 +54,7 @@ defineTool({
 
 defineTool({
   name: "recall",
+  group: "memory",
   label: "翻记忆",
   offer: () => memoryEnabled(),
   lookup: true,
@@ -70,6 +73,7 @@ defineTool({
 // 查旧谈：同一工作目录的执事对话排在前面，其余按新近
 defineTool({
   name: "search_conversations",
+  group: "memory",
   label: "查旧谈",
   offer: () => memoryEnabled(),
   lookup: true,
@@ -120,6 +124,7 @@ defineTool({
 
 defineTool({
   name: "read_conversation",
+  group: "memory",
   label: "翻旧谈",
   offer: () => memoryEnabled(),
   lookup: true,

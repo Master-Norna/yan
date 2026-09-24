@@ -747,7 +747,8 @@ http
         return sse(res, [
           ...Array.from({ length: 20 }, (_, i) => delta({ reasoning_content: `答复来了，再想 ${i + 1}。` })),
           delta({
-            content: `ASK|hint:${sys.includes("ask_user") ? "yes" : "no"}|tool:${names.includes("ask_user") ? "yes" : "no"}|${String(toolResults.at(-1).content).replace(/\s+/g, " ")}${note ? `|note:${note.replace(/\s+/g, " ")}` : ""}`
+            // 「拿不准就问」写在 ask_user 自己的说明里，不在系统提示里另说一遍
+            content: `ASK|hint:${/拿不准/.test((payload.tools || []).find(t => t.function.name === "ask_user")?.function.description || "") ? "yes" : "no"}|tool:${names.includes("ask_user") ? "yes" : "no"}|${String(toolResults.at(-1).content).replace(/\s+/g, " ")}${note ? `|note:${note.replace(/\s+/g, " ")}` : ""}`
           }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);

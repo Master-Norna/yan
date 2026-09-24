@@ -2,6 +2,7 @@
 // 路径与沙箱在桥接那头管（server/work.js）；这里只管呈现与「改之前先读过」这条规矩
 defineTool({
   name: "write_file",
+  group: "work",
   label: "写入",
   offer: ctx => ctx.files,
   sideEffect: true,
@@ -24,6 +25,7 @@ defineTool({
 
 defineTool({
   name: "edit_file",
+  group: "work",
   label: "修改",
   offer: ctx => ctx.files && ctx.work,
   sideEffect: true,
@@ -53,6 +55,7 @@ defineTool({
 
 defineTool({
   name: "read_file",
+  group: "work",
   label: "读取",
   offer: ctx => ctx.files,
   parallel: true,
@@ -81,6 +84,7 @@ defineTool({
 
 defineTool({
   name: "list_files",
+  group: "work",
   label: "列目录",
   offer: ctx => ctx.files,
   parallel: true,
@@ -108,6 +112,7 @@ defineTool({
 
 defineTool({
   name: "search_files",
+  group: "work",
   label: "搜索",
   offer: ctx => ctx.files && ctx.work,
   parallel: true,
@@ -143,6 +148,7 @@ defineTool({
 // 下载：桥接把网上的文件存进工作目录或卷宗，沙箱照常管路径
 defineTool({
   name: "download_file",
+  group: "web",
   label: "下载",
   offer: ctx => ctx.files,
   sideEffect: true,

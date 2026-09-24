@@ -2,6 +2,7 @@
 // 三档权限：问而后行（只读免问）、审而后行（不请示，桥接代判放行或回绝）、径行；逐段对话设置，请示条上按「径行」即切过去
 defineTool({
   name: "run_command",
+  group: "work",
   label: "运行",
   offer: ctx => ctx.files,
   sideEffect: true,
@@ -71,6 +72,7 @@ defineTool({
 // 后台指令：取上次之后的新输出，可顺带等一会儿，或结束它；只给行，跟着 run_command 的 background 走
 defineTool({
   name: "check_command",
+  group: "work",
   label: "后台",
   offer: ctx => ctx.files && ctx.work,
   html: workStepHtml,

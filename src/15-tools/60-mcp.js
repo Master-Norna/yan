@@ -68,6 +68,7 @@ function mcpInlineTool(server, spec) {
     name: mcpFunctionName(server, spec.name),
     label: server,
     mcp: true,
+    server,
     schema: { description: spec.description || spec.title || spec.name, parameters: spec.inputSchema },
     offer: ctx => ctx.bridge,
     lookup: readOnly,
@@ -90,12 +91,12 @@ const MCP_LAZY_TOOLS = [
     name: "mcp_describe",
     label: "MCP",
     mcp: true,
-    offer: ctx => ctx.bridge,
-    vars: () => ({ directory: mcpDirectory() }),
+    offer: ctx => ctx.bridge && mcpLazyServers(ctx.preset).length > 0,
+    vars: ctx => ({ directory: mcpDirectory(ctx.preset) }),
     parallel: true,
     cache: true,
-    run(step, args) {
-      const state = mcp.servers[args.server];
+    run(step, args, ctx) {
+      const state = mcpLazyServers(presetOf(ctx.conversation)).includes(args.server) ? mcp.servers[args.server] : null;
       step.title = `${args.server} · ${args.tools.join("、")}`;
       if (!state?.ok) return mcpUnknown(args.server, "");
       const found = args.tools.map(name => state.tools.find(tool => tool.name === name)).filter(Boolean);
@@ -114,7 +115,7 @@ const MCP_LAZY_TOOLS = [
     name: "mcp_call",
     label: "MCP",
     mcp: true,
-    offer: ctx => ctx.bridge,
+    offer: ctx => ctx.bridge && mcpLazyServers(ctx.preset).length > 0,
     sideEffect: true,
     approval: mcpApprovalHtml,
     digest: true,
@@ -139,9 +140,15 @@ const MCP_LAZY_TOOLS = [
     }
   }
 ];
+// 按需给的服务里，预设挑中的那几个
+/** @param {Preset|null} preset */
+function mcpLazyServers(preset) {
+  return mcp.lazy.filter(server => !preset?.mcp || preset.mcp.includes(server));
+}
 // 目录：一服务一段，一件一行（名字与说明的头一句）；只读的标出来
-function mcpDirectory() {
-  return mcp.lazy
+/** @param {Preset|null} preset */
+function mcpDirectory(preset) {
+  return mcpLazyServers(preset)
     .map(server => {
       const state = mcp.servers[server],
         head = [state.server?.title || state.server?.name, state.server?.description].filter(Boolean).join("：");
@@ -175,7 +182,8 @@ function mcpUnknown(server, tool) {
 async function runMcpTool(step, server, tool, args, ctx) {
   const config = mcpConfigs()[server],
     spec = mcp.servers[server]?.tools?.find(item => item.name === tool);
-  if (!config || !spec) return mcpUnknown(server, tool);
+  // 预设没挑这个服务：照着名字调来的也不跑
+  if (!config || !spec || !presetAllows(presetOf(ctx.conversation), /** @type {Tool} */ ({ server }))) return mcpUnknown(server, tool);
   step.title ||= spec.title || tool;
   step.code = JSON.stringify(args, null, 2);
   const ask = !mcpReadOnly(spec) && commandPolicyOf(ctx.conversation) === "ask" && !(config.autoApprove || []).includes(tool);
@@ -212,17 +220,17 @@ function mcpResultText(result) {
   if (!parts.length && result.structuredContent) parts.push(JSON.stringify(result.structuredContent, null, 2));
   return parts.join("\n\n") || "（无输出）";
 }
-// 系统提示里的一段：交给模型的工具里有哪几个服务的，就附上那几个服务自带的用法
-function mcpHint(names) {
+// 系统提示里 mcp.hint 那一段的值：交给模型的工具里有哪几个服务的，就附上那几个服务自带的用法；一个都没有就不带这段
+/** @param {Set<string>} names @param {Preset|null} preset */
+function mcpHintVars(names, preset) {
+  const lazy = names.has("mcp_call") ? mcpLazyServers(preset) : [];
   const servers = Object.entries(mcp.servers).filter(
     ([server, state]) =>
       state.ok &&
       state.instructions &&
-      (mcp.lazy.includes(server) ? names.has("mcp_call") : state.tools.some(tool => names.has(mcpFunctionName(server, tool.name))))
+      (mcp.lazy.includes(server) ? lazy.includes(server) : state.tools.some(tool => names.has(mcpFunctionName(server, tool.name))))
   );
   return servers.length
-    ? prompt("mcp.hint", {
-        servers: servers.map(([server, state]) => `【${server}】${state.instructions.trim().slice(0, 1500)}`).join("\n")
-      })
-    : "";
+    ? { servers: servers.map(([server, state]) => `【${server}】${state.instructions.trim().slice(0, 1500)}`).join("\n") }
+    : null;
 }

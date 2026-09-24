@@ -395,6 +395,8 @@ function openConversation(id) {
   const c = currentConversation();
   if (c) {
     c.unread = false;
+    // 新对话照最近看的这段用的预设，与模型一样
+    store.settings.presetId = presetOf(c)?.id || "";
     c.profileId && selectProfile(c.profileId, false);
   }
   render();

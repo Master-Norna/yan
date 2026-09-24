@@ -240,7 +240,7 @@ async function probeReasoningLevels(profile) {
 async function requestChat(profile, messages, signal, overrides = {}) {
   const parameters = {
     messages,
-    systemPrompt: overrides.systemPrompt ?? (profile.systemPrompt || ""),
+    systemPrompt: overrides.systemPrompt ?? "",
     temperature: Number(overrides.temperature ?? profile.temperature ?? 0.7),
     // 输出上限：拟题、压缩、探档位这几处自己给；平时 OpenAI 兼容接口不传（服务端的默认就是模型的上限，
     // 手写一个反而常常把长回答截断），Anthropic 必填、按模型设置或默认值

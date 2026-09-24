@@ -464,6 +464,8 @@ function bindEvents() {
       if (trigger) positionModelMenu(trigger);
       return;
     }
+    const preset = e.target.closest("[data-preset]");
+    if (preset) return selectPreset(preset.dataset.preset);
     const item = e.target.closest("[data-profile]");
     if (!item) return;
     selectProfile(item.dataset.profile);

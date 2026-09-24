@@ -1,6 +1,7 @@
 // 言 · 联网：检索、翻网页、调接口，都经桥接。地址门禁在桥接那头：本机 127.0.0.1 可，别的内网地址不可
 defineTool({
   name: "search_web",
+  group: "web",
   label: "检索",
   offer: ctx => ctx.bridge,
   lookup: true,
@@ -30,6 +31,7 @@ defineTool({
 
 defineTool({
   name: "fetch_page",
+  group: "web",
   label: "翻阅网页",
   offer: ctx => ctx.bridge,
   lookup: true,
@@ -50,6 +52,7 @@ defineTool({
 // 调接口能发 POST，不算纯查阅，旁注不给；只有 GET / HEAD 的结果可复用
 defineTool({
   name: "http_request",
+  group: "web",
   label: "调接口",
   offer: ctx => ctx.bridge,
   sideEffect: true,

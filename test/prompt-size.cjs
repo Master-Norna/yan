@@ -22,20 +22,26 @@ const toolDef = (name, vars, work) =>
 const WORK = ["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"],
   CHAT_FILES = ["run_command", "write_file", "read_file", "list_files"],
   MEM = ["remember", "forget", "recall", "search_conversations", "read_conversation"];
+// 照 prompts/assistant.js 的 order 表拼，与页面同一套条件；要填的值在这里给假的（页面里由 src/14-chat-engine.js 的 PROMPT_VARS 给）
 function sys(names, { work = false, archive = false, sub = false } = {}) {
-  // 与 src/14-chat-engine.js 的 assistantHint 同序；那边加了段落这里也要加，否则表上的数是假的（各模式给哪几件工具见 src/15-tools/ 的登记）
-  const lines = [prompt("assistant.today", { day: "九月十六日", iso: "2026-09-16" }), prompt("assistant.judgement")];
   const env = { platform: "Windows", shell: "PowerShell", shellNote: prompt("work.windowsShell") };
-  if (work) lines.push(prompt("work.hint", { workdir: "E:\\项目\\demo", ...env }));
-  else if (archive) lines.push(prompt("work.archive", { workdir: "C:\\Users\\我\\言\\卷宗", scratch: ".草稿/8f3a2c1b", ...env }));
-  if (names.has("search_web")) lines.push(prompt("assistant.search"));
-  if (names.has("ask_user")) lines.push(prompt("assistant.asking"));
-  if (names.has("delegate") && work) lines.push(prompt("assistant.delegating"));
-  if (names.has("remember")) lines.push(prompt("memory.hint", { count: 12 }));
-  lines.push(prompt("assistant.drawing"));
-  if (!work) lines.push(prompt("assistant.manner"));
-  if (sub) lines.push(prompt("delegate.system"));
-  return lines.join("\n");
+  const vars = {
+    "assistant.today": { day: "九月十六日", iso: "2026-09-16" },
+    "work.hint": { workdir: "E:\\项目\\demo", ...env },
+    "work.archive": { workdir: "C:\\Users\\我\\言\\卷宗", scratch: ".草稿/8f3a2c1b", ...env },
+    "work.env": null,
+    "memory.hint": { count: 12 },
+    "mcp.hint": null,
+    "side.passage": null,
+    "side.whole": null,
+    "side.noTools": null
+  };
+  const role = sub ? "sub" : "main";
+  return P.order
+    .filter(s => (!s.tool || names.has(s.tool)) && (!s.mode || s.mode === (work ? "work" : "chat")) && (!s.roles || s.roles.includes(role)))
+    .filter(s => !(s.key in vars) || vars[s.key])
+    .map(s => prompt(s.key, vars[s.key] || {}))
+    .join("\n");
 }
 const modes = {
   "言（桥接+记忆，工具落卷宗）": {

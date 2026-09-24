@@ -1,25 +1,19 @@
 // 言 · 内置提示词 · 通用
-// 每次请求都会带上的系统提示，各段按需拼接（见 src/14-chat-engine.js 的 assistantHint）：
-// today 总在最前，judgement 紧随其后（两种模式都带）；search 仅在桥接在线时加入；asking 在 ask_user 可用时加入；delegating 只给行（何时差遣写在 tools.js 的 delegate 里，这里只提醒别都自己扛）；
-// drawing 之后，言（对谈）再加一段 manner（克制的答法）。用户在模型设置里填写的 system prompt 排在这些段落之前。
+// 系统提示怎么拼，看文末的 order 表：一段一行，写明取哪句、何时带上。预设的提示词排在所有段落之前。
 // 言的提示以轻为要：每多一句都是每一问的开销，也在稀释模型对问题本身的注意。文白相杂、能省则省——今日能接工具的模型读这种句子不费力。
 // 原则：工具本身做什么、何时用，写在 tools.js 的工具说明里，这里不再复述；这里只放环境事实、跨工具的做法与页面的呈现约定。{{…}} 为运行时填入的值。
 (window.YAN_PROMPTS ||= {}).assistant = {
   today: "今日{{day}}（{{iso}}）。",
 
-  // 明辨与效率：两种模式都带。不顺着说、不编造、不绕弯
+  // 明辨与效率：处处都带。不顺着说、不编造、不绕弯
   judgement:
-    "有己见：用户说法有误、前提不立、所求做法明显更差，直言并给依据，不顺从、不奉承；被驳则看理据，对则改，站得住则坚持。分清确知与推测：数字、出处、接口、文件内容拿不准便标明或先查，不杜撰。直奔要点：该问的一次问完，该做的一并做完，显而易见者不复确认，不做未求之事，不重读同一份东西。",
+    "有己见：用户有误、前提不立或所求做法更差时直言并给依据，不奉承；被驳则看理据，对则改，立得住则坚持。分清确知与推测：数字、出处、接口、文件内容拿不准便标明或先查，不杜撰。直奔要点：该问的一次问完，该做的一并做完，不复确认显然之事，不做未求之事。",
 
-  search: "涉时效或超出所知者，先 search_web 再答，不以知识截止推脱；要细节用 fetch_page，引用附链接；同义检索不重复，资料够了便作答。",
+  search: "涉时效或超出所知者先 search_web，不以知识截止推脱；细节用 fetch_page，引用附链接；同义不重搜，够了便答。",
 
-  // 拿不准就问：请示表单让用户点两下就答完，比猜错了返工省
-  asking: "拿不准便用 ask_user 问一次再动手——范围、风格、交付形式、方案取舍、缺关键信息；答案显然者不问，问毕照答复做、不复述。",
-  delegating: "活能拆成互不相干的几块时，差遣帮手（delegate）并行去做；差遣前一句话说拆法。",
-
-  // 画在正文里：这几种围栏页面会就地渲染成图与可交互的演示，不是文件，不该落到目录
+  // 画在正文里：页面就地渲染成可交互的一块，不是文件，不该落到目录
   drawing:
-    '要图、图表、示意、演示时直接画在正文里：写一个自足的 ```html，页面就地渲染成可交互的一块（不是文件，勿写进目录；样式脚本内联，不引外部资源）。它与正文同一张纸：底透明、高随内容，色用 var(--ink) var(--ink-2) var(--paper-2) var(--line) var(--accent)，常用元素已有样式，另备 .card .row .grid .tag。这一块里：数据图表先 <script src="yan:echarts"></script> 再照常 echarts.init（已配色、随宽自适应）；流程、时序、结构图写 <pre class="mermaid">…</pre> 自动成图。用户明言要可下载的文件时才生成文件。',
+    '要图、图表、示意、演示时画在正文里：写一个自足的 ```html（样式脚本内联，不引外部资源），页面就地渲染成可交互的一块，不是文件、勿写进目录。与正文同一张纸：底透明、高随内容，配色用 var(--ink) var(--ink-2) var(--paper-2) var(--line) var(--accent)，常用元素已有样式，另备 .card .row .grid .tag。数据图表先 <script src="yan:echarts"></script> 再 echarts.init（已配色、随宽自适应）；流程、时序、结构图写 <pre class="mermaid">…</pre>。明言要可下载的文件时才生成文件。',
 
   // 言的答法：克制。只给言（对谈）；行有自己的收尾规矩
   manner:
@@ -40,3 +34,26 @@
   // 自动拟题：头一问发出时单独发起的一次请求（与作答并行），不带系统提示，也不进对话；没拟成的在那一答收尾时再试，那时带上答
   title: "为下面这段对话拟一个不超过 12 个字的标题，直接输出标题本身，不要引号、标点或解释。\n\n用户：{{user}}{{assistant}}"
 };
+
+// 系统提示的拼接次序。一段一行，写明何时带上，不写即处处都带：
+//   tool  交给模型的工具里有这一件才带（工具不在，讲它的话就是白占地方）
+//   mode  work 只给行（绑了目录），chat 只给言
+//   roles 只给这几种请求：main 主答、side 旁注、sub 帮手；不写即三种都带
+// 要填值、或视情形不带的（环境没备好、没有 MCP 服务附用法……），由 src/14-chat-engine.js 的 PROMPT_VARS 给出，给 null 即这回不带。
+// test/prompt-size.cjs 也照这张表拼，量出来的数与页面一致
+window.YAN_PROMPTS.order = [
+  { key: "assistant.today" },
+  { key: "assistant.judgement" },
+  { key: "work.hint", tool: "run_command", mode: "work" },
+  { key: "work.archive", tool: "run_command", mode: "chat" },
+  { key: "work.env", tool: "run_command" },
+  { key: "assistant.search", tool: "search_web" },
+  { key: "memory.hint", tool: "remember" },
+  { key: "mcp.hint" },
+  { key: "assistant.drawing", roles: ["main", "side"] },
+  { key: "assistant.manner", mode: "chat", roles: ["main", "side"] },
+  { key: "side.passage", roles: ["side"] },
+  { key: "side.whole", roles: ["side"] },
+  { key: "side.noTools", roles: ["side"] },
+  { key: "delegate.system", roles: ["sub"] }
+];

@@ -1,6 +1,7 @@
 // 言 · 请示用户：下一步取决于用户的选择时弹一张小表单，从输入框上方浮出，一页一题；对谈与执事都有，帮手没有
 defineTool({
   name: "ask_user",
+  group: "ask",
   label: "请示",
   mainOnly: true,
   // 同一答里同样的一问不再打扰用户第二回

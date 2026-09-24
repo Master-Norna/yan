@@ -11,7 +11,7 @@ function contextEstimate(c, draft = "", pending = null) {
   let n = 0;
   if (profile) {
     const tools = profile.tools !== false ? toolDefinitions(c) : null;
-    n += estimateText(assistantHint(profile, tools, c));
+    n += estimateText(systemPrompt(c, tools));
     if (tools) n += estimateText(JSON.stringify(tools));
   }
   const contextIndex = c.messages.map(m => m.role).lastIndexOf("context"),

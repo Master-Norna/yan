@@ -15,6 +15,7 @@
  * @property {boolean} files 有可落脚的目录（工作目录或卷宗）
  * @property {Array<Record<string, any>>} docs 可读的文档
  * @property {string[]} offered 登记在前、此处已经给出的工具
+ * @property {Preset|null} preset 这段对话用的预设：只给它挑中的几组与几个 MCP 服务
  *
  * @typedef {{ ok: boolean, content: string, display: string }} ToolOutcome content 回给模型，display 写在标题行右侧
  * @typedef {{ url?: string, title?: string, read?: boolean, talk?: string, date?: string, memory?: string }} Source 答末「出处」的一条：网页、旧谈或记忆
@@ -22,6 +23,8 @@
  * @typedef {Object} Tool
  * @property {string} name
  * @property {string} label 行迹上的名字
+ * @property {keyof typeof TOOL_GROUPS} [group] 属哪一组：预设按组挑内置工具
+ * @property {string} [server] MCP 工具属哪个服务：预设按服务挑
  * @property {false | ((ctx: OfferContext) => boolean)} [offer] 此处给不给；不写即处处都给，false 是只登记画法、从不交给模型的步骤（补言）
  * @property {boolean} [mainOnly] 只给主模型，帮手拿不到
  * @property {boolean} [lookup] 旁注（只查不改）也给
@@ -39,6 +42,16 @@
  * @property {(step: Step) => Source[]} [sources] 答末「出处」里列的条目
  * @property {boolean} [mcp] 由 MCP 服务登记的（配置一变就整批换掉）
  */
+// 内置工具的分组：预设按组挑（一件件挑太碎），设置里照这个次序列
+const TOOL_GROUPS = {
+  web: "联网",
+  compute: "计算",
+  work: "指令与文件",
+  docs: "翻文档",
+  ask: "请示",
+  memory: "记忆与旧谈",
+  delegate: "差遣"
+};
 /** @type {Map<string, Tool>} 按登记先后排，交给模型时也是这个次序 */
 const TOOLS = new Map();
 /** @param {Tool} tool */
@@ -62,11 +75,19 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
     bridge: apiBase !== null,
     files: !!workRoot(conversation),
     docs: availableDocuments(conversation),
-    offered: []
+    offered: [],
+    preset: presetOf(conversation)
   };
   const tools = [];
   for (const tool of TOOLS.values()) {
-    if (!tool.run || (sub && tool.mainOnly) || (lookup && !tool.lookup) || (tool.offer && !tool.offer(ctx))) continue;
+    if (
+      !tool.run ||
+      (sub && tool.mainOnly) ||
+      (lookup && !tool.lookup) ||
+      !presetAllows(ctx.preset, tool) ||
+      (tool.offer && !tool.offer(ctx))
+    )
+      continue;
     const spec = toolSpec(tool.name),
       text = !ctx.work && spec.brief ? spec.brief : spec.description,
       // 外来工具自带的说明原样给，不当模板填（里头的 {{…}} 是人家的字）
@@ -75,6 +96,13 @@ function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
     ctx.offered.push(tool.name);
   }
   return tools.length ? tools : null;
+}
+// 预设挑了哪几组、哪几个 MCP 服务：内置的按组，逐件摊开的 MCP 工具按服务；按需给的两件（mcp_describe / mcp_call）看目录里还剩不剩服务，由它们自己的 offer 管
+/** @param {Preset|null} preset @param {Tool} tool */
+function presetAllows(preset, tool) {
+  if (!preset) return true;
+  if (tool.server) return !preset.mcp || preset.mcp.includes(tool.server);
+  return !tool.group || !preset.tools || preset.tools.includes(tool.group);
 }
 /**
  * 跑一步：先把参数理顺（见 01-arguments.js），讲不通的原样告诉模型错在哪；理顺了交给那件工具

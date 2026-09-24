@@ -2,6 +2,7 @@
 // 长文档按页码或关键词只取片段；可读的文档名写进说明里（{{docs}}），对话里有可读文档时才给
 defineTool({
   name: "read_document",
+  group: "docs",
   label: "翻阅文档",
   offer: ctx => ctx.docs.length > 0,
   vars: ctx => ({ docs: ctx.docs.map(d => d.name).join("、") }),

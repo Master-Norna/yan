@@ -119,6 +119,7 @@
  * @property {string} [workdir] 绑了目录即为行
  * @property {CommandPolicy} [commandPolicy] 指令权限模式
  * @property {string} [reasoning] 思考档位
+ * @property {string} [presetId] 用的哪个预设；空即言的本色
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
  * @property {boolean} [ended] 旧版：额度尽了整段锁死；现已不再写入，读到照旧尊重
@@ -140,13 +141,22 @@
  * @property {number} [maxTokens] 只对 Anthropic 有意义（Messages API 必填）；OpenAI 兼容接口不传，由服务端定
  * @property {string} quota 用量上限，如 "100k"；空则不限
  * @property {number} usedTokens
- * @property {string} systemPrompt
  * @property {boolean} [tools] 本机工具，默认开
  * @property {number} [contextWindow]
  * @property {string} [reasoning] 此模型记住的思考档位；留空由接口决定
  * @property {string} [reasoningLevels] 此模型认的思考档位，逗号分隔；none 是不认；探到的与手填的都记在这里
  * @property {string} [reasoningProbed] 探过档位时模型的身份（接口|地址|模型 ID，见 reasoningProbeKey），亲手填的前面带 manual|；换了任一样再探
  * @property {string[]} [modelList]
+ */
+/**
+ * @typedef {Object} Preset 预设：一套打包好的做法，选了它的对话都照这一套——提示词排在系统提示最前，工具与 MCP 只给挑中的，可带默认模型与指令权限
+ * @property {string} id
+ * @property {string} name
+ * @property {string} prompt
+ * @property {string[]|null} tools 给哪几组内置工具（见 TOOL_GROUPS）；null 即全给
+ * @property {string[]|null} mcp 给哪几个 MCP 服务；null 即全给
+ * @property {string} profileId 选它时换到这个模型；空则不换
+ * @property {CommandPolicy|""} policy 选它时的指令权限；空则照设置里的默认
  */
 /** @typedef {{ id: string, text: string, createdAt: string, updatedAt: string, source: { conversationId: string, title: string }|null }} MemoryItem */
 /** @typedef {{ text: string, attachments: Attachment[], quote?: Quote|null, updatedAt?: string }} Draft */
@@ -159,6 +169,8 @@
  * @property {number} width
  * @property {string} accent
  * @property {string} activeProfileId
+ * @property {Preset[]} presets
+ * @property {string} presetId 新对话用的预设（上回选的）；空即本色
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
@@ -256,6 +268,8 @@ const defaultStore = {
     width: 760,
     accent: "#9b5540",
     activeProfileId: "",
+    presets: [],
+    presetId: "",
     autoTitle: true,
     pendingWorkdir: "",
     collapsedRepos: [],

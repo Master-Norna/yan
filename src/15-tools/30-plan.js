@@ -3,6 +3,7 @@ const PLAN_STATUSES = new Set(["pending", "doing", "done", "skipped"]),
   PLAN_MARKS = { done: "✓", doing: "▶", skipped: "–" };
 defineTool({
   name: "update_plan",
+  group: "work",
   label: "计划",
   offer: ctx => ctx.work,
   mainOnly: true,
