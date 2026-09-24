@@ -303,7 +303,9 @@ test("anthropicRequest：system 单列、工具结果并进 user、思考块回�
       { role: "user", content: "补一句" }
     ]
   });
-  assert.equal(body.system, "你是言");
+  // 提示缓存：系统提示末尾一处，整段对话最后一块一处
+  assert.deepEqual(body.system, [{ type: "text", text: "你是言", cache_control: { type: "ephemeral" } }]);
+  assert.deepEqual(body.messages.at(-1).content.at(-1), { type: "text", text: "补一句", cache_control: { type: "ephemeral" } });
   assert.equal(body.thinking.budget_tokens, 8192);
   assert.equal(body.max_tokens, 8192 + 4096);
   assert.equal(body.temperature, undefined);
@@ -328,6 +330,34 @@ test("anthropicRequest：system 单列、工具结果并进 user、思考块回�
     "user"
   );
   assert.equal(f.anthropicRequest({ model: "m", messages: [{ role: "user", content: "x" }], temperature: 1.7 }).temperature, 1);
+  // 新模型：思考是 adaptive、深浅走 effort；4.7 起不带 temperature、要回思考摘要；5 起不选档位也在想
+  const opus5 = f.anthropicRequest({
+    model: "claude-opus-5",
+    messages: [{ role: "user", content: "x" }],
+    temperature: 0.7,
+    reasoning_effort: "high"
+  });
+  assert.deepEqual(opus5.thinking, { type: "adaptive", display: "summarized" });
+  assert.deepEqual(opus5.output_config, { effort: "high" });
+  assert.equal(opus5.temperature, undefined);
+  assert.equal(opus5.max_tokens, 32000);
+  const opus5Default = f.anthropicRequest({ model: "claude-opus-5", messages: [{ role: "user", content: "x" }], temperature: 0.7 });
+  assert.deepEqual(opus5Default.thinking, { type: "adaptive", display: "summarized" });
+  assert.equal(opus5Default.output_config, undefined);
+  const opus48 = f.anthropicRequest({ model: "claude-opus-4-8", messages: [{ role: "user", content: "x" }], temperature: 0.7 });
+  assert.equal(opus48.thinking, undefined);
+  assert.equal(opus48.temperature, undefined);
+  const sonnet46 = f.anthropicRequest({
+    model: "claude-sonnet-4-6",
+    messages: [{ role: "user", content: "x" }],
+    reasoning_effort: "xhigh"
+  });
+  assert.deepEqual(sonnet46.thinking, { type: "adaptive" });
+  assert.deepEqual(sonnet46.output_config, { effort: "high" });
+  const sonnet46Plain = f.anthropicRequest({ model: "claude-sonnet-4-6", messages: [{ role: "user", content: "x" }], temperature: 0.4 });
+  assert.equal(sonnet46Plain.temperature, 0.4);
+  const haiku = f.anthropicRequest({ model: "claude-haiku-4-5", messages: [{ role: "user", content: "x" }], reasoning_effort: "low" });
+  assert.equal(haiku.thinking.budget_tokens, 2048);
   assert.equal(f.anthropicEndpoint("https://api.anthropic.com/v1/"), "https://api.anthropic.com/v1/messages");
   assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com" }), true);
   assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com", api: "openai" }), false);

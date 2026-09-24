@@ -73,7 +73,7 @@ const anthropicMessages = (payload, res) => {
   return anthropicSse(res, [
     ["message_start", { message: { id: "msg_2", model: payload.model, usage: { input_tokens: 30 } } }],
     ...text(
-      `ANTHROPIC|sys:${String(payload.system || "").includes("今日") ? "yes" : "no"}|think:${thought?.signature === "sig-1" ? "yes" : "no"}|tools:${(payload.tools || []).length}|schema:${payload.tools?.[0]?.input_schema ? "yes" : "no"}|result:${String(results.at(-1).content).replace(/\s+/g, " ").slice(0, 30)}`
+      `ANTHROPIC|sys:${(Array.isArray(payload.system) ? payload.system.map(b => b.text).join("") : String(payload.system || "")).includes("今日") ? "yes" : "no"}|think:${thought?.signature === "sig-1" ? "yes" : "no"}|tools:${(payload.tools || []).length}|schema:${payload.tools?.[0]?.input_schema ? "yes" : "no"}|result:${String(results.at(-1).content).replace(/\s+/g, " ").slice(0, 30)}`
     ),
     ["message_delta", { delta: { stop_reason: "end_turn" }, usage: { output_tokens: 11 } }],
     ["message_stop", {}]
