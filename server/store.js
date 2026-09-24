@@ -3,7 +3,8 @@
 //   卷宗/      模型写出的成品与用户收进来的文件（见 server/work.js 的卷宗接口）
 //   附件/      对话里附件的原件，一件一个原件加一份元数据（见 server/files.js）
 //   配置.json  设置、模型配置（含 API Key）、记忆、浏览器内卷宗与草稿——几个浏览器共用这一份，不再各存一套
-// 在设置里换了位置，整份拷到新处，旧处的 ~/.yan/位置.json 写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
+// 在设置里换了位置，整份拷到新处，%APPDATA%\言\位置.json 写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
+// 条子不放在 ~/.yan 里：旧处是叫人自行删去的，条子若在里头，删了旧数据也就删了条子，下次开又回到默认处。
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
 // 由 server.js 装配：require("./server/store.js")({ sendJson, readJson })
 "use strict";
@@ -13,19 +14,38 @@ const os = require("node:os");
 
 module.exports = function createStore({ sendJson, readJson }) {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
-    POINTER = path.join(HOME_ROOT, "位置.json"),
+    POINTER = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "言", "位置.json"),
+    // 旧版把条子放在默认根里；读到了就搬到 POINTER 去
+    LEGACY_POINTER = path.join(HOME_ROOT, "位置.json"),
     CONFIG_FILE = "配置.json",
     // 旧版的默认位置：~/言/对话 与 ~/言/卷宗。头一回开新版时从这里（以及页面报来的自定义目录）拷进来
     LEGACY_CHATS = path.join(os.homedir(), "言", "对话"),
     LEGACY_ARCHIVE = path.join(os.homedir(), "言", "卷宗");
   const expand = value => String(value || "").replace(/^~(?=$|[\\/])/, os.homedir());
+  function readPointer(file) {
+    try {
+      const pointed = JSON.parse(fs.readFileSync(file, "utf8"))?.root;
+      return pointed && path.isAbsolute(pointed) ? path.resolve(pointed) : "";
+    } catch {
+      return "";
+    }
+  }
+  function writePointer(target) {
+    fs.rmSync(LEGACY_POINTER, { force: true });
+    if (target.toLowerCase() === HOME_ROOT.toLowerCase()) return fs.rmSync(POINTER, { force: true });
+    fs.mkdirSync(path.dirname(POINTER), { recursive: true });
+    writeAtomic(POINTER, JSON.stringify({ 言: "位置", root: target }, null, 1));
+  }
   function initialRoot() {
     if (process.env.YAN_HOME) return path.resolve(expand(process.env.YAN_HOME));
-    try {
-      const pointed = JSON.parse(fs.readFileSync(POINTER, "utf8"))?.root;
-      if (pointed && path.isAbsolute(pointed)) return path.resolve(pointed);
-    } catch {}
-    return HOME_ROOT;
+    const pointed = readPointer(POINTER);
+    if (pointed) return pointed;
+    const legacy = readPointer(LEGACY_POINTER);
+    if (legacy)
+      try {
+        writePointer(legacy);
+      } catch {}
+    return legacy || HOME_ROOT;
   }
   let root = initialRoot();
   const paths = () => ({
@@ -126,7 +146,7 @@ module.exports = function createStore({ sendJson, readJson }) {
     }
   }
   // 换位置：parent 下的 .yan 就是新根。那里已有言的数据（另一台机器拷来的、先前搬过去的）就直接用它；
-  // 否则把整份拷过去。旧处原样留着，~/.yan/位置.json 记下新根，桥接重启后也认得
+  // 否则把整份拷过去。旧处原样留着（可自行删去），%APPDATA%\言\位置.json 记下新根，桥接重启后也认得
   async function handleMove(req, res) {
     try {
       const body = await readJson(req),
@@ -142,11 +162,7 @@ module.exports = function createStore({ sendJson, readJson }) {
       const previous = root;
       root = next;
       ensureRoot();
-      if (!process.env.YAN_HOME) {
-        fs.mkdirSync(HOME_ROOT, { recursive: true });
-        if (root.toLowerCase() === HOME_ROOT.toLowerCase()) fs.rmSync(POINTER, { force: true });
-        else writeAtomic(POINTER, JSON.stringify({ 言: "位置", root }, null, 1));
-      }
+      if (!process.env.YAN_HOME) writePointer(root);
       sendJson(res, 200, { ...describe(), moved: true, adopted: existing, previous });
     } catch (error) {
       sendJson(res, 400, { error: `存储位置未能更换：${String(error.message || error).slice(0, 200)}` });

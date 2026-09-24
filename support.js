@@ -810,6 +810,12 @@ const STORE_ROOT_KEY = "yan-store-root";
 async function syncConfigWithDisk() {
   if (apiBase === null) return;
   const info = bootstrap.store || {};
+  let met = "";
+  try {
+    met = localStorage.getItem(STORE_ROOT_KEY) || "";
+  } catch {}
+  // 桥接落在一个全新的根上，这台浏览器上回用的却是别处：多半是记位置的条子没了，说一声，免得以为数据丢了
+  const strayed = info.fresh && met && met.toLowerCase() !== String(info.root || "").toLowerCase();
   try {
     // 根头一回立起来，或这台浏览器还记着旧版自己的对话 / 卷宗目录（另一个浏览器先立了根）：把旧的拷进来，只补缺的、不覆盖
     if (info.fresh || store.settings.chatsDir || store.settings.archiveDir) {
@@ -822,10 +828,6 @@ async function syncConfigWithDisk() {
       if (moved.chats || moved.archive) toast(`旧的对话与卷宗已拷进 ${pathTail(info.root || "")}；旧处原样留着`);
     }
     const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
-    let met = "";
-    try {
-      met = localStorage.getItem(STORE_ROOT_KEY) || "";
-    } catch {}
     delete store.settings.chatsDir;
     delete store.settings.archiveDir;
     restoreConfigBase();
@@ -844,6 +846,7 @@ async function syncConfigWithDisk() {
     try {
       localStorage.setItem(STORE_ROOT_KEY, info.root || "");
     } catch {}
+    if (strayed) toast(`存储落在了 ${pathTail(info.root || "")}，上回用的是 ${met}；在设置 → 通用的「存储位置」填回去即可`, 8000);
   } catch (error) {
     toast(`配置未能与存储目录对齐：${String(error.message || error).slice(0, 60)}`);
   }
@@ -1532,12 +1535,12 @@ function dayBucket(value) {
   const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(value).setHours(0, 0, 0, 0)) / 86400000);
   return days <= 0 ? "今天" : days < 7 ? "过去七天" : "更早";
 }
-function toast(message) {
+function toast(message, ms = 2200) {
   const el = $("#toast");
   el.textContent = message;
   showNow(el);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => hideWithFade(el), 2200);
+  toastTimer = setTimeout(() => hideWithFade(el), ms);
 }
 function setConnection(state, text) {
   $("#connection").dataset.state = state;
@@ -11526,8 +11529,17 @@ async function exportConversationMarkdown(c) {
 // 把 OpenAI 格式的请求换成 Messages API 的，再把它的事件流换回 OpenAI 风格的 SSE 分块，其余代码一字不动。
 // 这一段两处跑：浏览器里随 support.js 拼进闭包（直连时用），桥接里由 server.js require（经桥接时用）；不能碰 DOM
 const ANTHROPIC_VERSION = "2023-06-01";
-// 思考档位换成思考预算（token）；预算得小于 max_tokens，不够就把 max_tokens 抬上去
+// 老模型（4.5 及以前、Haiku、认不出型号的）：思考档位换成思考预算（token）；预算得小于 max_tokens，不够就把 max_tokens 抬上去
 const ANTHROPIC_BUDGETS = { minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 32768, max: 65536 };
+// 模型代际：4.6 起思考改为 adaptive、深浅由 effort 定（预算在 4.7 起一律 400）；4.7 起不收 temperature（也是 400），
+// 思绪默认不回、要明说 summarized；5 起不带 thinking 也照样在想。认不出型号的按老模型走
+function anthropicGeneration(model) {
+  const m = String(model || "")
+    .toLowerCase()
+    .match(/claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d)(?!\d))?/);
+  const version = m ? Number(m[2]) + Number(m[3] || 0) / 10 : 0;
+  return { adaptive: !!m && m[1] !== "haiku" && version >= 4.6, noSampling: version >= 4.7, thinksByDefault: version >= 5, version };
+}
 // 是不是 Anthropic 的接口：模型上明说的优先，没说就看地址
 function anthropicLike(profile) {
   const api = String(profile?.api || "").toLowerCase();
@@ -11619,19 +11631,31 @@ function anthropicRequest(payload) {
       push("user", [{ type: "tool_result", tool_use_id: message.tool_call_id, content: String(message.content ?? "") }]);
   }
   if (!messages.length || messages[0].role !== "user") messages.unshift({ role: "user", content: [{ type: "text", text: "（接上文）" }] });
-  const level = String(payload.reasoning_effort || "").toLowerCase(),
-    budget = level && level !== "none" && level !== "off" ? ANTHROPIC_BUDGETS[level] || 8192 : 0;
-  const maxTokens = Math.max(16, Number(payload.max_tokens) || 32000);
-  const body = {
-    model: payload.model,
-    max_tokens: budget ? Math.max(maxTokens, budget + 4096) : maxTokens,
-    messages,
-    stream: true
-  };
-  if (system.length) body.system = system.join("\n\n");
-  // 开了思考 temperature 只能是 1：不传
-  if (budget) body.thinking = { type: "enabled", budget_tokens: budget };
-  else if (payload.temperature !== undefined) body.temperature = Math.max(0, Math.min(1, Number(payload.temperature)));
+  const raw = String(payload.reasoning_effort || "").toLowerCase(),
+    level = raw && raw !== "none" && raw !== "off" ? raw : "",
+    generation = anthropicGeneration(payload.model),
+    maxTokens = Math.max(16, Number(payload.max_tokens) || 32000);
+  const body = { model: payload.model, max_tokens: maxTokens, messages, stream: true };
+  // 提示缓存：系统提示末尾一处（工具定义连同系统提示，最稳的一段），整段对话最后一块一处（下一轮开口时此前的往来都从缓存读）。
+  // 太短的前缀不缓存也不报错；思考块上不能放标记，往前找
+  if (system.length) body.system = [{ type: "text", text: system.join("\n\n"), cache_control: { type: "ephemeral" } }];
+  const tail = [...messages.at(-1).content].reverse().find(block => block.type !== "thinking" && block.type !== "redacted_thinking");
+  if (tail) tail.cache_control = { type: "ephemeral" };
+  if (generation.adaptive) {
+    if (level || generation.thinksByDefault)
+      body.thinking = { type: "adaptive", ...(generation.noSampling ? { display: "summarized" } : {}) };
+    // effort 只认 low…max；4.6 还没有 xhigh
+    if (level) body.output_config = { effort: level === "minimal" ? "low" : level === "xhigh" && !generation.noSampling ? "high" : level };
+    if (!generation.noSampling && !body.thinking && payload.temperature !== undefined)
+      body.temperature = Math.max(0, Math.min(1, Number(payload.temperature)));
+  } else {
+    const budget = level ? ANTHROPIC_BUDGETS[level] || 8192 : 0;
+    // 开了思考 temperature 只能是 1：不传
+    if (budget) {
+      body.thinking = { type: "enabled", budget_tokens: budget };
+      body.max_tokens = Math.max(maxTokens, budget + 4096);
+    } else if (payload.temperature !== undefined) body.temperature = Math.max(0, Math.min(1, Number(payload.temperature)));
+  }
   if (Array.isArray(payload.tools) && payload.tools.length)
     body.tools = payload.tools.map(tool => ({
       name: tool.function?.name || "",

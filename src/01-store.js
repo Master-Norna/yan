@@ -422,6 +422,12 @@ const STORE_ROOT_KEY = "yan-store-root";
 async function syncConfigWithDisk() {
   if (apiBase === null) return;
   const info = bootstrap.store || {};
+  let met = "";
+  try {
+    met = localStorage.getItem(STORE_ROOT_KEY) || "";
+  } catch {}
+  // 桥接落在一个全新的根上，这台浏览器上回用的却是别处：多半是记位置的条子没了，说一声，免得以为数据丢了
+  const strayed = info.fresh && met && met.toLowerCase() !== String(info.root || "").toLowerCase();
   try {
     // 根头一回立起来，或这台浏览器还记着旧版自己的对话 / 卷宗目录（另一个浏览器先立了根）：把旧的拷进来，只补缺的、不覆盖
     if (info.fresh || store.settings.chatsDir || store.settings.archiveDir) {
@@ -434,10 +440,6 @@ async function syncConfigWithDisk() {
       if (moved.chats || moved.archive) toast(`旧的对话与卷宗已拷进 ${pathTail(info.root || "")}；旧处原样留着`);
     }
     const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
-    let met = "";
-    try {
-      met = localStorage.getItem(STORE_ROOT_KEY) || "";
-    } catch {}
     delete store.settings.chatsDir;
     delete store.settings.archiveDir;
     restoreConfigBase();
@@ -456,6 +458,7 @@ async function syncConfigWithDisk() {
     try {
       localStorage.setItem(STORE_ROOT_KEY, info.root || "");
     } catch {}
+    if (strayed) toast(`存储落在了 ${pathTail(info.root || "")}，上回用的是 ${met}；在设置 → 通用的「存储位置」填回去即可`, 8000);
   } catch (error) {
     toast(`配置未能与存储目录对齐：${String(error.message || error).slice(0, 60)}`);
   }

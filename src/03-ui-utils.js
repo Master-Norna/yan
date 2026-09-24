@@ -28,12 +28,12 @@ function dayBucket(value) {
   const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(value).setHours(0, 0, 0, 0)) / 86400000);
   return days <= 0 ? "今天" : days < 7 ? "过去七天" : "更早";
 }
-function toast(message) {
+function toast(message, ms = 2200) {
   const el = $("#toast");
   el.textContent = message;
   showNow(el);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => hideWithFade(el), 2200);
+  toastTimer = setTimeout(() => hideWithFade(el), ms);
 }
 function setConnection(state, text) {
   $("#connection").dataset.state = state;
