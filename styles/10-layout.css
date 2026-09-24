@@ -193,12 +193,13 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   font: 10.5px var(--title);
   letter-spacing: 0.16em;
 }
-/* 「工」组：绑了同一目录的对话归在一起，头一行是印 + 目录名 + 件数，点了收起 / 展开，右侧「＋」在此目录另起一纸 */
+/* 「工」组：绑了同一目录的对话归在一起，头一行是印 + 目录名 + 件数，点了收起 / 展开，右侧「＋」在此目录另起一纸。
+   组不衬底，印下垂一道由浓到淡的朱线，线有多长组就有多大；每段对话之间一道弱分隔，组内组外一样。
+   落选的：组衬一层亮纸（单独的对话与成块的组并排，一块一块的突兀）；只铺底、没有线（原先那层 paper-3 的四成，几乎看不出）；
+   左缘朱边的签条（太重）；虚线针脚（碎） */
 .history-repo-group {
-  margin: 2px 0 6px;
-  padding: 3px 0 3px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--paper-3) 40%, transparent);
+  margin: 2px 0 4px;
+  padding: 2px 0 2px;
 }
 .history-repo-head {
   position: relative;
@@ -274,7 +275,23 @@ button.history-repo:hover .history-repo-name {
   opacity: 1;
 }
 .history-repo-items {
-  padding: 0 3px 0 6px;
+  position: relative;
+  padding: 0 3px 0 22px;
+}
+.history-repo-items:before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: -3px;
+  bottom: 6px;
+  width: 1.5px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 70%, transparent),
+    color-mix(in srgb, var(--accent) 16%, transparent)
+  );
+  pointer-events: none;
 }
 /* 组内的对话不再各自打「行」印，组头的「工」已说明 */
 .history-repo-items .history-item.is-work .history-open:before {
@@ -289,6 +306,21 @@ button.history-repo:hover .history-repo-name {
   align-items: center;
   border-radius: 9px;
   margin: 1px 0;
+}
+.history-item:after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: -1px;
+  height: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+.history-item:last-child:after,
+.history-item.active:after,
+.history-item:hover:after {
+  display: none;
 }
 .history-item.active,
 .history-item:hover {
@@ -381,9 +413,17 @@ button.history-repo:hover .history-repo-name {
   color: var(--ink-2);
   font-size: 12px;
 }
+.settings-open .gear-wrap {
+  display: grid;
+  padding-right: 10px;
+}
 .settings-open .gear {
-  padding-right: 12px;
-  color: var(--ink-3);
+  width: 17px;
+  height: 17px;
+  stroke: var(--ink-3);
+}
+.settings-open:hover .gear {
+  stroke: var(--ink-2);
 }
 .avatar {
   width: 25px;

@@ -88,28 +88,37 @@ input[type="number"]::-webkit-outer-spin-button {
   --body: "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif;
   --title: "Noto Serif SC", "Songti SC", "STSong", serif;
 }
-.rail-icon .archive-seal {
-  width: 19px;
-  height: 19px;
-  display: grid;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  color: var(--ink-2);
-  font: 500 11px/1 var(--title);
-  transform: rotate(-2deg);
+/* 线稿图标：与查找的放大镜同一笔性（1.3 笔、圆头），纸色衬底，一处点朱。卷宗是展开的一段手卷（墨线的轴，只四个轴头点朱，纸面一道天头），设置是三道弦上的码子。
+   落选的：卷宗一个「卷」字小印（与「工」印混在一处，认不出是入口）；两端实心朱轴的手卷（偏卡通）；半卷、挂轴、线装书、书函、一摞文书；设置的齿轮（⚙ 字符各平台字形不一，线稿的轮在 17px 下糊） */
+.line-icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transition:
-    color 0.16s,
-    transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1),
-    background-color 0.2s;
+    stroke 0.16s,
+    transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-.library-open:hover .archive-seal,
-.library-open.active .archive-seal {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+.line-icon .icon-paper {
+  fill: var(--paper);
 }
-.library-open:hover .archive-seal {
-  transform: translateY(-1px) rotate(0);
+.line-icon .icon-cap {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+}
+.line-icon .icon-zhu {
+  fill: color-mix(in srgb, var(--accent) 16%, var(--paper));
+  stroke: var(--accent);
+}
+.library-open:hover .archive-icon,
+.library-open.active .archive-icon {
+  stroke: var(--ink);
+}
+.library-open:hover .archive-icon {
+  transform: translateY(-1px);
 }
 :root {
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .085 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
