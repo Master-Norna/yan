@@ -1,5 +1,6 @@
 // 桥接安全检查：Origin 门禁、工作目录必须完整限定、链接不能越出工作目录；卷宗接口不能越出卷宗目录、网页按纯文本给；沙箱在桥接这头守
 import { mkdirSync, writeFileSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import http from "node:http";
 const PORT = Number(process.env.YAN_PORT || 8797),
   BASE = `http://127.0.0.1:${PORT}`;
 import { TMP } from "./lib.mjs";
@@ -504,6 +505,27 @@ check("screen: a harmless command passes", r.status === 200 && r.data.why === nu
     r.status === 200 && r.data.savedAt === 42 && r.data.config?.profiles?.[0]?.apiKey === "k",
     JSON.stringify(r.data)
   );
+}
+// ---- 只认发往本机地址的请求：DNS 重绑定过来的（Host 是别的域名）一律不理；别的网站连模型转发也不能借道
+{
+  const status = await new Promise(resolve => {
+    const request = http.request(
+      { host: "127.0.0.1", port: PORT, path: "/api/bootstrap", headers: { Host: `evil.example:${PORT}` } },
+      response => {
+        response.resume();
+        resolve(response.statusCode);
+      }
+    );
+    request.on("error", () => resolve(0));
+    request.end();
+  });
+  check("a request addressed to another host name is refused (DNS rebinding)", status === 421, String(status));
+  r = await post(
+    "/api/chat",
+    { profile: { baseUrl: "http://192.168.1.1/v1", model: "x" }, messages: [{ role: "user", content: "x" }] },
+    { Origin: "https://evil.example" }
+  );
+  check("other websites cannot relay through the model endpoint", r.status === 403, String(r.status));
 }
 rmSync(ARCHIVE, { recursive: true, force: true });
 rmSync(WORK, { recursive: true, force: true });

@@ -50,14 +50,25 @@ function securityHeaders(req, res) {
       : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
   );
 }
-function corsHeaders(req, res) {
-  const origin = req.headers.origin;
-  const allowed =
+// 能调桥接的页面：本机的（file:// 预览的来源是 "null"）与 VS Code Webview。别的网站连模型转发、列模型也不许借道——
+// 那等于让任意网页经桥接往局域网里发请求
+function allowedOrigin(origin) {
+  return (
     origin === "null" ||
     /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin || "") ||
     /^vscode-webview:\/\//i.test(origin || "") ||
-    /^https:\/\/[a-z0-9-]+\.(vscode-cdn|vscode-webview)\.net$/i.test(origin || "");
-  if (!allowed) return;
+    /^https:\/\/[a-z0-9-]+\.(vscode-cdn|vscode-webview)\.net$/i.test(origin || "")
+  );
+}
+// Host 头只认本机的这个端口：防 DNS 重绑定——恶意域名解析到 127.0.0.1 后，它的页面对桥接发的是「同源」请求，GET 不带 Origin，
+// 只看 Origin 就会被当成本机脚本放行（卷宗的取件接口能读到任意路径）
+function trustedHost(req) {
+  const host = String(req.headers.host || "").toLowerCase();
+  return host === `127.0.0.1:${PORT}` || host === `localhost:${PORT}`;
+}
+function corsHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (!allowedOrigin(origin)) return;
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -800,7 +811,13 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     securityHeaders(req, res);
+    if (!trustedHost(req)) {
+      res.writeHead(421, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("只受理发往本机桥接地址的请求");
+    }
     const urlPath = new URL(req.url, `http://${HOST}`).pathname;
+    if (urlPath.startsWith("/api/") && req.headers.origin && !allowedOrigin(req.headers.origin))
+      return sendJson(res, 403, { error: "此页面无权调用本机桥接" });
     // 能打到本机服务的接口（执事、卷宗、对话目录、http_request）只受理本站页面与 VS Code Webview
     if (
       (urlPath.startsWith("/api/work/") ||
