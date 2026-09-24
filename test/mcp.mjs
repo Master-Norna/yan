@@ -88,40 +88,69 @@ check(
   `${trail} ${steps}`
 );
 
-// 设置 → MCP：三个服务的状态、停用一个、粘错了的配置不收
+// 设置 → MCP：一服务一张卡；停用、表单新增、以 JSON 改（密钥遮着、原样存回沿用原值）、粘错了的不收、旧式 SSE 自动退回
+const card = name => `document.querySelector('#mcpList [data-mcp="${name}"]')`;
+const setJson = text => `document.querySelector("#mcpConfig").value = ${text}; document.querySelector("#mcpJsonSave").click(); true`;
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await waitFor(`!document.querySelector("#settingsModal").classList.contains("hidden")`);
 await evalJs(`document.querySelector('.tab-btn[data-tab="mcp"]').click(); true`);
-await waitFor(`document.querySelectorAll("#mcpStatus .mcp-row").length === 3`);
-const rows = await evalJs(`[...document.querySelectorAll("#mcpStatus .mcp-row")].map(r => r.textContent).join(" | ")`);
+await waitFor(`document.querySelectorAll("#mcpList [data-mcp]").length === 3`);
+const rows = await evalJs(`[...document.querySelectorAll("#mcpList [data-mcp] .card-head")].map(r => r.textContent).join(" | ")`);
 check(
-  "settings list each server with its tool count and how it is handed over",
-  /local2 件工具 · 逐件/.test(rows) && /big42 件工具 · 按需/.test(rows) && /web2 件工具 · 逐件/.test(rows),
+  "each server is a card with its tool count and how it is handed over",
+  /local本机2 件工具 · 逐件给/.test(rows) && /big本机42 件工具 · 按需给/.test(rows) && /web远端2 件工具 · 逐件给/.test(rows),
   rows
 );
-await evalJs(`document.querySelector('[data-mcp="local"] [data-mcp-action="toggle"]').click(); true`);
-await waitFor(`/已停用/.test(document.querySelector('[data-mcp="local"]').textContent)`);
-const disabled = await evalJs(
-  `__yanState().settings.mcpServers.local.disabled === true && /"disabled": true/.test(document.querySelector("#mcpConfig").value)`
-);
-check("disabling a server is written into its config and shown in the editor", disabled);
+await evalJs(`${card("local")}.querySelector('[data-mcp-action="toggle"]').click(); true`);
+await waitFor(`/已停用/.test(${card("local")}.textContent)`);
+check("disabling a server is written into its config", await evalJs(`__yanState().settings.mcpServers.local.disabled === true`));
+// 表单新增：本机程序，命令与参数一行一个
+await evalJs(`document.querySelector("#mcpAdd").click(); true`);
 await evalJs(
-  `document.querySelector("#mcpConfig").value = '{"mcpServers": {"bad": {"args": []}}}'; document.querySelector("#mcpSave").click(); true`
+  `(f => { f.querySelector('[data-f="name"]').value = "formed"; f.querySelector('[data-f="command"]').value = ${JSON.stringify(process.execPath)}; f.querySelector('[data-f="args"]').value = ${JSON.stringify(FAKE)}; f.querySelector('[data-f="env"]').value = "API_TOKEN=tok-XYZ\\nLEVEL=info"; f.querySelector('[data-mcp-form="save"]').click(); })(document.querySelector('#mcpList [data-mcp-edit=""]')); true`
 );
+await waitFor(`/2 件工具/.test(${card("formed")}?.textContent || "")`, 30000);
+check(
+  "a server added through the form is saved and connected",
+  await evalJs(`(c => c.command && c.args.length === 1 && c.env.API_TOKEN === "tok-XYZ")(__yanState().settings.mcpServers.formed)`)
+);
+// JSON：像密钥的值遮着；原样存回，原值不丢
+await evalJs(`document.querySelector("#mcpJson").click(); true`);
+const shown = await evalJs(`document.querySelector("#mcpConfig").value`);
+check(
+  "secrets are masked in the JSON editor, other values shown",
+  !/tok-XYZ/.test(shown) && /已隐藏/.test(shown) && /"LEVEL": "info"/.test(shown),
+  shown.slice(0, 300)
+);
+await evalJs(`document.querySelector("#mcpJsonSave").click(); true`);
+await sleep(300);
+check(
+  "saving the masked JSON keeps the original secret",
+  await evalJs(`__yanState().settings.mcpServers.formed.env.API_TOKEN === "tok-XYZ"`)
+);
+await evalJs(setJson(`'{"mcpServers": {"bad": {"args": []}}}'`));
 const error = await evalJs(`document.querySelector("#mcpError").textContent`);
 check("a config without command or url is refused with a reason", /bad.*command.*url/.test(error), error);
 // 粘进来的若只是里面那一层（不带 mcpServers 外壳）也收
-await evalJs(
-  `document.querySelector("#mcpConfig").value = JSON.stringify({ solo: { command: ${JSON.stringify(process.execPath)}, args: [${JSON.stringify(FAKE)}] } }); document.querySelector("#mcpSave").click(); true`
-);
-await waitFor(`/2 件工具/.test(document.querySelector('[data-mcp="solo"]')?.textContent || "")`, 30000);
+await evalJs(setJson(`JSON.stringify({ solo: { command: ${JSON.stringify(process.execPath)}, args: [${JSON.stringify(FAKE)}] } })`));
+await waitFor(`/2 件工具/.test(${card("solo")}?.textContent || "")`, 30000);
 check("a bare server map (no mcpServers wrapper) is accepted and connected", true);
 // 只写了 url 的旧式 SSE 服务：新式握手被拒（405），自动退回 SSE 再连
-await evalJs(
-  `document.querySelector("#mcpConfig").value = JSON.stringify({ legacy: { url: "http://127.0.0.1:${SSE_PORT}/sse" } }); document.querySelector("#mcpSave").click(); true`
-);
-await waitFor(`/2 件工具|连不上/.test(document.querySelector('[data-mcp="legacy"]')?.textContent || "")`, 30000);
-const legacy = await evalJs(`document.querySelector('[data-mcp="legacy"]').textContent`);
+await evalJs(setJson(`JSON.stringify({ legacy: { url: "http://127.0.0.1:${SSE_PORT}/sse" } })`));
+await waitFor(`/2 件工具|连不上/.test(${card("legacy")}?.textContent || "")`, 30000);
+const legacy = await evalJs(`${card("legacy")}.textContent`);
 check("a url-only legacy SSE server is reached by falling back from streamable HTTP", /2 件工具/.test(legacy), legacy);
+// 环境页：列出工具包，Python 是底、勾着且不能取消；点一张就记进设置
+await evalJs(`document.querySelector('.tab-btn[data-tab="env"]').click(); true`);
+await waitFor(`document.querySelectorAll("#envPacks [data-env-pack]").length > 3`, 15000);
+const envPage = await evalJs(
+  `({ base: document.querySelector('[data-env-pack="python"]').getAttribute("aria-disabled"), status: document.querySelector("#envStatus .card-name").textContent })`
+);
+await evalJs(`document.querySelector('[data-env-pack="image"]').click(); true`);
+check(
+  "env page lists the packs (Python as the fixed base); picking one is saved",
+  envPage.base === "true" && envPage.status === "尚未准备" && (await evalJs(`__yanState().settings.env.packs.includes("image")`)),
+  JSON.stringify(envPage)
+);
 await close();
 process.exit(0);

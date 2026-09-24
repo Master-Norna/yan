@@ -528,6 +528,8 @@
 }
 .danger-btn,
 .outline-btn {
+  flex: none;
+  white-space: nowrap;
   padding: 7px 11px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -588,6 +590,9 @@
   margin-top: 12px;
 }
 .profile-status {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
   margin-left: auto;
   color: var(--ink-3);
   font-size: 11px;
@@ -599,6 +604,7 @@
   background: var(--paper-2);
 }
 .segmented button {
+  white-space: nowrap;
   min-width: 62px;
   padding: 6px 9px;
   border-radius: 7px;
@@ -680,45 +686,193 @@
   white-space: nowrap;
 }
 
-/* 设置 → MCP：各服务一行状态，下面是整份配置 */
-.mcp-list {
+/* 设置里的卡片列表：MCP 的各个服务、环境的各组工具。一张卡一行头（名、标签、状态、动作），下面一行说明，可展开细目或就地改 */
+.card-list {
   display: grid;
-  gap: 6px;
-  margin: 14px 0 16px;
+  /* 格子默认不肯比里面最长的一行字窄：卡里一长串包名、路径会把整张卡撑出面板 */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 14px 0 12px;
 }
-.mcp-row {
+.card {
+  box-sizing: border-box;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: border-color 0.2s;
+}
+.card-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  gap: 8px;
+  min-width: 0;
 }
-.mcp-name {
-  font-weight: 500;
+.card-name {
+  font: 500 14px var(--title);
   color: var(--ink);
 }
-.mcp-state {
+.card-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  color: var(--ink-3);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.card-state {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.mcp-state.err {
+.card-state.ok {
+  color: var(--ink-2);
+}
+.card-state.err {
   color: var(--danger);
 }
-.mcp-state.off {
-  color: var(--ink-3);
+.card-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
 }
-.mcp-empty {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: 13px;
+.card-actions .outline-btn {
+  padding: 4px 9px;
 }
-.mcp-editor {
+.card-sub {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.card-more {
+  margin-top: 6px;
+}
+.card-more > summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 11px;
+  list-style: none;
+}
+.card-more > summary::-webkit-details-marker {
+  display: none;
+}
+.card-more > summary::before {
+  content: "▸ ";
+}
+.card-more[open] > summary::before {
+  content: "▾ ";
+}
+.card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+.card-chips span {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.card-chips small {
+  margin-left: 4px;
+  color: var(--ink-3);
+  font-family: var(--body);
+}
+.card.editing {
+  border-color: var(--ink-3);
+}
+.card .profile-grid {
+  margin-top: 4px;
+}
+.card-form-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+}
+.card-form-foot .danger-btn {
+  margin-left: auto;
+}
+.card-error {
+  color: var(--danger);
+  font-size: 11px;
+}
+.card-foot {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+/* 可勾选的卡：整张可点，左边一枚勾 */
+.card.pickable {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.card.pickable:hover {
+  border-color: var(--ink-3);
+}
+.card.pickable[aria-disabled="true"] {
+  cursor: default;
+}
+.card-tick {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1px solid var(--ink-3);
+  border-radius: 4px;
+}
+.card.pickable[aria-checked="true"] .card-tick {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--paper);
+}
+.card-body {
+  flex: 1;
+  min-width: 0;
+}
+.card-body > span {
+  display: block;
+}
+.card-body > .card-head {
+  display: flex;
+}
+.card-note {
+  margin-top: 3px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.json-box {
+  margin-bottom: 14px;
+}
+.json-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.json-editor {
   width: 100%;
   min-height: 220px;
   box-sizing: border-box;
@@ -727,19 +881,34 @@
   font-size: 12px;
   line-height: 1.6;
 }
-.mcp-foot {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-}
-.mcp-error {
-  color: var(--danger);
-  font-size: 12px;
-}
-.mcp-note {
+.settings-note {
   margin-top: 14px;
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-size: 12px;
   line-height: 1.8;
+}
+.settings-sub {
+  margin: 22px 0 0;
+  color: var(--ink-2);
+  font: 500 13px var(--title);
+}
+/* 环境：状态一张卡，准备中时下面滚着输出 */
+.env-log {
+  max-height: 180px;
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font:
+    11px/1.6 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.env-extra .field {
+  width: 150px;
 }
