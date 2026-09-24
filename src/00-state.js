@@ -3,7 +3,7 @@
 // ---------- 数据模型（JSDoc，供 tsc --checkJs 与编辑器；见 src/types.d.ts 的说明）----------
 // 存下来的东西只有这几种：Store 里挂着设置、模型、对话、卷宗（浏览器内的旧件）、记忆与草稿；对话里是消息，消息上挂步骤，步骤上可挂帮手
 /**
- * @typedef {Object} Attachment 附件的元数据；原件（data）另存 IndexedDB，只在读出时才带
+ * @typedef {Object} Attachment 附件的元数据；原件（data）另存存储根的 附件/（没桥接时暂存 IndexedDB），只在读出时才带
  * @property {string} id
  * @property {"image"|"text"|"file"} kind
  * @property {string} name
@@ -346,6 +346,8 @@ let metaRevision = 0,
 // 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store.js 开头的说明）
 let chatsBroken = false,
   chatsSyncing = false,
+  // 这一回开页后对话已从目录读全过：之后才敢按「没人用」清附件原件
+  chatsLoaded = false,
   freshBrowser = false,
   // 开页时浏览器里是一份没带版本标记的记录（更老的版本，或测试灌进来的）：与 配置.json 对齐时以它为准
   localSeeded = false,

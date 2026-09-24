@@ -1,6 +1,7 @@
 // 言 · 桥接的存储根：卷宗、对话、配置统一落在一个目录里，默认 ~/.yan/：
 //   对话/      一段对话一个 JSON 文件（见 server/chats.js）
 //   卷宗/      模型写出的成品与用户收进来的文件（见 server/work.js 的卷宗接口）
+//   附件/      对话里附件的原件，一件一个原件加一份元数据（见 server/files.js）
 //   配置.json  设置、模型配置（含 API Key）、记忆、浏览器内卷宗与草稿——几个浏览器共用这一份，不再各存一套
 // 在设置里换了位置，整份拷到新处，旧处的 ~/.yan/位置.json 写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
@@ -27,7 +28,13 @@ module.exports = function createStore({ sendJson, readJson }) {
     return HOME_ROOT;
   }
   let root = initialRoot();
-  const paths = () => ({ root, chats: path.join(root, "对话"), archive: path.join(root, "卷宗"), config: path.join(root, CONFIG_FILE) });
+  const paths = () => ({
+    root,
+    chats: path.join(root, "对话"),
+    archive: path.join(root, "卷宗"),
+    files: path.join(root, "附件"),
+    config: path.join(root, CONFIG_FILE)
+  });
   function ensureRoot() {
     const { chats, archive } = paths();
     fs.mkdirSync(chats, { recursive: true });

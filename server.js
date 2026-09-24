@@ -579,6 +579,7 @@ function handleBootstrap(req, res) {
       home: WORK.WORK_HOME,
       archive: STORE.paths().archive,
       chats: STORE.paths().chats,
+      files: STORE.paths().files,
       scratch: WORK.SCRATCH_DIR,
       platform: process.platform,
       shell: WORK.WORK_SHELL
@@ -703,6 +704,7 @@ const WORK = require("./server/work.js")({
   archiveHome: () => STORE.paths().archive
 });
 const CHATS = require("./server/chats.js")({ sendJson, readJson, chatsHome: () => STORE.paths().chats });
+const FILES = require("./server/files.js")({ sendJson, readJson, filesHome: () => STORE.paths().files });
 
 const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>此页不存在 · 言</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#fbfaf6;color:#292724;font-family:"Noto Serif SC","Songti SC","STSong",serif}@media(prefers-color-scheme:dark){body{background:#1e1c19;color:#e6e1d6}}main{text-align:center;letter-spacing:.06em}.seal{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #9b5540;color:#9b5540;font-size:18px;transform:rotate(-3deg)}h1{margin:18px 0 8px;font-weight:500;font-size:24px}p{margin:0 0 22px;opacity:.6;font-size:13px}a{color:#9b5540;text-decoration:none;font-size:13px;border-bottom:1px solid currentColor}</style></head><body><main><span class="seal">空</span><h1>此页不存在</h1><p>所寻之处并无一字</p><a href="/">回到案前</a></main></body></html>`;
 // 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
@@ -805,6 +807,7 @@ const server = http.createServer(async (req, res) => {
         urlPath.startsWith("/api/archive/") ||
         urlPath.startsWith("/api/chats/") ||
         urlPath.startsWith("/api/store/") ||
+        urlPath.startsWith("/api/files/") ||
         urlPath === "/api/http") &&
       !trustedWorkRequest(req)
     )
@@ -843,6 +846,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/store/config/save") return await STORE.handleConfigSave(req, res);
     if (req.method === "POST" && req.url === "/api/store/adopt") return await STORE.handleAdopt(req, res);
     if (req.method === "POST" && req.url === "/api/store/move") return await STORE.handleMove(req, res);
+    if (req.method === "POST" && req.url === "/api/files/put") return await FILES.handlePut(req, res);
+    if (req.method === "POST" && req.url === "/api/files/get") return await FILES.handleGet(req, res);
+    if (req.method === "POST" && req.url === "/api/files/has") return await FILES.handleHas(req, res);
+    if (req.method === "POST" && req.url === "/api/files/delete") return await FILES.handleDelete(req, res);
+    if (req.method === "POST" && req.url === "/api/files/clean") return await FILES.handleClean(req, res);
     if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/api/archive/file")
       return await WORK.handleArchiveFile(req, res, new URL(req.url, `http://${HOST}`).searchParams);
     if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res);

@@ -86,7 +86,8 @@ async function addFiles(fileList) {
       toast(`本次附件合计不超过 ${limitLabel(MAX_PENDING_BYTES)}`);
       break;
     }
-    if (attachmentUsage + file.size > MAX_ATTACHMENTS_BYTES) {
+    // 合计上限只管浏览器里的暂存；桥接在线时原件落在存储目录，不受它限
+    if (apiBase === null && attachmentUsage + file.size > MAX_ATTACHMENTS_BYTES) {
       toast(`卷宗与附件原件合计已达 ${limitLabel(MAX_ATTACHMENTS_BYTES)} 上限，请先清理`);
       break;
     }
@@ -333,7 +334,7 @@ async function saveToLibrary(id) {
       .flatMap(m => m.attachments || [])
       .find(file => file.id === id);
   const file = metadata && (await getAttachment(id));
-  if (!file) return toast("附件原件已不在此浏览器中");
+  if (!file) return toast("附件原件已找不到");
   if (archiveOnline()) {
     try {
       const saved = await putArchiveFile(metadata.name, file.kind === "text" ? dataUrlFromText(file.data, file.mime) : file.data);
@@ -480,7 +481,7 @@ async function viewerReader(source) {
     return { url: () => url, text: async () => (await fetched()).text(), blob: async () => (await fetched()).blob(), extracted: "" };
   }
   const file = await getAttachment(source.attachmentId);
-  if (!file) throw Error("附件原件已不在此浏览器中");
+  if (!file) throw Error("附件原件已找不到");
   const blob = file.kind === "text" ? new Blob([file.data], { type: file.mime || "text/plain" }) : await (await fetch(file.data)).blob();
   return {
     url: () => viewerBlobUrl(blob),
@@ -809,7 +810,7 @@ async function extractZipDocumentText(extension, bytes) {
 async function downloadAttachment(id) {
   try {
     const file = await getAttachment(id);
-    if (!file) return toast("附件原件已不在此浏览器中");
+    if (!file) return toast("附件原件已找不到");
     const anchor = document.createElement("a");
     let objectUrl = "";
     if (file.kind === "text") {

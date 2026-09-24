@@ -223,7 +223,7 @@ function aboutSettingsHtml() {
     `<div class="about-section"><h3>数据与边界</h3>${rows([
       [
         "存放",
-        "桥接在线时对话落在本机的对话目录（默认 ~/言/对话，可在通用设置更换；一段一个文件，复制即备份）；设置、模型配置与草稿存于此浏览器，并镜像一份到该目录（不含 API Key）。没桥接时对话暂存于浏览器的 IndexedDB；附件原件另存 IndexedDB。不经任何云端"
+        "桥接在线时一切落在本机的存储位置（默认 ~/.yan，可在通用设置更换）：对话/ 一段一个文件，卷宗/ 是成品与收进来的文件，附件/ 是附件原件，配置.json 是设置、模型配置（含 API Key）、记忆与草稿；复制整个目录即备份。没桥接时暂存于此浏览器，接上后推过去。不经任何云端"
       ],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
       ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
@@ -325,7 +325,7 @@ function bindSettingsEvents() {
       }
       if (!data.moved) return;
       bootstrap.store = { root: data.root, parent: data.parent, fresh: false };
-      bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive };
+      bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive, files: data.files };
       chatsBroken = false;
       chatHashes.clear();
       chatStamps.clear();

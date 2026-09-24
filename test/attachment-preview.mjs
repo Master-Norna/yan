@@ -1,5 +1,7 @@
 // 对话里发出去的附件：点开是看，不是下载——CSV 进预览器成表，Esc 关得掉；预览不了的（压缩包）才落到下载
-import { connect, check, sleep, PAGE } from "./lib.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { connect, check, sleep, PAGE, HOME } from "./lib.mjs";
+const FILES = `${HOME}/附件`;
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
@@ -40,6 +42,34 @@ check(
   "Esc closes the file preview and returns keyboard focus to its attachment",
   await evalJs(
     `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewerStage").innerHTML && document.activeElement === document.querySelector(".message.user .attachment-card.sent[data-open-attachment]")`
+  )
+);
+// 原件与对话一起落在存储根的 附件/：一个原件、一份元数据；浏览器的 IndexedDB 里不留
+const [csvId, zipId] = await evalJs(`__yanState().conversations[0].messages[0].attachments.map(a => a.id)`);
+check(
+  "attachment originals are written into the storage root, not the browser",
+  existsSync(`${FILES}/${csvId}.csv`) &&
+    readFileSync(`${FILES}/${csvId}.csv`, "utf8") === "a,b\n1,2\n3,4" &&
+    JSON.parse(readFileSync(`${FILES}/${csvId}.json`, "utf8")).name === "报表.csv" &&
+    existsSync(`${FILES}/${zipId}.zip`)
+);
+const idbKeys = `new Promise(r => { const q = indexedDB.open("yan-chat-files-v1", 1); q.onupgradeneeded = () => q.result.createObjectStore("attachments", { keyPath: "id" }); q.onsuccess = () => { const g = q.result.transaction("attachments", "readonly").objectStore("attachments").getAllKeys(); g.onsuccess = () => { q.result.close(); r(g.result); }; }; })`;
+check("nothing of it is kept in IndexedDB", (await evalJs(idbKeys)).length === 0);
+// 旧版留在浏览器里的原件：接上桥接、对话读全后推进 附件/，表里的清掉
+await evalJs(
+  `new Promise(r => { const q = indexedDB.open("yan-chat-files-v1", 1); q.onsuccess = () => { const t = q.result.transaction("attachments", "readwrite"); t.objectStore("attachments").put({ id: "legacy-att-1", kind: "text", name: "旧件.txt", mime: "text/plain", size: 9, data: "旧件之文" }); t.oncomplete = () => { q.result.close(); r(true); }; }; })`
+);
+await send("Page.navigate", { url: PAGE });
+await waitFor(`!!document.querySelector(".history [data-conversation]")`, 8000);
+await waitFor(`${idbKeys}.then(keys => keys.length === 0)`, 8000);
+check(
+  "a legacy original left in IndexedDB moves into the storage root after reconnecting",
+  existsSync(`${FILES}/legacy-att-1.txt`) && readFileSync(`${FILES}/legacy-att-1.txt`, "utf8") === "旧件之文"
+);
+check(
+  "after a reload the sent csv still previews, read back from the storage root",
+  await evalJs(
+    `(async () => { document.querySelector(".history [data-conversation]").click(); await new Promise(r => setTimeout(r, 400)); document.querySelector(".message.user .attachment-card.sent[data-open-attachment]").click(); for (let i = 0; i < 40 && !document.querySelector("#fileViewerStage .file-viewer-table td"); i++) await new Promise(r => setTimeout(r, 150)); return document.querySelectorAll("#fileViewerStage .file-viewer-table td").length === 4; })()`
   )
 );
 await close();

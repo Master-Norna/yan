@@ -92,9 +92,14 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
   /** @type {Array<Record<string, any>>} 多段内容：首段文字，其后图片与文件原件 */
   const content = [{ type: "text", text: quotedText(message) || "请查看附件。" }];
   for (const metadata of message.attachments) {
+    // 早先消息里的图片只留一行占位，用不着原件：不必每问都把它从存储目录整份取回来
+    if (!latest && metadata.kind === "image") {
+      content[0].text += `\n\n[图片：${metadata.name}，${formatFileSize(metadata.size)}，已在此前发送]`;
+      continue;
+    }
     const file = metadata.data !== undefined ? metadata : await getAttachment(metadata.id);
     if (!file) {
-      content[0].text += `\n\n[附件 ${metadata.name} 的原件在此浏览器中已不可用]`;
+      content[0].text += `\n\n[附件 ${metadata.name} 的原件已找不到]`;
       continue;
     }
     if (file.kind === "text") {
