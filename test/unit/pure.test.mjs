@@ -43,7 +43,9 @@ const f = load([
   "anthropicEndpoint",
   "anthropicLike",
   "PROMPTS",
-  "mergeConfig3"
+  "mergeConfig3",
+  "looksLikeMermaid",
+  "liftBareMermaid"
 ]);
 // 工具的 schema 在 prompts/tools.js 里（挂在 window.YAN_PROMPTS 上）；这里把它接进来，参数归位才有 schema 可查
 const { createRequire } = await import("node:module");
@@ -490,4 +492,16 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
   );
   // 草稿 x 我发出去了（删了）、它没动：删；y 它新写的：留
   assert.deepEqual(Object.keys(merged.drafts), ["y"]);
+});
+test("looksLikeMermaid / liftBareMermaid：写岔了的流程图照样认得，普通代码与别的 pre 不误伤", () => {
+  assert.equal(f.looksLikeMermaid("flowchart TD\n  A --> B"), true);
+  assert.equal(f.looksLikeMermaid("%% 注\ngraph LR;\n  A --> B"), true);
+  assert.equal(f.looksLikeMermaid("sequenceDiagram\n  A->>B: hi"), true);
+  assert.equal(f.looksLikeMermaid("graph = build()\nprint(graph)"), false);
+  assert.equal(f.looksLikeMermaid("pie = 3.14"), false);
+  const lifted = f.liftBareMermaid('前文\n<pre class="mermaid">\nflowchart TD\n  A --> B\n</pre>\n后文 <pre>别的</pre>');
+  assert.match(lifted, /```mermaid\n+flowchart TD\n {2}A --> B\n+```/);
+  assert.match(lifted, /后文 <pre>别的<\/pre>/);
+  const fenced = '```html\n<pre class="mermaid">graph TD\nA-->B</pre>\n```';
+  assert.equal(f.liftBareMermaid(fenced), fenced);
 });

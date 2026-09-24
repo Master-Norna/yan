@@ -86,17 +86,19 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
     if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("不是言的对话文件");
     return { id: String(conversation.id), savedAt: Number(data.savedAt) || 0, file: name, conversation };
   }
-  // 整个目录读回来。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
+  // 整个目录读回来（给了 ids 就只读那几段：别处正在作答的，这边跟着看进度）。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
   async function handleLoad(req, res) {
     let home = chatsHome();
     try {
       const body = await readJson(req);
       home = ensureDir(body.root);
       const items = [],
-        seen = new Map();
+        seen = new Map(),
+        wanted = Array.isArray(body.ids) ? body.ids.map(id => `·${codeOf(id)}.json`) : null;
       let skipped = 0;
       for (const name of fs.readdirSync(home)) {
         if (!name.endsWith(".json") || name === META_FILE || name === TOMBSTONE_FILE) continue;
+        if (wanted && !wanted.some(suffix => name.endsWith(suffix))) continue;
         try {
           const item = readConversationFile(home, name);
           // 同一段对话若留了两个文件（改名时旧的没删成），以较新的为准，旧的顺手清掉
@@ -158,5 +160,28 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
       sendJson(res, 400, { error: `对话未能删除：${describe(error)}` });
     }
   }
-  return { handleLoad, handleSave, handleDelete };
+  // 谁在作答：几个页面（两个浏览器、VS Code 与浏览器）同开同一个存储时，正在作答的页面每隔几秒来报一次它在跑哪几段对话，
+  // 别的页面借同一次报到得知哪些对话正在别处作答——那几段只看不动、跟着进度，开页时也不当成中断。
+  // 只记在内存里：桥接重启，作答的请求也断了，没什么可记；十五秒没来报到的（页面关了、崩了）就算松手
+  const LEASE_MS = 15000,
+    leases = new Map();
+  async function handleLease(req, res) {
+    try {
+      const body = await readJson(req),
+        owner = String(body.owner || "").slice(0, 80),
+        ids = (Array.isArray(body.ids) ? body.ids : []).map(String).slice(0, 200),
+        now = Date.now();
+      if (owner && ids.length) leases.set(owner, { ids, at: now });
+      else if (owner) leases.delete(owner);
+      const busy = new Set();
+      for (const [who, lease] of leases) {
+        if (now - lease.at > LEASE_MS) leases.delete(who);
+        else if (who !== owner) for (const id of lease.ids) busy.add(id);
+      }
+      sendJson(res, 200, { busy: [...busy] });
+    } catch (error) {
+      sendJson(res, 400, { error: String(error.message || error).slice(0, 200) });
+    }
+  }
+  return { handleLoad, handleSave, handleDelete, handleLease };
 };

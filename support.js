@@ -311,6 +311,8 @@ class JobMap extends Map {
   set(key, value) {
     super.set(key, value);
     holdAwake();
+    // 开工即报到，别处立刻知道这段在作答
+    void syncLeases();
     return this;
   }
   delete(key) {
@@ -324,6 +326,11 @@ class JobMap extends Map {
   }
 }
 const requestJobs = new JobMap();
+// 几个页面同开同一个存储时，谁在作答（见 01-store.js 的 syncLeases）：PAGE_ID 是这个页面的名号；
+// remoteBusy 是别处正在作答的对话；leaseHold 是这边作答过、最后一次存盘还没落地的对话——落了地才松手，别处读到的才是写完的
+const PAGE_ID = uid();
+const remoteBusy = new Set(),
+  leaseHold = new Set();
 /** @type {{ release: () => void }|null} */
 let awakeHold = null;
 function holdAwake() {
@@ -888,7 +895,8 @@ function nextChatStamp(id) {
 // 这样长对话不会为了最后几个字反复序列化；同一段正在写时也只留一个「再看一次最新状态」的记号。
 function flushConversations(ids, { force = false } = {}) {
   for (const id of ids) {
-    if (deletedChatIds.has(id) || !store.conversations.some(item => item.id === id)) continue;
+    // 别处正作答的不写：磁盘上那份由它写，这边只跟着看
+    if (deletedChatIds.has(id) || runningElsewhere(id) || !store.conversations.some(item => item.id === id)) continue;
     const queued = pendingChatWrites.get(id);
     pendingChatWrites.set(id, { force: force || !!queued?.force });
   }
@@ -1217,6 +1225,75 @@ async function syncChatsWithDisk() {
   } finally {
     chatsSyncing = false;
   }
+}
+// ---------- 几处页面同开：谁在作答 ----------
+// 两个浏览器、VS Code 与浏览器同开同一个存储时，各页只知道自己在跑什么：那边正作答的一段，这边刷新后读到的是磁盘上「生成中」的快照，
+// 从前会当成页面刷新而中断、写回磁盘，两边轮流互盖，这边再点「继续生成」就成了两处同写一条回复。
+// 现在每隔几秒向桥接报到一次：报的是这边正作答的（以及作答完、最后一次存盘还没落地的）对话，回来的是别处正作答的。
+// 别处正作答的那几段，这边只看不动：不当成中断、不存盘、不让发问与改动，每次报到顺带从磁盘读回最新进度；
+// 别处松了手（写完，或页面关了、崩了，十五秒没来报到），再读一回：还停在「生成中」的，才按中断处理
+let leasing = null;
+function syncLeases() {
+  if (apiBase === null || !chatsOnline()) return Promise.resolve();
+  if (leasing) return leasing;
+  // 正作答的都算上（旁注的作业按它所在的对话记）；作答完了、最后一次存盘也落了地的松手
+  const running = new Set([...requestJobs].map(([key, job]) => job.conversationId || key));
+  for (const id of running) leaseHold.add(id);
+  for (const id of [...leaseHold]) if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) leaseHold.delete(id);
+  leasing = bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold] }, AbortSignal.timeout(5000))
+    .then(async ({ busy = [] }) => {
+      const released = [...remoteBusy].filter(id => !busy.includes(id));
+      remoteBusy.clear();
+      for (const id of busy) remoteBusy.add(id);
+      const follow = [...remoteBusy, ...released].filter(id => store.conversations.some(c => c.id === id));
+      if (follow.length) await followConversations(follow, released);
+      if (currentId && (remoteBusy.has(currentId) || released.includes(currentId))) {
+        renderSendButtons();
+        refreshConnection();
+      }
+    })
+    .catch(() => {})
+    .finally(() => (leasing = null));
+  return leasing;
+}
+// 页面要关或刷新：先松手。不然刷新后的自己会把刷新前的自己当成「别处在作答」，停在半途的那一答就不收束了
+function releaseLeases() {
+  if (apiBase === null || !leaseHold.size) return;
+  leaseHold.clear();
+  fetch(`${apiBase}/api/chats/lease`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner: PAGE_ID, ids: [] }),
+    keepalive: true
+  }).catch(() => {});
+}
+/** 别处正作答（或刚松手）的几段：磁盘上的更新就换进来；刚松手的若仍停在「生成中」，那边是没写完就走了，按中断收束 */
+async function followConversations(ids, released) {
+  const data = await bridge("/api/chats/load", { root: chatsDir(), ids }, AbortSignal.timeout(20000));
+  let current = false;
+  for (const item of data.items || []) {
+    const index = store.conversations.findIndex(c => c.id === item.id);
+    if (index < 0 || item.savedAt <= (chatStamps.get(item.id) || 0) || conversationRunning(item.id)) continue;
+    const next = normalizeConversation(item.conversation);
+    store.conversations[index] = next;
+    chatStamps.set(next.id, item.savedAt);
+    chatHashes.set(next.id, hashText(JSON.stringify(next)));
+    if (next.id === currentId) current = true;
+  }
+  for (const id of released) {
+    const c = store.conversations.find(item => item.id === id);
+    if (c && !conversationRunning(id) && recoverConversation(c)) {
+      markDirty(id);
+      saveStoreSoon();
+      if (id === currentId) current = true;
+    }
+  }
+  renderHistory();
+  if (current && view === "chat") renderConversation(false);
+}
+/** 这边跟着看、别处正作答：只看不动 */
+function runningElsewhere(id = currentId) {
+  return !!id && remoteBusy.has(id) && !conversationRunning(id);
 }
 function openFileDb() {
   if (fileDbPromise) return fileDbPromise;
@@ -1571,6 +1648,7 @@ function setJobLabel(conversation, job, label) {
 function refreshConnection() {
   const job = requestJob();
   if (job) return setConnection("busy", job.label || "生成中");
+  if (runningElsewhere()) return setConnection("busy", "另一处作答中");
   if (navigator.onLine === false) return setConnection("error", "连接中断");
   const conversation = currentConversation(),
     last = [...(conversation?.messages || [])].reverse().find(message => message.role === "assistant");
@@ -1928,8 +2006,8 @@ function codeBlockHtml(text, lang) {
       .toLowerCase(),
     known = !!(window.hljs && language && hljs.getLanguage(language));
   // 页内可视化只有一条路：自足的 HTML 在隔离沙箱里就地渲染（数据图表、流程图也在里面画，见 preview-runtime.js）。
-  // 旧对话里的 ```mermaid / ```echarts 换成等价的一页 HTML 照样成图
-  const legacy = language === "mermaid" || language === "echarts",
+  // 旧对话里的 ```mermaid / ```echarts 换成等价的一页 HTML 照样成图；模型把流程图写进 ```pre 或不标语言的围栏，内容一看就是 mermaid 的，也照画
+  const legacy = language === "mermaid" || language === "echarts" || ((language === "pre" || !language) && looksLikeMermaid(text)),
     htmlApp = ["html", "interactive", "app"].includes(language) || legacy;
   // 流式尾段尚未闭合时先立一个占位框，框里是一页草图（见 pendingSketchHtml）
   if (suppressViz && htmlApp) {
@@ -1949,9 +2027,47 @@ function codeBlockHtml(text, lang) {
   }
   return `<div class="code-block"><div class="code-head"><span class="code-lang">${escapeHtml(language || "text")}</span><button type="button" class="code-copy" data-copy-code>复制</button></div><pre><code class="hljs${known ? ` language-${escapeHtml(language)}` : ""}">${html}</code></pre></div>\n`;
 }
+// 一段文字是不是 mermaid 图：头一行（跳过 %% 注释与 --- 前言）整行就是它的图种声明——graph = build() 这类代码不算
+const MERMAID_HEAD =
+  /^(?:(?:flowchart|graph)\s+(?:TD|TB|BT|LR|RL)|sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie(?:\s+(?:showData|title\s.*))?|quadrantChart|requirementDiagram|gitGraph|C4(?:Context|Container|Component|Dynamic|Deployment)|mindmap|timeline|kanban|(?:sankey|xychart|block|packet|architecture)(?:-beta)?)\s*;?\s*$/;
+function looksLikeMermaid(text) {
+  const head = String(text || "")
+    .replace(/^\s*---[\s\S]*?\n---\s*\n/, "")
+    .split("\n")
+    .map(line => line.trim())
+    .find(line => line && !line.startsWith("%%"));
+  return MERMAID_HEAD.test(head || "");
+}
+// 正文里裸写的 <pre class="mermaid">…</pre>（没包进 ```html）：换成 ```mermaid 围栏，走同一条路成图；代码围栏里的不动
+function liftBareMermaid(text) {
+  const OPEN = '<pre class="mermaid">';
+  if (!text.includes(OPEN)) return text;
+  let fenced = false,
+    lifting = false;
+  return text
+    .split("\n")
+    .map(line => {
+      if (!lifting && /^ {0,3}(?:`{3,}|~{3,})/.test(line)) {
+        fenced = !fenced;
+        return line;
+      }
+      if (fenced) return line;
+      if (!lifting) {
+        const at = line.indexOf(OPEN);
+        if (at < 0) return line;
+        lifting = true;
+        line = `${line.slice(0, at)}\n\`\`\`mermaid\n${line.slice(at + OPEN.length)}`;
+      }
+      const end = line.indexOf("</pre>");
+      if (end < 0) return line;
+      lifting = false;
+      return `${line.slice(0, end)}\n\`\`\`\n${line.slice(end + "</pre>".length)}`;
+    })
+    .join("\n");
+}
 /** 旧对话里的 mermaid / echarts 围栏 → 等价的一页 HTML；echarts 的 option 解不开时回 null（按代码块显示） */
 function legacyVizHtml(language, text) {
-  if (language === "mermaid") return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
+  if (language !== "echarts") return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
   try {
     const option = parseVizJson(text),
       height = Math.min(560, Math.max(220, Number(option.height) || 320));
@@ -2160,7 +2276,7 @@ function renderMarkdown(source = "") {
   const plain = () => `<p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>`;
   if (!window.marked || !window.DOMPurify) return plain();
   try {
-    return DOMPurify.sanitize(marked.parse(text, { async: false }), PURIFY_OPTIONS);
+    return DOMPurify.sanitize(marked.parse(liftBareMermaid(text), { async: false }), PURIFY_OPTIONS);
   } catch {
     return plain();
   }
@@ -2234,27 +2350,35 @@ async function ensureLocalBridge() {
   }
   return connected;
 }
+// 停在「生成中」却没人在写的消息（页面刷新了、写的那一处关了）：按中断收束，已写的留着。改了返回 true
+/** @param {Conversation} conversation */
+function recoverConversation(conversation) {
+  let changed = false;
+  for (const message of conversation.messages || [])
+    if (message.status === "streaming") {
+      message.status = "interrupted";
+      message.error = "页面刷新或连接中断，已生成的内容已保留";
+      message.interruptedAt = now();
+      settleSteps(message, "连接中断");
+      changed = true;
+    }
+  for (const thread of conversation.threads || [])
+    for (const message of thread.messages || [])
+      if (message.status === "streaming") {
+        message.status = message.content ? "stopped" : "error";
+        message.error = "页面刷新或连接中断";
+        changed = true;
+      }
+  return changed;
+}
+// 开页时收束一遍；别处正作答的不算（见 syncLeases）
 function recoverInterruptedMessages() {
   let changed = false;
   for (const conversation of store.conversations)
-    for (const message of conversation.messages || [])
-      if (message.status === "streaming") {
-        message.status = "interrupted";
-        message.error = "页面刷新或连接中断，已生成的内容已保留";
-        message.interruptedAt = now();
-        settleSteps(message, "连接中断");
-        markDirty(conversation.id);
-        changed = true;
-      }
-  for (const conversation of store.conversations)
-    for (const thread of conversation.threads || [])
-      for (const message of thread.messages || [])
-        if (message.status === "streaming") {
-          message.status = message.content ? "stopped" : "error";
-          message.error = "页面刷新或连接中断";
-          markDirty(conversation.id);
-          changed = true;
-        }
+    if (!remoteBusy.has(conversation.id) && recoverConversation(conversation)) {
+      markDirty(conversation.id);
+      changed = true;
+    }
   if (changed) saveStore();
 }
 async function boot() {
@@ -2277,6 +2401,8 @@ async function boot() {
     if (servedByBridge()) retryBridgeLater();
   }
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+  // 先问一声别处在作答什么，那几段不当成中断
+  await syncLeases();
   recoverInterruptedMessages();
   applyAppearance();
   bindEvents();
@@ -2289,6 +2415,8 @@ async function boot() {
   render();
   // 低频的全量巡检：哪段改了没标到也兜得住；页面藏起来时也巡一趟（手机切走常常就不回来了）
   setInterval(sweepConversations, 45000);
+  // 报到：这边在作答什么、别处在作答什么（作答的一处三秒存一次盘，跟着看的一处也三秒读一次）
+  setInterval(() => void syncLeases(), 3000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) sweepConversations();
     else void refreshConfigFromDisk();
@@ -3146,6 +3274,7 @@ function bindEvents() {
   const flushPageState = () => {
     persistDraft();
     flushOnUnload();
+    releaseLeases();
   };
   // beforeunload 比 pagehide 早，给 IndexedDB 事务多一点提交时间；pagehide 仍兜住不派 beforeunload 的移动端 / 缓存路径。
   // flushOnUnload 自身幂等，不会因为两者都到而重复写。
@@ -3640,6 +3769,8 @@ function openConversation(id) {
 async function deleteConversation(id) {
   const removed = store.conversations.find(c => c.id === id);
   if (!removed) return;
+  // 那一处还在写，删了它也会写回来
+  if (runningElsewhere(id)) return toast("这段对话正在另一个页面作答，那边停下后再删");
   if (!(await askConfirm({ title: "删除这段对话？", body: `「${removed.title}」将连同其附件一起移除，无法撤销。`, ok: "删除" }))) return;
   if (conversationRunning(id)) stopGeneration(id);
   for (const [key, job] of requestJobs)
@@ -4109,7 +4240,8 @@ function syncNodes(host, items, converged) {
     const node = existing.get(item.key);
     existing.delete(item.key);
     let next = node;
-    const streaming = node && item.message?.status === "streaming" && node.dataset.status === "streaming";
+    // 正在流式写的那条由逐帧的那一路刷，这里不动；别处在写、这边跟着看的，没有那一路，照常按新内容重画
+    const streaming = node && item.message?.status === "streaming" && node.dataset.status === "streaming" && !runningElsewhere();
     if (!streaming) {
       const sig = item.html ?? messageSig(item.message, item.branch);
       if (!node || nodeSig.get(node) !== sig) {
@@ -6322,13 +6454,20 @@ function sealGlyph(button, running) {
 }
 // 作答途中：案上空着，印是「止」；写了话，印又成「寄」——寄出去的是补言，递给正在作答的模型，它读了就改道
 function renderSendButtons() {
-  const running = conversationRunning(),
+  const elsewhere = runningElsewhere(),
+    running = conversationRunning() || elsewhere,
     ended = conversationDry(currentConversation()),
     has = composerHasContent(),
     stop = running && !has;
   document.querySelectorAll(".send-trigger").forEach(b => {
     sealGlyph(b, stop);
-    b.title = stop ? "停止生成" : running ? "插言引路：模型说到落点便读这句，可就此改道" : "发送";
+    b.title = elsewhere
+      ? "另一个页面正在这段对话里作答，这里跟着看"
+      : stop
+        ? "停止生成"
+        : running
+          ? "插言引路：模型说到落点便读这句，可就此改道"
+          : "发送";
     b.classList.toggle("stop-btn", stop);
     b.classList.toggle("empty", !running && !has);
     b.disabled = !running && ended;
@@ -7671,6 +7810,8 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
 async function sendOrStop() {
   // 作答途中：输入框里有话就是补言，递给正在作答的模型；空着才是停止
   if (conversationRunning()) return composerHasContent() ? sendSupplement() : stopGeneration();
+  // 另一个页面正在这段对话里作答：这边只跟着看，写完再说（话留在输入框里）
+  if (runningElsewhere()) return toast("这段对话正在另一个页面作答，写完后这里会跟上，再发不迟");
   const input = currentConversation() ? $("#chatInput") : $("#welcomeInput");
   const text = input.value.trim();
   if (!text && !pendingAttachments.length && !pendingQuote) return;
@@ -10362,7 +10503,7 @@ function scrollBottom() {
 const ACTIONS_WHILE_RUNNING = new Set(["copy", "note"]);
 async function handleMessageAction(event) {
   const button = event.target.closest("[data-action]");
-  if (!button || (conversationRunning() && !ACTIONS_WHILE_RUNNING.has(button.dataset.action))) return;
+  if (!button || ((conversationRunning() || runningElsewhere()) && !ACTIONS_WHILE_RUNNING.has(button.dataset.action))) return;
   const c = currentConversation();
   if (!c) return;
   const id = button.closest("[data-message]")?.dataset.message,
@@ -11265,7 +11406,7 @@ function scheduleContextGauge(delay = 160) {
 const compactingIds = new Set();
 /** @param {Conversation} c */
 function compactable(c) {
-  if (!c || conversationRunning(c.id) || c.ended) return [];
+  if (!c || conversationRunning(c.id) || runningElsewhere(c.id) || c.ended) return [];
   const contextIndex = c.messages.map(m => m.role).lastIndexOf("context");
   return c.messages
     .slice(contextIndex + 1)
@@ -11375,7 +11516,7 @@ async function openContextMenu(anchor) {
   if (!c || anchor.dataset.busy) return;
   const source = compactable(c),
     turns = source.filter(m => m.role === "user").length;
-  if (turns < 2) return toast(conversationRunning(c.id) ? "生成中，稍后再压" : "对话还短，不必压缩");
+  if (turns < 2) return toast(conversationRunning(c.id) || runningElsewhere(c.id) ? "生成中，稍后再压" : "对话还短，不必压缩");
   const ok = await askConfirm({
     title: "把前文压成摘要？",
     body: `此前的 ${turns} 问 ${source.length - turns} 答会由模型压成一份摘要（目标、事实、决定、改过的文件、待办），此后每一问只带摘要与之后的消息。页面上的记录都还在，只是折起来。`,

@@ -130,6 +130,8 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
 async function sendOrStop() {
   // 作答途中：输入框里有话就是补言，递给正在作答的模型；空着才是停止
   if (conversationRunning()) return composerHasContent() ? sendSupplement() : stopGeneration();
+  // 另一个页面正在这段对话里作答：这边只跟着看，写完再说（话留在输入框里）
+  if (runningElsewhere()) return toast("这段对话正在另一个页面作答，写完后这里会跟上，再发不迟");
   const input = currentConversation() ? $("#chatInput") : $("#welcomeInput");
   const text = input.value.trim();
   if (!text && !pendingAttachments.length && !pendingQuote) return;

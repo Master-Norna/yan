@@ -4,7 +4,7 @@
 const ACTIONS_WHILE_RUNNING = new Set(["copy", "note"]);
 async function handleMessageAction(event) {
   const button = event.target.closest("[data-action]");
-  if (!button || (conversationRunning() && !ACTIONS_WHILE_RUNNING.has(button.dataset.action))) return;
+  if (!button || ((conversationRunning() || runningElsewhere()) && !ACTIONS_WHILE_RUNNING.has(button.dataset.action))) return;
   const c = currentConversation();
   if (!c) return;
   const id = button.closest("[data-message]")?.dataset.message,

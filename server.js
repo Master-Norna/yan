@@ -857,6 +857,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/chats/load") return await CHATS.handleLoad(req, res);
     if (req.method === "POST" && req.url === "/api/chats/save") return await CHATS.handleSave(req, res);
     if (req.method === "POST" && req.url === "/api/chats/delete") return await CHATS.handleDelete(req, res);
+    if (req.method === "POST" && req.url === "/api/chats/lease") return await CHATS.handleLease(req, res);
     if (req.method === "POST" && req.url === "/api/store/config/load") return await STORE.handleConfigLoad(req, res);
     if (req.method === "POST" && req.url === "/api/store/config/save") return await STORE.handleConfigSave(req, res);
     if (req.method === "POST" && req.url === "/api/store/adopt") return await STORE.handleAdopt(req, res);

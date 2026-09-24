@@ -64,6 +64,7 @@ function setJobLabel(conversation, job, label) {
 function refreshConnection() {
   const job = requestJob();
   if (job) return setConnection("busy", job.label || "生成中");
+  if (runningElsewhere()) return setConnection("busy", "另一处作答中");
   if (navigator.onLine === false) return setConnection("error", "连接中断");
   const conversation = currentConversation(),
     last = [...(conversation?.messages || [])].reverse().find(message => message.role === "assistant");

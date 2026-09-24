@@ -364,7 +364,8 @@ function syncNodes(host, items, converged) {
     const node = existing.get(item.key);
     existing.delete(item.key);
     let next = node;
-    const streaming = node && item.message?.status === "streaming" && node.dataset.status === "streaming";
+    // 正在流式写的那条由逐帧的那一路刷，这里不动；别处在写、这边跟着看的，没有那一路，照常按新内容重画
+    const streaming = node && item.message?.status === "streaming" && node.dataset.status === "streaming" && !runningElsewhere();
     if (!streaming) {
       const sig = item.html ?? messageSig(item.message, item.branch);
       if (!node || nodeSig.get(node) !== sig) {

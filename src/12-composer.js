@@ -13,13 +13,20 @@ function sealGlyph(button, running) {
 }
 // 作答途中：案上空着，印是「止」；写了话，印又成「寄」——寄出去的是补言，递给正在作答的模型，它读了就改道
 function renderSendButtons() {
-  const running = conversationRunning(),
+  const elsewhere = runningElsewhere(),
+    running = conversationRunning() || elsewhere,
     ended = conversationDry(currentConversation()),
     has = composerHasContent(),
     stop = running && !has;
   document.querySelectorAll(".send-trigger").forEach(b => {
     sealGlyph(b, stop);
-    b.title = stop ? "停止生成" : running ? "插言引路：模型说到落点便读这句，可就此改道" : "发送";
+    b.title = elsewhere
+      ? "另一个页面正在这段对话里作答，这里跟着看"
+      : stop
+        ? "停止生成"
+        : running
+          ? "插言引路：模型说到落点便读这句，可就此改道"
+          : "发送";
     b.classList.toggle("stop-btn", stop);
     b.classList.toggle("empty", !running && !has);
     b.disabled = !running && ended;

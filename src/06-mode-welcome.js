@@ -403,6 +403,8 @@ function openConversation(id) {
 async function deleteConversation(id) {
   const removed = store.conversations.find(c => c.id === id);
   if (!removed) return;
+  // 那一处还在写，删了它也会写回来
+  if (runningElsewhere(id)) return toast("这段对话正在另一个页面作答，那边停下后再删");
   if (!(await askConfirm({ title: "删除这段对话？", body: `「${removed.title}」将连同其附件一起移除，无法撤销。`, ok: "删除" }))) return;
   if (conversationRunning(id)) stopGeneration(id);
   for (const [key, job] of requestJobs)

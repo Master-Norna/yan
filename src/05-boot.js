@@ -49,27 +49,35 @@ async function ensureLocalBridge() {
   }
   return connected;
 }
+// 停在「生成中」却没人在写的消息（页面刷新了、写的那一处关了）：按中断收束，已写的留着。改了返回 true
+/** @param {Conversation} conversation */
+function recoverConversation(conversation) {
+  let changed = false;
+  for (const message of conversation.messages || [])
+    if (message.status === "streaming") {
+      message.status = "interrupted";
+      message.error = "页面刷新或连接中断，已生成的内容已保留";
+      message.interruptedAt = now();
+      settleSteps(message, "连接中断");
+      changed = true;
+    }
+  for (const thread of conversation.threads || [])
+    for (const message of thread.messages || [])
+      if (message.status === "streaming") {
+        message.status = message.content ? "stopped" : "error";
+        message.error = "页面刷新或连接中断";
+        changed = true;
+      }
+  return changed;
+}
+// 开页时收束一遍；别处正作答的不算（见 syncLeases）
 function recoverInterruptedMessages() {
   let changed = false;
   for (const conversation of store.conversations)
-    for (const message of conversation.messages || [])
-      if (message.status === "streaming") {
-        message.status = "interrupted";
-        message.error = "页面刷新或连接中断，已生成的内容已保留";
-        message.interruptedAt = now();
-        settleSteps(message, "连接中断");
-        markDirty(conversation.id);
-        changed = true;
-      }
-  for (const conversation of store.conversations)
-    for (const thread of conversation.threads || [])
-      for (const message of thread.messages || [])
-        if (message.status === "streaming") {
-          message.status = message.content ? "stopped" : "error";
-          message.error = "页面刷新或连接中断";
-          markDirty(conversation.id);
-          changed = true;
-        }
+    if (!remoteBusy.has(conversation.id) && recoverConversation(conversation)) {
+      markDirty(conversation.id);
+      changed = true;
+    }
   if (changed) saveStore();
 }
 async function boot() {
@@ -92,6 +100,8 @@ async function boot() {
     if (servedByBridge()) retryBridgeLater();
   }
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+  // 先问一声别处在作答什么，那几段不当成中断
+  await syncLeases();
   recoverInterruptedMessages();
   applyAppearance();
   bindEvents();
@@ -104,6 +114,8 @@ async function boot() {
   render();
   // 低频的全量巡检：哪段改了没标到也兜得住；页面藏起来时也巡一趟（手机切走常常就不回来了）
   setInterval(sweepConversations, 45000);
+  // 报到：这边在作答什么、别处在作答什么（作答的一处三秒存一次盘，跟着看的一处也三秒读一次）
+  setInterval(() => void syncLeases(), 3000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) sweepConversations();
     else void refreshConfigFromDisk();
@@ -961,6 +973,7 @@ function bindEvents() {
   const flushPageState = () => {
     persistDraft();
     flushOnUnload();
+    releaseLeases();
   };
   // beforeunload 比 pagehide 早，给 IndexedDB 事务多一点提交时间；pagehide 仍兜住不派 beforeunload 的移动端 / 缓存路径。
   // flushOnUnload 自身幂等，不会因为两者都到而重复写。

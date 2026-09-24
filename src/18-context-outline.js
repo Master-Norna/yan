@@ -82,7 +82,7 @@ function scheduleContextGauge(delay = 160) {
 const compactingIds = new Set();
 /** @param {Conversation} c */
 function compactable(c) {
-  if (!c || conversationRunning(c.id) || c.ended) return [];
+  if (!c || conversationRunning(c.id) || runningElsewhere(c.id) || c.ended) return [];
   const contextIndex = c.messages.map(m => m.role).lastIndexOf("context");
   return c.messages
     .slice(contextIndex + 1)
@@ -192,7 +192,7 @@ async function openContextMenu(anchor) {
   if (!c || anchor.dataset.busy) return;
   const source = compactable(c),
     turns = source.filter(m => m.role === "user").length;
-  if (turns < 2) return toast(conversationRunning(c.id) ? "生成中，稍后再压" : "对话还短，不必压缩");
+  if (turns < 2) return toast(conversationRunning(c.id) || runningElsewhere(c.id) ? "生成中，稍后再压" : "对话还短，不必压缩");
   const ok = await askConfirm({
     title: "把前文压成摘要？",
     body: `此前的 ${turns} 问 ${source.length - turns} 答会由模型压成一份摘要（目标、事实、决定、改过的文件、待办），此后每一问只带摘要与之后的消息。页面上的记录都还在，只是折起来。`,

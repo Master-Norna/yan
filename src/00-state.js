@@ -308,6 +308,8 @@ class JobMap extends Map {
   set(key, value) {
     super.set(key, value);
     holdAwake();
+    // 开工即报到，别处立刻知道这段在作答
+    void syncLeases();
     return this;
   }
   delete(key) {
@@ -321,6 +323,11 @@ class JobMap extends Map {
   }
 }
 const requestJobs = new JobMap();
+// 几个页面同开同一个存储时，谁在作答（见 01-store.js 的 syncLeases）：PAGE_ID 是这个页面的名号；
+// remoteBusy 是别处正在作答的对话；leaseHold 是这边作答过、最后一次存盘还没落地的对话——落了地才松手，别处读到的才是写完的
+const PAGE_ID = uid();
+const remoteBusy = new Set(),
+  leaseHold = new Set();
 /** @type {{ release: () => void }|null} */
 let awakeHold = null;
 function holdAwake() {
