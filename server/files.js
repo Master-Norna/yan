@@ -150,5 +150,13 @@ module.exports = function createFiles({ sendJson, readJson, filesHome }) {
       sendJson(res, 400, { error: `附件未能清理：${String(error.message || error).slice(0, 200)}` });
     }
   }
-  return { handlePut, handleGet, handleHas, handleDelete, handleClean };
+  return {
+    routes: {
+      "POST /api/files/put": handlePut,
+      "POST /api/files/get": handleGet,
+      "POST /api/files/has": handleHas,
+      "POST /api/files/delete": handleDelete,
+      "POST /api/files/clean": handleClean
+    }
+  };
 };

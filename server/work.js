@@ -1138,8 +1138,9 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
     }
   }
   // 取出：GET /api/archive/file?path=…（&root=… 指定卷宗根），页面用它做缩略图、置于案上与下载；?download=1 时让浏览器另存
-  async function handleArchiveFile(req, res, query) {
+  async function handleArchiveFile(req, res) {
     try {
+      const query = new URL(req.url, "http://127.0.0.1").searchParams;
       const root = await archiveRoot(query.get("root")),
         file = archivePath(root, query.get("path"));
       await assertNoEscapingLink(root, file);
@@ -1181,21 +1182,24 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
     WORK_HOME,
     SCRATCH_DIR,
     WORK_SHELL,
-    handleArchiveList,
-    handleArchiveClean,
-    handleArchivePut,
-    handleArchiveFile,
-    handleArchiveRemove,
-    handleWorkPick,
-    handleWorkPrepare,
-    handleWorkRun,
-    handleWorkScreen,
-    handleWorkCheck,
-    handleWorkWrite,
-    handleWorkRead,
-    handleWorkList,
-    handleWorkEdit,
-    handleWorkSearch,
-    handleWorkDownload
+    // 都碰本机磁盘或本机进程：只受理本站页面与 VS Code Webview（见 server.js 的接口表）
+    routes: {
+      "POST /api/work/prepare": handleWorkPrepare,
+      "POST /api/work/pick": handleWorkPick,
+      "POST /api/work/run": handleWorkRun,
+      "POST /api/work/screen": handleWorkScreen,
+      "POST /api/work/check": handleWorkCheck,
+      "POST /api/work/write": handleWorkWrite,
+      "POST /api/work/read": handleWorkRead,
+      "POST /api/work/list": handleWorkList,
+      "POST /api/work/edit": handleWorkEdit,
+      "POST /api/work/search": handleWorkSearch,
+      "POST /api/work/download": handleWorkDownload,
+      "POST /api/archive/list": handleArchiveList,
+      "POST /api/archive/put": handleArchivePut,
+      "POST /api/archive/remove": handleArchiveRemove,
+      "POST /api/archive/clean": handleArchiveClean,
+      "GET /api/archive/file": handleArchiveFile
+    }
   };
 };

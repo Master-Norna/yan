@@ -168,5 +168,15 @@ module.exports = function createStore({ sendJson, readJson }) {
       sendJson(res, 400, { error: `存储位置未能更换：${String(error.message || error).slice(0, 200)}` });
     }
   }
-  return { paths, describe, ensureRoot, handleConfigLoad, handleConfigSave, handleAdopt, handleMove };
+  return {
+    paths,
+    describe,
+    ensureRoot,
+    routes: {
+      "POST /api/store/config/load": handleConfigLoad,
+      "POST /api/store/config/save": handleConfigSave,
+      "POST /api/store/adopt": handleAdopt,
+      "POST /api/store/move": handleMove
+    }
+  };
 };

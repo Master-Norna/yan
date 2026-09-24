@@ -715,6 +715,20 @@ const WORK = require("./server/work.js")({
 const CHATS = require("./server/chats.js")({ sendJson, readJson, chatsHome: () => STORE.paths().chats });
 const FILES = require("./server/files.js")({ sendJson, readJson, filesHome: () => STORE.paths().files });
 
+// 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件，以及能打本机的 http_request），
+// 只受理本站页面与 VS Code Webview；另一半（引导、转发、检索、翻网页）凡是本机桥接认得的来源都可调
+const OPEN_ROUTES = {
+    "GET /api/bootstrap": handleBootstrap,
+    "POST /api/test": handleTest,
+    "POST /api/models": handleModels,
+    "POST /api/search": handleSearch,
+    "POST /api/fetch": handleFetch,
+    "POST /api/chat": handleChat
+  },
+  TRUSTED_ROUTES = { "POST /api/http": handleHttp, ...WORK.routes, ...CHATS.routes, ...STORE.routes, ...FILES.routes };
+const ROUTES = new Map(Object.entries({ ...OPEN_ROUTES, ...TRUSTED_ROUTES }));
+const TRUSTED_PATHS = new Set(Object.keys(TRUSTED_ROUTES).map(key => key.split(" ")[1]));
+
 const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>此页不存在 · 言</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#fbfaf6;color:#292724;font-family:"Noto Serif SC","Songti SC","STSong",serif}@media(prefers-color-scheme:dark){body{background:#1e1c19;color:#e6e1d6}}main{text-align:center;letter-spacing:.06em}.seal{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #9b5540;color:#9b5540;font-size:18px;transform:rotate(-3deg)}h1{margin:18px 0 8px;font-weight:500;font-size:24px}p{margin:0 0 22px;opacity:.6;font-size:13px}a{color:#9b5540;text-decoration:none;font-size:13px;border-bottom:1px solid currentColor}</style></head><body><main><span class="seal">空</span><h1>此页不存在</h1><p>所寻之处并无一字</p><a href="/">回到案前</a></main></body></html>`;
 // 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
 // 仓库里的 support.js / app.css 是 build.js 的产物，供 file:// 直接打开时使用，桥接启动时也会顺手刷新它们
@@ -816,59 +830,15 @@ const server = http.createServer(async (req, res) => {
     const urlPath = new URL(req.url, `http://${HOST}`).pathname;
     if (urlPath.startsWith("/api/") && req.headers.origin && !allowedOrigin(req.headers.origin))
       return sendJson(res, 403, { error: "此页面无权调用本机桥接" });
-    // 能打到本机服务的接口（执事、卷宗、对话目录、http_request）只受理本站页面与 VS Code Webview
-    if (
-      (urlPath.startsWith("/api/work/") ||
-        urlPath.startsWith("/api/archive/") ||
-        urlPath.startsWith("/api/chats/") ||
-        urlPath.startsWith("/api/store/") ||
-        urlPath.startsWith("/api/files/") ||
-        urlPath === "/api/http") &&
-      !trustedWorkRequest(req)
-    )
+    if (TRUSTED_PATHS.has(urlPath) && !trustedWorkRequest(req))
       return sendJson(res, 403, { error: "此页面无权调用本机执事接口，请从桥接地址或 VS Code 打开「言」" });
     corsHeaders(req, res);
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       return res.end();
     }
-    if (req.method === "GET" && req.url === "/api/bootstrap") return handleBootstrap(req, res);
-    if (req.method === "POST" && req.url === "/api/test") return await handleTest(req, res);
-    if (req.method === "POST" && req.url === "/api/models") return await handleModels(req, res);
-    if (req.method === "POST" && req.url === "/api/search") return await handleSearch(req, res);
-    if (req.method === "POST" && req.url === "/api/fetch") return await handleFetch(req, res);
-    if (req.method === "POST" && req.url === "/api/http") return await handleHttp(req, res);
-    if (req.method === "POST" && req.url === "/api/chat") return await handleChat(req, res);
-    if (req.method === "POST" && req.url === "/api/work/prepare") return await WORK.handleWorkPrepare(req, res);
-    if (req.method === "POST" && req.url === "/api/work/pick") return await WORK.handleWorkPick(req, res);
-    if (req.method === "POST" && req.url === "/api/work/run") return await WORK.handleWorkRun(req, res);
-    if (req.method === "POST" && req.url === "/api/work/screen") return await WORK.handleWorkScreen(req, res);
-    if (req.method === "POST" && req.url === "/api/work/check") return await WORK.handleWorkCheck(req, res);
-    if (req.method === "POST" && req.url === "/api/work/write") return await WORK.handleWorkWrite(req, res);
-    if (req.method === "POST" && req.url === "/api/work/read") return await WORK.handleWorkRead(req, res);
-    if (req.method === "POST" && req.url === "/api/work/list") return await WORK.handleWorkList(req, res);
-    if (req.method === "POST" && req.url === "/api/work/edit") return await WORK.handleWorkEdit(req, res);
-    if (req.method === "POST" && req.url === "/api/work/search") return await WORK.handleWorkSearch(req, res);
-    if (req.method === "POST" && req.url === "/api/work/download") return await WORK.handleWorkDownload(req, res);
-    if (req.method === "POST" && req.url === "/api/archive/list") return await WORK.handleArchiveList(req, res);
-    if (req.method === "POST" && req.url === "/api/archive/put") return await WORK.handleArchivePut(req, res);
-    if (req.method === "POST" && req.url === "/api/archive/remove") return await WORK.handleArchiveRemove(req, res);
-    if (req.method === "POST" && req.url === "/api/archive/clean") return await WORK.handleArchiveClean(req, res);
-    if (req.method === "POST" && req.url === "/api/chats/load") return await CHATS.handleLoad(req, res);
-    if (req.method === "POST" && req.url === "/api/chats/save") return await CHATS.handleSave(req, res);
-    if (req.method === "POST" && req.url === "/api/chats/delete") return await CHATS.handleDelete(req, res);
-    if (req.method === "POST" && req.url === "/api/chats/lease") return await CHATS.handleLease(req, res);
-    if (req.method === "POST" && req.url === "/api/store/config/load") return await STORE.handleConfigLoad(req, res);
-    if (req.method === "POST" && req.url === "/api/store/config/save") return await STORE.handleConfigSave(req, res);
-    if (req.method === "POST" && req.url === "/api/store/adopt") return await STORE.handleAdopt(req, res);
-    if (req.method === "POST" && req.url === "/api/store/move") return await STORE.handleMove(req, res);
-    if (req.method === "POST" && req.url === "/api/files/put") return await FILES.handlePut(req, res);
-    if (req.method === "POST" && req.url === "/api/files/get") return await FILES.handleGet(req, res);
-    if (req.method === "POST" && req.url === "/api/files/has") return await FILES.handleHas(req, res);
-    if (req.method === "POST" && req.url === "/api/files/delete") return await FILES.handleDelete(req, res);
-    if (req.method === "POST" && req.url === "/api/files/clean") return await FILES.handleClean(req, res);
-    if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/api/archive/file")
-      return await WORK.handleArchiveFile(req, res, new URL(req.url, `http://${HOST}`).searchParams);
+    const handler = ROUTES.get(`${req.method === "HEAD" ? "GET" : req.method} ${urlPath}`);
+    if (handler) return await handler(req, res);
     if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res);
     sendJson(res, 405, { error: "不支持此请求" });
   } catch (error) {

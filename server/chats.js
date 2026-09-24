@@ -183,5 +183,12 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
       sendJson(res, 400, { error: String(error.message || error).slice(0, 200) });
     }
   }
-  return { handleLoad, handleSave, handleDelete, handleLease };
+  return {
+    routes: {
+      "POST /api/chats/load": handleLoad,
+      "POST /api/chats/save": handleSave,
+      "POST /api/chats/delete": handleDelete,
+      "POST /api/chats/lease": handleLease
+    }
+  };
 };
