@@ -157,8 +157,8 @@ function codeBlockHtml(text, lang) {
       .toLowerCase(),
     known = !!(window.hljs && language && hljs.getLanguage(language));
   // 页内可视化只有一条路：自足的 HTML 在隔离沙箱里就地渲染（数据图表、流程图也在里面画，见 preview-runtime.js）。
-  // 旧对话里的 ```mermaid / ```echarts 换成等价的一页 HTML 照样成图
-  const legacy = language === "mermaid" || language === "echarts",
+  // 旧对话里的 ```mermaid / ```echarts 换成等价的一页 HTML 照样成图；模型把流程图写进 ```pre 或不标语言的围栏，内容一看就是 mermaid 的，也照画
+  const legacy = language === "mermaid" || language === "echarts" || ((language === "pre" || !language) && looksLikeMermaid(text)),
     htmlApp = ["html", "interactive", "app"].includes(language) || legacy;
   // 流式尾段尚未闭合时先立一个占位框，框里是一页草图（见 pendingSketchHtml）
   if (suppressViz && htmlApp) {
@@ -178,9 +178,47 @@ function codeBlockHtml(text, lang) {
   }
   return `<div class="code-block"><div class="code-head"><span class="code-lang">${escapeHtml(language || "text")}</span><button type="button" class="code-copy" data-copy-code>复制</button></div><pre><code class="hljs${known ? ` language-${escapeHtml(language)}` : ""}">${html}</code></pre></div>\n`;
 }
+// 一段文字是不是 mermaid 图：头一行（跳过 %% 注释与 --- 前言）整行就是它的图种声明——graph = build() 这类代码不算
+const MERMAID_HEAD =
+  /^(?:(?:flowchart|graph)\s+(?:TD|TB|BT|LR|RL)|sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie(?:\s+(?:showData|title\s.*))?|quadrantChart|requirementDiagram|gitGraph|C4(?:Context|Container|Component|Dynamic|Deployment)|mindmap|timeline|kanban|(?:sankey|xychart|block|packet|architecture)(?:-beta)?)\s*;?\s*$/;
+function looksLikeMermaid(text) {
+  const head = String(text || "")
+    .replace(/^\s*---[\s\S]*?\n---\s*\n/, "")
+    .split("\n")
+    .map(line => line.trim())
+    .find(line => line && !line.startsWith("%%"));
+  return MERMAID_HEAD.test(head || "");
+}
+// 正文里裸写的 <pre class="mermaid">…</pre>（没包进 ```html）：换成 ```mermaid 围栏，走同一条路成图；代码围栏里的不动
+function liftBareMermaid(text) {
+  const OPEN = '<pre class="mermaid">';
+  if (!text.includes(OPEN)) return text;
+  let fenced = false,
+    lifting = false;
+  return text
+    .split("\n")
+    .map(line => {
+      if (!lifting && /^ {0,3}(?:`{3,}|~{3,})/.test(line)) {
+        fenced = !fenced;
+        return line;
+      }
+      if (fenced) return line;
+      if (!lifting) {
+        const at = line.indexOf(OPEN);
+        if (at < 0) return line;
+        lifting = true;
+        line = `${line.slice(0, at)}\n\`\`\`mermaid\n${line.slice(at + OPEN.length)}`;
+      }
+      const end = line.indexOf("</pre>");
+      if (end < 0) return line;
+      lifting = false;
+      return `${line.slice(0, end)}\n\`\`\`\n${line.slice(end + "</pre>".length)}`;
+    })
+    .join("\n");
+}
 /** 旧对话里的 mermaid / echarts 围栏 → 等价的一页 HTML；echarts 的 option 解不开时回 null（按代码块显示） */
 function legacyVizHtml(language, text) {
-  if (language === "mermaid") return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
+  if (language !== "echarts") return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
   try {
     const option = parseVizJson(text),
       height = Math.min(560, Math.max(220, Number(option.height) || 320));
@@ -389,7 +427,7 @@ function renderMarkdown(source = "") {
   const plain = () => `<p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>`;
   if (!window.marked || !window.DOMPurify) return plain();
   try {
-    return DOMPurify.sanitize(marked.parse(text, { async: false }), PURIFY_OPTIONS);
+    return DOMPurify.sanitize(marked.parse(liftBareMermaid(text), { async: false }), PURIFY_OPTIONS);
   } catch {
     return plain();
   }

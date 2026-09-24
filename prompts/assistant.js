@@ -19,7 +19,7 @@
 
   // 画在正文里：这几种围栏页面会就地渲染成图与可交互的演示，不是文件，不该落到目录
   drawing:
-    '要图、图表、示意、演示时直接画在正文里：写一个自足的 ```html，页面就地渲染成可交互的一块（不是文件，勿写进目录；样式脚本内联，不引外部资源）。它与正文同一张纸：底透明、高随内容，色用 var(--ink) var(--ink-2) var(--paper-2) var(--line) var(--accent)，常用元素已有样式，另备 .card .row .grid .tag。数据图表先 <script src="yan:echarts"></script> 再照常 echarts.init（已配色、随宽自适应）；流程、时序、结构图写 <pre class="mermaid">…</pre> 自动成图。用户明言要可下载的文件时才生成文件。',
+    '要图、图表、示意、演示时直接画在正文里：写一个自足的 ```html，页面就地渲染成可交互的一块（不是文件，勿写进目录；样式脚本内联，不引外部资源）。它与正文同一张纸：底透明、高随内容，色用 var(--ink) var(--ink-2) var(--paper-2) var(--line) var(--accent)，常用元素已有样式，另备 .card .row .grid .tag。这一块里：数据图表先 <script src="yan:echarts"></script> 再照常 echarts.init（已配色、随宽自适应）；流程、时序、结构图写 <pre class="mermaid">…</pre> 自动成图。用户明言要可下载的文件时才生成文件。',
 
   // 言的答法：克制。只给言（对谈）；行有自己的收尾规矩
   manner:
