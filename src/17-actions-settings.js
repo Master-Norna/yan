@@ -226,7 +226,10 @@ function aboutSettingsHtml() {
         "桥接在线时一切落在本机的存储位置（默认 ~/.yan，可在通用设置更换）：对话/ 一段一个文件，卷宗/ 是成品与收进来的文件，附件/ 是附件原件，配置.json 是设置、模型配置（含 API Key）、记忆与草稿；复制整个目录即备份。没桥接时暂存于此浏览器，接上后推过去。不经任何云端"
       ],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
-      ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
+      [
+        "执事",
+        "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件工具能否越出工作目录由设置 → 工具的「可及范围」定（默认全盘，问而后行开着沙箱时只在目录内）"
+      ],
       [
         "沙箱",
         "指令与文件工具默认套着：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令，在桥接那头守。是静态筛查，不是进程隔离——脚本里的代码仍以你的权限运行；设置 → 工具可关"
@@ -264,7 +267,11 @@ function modelsSettingsHtml() {
     apiBase !== null
       ? `本机桥接已接通${apiBase ? "（VS Code 预览）" : ""}，联网与转发均可用。`
       : "当前由浏览器直连模型，联网检索不可用；本机桥接启动后将自动接通。";
-  return `<h2>模型</h2><p class="settings-lead">任何 OpenAI 兼容接口均可接入，API Key 仅存于当前浏览器。${transport}</p>${bootstrap.notice ? `<div class="server-notice">${escapeHtml(bootstrap.notice)}</div>` : ""}<div id="profileList">${profiles().map(profileCardHtml).join("")}</div><button id="addProfile" class="outline-btn profile-add">＋ 接入模型</button>`;
+  const keyNote =
+    apiBase !== null
+      ? "API Key 与其余配置一起存于本机存储位置的 配置.json，几个浏览器共用；导出的备份不含它。"
+      : "API Key 暂存于此浏览器，桥接接上后存进本机的存储位置；导出的备份不含它。";
+  return `<h2>模型</h2><p class="settings-lead">任何 OpenAI 兼容接口均可接入。${keyNote}${transport}</p>${bootstrap.notice ? `<div class="server-notice">${escapeHtml(bootstrap.notice)}</div>` : ""}<div id="profileList">${profiles().map(profileCardHtml).join("")}</div><button id="addProfile" class="outline-btn profile-add">＋ 接入模型</button>`;
 }
 function quotaParts(value) {
   const match = String(value ?? "")
@@ -576,6 +583,14 @@ async function handleProfileAction(profile, action, card) {
     return;
   }
   if (action === "delete") {
+    if (
+      !(await askConfirm({
+        title: "删除这个模型？",
+        body: `「${profile.name || profile.model || "未命名"}」的配置连同 API Key 将一并移除，无法撤销。`,
+        ok: "删除"
+      }))
+    )
+      return;
     store.profiles = store.profiles.filter(p => p.id !== profile.id);
     if (store.settings.activeProfileId === profile.id) store.settings.activeProfileId = profiles().find(p => p.id !== profile.id)?.id || "";
     saveStore();
@@ -671,25 +686,81 @@ async function fetchModelList(profile) {
 async function exportData(includeFiles) {
   /** @type {Store & { exportedAt: string, attachments?: Attachment[] }} 备份：去掉 API Key，可选带上附件原件 */
   const safeStore = { ...store, profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })), exportedAt: now() };
+  let blob,
+    files = 0;
   if (includeFiles) {
-    try {
-      safeStore.attachments = await fileStoreRequest("readonly", db => db.getAll());
-    } catch {
-      toast("附件原件读取失败，本次备份不含附件原件");
+    // 附件原件只带仍在用的那几件：存储目录与浏览器里的暂存都翻，谁有取谁。原件合起来可能上 GB，
+    // 拼成一个大字符串会超出浏览器的字符串上限、点了没反应——一件一件接进 Blob，内存里只过一件
+    toast("正在收拢附件原件…");
+    blob = new Blob([`${JSON.stringify(safeStore).slice(0, -1)},"attachments":[`], { type: "application/json" });
+    for (const id of attachmentKeepIds()) {
+      const record = await getAttachment(id).catch(() => null);
+      if (!record) continue;
+      blob = new Blob([blob, files ? "," : "", JSON.stringify(record)], { type: "application/json" });
+      uncacheAttachment(id);
+      files += 1;
     }
-  }
-  const blob = new Blob([JSON.stringify(safeStore, null, includeFiles ? 0 : 2)], { type: "application/json" });
+    blob = new Blob([blob, "]}"], { type: "application/json" });
+  } else blob = new Blob([JSON.stringify(safeStore, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `言-备份-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  toast(`备份已导出${safeStore.attachments ? `（含 ${safeStore.attachments.length} 件附件原件）` : ""}；不含 API Key`);
+  toast(`备份已导出${includeFiles ? `（含 ${files} 件附件原件）` : ""}；不含 API Key`);
+}
+// 读备份：小的整份解析；带着上百 MB 附件原件的，整份读成一个字符串会超出浏览器的上限——按字节找到末尾的附件数组，
+// 前面的记录照常解析，原件一件一件解出来交给调用者，内存里只过一件
+async function readBackup(file) {
+  if (file.size < 128 * MB) {
+    const data = JSON.parse(await readFile(file, "text"));
+    return {
+      data,
+      attachments: (async function* () {
+        yield* Array.isArray(data.attachments) ? data.attachments : [];
+      })()
+    };
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer()),
+    decoder = new TextDecoder(),
+    marker = new TextEncoder().encode(',"attachments":[');
+  // 附件数组是导出时最后接上的一项，原件里的引号都转义过，从末尾往前找到的第一处就是它
+  let at = -1;
+  for (let i = bytes.lastIndexOf(marker[0]); i >= 0; i = i > 0 ? bytes.lastIndexOf(marker[0], i - 1) : -1)
+    if (marker.every((b, k) => bytes[i + k] === b)) {
+      at = i;
+      break;
+    }
+  if (at < 0) return { data: JSON.parse(decoder.decode(bytes)), attachments: (async function* () {})() };
+  const data = JSON.parse(`${decoder.decode(bytes.subarray(0, at))}}`);
+  async function* attachments() {
+    let depth = 0,
+      inString = false,
+      escaped = false,
+      start = -1;
+    for (let i = at + marker.length; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (b === 92) escaped = true;
+        else if (b === 34) inString = false;
+        continue;
+      }
+      if (b === 34) inString = true;
+      else if (b === 123) {
+        if (depth++ === 0) start = i;
+      } else if (b === 125) {
+        if (--depth === 0) yield JSON.parse(decoder.decode(bytes.subarray(start, i + 1)));
+      } else if (b === 93 && depth === 0) break;
+    }
+  }
+  data.attachments = true;
+  return { data, attachments: attachments() };
 }
 // 导入采用合并策略：按 id 跳过已存在的对话 / 模型 / 卷宗，附件原件只在本机缺失时写入
 async function importData(file) {
   try {
-    const data = JSON.parse(await readFile(file, "text"));
+    const { data, attachments } = await readBackup(file);
     if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations))
       throw Error("不是言的备份文件，或版本不兼容");
     // 旧版备份先按启动时同一套迁移与规整过一遍（workAuto → commandPolicy、去掉半成品的压缩分隔……），别等下次刷新才对
@@ -723,9 +794,10 @@ async function importData(file) {
         store.drafts[key] = draft;
         drafts += 1;
       }
-    for (const record of Array.isArray(data.attachments) ? data.attachments : [])
+    for await (const record of attachments)
       if (record?.id && record.data !== undefined && !(await getAttachment(record.id))) {
         await putAttachment(record);
+        uncacheAttachment(record.id);
         files += 1;
       }
     const memoryIds = new Set(store.memory.items.map(item => item.id)),
