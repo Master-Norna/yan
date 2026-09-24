@@ -418,12 +418,12 @@ button.history-repo:hover .history-repo-name {
   padding-right: 10px;
 }
 .settings-open .gear {
-  width: 17px;
-  height: 17px;
-  stroke: var(--ink-3);
+  width: 18px;
+  height: 18px;
+  opacity: 0.8;
 }
 .settings-open:hover .gear {
-  stroke: var(--ink-2);
+  opacity: 1;
 }
 .avatar {
   width: 25px;

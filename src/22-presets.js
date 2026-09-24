@@ -32,12 +32,12 @@ function presetMenuHtml() {
   const current = presetOf(currentConversation())?.id || "";
   const option = (id, name, note) =>
     `<button class="model-option preset-option${id === current ? " active" : ""}" data-preset="${escapeHtml(id)}"${id === current ? ' aria-current="true"' : ""} title="${escapeHtml(note)}"><strong><span class="model-dot"></span><span class="model-option-name">${escapeHtml(name)}</span></strong></button>`;
-  return `<div class="menu-section"><div class="menu-section-title"><span>预设</span></div></div>${option("", "本色", "言本来的样子")}${presets.map(preset => option(preset.id, preset.name, preset.prompt.split("\n")[0].slice(0, 80))).join("")}`;
+  return `<div class="menu-section"><div class="menu-section-title"><span>预设</span></div></div>${option("", "本色", "言之本色，不加预设")}${presets.map(preset => option(preset.id, preset.name, preset.prompt.split("\n")[0].slice(0, 80))).join("")}`;
 }
 
 function presetsSettingsHtml() {
   const presets = store.settings.presets;
-  return `<div id="presetPage"><h2>预设</h2><p class="settings-lead">一套做法打包成一个预设：提示词、给哪些工具与 MCP 服务、用哪个模型、指令权限。在输入框旁的模型菜单里选用，选了的对话都照这一套；不选即本色。</p><div class="card-list">${
+  return `<div id="presetPage"><h2>预设</h2><p class="settings-lead">将提示词、工具、MCP 服务、模型与指令权限合为一套，即是预设。于输入框旁的模型菜单中选用，所选的对话皆依此行事；不选即为本色。</p><div class="card-list">${
     presets.map(preset => (preset.id === presetEditing ? presetFormHtml(preset) : presetCardHtml(preset))).join("") ||
     `<p class="card-note">尚无预设。</p>`
   }</div><div class="card-foot"><button id="presetAdd" class="outline-btn" type="button">＋ 新添预设</button></div></div>`;
@@ -69,7 +69,7 @@ function presetFormHtml(preset) {
     ["review", "审而后行"],
     ["auto", "径行"]
   ];
-  return `<div class="card editing" data-preset-card="${escapeHtml(preset.id)}"><div class="profile-grid"><label class="profile-full">名称<input class="field wide" data-preset-field="name" value="${escapeHtml(preset.name)}" maxlength="24"></label><label class="profile-full">提示词<textarea class="field wide field-area preset-prompt" data-preset-field="prompt" placeholder="它是谁、做什么、怎么答；排在系统提示最前" spellcheck="false">${escapeHtml(preset.prompt)}</textarea></label><label>模型<select class="field wide select" data-preset-field="profileId"><option value="">不换，用当前的</option>${profiles()
+  return `<div class="card editing" data-preset-card="${escapeHtml(preset.id)}"><div class="profile-grid"><label class="profile-full">名称<input class="field wide" data-preset-field="name" value="${escapeHtml(preset.name)}" maxlength="24"></label><label class="profile-full">提示词<textarea class="field wide field-area preset-prompt" data-preset-field="prompt" placeholder="所任何职、所司何事、答以何种风格；列于系统提示之首" spellcheck="false">${escapeHtml(preset.prompt)}</textarea></label><label>模型<select class="field wide select" data-preset-field="profileId"><option value="">沿用当前模型</option>${profiles()
     .map(p => `<option value="${escapeHtml(p.id)}"${p.id === preset.profileId ? " selected" : ""}>${escapeHtml(p.name)}</option>`)
     .join(
       ""
@@ -140,7 +140,7 @@ function bindPresetEvents() {
       toast(`已选用「${preset.name}」`);
     }
     if (action === "delete") {
-      if (!(await askConfirm({ title: `删除预设「${preset.name}」？`, body: "用着它的对话回到本色。", ok: "删除" }))) return;
+      if (!(await askConfirm({ title: `删除预设「${preset.name}」？`, body: "选用它的对话将回到本色。", ok: "删除" }))) return;
       store.settings.presets = store.settings.presets.filter(item => item !== preset);
       if (store.settings.presetId === preset.id) store.settings.presetId = "";
       for (const c of store.conversations)

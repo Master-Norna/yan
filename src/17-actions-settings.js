@@ -131,7 +131,6 @@ function closeSettings() {
   }
   render();
 }
-const SETTINGS_SEALS = { general: "常", appearance: "妆", models: "模", presets: "身", tools: "具", env: "境", mcp: "接", guide: "典" };
 function renderSettings() {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === settingsTab));
   const host = $("#settingsContent");
@@ -147,13 +146,12 @@ function renderSettings() {
   if (settingsTab === "memory") host.innerHTML = memorySettingsHtml();
   if (settingsTab === "guide") host.innerHTML = guideSettingsHtml();
   if (settingsTab === "about") host.innerHTML = aboutSettingsHtml();
-  // 每栏标题左边一方章印（记忆页自带「录」）；文档里翻开的一篇有自己的书口，不加
-  const seal = SETTINGS_SEALS[settingsTab],
-    title = host.querySelector("h2");
-  if (seal && title && !title.previousElementSibling && !title.parentElement.classList.contains("about-head")) {
+  // 每栏标题左边一个这一栏的笔意图标（记忆页自带）；文档里翻开的一篇有自己的书口，关于页的题目是「言」本身，都不加
+  const title = host.querySelector("h2");
+  if (BRUSH_ICONS[settingsTab] && title && !title.previousElementSibling && !title.parentElement.classList.contains("about-head")) {
     const head = document.createElement("div");
     head.className = "about-head memory-head";
-    head.innerHTML = `<span class="seal memory-seal" aria-hidden="true">${seal}</span>`;
+    head.innerHTML = brushIcon(settingsTab, "settings-mark");
     title.before(head);
     head.append(title);
   }

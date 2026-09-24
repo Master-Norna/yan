@@ -118,7 +118,7 @@ await sleep(200);
 check(
   "memory tab renders with seal and count",
   await evalJs(
-    `(h => h.querySelector(".memory-seal")?.textContent === "录" && h.querySelector("h2")?.textContent === "记忆" && h.querySelector(".about-version")?.textContent === "1 / 200 条" && h.querySelectorAll(".memory-item").length === 1)(document.querySelector("#settingsContent"))`
+    `(h => h.querySelector(".settings-mark path") && h.querySelector("h2")?.textContent === "记忆" && h.querySelector(".about-version")?.textContent === "1 / 200 条" && h.querySelectorAll(".memory-item").length === 1)(document.querySelector("#settingsContent"))`
   )
 );
 check("item shows source conversation", await evalJs(`!!document.querySelector('#settingsContent [data-memory-open]')`));
