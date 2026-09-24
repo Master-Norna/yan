@@ -211,10 +211,7 @@ async function startTurn(c, user, profile) {
 // 再请它开口——它读了这句接着写，可就此改道；正在拟工具调用或跑着工具时不停，等结果交回、模型再开口之前递上；
 // 这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出。引导是为了答得更好，从不硬掐
 // 断线后请模型接着写的那句话：手点「继续生成」与自动续写共用
-const RESUME_NOTE = "上一条回复在此处因连接中断。请仅从中断处继续，不要重复已生成的内容。",
-  AUTO_RESUMES = 2;
-const SUPPLEMENT_PREFIX = "［用户在你作答途中补充的话］",
-  STEER_PREFIX = "［用户在你作答途中插了一句，你写到此处暂停。读后接着作答，可据此改变方向；不必重复已写的内容］";
+const AUTO_RESUMES = 2;
 function sendSupplement() {
   const c = currentConversation(),
     job = c && requestJob(c.id),
@@ -275,7 +272,7 @@ async function deliverSupplements(job, history, budget, assistant, { steer = fal
   job.queue = [];
   for (const { user, step } of queue) {
     const entry = await messageForApi(user, true, budget),
-      prefix = steer ? STEER_PREFIX : SUPPLEMENT_PREFIX;
+      prefix = prompt(steer ? "assistant.steer" : "assistant.supplement");
     if (typeof entry.content === "string") entry.content = `${prefix}${entry.content}`;
     else entry.content[0].text = `${prefix}${entry.content[0].text}`;
     history.push(entry);
@@ -425,7 +422,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
     if (resume && assistant.content) {
       history.push({ role: "assistant", content: assistant.content });
-      history.push({ role: "user", content: RESUME_NOTE });
+      history.push({ role: "user", content: prompt("assistant.resume") });
     }
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
@@ -471,7 +468,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
             roundOpen = false;
           }
           assistant.toolCalls = null;
-          if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: RESUME_NOTE });
+          if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: prompt("assistant.resume") });
           setJobLabel(conversation, job, "网络不稳 · 稍候接着写");
           await restFor(2000 * resumed, job.controller.signal);
           setJobLabel(conversation, job, "生成中");
@@ -513,7 +510,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       if (++rounds > toolRoundLimit()) {
         const said = assistant.content.slice(roundStart).trim();
         if (said) history.push({ role: "assistant", content: said });
-        history.push({ role: "user", content: "工具调用轮次已达上限，请不要再调用工具，直接根据已有结果作答，并说明尚未完成的部分。" });
+        history.push({ role: "user", content: prompt("assistant.roundLimit") });
         overrides.tools = null;
         if (assistant.content) assistant.content += "\n\n";
         continue;

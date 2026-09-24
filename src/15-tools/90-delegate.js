@@ -73,7 +73,7 @@ async function runDelegate(step, args, ctx) {
         resumed += 1;
         const said = sub.content.slice(roundStart);
         sub.toolCalls = null;
-        if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: RESUME_NOTE });
+        if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: prompt("assistant.resume") });
         await restFor(2000 * resumed, signal);
         continue;
       }

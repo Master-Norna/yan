@@ -23,7 +23,7 @@ const WORK = ["run_command", "write_file", "edit_file", "read_file", "list_files
   CHAT_FILES = ["run_command", "write_file", "read_file", "list_files"],
   MEM = ["remember", "forget", "recall", "search_conversations", "read_conversation"];
 function sys(names, { work = false, archive = false, sub = false } = {}) {
-  // 与 src/14-chat-engine.js 的 assistantHint 同序；那边加了段落这里也要加，否则表上的数是假的
+  // 与 src/14-chat-engine.js 的 assistantHint 同序；那边加了段落这里也要加，否则表上的数是假的（各模式给哪几件工具见 src/15-tools/ 的登记）
   const lines = [prompt("assistant.today", { day: "九月十六日", iso: "2026-09-16" }), prompt("assistant.judgement")];
   const env = { platform: "Windows", shell: "PowerShell", shellNote: prompt("work.windowsShell") };
   if (work) lines.push(prompt("work.hint", { workdir: "E:\\项目\\demo", ...env }));
@@ -43,11 +43,34 @@ const modes = {
     archive: true
   },
   "行（桥接+记忆）": {
-    tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", "update_plan", "ask_user", ...MEM, "delegate"],
+    tools: [
+      "search_web",
+      "fetch_page",
+      "http_request",
+      "run_js",
+      ...WORK,
+      "check_command",
+      "download_file",
+      "update_plan",
+      "ask_user",
+      ...MEM,
+      "delegate"
+    ],
     work: true
   },
   "行·帮手": {
-    tools: ["search_web", "fetch_page", "http_request", "run_js", ...WORK, "download_file", ...MEM],
+    tools: [
+      "search_web",
+      "fetch_page",
+      "http_request",
+      "run_js",
+      ...WORK,
+      "check_command",
+      "download_file",
+      "recall",
+      "search_conversations",
+      "read_conversation"
+    ],
     work: true,
     sub: true
   },

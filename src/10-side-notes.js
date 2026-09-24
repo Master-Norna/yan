@@ -573,7 +573,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
       if (++rounds > toolRoundLimit()) {
         const said = assistant.content.slice(roundStart).trim();
         if (said) history.push({ role: "assistant", content: said });
-        history.push({ role: "user", content: "工具调用轮次已达上限，请不要再调用工具，直接根据已有结果作答。" });
+        history.push({ role: "user", content: prompt("assistant.roundLimit") });
         overrides.tools = null;
         if (assistant.content) assistant.content += "\n\n";
         continue;
