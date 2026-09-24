@@ -434,6 +434,8 @@ const READ_ONLY_COMMAND =
 function isReadOnlyCommand(command) {
   const text = String(command || "").trim();
   if (/[;&<>`\n{}]|\$\(|\|\|/.test(text) || /-(?:ComputerName|CimSession|Session|Credential)\b/i.test(text)) return false;
+  // git log / diff 带 --output 会写文件，--ext-diff 会跑外部程序：都不算只读
+  if (/--output\b|--ext-diff\b/i.test(text)) return false;
   const parts = text.split("|").map(part => part.trim());
   return !!parts[0] && READ_ONLY_COMMAND.test(parts[0]) && parts.slice(1).every(part => READ_ONLY_PIPE.test(part));
 }
@@ -471,7 +473,16 @@ function markSeen(conversation, file, step = null) {
     set = new Set();
     workSeen.set(key, set);
   }
-  set.add(normalizeWorkPath(file));
+  set.add(seenPath(conversation, file));
+}
+// 「读过没有」按同一个文件认：读时写相对路径、改时写完整路径，或 Windows 上大小写不同，都是同一个文件
+/** @param {Conversation} conversation */
+function seenPath(conversation, file) {
+  const win = (bootstrap.work?.platform || "win32") === "win32",
+    fold = text => (win ? text.toLowerCase() : text),
+    value = normalizeWorkPath(file),
+    root = normalizeWorkPath(workRoot(conversation));
+  return fold(root && fold(value).startsWith(`${fold(root)}/`) ? value.slice(root.length + 1) : value);
 }
 const STEP_OUTPUT_KEEP = 6000;
 /**
@@ -1079,14 +1090,14 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     markSeen(conversation, data.path, step);
     return {
       ok: true,
-      content: `${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行）\n${data.text}`,
+      content: `${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行${data.encoding && data.encoding !== "utf-8" ? `；文件是 ${data.encoding === "gbk" ? "GBK" : data.encoding.toUpperCase()} 编码${data.encoding === "gbk" ? "，edit_file 改不了它" : ""}` : ""}）\n${data.text}`,
       display: `${data.shown}/${data.totalLines} 行`
     };
   }
   if (step.name === "edit_file") {
     step.title = String(args.path || "");
     const seen = workSeen.get(seenKey(conversation, step)),
-      normalized = normalizeWorkPath(step.title);
+      normalized = seenPath(conversation, step.title);
     if (!seen?.has(normalized)) return { ok: false, content: prompt("work.unread", { path: step.title }), display: "需先读取" };
     const data = await bridge(
       "/api/work/edit",

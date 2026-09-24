@@ -373,6 +373,11 @@ test("anthropicToOpenAiStream：事件流换成 OpenAI 风格分块——文字�
   assert.deepEqual(last.usage, { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 });
   assert.equal(last.model, "claude-x");
 });
+test("isReadOnlyCommand：git 带 --output / --ext-diff 不算只读", () => {
+  assert.equal(f.isReadOnlyCommand("git log --oneline"), true);
+  assert.equal(f.isReadOnlyCommand("git log --output=out.txt"), false);
+  assert.equal(f.isReadOnlyCommand("git diff --ext-diff"), false);
+});
 test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 id 并增删，用量相加", () => {
   const base = {
     version: 5,

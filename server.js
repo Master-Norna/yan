@@ -893,6 +893,9 @@ server.headersTimeout = 66000;
 // 桥接是本机常驻进程：某个请求里没兜住的异常打出来即可，不能让整个桥接倒下、页面从此「Failed to fetch」
 process.on("uncaughtException", error => console.error(`${stamp()} 桥接内部错误（已忽略）：`, error));
 process.on("unhandledRejection", error => console.error(`${stamp()} 桥接内部错误（已忽略）：`, error));
+// Ctrl+C、关掉窗口、结束进程时 Node 默认直接退出，不发 exit 事件：还在跑的指令与后台指令（开发服务器之类）就留在了后台占着端口。
+// 接住这几个信号走一遍正常退出，exit 里的收尾（见 server/work.js）才会执行
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) process.on(signal, () => process.exit(signal === "SIGINT" ? 130 : 0));
 server.listen(PORT, HOST, () => {
   const address = `http://${HOST}:${PORT}`;
   try {

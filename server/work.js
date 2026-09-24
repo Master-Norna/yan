@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn, spawnSync } = require("node:child_process");
+const vm = require("node:vm");
 const sandbox = require("./sandbox.js");
 
 module.exports = function createWork({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes, archiveHome }) {
@@ -307,6 +308,30 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       .replace(/\r\n/g, "\n")
       .trim();
   }
+  // 文本文件的编码：UTF-8（可带 BOM）为常；Windows PowerShell 5.1 的 > 与 Out-File 写出的是带 BOM 的 UTF-16LE，老的中文文件多是 GBK。
+  // 认得出的都解成文字，真是二进制（没有 BOM 却有 NUL）才回 null。UTF-8 里夹着零星几个坏字节的仍按 UTF-8 读，不整篇改按 GBK 读成乱码
+  function decodeText(buffer) {
+    if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf)
+      return { text: buffer.subarray(3).toString("utf8"), encoding: "utf-8-bom" };
+    if (buffer[0] === 0xff && buffer[1] === 0xfe) return { text: buffer.subarray(2).toString("utf16le"), encoding: "utf-16le" };
+    if (buffer[0] === 0xfe && buffer[1] === 0xff) {
+      const body = Buffer.from(buffer.subarray(2, 2 + ((buffer.length - 2) & ~1)));
+      return { text: body.swap16().toString("utf16le"), encoding: "utf-16be" };
+    }
+    if (buffer.subarray(0, 4096).includes(0)) return null;
+    const text = buffer.toString("utf8"),
+      bad = (text.match(/�/g) || []).length;
+    if (!bad || bad < text.length / 100) return { text, encoding: "utf-8" };
+    return { text: new TextDecoder("gb18030").decode(buffer), encoding: "gbk" };
+  }
+  // 按原来的编码写回；GBK 编不回去（Node 只会编 UTF-8 / UTF-16），给 null，由调用者拒绝
+  function encodeText(text, encoding) {
+    if (encoding === "utf-8") return Buffer.from(text, "utf8");
+    if (encoding === "utf-8-bom") return Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, "utf8")]);
+    if (encoding === "utf-16le") return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, "utf16le")]);
+    if (encoding === "utf-16be") return Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, "utf16le").swap16()]);
+    return null;
+  }
   // 行数按惯例：末尾的换行不算多一行（"a\nb\n" 是 2 行），空文件 0 行
   function countLines(text) {
     const value = String(text || "");
@@ -402,7 +427,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
     const args = win
       ? ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)]
       : ["-c", command];
-    return spawn(win ? "powershell.exe" : "/bin/sh", args, {
+    const child = spawn(win ? "powershell.exe" : "/bin/sh", args, {
       cwd,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -415,7 +440,16 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         CI: "1"
       }
     });
+    // 按字交出输出：一块一块各自解码，汉字恰好跨在两块之间就被劈成两个 �
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    runningShells.add(child);
+    child.on("close", () => runningShells.delete(child));
+    child.on("error", () => runningShells.delete(child));
+    return child;
   }
+  // 正在跑的 shell（前台与后台）：桥接退出时整棵收掉，不留在后台改文件、占端口
+  const runningShells = new Set();
   function runShell(command, cwd, timeoutMs, signal = null, { boxed = false } = {}) {
     return new Promise(resolve => {
       const win = process.platform === "win32";
@@ -566,14 +600,14 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       durationMs: Date.now() - job.started
     };
   }
-  // 桥接退出时把还在跑的后台指令一并收掉（退出时起不了异步的 taskkill，用同步的）
+  // 桥接退出时把还在跑的指令（前台的与后台的）一并收掉（退出时起不了异步的 taskkill，用同步的）
   process.on("exit", () => {
-    for (const job of backgroundJobs.values())
-      if (job.exitCode === null && job.child.pid)
+    for (const child of runningShells)
+      if (child.pid && child.exitCode === null && !child.signalCode)
         try {
           if (process.platform === "win32")
-            spawnSync("taskkill", ["/T", "/F", "/PID", String(job.child.pid)], { windowsHide: true, stdio: "ignore" });
-          else job.child.kill("SIGKILL");
+            spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, stdio: "ignore" });
+          else child.kill("SIGKILL");
         } catch {}
   });
   async function handleWorkCheck(req, res) {
@@ -623,7 +657,8 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         });
         const existed = !!existing,
           previous = existed ? await fs.promises.readFile(file).catch(() => null) : null;
-        const previousLines = previous && !previous.subarray(0, 4096).includes(0) ? countLines(previous.toString("utf8")) : 0;
+        const previousText = previous ? decodeText(previous)?.text : "",
+          previousLines = previousText ? countLines(previousText) : 0;
         await fs.promises.writeFile(file, content, "utf8").catch(error => {
           throw Error(describeFsError(error, String(body.path)));
         });
@@ -653,14 +688,22 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       const buffer = await fs.promises.readFile(file).catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });
-      if (buffer.subarray(0, 4096).includes(0)) throw Error("二进制文件，不予读取");
-      const lines = buffer.toString("utf8").split(/\r?\n/),
+      const decoded = decodeText(buffer);
+      if (!decoded) throw Error("二进制文件，不予读取");
+      const lines = decoded.text.split(/\r?\n/),
         offset = Math.floor(clampNumber(body.offset, 1, 1, Math.max(1, lines.length))),
         limit = Math.floor(clampNumber(body.limit, 400, 1, 2000));
       const slice = lines.slice(offset - 1, offset - 1 + limit);
       let text = slice.map((line, i) => `${String(offset + i).padStart(4)}| ${line}`).join("\n");
       if (text.length > WORK_FILE_LIMIT) text = `${text.slice(0, WORK_FILE_LIMIT)}\n…（内容过长已截断，请缩小 limit）`;
-      sendJson(res, 200, { path: shownPath(workdir, file), totalLines: lines.length, offset, shown: slice.length, text });
+      sendJson(res, 200, {
+        path: shownPath(workdir, file),
+        totalLines: lines.length,
+        offset,
+        shown: slice.length,
+        text,
+        encoding: decoded.encoding
+      });
     } catch (error) {
       sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
     }
@@ -749,9 +792,13 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         if (!stat) throw Error(`文件不存在：${body.path}`);
         if (stat.isDirectory()) throw Error(`${body.path} 是目录`);
         if (stat.size > 8 * 1024 * 1024) throw Error("文件超过 8 MB，不予编辑");
-        const buffer = await fs.promises.readFile(file);
-        if (buffer.subarray(0, 4096).includes(0)) throw Error("二进制文件，不予编辑");
-        const source = buffer.toString("utf8"),
+        const decoded = decodeText(await fs.promises.readFile(file));
+        if (!decoded) throw Error("二进制文件，不予编辑");
+        if (decoded.encoding === "gbk")
+          throw Error(
+            "文件是 GBK 编码，edit_file 只改 UTF-8 / UTF-16 的文件；请用 write_file 整体重写（会存成 UTF-8），或用指令转码后再改"
+          );
+        const source = decoded.text,
           crlf = source.includes("\r\n") && !oldText.includes("\r\n");
         const needle = crlf ? oldText.replace(/\r?\n/g, "\r\n") : oldText,
           replacement = crlf ? newText.replace(/\r?\n/g, "\r\n") : newText;
@@ -760,7 +807,9 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
         if (!count) throw Error("未找到要替换的文本：old 必须与文件内容逐字一致（含缩进与空格），请先 read_file 核对");
         if (count > 1 && !replaceAll) throw Error(`要替换的文本出现了 ${count} 处，请提供更长的唯一片段，或设置 replace_all`);
         const result = replaceAll ? source.split(needle).join(replacement) : source.replace(needle, () => replacement);
-        await fs.promises.writeFile(file, result, "utf8").catch(error => {
+        // 按原来的编码写回：UTF-16 的还是 UTF-16，带 BOM 的还带 BOM
+        const output = encodeText(result, decoded.encoding);
+        await fs.promises.writeFile(file, output).catch(error => {
           throw Error(describeFsError(error, String(body.path)));
         });
         const line = source.slice(0, source.indexOf(needle)).split(/\r?\n/).length;
@@ -769,7 +818,7 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
           replaced: replaceAll ? count : 1,
           line,
           lines: countLines(result),
-          bytes: Buffer.byteLength(result)
+          bytes: output.length
         });
       } finally {
         release();
@@ -779,6 +828,27 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
     }
   }
   // ---- search_files：在工作目录里按正则或原文逐行检索；跳过 node_modules 等目录与二进制、超大文件
+  // 正则是模型写的：写成 (a+)+$ 这类会灾难性回溯的，一行就能把桥接卡死（单线程，所有对话一起停）。
+  // 每个文件的逐行匹配放进 vm 跑、限两秒，超时即中止这次检索，把原因回给模型
+  const SEARCH_REGEX_MS = 2000,
+    searchScript = new vm.Script("hits = []; for (let i = 0; i < lines.length; i++) if (regex.test(lines[i])) hits.push(i);"),
+    searchContext = vm.createContext({ regex: null, lines: null, hits: null });
+  function matchLines(regex, lines, rel) {
+    searchContext.regex = regex;
+    searchContext.lines = lines;
+    try {
+      searchScript.runInContext(searchContext, { timeout: SEARCH_REGEX_MS });
+      return searchContext.hits;
+    } catch (error) {
+      if (error?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT")
+        throw Error(
+          `正则在 ${rel} 上回溯过久（超过 ${SEARCH_REGEX_MS / 1000} 秒），已中止：请改写得更具体（避免 (a+)+ 这类嵌套的重复），或用 literal 按原文找`
+        );
+      throw error;
+    } finally {
+      searchContext.regex = searchContext.lines = searchContext.hits = null;
+    }
+  }
   const SEARCH_MATCH_LIMIT = 200,
     SEARCH_FILE_LIMIT = 4000,
     SEARCH_FILE_BYTES = 2 * 1024 * 1024;
@@ -807,7 +877,12 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
       let target = await targetOf(workdir, { ...body, path: given || "." }, { write: true });
       const stat = await fs.promises.stat(target).catch(() => null);
       if (!given || /[\\/]$/.test(given) || stat?.isDirectory()) {
-        target = path.join(target, path.basename(fromUrl));
+        // 网址末段解码后可能是「../」「..」或带 Windows 不许的字符：取最后一段、去掉怪字符，. 与 .. 一律换成默认名，不能借它落到目录外
+        const base = path
+          .basename(fromUrl)
+          .replace(/[<>:"|?*\u0000-\u001f]/g, "_")
+          .trim();
+        target = path.join(target, base && base !== "." && base !== ".." ? base : "下载文件");
         if (strictBox(body)) {
           const why = sandbox.screenPath(relPath(workdir, target), { write: true });
           if (why) throw Error(why);
@@ -898,11 +973,11 @@ module.exports = function createWork({ sendJson, readJson, decodeEntities, fetch
             .then(s => s.size)
             .catch(() => 0);
           if (!size || size > SEARCH_FILE_BYTES) continue;
-          const buffer = await fs.promises.readFile(full).catch(() => null);
-          if (!buffer || buffer.subarray(0, 4096).includes(0)) continue;
-          const lines = buffer.toString("utf8").split(/\r?\n/);
-          for (let i = 0; i < lines.length; i++) {
-            if (!regex.test(lines[i])) continue;
+          const buffer = await fs.promises.readFile(full).catch(() => null),
+            decoded = buffer && decodeText(buffer);
+          if (!decoded) continue;
+          const lines = decoded.text.split(/\r?\n/);
+          for (const i of matchLines(regex, lines, rel)) {
             filesHit.add(rel);
             matches.push({ file: shownPath(workdir, full), line: i + 1, text: lines[i].trim().slice(0, 240) });
             if (matches.length >= limit) {

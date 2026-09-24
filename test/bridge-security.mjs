@@ -1,5 +1,5 @@
 // 桥接安全检查：Origin 门禁、工作目录必须完整限定、链接不能越出工作目录；卷宗接口不能越出卷宗目录、网页按纯文本给；沙箱在桥接这头守
-import { mkdirSync, writeFileSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, existsSync } from "node:fs";
 import http from "node:http";
 const PORT = Number(process.env.YAN_PORT || 8797),
   BASE = `http://127.0.0.1:${PORT}`;
@@ -559,6 +559,51 @@ check("screen: a harmless command passes", r.status === 200 && r.data.why === nu
     { Origin: "https://evil.example" }
   );
   check("other websites cannot relay through the model endpoint", r.status === 403, String(r.status));
+}
+// ---- 编码：UTF-16LE（Windows PowerShell 5.1 的 > 写出的）照读、改后仍是带 BOM 的 UTF-16；GBK 照读、不许逐字改
+{
+  writeFileSync(`${WORK}/u16.txt`, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("第一行\r\n第二行\r\n", "utf16le")]));
+  r = await post("/api/work/read", { workdir, path: "u16.txt" });
+  check(
+    "utf-16 file reads as text",
+    r.status === 200 && /第二行/.test(r.data.text) && r.data.encoding === "utf-16le",
+    JSON.stringify(r.data)
+  );
+  r = await post("/api/work/edit", { workdir, path: "u16.txt", old: "第二行", new: "改过" });
+  const raw = readFileSync(`${WORK}/u16.txt`);
+  check(
+    "editing keeps utf-16 with its BOM",
+    r.status === 200 && raw[0] === 0xff && raw[1] === 0xfe && raw.subarray(2).toString("utf16le") === "第一行\r\n改过\r\n",
+    JSON.stringify(r.data)
+  );
+  writeFileSync(`${WORK}/gbk.txt`, Buffer.from([0xc4, 0xe3, 0xba, 0xc3, 0x0a]));
+  r = await post("/api/work/read", { workdir, path: "gbk.txt" });
+  check("gbk file reads as text", r.status === 200 && /你好/.test(r.data.text) && r.data.encoding === "gbk", JSON.stringify(r.data));
+  r = await post("/api/work/edit", { workdir, path: "gbk.txt", old: "你好", new: "再见" });
+  check("gbk file is not edited in place", r.status === 400 && /GBK/.test(r.data?.error || ""), JSON.stringify(r.data));
+}
+// ---- 检索：会灾难回溯的正则两秒上下即中止，桥接不被卡死
+{
+  writeFileSync(`${WORK}/redos.txt`, `${"a".repeat(40)}b\n`);
+  const started = Date.now();
+  r = await post("/api/work/search", { workdir, query: "(a+)+$", glob: "redos.txt" });
+  check(
+    "a catastrophic regex is cut off instead of hanging the bridge",
+    r.status === 400 && /回溯/.test(r.data?.error || "") && Date.now() - started < 8000,
+    `${Date.now() - started}ms ${JSON.stringify(r.data)}`
+  );
+}
+// ---- 指令输出里大段中文：分块到达时汉字跨在两块之间，也不被劈成 �
+{
+  r = await post("/api/work/run", {
+    workdir,
+    command: win ? '1..2000 | ForEach-Object { "汉字输出第$($_)行" }' : 'for i in $(seq 1 2000); do echo "汉字输出第${i}行"; done'
+  });
+  check(
+    "long chinese output survives chunk boundaries",
+    r.status === 200 && !String(r.data.stdout).includes("�") && /第2000行/.test(r.data.stdout),
+    String(r.data?.stdout || JSON.stringify(r.data)).slice(-80)
+  );
 }
 rmSync(ARCHIVE, { recursive: true, force: true });
 rmSync(WORK, { recursive: true, force: true });
