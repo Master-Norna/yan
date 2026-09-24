@@ -6,7 +6,7 @@
 // ---------- 数据模型（JSDoc，供 tsc --checkJs 与编辑器；见 src/types.d.ts 的说明）----------
 // 存下来的东西只有这几种：Store 里挂着设置、模型、对话、卷宗（浏览器内的旧件）、记忆与草稿；对话里是消息，消息上挂步骤，步骤上可挂帮手
 /**
- * @typedef {Object} Attachment 附件的元数据；原件（data）另存 IndexedDB，只在读出时才带
+ * @typedef {Object} Attachment 附件的元数据；原件（data）另存存储根的 附件/（没桥接时暂存 IndexedDB），只在读出时才带
  * @property {string} id
  * @property {"image"|"text"|"file"} kind
  * @property {string} name
@@ -349,6 +349,8 @@ let metaRevision = 0,
 // 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store.js 开头的说明）
 let chatsBroken = false,
   chatsSyncing = false,
+  // 这一回开页后对话已从目录读全过：之后才敢按「没人用」清附件原件
+  chatsLoaded = false,
   freshBrowser = false,
   // 开页时浏览器里是一份没带版本标记的记录（更老的版本，或测试灌进来的）：与 配置.json 对齐时以它为准
   localSeeded = false,
@@ -607,37 +609,85 @@ function nextMetaRevision() {
   metaRevision = Math.max(Date.now(), metaRevision + 1);
   return metaRevision;
 }
-/** @param {{ disk?: boolean }} [options] disk: 顺带排一次写 配置.json（从磁盘刚取回的就不必再写回去） */
+// 配置上次写下时的指纹：saveStore 每几百毫秒就来一次（存对话时顺带），配置本身没变就不必动版本号、更不必排一次写 配置.json——
+// 从前每存一次对话就把整份配置写回磁盘，两个浏览器同开时，这边随手发一句话，就拿自己手上的旧配置把那边刚加的模型、记忆盖掉了
+let metaHash = "",
+  metaLocalKey = "";
+/** @param {{ disk?: boolean }} [options] disk: 配置变了就排一次写 配置.json（从磁盘刚取回的就不必再写回去） */
 function writeMeta({ disk = true } = {}) {
-  const json = JSON.stringify({
-    ...metaOf(),
-    [STORAGE_META_KEY]: { revision: nextMetaRevision(), split: true, pendingDeletes: [...pendingChatDeletes] }
-  });
-  try {
-    localStorage.setItem(STORAGE_KEY, json);
-    metaSaveWarned = false;
-  } catch {
-    if (!metaSaveWarned) {
-      metaSaveWarned = true;
-      toast("设置未能存下（浏览器存储已满），请先导出备份");
-    }
+  const hash = hashText(JSON.stringify(metaOf())),
+    changed = hash !== metaHash;
+  if (changed) {
+    metaHash = hash;
+    nextMetaRevision();
   }
-  if (disk) scheduleConfigSave();
+  const deletes = [...pendingChatDeletes],
+    localKey = `${hash}|${deletes.join(",")}`;
+  if (localKey !== metaLocalKey)
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...metaOf(),
+          [STORAGE_META_KEY]: { revision: metaRevision || nextMetaRevision(), split: true, pendingDeletes: deletes }
+        })
+      );
+      metaLocalKey = localKey;
+      metaSaveWarned = false;
+    } catch {
+      if (!metaSaveWarned) {
+        metaSaveWarned = true;
+        toast("设置未能存下（浏览器存储已满），请先导出备份");
+      }
+    }
+  if (disk && changed) scheduleConfigSave();
 }
 // ---------- 配置.json ----------
-// 改动后一秒内写一次（含 API Key：这是自己机器上的文件，几个浏览器共用一套模型配置靠的就是它；导出的备份仍不含）
+// 改动后一秒内写一次（含 API Key：这是自己机器上的文件，几个浏览器共用一套模型配置靠的就是它；导出的备份仍不含）。
+// 几个浏览器共用一份，靠的是「基准」：记着上次与磁盘对齐时的那一份（configBase，连同它在磁盘上的时间戳 configSyncedAt）。
+// 写的时候带上这个时间戳，磁盘上若已有别处写过的更新的一份，桥接不写、把那份交回来；这边就按基准做三方合并——
+// 自己改过的取自己的，没改的取对方的——再写一次。基准记在 localStorage 里，关了页面再开也接得上
+const CONFIG_BASE_KEY = "yan-config-base";
+let configBase = "",
+  configSaving = false,
+  configSaveAgain = false;
+function rememberConfigBase(meta, savedAt) {
+  configBase = meta;
+  configSyncedAt = savedAt;
+  try {
+    localStorage.setItem(CONFIG_BASE_KEY, JSON.stringify({ root: bootstrap.store?.root || "", savedAt, meta }));
+  } catch {}
+}
+// 取回记着的基准：必须是同一个存储根的
+function restoreConfigBase() {
+  if (configBase) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONFIG_BASE_KEY) || "null");
+    if (saved?.meta && saved.root === (bootstrap.store?.root || "")) {
+      configBase = String(saved.meta);
+      configSyncedAt = Math.max(configSyncedAt, Number(saved.savedAt) || 0);
+    }
+  } catch {}
+}
 function scheduleConfigSave() {
   if (apiBase === null) return;
   clearTimeout(configSaveTimer);
   configSaveTimer = setTimeout(saveConfigNow, 1000);
 }
-function saveConfigNow() {
+/** @param {{ force?: boolean }} [options] force：不比时间戳，这边就是定论（头一回立根、以浏览器为准的导入） */
+function saveConfigNow({ force = false } = {}) {
   clearTimeout(configSaveTimer);
   configSaveTimer = null;
   if (apiBase === null) return;
-  const savedAt = metaRevision || nextMetaRevision(),
-    body = JSON.stringify({ config: metaOf(), savedAt });
-  configSyncedAt = Math.max(configSyncedAt, savedAt);
+  // 上一次还在路上：等它回来再写这一次，免得两次互相比时间戳
+  if (configSaving && !unloading) {
+    configSaveAgain = true;
+    return;
+  }
+  const meta = JSON.stringify(metaOf()),
+    savedAt = Math.max(Date.now(), configSyncedAt + 1),
+    body = `{"config":${meta},"savedAt":${savedAt}${force ? "" : `,"base":${configSyncedAt}`}}`;
+  configSaving = true;
   // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再推）
   fetch(`${apiBase}/api/store/config/save`, {
     method: "POST",
@@ -645,10 +695,85 @@ function saveConfigNow() {
     body,
     keepalive: unloading && body.length < 60000,
     signal: unloading ? undefined : AbortSignal.timeout(20000)
-  }).catch(() => {});
+  })
+    .then(async response => {
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 409 && data.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
+      if (response.ok) rememberConfigBase(meta, Number(data.savedAt) || savedAt);
+    })
+    .catch(() => {})
+    .finally(() => {
+      configSaving = false;
+      if (configSaveAgain) {
+        configSaveAgain = false;
+        saveConfigNow();
+      }
+    });
 }
-// 磁盘上的一份配置换进来：设置、模型、卷宗、记忆、草稿；这台浏览器自己的对话目录暂存与墓碑不动
-function adoptConfig(config, savedAt) {
+// 磁盘上有一份配置：与这边对一对。磁盘上的不比基准新——这边改过就写下去；磁盘上的更新、这边没改过——换进来；
+// 两边都改过——三方合并后换进来，再写回去
+function reconcileConfig(config, savedAt) {
+  const mine = JSON.stringify(metaOf()),
+    changed = mine !== configBase;
+  if (savedAt <= configSyncedAt) {
+    if (changed) saveConfigNow();
+    return;
+  }
+  if (!changed) return adoptConfig(config, savedAt);
+  const theirs = metaOf(normalizeStoreData({ ...config, conversations: [] }));
+  adoptConfig(mergeConfig3(configBase ? JSON.parse(configBase) : {}, JSON.parse(mine), theirs), savedAt, JSON.stringify(theirs));
+  saveConfigNow();
+}
+// 三方合并：base 是上次对齐时的那份。同一样东西，自己没动过的取对方的，自己动过的取自己的；
+// 模型、卷宗、记忆按 id 逐件比，设置与草稿按键逐项比；两边各自花掉的用量相加，不互相抹掉
+function mergeConfig3(base, mine, theirs) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const keyed = (b, m, t, pick = (bv, mv, tv) => (same(mv, bv) ? tv : mv)) => {
+    b ||= {};
+    m ||= {};
+    t ||= {};
+    const out = {};
+    for (const key of new Set([...Object.keys(t), ...Object.keys(m), ...Object.keys(b)])) {
+      const inB = key in b,
+        inM = key in m,
+        inT = key in t;
+      if (inM && inT) out[key] = pick(b[key], m[key], t[key]);
+      else if (inM && (!inB || !same(b[key], m[key])))
+        out[key] = m[key]; // 自己新加的，或对方删了而自己又改过的
+      else if (inT && (!inB || !same(b[key], t[key]))) out[key] = t[key]; // 对方新加的，或自己删了而对方又改过的
+    }
+    return out;
+  };
+  const byId = (b, m, t, pick) => {
+    const index = list => new Map((Array.isArray(list) ? list : []).filter(item => item?.id).map(item => [item.id, item]));
+    const merged = keyed(Object.fromEntries(index(b)), Object.fromEntries(index(m)), Object.fromEntries(index(t)), pick);
+    // 顺序：对方的在前（它的排序为准），自己新加的接在后面
+    const order = [...index(t).keys(), ...index(m).keys()];
+    return [...new Set(order)].filter(id => id in merged).map(id => merged[id]);
+  };
+  const mergeProfile = (b, m, t) => {
+    if (same(m, b)) return t;
+    const out = keyed(b, m, t);
+    // 用量两边各自往上加：合并时把两边新花的都记上（额度改过的一边会把用量清零，那时按合并的结果算）
+    if (b && same(m.quota, b.quota) && same(t.quota, b.quota))
+      out.usedTokens = Math.max(0, Number(m.usedTokens || 0) + Number(t.usedTokens || 0) - Number(b.usedTokens || 0));
+    return out;
+  };
+  return {
+    version: theirs.version ?? mine.version,
+    settings: keyed(base.settings, mine.settings, theirs.settings),
+    profiles: byId(base.profiles, mine.profiles, theirs.profiles, mergeProfile),
+    library: byId(base.library, mine.library, theirs.library),
+    memory: {
+      enabled: same(mine.memory?.enabled, base.memory?.enabled) ? theirs.memory?.enabled : mine.memory?.enabled,
+      items: byId(base.memory?.items, mine.memory?.items, theirs.memory?.items)
+    },
+    drafts: keyed(base.drafts, mine.drafts, theirs.drafts)
+  };
+}
+// 磁盘上的一份配置换进来：设置、模型、卷宗、记忆、草稿；这台浏览器自己的对话目录暂存与墓碑不动。
+// base：记作基准的那一份（默认就是换进来的这份；合并时是对方那份，自己改的仍算「改过」，写下去之前丢不了）
+function adoptConfig(config, savedAt, base = "") {
   const meta = normalizeStoreData({ ...config, conversations: [] });
   store.settings = meta.settings;
   store.profiles = meta.profiles;
@@ -657,7 +782,9 @@ function adoptConfig(config, savedAt) {
   store.drafts = meta.drafts;
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
   metaRevision = Math.max(metaRevision, savedAt);
-  configSyncedAt = savedAt;
+  const adopted = JSON.stringify(metaOf());
+  rememberConfigBase(base || adopted, savedAt);
+  metaHash = hashText(adopted);
   writeMeta({ disk: false });
   applyAppearance();
   renderHeader();
@@ -694,27 +821,25 @@ async function syncConfigWithDisk() {
       info.fresh = false;
       if (moved.chats || moved.archive) toast(`旧的对话与卷宗已拷进 ${pathTail(info.root || "")}；旧处原样留着`);
     }
-    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000)),
-      local = readLocalStoreRecord();
+    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
     let met = "";
     try {
       met = localStorage.getItem(STORE_ROOT_KEY) || "";
     } catch {}
     delete store.settings.chatsDir;
     delete store.settings.archiveDir;
+    restoreConfigBase();
     if (!disk.config || localSeeded) {
       writeMeta({ disk: false });
-      saveConfigNow();
-    } else if (freshBrowser) adoptConfig(disk.config, disk.savedAt);
+      saveConfigNow({ force: true });
+    } else if (freshBrowser) adoptConfig(disk.config, Number(disk.savedAt) || 0);
     else if (met !== (info.root || "")) {
       mergeConfig(disk.config);
       writeMeta({ disk: false });
-      saveConfigNow();
+      saveConfigNow({ force: true });
       renderHeader();
       renderQuota();
-    } else if ((local?.revision || 0) > disk.savedAt) saveConfigNow();
-    else if (disk.savedAt > configSyncedAt) adoptConfig(disk.config, disk.savedAt);
-    configSyncedAt = Math.max(configSyncedAt, Number(disk.savedAt) || 0);
+    } else reconcileConfig(disk.config, Number(disk.savedAt) || 0);
     freshBrowser = localSeeded = false;
     try {
       localStorage.setItem(STORE_ROOT_KEY, info.root || "");
@@ -723,12 +848,12 @@ async function syncConfigWithDisk() {
     toast(`配置未能与存储目录对齐：${String(error.message || error).slice(0, 60)}`);
   }
 }
-// 从后台切回来：另一个浏览器可能改过配置，磁盘上的更新就换进来（这边正有没写下去的改动时不换）
+// 从后台切回来：另一个浏览器可能改过配置，与磁盘上的对一对（这边有没写下去的改动也不丢，见 reconcileConfig）
 async function refreshConfigFromDisk() {
-  if (apiBase === null || configSaveTimer) return;
+  if (apiBase === null || configSaving) return;
   try {
     const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
-    if (disk.config && disk.savedAt > configSyncedAt && !configSaveTimer) adoptConfig(disk.config, disk.savedAt);
+    if (disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
   } catch {}
 }
 // 对话目录可用：桥接在线、桥接报了目录、上次读它没出错
@@ -815,6 +940,17 @@ async function writeConversation(id) {
             await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
         }
       } catch (error) {
+        // 迟到的旧保存撞上了别处的删除：不暂存、不复活，这边也跟着拿掉
+        if (/已在别处删除/.test(String(error.message))) {
+          activeChatWrites.delete(id);
+          store.conversations = store.conversations.filter(item => item.id !== id);
+          forgetConversation(id);
+          if (currentId === id) {
+            currentId = null;
+            render();
+          } else renderHistory();
+          return;
+        }
         spilled = true;
         if (!chatSaveWarned) {
           chatSaveWarned = true;
@@ -863,6 +999,15 @@ async function deleteConversationStorage(id) {
     chatStamps.delete(id);
     deletedChatIds.delete(id);
   }
+}
+// 别处删掉的一段：这边只从内存与暂存表里拿掉，目录那头已经删过了（附件原件那边也删过了）
+function forgetConversation(id) {
+  pendingChatWrites.delete(id);
+  dirtyChatIds.delete(id);
+  chatHashes.delete(id);
+  chatStamps.delete(id);
+  delete store.drafts?.[id];
+  void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
 }
 // 全量巡检：每段都算一遍指纹，变了的写下去。低频跑（定时、页面要关时），哪处改了没标脏也兜得住
 function sweepConversations() {
@@ -922,6 +1067,8 @@ async function hydrateStore() {
   freshBrowser = !local;
   localSeeded = !!local && !local.managed;
   for (const id of local?.pendingDeletes || []) pendingChatDeletes.add(id);
+  // 开页时的配置就是 localStorage 里那份：记下指纹，没改动时不去写 配置.json
+  metaHash = hashText(JSON.stringify(metaOf()));
   let db = null;
   try {
     db = await openStateDb();
@@ -987,6 +1134,7 @@ async function syncChatsWithDisk() {
   try {
     const data = await bridge("/api/chats/load", { root: chatsDir() }, AbortSignal.timeout(120000));
     chatsBroken = false;
+    chatsLoaded = true;
     for (const id of [...pendingChatDeletes]) {
       // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
       if (deletedChatIds.has(id)) continue;
@@ -998,32 +1146,44 @@ async function syncChatsWithDisk() {
     const disk = new Map();
     for (const item of data.items || []) if (item?.id && !pendingChatDeletes.has(item.id)) disk.set(item.id, item);
     const push = new Set(),
-      settled = new Set();
+      settled = new Set(),
+      gone = data.deleted && typeof data.deleted === "object" ? data.deleted : {};
     let changed = false,
-      currentReplaced = false;
-    store.conversations = store.conversations.map(c => {
-      const item = disk.get(c.id),
-        stamp = chatStamps.get(c.id) || 0,
-        hash = hashText(JSON.stringify(c)),
-        unsaved = chatHashes.get(c.id) !== hash,
-        busy = conversationRunning(c.id) || titlingIds.has(c.id) || compactingIds.has(c.id);
-      if (!item) {
-        push.add(c.id);
+      currentReplaced = false,
+      dropped = 0;
+    store.conversations = store.conversations
+      .map(c => {
+        const item = disk.get(c.id),
+          stamp = chatStamps.get(c.id) || 0,
+          hash = hashText(JSON.stringify(c)),
+          unsaved = chatHashes.get(c.id) !== hash,
+          busy = conversationRunning(c.id) || titlingIds.has(c.id) || compactingIds.has(c.id);
+        if (!item) {
+          // 别处删了、这边又没再动过：跟着删，不推回去让它复活；这边删后又说过话的，照推（桥接那头按时间认）
+          if (Number(gone[c.id]) > stamp && !unsaved && !busy) {
+            forgetConversation(c.id);
+            changed = true;
+            dropped += 1;
+            return null;
+          }
+          push.add(c.id);
+          return c;
+        }
+        if (item.savedAt > stamp && !unsaved && !busy) {
+          const next = normalizeConversation(item.conversation);
+          chatStamps.set(c.id, item.savedAt);
+          chatHashes.set(c.id, hashText(JSON.stringify(next)));
+          settled.add(c.id);
+          changed = true;
+          if (c.id === currentId) currentReplaced = true;
+          return next;
+        }
+        if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
+        else settled.add(c.id);
         return c;
-      }
-      if (item.savedAt > stamp && !unsaved && !busy) {
-        const next = normalizeConversation(item.conversation);
-        chatStamps.set(c.id, item.savedAt);
-        chatHashes.set(c.id, hashText(JSON.stringify(next)));
-        settled.add(c.id);
-        changed = true;
-        if (c.id === currentId) currentReplaced = true;
-        return next;
-      }
-      if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
-      else settled.add(c.id);
-      return c;
-    });
+      })
+      .filter(Boolean);
+    if (dropped) toast(dropped === 1 ? "有一段对话已在别处删除，此处随之移去" : `有 ${dropped} 段对话已在别处删除，此处随之移去`);
     const known = new Set(store.conversations.map(c => c.id));
     for (const item of disk.values())
       if (!known.has(item.id)) {
@@ -1046,6 +1206,8 @@ async function syncChatsWithDisk() {
         render();
       }
     }
+    // 对话读全了：浏览器里暂存的附件原件推进目录，没人用的清掉
+    void settleAttachmentStore();
   } catch (error) {
     chatsBroken = true;
     toast(`对话目录不可用，先存在浏览器里：${String(error.message || error).slice(0, 60)}`);
@@ -1073,15 +1235,60 @@ async function fileStoreRequest(mode, action) {
     transaction.onabort = () => reject(transaction.error || Error("附件存储已中止"));
   });
 }
-function putAttachment(record) {
-  return fileStoreRequest("readwrite", store => store.put(record));
+// ---------- 附件原件 ----------
+// 桥接在线时落在存储根的 附件/（与对话、卷宗、配置同在一处，几个浏览器共用，复制即备份；见 server/files.js）；
+// 没桥接、或落盘不成时暂存进这台浏览器的 IndexedDB，接上后推到目录里去、表里的清掉（见 settleAttachmentStore）。
+// 读的时候先问目录，目录里没有再翻表——迁过去之前的旧件也读得到
+const attachmentCache = new Map();
+let attachmentCacheSize = 0;
+// 最近读过的几件留在内存里：每发一问都要把历史里的附件翻一遍，不必回回经桥接取整份原件
+function cacheAttachment(record) {
+  if (!record?.id) return;
+  uncacheAttachment(record.id);
+  const size = String(record.data || "").length + String(record.extractedText || "").length;
+  if (size > 16 * MB) return;
+  attachmentCache.set(record.id, record);
+  attachmentCacheSize += size;
+  for (const [id] of attachmentCache) {
+    if (attachmentCacheSize <= 64 * MB) break;
+    uncacheAttachment(id);
+  }
 }
-function getAttachment(id) {
-  return id ? fileStoreRequest("readonly", store => store.get(id)) : Promise.resolve(null);
+function uncacheAttachment(id) {
+  const record = attachmentCache.get(id);
+  if (!record) return;
+  attachmentCache.delete(id);
+  attachmentCacheSize -= String(record.data || "").length + String(record.extractedText || "").length;
+}
+async function putAttachment(record) {
+  uncacheAttachment(record?.id);
+  if (apiBase !== null)
+    try {
+      await bridge("/api/files/put", { record }, AbortSignal.timeout(120000));
+      return;
+    } catch {}
+  return fileStoreRequest("readwrite", db => db.put(record));
+}
+async function getAttachment(id) {
+  if (!id) return null;
+  if (attachmentCache.has(id)) return attachmentCache.get(id);
+  let record = null;
+  if (apiBase !== null)
+    try {
+      record = (await bridge("/api/files/get", { id }, AbortSignal.timeout(60000))).record || null;
+    } catch {}
+  if (!record) record = (await fileStoreRequest("readonly", db => db.get(id)).catch(() => null)) || null;
+  cacheAttachment(record);
+  return record;
 }
 function deleteAttachment(id) {
   thumbCache.delete(id);
-  return id ? fileStoreRequest("readwrite", store => store.delete(id)).catch(() => {}) : Promise.resolve();
+  uncacheAttachment(id);
+  if (!id) return Promise.resolve();
+  return Promise.all([
+    apiBase !== null ? bridge("/api/files/delete", { ids: [id] }, AbortSignal.timeout(20000)).catch(() => {}) : null,
+    fileStoreRequest("readwrite", db => db.delete(id)).catch(() => {})
+  ]);
 }
 function attachmentIds(messages = []) {
   return messages
@@ -1091,6 +1298,24 @@ function attachmentIds(messages = []) {
 }
 function inLibrary(id) {
   return store.library.some(file => file.id === id);
+}
+// 仍在用的附件：各段对话（含换下的版本、旁注、行迹里补言带的）、草稿、案上待发的、浏览器内的卷宗
+function attachmentKeepIds() {
+  const ids = new Set();
+  const add = files => {
+    for (const file of files || []) if (file?.id) ids.add(file.id);
+  };
+  for (const c of store.conversations) {
+    for (const m of allMessages(c)) {
+      add(m.attachments);
+      for (const step of allSteps(m)) add(step.attachments);
+    }
+    for (const thread of c.threads || []) for (const m of thread.messages || []) add(m.attachments);
+  }
+  for (const value of Object.values(store.drafts || {})) add(value?.attachments);
+  add(pendingAttachments);
+  add(store.library);
+  return ids;
 }
 // 卷宗与对话附件原件合计占用（按 id 去重，同一原件记住两处只算一次）
 function usedAttachmentBytes() {
@@ -1104,28 +1329,50 @@ function usedAttachmentBytes() {
   return [...seen.values()].reduce((a, b) => a + b, 0);
 }
 function isReferenced(id) {
-  return (
-    pendingAttachments.some(file => file.id === id) ||
-    draftAttachmentIds().includes(id) ||
-    store.conversations.some(c => allMessages(c).some(m => (m.attachments || []).some(file => file.id === id)))
-  );
+  return attachmentKeepIds().has(id);
 }
 // 已收入卷宗的原件由卷宗管理，删除对话或移除待发附件时不会删掉它
 async function deleteAttachments(ids) {
   // 调用方通常会在本轮同步代码里紧接着移除消息或草稿；等引用更新完再判断，既不误删共用原件，也不留下孤立数据。
   await Promise.resolve();
-  await Promise.all([...new Set(ids)].filter(id => !inLibrary(id) && !isReferenced(id)).map(deleteAttachment));
+  const keep = attachmentKeepIds();
+  await Promise.all([...new Set(ids)].filter(id => id && !keep.has(id)).map(deleteAttachment));
 }
-async function cleanupAttachmentStore() {
+// 对话从目录读全之后（见 syncChatsWithDisk）才来这一趟：先把浏览器里暂存的原件推进目录、表里的清掉，再请桥接清掉目录里没人用的。
+// 对话没读全时绝不清——那时内存里只有没落盘的几段，照它判「没人用」会把别的对话的附件一并删掉
+let attachmentsSettling = false;
+async function settleAttachmentStore() {
+  if (apiBase === null || !chatsLoaded || attachmentsSettling) return;
+  attachmentsSettling = true;
   try {
-    const keep = new Set([
-        ...attachmentIds(store.conversations.flatMap(allMessages)),
-        ...store.library.map(file => file.id),
-        ...draftAttachmentIds()
-      ]),
+    let keys = [];
+    try {
       keys = await fileStoreRequest("readonly", db => db.getAllKeys());
-    await deleteAttachments(keys.filter(key => !keep.has(key)));
-  } catch {}
+    } catch {}
+    if (keys.length) {
+      const { has = [] } = await bridge("/api/files/has", { ids: keys.map(String) }, AbortSignal.timeout(20000));
+      const onDisk = new Set(has);
+      for (const id of keys) {
+        if (apiBase === null) return;
+        if (!onDisk.has(String(id))) {
+          const record = await fileStoreRequest("readonly", db => db.get(id)).catch(() => null);
+          if (!record) continue;
+          // 推不上去就留在表里，下回再推；推上去了才删表里的
+          const pushed = await bridge("/api/files/put", { record }, AbortSignal.timeout(120000)).then(
+            () => true,
+            () => false
+          );
+          if (!pushed) continue;
+        }
+        await fileStoreRequest("readwrite", db => db.delete(id)).catch(() => {});
+      }
+    }
+    if (apiBase !== null && chatsLoaded)
+      await bridge("/api/files/clean", { keep: [...attachmentKeepIds()] }, AbortSignal.timeout(60000)).catch(() => {});
+  } catch {
+  } finally {
+    attachmentsSettling = false;
+  }
 }
 // 分叉：c.messages 始终是当前走的那条路；编辑或重答时被换下来的尾巴整段收进 c.forks（记下它接在哪条消息之后），随时可以切回来。
 // 同一位置的几个版本 = 当前这条 + 接在同一位置的 forks，按首条消息的时间排序
@@ -2029,7 +2276,6 @@ async function boot() {
   applyAppearance();
   bindEvents();
   (window.requestIdleCallback || (fn => setTimeout(fn, 800)))(() => void themeSheets());
-  void cleanupAttachmentStore();
   void refreshArchive();
   // 侧栏的开合记在本机（不随备份走）：宽屏按上次的来，窄屏一律收起；theme-boot 已按同一记录先把宽度放好，这里接过来
   toggleSidebar(isMobile() || localStorage.getItem("yan-sidebar") === "collapsed");
@@ -3068,7 +3314,7 @@ function renderWelcomeNotice() {
   const none = !profiles().length;
   el.classList.toggle("hidden", !none);
   if (!none) return;
-  el.innerHTML = `<span class="seal" aria-hidden="true">始</span><span>尚未接入模型。任何 OpenAI 兼容接口均可使用，配置只存于此浏览器。</span><button type="button" data-open-models>前往设置 →</button>`;
+  el.innerHTML = `<span class="seal" aria-hidden="true">始</span><span>尚未接入模型。任何 OpenAI 兼容接口均可使用，配置只存于本机、不经云端。</span><button type="button" data-open-models>前往设置 →</button>`;
   el.querySelector("[data-open-models]").onclick = () => openSettings("models");
 }
 // 欢迎页输入框上方的一行小签：目录签（空着是言、落在卷宗；填了是行）、新对话的三档指令权限
@@ -6127,7 +6373,7 @@ function closeImageViewer() {
 async function openImageViewer(id, trigger = null) {
   try {
     const file = await getAttachment(id);
-    if (!file) return toast("图片原件已不在此浏览器中");
+    if (!file) return toast("图片原件已找不到");
     if (file.kind !== "image") return openFileViewer({ attachmentId: id }, file.name, trigger);
     imageViewerAttachmentId = id;
     imageViewerArchivePath = null;
@@ -6547,7 +6793,8 @@ async function addFiles(fileList) {
       toast(`本次附件合计不超过 ${limitLabel(MAX_PENDING_BYTES)}`);
       break;
     }
-    if (attachmentUsage + file.size > MAX_ATTACHMENTS_BYTES) {
+    // 合计上限只管浏览器里的暂存；桥接在线时原件落在存储目录，不受它限
+    if (apiBase === null && attachmentUsage + file.size > MAX_ATTACHMENTS_BYTES) {
       toast(`卷宗与附件原件合计已达 ${limitLabel(MAX_ATTACHMENTS_BYTES)} 上限，请先清理`);
       break;
     }
@@ -6794,7 +7041,7 @@ async function saveToLibrary(id) {
       .flatMap(m => m.attachments || [])
       .find(file => file.id === id);
   const file = metadata && (await getAttachment(id));
-  if (!file) return toast("附件原件已不在此浏览器中");
+  if (!file) return toast("附件原件已找不到");
   if (archiveOnline()) {
     try {
       const saved = await putArchiveFile(metadata.name, file.kind === "text" ? dataUrlFromText(file.data, file.mime) : file.data);
@@ -6941,7 +7188,7 @@ async function viewerReader(source) {
     return { url: () => url, text: async () => (await fetched()).text(), blob: async () => (await fetched()).blob(), extracted: "" };
   }
   const file = await getAttachment(source.attachmentId);
-  if (!file) throw Error("附件原件已不在此浏览器中");
+  if (!file) throw Error("附件原件已找不到");
   const blob = file.kind === "text" ? new Blob([file.data], { type: file.mime || "text/plain" }) : await (await fetch(file.data)).blob();
   return {
     url: () => viewerBlobUrl(blob),
@@ -7270,7 +7517,7 @@ async function extractZipDocumentText(extension, bytes) {
 async function downloadAttachment(id) {
   try {
     const file = await getAttachment(id);
-    if (!file) return toast("附件原件已不在此浏览器中");
+    if (!file) return toast("附件原件已找不到");
     const anchor = document.createElement("a");
     let objectUrl = "";
     if (file.kind === "text") {
@@ -7381,9 +7628,14 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
   /** @type {Array<Record<string, any>>} 多段内容：首段文字，其后图片与文件原件 */
   const content = [{ type: "text", text: quotedText(message) || "请查看附件。" }];
   for (const metadata of message.attachments) {
+    // 早先消息里的图片只留一行占位，用不着原件：不必每问都把它从存储目录整份取回来
+    if (!latest && metadata.kind === "image") {
+      content[0].text += `\n\n[图片：${metadata.name}，${formatFileSize(metadata.size)}，已在此前发送]`;
+      continue;
+    }
     const file = metadata.data !== undefined ? metadata : await getAttachment(metadata.id);
     if (!file) {
-      content[0].text += `\n\n[附件 ${metadata.name} 的原件在此浏览器中已不可用]`;
+      content[0].text += `\n\n[附件 ${metadata.name} 的原件已找不到]`;
       continue;
     }
     if (file.kind === "text") {
@@ -8675,6 +8927,8 @@ const READ_ONLY_COMMAND =
 function isReadOnlyCommand(command) {
   const text = String(command || "").trim();
   if (/[;&<>`\n{}]|\$\(|\|\|/.test(text) || /-(?:ComputerName|CimSession|Session|Credential)\b/i.test(text)) return false;
+  // git log / diff 带 --output 会写文件，--ext-diff 会跑外部程序：都不算只读
+  if (/--output\b|--ext-diff\b/i.test(text)) return false;
   const parts = text.split("|").map(part => part.trim());
   return !!parts[0] && READ_ONLY_COMMAND.test(parts[0]) && parts.slice(1).every(part => READ_ONLY_PIPE.test(part));
 }
@@ -8712,7 +8966,16 @@ function markSeen(conversation, file, step = null) {
     set = new Set();
     workSeen.set(key, set);
   }
-  set.add(normalizeWorkPath(file));
+  set.add(seenPath(conversation, file));
+}
+// 「读过没有」按同一个文件认：读时写相对路径、改时写完整路径，或 Windows 上大小写不同，都是同一个文件
+/** @param {Conversation} conversation */
+function seenPath(conversation, file) {
+  const win = (bootstrap.work?.platform || "win32") === "win32",
+    fold = text => (win ? text.toLowerCase() : text),
+    value = normalizeWorkPath(file),
+    root = normalizeWorkPath(workRoot(conversation));
+  return fold(root && fold(value).startsWith(`${fold(root)}/`) ? value.slice(root.length + 1) : value);
 }
 const STEP_OUTPUT_KEEP = 6000;
 /**
@@ -9320,14 +9583,14 @@ async function runWorkTool(step, args, conversation, assistant, signal) {
     markSeen(conversation, data.path, step);
     return {
       ok: true,
-      content: `${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行）\n${data.text}`,
+      content: `${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行${data.encoding && data.encoding !== "utf-8" ? `；文件是 ${data.encoding === "gbk" ? "GBK" : data.encoding.toUpperCase()} 编码${data.encoding === "gbk" ? "，edit_file 改不了它" : ""}` : ""}）\n${data.text}`,
       display: `${data.shown}/${data.totalLines} 行`
     };
   }
   if (step.name === "edit_file") {
     step.title = String(args.path || "");
     const seen = workSeen.get(seenKey(conversation, step)),
-      normalized = normalizeWorkPath(step.title);
+      normalized = seenPath(conversation, step.title);
     if (!seen?.has(normalized)) return { ok: false, content: prompt("work.unread", { path: step.title }), display: "需先读取" };
     const data = await bridge(
       "/api/work/edit",
@@ -10313,10 +10576,13 @@ function aboutSettingsHtml() {
     `<div class="about-section"><h3>数据与边界</h3>${rows([
       [
         "存放",
-        "桥接在线时对话落在本机的对话目录（默认 ~/言/对话，可在通用设置更换；一段一个文件，复制即备份）；设置、模型配置与草稿存于此浏览器，并镜像一份到该目录（不含 API Key）。没桥接时对话暂存于浏览器的 IndexedDB；附件原件另存 IndexedDB。不经任何云端"
+        "桥接在线时一切落在本机的存储位置（默认 ~/.yan，可在通用设置更换）：对话/ 一段一个文件，卷宗/ 是成品与收进来的文件，附件/ 是附件原件，配置.json 是设置、模型配置（含 API Key）、记忆与草稿；复制整个目录即备份。没桥接时暂存于此浏览器，接上后推过去。不经任何云端"
       ],
       ["桥接", "本机进程仅监听 127.0.0.1，负责转发模型请求、联网检索与读取网页；拒绝访问本机与内网地址"],
-      ["执事", "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件读写限定在工作目录之内"],
+      [
+        "执事",
+        "指令在你的机器上、以你的权限执行，只读指令直接执行，其余默认逐条确认；文件工具能否越出工作目录由设置 → 工具的「可及范围」定（默认全盘，问而后行开着沙箱时只在目录内）"
+      ],
       [
         "沙箱",
         "指令与文件工具默认套着：路径不出目录、机密文件不碰、动系统与直接外联的指令拒绝、机密环境变量不给指令，在桥接那头守。是静态筛查，不是进程隔离——脚本里的代码仍以你的权限运行；设置 → 工具可关"
@@ -10354,7 +10620,11 @@ function modelsSettingsHtml() {
     apiBase !== null
       ? `本机桥接已接通${apiBase ? "（VS Code 预览）" : ""}，联网与转发均可用。`
       : "当前由浏览器直连模型，联网检索不可用；本机桥接启动后将自动接通。";
-  return `<h2>模型</h2><p class="settings-lead">任何 OpenAI 兼容接口均可接入，API Key 仅存于当前浏览器。${transport}</p>${bootstrap.notice ? `<div class="server-notice">${escapeHtml(bootstrap.notice)}</div>` : ""}<div id="profileList">${profiles().map(profileCardHtml).join("")}</div><button id="addProfile" class="outline-btn profile-add">＋ 接入模型</button>`;
+  const keyNote =
+    apiBase !== null
+      ? "API Key 与其余配置一起存于本机存储位置的 配置.json，几个浏览器共用；导出的备份不含它。"
+      : "API Key 暂存于此浏览器，桥接接上后存进本机的存储位置；导出的备份不含它。";
+  return `<h2>模型</h2><p class="settings-lead">任何 OpenAI 兼容接口均可接入。${keyNote}${transport}</p>${bootstrap.notice ? `<div class="server-notice">${escapeHtml(bootstrap.notice)}</div>` : ""}<div id="profileList">${profiles().map(profileCardHtml).join("")}</div><button id="addProfile" class="outline-btn profile-add">＋ 接入模型</button>`;
 }
 function quotaParts(value) {
   const match = String(value ?? "")
@@ -10383,6 +10653,8 @@ function storageSize() {
   const bytes = new Blob([JSON.stringify(store)]).size;
   return bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 }
+// 存储位置的更换排着队来（见 bindSettingsEvents 里的 commitStore）
+let storeMoves = Promise.resolve();
 function bindSettingsEvents() {
   $("#settingName")?.addEventListener("input", e => {
     store.settings.name = e.target.value || "访客";
@@ -10404,7 +10676,9 @@ function bindSettingsEvents() {
   let storeTimer = null;
   const commitStore = value => {
     clearTimeout(storeTimer);
-    storeTimer = setTimeout(async () => {
+    // 一次换完（对话对齐、卷宗重翻、设置页重画）再换下一次：连着换两回时，前一回迟到的收尾不能把页面又画回它那个位置
+    storeTimer = setTimeout(() => (storeMoves = storeMoves.then(moveStore, moveStore)), 600);
+    const moveStore = async () => {
       const next = String(value || "").trim();
       if (!next || next === (bootstrap.store?.parent || "")) return;
       let data;
@@ -10415,16 +10689,18 @@ function bindSettingsEvents() {
       }
       if (!data.moved) return;
       bootstrap.store = { root: data.root, parent: data.parent, fresh: false };
-      bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive };
+      bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive, files: data.files };
       chatsBroken = false;
       chatHashes.clear();
       chatStamps.clear();
       chatDiskWrites.clear();
       // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
       if (data.adopted) {
+        configBase = "";
         configSyncedAt = 0;
-        await refreshConfigFromDisk();
-      } else saveConfigNow();
+        const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000)).catch(() => null);
+        if (disk?.config) adoptConfig(disk.config, Number(disk.savedAt) || 0);
+      } else saveConfigNow({ force: true });
       await syncChatsWithDisk();
       const ids = store.conversations.map(conversation => conversation.id);
       flushConversations(ids, { force: true });
@@ -10435,7 +10711,7 @@ function bindSettingsEvents() {
       } catch {}
       renderSettings();
       toast(`存储已换到 ${pathTail(data.root)}；${data.adopted ? "用的是那里原有的数据" : "旧处原样留着"}`);
-    }, 600);
+    };
   };
   storeInput?.addEventListener("change", e => commitStore(e.target.value));
   $("#settingStorePick")?.addEventListener("click", async () => {
@@ -10660,6 +10936,14 @@ async function handleProfileAction(profile, action, card) {
     return;
   }
   if (action === "delete") {
+    if (
+      !(await askConfirm({
+        title: "删除这个模型？",
+        body: `「${profile.name || profile.model || "未命名"}」的配置连同 API Key 将一并移除，无法撤销。`,
+        ok: "删除"
+      }))
+    )
+      return;
     store.profiles = store.profiles.filter(p => p.id !== profile.id);
     if (store.settings.activeProfileId === profile.id) store.settings.activeProfileId = profiles().find(p => p.id !== profile.id)?.id || "";
     saveStore();
@@ -10755,25 +11039,81 @@ async function fetchModelList(profile) {
 async function exportData(includeFiles) {
   /** @type {Store & { exportedAt: string, attachments?: Attachment[] }} 备份：去掉 API Key，可选带上附件原件 */
   const safeStore = { ...store, profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })), exportedAt: now() };
+  let blob,
+    files = 0;
   if (includeFiles) {
-    try {
-      safeStore.attachments = await fileStoreRequest("readonly", db => db.getAll());
-    } catch {
-      toast("附件原件读取失败，本次备份不含附件原件");
+    // 附件原件只带仍在用的那几件：存储目录与浏览器里的暂存都翻，谁有取谁。原件合起来可能上 GB，
+    // 拼成一个大字符串会超出浏览器的字符串上限、点了没反应——一件一件接进 Blob，内存里只过一件
+    toast("正在收拢附件原件…");
+    blob = new Blob([`${JSON.stringify(safeStore).slice(0, -1)},"attachments":[`], { type: "application/json" });
+    for (const id of attachmentKeepIds()) {
+      const record = await getAttachment(id).catch(() => null);
+      if (!record) continue;
+      blob = new Blob([blob, files ? "," : "", JSON.stringify(record)], { type: "application/json" });
+      uncacheAttachment(id);
+      files += 1;
     }
-  }
-  const blob = new Blob([JSON.stringify(safeStore, null, includeFiles ? 0 : 2)], { type: "application/json" });
+    blob = new Blob([blob, "]}"], { type: "application/json" });
+  } else blob = new Blob([JSON.stringify(safeStore, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `言-备份-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  toast(`备份已导出${safeStore.attachments ? `（含 ${safeStore.attachments.length} 件附件原件）` : ""}；不含 API Key`);
+  toast(`备份已导出${includeFiles ? `（含 ${files} 件附件原件）` : ""}；不含 API Key`);
+}
+// 读备份：小的整份解析；带着上百 MB 附件原件的，整份读成一个字符串会超出浏览器的上限——按字节找到末尾的附件数组，
+// 前面的记录照常解析，原件一件一件解出来交给调用者，内存里只过一件
+async function readBackup(file) {
+  if (file.size < 128 * MB) {
+    const data = JSON.parse(await readFile(file, "text"));
+    return {
+      data,
+      attachments: (async function* () {
+        yield* Array.isArray(data.attachments) ? data.attachments : [];
+      })()
+    };
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer()),
+    decoder = new TextDecoder(),
+    marker = new TextEncoder().encode(',"attachments":[');
+  // 附件数组是导出时最后接上的一项，原件里的引号都转义过，从末尾往前找到的第一处就是它
+  let at = -1;
+  for (let i = bytes.lastIndexOf(marker[0]); i >= 0; i = i > 0 ? bytes.lastIndexOf(marker[0], i - 1) : -1)
+    if (marker.every((b, k) => bytes[i + k] === b)) {
+      at = i;
+      break;
+    }
+  if (at < 0) return { data: JSON.parse(decoder.decode(bytes)), attachments: (async function* () {})() };
+  const data = JSON.parse(`${decoder.decode(bytes.subarray(0, at))}}`);
+  async function* attachments() {
+    let depth = 0,
+      inString = false,
+      escaped = false,
+      start = -1;
+    for (let i = at + marker.length; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (b === 92) escaped = true;
+        else if (b === 34) inString = false;
+        continue;
+      }
+      if (b === 34) inString = true;
+      else if (b === 123) {
+        if (depth++ === 0) start = i;
+      } else if (b === 125) {
+        if (--depth === 0) yield JSON.parse(decoder.decode(bytes.subarray(start, i + 1)));
+      } else if (b === 93 && depth === 0) break;
+    }
+  }
+  data.attachments = true;
+  return { data, attachments: attachments() };
 }
 // 导入采用合并策略：按 id 跳过已存在的对话 / 模型 / 卷宗，附件原件只在本机缺失时写入
 async function importData(file) {
   try {
-    const data = JSON.parse(await readFile(file, "text"));
+    const { data, attachments } = await readBackup(file);
     if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations))
       throw Error("不是言的备份文件，或版本不兼容");
     // 旧版备份先按启动时同一套迁移与规整过一遍（workAuto → commandPolicy、去掉半成品的压缩分隔……），别等下次刷新才对
@@ -10807,9 +11147,10 @@ async function importData(file) {
         store.drafts[key] = draft;
         drafts += 1;
       }
-    for (const record of Array.isArray(data.attachments) ? data.attachments : [])
+    for await (const record of attachments)
       if (record?.id && record.data !== undefined && !(await getAttachment(record.id))) {
         await putAttachment(record);
+        uncacheAttachment(record.id);
         files += 1;
       }
     const memoryIds = new Set(store.memory.items.map(item => item.id)),
@@ -11353,8 +11694,13 @@ function anthropicToOpenAiStream(model = "") {
     } else if (name === "message_stop") {
       stopped = true;
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-    } else if (name === "error")
-      controller.enqueue(chunk({ content: `\n[接口错误：${data.error?.message || data.error?.type || "未知"}]` }));
+    } else if (name === "error") {
+      // 流到半途的报错（overloaded_error 最常见）：按 OpenAI 流里的报错格式交出去，页面据此按「连接中断」处理、稍候接着写，
+      // 而不是把一句报错写进正文、当这一答写完了
+      stopped = true;
+      const message = [data.error?.type, data.error?.message].filter(Boolean).join("：") || "未知错误";
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: `接口在作答途中出错：${message}` } })}\n\n`));
+    }
   };
   const feed = (controller, text) => {
     buffer += text;
