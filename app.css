@@ -440,7 +440,7 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   display: flex;
   align-items: center;
 }
-button.history-repo {
+.history-repo {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -456,7 +456,7 @@ button.history-repo {
   cursor: pointer;
   transition: color 0.16s;
 }
-button.history-repo:hover {
+.history-repo:hover {
   color: var(--accent);
 }
 .repo-seal {
@@ -479,7 +479,7 @@ button.history-repo:hover {
   font: 500 12.5px var(--title);
   color: var(--ink);
 }
-button.history-repo:hover .history-repo-name {
+.history-repo:hover .history-repo-name {
   color: var(--accent);
 }
 .history-repo small {
@@ -659,15 +659,17 @@ button.history-repo:hover .history-repo-name {
 .settings-open:hover .gear {
   opacity: 1;
 }
+/* 左下角的名字：一方淡朱的圆印，与侧栏的纸色拉开；原先 paper-3 底、ink-2 字，与侧栏底色几乎一样 */
 .avatar {
   width: 25px;
   height: 25px;
   display: grid;
   place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
   border-radius: 50%;
-  background: var(--paper-3);
-  color: var(--ink-2);
-  font: 12px var(--title);
+  background: color-mix(in srgb, var(--accent) 12%, var(--paper));
+  color: var(--accent);
+  font: 500 12px var(--title);
 }
 .main {
   position: relative;
@@ -1054,6 +1056,28 @@ button.history-repo:hover .history-repo-name {
 }
 .quota.empty .quota-text {
   color: var(--danger);
+}
+/* 分组（「集」）组首里改名时的输入框：紧凑些，与组名同一行 */
+.history-repo .group-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 7px;
+  font-size: 12.5px;
+}
+/* 「集」组首比「工」组多一个「⋯」：两键浮在右侧、悬停才显，折叠的箭头与「工」组对齐 */
+.is-set > .history-repo-head {
+  padding-right: 27px;
+}
+.is-set > .history-repo-head .repo-new {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  margin: 0;
+  background: var(--paper-2);
+  transform: translateY(-50%);
+}
+.is-set > .history-repo-head [data-group-new] {
+  right: 28px;
 }
 
 /* ---- 20-welcome.css ---- */

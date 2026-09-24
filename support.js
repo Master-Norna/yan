@@ -123,6 +123,7 @@
  * @property {CommandPolicy} [commandPolicy] 指令权限模式
  * @property {string} [reasoning] 思考档位
  * @property {string} [presetId] 用的哪个预设；空即言的本色
+ * @property {string} [groupId] 归在哪个分组；空即散列
  * @property {boolean} [pinned]
  * @property {boolean} [unread]
  * @property {boolean} [ended] 旧版：额度尽了整段锁死；现已不再写入，读到照旧尊重
@@ -174,6 +175,8 @@
  * @property {string} activeProfileId
  * @property {Preset[]} presets
  * @property {string} presetId 新对话用的预设（上回选的）；空即本色
+ * @property {{ id: string, name: string, createdAt: string }[]} groups 分组：侧栏里自立的几组，对话各记 groupId
+ * @property {string} [pendingGroupId] 从组首「＋」另起的新对话归进这一组（用过即清）
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
@@ -273,6 +276,7 @@ const defaultStore = {
     activeProfileId: "",
     presets: [],
     presetId: "",
+    groups: [],
     autoTitle: true,
     pendingWorkdir: "",
     collapsedRepos: [],
@@ -493,6 +497,13 @@ function normalizeStoreData(value) {
         settings.presets.push(normalizePreset({ id: `from-${p.id}`, name: p.name || "预设", prompt: text, profileId: p.id }));
     }
     if (!settings.presets.some(preset => preset.id === settings.presetId)) settings.presetId = "";
+    settings.groups = (Array.isArray(settings.groups) ? settings.groups : [])
+      .filter(group => group && typeof group === "object" && group.id)
+      .map(group => ({
+        id: String(group.id),
+        name: String(group.name || "").trim() || "未命名",
+        createdAt: String(group.createdAt || new Date().toISOString())
+      }));
     return {
       ...structuredClone(defaultStore),
       ...data,
@@ -2654,7 +2665,11 @@ async function boot() {
 function bindEvents() {
   $("#collapseSidebar").onclick = () => toggleSidebar();
   $("#mobileMenu").onclick = () => toggleSidebar(false);
-  $("#newChat").onclick = newChat;
+  // 侧栏的翻页是散列的一段；要归进某组从组首「＋」起
+  $("#newChat").onclick = () => {
+    delete store.settings.pendingGroupId;
+    newChat();
+  };
   $("#openLibrary").onclick = () => (view === "library" ? closeLibrary() : openLibrary());
   $("#openSettings").onclick = () => openSettings("general");
   $("#closeSettings").onclick = closeSettings;
@@ -3697,6 +3712,11 @@ function renderChips(work, bridged) {
   approve.querySelector(".chip-text").textContent = meta[0];
   approve.classList.toggle("on", policy !== "ask");
   approve.title = `${meta[0]}：${meta[1]}（新对话默认）`;
+  // 从组首「＋」来的：新对话归进那一组
+  const group = pendingGroup(),
+    groupChip = $("#groupChip");
+  groupChip.classList.toggle("hidden", !group);
+  groupChip.querySelector(".chip-text").textContent = group?.name || "";
 }
 function closeChipPop() {
   document.querySelectorAll(".chip-pop").forEach(pop => pop.remove());
@@ -3809,7 +3829,7 @@ function openHistoryMenu(id, anchor) {
   if (document.querySelector(`.chip-pop[data-kind=history][data-for="${CSS.escape(id)}"]`)) return closeChipPop();
   const pop = openFloatingPop(
     anchor,
-    `<button type="button" data-menu="pin">${c.pinned ? "取消置顶" : "置顶"}</button><button type="button" data-menu="rename">改名</button><button type="button" data-menu="bind">${isWork(c) ? "更换目录" : "绑定目录"}</button><button type="button" data-menu="export"><span>导出</span><small>${archiveOnline() ? "存入卷宗" : "Markdown"}</small></button><button type="button" class="danger" data-menu="delete">删除</button>`,
+    `<button type="button" data-menu="pin">${c.pinned ? "取消置顶" : "置顶"}</button><button type="button" data-menu="rename">改名</button><button type="button" data-menu="bind">${isWork(c) ? "更换目录" : "绑定目录"}</button><button type="button" data-menu="group">${groupOf(c) ? "换个分组" : "移入分组"}</button><button type="button" data-menu="export"><span>导出</span><small>${archiveOnline() ? "存入卷宗" : "Markdown"}</small></button><button type="button" class="danger" data-menu="delete">删除</button>`,
     { align: "right" }
   );
   pop.dataset.kind = "history";
@@ -3823,6 +3843,7 @@ function openHistoryMenu(id, anchor) {
     else if (action === "rename") startRename(id);
     else if (action === "delete") deleteConversation(id);
     else if (action === "export") void exportConversationMarkdown(c);
+    else if (action === "group") openMoveMenu(c, anchor.closest(".history-item") || anchor);
     else if (action === "bind") {
       if (c.ended) return toast("此对话已收尾，请翻页后再绑定目录");
       openWorkdirPop({
@@ -3931,6 +3952,11 @@ function setupChips() {
         renderHistory();
       }
     });
+  $("#groupChip").onclick = () => {
+    delete store.settings.pendingGroupId;
+    saveStore();
+    renderChips(workMode(), apiBase !== null);
+  };
   $("#approveChip").onclick = () => {
     store.settings.commandPolicyDefault = nextCommandPolicy(store.settings.commandPolicyDefault);
     saveStore();
@@ -4238,13 +4264,21 @@ function renderHistory() {
     (c.messages || []).some(m => typeof m.content === "string" && m.content.toLowerCase().includes(query));
   const sorted = [...store.conversations].filter(matches).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   // 一条时间线：绑了目录的对话归在各自的「工」组里，组按组内最近动过的那条排（一条有动静，整组靠前），组内按时间；
-  // 没绑目录的对话按自己的时间散在其间；置顶另列。组可收起，收起时只露出当前打开的那条；查找时不收
+  // 没绑目录的对话按自己的时间散在其间；置顶另列；自立的分组（「集」）在置顶之下自成一段，空组也列着。
+  // 组可收起，收起时只露出当前打开的那条；查找时不收，也不列没有命中的组
   const collapsed = new Set(store.settings.collapsedRepos || []),
     pinned = sorted.filter(c => c.pinned),
     repos = new Map(),
+    sets = new Map(groupsList().map(group => [group.id, { kind: "set", group, at: group.createdAt, items: [] }])),
     nodes = [];
   for (const c of sorted) {
     if (c.pinned) continue;
+    const set = c.groupId && sets.get(c.groupId);
+    if (set) {
+      if (!set.items.length || c.updatedAt > set.at) set.at = c.updatedAt;
+      set.items.push(c);
+      continue;
+    }
     if (!isWork(c)) {
       nodes.push({ kind: "chat", at: c.updatedAt, c });
       continue;
@@ -4258,7 +4292,16 @@ function renderHistory() {
     node.items.push(c);
   }
   nodes.sort((a, b) => b.at.localeCompare(a.at));
-  const buckets = new Map([["置顶", pinned.map(c => ({ kind: "chat", c }))]]);
+  /** @type {Map<string, any[]>} */
+  const buckets = new Map();
+  buckets.set(
+    "置顶",
+    pinned.map(c => ({ kind: "chat", c }))
+  );
+  buckets.set(
+    "分组",
+    [...sets.values()].filter(node => !query || node.items.length).sort((a, b) => b.at.localeCompare(a.at))
+  );
   for (const label of ["今天", "过去七天", "更早"]) buckets.set(label, []);
   for (const node of nodes) buckets.get(dayBucket(node.at)).push(node);
   // 正改着名时侧栏也可能重画（别的对话拟好了题、后台一答收尾）：改到一半的字与光标得留住，不能被原标题冲掉
@@ -4289,6 +4332,18 @@ function renderHistory() {
       running = node.items.filter(c => c.id !== currentId && requestJob(c.id)).length;
     return `<div class="history-repo-group${fold ? " collapsed" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><button type="button" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? "展开" : "收起"}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">工</span><span class="history-repo-name">${escapeHtml(name)}</span><small>${node.items.length}${fold && running ? ` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></button><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="在此目录翻页">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
+  // 分组：画法同「工」组，印文是「集」；组首右侧「＋」在此组另起一段、「⋯」改名或解散；改名时组名换成输入框
+  const setHtml = node => {
+    const { group } = node,
+      key = `group:${group.id}`,
+      fold = collapsed.has(key) && !query,
+      shown = fold ? node.items.filter(c => c.id === currentId) : node.items,
+      renaming = renamingGroupId === group.id;
+    const name = renaming
+      ? `<input class="history-rename group-rename" value="${escapeHtml(group.name)}" maxlength="40" aria-label="分组改名">`
+      : `<span class="history-repo-name">${escapeHtml(group.name)}</span>`;
+    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">集</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="在此组翻页">＋</button><button type="button" class="history-tool repo-new" data-group-menu="${escapeHtml(group.id)}" title="分组" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
+  };
   renderingHistory = true;
   try {
     $("#history").innerHTML =
@@ -4296,7 +4351,7 @@ function renderHistory() {
         .filter(([, items]) => items.length)
         .map(
           ([label, items]) =>
-            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : item(node.c))).join("")}</div>`
+            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : node.kind === "set" ? setHtml(node) : item(node.c))).join("")}</div>`
         )
         .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
     const input = $("#history .history-rename");
@@ -7848,10 +7903,12 @@ async function sendOrStop() {
       messages: [],
       workdir: pending,
       presetId: presetOf(null)?.id || "",
+      groupId: pendingGroup()?.id || "",
       commandPolicy: normalizeCommandPolicy(presetOf(null)?.policy || store.settings.commandPolicyDefault),
       reasoning: normalizeReasoning(profile.reasoning)
     };
     if (!(await ensureWorkReady(c))) return;
+    delete store.settings.pendingGroupId;
     closeChipPop();
     store.conversations.unshift(c);
     currentId = c.id;
@@ -13408,6 +13465,180 @@ function bindGuideEvents() {
     $("#settingsContent").scrollTop = 0;
   });
 }
+
+  // ---- 24-groups.js ----
+// 言 · 分组：侧栏里自立的几组，像 Claude 的 project——把相关的对话聚在一处，不至散落。
+// 画法沿用「工」组（组首一方印、左侧一道朱线），印文是「集」；列在「置顶」之下，自成一段。
+// 对话的「⋯」里移入、移出或就地新建一组；组首「＋」在此组另起一段，「⋯」改名、解散（解散只拆组，对话退回散列）
+/** @type {string|null} 正在改名的那一组 */
+let renamingGroupId = null;
+
+function groupsList() {
+  return store.settings.groups;
+}
+/** @param {Conversation|null} c */
+function groupOf(c) {
+  return (c?.groupId && groupsList().find(group => group.id === c.groupId)) || null;
+}
+function pendingGroup() {
+  return groupsList().find(group => group.id === store.settings.pendingGroupId) || null;
+}
+function createGroup(name = "新分组") {
+  const group = { id: uid(), name, createdAt: now() };
+  groupsList().push(group);
+  saveStore();
+  return group;
+}
+/** @param {Conversation} c @param {string} groupId 空即移出 */
+function moveToGroup(c, groupId) {
+  c.groupId = groupId;
+  markDirty(c.id);
+  saveStore();
+  renderHistory();
+}
+function startGroupRename(id) {
+  renamingGroupId = id;
+  renderHistory();
+  const input = /** @type {HTMLInputElement|null} */ ($("#history .group-rename"));
+  input?.focus();
+  input?.select();
+}
+function commitGroupRename(value) {
+  const group = groupsList().find(item => item.id === renamingGroupId),
+    name = String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 40);
+  renamingGroupId = null;
+  if (group && name && name !== group.name) {
+    group.name = name;
+    saveStore();
+  }
+  renderHistory();
+  renderChips(workMode(), apiBase !== null);
+}
+async function dissolveGroup(id) {
+  const group = groupsList().find(item => item.id === id);
+  if (!group) return;
+  const members = store.conversations.filter(c => c.groupId === id);
+  if (
+    !(await askConfirm({
+      title: `解散分组「${group.name}」？`,
+      body: members.length ? `组里的 ${members.length} 段对话退回散列，不会删除。` : "这一组是空的。",
+      ok: "解散"
+    }))
+  )
+    return;
+  store.settings.groups = groupsList().filter(item => item !== group);
+  for (const c of members) {
+    c.groupId = "";
+    markDirty(c.id);
+  }
+  if (store.settings.pendingGroupId === id) delete store.settings.pendingGroupId;
+  saveStore();
+  renderHistory();
+  renderChips(workMode(), apiBase !== null);
+}
+// 对话「⋯」里的「移入分组」：列出各组，另有新建一组与移出
+/** @param {Conversation} c @param {Element} anchor */
+function openMoveMenu(c, anchor) {
+  const current = groupOf(c);
+  const pop = openFloatingPop(
+    anchor,
+    `${groupsList()
+      .map(
+        group =>
+          `<button type="button" data-move="${escapeHtml(group.id)}"${group === current ? ' class="active" disabled' : ""}>${escapeHtml(group.name)}</button>`
+      )
+      .join(
+        ""
+      )}<button type="button" data-move="__new">新建分组…</button>${current ? `<button type="button" data-move="">移出「${escapeHtml(current.name)}」</button>` : ""}`,
+    { align: "right" }
+  );
+  pop.dataset.kind = "group-move";
+  pop.addEventListener("click", event => {
+    const button = /** @type {HTMLElement} */ (event.target).closest("[data-move]");
+    if (!button) return;
+    closeChipPop();
+    const target = button.dataset.move;
+    if (target === "__new") {
+      const group = createGroup();
+      moveToGroup(c, group.id);
+      startGroupRename(group.id);
+    } else moveToGroup(c, target);
+  });
+}
+// 组首「⋯」：改名、解散
+function openGroupMenu(id, anchor) {
+  const pop = openFloatingPop(
+    anchor,
+    `<button type="button" data-group-act="rename">改名</button><button type="button" class="danger" data-group-act="dissolve">解散</button>`,
+    {
+      align: "right"
+    }
+  );
+  pop.dataset.kind = "group";
+  pop.addEventListener("click", event => {
+    const act = /** @type {HTMLElement} */ (event.target).closest("[data-group-act]")?.dataset.groupAct;
+    if (!act) return;
+    closeChipPop();
+    if (act === "rename") startGroupRename(id);
+    else void dissolveGroup(id);
+  });
+}
+// 侧栏里分组那几处的点击与改名：收起 / 展开、组首「＋」、组首「⋯」
+$("#history").addEventListener("click", event => {
+  const target = /** @type {HTMLElement} */ (event.target);
+  const toggle = target.closest("[data-group-toggle]");
+  if (toggle && !target.closest(".group-rename")) {
+    const key = `group:${toggle.dataset.groupToggle}`,
+      set = new Set(store.settings.collapsedRepos || []);
+    set.has(key) ? set.delete(key) : set.add(key);
+    store.settings.collapsedRepos = [...set];
+    saveStoreSoon();
+    return renderHistory();
+  }
+  const add = target.closest("[data-group-new]");
+  if (add) {
+    store.settings.pendingGroupId = add.dataset.groupNew;
+    saveStore();
+    return newChat();
+  }
+  const menu = target.closest("[data-group-menu]");
+  if (menu) {
+    event.stopPropagation();
+    openGroupMenu(menu.dataset.groupMenu, menu);
+  }
+});
+$("#history").addEventListener("dblclick", event => {
+  const toggle = /** @type {HTMLElement} */ (event.target).closest("[data-group-toggle]");
+  if (toggle && !renamingGroupId) startGroupRename(toggle.dataset.groupToggle);
+});
+$("#history").addEventListener("keydown", event => {
+  const input = /** @type {HTMLInputElement} */ (event.target);
+  // 组首是 div（改名时里面要放输入框，按钮里放不得）：回车与空格照按钮开合
+  if (input.dataset?.groupToggle !== undefined && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    return input.click();
+  }
+  if (!input.classList?.contains("group-rename")) return;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    commitGroupRename(input.value);
+  } else if (event.key === "Escape") {
+    event.stopPropagation();
+    renamingGroupId = null;
+    renderHistory();
+  }
+});
+$("#history").addEventListener(
+  "blur",
+  event => {
+    const input = /** @type {HTMLInputElement} */ (event.target);
+    if (input.classList?.contains("group-rename") && renamingGroupId) commitGroupRename(input.value);
+  },
+  true
+);
 
   // ---- 99-start.js ----
 // 言 · 启动
