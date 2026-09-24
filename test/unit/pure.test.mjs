@@ -373,6 +373,25 @@ test("anthropicToOpenAiStream：事件流换成 OpenAI 风格分块——文字�
   assert.deepEqual(last.usage, { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 });
   assert.equal(last.model, "claude-x");
 });
+test("anthropicToOpenAiStream：流到半途的 error 事件按流里的报错交出，不写进正文", async () => {
+  const raw = [
+    ["message_start", { type: "message_start", message: { model: "claude-x", usage: { input_tokens: 3 } } }],
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "写到一半" } }],
+    ["error", { type: "error", error: { type: "overloaded_error", message: "Overloaded" } }]
+  ]
+    .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
+    .join("");
+  const text = await new Response(new Blob([raw]).stream().pipeThrough(f.anthropicToOpenAiStream("claude"))).text();
+  const chunks = text
+    .split("\n\n")
+    .filter(Boolean)
+    .map(line => line.replace(/^data: /, ""));
+  const last = JSON.parse(chunks.at(-1));
+  assert.match(last.error.message, /overloaded_error/);
+  assert.equal(last.choices, undefined);
+  assert.ok(!chunks.some(c => c.includes("接口错误")));
+});
 test("isReadOnlyCommand：git 带 --output / --ext-diff 不算只读", () => {
   assert.equal(f.isReadOnlyCommand("git log --oneline"), true);
   assert.equal(f.isReadOnlyCommand("git log --output=out.txt"), false);

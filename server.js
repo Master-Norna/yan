@@ -632,9 +632,7 @@ async function handleChat(req, res) {
     const body = await readJson(req),
       config = resolveProfile(body.profile, true);
     if (!Array.isArray(body.messages) || !body.messages.length) throw Error("消息不能为空");
-    const messages = body.systemPrompt
-      ? [{ role: "system", content: String(body.systemPrompt).slice(0, 20000) }, ...body.messages]
-      : body.messages;
+    const messages = body.systemPrompt ? [{ role: "system", content: String(body.systemPrompt) }, ...body.messages] : body.messages;
     const payload = {
       model: config.model,
       messages,

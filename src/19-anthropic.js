@@ -172,8 +172,13 @@ function anthropicToOpenAiStream(model = "") {
     } else if (name === "message_stop") {
       stopped = true;
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-    } else if (name === "error")
-      controller.enqueue(chunk({ content: `\n[接口错误：${data.error?.message || data.error?.type || "未知"}]` }));
+    } else if (name === "error") {
+      // 流到半途的报错（overloaded_error 最常见）：按 OpenAI 流里的报错格式交出去，页面据此按「连接中断」处理、稍候接着写，
+      // 而不是把一句报错写进正文、当这一答写完了
+      stopped = true;
+      const message = [data.error?.type, data.error?.message].filter(Boolean).join("：") || "未知错误";
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: `接口在作答途中出错：${message}` } })}\n\n`));
+    }
   };
   const feed = (controller, text) => {
     buffer += text;
