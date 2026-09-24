@@ -14,6 +14,7 @@ async function connectBridge(candidates, timeout = 1400) {
       const next = await response.json();
       bootstrap = next;
       apiBase = candidate;
+      if (next.stale) toast("本机桥接的代码已更新，请关掉桥接窗口、重新运行 start.cmd", 8000);
       return true;
     } catch {}
   }

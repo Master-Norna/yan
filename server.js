@@ -7,7 +7,19 @@ const net = require("node:net");
 const { spawn } = require("node:child_process");
 const os = require("node:os");
 const { Readable } = require("node:stream");
-const bundler = require("./build.js");
+// 拼接规则（build.js）改了就重新载入：页面脚本本是即时拼的，不该因为拼法变了就得重启桥接
+const BUILD_FILE = require.resolve("./build.js");
+let bundler = require(BUILD_FILE),
+  bundlerStamp = fs.statSync(BUILD_FILE).mtimeMs;
+function currentBundler() {
+  const stamp = fs.statSync(BUILD_FILE).mtimeMs;
+  if (stamp !== bundlerStamp) {
+    delete require.cache[BUILD_FILE];
+    bundler = require(BUILD_FILE);
+    bundlerStamp = stamp;
+  }
+  return bundler;
+}
 // Anthropic 适配与页面共用同一份源码（src/19-anthropic.js）：请求换成 Messages API 的，事件流换回 OpenAI 风格
 require("./src/19-anthropic.js");
 const ANTHROPIC = globalThis.YAN_ANTHROPIC;
@@ -581,9 +593,19 @@ let APP_VERSION = "";
 try {
   APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8")).version || "";
 } catch {}
+// 桥接自己的代码（server.js、server/、Anthropic 适配）在启动之后又改过：页面据此提醒重启，
+// 否则新页面对着旧桥接，接口对不上时的毛病无从查起
+const STARTED_AT = Date.now();
+function bridgeStale() {
+  const server = path.join(ROOT, "server");
+  return [__filename, path.join(ROOT, "src", "19-anthropic.js"), ...fs.readdirSync(server).map(name => path.join(server, name))].some(
+    file => fs.statSync(file).mtimeMs > STARTED_AT
+  );
+}
 function handleBootstrap(req, res) {
   sendJson(res, 200, {
     version: APP_VERSION,
+    stale: bridgeStale(),
     // store：存储根的位置，fresh 是这个根还没立起来（页面据此把旧数据迁进来）
     store: STORE.describe(),
     work: {
@@ -733,8 +755,8 @@ const NOT_FOUND_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="u
 // 页面脚本与样式由多段源文件拼成：桥接在线时按请求即时拼接（ETag 取各段的大小与修改时间），src/ 改一段、刷新即生效；
 // 仓库里的 support.js / app.css 是 build.js 的产物，供 file:// 直接打开时使用，桥接启动时也会顺手刷新它们
 const BUNDLES = {
-  "/support.js": { build: bundler.bundleScript, type: "application/javascript; charset=utf-8" },
-  "/app.css": { build: bundler.bundleStyles, type: "text/css; charset=utf-8" }
+  "/support.js": { build: () => currentBundler().bundleScript(), type: "application/javascript; charset=utf-8" },
+  "/app.css": { build: () => currentBundler().bundleStyles(), type: "text/css; charset=utf-8" }
 };
 // 静态服务只开放页面运行真正需要的文件。仓库根目录里还有桥接源码、测试、.git 与用户可能临时放入的配置，
 // 不能因为它们恰好位于 ROOT 下就一并交给浏览器；vendor/ 是随页面分发的纯前端资源，提示词则逐个列出。
