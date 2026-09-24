@@ -42,7 +42,8 @@ const f = load([
   "anthropicToOpenAiStream",
   "anthropicEndpoint",
   "anthropicLike",
-  "PROMPTS"
+  "PROMPTS",
+  "mergeConfig3"
 ]);
 // 工具的 schema 在 prompts/tools.js 里（挂在 window.YAN_PROMPTS 上）；这里把它接进来，参数归位才有 schema 可查
 const { createRequire } = await import("node:module");
@@ -371,4 +372,68 @@ test("anthropicToOpenAiStream：事件流换成 OpenAI 风格分块——文字�
   assert.equal(last.choices[0].finish_reason, "tool_calls");
   assert.deepEqual(last.usage, { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 });
   assert.equal(last.model, "claude-x");
+});
+test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 id 并增删，用量相加", () => {
+  const base = {
+    version: 5,
+    settings: { name: "甲", theme: "light", width: 760 },
+    profiles: [
+      { id: "a", name: "A", quota: "", usedTokens: 100 },
+      { id: "b", name: "B", quota: "", usedTokens: 0 },
+      { id: "c", name: "C", quota: "", usedTokens: 0 }
+    ],
+    library: [],
+    memory: { enabled: true, items: [{ id: "m1", text: "旧" }] },
+    drafts: { x: { text: "草" } }
+  };
+  const mine = {
+    ...base,
+    settings: { name: "乙", theme: "light", width: 760 },
+    profiles: [
+      { id: "a", name: "A", quota: "", usedTokens: 130 },
+      { id: "c", name: "C", quota: "", usedTokens: 0 },
+      { id: "d", name: "D" }
+    ],
+    memory: {
+      enabled: true,
+      items: [
+        { id: "m1", text: "旧" },
+        { id: "m2", text: "我记的" }
+      ]
+    },
+    drafts: {}
+  };
+  const theirs = {
+    ...base,
+    settings: { name: "甲", theme: "dark", width: 760 },
+    profiles: [
+      { id: "a", name: "A 改名", quota: "", usedTokens: 150 },
+      { id: "b", name: "B", quota: "", usedTokens: 0 },
+      { id: "c", name: "C", quota: "", usedTokens: 0 },
+      { id: "e", name: "E" }
+    ],
+    memory: {
+      enabled: true,
+      items: [
+        { id: "m1", text: "旧" },
+        { id: "m3", text: "它记的" }
+      ]
+    },
+    drafts: { x: { text: "草" }, y: { text: "它的草稿" } }
+  };
+  const merged = f.mergeConfig3(base, mine, theirs);
+  assert.deepEqual(merged.settings, { name: "乙", theme: "dark", width: 760 });
+  // b 我删了、它没动：删；d 我新加、e 它新加：都留；a 两边都改：名字取它的，用量两边相加
+  assert.deepEqual(
+    merged.profiles.map(p => p.id),
+    ["a", "c", "e", "d"]
+  );
+  assert.equal(merged.profiles[0].name, "A 改名");
+  assert.equal(merged.profiles[0].usedTokens, 180);
+  assert.deepEqual(
+    merged.memory.items.map(item => item.id),
+    ["m1", "m3", "m2"]
+  );
+  // 草稿 x 我发出去了（删了）、它没动：删；y 它新写的：留
+  assert.deepEqual(Object.keys(merged.drafts), ["y"]);
 });

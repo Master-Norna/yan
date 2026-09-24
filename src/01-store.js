@@ -221,37 +221,85 @@ function nextMetaRevision() {
   metaRevision = Math.max(Date.now(), metaRevision + 1);
   return metaRevision;
 }
-/** @param {{ disk?: boolean }} [options] disk: 顺带排一次写 配置.json（从磁盘刚取回的就不必再写回去） */
+// 配置上次写下时的指纹：saveStore 每几百毫秒就来一次（存对话时顺带），配置本身没变就不必动版本号、更不必排一次写 配置.json——
+// 从前每存一次对话就把整份配置写回磁盘，两个浏览器同开时，这边随手发一句话，就拿自己手上的旧配置把那边刚加的模型、记忆盖掉了
+let metaHash = "",
+  metaLocalKey = "";
+/** @param {{ disk?: boolean }} [options] disk: 配置变了就排一次写 配置.json（从磁盘刚取回的就不必再写回去） */
 function writeMeta({ disk = true } = {}) {
-  const json = JSON.stringify({
-    ...metaOf(),
-    [STORAGE_META_KEY]: { revision: nextMetaRevision(), split: true, pendingDeletes: [...pendingChatDeletes] }
-  });
-  try {
-    localStorage.setItem(STORAGE_KEY, json);
-    metaSaveWarned = false;
-  } catch {
-    if (!metaSaveWarned) {
-      metaSaveWarned = true;
-      toast("设置未能存下（浏览器存储已满），请先导出备份");
-    }
+  const hash = hashText(JSON.stringify(metaOf())),
+    changed = hash !== metaHash;
+  if (changed) {
+    metaHash = hash;
+    nextMetaRevision();
   }
-  if (disk) scheduleConfigSave();
+  const deletes = [...pendingChatDeletes],
+    localKey = `${hash}|${deletes.join(",")}`;
+  if (localKey !== metaLocalKey)
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...metaOf(),
+          [STORAGE_META_KEY]: { revision: metaRevision || nextMetaRevision(), split: true, pendingDeletes: deletes }
+        })
+      );
+      metaLocalKey = localKey;
+      metaSaveWarned = false;
+    } catch {
+      if (!metaSaveWarned) {
+        metaSaveWarned = true;
+        toast("设置未能存下（浏览器存储已满），请先导出备份");
+      }
+    }
+  if (disk && changed) scheduleConfigSave();
 }
 // ---------- 配置.json ----------
-// 改动后一秒内写一次（含 API Key：这是自己机器上的文件，几个浏览器共用一套模型配置靠的就是它；导出的备份仍不含）
+// 改动后一秒内写一次（含 API Key：这是自己机器上的文件，几个浏览器共用一套模型配置靠的就是它；导出的备份仍不含）。
+// 几个浏览器共用一份，靠的是「基准」：记着上次与磁盘对齐时的那一份（configBase，连同它在磁盘上的时间戳 configSyncedAt）。
+// 写的时候带上这个时间戳，磁盘上若已有别处写过的更新的一份，桥接不写、把那份交回来；这边就按基准做三方合并——
+// 自己改过的取自己的，没改的取对方的——再写一次。基准记在 localStorage 里，关了页面再开也接得上
+const CONFIG_BASE_KEY = "yan-config-base";
+let configBase = "",
+  configSaving = false,
+  configSaveAgain = false;
+function rememberConfigBase(meta, savedAt) {
+  configBase = meta;
+  configSyncedAt = savedAt;
+  try {
+    localStorage.setItem(CONFIG_BASE_KEY, JSON.stringify({ root: bootstrap.store?.root || "", savedAt, meta }));
+  } catch {}
+}
+// 取回记着的基准：必须是同一个存储根的
+function restoreConfigBase() {
+  if (configBase) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONFIG_BASE_KEY) || "null");
+    if (saved?.meta && saved.root === (bootstrap.store?.root || "")) {
+      configBase = String(saved.meta);
+      configSyncedAt = Math.max(configSyncedAt, Number(saved.savedAt) || 0);
+    }
+  } catch {}
+}
 function scheduleConfigSave() {
   if (apiBase === null) return;
   clearTimeout(configSaveTimer);
   configSaveTimer = setTimeout(saveConfigNow, 1000);
 }
-function saveConfigNow() {
+/** @param {{ force?: boolean }} [options] force：不比时间戳，这边就是定论（头一回立根、以浏览器为准的导入） */
+function saveConfigNow({ force = false } = {}) {
   clearTimeout(configSaveTimer);
   configSaveTimer = null;
   if (apiBase === null) return;
-  const savedAt = metaRevision || nextMetaRevision(),
-    body = JSON.stringify({ config: metaOf(), savedAt });
-  configSyncedAt = Math.max(configSyncedAt, savedAt);
+  // 上一次还在路上：等它回来再写这一次，免得两次互相比时间戳
+  if (configSaving && !unloading) {
+    configSaveAgain = true;
+    return;
+  }
+  const meta = JSON.stringify(metaOf()),
+    savedAt = Math.max(Date.now(), configSyncedAt + 1),
+    body = `{"config":${meta},"savedAt":${savedAt}${force ? "" : `,"base":${configSyncedAt}`}}`;
+  configSaving = true;
   // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再推）
   fetch(`${apiBase}/api/store/config/save`, {
     method: "POST",
@@ -259,10 +307,85 @@ function saveConfigNow() {
     body,
     keepalive: unloading && body.length < 60000,
     signal: unloading ? undefined : AbortSignal.timeout(20000)
-  }).catch(() => {});
+  })
+    .then(async response => {
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 409 && data.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
+      if (response.ok) rememberConfigBase(meta, Number(data.savedAt) || savedAt);
+    })
+    .catch(() => {})
+    .finally(() => {
+      configSaving = false;
+      if (configSaveAgain) {
+        configSaveAgain = false;
+        saveConfigNow();
+      }
+    });
 }
-// 磁盘上的一份配置换进来：设置、模型、卷宗、记忆、草稿；这台浏览器自己的对话目录暂存与墓碑不动
-function adoptConfig(config, savedAt) {
+// 磁盘上有一份配置：与这边对一对。磁盘上的不比基准新——这边改过就写下去；磁盘上的更新、这边没改过——换进来；
+// 两边都改过——三方合并后换进来，再写回去
+function reconcileConfig(config, savedAt) {
+  const mine = JSON.stringify(metaOf()),
+    changed = mine !== configBase;
+  if (savedAt <= configSyncedAt) {
+    if (changed) saveConfigNow();
+    return;
+  }
+  if (!changed) return adoptConfig(config, savedAt);
+  const theirs = metaOf(normalizeStoreData({ ...config, conversations: [] }));
+  adoptConfig(mergeConfig3(configBase ? JSON.parse(configBase) : {}, JSON.parse(mine), theirs), savedAt, JSON.stringify(theirs));
+  saveConfigNow();
+}
+// 三方合并：base 是上次对齐时的那份。同一样东西，自己没动过的取对方的，自己动过的取自己的；
+// 模型、卷宗、记忆按 id 逐件比，设置与草稿按键逐项比；两边各自花掉的用量相加，不互相抹掉
+function mergeConfig3(base, mine, theirs) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const keyed = (b, m, t, pick = (bv, mv, tv) => (same(mv, bv) ? tv : mv)) => {
+    b ||= {};
+    m ||= {};
+    t ||= {};
+    const out = {};
+    for (const key of new Set([...Object.keys(t), ...Object.keys(m), ...Object.keys(b)])) {
+      const inB = key in b,
+        inM = key in m,
+        inT = key in t;
+      if (inM && inT) out[key] = pick(b[key], m[key], t[key]);
+      else if (inM && (!inB || !same(b[key], m[key])))
+        out[key] = m[key]; // 自己新加的，或对方删了而自己又改过的
+      else if (inT && (!inB || !same(b[key], t[key]))) out[key] = t[key]; // 对方新加的，或自己删了而对方又改过的
+    }
+    return out;
+  };
+  const byId = (b, m, t, pick) => {
+    const index = list => new Map((Array.isArray(list) ? list : []).filter(item => item?.id).map(item => [item.id, item]));
+    const merged = keyed(Object.fromEntries(index(b)), Object.fromEntries(index(m)), Object.fromEntries(index(t)), pick);
+    // 顺序：对方的在前（它的排序为准），自己新加的接在后面
+    const order = [...index(t).keys(), ...index(m).keys()];
+    return [...new Set(order)].filter(id => id in merged).map(id => merged[id]);
+  };
+  const mergeProfile = (b, m, t) => {
+    if (same(m, b)) return t;
+    const out = keyed(b, m, t);
+    // 用量两边各自往上加：合并时把两边新花的都记上（额度改过的一边会把用量清零，那时按合并的结果算）
+    if (b && same(m.quota, b.quota) && same(t.quota, b.quota))
+      out.usedTokens = Math.max(0, Number(m.usedTokens || 0) + Number(t.usedTokens || 0) - Number(b.usedTokens || 0));
+    return out;
+  };
+  return {
+    version: theirs.version ?? mine.version,
+    settings: keyed(base.settings, mine.settings, theirs.settings),
+    profiles: byId(base.profiles, mine.profiles, theirs.profiles, mergeProfile),
+    library: byId(base.library, mine.library, theirs.library),
+    memory: {
+      enabled: same(mine.memory?.enabled, base.memory?.enabled) ? theirs.memory?.enabled : mine.memory?.enabled,
+      items: byId(base.memory?.items, mine.memory?.items, theirs.memory?.items)
+    },
+    drafts: keyed(base.drafts, mine.drafts, theirs.drafts)
+  };
+}
+// 磁盘上的一份配置换进来：设置、模型、卷宗、记忆、草稿；这台浏览器自己的对话目录暂存与墓碑不动。
+// base：记作基准的那一份（默认就是换进来的这份；合并时是对方那份，自己改的仍算「改过」，写下去之前丢不了）
+function adoptConfig(config, savedAt, base = "") {
   const meta = normalizeStoreData({ ...config, conversations: [] });
   store.settings = meta.settings;
   store.profiles = meta.profiles;
@@ -271,7 +394,9 @@ function adoptConfig(config, savedAt) {
   store.drafts = meta.drafts;
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
   metaRevision = Math.max(metaRevision, savedAt);
-  configSyncedAt = savedAt;
+  const adopted = JSON.stringify(metaOf());
+  rememberConfigBase(base || adopted, savedAt);
+  metaHash = hashText(adopted);
   writeMeta({ disk: false });
   applyAppearance();
   renderHeader();
@@ -308,27 +433,25 @@ async function syncConfigWithDisk() {
       info.fresh = false;
       if (moved.chats || moved.archive) toast(`旧的对话与卷宗已拷进 ${pathTail(info.root || "")}；旧处原样留着`);
     }
-    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000)),
-      local = readLocalStoreRecord();
+    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
     let met = "";
     try {
       met = localStorage.getItem(STORE_ROOT_KEY) || "";
     } catch {}
     delete store.settings.chatsDir;
     delete store.settings.archiveDir;
+    restoreConfigBase();
     if (!disk.config || localSeeded) {
       writeMeta({ disk: false });
-      saveConfigNow();
-    } else if (freshBrowser) adoptConfig(disk.config, disk.savedAt);
+      saveConfigNow({ force: true });
+    } else if (freshBrowser) adoptConfig(disk.config, Number(disk.savedAt) || 0);
     else if (met !== (info.root || "")) {
       mergeConfig(disk.config);
       writeMeta({ disk: false });
-      saveConfigNow();
+      saveConfigNow({ force: true });
       renderHeader();
       renderQuota();
-    } else if ((local?.revision || 0) > disk.savedAt) saveConfigNow();
-    else if (disk.savedAt > configSyncedAt) adoptConfig(disk.config, disk.savedAt);
-    configSyncedAt = Math.max(configSyncedAt, Number(disk.savedAt) || 0);
+    } else reconcileConfig(disk.config, Number(disk.savedAt) || 0);
     freshBrowser = localSeeded = false;
     try {
       localStorage.setItem(STORE_ROOT_KEY, info.root || "");
@@ -337,12 +460,12 @@ async function syncConfigWithDisk() {
     toast(`配置未能与存储目录对齐：${String(error.message || error).slice(0, 60)}`);
   }
 }
-// 从后台切回来：另一个浏览器可能改过配置，磁盘上的更新就换进来（这边正有没写下去的改动时不换）
+// 从后台切回来：另一个浏览器可能改过配置，与磁盘上的对一对（这边有没写下去的改动也不丢，见 reconcileConfig）
 async function refreshConfigFromDisk() {
-  if (apiBase === null || configSaveTimer) return;
+  if (apiBase === null || configSaving) return;
   try {
     const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
-    if (disk.config && disk.savedAt > configSyncedAt && !configSaveTimer) adoptConfig(disk.config, disk.savedAt);
+    if (disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
   } catch {}
 }
 // 对话目录可用：桥接在线、桥接报了目录、上次读它没出错
@@ -429,6 +552,17 @@ async function writeConversation(id) {
             await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
         }
       } catch (error) {
+        // 迟到的旧保存撞上了别处的删除：不暂存、不复活，这边也跟着拿掉
+        if (/已在别处删除/.test(String(error.message))) {
+          activeChatWrites.delete(id);
+          store.conversations = store.conversations.filter(item => item.id !== id);
+          forgetConversation(id);
+          if (currentId === id) {
+            currentId = null;
+            render();
+          } else renderHistory();
+          return;
+        }
         spilled = true;
         if (!chatSaveWarned) {
           chatSaveWarned = true;
@@ -477,6 +611,15 @@ async function deleteConversationStorage(id) {
     chatStamps.delete(id);
     deletedChatIds.delete(id);
   }
+}
+// 别处删掉的一段：这边只从内存与暂存表里拿掉，目录那头已经删过了（附件原件那边也删过了）
+function forgetConversation(id) {
+  pendingChatWrites.delete(id);
+  dirtyChatIds.delete(id);
+  chatHashes.delete(id);
+  chatStamps.delete(id);
+  delete store.drafts?.[id];
+  void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
 }
 // 全量巡检：每段都算一遍指纹，变了的写下去。低频跑（定时、页面要关时），哪处改了没标脏也兜得住
 function sweepConversations() {
@@ -536,6 +679,8 @@ async function hydrateStore() {
   freshBrowser = !local;
   localSeeded = !!local && !local.managed;
   for (const id of local?.pendingDeletes || []) pendingChatDeletes.add(id);
+  // 开页时的配置就是 localStorage 里那份：记下指纹，没改动时不去写 配置.json
+  metaHash = hashText(JSON.stringify(metaOf()));
   let db = null;
   try {
     db = await openStateDb();
@@ -613,32 +758,44 @@ async function syncChatsWithDisk() {
     const disk = new Map();
     for (const item of data.items || []) if (item?.id && !pendingChatDeletes.has(item.id)) disk.set(item.id, item);
     const push = new Set(),
-      settled = new Set();
+      settled = new Set(),
+      gone = data.deleted && typeof data.deleted === "object" ? data.deleted : {};
     let changed = false,
-      currentReplaced = false;
-    store.conversations = store.conversations.map(c => {
-      const item = disk.get(c.id),
-        stamp = chatStamps.get(c.id) || 0,
-        hash = hashText(JSON.stringify(c)),
-        unsaved = chatHashes.get(c.id) !== hash,
-        busy = conversationRunning(c.id) || titlingIds.has(c.id) || compactingIds.has(c.id);
-      if (!item) {
-        push.add(c.id);
+      currentReplaced = false,
+      dropped = 0;
+    store.conversations = store.conversations
+      .map(c => {
+        const item = disk.get(c.id),
+          stamp = chatStamps.get(c.id) || 0,
+          hash = hashText(JSON.stringify(c)),
+          unsaved = chatHashes.get(c.id) !== hash,
+          busy = conversationRunning(c.id) || titlingIds.has(c.id) || compactingIds.has(c.id);
+        if (!item) {
+          // 别处删了、这边又没再动过：跟着删，不推回去让它复活；这边删后又说过话的，照推（桥接那头按时间认）
+          if (Number(gone[c.id]) > stamp && !unsaved && !busy) {
+            forgetConversation(c.id);
+            changed = true;
+            dropped += 1;
+            return null;
+          }
+          push.add(c.id);
+          return c;
+        }
+        if (item.savedAt > stamp && !unsaved && !busy) {
+          const next = normalizeConversation(item.conversation);
+          chatStamps.set(c.id, item.savedAt);
+          chatHashes.set(c.id, hashText(JSON.stringify(next)));
+          settled.add(c.id);
+          changed = true;
+          if (c.id === currentId) currentReplaced = true;
+          return next;
+        }
+        if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
+        else settled.add(c.id);
         return c;
-      }
-      if (item.savedAt > stamp && !unsaved && !busy) {
-        const next = normalizeConversation(item.conversation);
-        chatStamps.set(c.id, item.savedAt);
-        chatHashes.set(c.id, hashText(JSON.stringify(next)));
-        settled.add(c.id);
-        changed = true;
-        if (c.id === currentId) currentReplaced = true;
-        return next;
-      }
-      if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
-      else settled.add(c.id);
-      return c;
-    });
+      })
+      .filter(Boolean);
+    if (dropped) toast(dropped === 1 ? "有一段对话已在别处删除，此处随之移去" : `有 ${dropped} 段对话已在别处删除，此处随之移去`);
     const known = new Set(store.conversations.map(c => c.id));
     for (const item of disk.values())
       if (!known.has(item.id)) {

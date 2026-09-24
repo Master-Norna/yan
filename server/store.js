@@ -67,7 +67,18 @@ module.exports = function createStore({ sendJson, readJson }) {
       const body = await readJson(req);
       if (!body.config || typeof body.config !== "object") throw Error("缺少配置内容");
       ensureRoot();
-      const savedAt = Number(body.savedAt) || Date.now();
+      // 页面带着它上次对齐时的时间戳（base）来写：磁盘上已有别处写过的更新的一份，就不写，把那份交回去，由页面合并后再写。
+      // 不带 base 的（头一回立根、以浏览器为准的导入）照写
+      let current = 0;
+      try {
+        const existing = JSON.parse(fs.readFileSync(paths().config, "utf8")) || {};
+        current = Number(existing.savedAt) || 0;
+        if (body.base !== undefined && current > (Number(body.base) || 0)) {
+          const { 言: _mark, savedAt: _savedAt, ...config } = existing;
+          return sendJson(res, 409, { error: "配置已在别处更新", config, savedAt: current });
+        }
+      } catch {}
+      const savedAt = Math.max(Number(body.savedAt) || Date.now(), current + 1);
       writeAtomic(paths().config, JSON.stringify({ 言: "配置", ...body.config, savedAt }, null, 1));
       sendJson(res, 200, { savedAt });
     } catch (error) {

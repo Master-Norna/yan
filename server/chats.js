@@ -11,7 +11,25 @@ const crypto = require("node:crypto");
 module.exports = function createChats({ sendJson, readJson, chatsHome }) {
   // 旧版的设置镜像：迁进来的目录里可能还躺着一份，读目录时跳过它
   const META_FILE = "设置.json",
-    FILE_LIMIT = 256 * 1024 * 1024;
+    FILE_LIMIT = 256 * 1024 * 1024,
+    // 删除记录：哪段对话在何时删的。几个浏览器共用一个目录，那边删了的，这边内存里还留着一份——没有这份记录，
+    // 这边一对目录发现「目录里没有」，就又把它推回去了。记三十天，久了的清掉
+    TOMBSTONE_FILE = "删除记录.json",
+    TOMBSTONE_DAYS = 30;
+  function readTombstones(home) {
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(home, TOMBSTONE_FILE), "utf8"));
+      return data && typeof data.deleted === "object" ? data.deleted : {};
+    } catch {
+      return {};
+    }
+  }
+  function writeTombstones(home, deleted) {
+    const cutoff = Date.now() - TOMBSTONE_DAYS * 86400000,
+      kept = Object.fromEntries(Object.entries(deleted).filter(([, at]) => Number(at) > cutoff));
+    if (!Object.keys(kept).length) return fs.rmSync(path.join(home, TOMBSTONE_FILE), { force: true });
+    writeAtomic(path.join(home, TOMBSTONE_FILE), JSON.stringify({ 言: "删除记录", deleted: kept }, null, 1));
+  }
   // 请求可带来目录；留空用存储根里的对话目录
   function ensureDir(raw) {
     const value = String(raw || "").trim();
@@ -78,7 +96,7 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
         seen = new Map();
       let skipped = 0;
       for (const name of fs.readdirSync(home)) {
-        if (!name.endsWith(".json") || name === META_FILE) continue;
+        if (!name.endsWith(".json") || name === META_FILE || name === TOMBSTONE_FILE) continue;
         try {
           const item = readConversationFile(home, name);
           // 同一段对话若留了两个文件（改名时旧的没删成），以较新的为准，旧的顺手清掉
@@ -94,7 +112,7 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
         }
       }
       for (const item of seen.values()) items.push(item);
-      sendJson(res, 200, { dir: home, items, skipped });
+      sendJson(res, 200, { dir: home, items, skipped, deleted: readTombstones(home) });
     } catch (error) {
       sendJson(res, 500, { error: `对话目录不可用：${describe(error, home)}` });
     }
@@ -108,6 +126,13 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
       const id = String(conversation.id),
         savedAt = Number(body.savedAt) || Date.now(),
         name = fileNameFor(id, conversation.title);
+      // 删了以后又存：比删除晚的是真要它（接着在里头说话、从备份导回来），删除记录作废；比删除早的是迟到的旧保存，不写
+      const tombstones = readTombstones(home);
+      if (tombstones[id]) {
+        if (savedAt <= Number(tombstones[id])) return sendJson(res, 410, { error: "这段对话已在别处删除", deleted: true });
+        delete tombstones[id];
+        writeTombstones(home, tombstones);
+      }
       writeAtomic(path.join(home, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
       // 标题改过：旧名的文件不留
       for (const stale of filesFor(home, id)) if (stale !== name) fs.rmSync(path.join(home, stale), { force: true });
@@ -127,6 +152,7 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
         fs.rmSync(path.join(home, name), { force: true });
         removed += 1;
       }
+      writeTombstones(home, { ...readTombstones(home), [id]: Date.now() });
       sendJson(res, 200, { removed });
     } catch (error) {
       sendJson(res, 400, { error: `对话未能删除：${describe(error)}` });

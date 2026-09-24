@@ -293,6 +293,8 @@ function storageSize() {
   const bytes = new Blob([JSON.stringify(store)]).size;
   return bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 }
+// 存储位置的更换排着队来（见 bindSettingsEvents 里的 commitStore）
+let storeMoves = Promise.resolve();
 function bindSettingsEvents() {
   $("#settingName")?.addEventListener("input", e => {
     store.settings.name = e.target.value || "访客";
@@ -314,7 +316,9 @@ function bindSettingsEvents() {
   let storeTimer = null;
   const commitStore = value => {
     clearTimeout(storeTimer);
-    storeTimer = setTimeout(async () => {
+    // 一次换完（对话对齐、卷宗重翻、设置页重画）再换下一次：连着换两回时，前一回迟到的收尾不能把页面又画回它那个位置
+    storeTimer = setTimeout(() => (storeMoves = storeMoves.then(moveStore, moveStore)), 600);
+    const moveStore = async () => {
       const next = String(value || "").trim();
       if (!next || next === (bootstrap.store?.parent || "")) return;
       let data;
@@ -332,9 +336,11 @@ function bindSettingsEvents() {
       chatDiskWrites.clear();
       // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
       if (data.adopted) {
+        configBase = "";
         configSyncedAt = 0;
-        await refreshConfigFromDisk();
-      } else saveConfigNow();
+        const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000)).catch(() => null);
+        if (disk?.config) adoptConfig(disk.config, Number(disk.savedAt) || 0);
+      } else saveConfigNow({ force: true });
       await syncChatsWithDisk();
       const ids = store.conversations.map(conversation => conversation.id);
       flushConversations(ids, { force: true });
@@ -345,7 +351,7 @@ function bindSettingsEvents() {
       } catch {}
       renderSettings();
       toast(`存储已换到 ${pathTail(data.root)}；${data.adopted ? "用的是那里原有的数据" : "旧处原样留着"}`);
-    }, 600);
+    };
   };
   storeInput?.addEventListener("change", e => commitStore(e.target.value));
   $("#settingStorePick")?.addEventListener("click", async () => {

@@ -505,6 +505,39 @@ check("screen: a harmless command passes", r.status === 200 && r.data.why === nu
     r.status === 200 && r.data.savedAt === 42 && r.data.config?.profiles?.[0]?.apiKey === "k",
     JSON.stringify(r.data)
   );
+  // 另一个浏览器拿着旧的一份来写：不写，把磁盘上更新的那份交回去，由它合并后再写
+  r = await post("/api/store/config/save", { config: { settings: { name: "旧" } }, savedAt: 50, base: 10 });
+  check(
+    "a config save based on an older copy is refused and handed the newer one",
+    r.status === 409 && r.data.savedAt === 42 && r.data.config?.settings?.name === "测",
+    JSON.stringify(r.data)
+  );
+  r = await post("/api/store/config/save", { config: { settings: { name: "新" } }, savedAt: 60, base: 42 });
+  check("a config save based on the current copy goes through", r.status === 200 && r.data.savedAt === 60, JSON.stringify(r.data));
+}
+// ---- 删除记录：别处删了的对话，迟到的旧保存不让它复活；删后又真存了（在里头说话、从备份导回）的照存
+{
+  const root = `${TMP}/tomb-chats`.split("/").join(win ? "\\" : "/"),
+    conversation = { id: "tomb-1", title: "墓", messages: [] };
+  rmSync(root, { recursive: true, force: true });
+  await post("/api/chats/save", { root, savedAt: 1000, conversation });
+  await post("/api/chats/delete", { root, id: "tomb-1" });
+  r = await post("/api/chats/load", { root });
+  check(
+    "a deletion is recorded for the other browsers",
+    r.status === 200 && r.data.items.length === 0 && r.data.deleted?.["tomb-1"] > 0,
+    JSON.stringify(r.data)
+  );
+  r = await post("/api/chats/save", { root, savedAt: 2000, conversation });
+  check("a stale save after the deletion does not bring it back", r.status === 410, JSON.stringify(r.data));
+  r = await post("/api/chats/save", { root, savedAt: Date.now() + 1000, conversation });
+  const after = await post("/api/chats/load", { root });
+  check(
+    "a save made after the deletion revives it and clears the record",
+    r.status === 200 && after.data.items.length === 1 && !after.data.deleted?.["tomb-1"],
+    JSON.stringify(after.data)
+  );
+  rmSync(root, { recursive: true, force: true });
 }
 // ---- 只认发往本机地址的请求：DNS 重绑定过来的（Host 是别的域名）一律不理；别的网站连模型转发也不能借道
 {
