@@ -33,6 +33,16 @@ function parseToolArguments(raw) {
   }
   return { ok: false, error: String(first?.error?.message || "不是合法 JSON"), raw: text };
 }
+// 回传给接口的工具调用参数必须是一个合法的 JSON 对象：模型写坏的（如 "params": , ）若原样回传，有的中转一解析就让整个请求报错，
+// 这一答便断在半途。写坏这件事已在工具结果里告诉模型了，历史里给救回的参数，救不回的给 {}
+function replayArguments(raw) {
+  try {
+    const value = JSON.parse(raw);
+    if (value && typeof value === "object" && !Array.isArray(value)) return raw;
+  } catch {}
+  const parsed = parseToolArguments(raw);
+  return parsed.ok ? JSON.stringify(parsed.args) : "{}";
+}
 // 被截断的 JSON：补齐未闭合的括号，能救多少是多少——先试直接补齐（截在一个值刚写完的地方），
 // 不行再退到最后一个安全的逗号处（末尾那个残缺的键值对丢掉）。给出几个候选，由调用方逐个试
 function repairTruncatedJson(text) {
@@ -74,7 +84,8 @@ const TOOL_ARG_ALIASES = {
   url: ["link", "href", "page"],
   task: ["prompt", "instruction", "instructions", "description"],
   name: ["document", "doc", "file"],
-  id: ["conversation_id", "conversationId", "memory_id"]
+  id: ["conversation_id", "conversationId", "memory_id"],
+  params: ["arguments", "args", "input"]
 };
 function coerceToolValue(value, rule) {
   const type = rule?.type;

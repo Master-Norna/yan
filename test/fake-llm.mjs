@@ -99,6 +99,15 @@ http
       const msgs = payload.messages || [],
         toolResults = msgs.filter(m => m.role === "tool");
       const lastUser = [...msgs].reverse().find(m => m.role === "user")?.content || "";
+      // 学有的中转：回传的工具调用参数逐个当 JSON 解析，有一个坏的整个请求就报错（页面得回传合法的 JSON 对象）
+      for (const call of msgs.flatMap(m => m.tool_calls || []))
+        try {
+          const value = JSON.parse(call.function.arguments);
+          if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("not an object");
+        } catch (error) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: { message: `Expecting value: ${error.message}` } }));
+        }
       // 探思考档位：页面故意送 reasoning_effort: "probe"。按模型 ID 装几种接口：
       // fake-three 只认三档；fake-plain 压根不认识这个字段；fake-mute 照单全收（中转站的样子）；其余按 OpenAI 的样子列四档
       // fake-slow 认四档，但要一秒半才回——探着它的时候换了模型，这份迟到的结果不能写到新模型上
@@ -178,7 +187,7 @@ http
               tool_calls: [
                 tool(0, "mcp__local__echo", { text: "你好" }),
                 tool(1, "mcp_describe", { server: "big", tools: ["tool_07"] }),
-                tool(2, "mcp_call", { server: "big", tool: "tool_07", arguments: { n: "7" } }),
+                tool(2, "mcp_call", { server: "big", tool: "tool_07", params: { n: "7" } }),
                 tool(3, "mcp_call", { server: "big", tool: "nope", arguments: {} }),
                 tool(4, "mcp__web__write_note", { text: "记下" })
               ]

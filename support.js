@@ -6055,7 +6055,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("assistant.roundLimit") });
         overrides.tools = null;
-        if (assistant.content) assistant.content += "\n\n";
+        assistant.content = paragraphBreak(assistant.content);
         continue;
       }
       /** @type {Step[]} */
@@ -6072,12 +6072,16 @@ async function streamSideReply(conversation, thread, assistant, profile) {
       history.push({
         role: "assistant",
         content: assistant.content.slice(roundStart) || null,
-        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } })),
+        tool_calls: steps.map(step => ({
+          id: step.id,
+          type: "function",
+          function: { name: step.name, arguments: replayArguments(step.arguments) }
+        })),
         ...(assistant.thinkingBlocks?.length ? { thinking_blocks: assistant.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
-      if (assistant.content) assistant.content += "\n\n";
+      assistant.content = paragraphBreak(assistant.content);
     }
     const leadTrim = assistant.content.match(/^\n*/)[0].length;
     assistant.content = assistant.content.replace(/^\n+|\n+$/g, "");
@@ -7692,6 +7696,10 @@ async function startTurn(c, user, profile) {
 // 这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出。引导是为了答得更好，从不硬掐
 // 断线后请模型接着写的那句话：手点「继续生成」与自动续写共用
 const AUTO_RESUMES = 2;
+// 一轮说完、下一轮起笔前隔一个空段；这一轮什么也没说（只调了工具）就不隔，免得正文攒下一串空行
+function paragraphBreak(text) {
+  return /\S/.test(text) && !text.endsWith("\n\n") ? `${text}\n\n` : text;
+}
 function sendSupplement() {
   const c = currentConversation(),
     job = c && requestJob(c.id),
@@ -7970,7 +7978,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         assistant.toolCalls = null;
         if (said.trim()) history.push({ role: "assistant", content: said });
         await deliverSupplements(job, history, budget, assistant, { steer: true });
-        if (assistant.content) assistant.content += "\n\n";
+        assistant.content = paragraphBreak(assistant.content);
         continue;
       } finally {
         job.reading = false;
@@ -7993,7 +8001,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("assistant.roundLimit") });
         overrides.tools = null;
-        if (assistant.content) assistant.content += "\n\n";
+        assistant.content = paragraphBreak(assistant.content);
         continue;
       }
       // 模型请求调用工具：记录步骤、执行、把结果作为 tool 消息回传，再让模型继续；历史里只带本轮新写的正文，前几轮的已经在各自的 assistant 消息里
@@ -8012,13 +8020,17 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       history.push({
         role: "assistant",
         content: assistant.content.slice(roundStart) || null,
-        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } })),
+        tool_calls: steps.map(step => ({
+          id: step.id,
+          type: "function",
+          function: { name: step.name, arguments: replayArguments(step.arguments) }
+        })),
         ...(assistant.thinkingBlocks?.length ? { thinking_blocks: assistant.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
       await deliverSupplements(job, history, budget, assistant);
-      if (assistant.content) assistant.content += "\n\n";
+      assistant.content = paragraphBreak(assistant.content);
       setJobLabel(conversation, job, "生成中");
     }
     leadTrim = assistant.content.match(/^\n*/)[0].length;
@@ -8570,6 +8582,16 @@ function parseToolArguments(raw) {
   }
   return { ok: false, error: String(first?.error?.message || "不是合法 JSON"), raw: text };
 }
+// 回传给接口的工具调用参数必须是一个合法的 JSON 对象：模型写坏的（如 "params": , ）若原样回传，有的中转一解析就让整个请求报错，
+// 这一答便断在半途。写坏这件事已在工具结果里告诉模型了，历史里给救回的参数，救不回的给 {}
+function replayArguments(raw) {
+  try {
+    const value = JSON.parse(raw);
+    if (value && typeof value === "object" && !Array.isArray(value)) return raw;
+  } catch {}
+  const parsed = parseToolArguments(raw);
+  return parsed.ok ? JSON.stringify(parsed.args) : "{}";
+}
 // 被截断的 JSON：补齐未闭合的括号，能救多少是多少——先试直接补齐（截在一个值刚写完的地方），
 // 不行再退到最后一个安全的逗号处（末尾那个残缺的键值对丢掉）。给出几个候选，由调用方逐个试
 function repairTruncatedJson(text) {
@@ -8611,7 +8633,8 @@ const TOOL_ARG_ALIASES = {
   url: ["link", "href", "page"],
   task: ["prompt", "instruction", "instructions", "description"],
   name: ["document", "doc", "file"],
-  id: ["conversation_id", "conversationId", "memory_id"]
+  id: ["conversation_id", "conversationId", "memory_id"],
+  params: ["arguments", "args", "input"]
 };
 function coerceToolValue(value, rule) {
   const type = rule?.type;
@@ -9949,8 +9972,8 @@ const MCP_LAZY_TOOLS = [
       const spec = mcp.servers[args.server]?.tools?.find(tool => tool.name === args.tool);
       step.title = `${args.server} · ${args.tool}`;
       if (!spec) return mcpUnknown(args.server, args.tool);
-      // 外层只核了 server / tool；arguments 对着目标工具自己的参数表再理一遍
-      const { args: inner, problems } = normalizeArguments(spec.inputSchema, args.arguments);
+      // 外层只核了 server / tool；params 对着目标工具自己的参数表再理一遍
+      const { args: inner, problems } = normalizeArguments(spec.inputSchema, args.params);
       if (problems.length)
         return {
           ok: false,
@@ -10143,7 +10166,7 @@ async function runDelegate(step, args, ctx) {
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("delegate.limit") });
         overrides.tools = null;
-        if (sub.content) sub.content += "\n\n";
+        sub.content = paragraphBreak(sub.content);
         continue;
       }
       /** @type {Step[]} */
@@ -10161,12 +10184,12 @@ async function runDelegate(step, args, ctx) {
       history.push({
         role: "assistant",
         content: sub.content.slice(reportStart) || null,
-        tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: s.arguments } })),
+        tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: replayArguments(s.arguments) } })),
         ...(sub.thinkingBlocks?.length ? { thinking_blocks: sub.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, signal, toolCache);
       for (const s of steps) history.push({ role: "tool", tool_call_id: s.id, content: outcomes.get(s.id) ?? "" });
-      if (sub.content) sub.content += "\n\n";
+      sub.content = paragraphBreak(sub.content);
       if (job) setJobLabel(conversation, job, "帮手工作中");
     }
     sub.status = "complete";

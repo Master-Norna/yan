@@ -122,8 +122,8 @@ const MCP_LAZY_TOOLS = [
       const spec = mcp.servers[args.server]?.tools?.find(tool => tool.name === args.tool);
       step.title = `${args.server} · ${args.tool}`;
       if (!spec) return mcpUnknown(args.server, args.tool);
-      // 外层只核了 server / tool；arguments 对着目标工具自己的参数表再理一遍
-      const { args: inner, problems } = normalizeArguments(spec.inputSchema, args.arguments);
+      // 外层只核了 server / tool；params 对着目标工具自己的参数表再理一遍
+      const { args: inner, problems } = normalizeArguments(spec.inputSchema, args.params);
       if (problems.length)
         return {
           ok: false,

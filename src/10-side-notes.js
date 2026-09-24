@@ -576,7 +576,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("assistant.roundLimit") });
         overrides.tools = null;
-        if (assistant.content) assistant.content += "\n\n";
+        assistant.content = paragraphBreak(assistant.content);
         continue;
       }
       /** @type {Step[]} */
@@ -593,12 +593,16 @@ async function streamSideReply(conversation, thread, assistant, profile) {
       history.push({
         role: "assistant",
         content: assistant.content.slice(roundStart) || null,
-        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } })),
+        tool_calls: steps.map(step => ({
+          id: step.id,
+          type: "function",
+          function: { name: step.name, arguments: replayArguments(step.arguments) }
+        })),
         ...(assistant.thinkingBlocks?.length ? { thinking_blocks: assistant.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
-      if (assistant.content) assistant.content += "\n\n";
+      assistant.content = paragraphBreak(assistant.content);
     }
     const leadTrim = assistant.content.match(/^\n*/)[0].length;
     assistant.content = assistant.content.replace(/^\n+|\n+$/g, "");

@@ -299,13 +299,13 @@
   },
 
   mcp_call: {
-    description: "调用一件 MCP 工具（服务与工具见 mcp_describe 的目录），arguments 照查得的参数给。",
+    description: "调用一件 MCP 工具（服务与工具见 mcp_describe 的目录），params 照查得的参数给。",
     parameters: {
       type: "object",
       properties: {
         server: { type: "string", description: "服务名" },
         tool: { type: "string", description: "工具名" },
-        arguments: { type: "object", description: "那件工具的参数" }
+        params: { type: "object", description: "那件工具的参数" }
       },
       required: ["server", "tool"]
     }

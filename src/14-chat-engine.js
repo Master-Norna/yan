@@ -212,6 +212,10 @@ async function startTurn(c, user, profile) {
 // 这一答若已在收尾、不再有下一回合，就在落笔后作为新的一问送出。引导是为了答得更好，从不硬掐
 // 断线后请模型接着写的那句话：手点「继续生成」与自动续写共用
 const AUTO_RESUMES = 2;
+// 一轮说完、下一轮起笔前隔一个空段；这一轮什么也没说（只调了工具）就不隔，免得正文攒下一串空行
+function paragraphBreak(text) {
+  return /\S/.test(text) && !text.endsWith("\n\n") ? `${text}\n\n` : text;
+}
 function sendSupplement() {
   const c = currentConversation(),
     job = c && requestJob(c.id),
@@ -490,7 +494,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         assistant.toolCalls = null;
         if (said.trim()) history.push({ role: "assistant", content: said });
         await deliverSupplements(job, history, budget, assistant, { steer: true });
-        if (assistant.content) assistant.content += "\n\n";
+        assistant.content = paragraphBreak(assistant.content);
         continue;
       } finally {
         job.reading = false;
@@ -513,7 +517,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("assistant.roundLimit") });
         overrides.tools = null;
-        if (assistant.content) assistant.content += "\n\n";
+        assistant.content = paragraphBreak(assistant.content);
         continue;
       }
       // 模型请求调用工具：记录步骤、执行、把结果作为 tool 消息回传，再让模型继续；历史里只带本轮新写的正文，前几轮的已经在各自的 assistant 消息里
@@ -532,13 +536,17 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       history.push({
         role: "assistant",
         content: assistant.content.slice(roundStart) || null,
-        tool_calls: steps.map(step => ({ id: step.id, type: "function", function: { name: step.name, arguments: step.arguments } })),
+        tool_calls: steps.map(step => ({
+          id: step.id,
+          type: "function",
+          function: { name: step.name, arguments: replayArguments(step.arguments) }
+        })),
         ...(assistant.thinkingBlocks?.length ? { thinking_blocks: assistant.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, job.controller.signal, toolCache);
       for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
       await deliverSupplements(job, history, budget, assistant);
-      if (assistant.content) assistant.content += "\n\n";
+      assistant.content = paragraphBreak(assistant.content);
       setJobLabel(conversation, job, "生成中");
     }
     leadTrim = assistant.content.match(/^\n*/)[0].length;

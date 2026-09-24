@@ -86,7 +86,7 @@ async function runDelegate(step, args, ctx) {
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("delegate.limit") });
         overrides.tools = null;
-        if (sub.content) sub.content += "\n\n";
+        sub.content = paragraphBreak(sub.content);
         continue;
       }
       /** @type {Step[]} */
@@ -104,12 +104,12 @@ async function runDelegate(step, args, ctx) {
       history.push({
         role: "assistant",
         content: sub.content.slice(reportStart) || null,
-        tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: s.arguments } })),
+        tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: replayArguments(s.arguments) } })),
         ...(sub.thinkingBlocks?.length ? { thinking_blocks: sub.thinkingBlocks } : {})
       });
       const outcomes = await runSteps(steps, conversation, assistant, signal, toolCache);
       for (const s of steps) history.push({ role: "tool", tool_call_id: s.id, content: outcomes.get(s.id) ?? "" });
-      if (sub.content) sub.content += "\n\n";
+      sub.content = paragraphBreak(sub.content);
       if (job) setJobLabel(conversation, job, "帮手工作中");
     }
     sub.status = "complete";
