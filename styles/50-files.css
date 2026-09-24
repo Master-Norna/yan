@@ -369,3 +369,84 @@
   color: var(--ink-3);
   font: 12px/1.9 var(--title);
 }
+/* 分组页：列表如目录页（「集」印、组名、引线、提要），一组的详情是几行设置加组里的对话 */
+.group-toc {
+  margin-top: 4px;
+}
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  text-align: left;
+  transition: background-color 0.16s;
+}
+.group-row:hover {
+  background: color-mix(in srgb, var(--paper-3) 45%, transparent);
+}
+.group-row-name {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--ink);
+  font: 600 14.5px var(--title);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.group-row-gist {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.group-pin {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: rotate(45deg);
+}
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 8px;
+}
+.group-title .repo-seal {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+}
+.group-name-field {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font: 500 30px var(--title);
+  letter-spacing: 0.05em;
+}
+.group-name-field:hover,
+.group-name-field:focus {
+  border-bottom-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.group-settings {
+  margin-bottom: 14px;
+}
+.group-settings .setting-row:first-child {
+  border-top: 0;
+}
+.group-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}

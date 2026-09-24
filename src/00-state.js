@@ -172,7 +172,7 @@
  * @property {string} activeProfileId
  * @property {Preset[]} presets
  * @property {string} presetId 新对话用的预设（上回选的）；空即本色
- * @property {{ id: string, name: string, createdAt: string }[]} groups 分组：侧栏里自立的几组，对话各记 groupId
+ * @property {{ id: string, name: string, createdAt: string, presetId: string, workdir: string }[]} groups 分组：自立的几组，对话各记 groupId；组里新起的对话用组的预设、绑组的默认目录
  * @property {string} [pendingGroupId] 从组首「＋」另起的新对话归进这一组（用过即清）
  * @property {boolean} autoTitle
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
@@ -186,7 +186,7 @@
  * @property {number} subRounds
  * @property {string} [archiveDir] 旧版的卷宗目录；只在头一回迁入存储根时读一次，此后删去
  * @property {string} [chatsDir] 旧版的对话目录；同上
- * @property {"chat"|"library"} [lastView] 上次停在哪一页，刷新后回到原处
+ * @property {"chat"|"library"|"groups"} [lastView] 上次停在哪一页，刷新后回到原处
  * @property {string} [lastConversationId]
  * @property {{ packs: string[], pip: string, npm: string, mirror: "china"|"official" }} env 沙箱环境：选了哪几组工具、另装的包、下载源
  * @property {Record<string, Record<string, any>>} mcpServers 接入的 MCP 服务，照通行的 mcpServers 写法：{ 名字: { command, args, cwd, env } 或 { url, headers, type } }

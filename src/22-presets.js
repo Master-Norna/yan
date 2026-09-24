@@ -6,7 +6,8 @@ let presetEditing = null;
 
 /** @param {Conversation|null} conversation @returns {Preset|null} */
 function presetOf(conversation) {
-  const id = conversation ? conversation.presetId || "" : store.settings.presetId;
+  // 还没发出的新对话：从组首「＋」来且组带了预设的，用组的
+  const id = conversation ? conversation.presetId || "" : pendingGroup()?.presetId || store.settings.presetId;
   return (id && store.settings.presets.find(preset => preset.id === id)) || null;
 }
 // 选一个预设：记在这段对话上，新对话也照它；带了模型的换过去，带了权限的换上

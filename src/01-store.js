@@ -81,7 +81,9 @@ function normalizeStoreData(value) {
       .map(group => ({
         id: String(group.id),
         name: String(group.name || "").trim() || "未命名",
-        createdAt: String(group.createdAt || new Date().toISOString())
+        createdAt: String(group.createdAt || new Date().toISOString()),
+        presetId: String(group.presetId || ""),
+        workdir: String(group.workdir || "")
       }));
     return {
       ...structuredClone(defaultStore),

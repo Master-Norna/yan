@@ -137,6 +137,7 @@ function bindEvents() {
     newChat();
   };
   $("#openLibrary").onclick = () => (view === "library" ? closeLibrary() : openLibrary());
+  $("#openGroups").onclick = () => (view === "groups" ? closeGroupsPage() : openGroupsPage());
   $("#openSettings").onclick = () => openSettings("general");
   $("#closeSettings").onclick = closeSettings;
   $("#settingsModal").addEventListener("click", e => {

@@ -133,7 +133,7 @@ async function sendOrStop() {
   let c = currentConversation();
   if (c && !(await ensureWorkReady(c))) return;
   if (!c) {
-    const pending = (store.settings.pendingWorkdir || "").trim();
+    const pending = (store.settings.pendingWorkdir || "").trim() || pendingGroup()?.workdir || "";
     if (pending) {
       // 行：先把工作目录立起来，立不起来就不发
       if (profile.tools === false) {

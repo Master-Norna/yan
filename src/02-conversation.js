@@ -100,7 +100,7 @@ function persistDraft() {
   saveStoreSoon();
 }
 function restoreDraft() {
-  if (view === "library") return;
+  if (view !== "chat") return;
   const draft = draftRecord();
   pendingAttachments = draft.attachments.map(file => ({ ...file }));
   pendingQuote = currentConversation() ? draft.quote : null;

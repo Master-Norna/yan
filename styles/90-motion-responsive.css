@@ -758,3 +758,13 @@ body {
     transform: scale(1.12);
   }
 }
+/* 组内置顶：一粒朱色小菱形，与设置条目前那粒同样 */
+.history-state.pinned {
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: rotate(45deg);
+  opacity: 0.85;
+}

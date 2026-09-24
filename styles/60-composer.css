@@ -928,3 +928,43 @@ textarea::placeholder,
   color: var(--ink-3);
   opacity: 0.55;
 }
+/* 输入框左下「＋」旁的分组签：一方「集」印加组名；欢迎页的可撤（✕），对话页的点开分组页 */
+.group-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  margin-left: 4px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 7px;
+  color: var(--ink-2);
+  font: 12px var(--title);
+  transition:
+    border-color 0.16s,
+    color 0.16s;
+}
+.group-tag:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.group-tag-seal {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  color: var(--accent);
+  font: 9px var(--title);
+}
+.group-tag-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.group-tag-x {
+  color: var(--ink-3);
+  font-size: 10px;
+}

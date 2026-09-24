@@ -830,18 +830,3 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   padding: 3px 7px;
   font-size: 12.5px;
 }
-/* 「集」组首比「工」组多一个「⋯」：两键浮在右侧、悬停才显，折叠的箭头与「工」组对齐 */
-.is-set > .history-repo-head {
-  padding-right: 27px;
-}
-.is-set > .history-repo-head .repo-new {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  margin: 0;
-  background: var(--paper-2);
-  transform: translateY(-50%);
-}
-.is-set > .history-repo-head [data-group-new] {
-  right: 28px;
-}

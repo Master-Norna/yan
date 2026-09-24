@@ -3,9 +3,11 @@
 function render(shouldScroll = false) {
   rememberPlace();
   const c = currentConversation(),
-    library = view === "library";
+    library = view === "library",
+    groups = view === "groups",
+    page = library || groups;
   // 人在卷宗页时这段对话的一答写完了，记了「有新回复」；回到它眼前就算看过了，不必再点一次侧栏
-  if (c && !library && c.unread) {
+  if (c && !page && c.unread) {
     c.unread = false;
     saveStoreSoon();
   }
@@ -14,12 +16,17 @@ function render(shouldScroll = false) {
   syncDocumentTitle();
   requestAnimationFrame(() => syncJumpBottom());
   $("#library").classList.toggle("hidden", !library);
-  $("#welcome").classList.toggle("hidden", library || !!c);
-  $("#chat").classList.toggle("hidden", library || !c);
-  $("#chatScrollGrabber").classList.toggle("hidden", library || !c);
-  $("#composerArea").classList.toggle("hidden", library || !c);
+  $("#groups").classList.toggle("hidden", !groups);
+  $("#welcome").classList.toggle("hidden", page || !!c);
+  $("#chat").classList.toggle("hidden", page || !c);
+  $("#chatScrollGrabber").classList.toggle("hidden", page || !c);
+  $("#composerArea").classList.toggle("hidden", page || !c);
   $("#openLibrary").classList.toggle("active", library);
+  $("#openGroups").classList.toggle("active", groups);
+  renderGroupsCount();
+  renderGroupTags();
   if (library) renderLibrary();
+  else if (groups) renderGroupsPage();
   else if (c) renderConversation(shouldScroll);
   else renderOutline();
   restoreDraft();
@@ -142,18 +149,18 @@ function renderHistory() {
   // 没绑目录的对话按自己的时间散在其间；置顶另列；自立的分组（「集」）在置顶之下自成一段，空组也列着。
   // 组可收起，收起时只露出当前打开的那条；查找时不收，也不列没有命中的组
   const collapsed = new Set(store.settings.collapsedRepos || []),
-    pinned = sorted.filter(c => c.pinned),
+    pinned = sorted.filter(c => c.pinned && !groupOf(c)),
     repos = new Map(),
     sets = new Map(groupsList().map(group => [group.id, { kind: "set", group, at: group.createdAt, items: [] }])),
     nodes = [];
   for (const c of sorted) {
-    if (c.pinned) continue;
     const set = c.groupId && sets.get(c.groupId);
     if (set) {
       if (!set.items.length || c.updatedAt > set.at) set.at = c.updatedAt;
       set.items.push(c);
       continue;
     }
+    if (c.pinned) continue;
     if (!isWork(c)) {
       nodes.push({ kind: "chat", at: c.updatedAt, c });
       continue;
@@ -197,7 +204,9 @@ function renderHistory() {
         ? `<span class="history-state running" title="后台生成中" aria-label="后台生成中"></span>`
         : c.unread
           ? `<span class="history-state unread" title="有新回复" aria-label="有新回复"></span>`
-          : "";
+          : c.pinned && groupOf(c)
+            ? `<span class="history-state pinned" title="组内置顶" aria-label="组内置顶"></span>`
+            : "";
     return `<div class="history-item ${c.id === currentId ? "active" : ""} ${running ? "is-running" : ""} ${c.unread ? "has-unread" : ""} ${isWork(c) ? "is-work" : ""}" data-conversation="${escapeHtml(c.id)}"><button class="history-open" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>${state}<span class="history-tools"><button class="history-tool history-more" data-history-action="menu" title="更多" aria-label="更多" aria-haspopup="menu">⋯</button></span></div>`;
   };
   const repoHtml = node => {
@@ -205,19 +214,20 @@ function renderHistory() {
       fold = collapsed.has(node.dir) && !query,
       shown = fold ? node.items.filter(c => c.id === currentId) : node.items,
       running = node.items.filter(c => c.id !== currentId && requestJob(c.id)).length;
-    return `<div class="history-repo-group${fold ? " collapsed" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><button type="button" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? "展开" : "收起"}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">工</span><span class="history-repo-name">${escapeHtml(name)}</span><small>${node.items.length}${fold && running ? ` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></button><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="在此目录翻页">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
+    return `<div class="history-repo-group${fold ? " collapsed" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><button type="button" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? "展开" : "收起"}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">工</span><span class="history-repo-name">${escapeHtml(name)}</span><small>${node.items.length}${fold && running ? ` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></button><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="在此目录新建">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
   // 分组：画法同「工」组，印文是「集」；组首右侧「＋」在此组另起一段、「⋯」改名或解散；改名时组名换成输入框
   const setHtml = node => {
     const { group } = node,
       key = `group:${group.id}`,
       fold = collapsed.has(key) && !query,
-      shown = fold ? node.items.filter(c => c.id === currentId) : node.items,
+      items = [...node.items].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
+      shown = fold ? items.filter(c => c.id === currentId) : items,
       renaming = renamingGroupId === group.id;
     const name = renaming
       ? `<input class="history-rename group-rename" value="${escapeHtml(group.name)}" maxlength="40" aria-label="分组改名">`
       : `<span class="history-repo-name">${escapeHtml(group.name)}</span>`;
-    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">集</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="在此组翻页">＋</button><button type="button" class="history-tool repo-new" data-group-menu="${escapeHtml(group.id)}" title="分组" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
+    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">集</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="在此组新建">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
   renderingHistory = true;
   try {
@@ -327,8 +337,8 @@ function renderConversation(shouldScroll = false) {
 // 停在哪一页记在设置里：刷新后回到原处——正看着的那段对话、或卷宗；开机时由 boot 读回
 function rememberPlace() {
   const s = store.settings,
-    /** @type {{ view: "chat"|"library", id: string }} */
-    next = { view: view === "library" ? "library" : "chat", id: view === "library" ? "" : currentId || "" };
+    /** @type {{ view: "chat"|"library"|"groups", id: string }} */
+    next = { view: view === "library" || view === "groups" ? view : "chat", id: view === "chat" ? currentId || "" : "" };
   if (s.lastView === next.view && (s.lastConversationId || "") === next.id) return;
   s.lastView = next.view;
   s.lastConversationId = next.id;
@@ -336,7 +346,7 @@ function rememberPlace() {
 }
 function restorePlace() {
   const { lastView, lastConversationId } = store.settings;
-  if (lastView === "library") view = "library";
+  if (lastView === "library" || lastView === "groups") view = lastView;
   else if (lastConversationId && store.conversations.some(c => c.id === lastConversationId)) {
     currentId = lastConversationId;
     const c = currentConversation();
