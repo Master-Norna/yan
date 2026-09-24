@@ -1644,6 +1644,158 @@ function draftAttachmentIds() {
     .filter(Boolean);
 }
 
+  // ---- 03-brush.js ----
+// 言 · 笔意图标：卷宗、设置入口与设置各栏的小画。一件是几笔墨、一点朱，不是等宽的线稿——
+// 一笔是一串二次曲线（起点、控制点、终点、控制点、终点……），照「起笔顿、行笔匀、收笔出锋」的笔形铺成一片面。
+// 页面里写 <svg data-brush="名字"></svg>，开页时由 paintBrushIcons 画上；设置里用 brushIcon(名字) 直接拼进 HTML。
+// 落选的：等宽圆头的线稿加实心色块（UI 图标的画法，怎么减细节都偏卡通）
+
+/**
+ * 一笔。points 是 x0 y0 cx cy x1 y1 [cx cy x2 y2 …]；width 最粗处；tail 收笔处的粗细比（0 出锋，0.6 以上是顿笔收住）
+ * @param {number[]} points
+ * @param {number} width
+ * @param {{ tail?: number, head?: number, tone?: "ink"|"ink2"|"zhu" }} [options]
+ */
+function brushStroke(points, width, { tail = 0, head = 0.78, tone = "ink" } = {}) {
+  const samples = [];
+  for (let i = 0; i + 4 < points.length; i += 4) {
+    const [x0, y0, cx, cy, x1, y1] = points.slice(i, i + 6);
+    for (let k = i ? 1 : 0; k <= 12; k++) {
+      const t = k / 12,
+        u = 1 - t;
+      samples.push([u * u * x0 + 2 * u * t * cx + t * t * x1, u * u * y0 + 2 * u * t * cy + t * t * y1]);
+    }
+  }
+  const lengths = [0];
+  for (let i = 1; i < samples.length; i++)
+    lengths.push(lengths[i - 1] + Math.hypot(samples[i][0] - samples[i - 1][0], samples[i][1] - samples[i - 1][1]));
+  const total = lengths.at(-1) || 1,
+    shape = t => (t < 0.16 ? head + ((1 - head) * t) / 0.16 : t < 0.62 ? 1 : 1 - ((1 - tail) * (t - 0.62)) / 0.38),
+    left = [],
+    right = [];
+  samples.forEach(([x, y], i) => {
+    const [ax, ay] = samples[Math.max(0, i - 1)],
+      [bx, by] = samples[Math.min(samples.length - 1, i + 1)],
+      len = Math.hypot(bx - ax, by - ay) || 1,
+      half = (width * shape(lengths[i] / total)) / 2,
+      nx = -(by - ay) / len,
+      ny = (bx - ax) / len;
+    left.push([x + nx * half, y + ny * half]);
+    right.push([x - nx * half, y - ny * half]);
+  });
+  // 起笔是个圆头：从右边绕回左边时往笔尖反方向鼓出去一点
+  const [sx, sy] = samples[0],
+    [tx, ty] = samples[1],
+    back = Math.hypot(tx - sx, ty - sy) || 1,
+    bulge = [sx - ((tx - sx) / back) * width * 0.55, sy - ((ty - sy) / back) * width * 0.55];
+  const f = n => n.toFixed(2),
+    line = list => list.map(([x, y]) => `L${f(x)} ${f(y)}`).join("");
+  return `<path class="${tone}" d="M${f(left[0][0])} ${f(left[0][1])}${line(left.slice(1))}${line(right.reverse())}Q${f(bulge[0])} ${f(bulge[1])} ${f(left[0][0])} ${f(left[0][1])}Z"/>`;
+}
+// 圆相：以 (cx, cy) 为心、r 为径，从 from 度起顺时针走到 to 度的一笔
+function brushArc(cx, cy, r, from, to, width, options) {
+  const points = [],
+    steps = 6,
+    span = (to - from) / steps,
+    at = (deg, radius = r) => [cx + radius * Math.cos((deg * Math.PI) / 180), cy + radius * Math.sin((deg * Math.PI) / 180)];
+  points.push(...at(from));
+  for (let i = 0; i < steps; i++)
+    points.push(...at(from + span * (i + 0.5), r / Math.cos((span * Math.PI) / 360)), ...at(from + span * (i + 1)));
+  return brushStroke(points, width, options);
+}
+const brushSeal = (x, y, size) => `<rect class="zhu" x="${x}" y="${y}" width="${size}" height="${size}" rx=".25"/>`,
+  brushDot = (x, y, r, tone = "ink") => `<circle class="${tone}" cx="${x}" cy="${y}" r="${r}"/>`;
+
+/** @type {Record<string, () => string>} 20 × 20 的画幅 */
+const BRUSH_ICONS = {
+  // 卷宗：写意手卷——两根轴各一笔竖画，纸是一片淡墨，字是两笔短横，角上一方小朱印
+  scroll: () =>
+    `<rect class="wash" x="5" y="5" width="10.2" height="9.6" rx=".4"/>` +
+    brushStroke([4, 3, 4.3, 10, 4.2, 17], 2.2) +
+    brushStroke([16, 3.2, 15.8, 10, 15.9, 16.8], 2.2) +
+    brushStroke([7.2, 8.3, 10, 8, 12.8, 8.1], 1.3, { tone: "ink2" }) +
+    brushStroke([7.2, 11.2, 9.1, 11, 11, 11.1], 1.3, { tone: "ink2" }) +
+    brushSeal(11.6, 12, 2.1),
+  // 设置入口：调律——三道弦各一笔淡墨，弦上三枚墨码，中间一枚是朱
+  tune: () =>
+    [5.2, 10, 14.8].map(y => brushStroke([2.6, y + 0.2, 10, y - 0.3, 17.4, y + 0.1], 1.2, { tone: "ink2", tail: 0.2 })).join("") +
+    brushDot(12.8, 5, 1.9) +
+    brushDot(6.8, 9.8, 1.9, "zhu") +
+    brushDot(10.8, 14.9, 1.9),
+  // 翻页：一页纸正被翻起——左边一笔是纸边，一道弧是翻起的那一页，页角一点朱
+  newpage: () =>
+    `<path class="wash" d="M5 3.6h10.6v13H5z"/>` +
+    brushStroke([4.6, 3.2, 4.8, 10, 4.6, 17], 1.6, { tail: 0.5 }) +
+    brushStroke([5, 16.4, 13, 14.6, 16.4, 3.8], 1.4) +
+    brushDot(15.8, 4.6, 1.1, "zhu"),
+  // 通用：一张几案，案上一方小印
+  general: () =>
+    brushStroke([2.6, 8, 10, 7.2, 17.4, 7.8], 2, { tail: 0.4 }) +
+    brushStroke([5, 8.4, 4.9, 12, 4.4, 16.2], 1.6) +
+    brushStroke([15, 8.4, 15.1, 12, 15.6, 16.2], 1.6) +
+    brushSeal(10.6, 3.6, 2.4),
+  // 个性化：一支笔，笔下一道朱
+  appearance: () =>
+    brushStroke([16.2, 2.8, 12, 7.4, 8.2, 11.6], 1.3, { tail: 0.7 }) +
+    brushStroke([8.6, 11.2, 5.6, 13.6, 3.4, 16.8], 3.4) +
+    brushStroke([8.4, 17, 12.6, 16.2, 17, 16.6], 1.4, { tone: "zhu" }),
+  // 模型：一锭墨，墨下一汪
+  models: () =>
+    `<ellipse class="wash" cx="10" cy="16.2" rx="6.6" ry="1.9"/>` +
+    brushStroke([10, 2.8, 10.3, 8, 10, 13.2], 4.4, { tail: 0.85, head: 0.9 }) +
+    brushSeal(9.1, 5, 1.8),
+  // 预设：一方印——印钮一笔墨，印身一笔粗横，印下一方朱痕
+  presets: () =>
+    brushStroke([10, 2.6, 10.2, 5, 10, 7.6], 3.4, { tail: 0.9, head: 0.9 }) +
+    brushStroke([4.6, 9.4, 10, 9, 15.4, 9.4], 2.6, { tail: 0.8 }) +
+    `<rect class="zhu" x="6" y="12" width="8" height="5.6" rx=".4" transform="rotate(-3 10 14.8)"/>`,
+  // 工具：一把矩尺
+  tools: () =>
+    brushStroke([4.2, 3, 4.4, 9.6, 4.3, 16.2], 1.9, { tail: 0.6 }) +
+    brushStroke([4.3, 16.2, 10.6, 16, 16.8, 16.3], 1.9) +
+    brushStroke([4.6, 10.6, 7, 12.8, 9.6, 15.6], 1.1, { tone: "ink2" }) +
+    brushSeal(12.6, 4.2, 2.2),
+  // 环境：远山两叠，山头一轮朱日
+  env: () =>
+    brushStroke([2.4, 15.8, 6.4, 6.6, 10.4, 13.2], 1.8, { tail: 0.3 }) +
+    brushStroke([8.4, 11, 12.6, 3.8, 17.6, 15.8], 1.9, { tail: 0.2 }) +
+    brushStroke([2.2, 16.6, 10, 16.2, 17.8, 16.6], 1, { tone: "ink2" }) +
+    brushDot(15.2, 4.6, 1.5, "zhu"),
+  // MCP：一座拱桥，桥下一道水，桥头一点朱
+  mcp: () =>
+    brushStroke([2.4, 13.4, 10, 3.8, 17.6, 13.4], 2.1, { tail: 0.3 }) +
+    brushStroke([4.6, 12.6, 4.8, 14.4, 4.6, 16.2], 1.3, { tail: 0.5 }) +
+    brushStroke([15.4, 12.6, 15.2, 14.4, 15.4, 16.2], 1.3, { tail: 0.5 }) +
+    brushStroke([2, 17.2, 10, 16.8, 18, 17.3], 0.9, { tone: "ink2" }) +
+    brushDot(10, 7.2, 1.1, "zhu"),
+  // 记忆：结绳记事——一根绳，三个结，末一结是朱
+  memory: () =>
+    brushStroke([10, 2.4, 11.6, 10, 9.6, 17.6], 1.1, { tone: "ink2", tail: 0.3 }) +
+    brushDot(10.6, 6, 1.8) +
+    brushDot(10.8, 10.4, 2) +
+    brushDot(10.3, 14.6, 1.7, "zhu"),
+  // 文档：半展的书卷——卷着的一轴一笔粗竖，纸面上下两笔长横，两行字，一方小印
+  guide: () =>
+    brushStroke([4.2, 3.2, 4.5, 10, 4.4, 16.8], 3) +
+    brushStroke([6.2, 5.4, 11.6, 5.3, 17, 5.8], 1.4) +
+    brushStroke([6.2, 14.4, 11.4, 14.6, 16.6, 14.2], 1.4) +
+    brushStroke([8, 9, 11, 8.7, 14, 8.8], 1.1, { tone: "ink2" }) +
+    brushStroke([8, 11.3, 10.2, 11.1, 12.4, 11.2], 1.1, { tone: "ink2" }) +
+    brushSeal(15, 9.3, 1.9),
+  // 关于：一笔圆相，旁落一方小印
+  about: () => brushArc(9.6, 9.8, 6.4, 200, 505, 2.2, { tail: 0.15 }) + brushSeal(14.8, 14.8, 2.2)
+};
+/** @param {string} name @param {string} [className] */
+function brushIcon(name, className = "") {
+  return `<svg class="brush${className ? ` ${className}` : ""}" viewBox="0 0 20 20" aria-hidden="true">${BRUSH_ICONS[name]?.() || ""}</svg>`;
+}
+// 页面里写好位置的（侧栏的卷宗、设置入口，设置各栏的名字前）：开页时画上
+function paintBrushIcons(root = document) {
+  for (const svg of root.querySelectorAll("svg[data-brush]"))
+    if (!svg.childElementCount) svg.innerHTML = BRUSH_ICONS[svg.dataset.brush]?.() || "";
+}
+paintBrushIcons();
+
   // ---- 03-ui-utils.js ----
 // 言 · 小工具：转义、时间、提示、确认框、按需加载、动效开合
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
@@ -6222,7 +6374,7 @@ function memorySettingsHtml() {
     return `<div class="memory-item" data-memory="${escapeHtml(item.id)}"><textarea class="memory-text" rows="1" spellcheck="false" aria-label="记忆内容">${escapeHtml(item.text)}</textarea><div class="memory-meta"><span>${escapeHtml(formatDay(item.updatedAt || item.createdAt))}</span>${source}<span class="memory-spacer"></span><button type="button" data-memory-delete title="删去这条">删去</button></div></div>`;
   };
   return (
-    `<div class="about-head memory-head"><span class="seal memory-seal" aria-hidden="true">录</span><h2>记忆</h2><span class="about-version">${items.length} / ${MAX_MEMORY_ITEMS} 条</span></div><p class="settings-lead">模型在对谈中记下长期有效的事，跨对话可翻阅。何时记、何时看由它判断；条目不随请求发送，也不经云端。</p>` +
+    `<div class="about-head memory-head">${brushIcon("memory", "settings-mark")}<h2>记忆</h2><span class="about-version">${items.length} / ${MAX_MEMORY_ITEMS} 条</span></div><p class="settings-lead">模型在对谈中记下长期有效的事，跨对话可翻阅。何时记、何时看由它判断；条目不随请求发送，也不经云端。</p>` +
     segmentRow(
       "启用记忆",
       "关闭后模型不再记入、也看不到已有条目；条目仍保留在此",
@@ -11143,7 +11295,6 @@ function closeSettings() {
   }
   render();
 }
-const SETTINGS_SEALS = { general: "常", appearance: "妆", models: "模", presets: "身", tools: "具", env: "境", mcp: "接", guide: "典" };
 function renderSettings() {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === settingsTab));
   const host = $("#settingsContent");
@@ -11159,13 +11310,12 @@ function renderSettings() {
   if (settingsTab === "memory") host.innerHTML = memorySettingsHtml();
   if (settingsTab === "guide") host.innerHTML = guideSettingsHtml();
   if (settingsTab === "about") host.innerHTML = aboutSettingsHtml();
-  // 每栏标题左边一方章印（记忆页自带「录」）；文档里翻开的一篇有自己的书口，不加
-  const seal = SETTINGS_SEALS[settingsTab],
-    title = host.querySelector("h2");
-  if (seal && title && !title.previousElementSibling && !title.parentElement.classList.contains("about-head")) {
+  // 每栏标题左边一个这一栏的笔意图标（记忆页自带）；文档里翻开的一篇有自己的书口，关于页的题目是「言」本身，都不加
+  const title = host.querySelector("h2");
+  if (BRUSH_ICONS[settingsTab] && title && !title.previousElementSibling && !title.parentElement.classList.contains("about-head")) {
     const head = document.createElement("div");
     head.className = "about-head memory-head";
-    head.innerHTML = `<span class="seal memory-seal" aria-hidden="true">${seal}</span>`;
+    head.innerHTML = brushIcon(settingsTab, "settings-mark");
     title.before(head);
     head.append(title);
   }
@@ -12860,12 +13010,12 @@ function presetMenuHtml() {
   const current = presetOf(currentConversation())?.id || "";
   const option = (id, name, note) =>
     `<button class="model-option preset-option${id === current ? " active" : ""}" data-preset="${escapeHtml(id)}"${id === current ? ' aria-current="true"' : ""} title="${escapeHtml(note)}"><strong><span class="model-dot"></span><span class="model-option-name">${escapeHtml(name)}</span></strong></button>`;
-  return `<div class="menu-section"><div class="menu-section-title"><span>预设</span></div></div>${option("", "本色", "言本来的样子")}${presets.map(preset => option(preset.id, preset.name, preset.prompt.split("\n")[0].slice(0, 80))).join("")}`;
+  return `<div class="menu-section"><div class="menu-section-title"><span>预设</span></div></div>${option("", "本色", "言之本色，不加预设")}${presets.map(preset => option(preset.id, preset.name, preset.prompt.split("\n")[0].slice(0, 80))).join("")}`;
 }
 
 function presetsSettingsHtml() {
   const presets = store.settings.presets;
-  return `<div id="presetPage"><h2>预设</h2><p class="settings-lead">一套做法打包成一个预设：提示词、给哪些工具与 MCP 服务、用哪个模型、指令权限。在输入框旁的模型菜单里选用，选了的对话都照这一套；不选即本色。</p><div class="card-list">${
+  return `<div id="presetPage"><h2>预设</h2><p class="settings-lead">将提示词、工具、MCP 服务、模型与指令权限合为一套，即是预设。于输入框旁的模型菜单中选用，所选的对话皆依此行事；不选即为本色。</p><div class="card-list">${
     presets.map(preset => (preset.id === presetEditing ? presetFormHtml(preset) : presetCardHtml(preset))).join("") ||
     `<p class="card-note">尚无预设。</p>`
   }</div><div class="card-foot"><button id="presetAdd" class="outline-btn" type="button">＋ 新添预设</button></div></div>`;
@@ -12897,7 +13047,7 @@ function presetFormHtml(preset) {
     ["review", "审而后行"],
     ["auto", "径行"]
   ];
-  return `<div class="card editing" data-preset-card="${escapeHtml(preset.id)}"><div class="profile-grid"><label class="profile-full">名称<input class="field wide" data-preset-field="name" value="${escapeHtml(preset.name)}" maxlength="24"></label><label class="profile-full">提示词<textarea class="field wide field-area preset-prompt" data-preset-field="prompt" placeholder="它是谁、做什么、怎么答；排在系统提示最前" spellcheck="false">${escapeHtml(preset.prompt)}</textarea></label><label>模型<select class="field wide select" data-preset-field="profileId"><option value="">不换，用当前的</option>${profiles()
+  return `<div class="card editing" data-preset-card="${escapeHtml(preset.id)}"><div class="profile-grid"><label class="profile-full">名称<input class="field wide" data-preset-field="name" value="${escapeHtml(preset.name)}" maxlength="24"></label><label class="profile-full">提示词<textarea class="field wide field-area preset-prompt" data-preset-field="prompt" placeholder="所任何职、所司何事、答以何种风格；列于系统提示之首" spellcheck="false">${escapeHtml(preset.prompt)}</textarea></label><label>模型<select class="field wide select" data-preset-field="profileId"><option value="">沿用当前模型</option>${profiles()
     .map(p => `<option value="${escapeHtml(p.id)}"${p.id === preset.profileId ? " selected" : ""}>${escapeHtml(p.name)}</option>`)
     .join(
       ""
@@ -12968,7 +13118,7 @@ function bindPresetEvents() {
       toast(`已选用「${preset.name}」`);
     }
     if (action === "delete") {
-      if (!(await askConfirm({ title: `删除预设「${preset.name}」？`, body: "用着它的对话回到本色。", ok: "删除" }))) return;
+      if (!(await askConfirm({ title: `删除预设「${preset.name}」？`, body: "选用它的对话将回到本色。", ok: "删除" }))) return;
       store.settings.presets = store.settings.presets.filter(item => item !== preset);
       if (store.settings.presetId === preset.id) store.settings.presetId = "";
       for (const c of store.conversations)
@@ -12997,87 +13147,87 @@ const GUIDE = [
   {
     id: "start",
     title: "起步",
-    lead: "接模型、问第一句",
-    summary: "接上一个模型，便能落笔；顶栏右侧三件，看一眼就知道言此刻的样子。",
+    lead: "接入模型，落笔初问",
+    summary: "接入一个模型，便可落笔。顶栏右侧三件，标示言此刻的情形。",
     steps: [
       {
-        h: "接一个模型",
-        body: "设置 → 模型 → 新增：填显示名称、Base URL、API Key，再点「获取列表」挑模型，或手填模型 ID。接口选 **OpenAI 兼容**（大多数服务与中转站）或 **Anthropic**。填完点「测试连接」。",
+        h: "接入模型",
+        body: "设置 → 模型 → 新增：填显示名称、Base URL 与 API Key，点「获取列表」择定模型，亦可手填模型 ID。接口分 **OpenAI 兼容**（多数服务与中转站）与 **Anthropic** 两种。填毕以「测试连接」验一遍。",
         noteLabel: "留意",
-        note: "API Key 只存在本机的 配置.json 里，导出的备份不带它。"
+        note: "API Key 只存于本机的 配置.json，导出的备份不含它。"
       },
       {
         h: "落笔",
-        body: "在输入框写下问题，Enter 寄出，Shift + Enter 换行；图片可直接粘贴。作答途中还能再写一句，它会等模型说到一个落点再递上。"
+        body: "输入框里写下所问，Enter 寄出，Shift + Enter 换行；图片可径直粘贴。作答途中亦可补上一句，待模型说到落点时递上，不打断其思路。"
       },
       {
-        h: "认顶栏",
-        body: "右上三件：一点印泥是连接——静时空心，作答时朱色呼吸，断了转赤；中间一方砚台，点它明暗互换；右边一笔墨是用量，没设上限时记已耗，设了便是余墨，随用随减。",
-        note: "印泥转赤，多半是 start.cmd 的窗口被关了：重新打开它，下一回寄出时页面自会接上。"
+        h: "识顶栏",
+        body: "右上三件：一点印泥是连接——静时空心，作答时朱色呼吸，断开则转赤；中间一方砚台，点之明暗互换；右侧一笔墨是用量，未设上限记所耗，设了便是余墨，随用随减。",
+        note: "印泥转赤，多是 start.cmd 的窗口已关。重新打开，下一回寄出时页面自会接上。"
       }
     ]
   },
   {
     id: "modes",
     title: "言与行",
-    lead: "对谈与执事，绑一个目录",
-    summary: "同一段对话，不绑目录是「言」，照常聊；绑上一个目录是「行」，在那里读写文件、跑指令。",
+    lead: "对谈与执事，以目录为界",
+    summary: "同一段对话，不绑目录是「言」，照常对谈；绑定目录是「行」，在其中读写文件、执行指令。",
     steps: [
       {
         h: "言 · 对谈",
-        body: "不绑目录即对谈。要一份表格、文档、PDF 时，模型把成品落进卷宗，答末列出「成品 n 件」，可预览、可下载。"
+        body: "未绑目录即为对谈。需要表格、文档、PDF 一类成品时，模型将其落入卷宗，答末列出「成品 n 件」，可预览，可下载。"
       },
       {
         h: "行 · 执事",
-        body: "欢迎页点「目录」签，选一个工作目录，这段对话就是执事：检索、读懂、修改、运行、验证，一步步记在行迹里。",
-        note: "执事只在这个目录里动手；要它碰目录外的东西，先在设置 → 工具里看清沙箱与可及范围。"
+        body: "欢迎页点「目录」签，择一工作目录，此段对话便是执事：检索、读懂、修改、运行、验证，每一步皆记于行迹。",
+        note: "执事只在此目录内动手。若需触及目录之外，先于设置 → 工具看清沙箱与可及范围。"
       },
       {
-        h: "按目录归组",
-        body: "侧栏里绑了同一目录的对话归成一组，头上一方「工」印；组头的「＋」在此目录另起一段。"
+        h: "依目录归组",
+        body: "侧栏里绑定同一目录的对话归为一组，组首一方「工」印，左侧一道朱线标出范围；组首的「＋」在此目录另起一段。"
       }
     ]
   },
   {
     id: "safety",
     title: "权限沙箱",
-    lead: "三档权限与沙箱的边界",
-    summary: "指令逐条可见。做到哪一步问你一声，由三档权限定；沙箱在桥接那头守着系统。",
+    lead: "三档权限与沙箱之界",
+    summary: "指令逐条可见。何时须经你首肯，由三档权限而定；沙箱在桥接一侧守护系统。",
     steps: [
       {
         h: "三档权限",
-        body: "**问而后行**：会改动东西的指令逐条请示，只读的径直跑。**审而后行**：由桥接代审，常规改动放行，只拦伤及系统与难以恢复的。**径行**：不再审查。输入框旁可随时换。"
+        body: "**问而后行**：凡会改动的指令逐条请示，只读者径行。**审而后行**：由桥接代审，寻常改动放行，只拦伤及系统、难以恢复者。**径行**：不再审查。输入框旁随时可换。"
       },
       {
         h: "沙箱",
-        body: "问而后行里从严：改动不出工作目录，机密文件不碰，动系统与直接外联的指令拦下、转请你定夺。审而后行与径行只守系统本身。总开关在设置 → 工具。",
+        body: "问而后行下从严：改动不出工作目录，机密文件不碰，动系统或直接外联的指令拦下，转请你定夺。审而后行与径行只守系统本身。总开关在设置 → 工具。",
         noteLabel: "留意",
-        note: "沙箱是静态筛查，不是进程隔离；MCP 服务以你的权限运行，不受它约束。"
+        note: "沙箱是静态筛查，并非进程隔离；MCP 服务以你的权限运行，不受其约束。"
       },
       {
-        h: "停下",
-        body: "寄出键在作答时变成「止」，按下即停；正在跑的指令连同它起的子进程一起收掉。"
+        h: "止",
+        body: "作答时寄出键化为「止」，按下即停；正在执行的指令连同其子进程一并收束。"
       }
     ]
   },
   {
     id: "files",
     title: "卷宗附件",
-    lead: "文件怎么进来、成品落在哪",
-    summary: "附件随一问送出；卷宗是跨对话的书架，常用的文件收在这里。",
+    lead: "附件的来路，成品的归处",
+    summary: "附件随一问送出；卷宗是跨对话的书架，常用文件收存于此。",
     steps: [
       {
         h: "附件",
-        body: "点「＋」、拖进来或粘贴：图片、文本、代码、PDF、Office 都行。文档先在本机抽出正文；单件 32 MB，一次最多 10 件。"
+        body: "点「＋」、拖入或粘贴皆可：图片、文本、代码、PDF 与 Office 文档。文档先在本机抽出正文；单件不过 32 MB，一次至多 10 件。"
       },
       {
         h: "卷宗",
-        body: "侧栏的「卷宗」即存储位置里的 `卷宗/` 目录。拖进去、或在附件上按「藏」收入；要随消息送出，从「＋」里选「卷宗」。",
-        note: "卷宗里的文档对每段对话都可读，模型用到时才取回；设置 → 工具里可关。"
+        body: "侧栏的「卷宗」即存储位置里的 `卷宗/` 目录。拖入，或在附件上按「藏」收存；需随消息送出时，从「＋」中选「卷宗」。",
+        note: "卷宗里的文档对每段对话皆可读，模型用到时方才取回；设置 → 工具中可关闭。"
       },
       {
         h: "成品",
-        body: "模型做出的文件挂在答末的「成品」卡上：预览就地看，Word、Excel、PPT 也能抽出正文来看；之后在卷宗里删了的，那一行标「已移出」。"
+        body: "模型所作的文件列于答末的「成品」卡：就地预览，Word、Excel、PPT 亦可抽出正文查看；日后在卷宗中删去的，此处标为「已移出」。"
       }
     ]
   },
@@ -13085,138 +13235,138 @@ const GUIDE = [
     id: "notes",
     title: "旁注引用",
     lead: "就地追问，不入正文",
-    summary: "读到一处有疑问，不必把主线打断：引它追问，或在旁边另开一条小对话。",
+    summary: "读至一处有疑，不必打断主线：或引而问之，或于旁另起一段小对话。",
     steps: [
       {
         h: "引用",
-        body: "在回复里划选一段，浮出「引用」，那段便作为引文带进输入框，随下一问送出。"
+        body: "在回复中划选一段，浮出「引用」，所选即作为引文置入输入框，随下一问送出。"
       },
       {
         h: "旁注",
-        body: "划选后选「旁注」，右侧开一条附在这一处的小对话。它读得到正文，正文读不到它；只查不改，不会动文件。",
-        note: "同一条回复上可起几条旁注；「旁注 n」打开目录，‹ › 在各条间切换，「阔」铺满整页。"
+        body: "划选后择「旁注」，右侧展开一段附于此处的小对话。它读得到正文，正文读不到它；只查不改，不动文件。",
+        note: "同一条回复上可起数条旁注；「旁注 n」打开目录，‹ › 于各条间切换，「阔」铺满整页。"
       },
       {
-        h: "跟着分支走",
-        body: "旁注跟着它所注的那一问一答走：换到另一个版本，注在旧版上的旁注暂不在眼前，换回来就回来。"
+        h: "随分支而行",
+        body: "旁注随所注的一问一答而行：切换至另一版本，注于旧版的旁注暂隐，切回即现。"
       }
     ]
   },
   {
     id: "delegate",
     title: "差遣",
-    lead: "帮手：分出去的活",
-    summary: "量大、独立的活，模型会差遣帮手另起一段去做，做完回报。",
+    lead: "遣帮手分担一事",
+    summary: "量大而独立的事，模型会差遣帮手另起一段去做，事毕回报。",
     steps: [
       {
         h: "何时差遣",
-        body: "通读一批资料并归纳、多路检索比对、在不熟的模块里排查——这类活由模型自己决定分出去，几件互不相干的还能并行。"
+        body: "通读一批资料并归纳、多路检索比对、在陌生模块中排查——此类事由模型自行分出，互不相干者可数件并行。"
       },
       {
-        h: "看它做什么",
-        body: "行迹里的差遣卡片可以点开：帮手领的任务、走的每一步、最后的回报都在里面。输入框上方的帮手条也能直达。",
+        h: "观其所为",
+        body: "行迹中的差遣卡片可以展开：帮手所领之命、所行每一步、最后的回报，皆在其中。输入框上方的帮手条亦可直达。",
         noteLabel: "留意",
-        note: "帮手看不到这段对话，只凭任务说明做事；它不向你请示，也不改记忆。"
+        note: "帮手看不到这段对话，只凭任务说明行事；它不向你请示，也不改动记忆。"
       }
     ]
   },
   {
     id: "presets",
     title: "预设",
-    lead: "做一个自己的 Agent",
-    summary: "把提示词、工具、MCP 服务、模型与权限打包成一套，选用即换上。",
+    lead: "为专事定一套做法",
+    summary: "将提示词、工具、MCP 服务、模型与权限合为一套，选用即全部换上。",
     steps: [
       {
         h: "新添",
-        body: "设置 → 预设 → 新添：起个名字，写一段提示词——它是谁、做什么、怎么答。提示词排在系统提示的最前面。"
+        body: "设置 → 预设 → 新添：命名，再写一段提示词——所任何职、所司何事、答以何种风格。提示词列于系统提示之首。"
       },
       {
-        h: "挑工具",
-        body: "工具按组勾选：联网、计算、指令与文件、翻文档、请示、记忆与旧谈、差遣；接了 MCP 的，再勾用哪几个服务。全勾上即「全给」，往后新添的也跟着给。",
-        note: "工具越少，每一问背的定义越轻；只聊天的预设，工具可以全不勾。"
+        h: "择工具",
+        body: "工具按组勾选：联网、计算、指令与文件、翻文档、请示、记忆与旧谈、差遣；已接入 MCP 的，再择定所用服务。全数勾选即为「全给」，日后新添者亦随之给出。",
+        note: "工具愈少，每一问所负的定义愈轻；只作对谈的预设，工具可一概不选。"
       },
       {
         h: "选用",
-        body: "输入框旁的模型菜单里多了「预设」一段，点一个即换上；模型按钮上标着它的名字。带了模型或权限的，一并换上。不选即本色。"
+        body: "输入框旁的模型菜单中多出「预设」一段，点选即换上，模型按钮上标其名。预设若带模型或权限，一并换上。不选即为本色。"
       }
     ]
   },
   {
     id: "mcp",
     title: "MCP",
-    lead: "接外部服务：GitHub、自家项目",
-    summary: "MCP 让言调用别处的能力：GitHub 的仓库与议题、你自己项目里的工具。只改配置，不动代码。",
+    lead: "接入外部服务",
+    summary: "借 MCP，言可调用别处的能力，如 GitHub 的仓库与议题，或其他项目自带的工具。接入只需配置，无需改动代码。",
     steps: [
       {
-        h: "找到服务的接法",
-        body: "服务的说明里通常给出一段 JSON：本机程序写 `command` 与 `args`，远端服务写一个 `url`。",
-        note: "项目里现成的 `.mcp.json`，整段粘进「以 JSON 编辑」即可，写法与 Claude、Cursor 通用。"
+        h: "觅其接法",
+        body: "服务的说明中通常附一段 JSON：本机程序写明 `command` 与 `args`，远端服务写明 `url`。",
+        note: "项目中已有的 `.mcp.json` 可整段粘入「以 JSON 编辑」，写法与 Claude、Cursor 通用。"
       },
       {
-        h: "在设置里添上",
-        body: "设置 → MCP → 新增服务，填命令或地址；令牌放在环境变量或请求头里，页面上遮着。"
+        h: "于设置中添入",
+        body: "设置 → MCP → 新增服务，填入命令或地址；令牌置于环境变量或请求头中，页面上遮蔽显示。"
       },
       {
-        h: "让模型用起来",
-        body: "接通后卡上亮出工具件数。对话里直说要做的事，模型会挑合用的工具，行迹里记着它调了哪件；工具多的服务只给模型一张目录，按需取用。",
+        h: "交予模型",
+        body: "接通后卡上显出工具件数。对话中说明所求，模型自会择用相宜的工具，行迹里记下所调何件；工具繁多的服务只给模型一张目录，按需取用。",
         noteLabel: "留意",
-        note: "标了只读的工具径直调用，其余在问而后行下逐次请示。"
+        note: "标为只读的工具径直调用，其余在问而后行下逐次请示。"
       }
     ]
   },
   {
     id: "env",
     title: "环境",
-    lead: "Python、C、Go 装在哪、怎么用",
-    summary: "给模型备一套自带的开发环境，装在存储位置的 `环境/` 里，不改动系统。",
+    lead: "为模型备一套开发环境",
+    summary: "独立的 Python 与常用工具链，装于存储位置的 `环境/`，不改动系统。",
     steps: [
       {
         h: "勾选",
-        body: "设置 → 环境：一组工具一张卡，名称在左、状态在右——空框没选，朱色实心待装，一笔勾已装。有数据处理、办公文档、图像、音视频，也有 C / C++、Go、Rust、Java 几套工具链。"
+        body: "设置 → 环境：一组工具一张卡，名称居左、状态居右——空框未选，朱色实心待装，一笔勾已装。可选数据处理、办公文档、图像、音视频，以及 C / C++、Go、Rust、Java 数套工具链。"
       },
       {
         h: "准备",
-        body: "点「准备环境」，环境便对齐到勾选：勾上的装，取消的卸。国内镜像下得快，工具链大些，卡上写着约多少。",
-        note: "模型的指令与 MCP 服务都接着这套环境；它缺什么库，自己装进来即可。"
+        body: "点「准备环境」，环境即与勾选对齐：勾上者装，取消者卸。国内镜像下载较快；工具链体量较大，卡上注明约数。",
+        note: "模型的指令与 MCP 服务皆接此环境；所缺之库，模型自行装入即可。"
       }
     ]
   },
   {
     id: "memory",
     title: "记忆",
-    lead: "录下什么、怎么忘",
-    summary: "录是一份跨对话的记忆：你的偏好、身份、约定，下回不必再说。",
+    lead: "何者当记，何时可忘",
+    summary: "录是一份跨对话的记忆：你的偏好、身份与约定，此后不必重述。",
     steps: [
       {
         h: "记与翻",
-        body: "模型觉得值得记的，一句话记入；新话题里用得上时再翻。行迹里「记入」「翻记忆」用一点冷色标着。"
+        body: "模型认为值得留存的，以一句记入；新话题中用得着时再行翻检。行迹里「记入」「翻记忆」以一抹冷色标示。"
       },
       {
         h: "改与忘",
-        body: "设置 → 记忆里每条都可改可删，也可手记一条；整份记忆可以关掉。",
+        body: "设置 → 记忆中每条皆可修改、删除，亦可手记一条；整份记忆可以关闭。",
         noteLabel: "留意",
-        note: "记忆的内容不进系统提示，只告诉模型有几条；用到时它才去翻。"
+        note: "记忆的内容不入系统提示，只告知模型现有几条；用到时方才翻阅。"
       }
     ]
   },
   {
     id: "storage",
     title: "存储备份",
-    lead: "~/.yan、换位置、导入导出",
-    summary: "对话、卷宗、附件与配置都在一个存储目录里，复制即备份。",
+    lead: "存储所在，迁移与备份",
+    summary: "对话、卷宗、附件与配置同在一个存储目录，复制即是备份。",
     steps: [
       {
-        h: "在哪",
-        body: "默认 `~/.yan/`：`对话/` 一段一个文件，`卷宗/` 是成品与收进来的文件，`附件/` 是附件原件，`配置.json` 是设置与模型。几个浏览器共用这一份。"
+        h: "所在",
+        body: "默认为 `~/.yan/`：`对话/` 一段一个文件，`卷宗/` 收成品与存入的文件，`附件/` 存附件原件，`配置.json` 记设置与模型。数个浏览器共用这一份。"
       },
       {
-        h: "换位置",
-        body: "设置 → 通用 → 存储位置，填一个目录，整份拷过去，旧处原样留着。",
-        note: "环境不随之拷走，到新处重新准备一遍即可。"
+        h: "迁移",
+        body: "设置 → 通用 → 存储位置，填一目录，整份拷至其下，旧处原样保留。",
+        note: "环境不随之迁移，至新处重新准备一遍即可。"
       },
       {
         h: "备份",
-        body: "设置 → 通用里导出备份（可含附件原件），导入时按 id 合并，已有的跳过。备份不含 API Key。"
+        body: "设置 → 通用中导出备份（可含附件原件）；导入时按 id 合并，已有者略过。备份不含 API Key。"
       }
     ]
   }

@@ -89,37 +89,42 @@ input[type="number"]::-webkit-outer-spin-button {
   --body: "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif;
   --title: "Noto Serif SC", "Songti SC", "STSong", serif;
 }
-/* 线稿图标：与查找的放大镜同一笔性（1.3 笔、圆头），纸色衬底，一处点朱。卷宗是展开的一段手卷（墨线的轴，只四个轴头点朱，纸面一道天头），设置是三道弦上的码子。
-   落选的：卷宗一个「卷」字小印（与「工」印混在一处，认不出是入口）；两端实心朱轴的手卷（偏卡通）；半卷、挂轴、线装书、书函、一摞文书；设置的齿轮（⚙ 字符各平台字形不一，线稿的轮在 17px 下糊） */
-.line-icon {
+/* 笔意图标（画法见 src/03-brush.js）：墨分两色，一片淡墨作纸，一点朱。
+   落选的：等宽圆头的线稿加实心色块（UI 图标的画法，怎么减细节都偏卡通）；卷宗一个「卷」字小印（与「工」印混在一处，认不出是入口） */
+.brush {
+  flex: none;
   width: 20px;
   height: 20px;
-  fill: none;
-  stroke: var(--ink-2);
-  stroke-width: 1.3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition:
-    stroke 0.16s,
-    transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-.line-icon .icon-paper {
-  fill: var(--paper);
+.brush .ink {
+  fill: color-mix(in srgb, var(--ink) 80%, var(--paper));
 }
-.line-icon .icon-cap {
-  stroke: var(--accent);
-  stroke-width: 1.8;
+.brush .ink2 {
+  fill: color-mix(in srgb, var(--ink) 45%, var(--paper));
 }
-.line-icon .icon-zhu {
-  fill: color-mix(in srgb, var(--accent) 16%, var(--paper));
-  stroke: var(--accent);
+.brush .wash {
+  fill: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+.brush .zhu {
+  fill: var(--accent);
 }
 .library-open:hover .archive-icon,
-.library-open.active .archive-icon {
-  stroke: var(--ink);
-}
-.library-open:hover .archive-icon {
+.new-chat:hover .brush {
   transform: translateY(-1px);
+}
+.tab-btn .brush {
+  width: 16px;
+  height: 16px;
+  opacity: 0.85;
+}
+.tab-btn.active .brush,
+.tab-btn:hover .brush {
+  opacity: 1;
+}
+.settings-mark {
+  width: 28px;
+  height: 28px;
 }
 :root {
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .085 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
@@ -647,12 +652,12 @@ button.history-repo:hover .history-repo-name {
   padding-right: 10px;
 }
 .settings-open .gear {
-  width: 17px;
-  height: 17px;
-  stroke: var(--ink-3);
+  width: 18px;
+  height: 18px;
+  opacity: 0.8;
 }
 .settings-open:hover .gear {
-  stroke: var(--ink-2);
+  opacity: 1;
 }
 .avatar {
   width: 25px;
@@ -4044,11 +4049,6 @@ textarea::placeholder,
 .memory-head {
   align-items: center;
 }
-.memory-seal {
-  width: 26px;
-  height: 26px;
-  font-size: 14px;
-}
 .memory-list {
   border-top: 1px solid var(--line);
 }
@@ -4315,6 +4315,9 @@ textarea::placeholder,
   border-color: var(--danger);
 }
 .tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   padding: 8px 10px;
   border-radius: 9px;
   text-align: left;
