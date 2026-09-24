@@ -1,29 +1,5 @@
 // 言 · 行迹与时间线：步骤卡、思绪、出处
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
-const TOOL_LABELS = {
-  search_web: "检索",
-  fetch_page: "翻阅网页",
-  read_document: "翻阅文档",
-  run_command: "运行",
-  check_command: "后台",
-  write_file: "写入",
-  edit_file: "修改",
-  read_file: "读取",
-  list_files: "列目录",
-  search_files: "搜索",
-  ask_user: "请示",
-  delegate: "差遣",
-  remember: "记入",
-  forget: "忘却",
-  recall: "翻记忆",
-  search_conversations: "查旧谈",
-  read_conversation: "翻旧谈",
-  run_js: "计算",
-  http_request: "调接口",
-  download_file: "下载",
-  update_plan: "计划",
-  user_note: "补言"
-};
 function toolStackLabel() {
   return "行迹";
 }
@@ -153,7 +129,7 @@ function paintDrafting(host, assistant) {
   const label = drafting
     .map(call => {
       const path = call.arguments.match(/"(?:path|command|query|url|title)"\s*:\s*"((?:[^"\\]|\\.){1,80})/)?.[1];
-      return `${TOOL_LABELS[call.name] || call.name}${path ? ` ${path}` : ""}`;
+      return `${toolLabel(call.name)}${path ? ` ${path}` : ""}`;
     })
     .join("、");
   const chars = drafting.reduce((sum, call) => sum + call.arguments.length, 0);
@@ -217,7 +193,7 @@ function subStepsRunning(sub, steps) {
 function subStepsLabel(steps) {
   const counts = new Map();
   for (const step of steps) {
-    const label = TOOL_LABELS[step.name] || step.name;
+    const label = toolLabel(step.name);
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   return [...counts].map(([label, n]) => (n > 1 ? `${label} ${n}` : label)).join(" · ");
@@ -290,29 +266,23 @@ function stepsHtml(message) {
     : `<div class="tool-steps">${message.steps.map(stepHtml).join("")}</div>`;
   return `<details class="tool-stack${work ? " is-work" : ""}"${open ? " open" : ""} data-state="${escapeHtml(message.status || "complete")}"><summary><span class="tool-stack-label">${escapeHtml(trailLabel(message))}</span><span class="tool-stack-meta">${escapeHtml(trailMeta(message))}</span></summary><div class="tool-stack-body">${body}</div></details>`;
 }
+// 一步的卡片：工具自己登记了画法（指令、文件、请示、差遣、计划、补言）就照它画，其余（检索、翻阅、计算、调接口、翻记忆）用下面通用的一种
 /** @param {Step} step */
 function stepHtml(step) {
-  let title = step.title;
-  if (!title) {
-    try {
-      const args = JSON.parse(step.arguments || "{}");
-      title = args.query || args.url || args.name || "";
-    } catch {
-      title = "";
-    }
-  }
-  const resultLink = result => {
-    const url = safeWebUrl(result.url),
-      label = escapeHtml(result.title || result.url);
-    return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<span>${label}</span>`;
-  };
-  const stepUrl = safeWebUrl(step.url);
-  if (WORK_TOOLS.has(step.name) || step.name === "check_command") return workStepHtml(step, title);
-  if (step.name === "ask_user") return askStepHtml(step);
-  if (step.name === "delegate") return delegateStepHtml(step);
-  if (step.name === "user_note") return noteStepHtml(step);
-  if (step.name === "update_plan") return planStepHtml(step);
-  // 计算与调接口：代码（或请求）在上、输出在下，与指令输出同一套折叠与「展开全部」
+  const title = step.title || stepArgsTitle(step),
+    own = TOOLS.get(step.name)?.html;
+  return own ? own(step, title) : plainStepHtml(step, title);
+}
+// 标题还没定下来（步骤刚入册、工具还没跑）时，先从参数里取一个
+/** @param {Step} step */
+function stepArgsTitle(step) {
+  const parsed = parseToolArguments(step.arguments);
+  return parsed.ok ? String(parsed.args.query || parsed.args.url || parsed.args.name || "") : "";
+}
+// 代码（或请求）在上、输出在下，与指令输出同一套折叠与「展开全部」；没有输出的列命中、网址或一句备注。
+// 默认折起：一答里几十次检索，命中全摊开要占一整屏；标题行有关键词与结果数，点开才看
+/** @param {Step} step */
+function plainStepHtml(step, title) {
   let more = "";
   const clamp = text => {
     const out = clampLines(text, step.full);
@@ -320,33 +290,30 @@ function stepHtml(step) {
     else if (step.full && out.total > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
     return escapeHtml(out.text);
   };
+  const link = (url, label) => {
+    const href = safeWebUrl(url);
+    return href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<span>${label}</span>`;
+  };
   const outputBody =
     step.code || step.output
       ? `${step.code ? `<pre class="tool-output tool-code">${clamp(step.code)}</pre>` : ""}${step.output ? `<pre class="tool-output">${clamp(step.output)}</pre>` : ""}${more ? `<button type="button" class="tool-more" data-step-more>${more}</button>` : ""}`
       : "";
-  const body = outputBody
-    ? outputBody
-    : step.results?.length
+  const body =
+    outputBody ||
+    (step.results?.length
       ? `<ul class="tool-results">${step.results
           .slice(0, 8)
-          .map(r => `<li>${resultLink(r)}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
+          .map(r => `<li>${link(r.url, escapeHtml(r.title || r.url))}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
           .join("")}</ul>`
       : step.url
-        ? `<div class="tool-note">${stepUrl ? `<a href="${escapeHtml(stepUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(stepUrl)}</a>` : escapeHtml(step.url)}</div>`
+        ? `<div class="tool-note">${link(step.url, escapeHtml(safeWebUrl(step.url) || step.url))}</div>`
         : step.note
           ? `<div class="tool-note">${escapeHtml(step.note)}</div>`
-          : "";
+          : "");
   const status = step.status || "done",
-    state =
-      status === "running"
-        ? `<span class="tool-state spinning" aria-label="进行中"></span>`
-        : status === "error"
-          ? `<span class="tool-state failed" aria-label="失败">×</span>`
-          : `<span class="tool-state done" aria-label="完成">✓</span>`;
-  // 检索、翻阅这类查阅步骤默认折起：一答里几十次检索，命中全摊开要占一整屏；标题行有关键词与结果数，点开才看命中
-  const foldable = !!body,
+    foldable = !!body,
     folded = foldable && (step.expanded === undefined ? true : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开" : "收起"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开" : "收起"}"` : ""}><span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
 // 帮手自己的一条小时间线——每轮的思绪、说的话、各步，与主行迹同一套画法；进行中时最新的思绪与话跟着流。
 // 它画在右侧的差遣面板里（不在行迹里：差遣是并行的活，线性的时间线盛不下）；首次画整段，此后由 syncDelegateTrail 就地更新
@@ -393,29 +360,6 @@ function delegateTrailHtml(step) {
   }</div>`;
   // 面板里整条时间线不再折起来：这一栏就是为了看过程而开的，开了还要再点一下才见内容没有道理；折的是各轮的步骤
   return `<div class="sub-trail"${live ? ' data-live="true"' : ""}><div class="sub-timeline">${groups}${tail}</div>${report ? `<div class="sub-report">${renderMarkdown(report)}</div>` : ""}</div>`;
-}
-// 行迹里只留一枚签：差遣是并行的活，塞进线性的时间线会把后面的东西一直往下顶。
-// 这里只记「此刻遣了谁、做到哪一步」——那确实是这一刻发生的事；回报与帮手自己的那条小时间线都在面板里，
-// 签上不铺回报：主模型接着会把它消化进正文，几名帮手的回报叠在行迹里，正文就被顶到几屏之下了。
-/** @param {Step} step */
-function delegateStepHtml(step) {
-  const { sub, status, meta } = delegateSubState(step);
-  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>差遣</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div></div>`;
-}
-// 行迹里那枚签的就地更新：只动头上的状态与标题。帮手自己的时间线与回报不在这儿，在面板里
-/** @param {Step} step */
-function syncDelegateCard(el, step, prev, seen) {
-  const { sub, status, meta } = delegateSubState(step);
-  el.dataset.status = status;
-  const head = el.querySelector(":scope > .tool-step-head");
-  rollText(head.querySelector(".tool-meta"), meta);
-  if (!prev || prev.status !== status) head.querySelector(".tool-state").outerHTML = stepStateHtml(status);
-  // 标题在领命时才定下来，签却在那之前就画出来了
-  const title = head.querySelector(".tool-title");
-  if (title.textContent !== String(step.title || "")) {
-    title.textContent = step.title || "";
-    title.title = sub?.task || step.title || "";
-  }
 }
 // 帮手时间线就地更新（面板里那一条）。帮手每 350ms 刷一次，若整段换新：已画出的步骤输出会重新起入场动画
 // （列目录的结果闪一下又空一片）、用户收起的思绪又被摊开。这里只动变了的部分：新出的分组与步骤、最后一轮的思绪与话、回报
@@ -506,7 +450,7 @@ function syncStep(list, step, seen) {
   if (!el) {
     list.insertAdjacentHTML("beforeend", html);
     el = list.lastElementChild;
-  } else if (step.name === "delegate") syncDelegateCard(el, step, prev, seen);
+  } else if (TOOLS.get(step.name)?.sync) TOOLS.get(step.name).sync(el, step, prev);
   else if (prev && prev.html !== html) {
     el.insertAdjacentHTML("afterend", html);
     const next = el.nextElementSibling;
@@ -536,7 +480,7 @@ function delegateDoing(step) {
     steps = sub?.steps || [],
     current = [...steps].reverse().find(s => s.status === "running" || s.status === "pending") || steps.at(-1);
   if (current && (current.status === "running" || current.status === "pending"))
-    return `${current.status === "pending" ? "等待确认" : "正在"} ${TOOL_LABELS[current.name] || current.name} ${String(current.title || "").slice(0, 60)}`.trim();
+    return `${current.status === "pending" ? "等待确认" : "正在"} ${toolLabel(current.name)} ${String(current.title || "").slice(0, 60)}`.trim();
   const base = Math.max(0, ...steps.map(s => Number(s.at) || 0)),
     said = String(sub?.content || "")
       .slice(base)
@@ -688,35 +632,6 @@ function renderHelperPanel(fresh = false) {
   syncDelegateTrail(trail, step, helperSeen);
 }
 
-// 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面
-/** @param {Step} step */
-function noteStepHtml(step) {
-  const status = step.status || "done",
-    text = String(step.note || "").trim(),
-    first = text.split("\n").find(Boolean)?.slice(0, 80) || "",
-    files = (step.attachments || []).map(file => file.name);
-  const meta = status === "running" ? "待寄" : status === "error" ? escapeHtml(step.result || "未送达") : escapeHtml(step.result || "已递");
-  const body =
-    text.length > first.length || files.length
-      ? `<div class="tool-note">${escapeHtml(text)}${files.length ? `<div class="tool-note-files">${files.map(name => escapeHtml(name)).join("、")}</div>` : ""}</div>`
-      : "";
-  return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
-}
-// 计划卡：一行一项，○ 待做、▶ 正在做（朱色呼吸点）、✓ 做完、– 不做了；标题行是正在做的那一项或「n/m」
-/** @param {Step} step */
-function planStepHtml(step) {
-  const status = step.status || "done",
-    items = step.plan || [],
-    done = items.filter(item => item.status === "done").length;
-  const rows = items
-    .map(
-      item =>
-        `<li class="plan-item" data-plan="${escapeHtml(item.status)}"><span class="plan-mark" aria-hidden="true">${{ done: "✓", doing: "", skipped: "–" }[item.status] ?? "○"}</span><span class="plan-text">${escapeHtml(item.text)}</span></li>`
-    )
-    .join("");
-  const meta = status === "error" ? escapeHtml(step.result || "失败") : `${done}/${items.length}`;
-  return `<div class="tool-step tool-step-plan" data-tool="update_plan" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">计划</span><span class="tool-title" title="${escapeHtml(step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${items.length ? `<ol class="plan-list">${rows}</ol>` : ""}</div>`;
-}
 function stepStateHtml(status) {
   return status === "running"
     ? `<span class="tool-state spinning" aria-label="进行中"></span>`
@@ -763,7 +678,7 @@ function workStepHtml(step, title) {
   const foldable = !!body && status !== "pending",
     openByDefault = status !== "error" && (!!step.diff || step.name === "list_files"),
     folded = foldable && (step.expanded === undefined ? !openByDefault : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开输出" : "收起输出"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title${command ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "执行失败") : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开输出" : "收起输出"}"` : ""}><span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "执行失败") : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
 /** @param {Message} assistant */
 function refreshSteps(assistant) {
@@ -915,21 +830,17 @@ function sourceCardsHtml(message) {
       const old = sources.get(key);
       if (!old || read) sources.set(key, { url: key, title: title || old?.title || safeHost(key), read: read || !!old?.read });
     };
-  for (const step of message.steps || []) if (step.name === "fetch_page" && step.status === "done") add(step.url, step.title, true);
-  for (const step of message.steps || [])
-    if (step.name === "search_web" && step.status === "done") for (const result of step.results || []) add(result.url, result.title, false);
+  // 出处由各工具登记的 sources 给出；网页里读过全文的排在只见于检索结果的前面
+  const found = (message.steps || []).filter(step => step.status === "done").flatMap(step => TOOLS.get(step.name)?.sources?.(step) || []);
+  for (const entry of found) if (entry.url && entry.read) add(entry.url, entry.title, true);
+  for (const entry of found) if (entry.url && !entry.read) add(entry.url, entry.title, false);
   // 记忆与旧谈：翻过的条目、查到并读过的对话，与网页并列列出，点开各归其处
   const talks = new Map(),
     memories = new Map();
-  for (const step of message.steps || []) {
-    if (step.status !== "done") continue;
-    if (step.name === "search_conversations")
-      for (const hit of step.results || [])
-        if (hit.conversationId && !talks.has(hit.conversationId))
-          talks.set(hit.conversationId, { id: hit.conversationId, title: hit.title, date: hit.date, read: false });
-    if (step.name === "read_conversation" && step.conversationId)
-      talks.set(step.conversationId, { id: step.conversationId, title: step.title, date: step.date, read: true });
-    if (step.name === "recall") for (const hit of step.results || []) if (hit.memoryId) memories.set(hit.memoryId, hit.title);
+  for (const entry of found) {
+    if (entry.talk && (entry.read || !talks.has(entry.talk)))
+      talks.set(entry.talk, { id: entry.talk, title: entry.title, date: entry.date, read: !!entry.read });
+    if (entry.memory) memories.set(entry.memory, entry.title);
   }
   const list = [...sources.values()],
     local = [...talks.values(), ...[...memories].map(([id, text]) => ({ memoryId: id, text }))];

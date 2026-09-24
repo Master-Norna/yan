@@ -1,6 +1,20 @@
 // 言 · 本地存储：迁移、读写、附件库（IndexedDB）
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 
+// 调本机桥接：存储、卷宗、工具都走这一个口子；桥接回的错误是一句话，原样抛出
+async function bridge(path, payload, signal) {
+  if (apiBase === null) throw Error("本机工具需要本机桥接");
+  const response = await fetch(`${apiBase}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw Error(data.error || `请求失败（${response.status}）`);
+  return data;
+}
+
 // 结构迁移按版本递增：老数据按字段补默认值，不清空；将来调整结构时在 migrateStoreVx 里写迁移
 function migrateStoreV1(data) {
   data.version = 2; /* v1 → v2 无结构变化，为后续迁移留位 */

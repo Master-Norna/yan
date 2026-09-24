@@ -1,15 +1,16 @@
 // 纯函数的单元测试用：把 src/*.js（除启动那段）拼进一个函数里，在 Node 里跑起来，把要测的函数交出来。
 // 页面的源码是无模块的普通脚本，靠拼接共享一个闭包，所以这里也照原样拼——只是把 window / document / localStorage
 // 这些顶层会碰到的东西换成够用的桩。DOM 相关的函数不在这里测，那是 e2e 的事（见 test/run.mjs）
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
-const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
-const files = readdirSync(SRC)
-  .filter(name => name.endsWith(".js") && !name.startsWith(".") && name !== "99-start.js")
-  .sort();
-const body = files.map(name => readFileSync(path.join(SRC, name), "utf8")).join("\n");
+// 与页面同一份清单（build.js 的 scriptParts，含子目录），只去掉启动那段
+const { scriptParts } = createRequire(import.meta.url)("../../build.js");
+const body = scriptParts()
+  .filter(file => path.basename(file) !== "99-start.js")
+  .map(file => readFileSync(file, "utf8"))
+  .join("\n");
 
 const noop = () => {};
 const media = () => ({ matches: false, addEventListener: noop, removeEventListener: noop });

@@ -15,38 +15,18 @@ function quotedText(message) {
     .map(line => `> ${line}`)
     .join("\n")}\n\n${message.content || "请就所引用的内容作答。"}`;
 }
-// 上一答动过文件、请示过、差遣过、检索翻阅过的，压成一行带给下一问：模型才记得自己读过、改过哪些文件、查到过哪几条，不必从头再探
-// label 是方括号里的标头：进历史时写「上一答的行迹」（见 historyForApi），存卷宗与压缩转写里写「行迹」
+// 上一答动过文件、请示过、差遣过、检索翻阅过的，压成一行带给下一问：模型才记得自己读过、改过哪些文件、查到过哪几条，不必从头再探。
+// 哪些步骤带、怎么写，由各工具登记的 digest 定。label 是方括号里的标头：进历史时写「上一答的行迹」（见 historyForApi），存卷宗与压缩转写里写「行迹」
 /** @param {Message} message */
 function stepsDigest(message, label = "行迹") {
-  const steps = (message.steps || []).filter(
-    step =>
-      WORK_TOOLS.has(step.name) ||
-      ["ask_user", "delegate", "search_web", "fetch_page", "user_note", "download_file", "update_plan"].includes(step.name)
-  );
+  const steps = (message.steps || []).filter(step => TOOLS.get(step.name)?.digest);
   if (!steps.length) return "";
-  const items = steps.slice(0, 16).map(step =>
-    step.name === "user_note"
-      ? `用户补言「${String(step.note || "").slice(0, 200)}」`
-      : step.name === "ask_user"
-        ? `请示 → ${step.answers ? String(step.note || "").slice(0, 200) : "用户未作答"}`
-        : step.name === "delegate"
-          ? `差遣「${String(step.title || "").slice(0, 40)}」→ ${step.result || step.status}${subChangedPaths(step).length ? `，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
-          : step.name === "search_web"
-            ? `检索「${String(step.title || "").slice(0, 60)}」→ ${
-                (step.results || [])
-                  .slice(0, 3)
-                  .map(r => `${String(r.title || "").slice(0, 40)}（${r.url}）`)
-                  .join("；") ||
-                step.result ||
-                step.status
-              }`
-            : step.name === "fetch_page"
-              ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
-              : step.name === "update_plan"
-                ? `计划 → ${(step.plan || []).map(item => `${{ done: "✓", doing: "▶", skipped: "–" }[item.status] || "○"}${item.text.slice(0, 40)}`).join("；")}`
-                : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
-  );
+  const items = steps.slice(0, 16).map(step => {
+    const digest = TOOLS.get(step.name).digest;
+    return digest === true
+      ? `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
+      : digest(step);
+  });
   return `［${label}］${items.join("；")}${steps.length > 16 ? `；…共 ${steps.length} 步` : ""}`;
 }
 // 最新一问的文本附件能整份随消息送出的上限：按模型窗口的一成半算（没填窗口按 24k token）。超过的只给一行元数据，
@@ -574,7 +554,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     conversation.updatedAt = now();
     setTimeout(() => maybeAutoCompact(conversation), 0);
     // 言里动过文件的，卷宗目录多半有了新东西：重新翻一遍，新出的、改过的成品挂在答末，侧栏的件数跟着更新
-    if (archiveBefore && allSteps(assistant).some(step => WORK_TOOLS.has(step.name))) {
+    if (archiveBefore && allSteps(assistant).some(step => TOOLS.get(step.name)?.writes)) {
       await refreshArchive();
       assistant.deliverables = (archiveEntries || [])
         .filter(entry => archiveBefore.get(entry.path) !== entry.modifiedAt)
@@ -710,51 +690,6 @@ async function requestPatiently(profile, history, signal, overrides) {
     await restFor(wait, signal);
   }
 }
-// 把一批工具调用跑完，返回各步回给模型的结果。相邻的只读调用一起跑（读、搜、翻网页、翻记忆彼此无关）；会改状态或要请示的按原顺序逐个来。
-// 主模型与帮手共用这一段：assistant 是页面上那条消息（帮手的步骤也画在它的行迹里）
-/**
- * @param {Conversation} conversation
- * @param {Message} assistant
- */
-async function runSteps(steps, conversation, assistant, signal, toolCache) {
-  const outcomes = new Map();
-  const runOne = async step => {
-    const stepStarted = performance.now();
-    const cacheable = !WORK_TOOLS.has(step.name) && !MEMORY_TOOLS.has(step.name) && !["delegate", "check_command"].includes(step.name),
-      cacheKey = toolCacheKey(step),
-      cached = cacheable ? toolCache.get(cacheKey) : null;
-    let outcome;
-    if (cached) {
-      Object.assign(step, structuredClone(cached.presentation));
-      step.cached = true;
-      outcome = structuredClone(cached.outcome);
-      outcome.display = `复用 · ${outcome.display}`;
-    } else {
-      outcome = await runTool(step, conversation, assistant, signal);
-      // 只缓存成功的：临时的 502、超时若也缓存，模型想重试只会一直拿到同一个旧失败
-      if (cacheable && outcome.ok) toolCache.set(cacheKey, { outcome: structuredClone(outcome), presentation: toolPresentation(step) });
-    }
-    const remaining = MIN_TOOL_STATUS_MS - (performance.now() - stepStarted);
-    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
-    step.status = step.skipped ? "skipped" : outcome.ok ? "done" : "error";
-    step.result = outcome.display;
-    outcomes.set(step.id, String(outcome.content).slice(0, 60000));
-    refreshSteps(assistant);
-    saveStore();
-  };
-  for (let i = 0; i < steps.length; ) {
-    if (!PARALLEL_TOOLS.has(steps[i].name)) {
-      await runOne(steps[i]);
-      i += 1;
-      continue;
-    }
-    let j = i;
-    while (j < steps.length && PARALLEL_TOOLS.has(steps[j].name)) j += 1;
-    await Promise.all(steps.slice(i, j).map(runOne));
-    i = j;
-  }
-  return outcomes;
-}
 // opened：接口至少接下过一次请求（没接下的——400、连不上——不花墨）；partialRound：最后一轮开了头却没等到它的 usage（停止、断网），
 // 那一轮按估算补上——提示全文加上这一轮写出的字；一次 usage 都没拿到的（直连不回 usage）整答按估算
 /**
@@ -856,60 +791,6 @@ async function maybeAutoTitle(conversation, profile) {
     if (retry && !conversation.titled && !renamedByHand(conversation) && store.settings.autoTitle)
       setTimeout(() => void maybeAutoTitle(conversation, profile), 0);
   }
-}
-// 可读的文档：对话附件、浏览器内的旧卷宗，以及（设置允许时）磁盘卷宗里的文本与 Office / PDF——后者用到时才取回并抽正文
-const ARCHIVE_DOC_EXTENSIONS = new Set(["pdf", "docx", "pptx", "xlsx", "odt", "ods", "odp"]);
-/** @param {Conversation} conversation */
-function availableDocuments(conversation) {
-  const seen = new Map();
-  for (const file of [...(conversation?.messages || []).flatMap(m => m.attachments || []), ...store.library])
-    if (file.id && !seen.has(file.name) && (file.kind === "text" || (file.kind === "file" && file.extracted))) seen.set(file.name, file);
-  if (store.settings.archiveRead !== false && archiveOnline())
-    for (const entry of archiveEntries || []) {
-      const extension = String(entry.name).split(".").pop().toLowerCase();
-      if (seen.has(entry.name) || !(ARCHIVE_DOC_EXTENSIONS.has(extension) || isTextFile({ name: entry.name, type: "" }))) continue;
-      seen.set(entry.name, { name: entry.name, archive: entry.path, size: entry.size, modifiedAt: entry.modifiedAt, kind: "archive" });
-    }
-  return [...seen.values()];
-}
-// sub：给帮手的一套——同样的工具，但不再差遣、也不请示用户
-/** @param {Conversation} conversation */
-function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
-  // 描述与参数说明在 prompts/tools.js；这里只决定哪些工具在此对话里可用
-  // 言（对谈）的文件工具只为产出。带 brief 的用短说明，且不带 edit_file / search_files
-  // lookup：旁注用的只查不改的一套——检索、翻网页、翻文档、翻记忆与旧谈；不动文件、不请示、不差遣、不记不忘
-  const work = isWork(conversation) && !lookup;
-  const define = (name, vars = {}) => {
-    const spec = PROMPTS.tools?.[name];
-    if (!spec) {
-      console.error(`缺少工具定义：${name}`);
-      return null;
-    }
-    const text = !work && spec.brief ? prompt(`tools.${name}.brief`, vars) : prompt(`tools.${name}.description`, vars);
-    return { type: "function", function: { name, description: text, parameters: spec.parameters } };
-  };
-  const tools = [];
-  if (apiBase !== null) tools.push(define("search_web"), define("fetch_page"));
-  // 调接口能发 POST，不算纯查阅，旁注不给；算一段 JS 在浏览器里的隔离沙箱跑，不经桥接，谁都有
-  if (apiBase !== null && !lookup) tools.push(define("http_request"));
-  tools.push(define("run_js"));
-  // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线。下载也落在同一处
-  if (workRoot(conversation) && !lookup)
-    tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));
-  // 计划：行里给用户看的清单，只有主模型维护
-  if (work && !sub) tools.push(define("update_plan"));
-  // 后台指令的新输出与结束：只给行，跟着 run_command 的 background 走
-  if (work && workRoot(conversation)) tools.push(define("check_command"));
-  if (!sub && !lookup) tools.push(define("ask_user"));
-  // 帮手与旁注对记忆只读：翻记忆、查旧谈可以，记与忘留给主模型
-  if (memoryEnabled())
-    tools.push(...[...MEMORY_TOOLS].filter(name => (!sub && !lookup) || !MEMORY_WRITE_TOOLS.has(name)).map(name => define(name)));
-  const docs = availableDocuments(conversation);
-  if (docs.length) tools.push(define("read_document", { docs: docs.map(d => d.name).join("、") }));
-  // 有桥接、且有别的活能交出去时才可差遣；帮手自己不再差遣
-  if (!sub && !lookup && apiBase !== null && tools.some(tool => tool && tool.function.name !== "ask_user")) tools.push(define("delegate"));
-  const usable = tools.filter(Boolean);
-  return usable.length ? usable : null;
 }
 // 附加给模型的提示：日期、目录与做法（执事的，或言里卷宗的）、联网分寸、记忆分寸、页内可视化的写法。工具各自做什么、何时用，在工具说明里说，这里不重复
 /** @param {Conversation} conversation */

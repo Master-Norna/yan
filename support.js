@@ -203,6 +203,10 @@ function prompt(path, vars = {}) {
     console.error(`缺少内置提示词：${path}（prompts/ 目录未加载？）`);
     return "";
   }
+  return fillTemplate(text, vars);
+}
+// 提示词的写法：字符串或按行拼的数组，{{名字}} 在运行时填入
+function fillTemplate(text, vars = {}) {
   return (Array.isArray(text) ? text.join("\n") : String(text)).replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? "")).trim();
 }
 const APP_VERSION = "0.3.0"; // 与 package.json 同步；桥接在线时以桥接返回的为准
@@ -395,6 +399,20 @@ let imageViewerAttachmentId = null,
   // ---- 01-store.js ----
 // 言 · 本地存储：迁移、读写、附件库（IndexedDB）
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
+
+// 调本机桥接：存储、卷宗、工具都走这一个口子；桥接回的错误是一句话，原样抛出
+async function bridge(path, payload, signal) {
+  if (apiBase === null) throw Error("本机工具需要本机桥接");
+  const response = await fetch(`${apiBase}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw Error(data.error || `请求失败（${response.status}）`);
+  return data;
+}
 
 // 结构迁移按版本递增：老数据按字段补默认值，不清空；将来调整结构时在 migrateStoreVx 里写迁移
 function migrateStoreV1(data) {
@@ -2541,16 +2559,7 @@ function bindEvents() {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         const waiting = input.id === "chatInput" && !input.value.trim() ? pendingApprovalHere() : null;
-        if (waiting) {
-          if (waiting.step.name !== "ask_user") return settleApproval(waiting.step.id, true);
-          const bar = $("#approvalBar"),
-            page = Number(bar.dataset.page || 0),
-            total = bar.querySelectorAll(".ask-q").length;
-          if (page < total - 1) return formPage(bar, page + 1);
-          const answers = collectForm(bar);
-          if (answers?.some(Boolean)) return settleApproval(waiting.step.id, answers);
-          return toast("请先在上方作答");
-        }
+        if (waiting) return approveByEnter(waiting);
         sendOrStop();
       }
     });
@@ -4442,30 +4451,6 @@ function finalizeAssistant(conversation, assistant, leadTrim = 0) {
   // ---- 08-trail.js ----
 // 言 · 行迹与时间线：步骤卡、思绪、出处
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
-const TOOL_LABELS = {
-  search_web: "检索",
-  fetch_page: "翻阅网页",
-  read_document: "翻阅文档",
-  run_command: "运行",
-  check_command: "后台",
-  write_file: "写入",
-  edit_file: "修改",
-  read_file: "读取",
-  list_files: "列目录",
-  search_files: "搜索",
-  ask_user: "请示",
-  delegate: "差遣",
-  remember: "记入",
-  forget: "忘却",
-  recall: "翻记忆",
-  search_conversations: "查旧谈",
-  read_conversation: "翻旧谈",
-  run_js: "计算",
-  http_request: "调接口",
-  download_file: "下载",
-  update_plan: "计划",
-  user_note: "补言"
-};
 function toolStackLabel() {
   return "行迹";
 }
@@ -4595,7 +4580,7 @@ function paintDrafting(host, assistant) {
   const label = drafting
     .map(call => {
       const path = call.arguments.match(/"(?:path|command|query|url|title)"\s*:\s*"((?:[^"\\]|\\.){1,80})/)?.[1];
-      return `${TOOL_LABELS[call.name] || call.name}${path ? ` ${path}` : ""}`;
+      return `${toolLabel(call.name)}${path ? ` ${path}` : ""}`;
     })
     .join("、");
   const chars = drafting.reduce((sum, call) => sum + call.arguments.length, 0);
@@ -4659,7 +4644,7 @@ function subStepsRunning(sub, steps) {
 function subStepsLabel(steps) {
   const counts = new Map();
   for (const step of steps) {
-    const label = TOOL_LABELS[step.name] || step.name;
+    const label = toolLabel(step.name);
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   return [...counts].map(([label, n]) => (n > 1 ? `${label} ${n}` : label)).join(" · ");
@@ -4732,29 +4717,23 @@ function stepsHtml(message) {
     : `<div class="tool-steps">${message.steps.map(stepHtml).join("")}</div>`;
   return `<details class="tool-stack${work ? " is-work" : ""}"${open ? " open" : ""} data-state="${escapeHtml(message.status || "complete")}"><summary><span class="tool-stack-label">${escapeHtml(trailLabel(message))}</span><span class="tool-stack-meta">${escapeHtml(trailMeta(message))}</span></summary><div class="tool-stack-body">${body}</div></details>`;
 }
+// 一步的卡片：工具自己登记了画法（指令、文件、请示、差遣、计划、补言）就照它画，其余（检索、翻阅、计算、调接口、翻记忆）用下面通用的一种
 /** @param {Step} step */
 function stepHtml(step) {
-  let title = step.title;
-  if (!title) {
-    try {
-      const args = JSON.parse(step.arguments || "{}");
-      title = args.query || args.url || args.name || "";
-    } catch {
-      title = "";
-    }
-  }
-  const resultLink = result => {
-    const url = safeWebUrl(result.url),
-      label = escapeHtml(result.title || result.url);
-    return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<span>${label}</span>`;
-  };
-  const stepUrl = safeWebUrl(step.url);
-  if (WORK_TOOLS.has(step.name) || step.name === "check_command") return workStepHtml(step, title);
-  if (step.name === "ask_user") return askStepHtml(step);
-  if (step.name === "delegate") return delegateStepHtml(step);
-  if (step.name === "user_note") return noteStepHtml(step);
-  if (step.name === "update_plan") return planStepHtml(step);
-  // 计算与调接口：代码（或请求）在上、输出在下，与指令输出同一套折叠与「展开全部」
+  const title = step.title || stepArgsTitle(step),
+    own = TOOLS.get(step.name)?.html;
+  return own ? own(step, title) : plainStepHtml(step, title);
+}
+// 标题还没定下来（步骤刚入册、工具还没跑）时，先从参数里取一个
+/** @param {Step} step */
+function stepArgsTitle(step) {
+  const parsed = parseToolArguments(step.arguments);
+  return parsed.ok ? String(parsed.args.query || parsed.args.url || parsed.args.name || "") : "";
+}
+// 代码（或请求）在上、输出在下，与指令输出同一套折叠与「展开全部」；没有输出的列命中、网址或一句备注。
+// 默认折起：一答里几十次检索，命中全摊开要占一整屏；标题行有关键词与结果数，点开才看
+/** @param {Step} step */
+function plainStepHtml(step, title) {
   let more = "";
   const clamp = text => {
     const out = clampLines(text, step.full);
@@ -4762,33 +4741,30 @@ function stepHtml(step) {
     else if (step.full && out.total > STEP_SHOW_LINES) more = `只看前 ${STEP_SHOW_LINES} 行`;
     return escapeHtml(out.text);
   };
+  const link = (url, label) => {
+    const href = safeWebUrl(url);
+    return href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<span>${label}</span>`;
+  };
   const outputBody =
     step.code || step.output
       ? `${step.code ? `<pre class="tool-output tool-code">${clamp(step.code)}</pre>` : ""}${step.output ? `<pre class="tool-output">${clamp(step.output)}</pre>` : ""}${more ? `<button type="button" class="tool-more" data-step-more>${more}</button>` : ""}`
       : "";
-  const body = outputBody
-    ? outputBody
-    : step.results?.length
+  const body =
+    outputBody ||
+    (step.results?.length
       ? `<ul class="tool-results">${step.results
           .slice(0, 8)
-          .map(r => `<li>${resultLink(r)}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
+          .map(r => `<li>${link(r.url, escapeHtml(r.title || r.url))}${r.snippet ? `<span>${escapeHtml(r.snippet)}</span>` : ""}</li>`)
           .join("")}</ul>`
       : step.url
-        ? `<div class="tool-note">${stepUrl ? `<a href="${escapeHtml(stepUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(stepUrl)}</a>` : escapeHtml(step.url)}</div>`
+        ? `<div class="tool-note">${link(step.url, escapeHtml(safeWebUrl(step.url) || step.url))}</div>`
         : step.note
           ? `<div class="tool-note">${escapeHtml(step.note)}</div>`
-          : "";
+          : "");
   const status = step.status || "done",
-    state =
-      status === "running"
-        ? `<span class="tool-state spinning" aria-label="进行中"></span>`
-        : status === "error"
-          ? `<span class="tool-state failed" aria-label="失败">×</span>`
-          : `<span class="tool-state done" aria-label="完成">✓</span>`;
-  // 检索、翻阅这类查阅步骤默认折起：一答里几十次检索，命中全摊开要占一整屏；标题行有关键词与结果数，点开才看命中
-  const foldable = !!body,
+    foldable = !!body,
     folded = foldable && (step.expanded === undefined ? true : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开" : "收起"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${state}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开" : "收起"}"` : ""}><span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "工具执行失败") : ""}">${status === "running" ? "查阅中" : status === "error" ? escapeHtml(step.result || "失败") : escapeHtml(step.result || "")}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
 // 帮手自己的一条小时间线——每轮的思绪、说的话、各步，与主行迹同一套画法；进行中时最新的思绪与话跟着流。
 // 它画在右侧的差遣面板里（不在行迹里：差遣是并行的活，线性的时间线盛不下）；首次画整段，此后由 syncDelegateTrail 就地更新
@@ -4835,29 +4811,6 @@ function delegateTrailHtml(step) {
   }</div>`;
   // 面板里整条时间线不再折起来：这一栏就是为了看过程而开的，开了还要再点一下才见内容没有道理；折的是各轮的步骤
   return `<div class="sub-trail"${live ? ' data-live="true"' : ""}><div class="sub-timeline">${groups}${tail}</div>${report ? `<div class="sub-report">${renderMarkdown(report)}</div>` : ""}</div>`;
-}
-// 行迹里只留一枚签：差遣是并行的活，塞进线性的时间线会把后面的东西一直往下顶。
-// 这里只记「此刻遣了谁、做到哪一步」——那确实是这一刻发生的事；回报与帮手自己的那条小时间线都在面板里，
-// 签上不铺回报：主模型接着会把它消化进正文，几名帮手的回报叠在行迹里，正文就被顶到几屏之下了。
-/** @param {Step} step */
-function delegateStepHtml(step) {
-  const { sub, status, meta } = delegateSubState(step);
-  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>差遣</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div></div>`;
-}
-// 行迹里那枚签的就地更新：只动头上的状态与标题。帮手自己的时间线与回报不在这儿，在面板里
-/** @param {Step} step */
-function syncDelegateCard(el, step, prev, seen) {
-  const { sub, status, meta } = delegateSubState(step);
-  el.dataset.status = status;
-  const head = el.querySelector(":scope > .tool-step-head");
-  rollText(head.querySelector(".tool-meta"), meta);
-  if (!prev || prev.status !== status) head.querySelector(".tool-state").outerHTML = stepStateHtml(status);
-  // 标题在领命时才定下来，签却在那之前就画出来了
-  const title = head.querySelector(".tool-title");
-  if (title.textContent !== String(step.title || "")) {
-    title.textContent = step.title || "";
-    title.title = sub?.task || step.title || "";
-  }
 }
 // 帮手时间线就地更新（面板里那一条）。帮手每 350ms 刷一次，若整段换新：已画出的步骤输出会重新起入场动画
 // （列目录的结果闪一下又空一片）、用户收起的思绪又被摊开。这里只动变了的部分：新出的分组与步骤、最后一轮的思绪与话、回报
@@ -4948,7 +4901,7 @@ function syncStep(list, step, seen) {
   if (!el) {
     list.insertAdjacentHTML("beforeend", html);
     el = list.lastElementChild;
-  } else if (step.name === "delegate") syncDelegateCard(el, step, prev, seen);
+  } else if (TOOLS.get(step.name)?.sync) TOOLS.get(step.name).sync(el, step, prev);
   else if (prev && prev.html !== html) {
     el.insertAdjacentHTML("afterend", html);
     const next = el.nextElementSibling;
@@ -4978,7 +4931,7 @@ function delegateDoing(step) {
     steps = sub?.steps || [],
     current = [...steps].reverse().find(s => s.status === "running" || s.status === "pending") || steps.at(-1);
   if (current && (current.status === "running" || current.status === "pending"))
-    return `${current.status === "pending" ? "等待确认" : "正在"} ${TOOL_LABELS[current.name] || current.name} ${String(current.title || "").slice(0, 60)}`.trim();
+    return `${current.status === "pending" ? "等待确认" : "正在"} ${toolLabel(current.name)} ${String(current.title || "").slice(0, 60)}`.trim();
   const base = Math.max(0, ...steps.map(s => Number(s.at) || 0)),
     said = String(sub?.content || "")
       .slice(base)
@@ -5130,35 +5083,6 @@ function renderHelperPanel(fresh = false) {
   syncDelegateTrail(trail, step, helperSeen);
 }
 
-// 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面
-/** @param {Step} step */
-function noteStepHtml(step) {
-  const status = step.status || "done",
-    text = String(step.note || "").trim(),
-    first = text.split("\n").find(Boolean)?.slice(0, 80) || "",
-    files = (step.attachments || []).map(file => file.name);
-  const meta = status === "running" ? "待寄" : status === "error" ? escapeHtml(step.result || "未送达") : escapeHtml(step.result || "已递");
-  const body =
-    text.length > first.length || files.length
-      ? `<div class="tool-note">${escapeHtml(text)}${files.length ? `<div class="tool-note-files">${files.map(name => escapeHtml(name)).join("、")}</div>` : ""}</div>`
-      : "";
-  return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
-}
-// 计划卡：一行一项，○ 待做、▶ 正在做（朱色呼吸点）、✓ 做完、– 不做了；标题行是正在做的那一项或「n/m」
-/** @param {Step} step */
-function planStepHtml(step) {
-  const status = step.status || "done",
-    items = step.plan || [],
-    done = items.filter(item => item.status === "done").length;
-  const rows = items
-    .map(
-      item =>
-        `<li class="plan-item" data-plan="${escapeHtml(item.status)}"><span class="plan-mark" aria-hidden="true">${{ done: "✓", doing: "", skipped: "–" }[item.status] ?? "○"}</span><span class="plan-text">${escapeHtml(item.text)}</span></li>`
-    )
-    .join("");
-  const meta = status === "error" ? escapeHtml(step.result || "失败") : `${done}/${items.length}`;
-  return `<div class="tool-step tool-step-plan" data-tool="update_plan" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">计划</span><span class="tool-title" title="${escapeHtml(step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${items.length ? `<ol class="plan-list">${rows}</ol>` : ""}</div>`;
-}
 function stepStateHtml(status) {
   return status === "running"
     ? `<span class="tool-state spinning" aria-label="进行中"></span>`
@@ -5205,7 +5129,7 @@ function workStepHtml(step, title) {
   const foldable = !!body && status !== "pending",
     openByDefault = status !== "error" && (!!step.diff || step.name === "list_files"),
     folded = foldable && (step.expanded === undefined ? !openByDefault : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开输出" : "收起输出"}"` : ""}><span class="tool-label">${escapeHtml(TOOL_LABELS[step.name] || step.name)}</span><span class="tool-title${command ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "执行失败") : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? "展开输出" : "收起输出"}"` : ""}><span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "执行失败") : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
 /** @param {Message} assistant */
 function refreshSteps(assistant) {
@@ -5357,21 +5281,17 @@ function sourceCardsHtml(message) {
       const old = sources.get(key);
       if (!old || read) sources.set(key, { url: key, title: title || old?.title || safeHost(key), read: read || !!old?.read });
     };
-  for (const step of message.steps || []) if (step.name === "fetch_page" && step.status === "done") add(step.url, step.title, true);
-  for (const step of message.steps || [])
-    if (step.name === "search_web" && step.status === "done") for (const result of step.results || []) add(result.url, result.title, false);
+  // 出处由各工具登记的 sources 给出；网页里读过全文的排在只见于检索结果的前面
+  const found = (message.steps || []).filter(step => step.status === "done").flatMap(step => TOOLS.get(step.name)?.sources?.(step) || []);
+  for (const entry of found) if (entry.url && entry.read) add(entry.url, entry.title, true);
+  for (const entry of found) if (entry.url && !entry.read) add(entry.url, entry.title, false);
   // 记忆与旧谈：翻过的条目、查到并读过的对话，与网页并列列出，点开各归其处
   const talks = new Map(),
     memories = new Map();
-  for (const step of message.steps || []) {
-    if (step.status !== "done") continue;
-    if (step.name === "search_conversations")
-      for (const hit of step.results || [])
-        if (hit.conversationId && !talks.has(hit.conversationId))
-          talks.set(hit.conversationId, { id: hit.conversationId, title: hit.title, date: hit.date, read: false });
-    if (step.name === "read_conversation" && step.conversationId)
-      talks.set(step.conversationId, { id: step.conversationId, title: step.title, date: step.date, read: true });
-    if (step.name === "recall") for (const hit of step.results || []) if (hit.memoryId) memories.set(hit.memoryId, hit.title);
+  for (const entry of found) {
+    if (entry.talk && (entry.read || !talks.has(entry.talk)))
+      talks.set(entry.talk, { id: entry.talk, title: entry.title, date: entry.date, read: !!entry.read });
+    if (entry.memory) memories.set(entry.memory, entry.title);
   }
   const list = [...sources.values()],
     local = [...talks.values(), ...[...memories].map(([id, text]) => ({ memoryId: id, text }))];
@@ -6169,31 +6089,12 @@ async function streamSideReply(conversation, thread, assistant, profile) {
 }
 
   // ---- 11-memory.js ----
-// 言 · 录（记忆）：工具与设置页
+// 言 · 录（记忆）：条目的增删与设置页；模型用的五件工具在 15-tools/40-memory.js
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // ── 录（记忆）──
 // 一条条由模型在对谈中记下的话，跨对话可翻。内容不进系统提示，模型要看得自己 recall；旧对话也只在它去查时才给。
-// 五件工具全在浏览器里完成、不经桥接，也不需确认——每一步都会在行迹里显示，条目在设置页可改可删。
-const MEMORY_TOOLS = new Set(["remember", "forget", "recall", "search_conversations", "read_conversation"]);
-// 会改动记忆的两件：帮手（差遣）拿不到，见 toolDefinitions 与 runTool
-const MEMORY_WRITE_TOOLS = new Set(["remember", "forget"]);
-// 差遣也并行：同一轮里派出的几名帮手同时开工，各自的卡片各自刷新；活是主模型分的，不重叠靠它分派时留意（工具说明里有交代）
-const PARALLEL_TOOLS = new Set([
-  "delegate",
-  "run_js",
-  "search_web",
-  "fetch_page",
-  "read_document",
-  "read_file",
-  "list_files",
-  "search_files",
-  "recall",
-  "search_conversations",
-  "read_conversation"
-]);
 const MAX_MEMORY_ITEMS = 200,
-  MEMORY_TEXT_CHARS = 200,
-  CONVERSATION_MESSAGE_CHARS = 1500;
+  MEMORY_TEXT_CHARS = 200;
 function memoryEnabled() {
   return store.memory.enabled !== false;
 }
@@ -6227,123 +6128,6 @@ function addMemory(text, source = null) {
   store.memory.items.push(item);
   saveStore();
   return item;
-}
-/**
- * @param {Step} step
- * @param {Conversation} conversation
- */
-function runMemoryTool(step, args, conversation) {
-  const items = store.memory.items;
-  if (step.name === "remember") {
-    const text = String(args.text || "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, MEMORY_TEXT_CHARS);
-    step.title = text;
-    if (!text) return { ok: false, content: "text 不能为空", display: "内容为空" };
-    const source = { conversationId: conversation.id, title: conversation.title };
-    const existing = (args.replaces && items.find(item => item.id === String(args.replaces))) || items.find(item => item.text === text);
-    if (existing) {
-      existing.text = text;
-      existing.updatedAt = now();
-      existing.source = source;
-      saveStore();
-      refreshMemorySettings();
-      return { ok: true, content: `已更新 ${memoryLine(existing)}`, display: "已更新" };
-    }
-    if (items.length >= MAX_MEMORY_ITEMS)
-      return {
-        ok: false,
-        content: `记忆已有 ${MAX_MEMORY_ITEMS} 条，已满。请先用 recall 查看，用 forget 删去过时的，或用 replaces 把相近的合并成一条`,
-        display: "记忆已满"
-      };
-    const item = addMemory(text, source);
-    refreshMemorySettings();
-    return { ok: true, content: `已记入 ${memoryLine(item)}`, display: "已记入" };
-  }
-  if (step.name === "forget") {
-    const index = items.findIndex(item => item.id === String(args.id || ""));
-    step.title = index >= 0 ? items[index].text : String(args.id || "");
-    if (index < 0) return { ok: false, content: "没有这条记忆，id 以 recall 的结果为准", display: "未找到" };
-    items.splice(index, 1);
-    saveStore();
-    refreshMemorySettings();
-    return { ok: true, content: "已删除", display: "已删除" };
-  }
-  if (step.name === "recall") {
-    const terms = keywordTerms(args.query);
-    step.title = terms.length ? String(args.query).trim() : "全部";
-    const hits = terms.length ? items.filter(item => hitsAll(item.text, terms)) : items;
-    step.results = hits.slice(0, 8).map(item => ({ title: item.text, memoryId: item.id }));
-    return { ok: true, content: hits.length ? hits.map(memoryLine).join("\n") : "记忆里没有相关条目", display: `${hits.length} 条` };
-  }
-  if (step.name === "search_conversations") {
-    const terms = keywordTerms(args.query);
-    step.title = String(args.query || "").trim();
-    if (!terms.length) return { ok: false, content: "query 不能为空", display: "缺少关键词" };
-    const limit = Math.min(20, Math.max(1, Number(args.limit) || 8)),
-      hits = [];
-    const sameRepo = c => isWork(conversation) && isWork(c) && c.workdir === conversation.workdir;
-    for (const c of [...store.conversations].sort(
-      (a, b) => Number(sameRepo(b)) - Number(sameRepo(a)) || String(b.updatedAt).localeCompare(String(a.updatedAt))
-    )) {
-      if (c.id === conversation.id) continue;
-      const lines = (c.messages || []).filter(m => (m.role === "user" || m.role === "assistant") && m.content);
-      if (!hitsAll(`${c.title}\n${lines.map(m => m.content).join("\n")}`, terms)) continue;
-      const hit = lines.find(m => String(m.content).toLowerCase().includes(terms[0])),
-        text = String(hit?.content || "").replace(/\s+/g, " ");
-      const at = Math.max(0, text.toLowerCase().indexOf(terms[0]) - 40),
-        snippet = text ? `${at ? "…" : ""}${text.slice(at, at + 120)}${at + 120 < text.length ? "…" : ""}` : "";
-      hits.push({
-        id: c.id,
-        title: c.title,
-        date: String(c.updatedAt || c.createdAt).slice(0, 10),
-        count: lines.length,
-        snippet,
-        repo: isWork(c) ? (sameRepo(c) ? "同一目录" : `执事：${c.workdir}`) : ""
-      });
-      if (hits.length >= limit) break;
-    }
-    step.results = hits.map(hit => ({ title: hit.title, snippet: hit.snippet, conversationId: hit.id, date: hit.date }));
-    return {
-      ok: true,
-      content: hits.length
-        ? hits
-            .map(
-              hit =>
-                `[${hit.id}] ${hit.date}「${hit.title}」共 ${hit.count} 条${hit.repo ? `（${hit.repo}）` : ""}${hit.snippet ? `\n  ${hit.snippet}` : ""}`
-            )
-            .join("\n")
-        : "此前的对话里没有命中",
-      display: `${hits.length} 段`
-    };
-  }
-  if (step.name === "read_conversation") {
-    const id = String(args.id || ""),
-      c = store.conversations.find(item => item.id === id);
-    step.title = c ? c.title : id;
-    if (!c) return { ok: false, content: "没有这段对话，id 以 search_conversations 的结果为准", display: "未找到" };
-    step.conversationId = c.id;
-    step.date = c.updatedAt || c.createdAt;
-    if (c.id === conversation.id) return { ok: false, content: "这是当前对话，无需读取", display: "当前对话" };
-    const lines = (c.messages || []).filter(m => (m.role === "user" || m.role === "assistant") && (m.content || m.attachments?.length));
-    const offset = Math.max(1, Number(args.offset) || 1),
-      limit = Math.min(100, Math.max(1, Number(args.limit) || 40)),
-      slice = lines.slice(offset - 1, offset - 1 + limit);
-    const body = slice
-      .map((m, i) => {
-        const text = String(m.content || "（附件）").trim();
-        return `${offset + i}. 【${m.role === "user" ? "用户" : "助手"}】${text.length > CONVERSATION_MESSAGE_CHARS ? `${text.slice(0, CONVERSATION_MESSAGE_CHARS)}…` : text}`;
-      })
-      .join("\n\n");
-    const end = offset - 1 + slice.length;
-    return {
-      ok: true,
-      content: `「${c.title}」${String(c.createdAt).slice(0, 10)}${isWork(c) ? ` · 执事：${c.workdir}` : ""}，共 ${lines.length} 条，此为第 ${offset}–${end} 条${end < lines.length ? `；后面还有 ${lines.length - end} 条` : ""}\n\n${body || "（这段对话没有正文）"}`,
-      display: `${slice.length} 条`
-    };
-  }
-  return { ok: false, content: `未知工具 ${step.name}`, display: "未知工具" };
 }
 // 设置页开着「记忆」时，模型记入或删去要立刻反映在列表里
 function refreshMemorySettings() {
@@ -7695,38 +7479,18 @@ function quotedText(message) {
     .map(line => `> ${line}`)
     .join("\n")}\n\n${message.content || "请就所引用的内容作答。"}`;
 }
-// 上一答动过文件、请示过、差遣过、检索翻阅过的，压成一行带给下一问：模型才记得自己读过、改过哪些文件、查到过哪几条，不必从头再探
-// label 是方括号里的标头：进历史时写「上一答的行迹」（见 historyForApi），存卷宗与压缩转写里写「行迹」
+// 上一答动过文件、请示过、差遣过、检索翻阅过的，压成一行带给下一问：模型才记得自己读过、改过哪些文件、查到过哪几条，不必从头再探。
+// 哪些步骤带、怎么写，由各工具登记的 digest 定。label 是方括号里的标头：进历史时写「上一答的行迹」（见 historyForApi），存卷宗与压缩转写里写「行迹」
 /** @param {Message} message */
 function stepsDigest(message, label = "行迹") {
-  const steps = (message.steps || []).filter(
-    step =>
-      WORK_TOOLS.has(step.name) ||
-      ["ask_user", "delegate", "search_web", "fetch_page", "user_note", "download_file", "update_plan"].includes(step.name)
-  );
+  const steps = (message.steps || []).filter(step => TOOLS.get(step.name)?.digest);
   if (!steps.length) return "";
-  const items = steps.slice(0, 16).map(step =>
-    step.name === "user_note"
-      ? `用户补言「${String(step.note || "").slice(0, 200)}」`
-      : step.name === "ask_user"
-        ? `请示 → ${step.answers ? String(step.note || "").slice(0, 200) : "用户未作答"}`
-        : step.name === "delegate"
-          ? `差遣「${String(step.title || "").slice(0, 40)}」→ ${step.result || step.status}${subChangedPaths(step).length ? `，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
-          : step.name === "search_web"
-            ? `检索「${String(step.title || "").slice(0, 60)}」→ ${
-                (step.results || [])
-                  .slice(0, 3)
-                  .map(r => `${String(r.title || "").slice(0, 40)}（${r.url}）`)
-                  .join("；") ||
-                step.result ||
-                step.status
-              }`
-            : step.name === "fetch_page"
-              ? `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`
-              : step.name === "update_plan"
-                ? `计划 → ${(step.plan || []).map(item => `${{ done: "✓", doing: "▶", skipped: "–" }[item.status] || "○"}${item.text.slice(0, 40)}`).join("；")}`
-                : `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
-  );
+  const items = steps.slice(0, 16).map(step => {
+    const digest = TOOLS.get(step.name).digest;
+    return digest === true
+      ? `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
+      : digest(step);
+  });
   return `［${label}］${items.join("；")}${steps.length > 16 ? `；…共 ${steps.length} 步` : ""}`;
 }
 // 最新一问的文本附件能整份随消息送出的上限：按模型窗口的一成半算（没填窗口按 24k token）。超过的只给一行元数据，
@@ -8254,7 +8018,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     conversation.updatedAt = now();
     setTimeout(() => maybeAutoCompact(conversation), 0);
     // 言里动过文件的，卷宗目录多半有了新东西：重新翻一遍，新出的、改过的成品挂在答末，侧栏的件数跟着更新
-    if (archiveBefore && allSteps(assistant).some(step => WORK_TOOLS.has(step.name))) {
+    if (archiveBefore && allSteps(assistant).some(step => TOOLS.get(step.name)?.writes)) {
       await refreshArchive();
       assistant.deliverables = (archiveEntries || [])
         .filter(entry => archiveBefore.get(entry.path) !== entry.modifiedAt)
@@ -8390,51 +8154,6 @@ async function requestPatiently(profile, history, signal, overrides) {
     await restFor(wait, signal);
   }
 }
-// 把一批工具调用跑完，返回各步回给模型的结果。相邻的只读调用一起跑（读、搜、翻网页、翻记忆彼此无关）；会改状态或要请示的按原顺序逐个来。
-// 主模型与帮手共用这一段：assistant 是页面上那条消息（帮手的步骤也画在它的行迹里）
-/**
- * @param {Conversation} conversation
- * @param {Message} assistant
- */
-async function runSteps(steps, conversation, assistant, signal, toolCache) {
-  const outcomes = new Map();
-  const runOne = async step => {
-    const stepStarted = performance.now();
-    const cacheable = !WORK_TOOLS.has(step.name) && !MEMORY_TOOLS.has(step.name) && !["delegate", "check_command"].includes(step.name),
-      cacheKey = toolCacheKey(step),
-      cached = cacheable ? toolCache.get(cacheKey) : null;
-    let outcome;
-    if (cached) {
-      Object.assign(step, structuredClone(cached.presentation));
-      step.cached = true;
-      outcome = structuredClone(cached.outcome);
-      outcome.display = `复用 · ${outcome.display}`;
-    } else {
-      outcome = await runTool(step, conversation, assistant, signal);
-      // 只缓存成功的：临时的 502、超时若也缓存，模型想重试只会一直拿到同一个旧失败
-      if (cacheable && outcome.ok) toolCache.set(cacheKey, { outcome: structuredClone(outcome), presentation: toolPresentation(step) });
-    }
-    const remaining = MIN_TOOL_STATUS_MS - (performance.now() - stepStarted);
-    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
-    step.status = step.skipped ? "skipped" : outcome.ok ? "done" : "error";
-    step.result = outcome.display;
-    outcomes.set(step.id, String(outcome.content).slice(0, 60000));
-    refreshSteps(assistant);
-    saveStore();
-  };
-  for (let i = 0; i < steps.length; ) {
-    if (!PARALLEL_TOOLS.has(steps[i].name)) {
-      await runOne(steps[i]);
-      i += 1;
-      continue;
-    }
-    let j = i;
-    while (j < steps.length && PARALLEL_TOOLS.has(steps[j].name)) j += 1;
-    await Promise.all(steps.slice(i, j).map(runOne));
-    i = j;
-  }
-  return outcomes;
-}
 // opened：接口至少接下过一次请求（没接下的——400、连不上——不花墨）；partialRound：最后一轮开了头却没等到它的 usage（停止、断网），
 // 那一轮按估算补上——提示全文加上这一轮写出的字；一次 usage 都没拿到的（直连不回 usage）整答按估算
 /**
@@ -8537,60 +8256,6 @@ async function maybeAutoTitle(conversation, profile) {
       setTimeout(() => void maybeAutoTitle(conversation, profile), 0);
   }
 }
-// 可读的文档：对话附件、浏览器内的旧卷宗，以及（设置允许时）磁盘卷宗里的文本与 Office / PDF——后者用到时才取回并抽正文
-const ARCHIVE_DOC_EXTENSIONS = new Set(["pdf", "docx", "pptx", "xlsx", "odt", "ods", "odp"]);
-/** @param {Conversation} conversation */
-function availableDocuments(conversation) {
-  const seen = new Map();
-  for (const file of [...(conversation?.messages || []).flatMap(m => m.attachments || []), ...store.library])
-    if (file.id && !seen.has(file.name) && (file.kind === "text" || (file.kind === "file" && file.extracted))) seen.set(file.name, file);
-  if (store.settings.archiveRead !== false && archiveOnline())
-    for (const entry of archiveEntries || []) {
-      const extension = String(entry.name).split(".").pop().toLowerCase();
-      if (seen.has(entry.name) || !(ARCHIVE_DOC_EXTENSIONS.has(extension) || isTextFile({ name: entry.name, type: "" }))) continue;
-      seen.set(entry.name, { name: entry.name, archive: entry.path, size: entry.size, modifiedAt: entry.modifiedAt, kind: "archive" });
-    }
-  return [...seen.values()];
-}
-// sub：给帮手的一套——同样的工具，但不再差遣、也不请示用户
-/** @param {Conversation} conversation */
-function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
-  // 描述与参数说明在 prompts/tools.js；这里只决定哪些工具在此对话里可用
-  // 言（对谈）的文件工具只为产出。带 brief 的用短说明，且不带 edit_file / search_files
-  // lookup：旁注用的只查不改的一套——检索、翻网页、翻文档、翻记忆与旧谈；不动文件、不请示、不差遣、不记不忘
-  const work = isWork(conversation) && !lookup;
-  const define = (name, vars = {}) => {
-    const spec = PROMPTS.tools?.[name];
-    if (!spec) {
-      console.error(`缺少工具定义：${name}`);
-      return null;
-    }
-    const text = !work && spec.brief ? prompt(`tools.${name}.brief`, vars) : prompt(`tools.${name}.description`, vars);
-    return { type: "function", function: { name, description: text, parameters: spec.parameters } };
-  };
-  const tools = [];
-  if (apiBase !== null) tools.push(define("search_web"), define("fetch_page"));
-  // 调接口能发 POST，不算纯查阅，旁注不给；算一段 JS 在浏览器里的隔离沙箱跑，不经桥接，谁都有
-  if (apiBase !== null && !lookup) tools.push(define("http_request"));
-  tools.push(define("run_js"));
-  // 文件工具：绑了目录是执事的六件，落在工作目录；没绑是言的四件，落在卷宗；都要桥接在线。下载也落在同一处
-  if (workRoot(conversation) && !lookup)
-    tools.push(...(work ? [...WORK_TOOLS] : CHAT_FILE_TOOLS).map(name => define(name)), define("download_file"));
-  // 计划：行里给用户看的清单，只有主模型维护
-  if (work && !sub) tools.push(define("update_plan"));
-  // 后台指令的新输出与结束：只给行，跟着 run_command 的 background 走
-  if (work && workRoot(conversation)) tools.push(define("check_command"));
-  if (!sub && !lookup) tools.push(define("ask_user"));
-  // 帮手与旁注对记忆只读：翻记忆、查旧谈可以，记与忘留给主模型
-  if (memoryEnabled())
-    tools.push(...[...MEMORY_TOOLS].filter(name => (!sub && !lookup) || !MEMORY_WRITE_TOOLS.has(name)).map(name => define(name)));
-  const docs = availableDocuments(conversation);
-  if (docs.length) tools.push(define("read_document", { docs: docs.map(d => d.name).join("、") }));
-  // 有桥接、且有别的活能交出去时才可差遣；帮手自己不再差遣
-  if (!sub && !lookup && apiBase !== null && tools.some(tool => tool && tool.function.name !== "ask_user")) tools.push(define("delegate"));
-  const usable = tools.filter(Boolean);
-  return usable.length ? usable : null;
-}
 // 附加给模型的提示：日期、目录与做法（执事的，或言里卷宗的）、联网分寸、记忆分寸、页内可视化的写法。工具各自做什么、何时用，在工具说明里说，这里不重复
 /** @param {Conversation} conversation */
 function workHint(conversation) {
@@ -8636,20 +8301,134 @@ function assistantHint(profile, tools, conversation = null) {
   return base ? `${base}\n\n${lines.join("\n")}` : lines.join("\n");
 }
 
-  // ---- 15-tools.js ----
-// 言 · 工具执行：桥接调用、执事工具、请示与表单、改动统计
-// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
-async function bridge(path, payload, signal) {
-  if (apiBase === null) throw Error("本机工具需要本机桥接");
-  const response = await fetch(`${apiBase}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Error(data.error || `请求失败（${response.status}）`);
-  return data;
+  // ---- 15-tools/00-registry.js ----
+// 言 · 工具注册表：一件工具一份登记，写明给谁用、什么性质、怎么执行、行迹怎么画、带给下一问怎么说
+// 本目录各段与 src/ 下其余各段一样，由桥接（或 node build.js）按路径顺序拼进同一个闭包；无需模块系统。
+// 说给模型听的话（description 与参数）不在登记里，在 prompts/tools.js，按工具名对上；日后外来的工具（接口卡、MCP）自带 schema。
+// 交给模型的工具定义、执行、行迹卡片、摘要、出处都从这张表派生：加一件工具，只需在本目录加一份登记、在 prompts/tools.js 加一段说明
+/**
+ * @typedef {Object} ToolContext 执行时的处境
+ * @property {Conversation} conversation
+ * @property {Message} assistant 页面上的那一答（帮手的步骤也画在它的行迹里）
+ * @property {AbortSignal} signal
+ *
+ * @typedef {Object} OfferContext 此处给不给某件工具，看这几样
+ * @property {Conversation} conversation
+ * @property {boolean} work 执事（绑了工作目录，且不是旁注）
+ * @property {boolean} bridge 本机桥接在线
+ * @property {boolean} files 有可落脚的目录（工作目录或卷宗）
+ * @property {Array<Record<string, any>>} docs 可读的文档
+ * @property {string[]} offered 登记在前、此处已经给出的工具
+ *
+ * @typedef {{ ok: boolean, content: string, display: string }} ToolOutcome content 回给模型，display 写在标题行右侧
+ * @typedef {{ url?: string, title?: string, read?: boolean, talk?: string, date?: string, memory?: string }} Source 答末「出处」的一条：网页、旧谈或记忆
+ *
+ * @typedef {Object} Tool
+ * @property {string} name
+ * @property {string} label 行迹上的名字
+ * @property {false | ((ctx: OfferContext) => boolean)} [offer] 此处给不给；不写即处处都给，false 是只登记画法、从不交给模型的步骤（补言）
+ * @property {boolean} [mainOnly] 只给主模型，帮手拿不到
+ * @property {boolean} [lookup] 旁注（只查不改）也给
+ * @property {(ctx: OfferContext) => Record<string, any>} [vars] 说明里 {{名字}} 的值
+ * @property {{ description: string, brief?: string, parameters: Record<string, any> }} [schema] 自带的说明与参数；不写则取 prompts/tools.js
+ * @property {boolean} [parallel] 可与相邻的同类一起跑
+ * @property {boolean} [sideEffect] 有副作用：参数 JSON 残缺就不执行
+ * @property {boolean} [writes] 会在目录里出新文件：言里据此收成品
+ * @property {true | ((args: Record<string, any>) => Record<string, any> | null)} [cache] 同一答里同样的参数直接复用结果；函数给出规范化后的参数，给 null 即这次不复用
+ * @property {(step: Step, args: Record<string, any>, ctx: ToolContext) => ToolOutcome | Promise<ToolOutcome>} [run]
+ * @property {(step: Step, title: string) => string} [html] 行迹卡片；不写用通用的一种
+ * @property {(el: Element, step: Step, prev: { status: string } | undefined) => void} [sync] 卡片就地更新（不写则变了就整张换）
+ * @property {(step: Step) => string} [approval] 请示条的内容
+ * @property {true | ((step: Step) => string)} [digest] 带给下一问的一行；true 用通用写法，不写即不带
+ * @property {(step: Step) => Source[]} [sources] 答末「出处」里列的条目
+ */
+/** @type {Map<string, Tool>} 按登记先后排，交给模型时也是这个次序 */
+const TOOLS = new Map();
+/** @param {Tool} tool */
+function defineTool(tool) {
+  TOOLS.set(tool.name, tool);
+}
+function toolLabel(name) {
+  return TOOLS.get(name)?.label || name;
+}
+function toolSpec(name) {
+  return TOOLS.get(name)?.schema || PROMPTS.tools[name];
+}
+// 此处交给模型的工具。sub：帮手的一套（只给主模型的除外）；lookup：旁注的一套，只查不改。
+// 言（对谈）里带 brief 的用短说明：对谈的每一问都背着这份定义，越轻越好
+/** @param {Conversation} conversation */
+function toolDefinitions(conversation, { sub = false, lookup = false } = {}) {
+  /** @type {OfferContext} */
+  const ctx = {
+    conversation,
+    work: isWork(conversation) && !lookup,
+    bridge: apiBase !== null,
+    files: !!workRoot(conversation),
+    docs: availableDocuments(conversation),
+    offered: []
+  };
+  const tools = [];
+  for (const tool of TOOLS.values()) {
+    if (!tool.run || (sub && tool.mainOnly) || (lookup && !tool.lookup) || (tool.offer && !tool.offer(ctx))) continue;
+    const spec = toolSpec(tool.name),
+      text = !ctx.work && spec.brief ? spec.brief : spec.description;
+    tools.push({
+      type: "function",
+      function: { name: tool.name, description: fillTemplate(text, tool.vars?.(ctx)), parameters: spec.parameters }
+    });
+    ctx.offered.push(tool.name);
+  }
+  return tools.length ? tools : null;
+}
+/**
+ * 跑一步：先把参数理顺（见 01-arguments.js），讲不通的原样告诉模型错在哪；理顺了交给那件工具
+ * @param {Step} step
+ * @param {ToolContext} ctx
+ * @returns {Promise<ToolOutcome>}
+ */
+async function runTool(step, ctx) {
+  const tool = TOOLS.get(step.name);
+  if (!tool?.run) return { ok: false, content: `未知工具 ${step.name}`, display: "未知工具" };
+  // 帮手没拿到的工具，它也可能照着名字调
+  if (step.scope && tool.mainOnly)
+    return { ok: false, content: `${step.name} 只有主模型可用；需要它做的事写进回报里，由主模型决定。`, display: "帮手无权" };
+  const parsed = parseToolArguments(step.arguments);
+  if (!parsed.ok)
+    return {
+      ok: false,
+      content: `调用 ${step.name} 的参数不是合法 JSON（${parsed.error}）。arguments 必须是一个 JSON 对象，不要加代码围栏、注释或多余的逗号，也不要把它再编码成字符串；内容过长时先精简再发。这件工具收的参数：${toolSchemaHint(step.name)}\n\n收到的原文（前 300 字）：${parsed.raw.slice(0, 300)}`,
+      display: "参数解析失败"
+    };
+  // 截断的参数救回来也不能拿去写：内容已经不全，写下去就是把文件写坏
+  if (parsed.truncated && tool.sideEffect)
+    return {
+      ok: false,
+      content: `调用 ${step.name} 的参数 JSON 不完整（多半是输出被最大长度截断），为安全起见没有执行。请把内容精简或分成几次写入（大文件先 write_file 写开头，再用 edit_file 追加），确保 arguments 是完整的 JSON。这件工具收的参数：${toolSchemaHint(step.name)}\n\n收到的原文（末尾 200 字）：…${step.arguments.slice(-200)}`,
+      display: "参数不完整"
+    };
+  const { args, problems } = normalizeToolArguments(step.name, parsed.args);
+  if (problems.length)
+    return {
+      ok: false,
+      content: `调用 ${step.name} 的参数不合要求：${problems.join("；")}。这件工具收的参数：${toolSchemaHint(step.name)}；实际收到的键：${Object.keys(parsed.args).join("、") || "（无）"}${parsed.truncated ? "\n（参数 JSON 不完整，可能是输出被截断）" : ""}\n\n收到的原文（前 300 字）：${step.arguments.slice(0, 300)}`,
+      display: "参数不合要求"
+    };
+  try {
+    return await tool.run(step, args, ctx);
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    const message = String(error.message || error);
+    return { ok: false, content: `工具执行失败：${message}`, display: friendlyError(message).slice(0, 60) };
+  }
+}
+// 同一答里同样的参数不必再跑一遍：键是工具名加规范化后的参数，怎么规范由各工具的 cache 定
+/** @param {Step} step */
+function toolCacheKey(step) {
+  const cache = TOOLS.get(step.name)?.cache,
+    parsed = cache ? parseToolArguments(step.arguments) : null;
+  if (!parsed?.ok) return null;
+  const args = cache === true ? parsed.args : cache(parsed.args);
+  return args ? `${step.name}:${JSON.stringify(stableToolJson(args))}` : null;
 }
 function stableToolJson(value) {
   if (Array.isArray(value)) return value.map(stableToolJson);
@@ -8661,6 +8440,86 @@ function stableToolJson(value) {
     );
   return typeof value === "string" ? value.trim() : value;
 }
+// 复用结果时连同呈现一起搬过来：标题、网址、备注、命中
+/** @param {Step} step */
+function toolPresentation(step) {
+  return {
+    title: step.title || "",
+    url: step.url || "",
+    note: step.note || "",
+    results: step.results ? structuredClone(step.results) : null
+  };
+}
+// 把一批工具调用跑完，返回各步回给模型的结果。相邻的可并发的一起跑（读、搜、翻网页、翻记忆彼此无关）；会改状态或要请示的按原顺序逐个来。
+// 主模型、帮手与旁注共用这一段：assistant 是页面上那条消息（帮手的步骤也画在它的行迹里）
+/**
+ * @param {Step[]} steps
+ * @param {Conversation} conversation
+ * @param {Message} assistant
+ */
+async function runSteps(steps, conversation, assistant, signal, toolCache) {
+  const outcomes = new Map(),
+    ctx = { conversation, assistant, signal };
+  const runOne = async step => {
+    const started = performance.now(),
+      key = toolCacheKey(step),
+      cached = key ? toolCache.get(key) : null;
+    let outcome;
+    if (cached) {
+      Object.assign(step, structuredClone(cached.presentation));
+      step.cached = true;
+      outcome = structuredClone(cached.outcome);
+      outcome.display = `复用 · ${outcome.display}`;
+    } else {
+      outcome = await runTool(step, ctx);
+      // 只缓存成功的：临时的 502、超时若也缓存，模型想重试只会一直拿到同一个旧失败
+      if (key && outcome.ok) toolCache.set(key, { outcome: structuredClone(outcome), presentation: toolPresentation(step) });
+    }
+    const remaining = MIN_TOOL_STATUS_MS - (performance.now() - started);
+    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+    step.status = step.skipped ? "skipped" : outcome.ok ? "done" : "error";
+    step.result = outcome.display;
+    outcomes.set(step.id, String(outcome.content).slice(0, 60000));
+    refreshSteps(assistant);
+    saveStore();
+  };
+  const parallel = step => !!TOOLS.get(step.name)?.parallel;
+  for (let i = 0; i < steps.length; ) {
+    let j = i + 1;
+    if (parallel(steps[i])) while (j < steps.length && parallel(steps[j])) j += 1;
+    await Promise.all(steps.slice(i, j).map(runOne));
+    i = j;
+  }
+  return outcomes;
+}
+// 生成结束（停止、出错或中断）时，还在转圈或等待确认的步骤一并收束，不留下永远转圈的卡片
+/** @param {Message} assistant */
+function settleSteps(assistant, note) {
+  for (const step of allSteps(assistant))
+    if (step.status === "running" || step.status === "pending") {
+      pendingApprovals.delete(step.id);
+      step.status = step.status === "pending" ? "skipped" : "error";
+      step.result = note;
+    }
+  for (const step of assistant.steps || []) if (step.sub?.status === "streaming") step.sub.status = "stopped";
+}
+// 一答里的全部步骤，含帮手在差遣卡片里跑的那些（只嵌一层：帮手不再差遣）
+/** @param {{ steps?: Step[] }} message 消息或帮手 */
+function allSteps(message) {
+  return (message?.steps || []).flatMap(step => [step, ...(step.sub?.steps || [])]);
+}
+// 步骤上留着的输出只留末尾一截：指令跑出几万行，整份存进对话既占地方也没人看
+const STEP_OUTPUT_KEEP = 6000;
+function trimOutput(text) {
+  const value = String(text || "");
+  return value.length > STEP_OUTPUT_KEEP ? `…（前面 ${value.length - STEP_OUTPUT_KEEP} 字略去）\n${value.slice(-STEP_OUTPUT_KEEP)}` : value;
+}
+function clampNumber(value, fallback, min, max) {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : fallback));
+}
+
+  // ---- 15-tools/01-arguments.js ----
+// 言 · 工具参数：模型给的参数在这里过一道关，理顺了才交给工具。工具里拿到的 args 已按 schema 归位、定型，必填项一个不缺
 // 工具参数按 JSON 给，但模型写出来的常有小毛病：裹了 ```json 围栏、结尾多一个逗号、整段被 max_tokens 截断、
 // 或是把 JSON 又编码成了字符串。这些都能救回来，救不回来才算失败——每失败一次就是白花一轮的墨。
 // 去围栏、去多余逗号不丢内容；补齐截断的 JSON 会丢掉末尾残缺的键值对，结果带 truncated 标记：
@@ -8695,18 +8554,35 @@ function parseToolArguments(raw) {
   }
   return { ok: false, error: String(first?.error?.message || "不是合法 JSON"), raw: text };
 }
-// 有副作用的工具：参数必须是完整的 JSON，且 schema 里的必填项一个不少，否则不执行
-const SIDE_EFFECT_TOOLS = new Set([
-  "run_command",
-  "write_file",
-  "edit_file",
-  "remember",
-  "forget",
-  "delegate",
-  "download_file",
-  "http_request"
-]);
-// 按 prompts/tools.js 里的 schema 把参数理顺：模型写参数常有小出入，能理解的都照单收下，只有真讲不通的才算失败——
+// 被截断的 JSON：补齐未闭合的括号，能救多少是多少——先试直接补齐（截在一个值刚写完的地方），
+// 不行再退到最后一个安全的逗号处（末尾那个残缺的键值对丢掉）。给出几个候选，由调用方逐个试
+function repairTruncatedJson(text) {
+  const stack = [];
+  let inString = false,
+    escaped = false,
+    lastSafe = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") stack.pop();
+    else if (ch === "," && stack.length) lastSafe = i;
+  }
+  if (!stack.length && !inString) return [];
+  const closers = stack.reverse().join(""),
+    candidates = [];
+  if (!inString) candidates.push(text.replace(/,\s*$/, "") + closers);
+  // 截在半截的字符串或键值对里：退回最后一个安全的逗号处
+  if (lastSafe > 0) candidates.push(text.slice(0, lastSafe) + closers);
+  return candidates;
+}
+// 按工具的 schema 把参数理顺：模型写参数常有小出入，能理解的都照单收下，只有真讲不通的才算失败——
 // 键名写成了常见的别名（file_path → path、cmd → command、old_string → old）、数字与布尔给成了字符串、该是数组的只给了一项、
 // 该是数组的整段 JSON 又编码成了字符串、ask_user 把单个问题直接摊在顶层……都在这里归位；必填项理顺后仍缺的才报
 const TOOL_ARG_ALIASES = {
@@ -8755,7 +8631,7 @@ function coerceToolValue(value, rule) {
   return value;
 }
 function normalizeToolArguments(name, raw) {
-  const spec = PROMPTS.tools?.[name]?.parameters,
+  const spec = toolSpec(name)?.parameters,
     args = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
   if (!spec?.properties) return { args, problems: [] };
   const known = new Set(Object.keys(spec.properties));
@@ -8781,157 +8657,216 @@ function normalizeToolArguments(name, raw) {
   for (const key of spec.required || []) if (args[key] === undefined || args[key] === null) problems.push(`缺少必填参数 ${key}`);
   return { args, problems };
 }
-// 被截断的 JSON：补齐未闭合的括号，能救多少是多少——先试直接补齐（截在一个值刚写完的地方），
-// 不行再退到最后一个安全的逗号处（末尾那个残缺的键值对丢掉）。给出几个候选，由调用方逐个试
-function repairTruncatedJson(text) {
-  const stack = [];
-  let inString = false,
-    escaped = false,
-    lastSafe = -1;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
-    else if (ch === "}" || ch === "]") stack.pop();
-    else if (ch === "," && stack.length) lastSafe = i;
-  }
-  if (!stack.length && !inString) return [];
-  const closers = stack.reverse().join(""),
-    candidates = [];
-  if (!inString) candidates.push(text.replace(/,\s*$/, "") + closers);
-  // 截在半截的字符串或键值对里：退回最后一个安全的逗号处
-  if (lastSafe > 0) candidates.push(text.slice(0, lastSafe) + closers);
-  return candidates;
-}
-/** @param {Step} step */
-function toolCacheKey(step) {
-  const parsed = parseToolArguments(step.arguments);
-  if (!parsed.ok) return `${step.name}:invalid:${String(step.arguments || "")}`;
-  const args = parsed.args;
-  if (step.name === "search_web")
-    args.query = String(args.query || "")
-      .trim()
-      .replace(/\s+/g, " ")
-      .toLowerCase();
-  if (step.name === "fetch_page") {
-    try {
-      const url = new URL(String(args.url || ""));
-      url.hash = "";
-      args.url = url.href;
-    } catch {
-      args.url = String(args.url || "").trim();
-    }
-  }
-  if (step.name === "read_document") {
-    args.name = String(args.name || "")
-      .trim()
-      .toLowerCase();
-    if (args.query) args.query = String(args.query).trim().toLowerCase();
-    if (args.page) args.page = Number(args.page);
-  }
-  return `${step.name}:${JSON.stringify(stableToolJson(args))}`;
-}
-// 参数出错时回给模型的一行 schema 摘要，取自 prompts/tools.js 的定义
+// 参数出错时回给模型的一行 schema 摘要
 function toolSchemaHint(name) {
-  const spec = PROMPTS.tools?.[name]?.parameters;
+  const spec = toolSpec(name)?.parameters;
   if (!spec?.properties) return "见工具定义";
   const required = new Set(spec.required || []);
   return Object.entries(spec.properties)
     .map(([key, value]) => `${key}（${value.type || "any"}${required.has(key) ? "，必填" : "，可选"}）`)
     .join("、");
 }
-/** @param {Step} step */
-function toolPresentation(step) {
-  return {
-    title: step.title || "",
-    url: step.url || "",
-    note: step.note || "",
-    results: Array.isArray(step.results) ? structuredClone(step.results) : null
-  };
-}
+
+  // ---- 15-tools/02-approval.js ----
+// 言 · 请示：步骤挂起、等用户定夺——运行一条指令（run_command），或答一张小表单（ask_user）。
+// 请示条从输入框上方浮出，不必去行迹里找那一行；条上画什么由那件工具的 approval 定。输入框留空时按 Enter 即运行或翻到下一题
+const pendingApprovals = new Map();
 /**
+ * 挂起这一步，等用户在请示条上定夺，返回定夺的结果；定了之后任务条上写 label
  * @param {Step} step
- * @param {Conversation} conversation
- * @param {Message} assistant
+ * @param {ToolContext} ctx
  */
-async function runTool(step, conversation, assistant, signal) {
-  const parsed = parseToolArguments(step.arguments);
-  if (!parsed.ok)
-    return {
-      ok: false,
-      content: `调用 ${step.name} 的参数不是合法 JSON（${parsed.error}）。arguments 必须是一个 JSON 对象，不要加代码围栏、注释或多余的逗号，也不要把它再编码成字符串；内容过长时先精简再发。这件工具收的参数：${toolSchemaHint(step.name)}\n\n收到的原文（前 300 字）：${String(parsed.raw || "").slice(0, 300)}`,
-      display: "参数解析失败"
+async function askApproval(step, { conversation, assistant, signal }, label) {
+  const job = requestJob(conversation.id);
+  step.status = "pending";
+  if (job) setJobLabel(conversation, job, "等待确认");
+  refreshSteps(assistant);
+  saveStore();
+  renderHistory();
+  const answer = await new Promise((resolve, reject) => {
+    const done = value => {
+      pendingApprovals.delete(step.id);
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
     };
-  const sideEffect = SIDE_EFFECT_TOOLS.has(step.name);
-  // 截断的参数救回来也不能拿去写：内容已经不全，写下去就是把文件写坏
-  if (parsed.truncated && sideEffect)
-    return {
-      ok: false,
-      content: `调用 ${step.name} 的参数 JSON 不完整（多半是输出被最大长度截断），为安全起见没有执行。请把内容精简或分成几次写入（大文件先 write_file 写开头，再用 edit_file 追加），确保 arguments 是完整的 JSON。这件工具收的参数：${toolSchemaHint(step.name)}\n\n收到的原文（末尾 200 字）：…${String(step.arguments || "").slice(-200)}`,
-      display: "参数不完整"
+    const onAbort = () => {
+      pendingApprovals.delete(step.id);
+      reject(Object.assign(Error("已停止"), { name: "AbortError" }));
     };
-  const { args, problems } = normalizeToolArguments(step.name, parsed.args);
-  if (problems.length)
+    signal.addEventListener("abort", onAbort, { once: true });
+    pendingApprovals.set(step.id, { conversationId: conversation.id, resolve: done, step });
+    renderApprovalBar();
+  }).finally(renderApprovalBar);
+  step.status = "running";
+  if (job) setJobLabel(conversation, job, label);
+  refreshSteps(assistant);
+  renderHistory();
+  return answer;
+}
+function settleApproval(stepId, value) {
+  pendingApprovals.get(stepId)?.resolve(value);
+}
+function pendingApprovalHere() {
+  const c = currentConversation();
+  if (!c) return null;
+  for (const entry of pendingApprovals.values()) if (entry.conversationId === c.id) return entry;
+  return null;
+}
+function renderApprovalBar() {
+  const bar = $("#approvalBar");
+  const entry = view === "chat" ? pendingApprovalHere() : null;
+  if (!entry) {
+    bar.dataset.stepId = "";
+    if (!bar.classList.contains("hidden")) hideWithFade(bar);
+    return;
+  }
+  if (bar.dataset.stepId !== entry.step.id) {
+    bar.dataset.stepId = entry.step.id;
+    bar.dataset.page = "0";
+    bar.innerHTML = TOOLS.get(entry.step.name).approval(entry.step);
+    formPage(bar);
+  }
+  if (bar.classList.contains("hidden") || bar.classList.contains("leaving")) showNow(bar);
+}
+// 请示条或行迹里的「运行 / 跳过 / 径行」
+function approveFrom(button) {
+  const stepId = button.closest("[data-step-id]")?.dataset.stepId,
+    c = currentConversation();
+  if (!stepId || !c) return;
+  if (button.dataset.approve === "auto") {
+    c.commandPolicy = "auto";
+    saveStore();
+    renderWorkAuto();
+  }
+  settleApproval(stepId, button.dataset.approve !== "skip");
+}
+// 输入框留空时按 Enter：指令即运行；表单翻到下一题，末题即提交
+function approveByEnter(entry) {
+  if (!entry.step.form) return settleApproval(entry.step.id, true);
+  const bar = $("#approvalBar"),
+    page = Number(bar.dataset.page || 0),
+    total = bar.querySelectorAll(".ask-q").length;
+  if (page < total - 1) return formPage(bar, page + 1);
+  const answers = collectForm(bar);
+  if (answers?.some(Boolean)) return settleApproval(entry.step.id, answers);
+  toast("请先在上方作答");
+}
+
+  // ---- 15-tools/10-web.js ----
+// 言 · 联网：检索、翻网页、调接口，都经桥接。地址门禁在桥接那头：本机 127.0.0.1 可，别的内网地址不可
+defineTool({
+  name: "search_web",
+  label: "检索",
+  offer: ctx => ctx.bridge,
+  lookup: true,
+  parallel: true,
+  cache: args => ({ ...args, query: args.query.trim().replace(/\s+/g, " ").toLowerCase() }),
+  digest: step =>
+    `检索「${String(step.title || "").slice(0, 60)}」→ ${
+      (step.results || [])
+        .slice(0, 3)
+        .map(r => `${String(r.title || "").slice(0, 40)}（${r.url}）`)
+        .join("；") ||
+      step.result ||
+      step.status
+    }`,
+  sources: step => (step.results || []).map(r => ({ url: r.url, title: r.title })),
+  async run(step, args, { signal }) {
+    step.title = args.query;
+    const data = await bridge("/api/search", { query: args.query, count: 6 }, signal);
+    step.results = data.results.map(({ title, url, snippet }) => ({ title, url, snippet }));
     return {
-      ok: false,
-      content: `调用 ${step.name} 的参数不合要求：${problems.join("；")}。这件工具收的参数：${toolSchemaHint(step.name)}；实际收到的键：${Object.keys(parsed.args || {}).join("、") || "（无）"}${parsed.truncated ? "\n（参数 JSON 不完整，可能是输出被截断）" : ""}\n\n收到的原文（前 300 字）：${String(step.arguments || "").slice(0, 300)}`,
-      display: "参数不合要求"
-    };
-  // 帮手对记忆只读：几名帮手同时改、删全局记忆没人把关，记与忘留给主模型
-  if (step.scope && (step.name === "remember" || step.name === "forget"))
-    return {
-      ok: false,
-      content: "帮手不能改动记忆（remember / forget 只有主模型可用）；需要记下的事写进回报里，由主模型决定。",
-      display: "帮手无权"
-    };
-  try {
-    if (step.name === "search_web") {
-      step.title = String(args.query || "");
-      const data = await bridge("/api/search", { query: step.title, count: 6 }, signal);
-      step.results = (data.results || []).map(({ title, url, snippet }) => ({ title, url, snippet }));
-      return {
-        ok: true,
-        content: step.results.length ? JSON.stringify(step.results) : "未找到结果",
-        display: `${step.results.length} 条结果`
-      };
-    }
-    if (step.name === "fetch_page") {
-      step.url = String(args.url || "");
-      const data = await bridge("/api/fetch", { url: step.url }, signal);
-      step.title = data.title || step.url;
-      return {
-        ok: true,
-        content: `标题：${data.title || ""}\n地址：${data.url || step.url}\n\n${data.text || ""}`,
-        display: `${(data.text || "").length} 字`
-      };
-    }
-    if (step.name === "read_document") return await readDocumentTool(step, args, conversation);
-    if (step.name === "run_js") return await runJsTool(step, args, signal);
-    if (step.name === "http_request") return await httpRequestTool(step, args, signal);
-    if (step.name === "download_file") return await downloadFileTool(step, args, conversation, signal);
-    if (step.name === "update_plan") return updatePlanTool(step, args);
-    if (MEMORY_TOOLS.has(step.name)) return runMemoryTool(step, args, conversation);
-    if (step.name === "ask_user") return await askUserTool(step, args, conversation, assistant, signal);
-    if (step.name === "delegate") return await runDelegate(step, args, conversation, assistant, signal);
-    if (WORK_TOOLS.has(step.name) || step.name === "check_command") return await runWorkTool(step, args, conversation, assistant, signal);
-    return { ok: false, content: `未知工具 ${step.name}`, display: "未知工具" };
-  } catch (error) {
-    if (error.name === "AbortError") throw error;
-    return {
-      ok: false,
-      content: `工具执行失败：${String(error.message || error)}`,
-      display: friendlyError(String(error.message || error)).slice(0, 60)
+      ok: true,
+      content: step.results.length ? JSON.stringify(step.results) : "未找到结果",
+      display: `${step.results.length} 条结果`
     };
   }
-}
-// ---- run_js：在隔离沙箱里算一段 JS。沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；
-// 每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉；直连没桥接也能用
+});
+
+defineTool({
+  name: "fetch_page",
+  label: "翻阅网页",
+  offer: ctx => ctx.bridge,
+  lookup: true,
+  parallel: true,
+  // 同一页的不同锚点是同一页
+  cache: args => ({ ...args, url: URL.canParse(args.url) ? Object.assign(new URL(args.url), { hash: "" }).href : args.url.trim() }),
+  digest: step =>
+    `翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? "已读" : step.result || step.status}`,
+  sources: step => [{ url: step.url, title: step.title, read: true }],
+  async run(step, args, { signal }) {
+    step.url = args.url;
+    const data = await bridge("/api/fetch", { url: args.url }, signal);
+    step.title = data.title || args.url;
+    return { ok: true, content: `标题：${data.title}\n地址：${data.url}\n\n${data.text}`, display: `${data.text.length} 字` };
+  }
+});
+
+// 调接口能发 POST，不算纯查阅，旁注不给；只有 GET / HEAD 的结果可复用
+defineTool({
+  name: "http_request",
+  label: "调接口",
+  offer: ctx => ctx.bridge,
+  sideEffect: true,
+  cache: args => (/^\s*(GET|HEAD)?\s*$/i.test(args.method || "") ? args : null),
+  async run(step, args, { signal }) {
+    const url = args.url.trim(),
+      method = (args.method || "GET").trim().toUpperCase();
+    step.url = url;
+    step.title = `${method} ${url}`.slice(0, 200);
+    const data = await bridge("/api/http", { url, method, headers: args.headers, body: args.body }, signal);
+    const headers = Object.entries(data.headers)
+      .map(([name, value]) => `${name}: ${String(value).slice(0, 300)}`)
+      .join("\n");
+    const body = data.textual ? data.text || "(空)" : `（${data.type || "二进制"}，${formatFileSize(data.bytes)}，不作为文本返回）`;
+    step.output = trimOutput(`${data.status} ${data.statusText}\n${body}`);
+    return {
+      ok: data.status < 400,
+      content: `HTTP ${data.status} ${data.statusText}${data.url !== url ? `（跳转到 ${data.url}）` : ""}\n--- 响应头 ---\n${headers}\n--- 正文${data.truncated ? "（已截断）" : ""} ---\n${body}`,
+      display: `${data.status} · ${data.textual ? `${data.text.length} 字` : formatFileSize(data.bytes)}`
+    };
+  }
+});
+
+  // ---- 15-tools/11-compute.js ----
+// 言 · 计算：run_js 在浏览器里的隔离沙箱跑一段 JS，不经桥接，直连也有。
+// 沙箱是一个 sandbox iframe（origin null、CSP 不许联网）里的 Worker，由 preview-runtime.js 承担；每次现起一个 iframe、算完就撤，超时由那头把 Worker 杀掉
+defineTool({
+  name: "run_js",
+  label: "计算",
+  lookup: true,
+  parallel: true,
+  cache: true,
+  async run(step, args, { signal }) {
+    const code = args.code.trim();
+    step.code = code;
+    step.title =
+      code
+        .split("\n")
+        .find(line => line.trim())
+        ?.trim()
+        .slice(0, 80) || "";
+    if (!code) return { ok: false, content: "code 为空", display: "代码为空" };
+    const timeout = clampNumber(Number(args.timeout) * 1000, 10000, 1000, 60000);
+    const result = await computeInSandbox(code, timeout, signal);
+    const parts = [];
+    if (result.logs) parts.push(result.logs);
+    if (result.value !== undefined) parts.push(`→ ${result.value}`);
+    if (result.error) parts.push(`✗ ${result.error}`);
+    step.output = trimOutput(parts.join("\n"));
+    const ms = Number(result.ms) || 0;
+    return {
+      ok: !!result.ok,
+      content: result.ok
+        ? `${result.logs ? `输出：\n${result.logs}\n` : ""}返回值：${result.value === undefined ? "（无；用 return 交回结果）" : result.value}`.slice(
+            0,
+            60000
+          )
+        : `运行出错：${result.error || "未知错误"}${result.logs ? `\n出错前的输出：\n${result.logs}` : ""}`,
+      display: result.ok ? (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`) : "出错"
+    };
+  }
+});
 function computeInSandbox(code, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
     const id = `compute-${uid()}`,
@@ -8946,7 +8881,7 @@ function computeInSandbox(code, timeoutMs, signal) {
       settled = true;
       clearTimeout(guard);
       window.removeEventListener("message", onMessage);
-      signal?.removeEventListener("abort", onAbort);
+      signal.removeEventListener("abort", onAbort);
       iframe.remove();
       fn(value);
     };
@@ -8960,112 +8895,120 @@ function computeInSandbox(code, timeoutMs, signal) {
     // 那头没回话（页没起来、Worker 起不来）：多等 5 秒就算了
     const guard = setTimeout(() => finish(resolve, { ok: false, error: "沙箱没有回话" }), timeoutMs + 5000);
     window.addEventListener("message", onMessage);
-    if (signal?.aborted) return onAbort();
-    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
     document.body.append(iframe);
   });
 }
-async function runJsTool(step, args, signal) {
-  const code = String(args.code ?? "").trim();
-  step.code = code;
-  step.title =
-    code
-      .split("\n")
-      .find(line => line.trim())
-      ?.trim()
-      .slice(0, 80) || "";
-  if (!code) return { ok: false, content: "code 为空", display: "代码为空" };
-  const timeout = clampNumber(Number(args.timeout) * 1000, 10000, 1000, 60000);
-  const result = await computeInSandbox(code, timeout, signal);
-  const parts = [];
-  if (result.logs) parts.push(result.logs);
-  if (result.value !== undefined) parts.push(`→ ${result.value}`);
-  if (result.error) parts.push(`✗ ${result.error}`);
-  step.output = trimOutput(parts.join("\n"));
-  const ms = Number(result.ms) || 0;
-  return {
-    ok: !!result.ok,
-    content: result.ok
-      ? `${result.logs ? `输出：\n${result.logs}\n` : ""}返回值：${result.value === undefined ? "（无；用 return 交回结果）" : result.value}`.slice(
-          0,
-          60000
-        )
-      : `运行出错：${result.error || "未知错误"}${result.logs ? `\n出错前的输出：\n${result.logs}` : ""}`,
-    display: result.ok ? `${ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`}` : "出错"
-  };
+
+  // ---- 15-tools/20-command.js ----
+// 言 · 指令：run_command 与后台指令的 check_command。言与行都有，言里落在卷宗目录、行里落在工作目录。
+// 三档权限：问而后行（只读免问）、审而后行（不请示，桥接代判放行或回绝）、径行；逐段对话设置，请示条上按「径行」即切过去
+defineTool({
+  name: "run_command",
+  label: "运行",
+  offer: ctx => ctx.files,
+  sideEffect: true,
+  writes: true,
+  html: workStepHtml,
+  approval: commandApprovalHtml,
+  digest: true,
+  async run(step, args, ctx) {
+    const { conversation, signal } = ctx,
+      { workdir, sandbox } = workScope(conversation);
+    step.title = args.command.trim();
+    if (!step.title) return { ok: false, content: "指令为空", display: "指令为空" };
+    step.readOnly = isReadOnlyCommand(step.title);
+    const background = args.background === true;
+    if (background) step.background = true;
+    let policy = commandPolicyOf(conversation);
+    // 问而后行开着沙箱：先问一声严的沙箱会不会拦。会拦的也请示（只读的也不例外），请示条写明原因；批了这一条就出沙箱跑
+    if (policy === "ask" && sandbox) {
+      const screened = await bridge("/api/work/screen", { workdir, command: step.title }, signal).catch(() => null);
+      step.sandboxWhy = screened?.why || undefined;
+    }
+    let escalated = false;
+    if (policy === "ask" && (!step.readOnly || step.sandboxWhy)) {
+      if (!(await askApproval(step, ctx, "执行中"))) {
+        step.skipped = true;
+        return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
+      }
+      escalated = !!step.sandboxWhy;
+    } else {
+      const job = requestJob(conversation.id);
+      if (job) setJobLabel(conversation, job, "执行中");
+    }
+    // 用户可能在请示条上把这一段对话切成了径行：执行前再取一次，不沿用旧档位
+    policy = commandPolicyOf(conversation);
+    const data = await bridge(
+      "/api/work/run",
+      {
+        workdir,
+        sandbox: sandbox && !escalated,
+        permission: policy,
+        command: step.title,
+        timeout: Number(args.timeout) || 120,
+        background
+      },
+      signal
+    );
+    const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0),
+      marks = `${escalated ? " · 出沙箱" : ""}${step.readOnly && policy === "ask" && !step.sandboxWhy ? " · 只读免确认" : ""}`;
+    step.output = commandOutput(data);
+    if (background) {
+      step.exitCode = data.exitCode ?? undefined;
+      return {
+        ok: data.running || data.exitCode === 0,
+        content: `${data.running ? `后台指令 ${data.id} 仍在跑（已 ${seconds} 秒），用 check_command 取新输出或结束它` : `后台指令 ${data.id} 已结束，退出码：${data.exitCode}`}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
+        display: `${data.running ? `后台 ${data.id} · 在跑` : `后台 ${data.id} · 退出码 ${data.exitCode}`}${marks}`
+      };
+    }
+    step.exitCode = data.exitCode;
+    return {
+      ok: !data.timedOut && data.exitCode === 0,
+      content: `退出码：${data.exitCode}${data.timedOut ? "（超时被终止）" : ""}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
+      display: `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${marks}`
+    };
+  }
+});
+
+// 后台指令：取上次之后的新输出，可顺带等一会儿，或结束它；只给行，跟着 run_command 的 background 走
+defineTool({
+  name: "check_command",
+  label: "后台",
+  offer: ctx => ctx.files && ctx.work,
+  html: workStepHtml,
+  async run(step, args, { signal }) {
+    const id = args.id.trim(),
+      stop = args.stop === true;
+    step.title = `${id}${stop ? " · 结束" : ""}`;
+    const data = await bridge("/api/work/check", { id, stop, wait: Number(args.wait) || 0 }, signal);
+    step.output = commandOutput(data);
+    if (!data.running) step.exitCode = data.exitCode;
+    return {
+      ok: true,
+      content: `${data.running ? `${data.id} 仍在跑` : `${data.id} 已结束，退出码：${data.exitCode}`}\n--- 新的 stdout ---\n${data.stdout || "(空)"}\n--- 新的 stderr ---\n${data.stderr || "(空)"}`,
+      display: data.running ? "在跑" : stop ? "已结束" : `退出码 ${data.exitCode}`
+    };
+  }
+});
+
+function commandOutput(data) {
+  return trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
 }
-function clampNumber(value, fallback, min, max) {
-  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : fallback));
-}
-// ---- http_request：经桥接向公网接口发请求；地址门禁在桥接那头（不许本机与内网）
-async function httpRequestTool(step, args, signal) {
-  const url = String(args.url || "").trim(),
-    method = String(args.method || "GET")
-      .trim()
-      .toUpperCase();
-  step.url = url;
-  step.title = `${method} ${url}`.slice(0, 200);
-  const data = await bridge("/api/http", { url, method, headers: args.headers, body: args.body }, signal);
-  const headers = Object.entries(data.headers || {})
-    .map(([name, value]) => `${name}: ${String(value).slice(0, 300)}`)
-    .join("\n");
-  const body = data.textual ? data.text || "(空)" : `（${data.type || "二进制"}，${formatFileSize(data.bytes)}，不作为文本返回）`;
-  step.output = trimOutput(`${data.status} ${data.statusText || ""}\n${body}`);
-  return {
-    ok: data.status < 400,
-    content: `HTTP ${data.status} ${data.statusText || ""}${data.url && data.url !== url ? `（跳转到 ${data.url}）` : ""}\n--- 响应头 ---\n${headers}\n--- 正文${data.truncated ? "（已截断）" : ""} ---\n${body}`,
-    display: `${data.status} · ${data.textual ? `${(data.text || "").length} 字` : formatFileSize(data.bytes)}`
-  };
-}
-// ---- download_file：桥接把网上的文件存进工作目录或卷宗；沙箱照常管路径
-async function downloadFileTool(step, args, conversation, signal) {
+// 文件与指令工具发给桥接的共同几样：落在哪个目录、能不能出目录、沙箱开没开、这段对话的档位
+/** @param {Conversation} conversation */
+function workScope(conversation) {
   const workdir = workRoot(conversation);
-  if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
-  const url = String(args.url || "").trim();
-  step.url = url;
-  step.title = String(args.path || "").trim() || url.split("/").pop() || url;
-  const data = await bridge(
-    "/api/work/download",
-    { workdir, roam: roamAllowed(), sandbox: sandboxed(), permission: commandPolicyOf(conversation), url, path: args.path },
-    signal
-  );
-  step.title = data.path;
-  step.note = url;
-  step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要
-  return {
-    ok: true,
-    content: `已存为 ${data.path}（${formatFileSize(data.bytes)}${data.type ? `，${data.type}` : ""}）`,
-    display: formatFileSize(data.bytes)
-  };
+  if (!workdir) throw Error("此对话没有可用的目录（本机桥接不在线）");
+  return { workdir, roam: roamAllowed(), sandbox: sandboxed(), permission: commandPolicyOf(conversation) };
 }
-// ---- update_plan：清单画在行迹里，每次都是完整的一份；回给模型一行计数就够
-function updatePlanTool(step, args) {
-  const STATUSES = new Set(["pending", "doing", "done", "skipped"]);
-  const items = (Array.isArray(args.items) ? args.items : [])
-    .map(item => (typeof item === "string" ? { text: item, status: "pending" } : item))
-    .filter(item => item && typeof item === "object" && String(item.text || "").trim())
-    .slice(0, 12)
-    .map(item => ({
-      text: String(item.text).trim().slice(0, 200),
-      status: STATUSES.has(String(item.status || "").toLowerCase()) ? String(item.status).toLowerCase() : "pending"
-    }));
-  if (!items.length) return { ok: false, content: "items 为空：每项给 text 与 status", display: "清单为空" };
-  step.plan = items;
-  const done = items.filter(item => item.status === "done").length,
-    doing = items.find(item => item.status === "doing");
-  step.title = doing ? doing.text : done === items.length ? "全部完成" : `${done}/${items.length}`;
-  return {
-    ok: true,
-    content: `计划已更新：${done}/${items.length} 完成${doing ? `，正在做「${doing.text}」` : ""}`,
-    display: `${done}/${items.length}`
-  };
+// 文件工具能不能出目录：设置里的「可及范围」，默认全盘（系统级配置、别处的资料本就该读得到）
+function roamAllowed() {
+  return store.settings.toolReach !== "inside";
 }
-// run_command 三档：问而后行（只读免问）、审而后行（不请示，桥接代判放行或回绝）、径行；言与行都可逐段设置。
-const WORK_TOOLS = new Set(["run_command", "write_file", "edit_file", "read_file", "list_files", "search_files"]),
-  // 言（对谈）里只给这四件：对谈的文件工具只为产出成品，逐字替换与代码检索是执事的活
-  CHAT_FILE_TOOLS = ["run_command", "write_file", "read_file", "list_files"],
-  pendingApprovals = new Map();
-// 「问而后行」里的本机规则：明确只读才免确认。系统检查纳入白名单；只允许一组纯展示管道，脚本块、远程会话与重定向仍去请示。
+
+// 「问而后行」里的本机规则：明确只读才免确认。系统检查纳入白名单；只允许一组纯展示管道，脚本块、远程会话与重定向仍去请示
 const READ_ONLY_COMMAND =
     /^(?:git\s+(?:status|log|diff|show|rev-parse|ls-files|remote\s+-v)\b|git\s+branch(?:\s+(?:-a|-r|-v|-vv|--list))*\s*$|(?:ls|dir|tree|pwd|cat|type|head|tail|wc|grep|findstr|which|where|whoami|hostname|uname|uptime|free|df|du|ps|lscpu|lsmem|lsblk|lspci|lsusb|mount|id|groups|sw_vers|vm_stat)\b|Get-(?:ChildItem|Content|Location|Command|Item|ItemProperty|Date|ComputerInfo|CimInstance|WmiObject|Process|Service|NetAdapter|NetIPConfiguration|NetIPAddress|NetRoute|NetTCPConnection|NetUDPEndpoint|DnsClientServerAddress|Volume|Disk|Partition|PhysicalDisk|StorageReliabilityCounter|MpComputerStatus|HotFix|WinEvent|EventLog|ScheduledTask|LocalUser|LocalGroup|Acl|Package)\b|Select-String\b|(?:systeminfo|tasklist|driverquery|ipconfig|netstat)\b|sc(?:\.exe)?\s+query\b|wmic(?:\.exe)?\b[^\n]*\bget\b|wsl(?:\.exe)?\s+(?:--status|--version|-l\b|--list\b)|docker\s+(?:version|info|ps|images)\b|(?:node|npm|npx|python|python3|pip|dotnet|java|go|cargo|rustc|ruby|php|git)\s+(?:-v|-V|--version|version)\s*$)/i,
   READ_ONLY_PIPE =
@@ -9078,6 +9021,185 @@ function isReadOnlyCommand(command) {
   const parts = text.split("|").map(part => part.trim());
   return !!parts[0] && READ_ONLY_COMMAND.test(parts[0]) && parts.slice(1).every(part => READ_ONLY_PIPE.test(part));
 }
+// 沙箱会拦下的指令：请示时写明原因（去掉「沙箱拒绝：」的前缀），批了这一条就出沙箱跑
+/** @param {Step} step */
+function sandboxWhyHtml(step) {
+  return step.sandboxWhy
+    ? `<div class="approval-sandbox">沙箱会拦下：${escapeHtml(step.sandboxWhy.replace(/^沙箱拒绝：/, ""))}。运行即在沙箱外执行这一条。</div>`
+    : "";
+}
+/** @param {Step} step */
+function commandApprovalHtml(step) {
+  return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">${isWork(currentConversation()) ? "执事请示" : "本机请示"} · 运行此指令${step.background ? "（后台）" : ""}</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre>${sandboxWhyHtml(step)}<div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
+}
+
+  // ---- 15-tools/21-files.js ----
+// 言 · 文件：读、写、改、列、搜、下载。绑了目录落在工作目录（执事的六件），没绑落在卷宗（言只带产出所需的读、写、列与指令）。
+// 路径与沙箱在桥接那头管（server/work.js）；这里只管呈现与「改之前先读过」这条规矩
+defineTool({
+  name: "write_file",
+  label: "写入",
+  offer: ctx => ctx.files,
+  sideEffect: true,
+  writes: true,
+  html: workStepHtml,
+  digest: true,
+  async run(step, args, { conversation, signal }) {
+    const data = await bridge("/api/work/write", { ...workScope(conversation), path: args.path, content: args.content }, signal);
+    step.title = data.path;
+    markSeen(conversation, data.path, step);
+    step.note = `${data.lines} 行 · ${formatFileSize(data.bytes)}${data.existed ? " · 覆盖" : ""}`;
+    step.change = { path: data.path, added: data.lines, removed: data.existed ? data.previousLines : 0, created: !data.existed };
+    return {
+      ok: true,
+      content: `已写入 ${data.path}（${data.bytes} 字节，${data.lines} 行${data.existed ? "，覆盖了原文件" : ""}）`,
+      display: data.existed ? "已覆盖" : "已写入"
+    };
+  }
+});
+
+defineTool({
+  name: "edit_file",
+  label: "修改",
+  offer: ctx => ctx.files && ctx.work,
+  sideEffect: true,
+  writes: true,
+  html: workStepHtml,
+  digest: true,
+  async run(step, args, { conversation, signal }) {
+    step.title = args.path;
+    if (!workSeen.get(seenKey(conversation, step))?.has(seenPath(conversation, args.path)))
+      return { ok: false, content: prompt("work.unread", { path: args.path }), display: "需先读取" };
+    const data = await bridge(
+      "/api/work/edit",
+      { ...workScope(conversation), path: args.path, old: args.old, new: args.new, replaceAll: args.replace_all === true },
+      signal
+    );
+    step.title = data.path;
+    step.diff = { old: args.old.slice(0, 1500), new: args.new.slice(0, 1500) };
+    const counts = diffCounts(args.old, args.new);
+    step.change = { path: data.path, added: counts.added * data.replaced, removed: counts.removed * data.replaced };
+    return {
+      ok: true,
+      content: `已修改 ${data.path}：第 ${data.line} 行起替换 ${data.replaced} 处，文件现为 ${data.lines} 行`,
+      display: `第 ${data.line} 行 · ${data.replaced} 处`
+    };
+  }
+});
+
+defineTool({
+  name: "read_file",
+  label: "读取",
+  offer: ctx => ctx.files,
+  parallel: true,
+  html: workStepHtml,
+  digest: true,
+  async run(step, args, { conversation, signal }) {
+    step.title = args.path;
+    const data = await bridge(
+      "/api/work/read",
+      { ...workScope(conversation), path: args.path, offset: args.offset, limit: args.limit },
+      signal
+    );
+    step.title = data.path;
+    markSeen(conversation, data.path, step);
+    const encoding =
+      data.encoding === "utf-8"
+        ? ""
+        : `；文件是 ${data.encoding === "gbk" ? "GBK" : data.encoding.toUpperCase()} 编码${data.encoding === "gbk" ? "，edit_file 改不了它" : ""}`;
+    return {
+      ok: true,
+      content: `${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行${encoding}）\n${data.text}`,
+      display: `${data.shown}/${data.totalLines} 行`
+    };
+  }
+});
+
+defineTool({
+  name: "list_files",
+  label: "列目录",
+  offer: ctx => ctx.files,
+  parallel: true,
+  html: workStepHtml,
+  digest: true,
+  async run(step, args, { conversation, signal }) {
+    const pattern = args.pattern ? ` · ${args.pattern}` : "";
+    step.title = `${args.path || "."}${pattern}`;
+    const data = await bridge(
+      "/api/work/list",
+      { ...workScope(conversation), path: args.path, depth: args.depth, pattern: args.pattern },
+      signal
+    );
+    step.title = `${data.path}${pattern}`;
+    step.output = trimOutput(data.entries.join("\n"));
+    return {
+      ok: true,
+      content: data.entries.length
+        ? `${data.entries.join("\n")}${data.truncated ? "\n…（条目过多已截断，请指定子目录）" : ""}`
+        : "（空目录）",
+      display: `${data.entries.length} 项`
+    };
+  }
+});
+
+defineTool({
+  name: "search_files",
+  label: "搜索",
+  offer: ctx => ctx.files && ctx.work,
+  parallel: true,
+  html: workStepHtml,
+  digest: true,
+  async run(step, args, { conversation, signal }) {
+    step.title = args.query;
+    const data = await bridge(
+      "/api/work/search",
+      {
+        ...workScope(conversation),
+        query: args.query,
+        path: args.path,
+        glob: args.glob,
+        literal: args.literal === true,
+        limit: args.limit
+      },
+      signal
+    );
+    const lines = data.matches.map(match => `${match.file}:${match.line}: ${match.text}`);
+    step.output = trimOutput(lines.join("\n"));
+    step.note = lines.length ? "" : "无匹配";
+    return {
+      ok: true,
+      content: lines.length
+        ? `${lines.join("\n")}${data.truncated ? "\n…（结果已截断，请缩小范围或加 glob）" : ""}`
+        : `未找到匹配「${args.query}」的内容（扫描了 ${data.scanned} 个文件）`,
+      display: `${lines.length} 处 · ${data.files} 文件`
+    };
+  }
+});
+
+// 下载：桥接把网上的文件存进工作目录或卷宗，沙箱照常管路径
+defineTool({
+  name: "download_file",
+  label: "下载",
+  offer: ctx => ctx.files,
+  sideEffect: true,
+  writes: true,
+  digest: true,
+  async run(step, args, { conversation, signal }) {
+    const url = args.url.trim();
+    step.url = url;
+    step.title = args.path?.trim() || url.split("/").pop() || url;
+    const data = await bridge("/api/work/download", { ...workScope(conversation), url, path: args.path }, signal);
+    step.title = data.path;
+    step.note = url;
+    step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要
+    return {
+      ok: true,
+      content: `已存为 ${data.path}（${formatFileSize(data.bytes)}${data.type ? `，${data.type}` : ""}）`,
+      display: formatFileSize(data.bytes)
+    };
+  }
+});
+
 // 本段对话里读过或写过的文件才允许 edit_file：模型必须对着真实内容改，而不是凭记忆猜。
 // 帮手另记一份（按步骤上的 scope 分开）：主模型没亲眼读过帮手改过的文件，要改就得再读一遍，帮手亦然
 const workSeen = new Map();
@@ -9090,6 +9212,24 @@ function seenKey(conversation, step) {
   const base = `${conversation.id}@${workRoot(conversation)}`;
   return step?.scope ? `${base}/${step.scope}` : base;
 }
+/**
+ * @param {Conversation} conversation
+ * @param {Step} step
+ */
+function markSeen(conversation, file, step = null) {
+  const key = seenKey(conversation, step);
+  if (!workSeen.has(key)) workSeen.set(key, new Set());
+  workSeen.get(key).add(seenPath(conversation, file));
+}
+// 「读过没有」按同一个文件认：读时写相对路径、改时写完整路径，或 Windows 上大小写不同，都是同一个文件
+/** @param {Conversation} conversation */
+function seenPath(conversation, file) {
+  const win = (bootstrap.work?.platform || "win32") === "win32",
+    fold = text => (win ? text.toLowerCase() : text),
+    value = normalizeWorkPath(file),
+    root = normalizeWorkPath(workRoot(conversation));
+  return fold(root && fold(value).startsWith(`${fold(root)}/`) ? value.slice(root.length + 1) : value);
+}
 function normalizeWorkPath(file) {
   const parts = [];
   for (const part of String(file || "")
@@ -9101,221 +9241,42 @@ function normalizeWorkPath(file) {
   }
   return parts.join("/");
 }
-/**
- * @param {Conversation} conversation
- * @param {Step} step
- */
-function markSeen(conversation, file, step = null) {
-  const key = seenKey(conversation, step);
-  let set = workSeen.get(key);
-  if (!set) {
-    set = new Set();
-    workSeen.set(key, set);
-  }
-  set.add(seenPath(conversation, file));
-}
-// 「读过没有」按同一个文件认：读时写相对路径、改时写完整路径，或 Windows 上大小写不同，都是同一个文件
+// 每次发送前把工具的落脚目录备好。行：桥接必须在线、工作目录仍在（被删了就重建），否则不发；
+// 言：桥接在线就顺手把卷宗目录备好，备不好也照常聊（工具用到时自会报错）
 /** @param {Conversation} conversation */
-function seenPath(conversation, file) {
-  const win = (bootstrap.work?.platform || "win32") === "win32",
-    fold = text => (win ? text.toLowerCase() : text),
-    value = normalizeWorkPath(file),
-    root = normalizeWorkPath(workRoot(conversation));
-  return fold(root && fold(value).startsWith(`${fold(root)}/`) ? value.slice(root.length + 1) : value);
-}
-const STEP_OUTPUT_KEEP = 6000;
-/**
- * @param {Step} step
- * @param {Conversation} conversation
- */
-function awaitApproval(step, conversation, signal) {
-  return new Promise((resolve, reject) => {
-    const done = value => {
-      pendingApprovals.delete(step.id);
-      signal?.removeEventListener("abort", onAbort);
-      resolve(value);
-    };
-    const onAbort = () => {
-      pendingApprovals.delete(step.id);
-      reject(Object.assign(Error("已停止"), { name: "AbortError" }));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    pendingApprovals.set(step.id, { conversationId: conversation.id, resolve: done, step });
-    renderApprovalBar();
-  }).finally(renderApprovalBar);
-}
-// 请示条：指令等待确认时从输入框上方浮出，不必去行迹里找那一行；输入框留空时按 Enter 即运行
-function pendingApprovalHere() {
-  const c = currentConversation();
-  if (!c) return null;
-  for (const entry of pendingApprovals.values()) if (entry.conversationId === c.id && entry.step) return entry;
-  return null;
-}
-function renderApprovalBar() {
-  const bar = $("#approvalBar");
-  if (!bar) return;
-  const entry = view === "chat" ? pendingApprovalHere() : null;
-  if (!entry) {
-    bar.dataset.stepId = "";
-    if (!bar.classList.contains("hidden")) hideWithFade(bar);
-    return;
+async function ensureWorkReady(conversation) {
+  if (!isWork(conversation)) {
+    const archive = workRoot(conversation);
+    // 备的是草稿目录，卷宗根随之建好
+    if (archive && activeProfile()?.tools !== false)
+      await bridge(
+        "/api/work/prepare",
+        { workdir: `${archive}${archive.includes("/") && !archive.includes("\\") ? "/" : "\\"}${scratchRel(conversation)}` },
+        AbortSignal.timeout(8000)
+      ).catch(error => toast(`卷宗目录不可用：${String(error.message || error)}`));
+    return true;
   }
-  if (bar.dataset.stepId !== entry.step.id) {
-    bar.dataset.stepId = entry.step.id;
-    bar.dataset.page = "0";
-    bar.innerHTML = approvalBarHtml(entry.step);
-    formPage(bar);
+  if (activeProfile()?.tools === false) {
+    toast("当前模型已关闭本机工具，请在模型高级配置中开启");
+    return false;
   }
-  if (bar.classList.contains("hidden") || bar.classList.contains("leaving")) showNow(bar);
-}
-/**
- * @param {Step} step
- * @param {Conversation} conversation
- * @param {Message} assistant
- */
-async function askUserTool(step, args, conversation, assistant, signal) {
-  const questions = (Array.isArray(args.questions) ? args.questions : [])
-    .slice(0, 8)
-    .map(q => ({
-      question: String(q?.question || "")
-        .trim()
-        .slice(0, 200),
-      header: String(q?.header || "")
-        .trim()
-        .slice(0, 12),
-      multi: q?.multi === true,
-      options: (Array.isArray(q?.options) ? q.options : [])
-        .slice(0, 4)
-        // 选项按字符串给：「选项 — 一句说明」；旧的 { label, description } 对象也照收
-        .map(o =>
-          typeof o === "string"
-            ? (([label, ...rest]) => ({ label: label.trim().slice(0, 60), description: rest.join("—").trim().slice(0, 120) }))(
-                o.split(/\s+[—–-]{1,2}\s+|—/)
-              )
-            : {
-                label: String(o?.label || "")
-                  .trim()
-                  .slice(0, 60),
-                description: String(o?.description || "")
-                  .trim()
-                  .slice(0, 120)
-              }
-        )
-        .filter(o => o.label)
-    }))
-    .filter(q => q.question);
-  if (!questions.length)
-    return {
-      ok: false,
-      content: `没能从参数里读出问题。questions 是一个数组，每项至少要有 question（完整的问句）与 options（2–4 个字符串选项），要多选就给 multi: true。例如：{"questions":[{"question":"用哪种风格？","header":"风格","options":["清简 — 留白多","繁复 — 信息密"],"multi":false}]}${
-        Array.isArray(args.questions)
-          ? `\n收到了 ${args.questions.length} 项，但没有一项带得出 question。`
-          : `\n收到的 questions 是 ${typeof args.questions}，不是数组。`
-      }`,
-      display: "表单为空"
-    };
-  // 一个选项都没有的题只能靠自填，多半是模型漏了 options：补一句提醒，但表单照出，不白费这一轮
-  const missing = questions.filter(q => q.options.length < 2).length;
-  step.form = { questions };
-  step.title = questions
-    .map(q => q.header || q.question)
-    .join(" · ")
-    .slice(0, 80);
-  const job = requestJob(conversation.id);
-  step.status = "pending";
-  if (job) setJobLabel(conversation, job, "等待确认");
-  refreshSteps(assistant);
-  saveStore();
-  renderHistory();
-  const answers = await awaitApproval(step, conversation, signal);
-  step.status = "running";
-  if (job) setJobLabel(conversation, job, "生成中");
-  refreshSteps(assistant);
-  renderHistory();
-  if (!Array.isArray(answers)) {
-    step.skipped = true;
-    return { ok: false, content: "用户没有作答。请按你的最佳判断继续，并在正文里说明你做了什么假设。", display: "未作答" };
+  if (apiBase === null && !(await ensureLocalBridge())) {
+    toast("执事需要本机桥接，请先运行 start.cmd");
+    return false;
   }
-  step.answers = answers;
-  step.note = questions.map((q, i) => `${q.header || q.question}：${answers[i] || "（未答）"}`).join("；");
-  return {
-    ok: true,
-    content: `${questions.map((q, i) => `${q.question}\n→ ${answers[i] || "（未答）"}`).join("\n\n")}${missing ? `\n\n（有 ${missing} 题没给够选项，只能由用户自填；下次每题给 2–4 个选项。）` : ""}`,
-    display: "已作答"
-  };
-}
-/** @param {Step} step */
-function askStepHtml(step) {
-  const status = step.status || "done",
-    meta =
-      status === "pending"
-        ? "待作答"
-        : status === "skipped"
-          ? escapeHtml(step.result || "未作答")
-          : status === "error"
-            ? escapeHtml(step.result || "失败")
-            : escapeHtml(step.result || "已作答");
-  const body =
-    status === "done" && step.answers
-      ? `<div class="tool-note">${escapeHtml(step.note || "")}</div>`
-      : status === "pending"
-        ? `<div class="tool-note">请于输入框上方作答</div>`
-        : "";
-  return `<div class="tool-step" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">请示</span><span class="tool-title" title="${escapeHtml(step.title)}">${escapeHtml(step.title)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
-}
-// 沙箱会拦下的指令：请示时写明原因（去掉「沙箱拒绝：」的前缀），批了这一条就出沙箱跑
-/** @param {Step} step */
-function sandboxWhyHtml(step) {
-  return step.sandboxWhy
-    ? `<div class="approval-sandbox">沙箱会拦下：${escapeHtml(String(step.sandboxWhy).replace(/^沙箱拒绝：/, ""))}。运行即在沙箱外执行这一条。</div>`
-    : "";
-}
-// 右上角只写一个快捷键：这一页按 Enter 是下一题还是提交（输入框留空时），随翻页改，见 formPage；题数与第几问在标题里
-/** @param {Step} step */
-function approvalBarHtml(step) {
-  if (step.name !== "ask_user")
-    return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title">${isWork(currentConversation()) ? "执事请示" : "本机请示"} · 运行此指令${step.background ? "（后台）" : ""}</span><span class="approval-hint" title="输入框留空时，Enter 即运行">Enter 运行</span></div><pre class="approval-cmd">${escapeHtml(step.title)}</pre>${sandboxWhyHtml(step)}<div class="approval-actions"><button type="button" data-approve="run">运行</button><button type="button" data-approve="skip">跳过</button><button type="button" data-approve="auto" title="径行：此对话中后续指令不再询问">径行</button></div>`;
-  const questions = step.form?.questions || [];
-  const block = (q, i) =>
-    `<div class="ask-q" data-q="${i}" data-multi="${q.multi ? "true" : "false"}"><div class="ask-question">${q.header ? `<span class="ask-header">${escapeHtml(q.header)}</span>` : ""}${escapeHtml(q.question)}${q.multi ? `<span class="ask-multi">可多选</span>` : ""}</div><div class="ask-options" role="${q.multi ? "group" : "radiogroup"}">${q.options.map((o, j) => `<button type="button" class="ask-opt" role="${q.multi ? "checkbox" : "radio"}" aria-checked="false" data-opt="${j}"><span class="ask-tick" aria-hidden="true"></span><span class="ask-opt-copy"><strong>${escapeHtml(o.label)}</strong>${o.description ? `<small>${escapeHtml(o.description)}</small>` : ""}</span></button>`).join("")}</div><input class="ask-other" type="text" maxlength="200" placeholder="${q.options.length ? (q.multi ? "还可自行补充" : "或自行填写") : "请填写"}" aria-label="自行填写"></div>`;
-  return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title"></span><span class="approval-hint" title="输入框留空时，Enter 即作答"></span></div><div class="ask-form">${questions.map(block).join("")}</div><div class="approval-actions ask-nav"><span class="ask-spacer"></span><button type="button" class="ask-arrow" data-form="prev" title="上一题" aria-label="上一题">‹</button><button type="button" class="ask-arrow" data-form="next" title="下一题（未答即跳过）" aria-label="下一题">›</button><button type="button" class="ask-arrow ask-done" data-form="submit" title="提交" aria-label="提交">✓</button></div>`;
-}
-function formPage(bar, page = null) {
-  const blocks = [...bar.querySelectorAll(".ask-q")];
-  if (!blocks.length) return;
-  const total = blocks.length,
-    current = Math.max(0, Math.min(total - 1, page ?? Number(bar.dataset.page || 0)));
-  bar.dataset.page = String(current);
-  blocks.forEach((block, index) => block.classList.toggle("hidden", index !== current));
-  bar.querySelector(".approval-title").textContent = total === 1 ? "有一问" : `第${chineseNumber(current + 1)}问 · 共 ${total} 问`;
-  bar.querySelector(".approval-hint").textContent = current === total - 1 ? "Enter 提交" : "Enter 下一题";
-  bar.querySelector('[data-form="prev"]').disabled = current === 0;
-  bar.querySelector('[data-form="next"]').classList.toggle("hidden", current === total - 1);
-  bar.querySelector('[data-form="submit"]').classList.toggle("hidden", current !== total - 1);
-  if (page !== null) setTimeout(() => blocks[current].querySelector(".ask-opt, .ask-other")?.focus(), 0);
-}
-function collectForm(bar) {
-  const step = pendingApprovalHere()?.step;
-  if (!step?.form) return null;
-  return step.form.questions.map((q, i) => {
-    const block = bar.querySelector(`.ask-q[data-q="${i}"]`);
-    if (!block) return "";
-    const picked = [...block.querySelectorAll('.ask-opt[aria-checked="true"]')].map(b => b.querySelector("strong").textContent),
-      other = block.querySelector(".ask-other")?.value.trim();
-    return [...picked, ...(other ? [other] : [])].join("、");
-  });
-}
-function approveFrom(button) {
-  const stepId = button.closest("[data-step-id]")?.dataset.stepId,
-    c = currentConversation();
-  if (!stepId || !c) return;
-  if (button.dataset.approve === "auto") {
-    c.commandPolicy = "auto";
-    saveStore();
-    renderWorkAuto();
+  try {
+    const prepared = await bridge("/api/work/prepare", { workdir: conversation.workdir }, AbortSignal.timeout(8000));
+    if (prepared.created) toast("工作目录不存在，已新建");
+    conversation.workdir = prepared.workdir;
+  } catch (error) {
+    toast(`工作目录不可用：${String(error.message || error)}`);
+    return false;
   }
-  settleApproval(stepId, button.dataset.approve !== "skip");
+  return true;
 }
+
+  // ---- 15-tools/22-changes.js ----
+// 言 · 改动与成品：执事这一答改过哪些文件（挂在回复末尾的改动条），言这一答在卷宗里新出了哪几件（成品条）
 // 改动摘要：这一答里执事改过哪些文件、各增减多少行，挂在回复末尾，写入/修改一落地就实时累加，不等整条回复收尾
 function diffCounts(oldText, newText) {
   const a = String(oldText || "").split(/\r?\n/),
@@ -9397,26 +9358,468 @@ function syncChangeBar(block, assistant) {
     block.insertAdjacentHTML("beforeend", `<div class="change-bar is-new">${inner}</div>`);
   } else if (bar.innerHTML !== inner) bar.innerHTML = inner;
 }
-function settleApproval(stepId, value) {
-  const entry = pendingApprovals.get(stepId);
-  if (entry) entry.resolve(value);
+
+  // ---- 15-tools/30-plan.js ----
+// 言 · 计划：行里给用户看的任务清单，每次给完整的一份，画在行迹里；只有主模型维护，回给它一行计数就够
+const PLAN_STATUSES = new Set(["pending", "doing", "done", "skipped"]),
+  PLAN_MARKS = { done: "✓", doing: "▶", skipped: "–" };
+defineTool({
+  name: "update_plan",
+  label: "计划",
+  offer: ctx => ctx.work,
+  mainOnly: true,
+  html: planStepHtml,
+  digest: step => `计划 → ${(step.plan || []).map(item => `${PLAN_MARKS[item.status] || "○"}${item.text.slice(0, 40)}`).join("；")}`,
+  run(step, args) {
+    const items = args.items
+      .map(item => (typeof item === "string" ? { text: item, status: "pending" } : item))
+      .filter(item => item && typeof item === "object" && String(item.text || "").trim())
+      .slice(0, 12)
+      .map(item => {
+        const status = String(item.status || "").toLowerCase();
+        return { text: String(item.text).trim().slice(0, 200), status: PLAN_STATUSES.has(status) ? status : "pending" };
+      });
+    if (!items.length) return { ok: false, content: "items 为空：每项给 text 与 status", display: "清单为空" };
+    step.plan = items;
+    const done = items.filter(item => item.status === "done").length,
+      doing = items.find(item => item.status === "doing");
+    step.title = doing ? doing.text : done === items.length ? "全部完成" : `${done}/${items.length}`;
+    return {
+      ok: true,
+      content: `计划已更新：${done}/${items.length} 完成${doing ? `，正在做「${doing.text}」` : ""}`,
+      display: `${done}/${items.length}`
+    };
+  }
+});
+// 计划卡：一行一项，○ 待做、▶ 正在做（朱色呼吸点）、✓ 做完、– 不做了；标题行是正在做的那一项或「n/m」
+/** @param {Step} step */
+function planStepHtml(step) {
+  const status = step.status || "done",
+    items = step.plan || [],
+    done = items.filter(item => item.status === "done").length;
+  const rows = items
+    .map(
+      item =>
+        `<li class="plan-item" data-plan="${escapeHtml(item.status)}"><span class="plan-mark" aria-hidden="true">${{ done: "✓", doing: "", skipped: "–" }[item.status] ?? "○"}</span><span class="plan-text">${escapeHtml(item.text)}</span></li>`
+    )
+    .join("");
+  const meta = status === "error" ? escapeHtml(step.result || "失败") : `${done}/${items.length}`;
+  return `<div class="tool-step tool-step-plan" data-tool="update_plan" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">计划</span><span class="tool-title" title="${escapeHtml(step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${items.length ? `<ol class="plan-list">${rows}</ol>` : ""}</div>`;
 }
-// 生成结束（停止、出错或中断）时，还在转圈或等待确认的步骤一并收束，不留下永远转圈的卡片
-/** @param {Message} assistant */
-function settleSteps(assistant, note) {
-  for (const step of allSteps(assistant))
-    if (step.status === "running" || step.status === "pending") {
-      pendingApprovals.delete(step.id);
-      step.status = step.status === "pending" ? "skipped" : "error";
-      step.result = note;
+
+  // ---- 15-tools/31-ask.js ----
+// 言 · 请示用户：下一步取决于用户的选择时弹一张小表单，从输入框上方浮出，一页一题；对谈与执事都有，帮手没有
+defineTool({
+  name: "ask_user",
+  label: "请示",
+  mainOnly: true,
+  // 同一答里同样的一问不再打扰用户第二回
+  cache: true,
+  html: askStepHtml,
+  approval: askFormHtml,
+  digest: step => `请示 → ${step.answers ? String(step.note || "").slice(0, 200) : "用户未作答"}`,
+  async run(step, args, ctx) {
+    const questions = args.questions
+      .slice(0, 8)
+      .map(q => ({
+        question: String(q?.question || "")
+          .trim()
+          .slice(0, 200),
+        header: String(q?.header || "")
+          .trim()
+          .slice(0, 12),
+        multi: q?.multi === true,
+        options: (Array.isArray(q?.options) ? q.options : [])
+          .slice(0, 4)
+          .map(askOption)
+          .filter(o => o.label)
+      }))
+      .filter(q => q.question);
+    if (!questions.length)
+      return {
+        ok: false,
+        content: `没能从参数里读出问题。questions 是一个数组，每项至少要有 question（完整的问句）与 options（2–4 个字符串选项），要多选就给 multi: true。例如：{"questions":[{"question":"用哪种风格？","header":"风格","options":["清简 — 留白多","繁复 — 信息密"],"multi":false}]}\n收到了 ${args.questions.length} 项，但没有一项带得出 question。`,
+        display: "表单为空"
+      };
+    // 一个选项都没有的题只能靠自填，多半是模型漏了 options：补一句提醒，但表单照出，不白费这一轮
+    const missing = questions.filter(q => q.options.length < 2).length;
+    step.form = { questions };
+    step.title = questions
+      .map(q => q.header || q.question)
+      .join(" · ")
+      .slice(0, 80);
+    const answers = await askApproval(step, ctx, "生成中");
+    if (!Array.isArray(answers)) {
+      step.skipped = true;
+      return { ok: false, content: "用户没有作答。请按你的最佳判断继续，并在正文里说明你做了什么假设。", display: "未作答" };
     }
-  for (const step of assistant.steps || []) if (step.sub?.status === "streaming") step.sub.status = "stopped";
+    step.answers = answers;
+    step.note = questions.map((q, i) => `${q.header || q.question}：${answers[i] || "（未答）"}`).join("；");
+    return {
+      ok: true,
+      content: `${questions.map((q, i) => `${q.question}\n→ ${answers[i] || "（未答）"}`).join("\n\n")}${missing ? `\n\n（有 ${missing} 题没给够选项，只能由用户自填；下次每题给 2–4 个选项。）` : ""}`,
+      display: "已作答"
+    };
+  }
+});
+// 选项按字符串给：「选项 — 一句说明」；旧的 { label, description } 对象也照收
+function askOption(o) {
+  if (typeof o === "string") {
+    const [label, ...rest] = o.split(/\s+[—–-]{1,2}\s+|—/);
+    return { label: label.trim().slice(0, 60), description: rest.join("—").trim().slice(0, 120) };
+  }
+  return {
+    label: String(o?.label || "")
+      .trim()
+      .slice(0, 60),
+    description: String(o?.description || "")
+      .trim()
+      .slice(0, 120)
+  };
 }
-// 一答里的全部步骤，含帮手在差遣卡片里跑的那些（只嵌一层：帮手不再差遣）
-/** @param {{ steps?: Step[] }} message 消息或帮手 */
-function allSteps(message) {
-  return (message?.steps || []).flatMap(step => [step, ...(step.sub?.steps || [])]);
+/** @param {Step} step */
+function askStepHtml(step) {
+  const status = step.status || "done",
+    meta =
+      status === "pending"
+        ? "待作答"
+        : status === "skipped"
+          ? escapeHtml(step.result || "未作答")
+          : status === "error"
+            ? escapeHtml(step.result || "失败")
+            : escapeHtml(step.result || "已作答");
+  const body =
+    status === "done" && step.answers
+      ? `<div class="tool-note">${escapeHtml(step.note || "")}</div>`
+      : status === "pending"
+        ? `<div class="tool-note">请于输入框上方作答</div>`
+        : "";
+  return `<div class="tool-step" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">请示</span><span class="tool-title" title="${escapeHtml(step.title)}">${escapeHtml(step.title)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
+// 请示条上的表单：右上角只写一个快捷键，这一页按 Enter 是下一题还是提交（输入框留空时），随翻页改，见 formPage；题数与第几问在标题里
+/** @param {Step} step */
+function askFormHtml(step) {
+  const block = (q, i) =>
+    `<div class="ask-q" data-q="${i}" data-multi="${q.multi ? "true" : "false"}"><div class="ask-question">${q.header ? `<span class="ask-header">${escapeHtml(q.header)}</span>` : ""}${escapeHtml(q.question)}${q.multi ? `<span class="ask-multi">可多选</span>` : ""}</div><div class="ask-options" role="${q.multi ? "group" : "radiogroup"}">${q.options.map((o, j) => `<button type="button" class="ask-opt" role="${q.multi ? "checkbox" : "radio"}" aria-checked="false" data-opt="${j}"><span class="ask-tick" aria-hidden="true"></span><span class="ask-opt-copy"><strong>${escapeHtml(o.label)}</strong>${o.description ? `<small>${escapeHtml(o.description)}</small>` : ""}</span></button>`).join("")}</div><input class="ask-other" type="text" maxlength="200" placeholder="${q.options.length ? (q.multi ? "还可自行补充" : "或自行填写") : "请填写"}" aria-label="自行填写"></div>`;
+  return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">问</span><span class="approval-title"></span><span class="approval-hint" title="输入框留空时，Enter 即作答"></span></div><div class="ask-form">${step.form.questions.map(block).join("")}</div><div class="approval-actions ask-nav"><span class="ask-spacer"></span><button type="button" class="ask-arrow" data-form="prev" title="上一题" aria-label="上一题">‹</button><button type="button" class="ask-arrow" data-form="next" title="下一题（未答即跳过）" aria-label="下一题">›</button><button type="button" class="ask-arrow ask-done" data-form="submit" title="提交" aria-label="提交">✓</button></div>`;
+}
+function formPage(bar, page = null) {
+  const blocks = [...bar.querySelectorAll(".ask-q")];
+  if (!blocks.length) return;
+  const total = blocks.length,
+    current = Math.max(0, Math.min(total - 1, page ?? Number(bar.dataset.page || 0)));
+  bar.dataset.page = String(current);
+  blocks.forEach((block, index) => block.classList.toggle("hidden", index !== current));
+  bar.querySelector(".approval-title").textContent = total === 1 ? "有一问" : `第${chineseNumber(current + 1)}问 · 共 ${total} 问`;
+  bar.querySelector(".approval-hint").textContent = current === total - 1 ? "Enter 提交" : "Enter 下一题";
+  bar.querySelector('[data-form="prev"]').disabled = current === 0;
+  bar.querySelector('[data-form="next"]').classList.toggle("hidden", current === total - 1);
+  bar.querySelector('[data-form="submit"]').classList.toggle("hidden", current !== total - 1);
+  if (page !== null) setTimeout(() => blocks[current].querySelector(".ask-opt, .ask-other")?.focus(), 0);
+}
+function collectForm(bar) {
+  const step = pendingApprovalHere()?.step;
+  if (!step?.form) return null;
+  return step.form.questions.map((q, i) => {
+    const block = bar.querySelector(`.ask-q[data-q="${i}"]`);
+    const picked = [...block.querySelectorAll('.ask-opt[aria-checked="true"]')].map(b => b.querySelector("strong").textContent),
+      other = block.querySelector(".ask-other").value.trim();
+    return [...picked, ...(other ? [other] : [])].join("、");
+  });
+}
+
+  // ---- 15-tools/40-memory.js ----
+// 言 · 录（记忆）与旧谈：五件都在浏览器里完成，不经桥接，也不需确认——每一步都在行迹里显示，条目在设置页可改可删。
+// 记忆启用时才有；记与忘只给主模型，帮手与旁注只能翻
+const CONVERSATION_MESSAGE_CHARS = 1500; // read_conversation 每条消息最多给这么多字
+defineTool({
+  name: "remember",
+  label: "记入",
+  offer: () => memoryEnabled(),
+  mainOnly: true,
+  sideEffect: true,
+  run(step, args, { conversation }) {
+    const items = store.memory.items,
+      text = args.text.replace(/\s+/g, " ").trim().slice(0, MEMORY_TEXT_CHARS);
+    step.title = text;
+    if (!text) return { ok: false, content: "text 不能为空", display: "内容为空" };
+    const source = { conversationId: conversation.id, title: conversation.title };
+    const existing = (args.replaces && items.find(item => item.id === args.replaces)) || items.find(item => item.text === text);
+    if (existing) {
+      Object.assign(existing, { text, updatedAt: now(), source });
+      saveStore();
+      refreshMemorySettings();
+      return { ok: true, content: `已更新 ${memoryLine(existing)}`, display: "已更新" };
+    }
+    if (items.length >= MAX_MEMORY_ITEMS)
+      return {
+        ok: false,
+        content: `记忆已有 ${MAX_MEMORY_ITEMS} 条，已满。请先用 recall 查看，用 forget 删去过时的，或用 replaces 把相近的合并成一条`,
+        display: "记忆已满"
+      };
+    const item = addMemory(text, source);
+    refreshMemorySettings();
+    return { ok: true, content: `已记入 ${memoryLine(item)}`, display: "已记入" };
+  }
+});
+
+defineTool({
+  name: "forget",
+  label: "忘却",
+  offer: () => memoryEnabled(),
+  mainOnly: true,
+  sideEffect: true,
+  run(step, args) {
+    const items = store.memory.items,
+      index = items.findIndex(item => item.id === args.id);
+    step.title = index >= 0 ? items[index].text : args.id;
+    if (index < 0) return { ok: false, content: "没有这条记忆，id 以 recall 的结果为准", display: "未找到" };
+    items.splice(index, 1);
+    saveStore();
+    refreshMemorySettings();
+    return { ok: true, content: "已删除", display: "已删除" };
+  }
+});
+
+defineTool({
+  name: "recall",
+  label: "翻记忆",
+  offer: () => memoryEnabled(),
+  lookup: true,
+  parallel: true,
+  sources: step => (step.results || []).map(hit => ({ memory: hit.memoryId, title: hit.title })),
+  run(step, args) {
+    const items = store.memory.items,
+      terms = keywordTerms(args.query);
+    step.title = terms.length ? args.query.trim() : "全部";
+    const hits = terms.length ? items.filter(item => hitsAll(item.text, terms)) : items;
+    step.results = hits.slice(0, 8).map(item => ({ title: item.text, memoryId: item.id }));
+    return { ok: true, content: hits.length ? hits.map(memoryLine).join("\n") : "记忆里没有相关条目", display: `${hits.length} 条` };
+  }
+});
+
+// 查旧谈：同一工作目录的执事对话排在前面，其余按新近
+defineTool({
+  name: "search_conversations",
+  label: "查旧谈",
+  offer: () => memoryEnabled(),
+  lookup: true,
+  parallel: true,
+  sources: step => (step.results || []).map(hit => ({ talk: hit.conversationId, title: hit.title, date: hit.date })),
+  run(step, args, { conversation }) {
+    const terms = keywordTerms(args.query);
+    step.title = args.query.trim();
+    if (!terms.length) return { ok: false, content: "query 不能为空", display: "缺少关键词" };
+    const limit = clampNumber(Number(args.limit), 8, 1, 20),
+      sameRepo = c => isWork(conversation) && isWork(c) && c.workdir === conversation.workdir,
+      hits = [];
+    for (const c of [...store.conversations].sort(
+      (a, b) => Number(sameRepo(b)) - Number(sameRepo(a)) || String(b.updatedAt).localeCompare(String(a.updatedAt))
+    )) {
+      if (c.id === conversation.id) continue;
+      const lines = c.messages.filter(m => (m.role === "user" || m.role === "assistant") && m.content);
+      if (!hitsAll(`${c.title}\n${lines.map(m => m.content).join("\n")}`, terms)) continue;
+      const hit = lines.find(m => m.content.toLowerCase().includes(terms[0])),
+        text = String(hit?.content || "").replace(/\s+/g, " ");
+      const at = Math.max(0, text.toLowerCase().indexOf(terms[0]) - 40),
+        snippet = text ? `${at ? "…" : ""}${text.slice(at, at + 120)}${at + 120 < text.length ? "…" : ""}` : "";
+      hits.push({
+        id: c.id,
+        title: c.title,
+        date: String(c.updatedAt || c.createdAt).slice(0, 10),
+        count: lines.length,
+        snippet,
+        repo: isWork(c) ? (sameRepo(c) ? "同一目录" : `执事：${c.workdir}`) : ""
+      });
+      if (hits.length >= limit) break;
+    }
+    step.results = hits.map(hit => ({ title: hit.title, snippet: hit.snippet, conversationId: hit.id, date: hit.date }));
+    return {
+      ok: true,
+      content: hits.length
+        ? hits
+            .map(
+              hit =>
+                `[${hit.id}] ${hit.date}「${hit.title}」共 ${hit.count} 条${hit.repo ? `（${hit.repo}）` : ""}${hit.snippet ? `\n  ${hit.snippet}` : ""}`
+            )
+            .join("\n")
+        : "此前的对话里没有命中",
+      display: `${hits.length} 段`
+    };
+  }
+});
+
+defineTool({
+  name: "read_conversation",
+  label: "翻旧谈",
+  offer: () => memoryEnabled(),
+  lookup: true,
+  parallel: true,
+  sources: step => (step.conversationId ? [{ talk: step.conversationId, title: step.title, date: step.date, read: true }] : []),
+  run(step, args, { conversation }) {
+    const c = store.conversations.find(item => item.id === args.id);
+    step.title = c ? c.title : args.id;
+    if (!c) return { ok: false, content: "没有这段对话，id 以 search_conversations 的结果为准", display: "未找到" };
+    step.conversationId = c.id;
+    step.date = c.updatedAt || c.createdAt;
+    if (c.id === conversation.id) return { ok: false, content: "这是当前对话，无需读取", display: "当前对话" };
+    const lines = c.messages.filter(m => (m.role === "user" || m.role === "assistant") && (m.content || m.attachments?.length));
+    const offset = Math.max(1, Number(args.offset) || 1),
+      limit = clampNumber(Number(args.limit), 40, 1, 100),
+      slice = lines.slice(offset - 1, offset - 1 + limit);
+    const body = slice
+      .map((m, i) => {
+        const text = String(m.content || "（附件）").trim();
+        return `${offset + i}. 【${m.role === "user" ? "用户" : "助手"}】${text.length > CONVERSATION_MESSAGE_CHARS ? `${text.slice(0, CONVERSATION_MESSAGE_CHARS)}…` : text}`;
+      })
+      .join("\n\n");
+    const end = offset - 1 + slice.length;
+    return {
+      ok: true,
+      content: `「${c.title}」${String(c.createdAt).slice(0, 10)}${isWork(c) ? ` · 执事：${c.workdir}` : ""}，共 ${lines.length} 条，此为第 ${offset}–${end} 条${end < lines.length ? `；后面还有 ${lines.length - end} 条` : ""}\n\n${body || "（这段对话没有正文）"}`,
+      display: `${slice.length} 条`
+    };
+  }
+});
+
+  // ---- 15-tools/41-document.js ----
+// 言 · 翻阅文档：对话附件、浏览器内的旧卷宗，以及（设置允许时）磁盘卷宗里的文本与 Office / PDF——后者用到时才取回并抽正文。
+// 长文档按页码或关键词只取片段；可读的文档名写进说明里（{{docs}}），对话里有可读文档时才给
+defineTool({
+  name: "read_document",
+  label: "翻阅文档",
+  offer: ctx => ctx.docs.length > 0,
+  vars: ctx => ({ docs: ctx.docs.map(d => d.name).join("、") }),
+  lookup: true,
+  parallel: true,
+  cache: args => ({ ...args, name: args.name.trim().toLowerCase(), query: args.query?.trim().toLowerCase() }),
+  async run(step, args, { conversation }) {
+    const docs = availableDocuments(conversation),
+      wanted = args.name.toLowerCase();
+    const doc =
+      docs.find(d => d.name.toLowerCase() === wanted) ||
+      docs.find(d => d.name.toLowerCase().includes(wanted)) ||
+      (docs.length === 1 ? docs[0] : null);
+    if (!doc)
+      return { ok: false, content: `未找到文档「${args.name}」。可读文档：${docs.map(d => d.name).join("、") || "无"}`, display: "未找到" };
+    step.title = doc.name;
+    let text = "";
+    if (doc.archive) {
+      try {
+        text = await archiveDocumentText(doc);
+      } catch (error) {
+        return { ok: false, content: `卷宗文档读取失败：${String(error.message || error).slice(0, 120)}`, display: "读取失败" };
+      }
+    } else {
+      const record = await getAttachment(doc.id);
+      text = record ? (record.kind === "text" ? record.data : record.extractedText) || "" : "";
+    }
+    if (!text) return { ok: false, content: "该文档无可读取的文本", display: "无文本" };
+    const pages = text.split(/^(?=第 \d+ 页$)/m),
+      pageCount = pages.filter(p => /^第 \d+ 页$/m.test(p)).length;
+    if (args.page) {
+      const page = pages.find(p => p.startsWith(`第 ${args.page} 页`));
+      if (!page) return { ok: false, content: `没有第 ${args.page} 页，共 ${pageCount || 1} 页`, display: "页码超出" };
+      step.note = `第 ${args.page} 页`;
+      return { ok: true, content: page.slice(0, 20000), display: `第 ${args.page} 页 · ${page.length} 字` };
+    }
+    if (args.query) {
+      const needle = args.query.toLowerCase(),
+        lower = text.toLowerCase(),
+        hits = [];
+      let index = lower.indexOf(needle);
+      while (index >= 0 && hits.length < 8) {
+        hits.push(text.slice(Math.max(0, index - 300), index + needle.length + 300).trim());
+        index = lower.indexOf(needle, index + needle.length + 300);
+      }
+      step.note = `关键词「${args.query}」`;
+      return hits.length
+        ? { ok: true, content: hits.map((hit, i) => `片段 ${i + 1}：…${hit}…`).join("\n\n"), display: `${hits.length} 处匹配` }
+        : { ok: true, content: `全文未出现「${args.query}」`, display: "无匹配" };
+    }
+    const limit = 12000;
+    step.note = `${text.length} 字${pageCount ? ` · ${pageCount} 页` : ""}`;
+    return {
+      ok: true,
+      content:
+        text.length > limit
+          ? `${text.slice(0, limit)}\n\n[文档共 ${text.length} 字${pageCount ? `、${pageCount} 页` : ""}，此处只给出开头；可用 page 或 query 参数读取其余部分]`
+          : text,
+      display: `${Math.min(text.length, limit)} 字`
+    };
+  }
+});
+const ARCHIVE_DOC_EXTENSIONS = new Set(["pdf", "docx", "pptx", "xlsx", "odt", "ods", "odp"]);
+/** @param {Conversation} conversation */
+function availableDocuments(conversation) {
+  const seen = new Map();
+  for (const file of [...(conversation?.messages || []).flatMap(m => m.attachments || []), ...store.library])
+    if (file.id && !seen.has(file.name) && (file.kind === "text" || (file.kind === "file" && file.extracted))) seen.set(file.name, file);
+  if (store.settings.archiveRead !== false && archiveOnline())
+    for (const entry of archiveEntries || []) {
+      const extension = String(entry.name).split(".").pop().toLowerCase();
+      if (seen.has(entry.name) || !(ARCHIVE_DOC_EXTENSIONS.has(extension) || isTextFile({ name: entry.name, type: "" }))) continue;
+      seen.set(entry.name, { name: entry.name, archive: entry.path, size: entry.size, modifiedAt: entry.modifiedAt, kind: "archive" });
+    }
+  return [...seen.values()];
+}
+// 磁盘卷宗里的文档：取回原件，文本直接用，PDF / Office 在本机抽正文；按路径与修改时间缓存几份
+const archiveDocCache = new Map();
+async function archiveDocumentText(doc) {
+  const key = `${doc.archive}|${doc.modifiedAt}`;
+  if (archiveDocCache.has(key)) return archiveDocCache.get(key);
+  const response = await fetch(archiveFileUrl(doc.archive), { signal: AbortSignal.timeout(60000) });
+  if (!response.ok) throw Error("取回失败");
+  const blob = await response.blob();
+  const text = isTextFile({ name: doc.name, type: "" })
+    ? await blob.text()
+    : await extractDocumentText(doc.name, await readFile(blob, "data"));
+  archiveDocCache.set(key, text);
+  if (archiveDocCache.size > 12) archiveDocCache.delete(archiveDocCache.keys().next().value);
+  return text;
+}
+
+  // ---- 15-tools/50-note.js ----
+// 言 · 补言：不是工具，是作答途中用户寄来的话，也记作行迹里的一步（见 14-chat-engine.js 的 sendSupplement）；在这张表里只登记画法与摘要，从不交给模型
+defineTool({
+  name: "user_note",
+  label: "补言",
+  offer: false,
+  html: noteStepHtml,
+  digest: step => `用户补言「${String(step.note || "").slice(0, 200)}」`
+});
+// 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面
+/** @param {Step} step */
+function noteStepHtml(step) {
+  const status = step.status || "done",
+    text = String(step.note || "").trim(),
+    first = text.split("\n").find(Boolean)?.slice(0, 80) || "",
+    files = (step.attachments || []).map(file => file.name);
+  const meta = status === "running" ? "待寄" : status === "error" ? escapeHtml(step.result || "未送达") : escapeHtml(step.result || "已递");
+  const body =
+    text.length > first.length || files.length
+      ? `<div class="tool-note">${escapeHtml(text)}${files.length ? `<div class="tool-note-files">${files.map(name => escapeHtml(name)).join("、")}</div>` : ""}</div>`
+      : "";
+  return `<div class="tool-step tool-step-note" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label"><span class="seal note-seal" aria-hidden="true">补</span>补言</span><span class="tool-title" title="${escapeHtml(text)}">${escapeHtml(first)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+}
+
+  // ---- 15-tools/90-delegate.js ----
+// 言 · 差遣：主模型把一件自成一段的子任务交给帮手，帮手另起一段对话做完后回报。桥接在线、且有别的活能交出去时才给；帮手自己不再差遣。
+// 同一轮派出的几名帮手同时开工（parallel），活是主模型分的，不重叠靠它分派时留意（工具说明里有交代）。
+// 行迹里只留一枚签，帮手自己的那条时间线开在差遣面板里（见 08-trail.js）
+defineTool({
+  name: "delegate",
+  label: "差遣",
+  offer: ctx => ctx.bridge && ctx.offered.some(name => name !== "ask_user"),
+  mainOnly: true,
+  sideEffect: true,
+  parallel: true,
+  run: runDelegate,
+  html: delegateStepHtml,
+  sync: syncDelegateCard,
+  digest: step =>
+    `差遣「${String(step.title || "").slice(0, 40)}」→ ${step.result || step.status}${subChangedPaths(step).length ? `，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
+});
 /** @param {Step} step */
 function subChangedPaths(step) {
   return [...new Set((step.sub?.steps || []).filter(s => s.change && s.status === "done").map(s => s.change.path))];
@@ -9425,15 +9828,13 @@ function subChangedPaths(step) {
 // 步骤都画在主对话这条消息的差遣卡片里（指令照样问而后行），做完把最后一轮的回报连同改动摘要作为工具结果交回主模型
 /**
  * @param {Step} step
- * @param {Conversation} conversation
- * @param {Message} assistant
+ * @param {Record<string, any>} args
+ * @param {ToolContext} ctx
  */
-async function runDelegate(step, args, conversation, assistant, signal) {
-  const task = String(args.task || "").trim();
-  step.title =
-    String(args.title || "")
-      .trim()
-      .slice(0, 40) || task.slice(0, 24);
+async function runDelegate(step, args, ctx) {
+  const { conversation, assistant, signal } = ctx;
+  const task = args.task.trim();
+  step.title = args.title.trim().slice(0, 40) || task.slice(0, 24);
   if (!task) return { ok: false, content: "task 不能为空：请把背景、目标、边界与要回报的内容写全", display: "任务为空" };
   const job = requestJob(conversation.id),
     profile = job?.profile || activeProfile();
@@ -9474,7 +9875,7 @@ async function runDelegate(step, args, conversation, assistant, signal) {
         await readReply(profile, history, signal, overrides, sub);
       } catch (error) {
         // 与主答一样：写到一半断了，稍候接着写，最多两回
-        if (!error.midStream || signal?.aborted || resumed >= AUTO_RESUMES) throw error;
+        if (!error.midStream || signal.aborted || resumed >= AUTO_RESUMES) throw error;
         resumed += 1;
         const said = sub.content.slice(roundStart);
         sub.toolCalls = null;
@@ -9566,318 +9967,28 @@ async function runDelegate(step, args, conversation, assistant, signal) {
     display
   };
 }
-// 每次发送前把工具的落脚目录备好。行：桥接必须在线、工作目录仍在（被删了就重建），否则不发；
-// 言：桥接在线就顺手把卷宗目录备好，备不好也照常聊（工具用到时自会报错）
-/** @param {Conversation} conversation */
-async function ensureWorkReady(conversation) {
-  if (!isWork(conversation)) {
-    const archive = workRoot(conversation);
-    // 备的是草稿目录，卷宗根随之建好
-    if (archive && activeProfile()?.tools !== false)
-      await bridge(
-        "/api/work/prepare",
-        { workdir: `${archive}${archive.includes("/") && !archive.includes("\\") ? "/" : "\\"}${scratchRel(conversation)}` },
-        AbortSignal.timeout(8000)
-      ).catch(error => toast(`卷宗目录不可用：${String(error.message || error)}`));
-    return true;
-  }
-  if (activeProfile()?.tools === false) {
-    toast("当前模型已关闭本机工具，请在模型高级配置中开启");
-    return false;
-  }
-  if (apiBase === null && !(await ensureLocalBridge())) {
-    toast("执事需要本机桥接，请先运行 start.cmd");
-    return false;
-  }
-  try {
-    const prepared = await bridge("/api/work/prepare", { workdir: conversation.workdir }, AbortSignal.timeout(8000));
-    if (prepared.created) toast("工作目录不存在，已新建");
-    conversation.workdir = prepared.workdir;
-  } catch (error) {
-    toast(`工作目录不可用：${String(error.message || error)}`);
-    return false;
-  }
-  return true;
+// 行迹里只留一枚签：差遣是并行的活，塞进线性的时间线会把后面的东西一直往下顶。
+// 这里只记「此刻遣了谁、做到哪一步」——那确实是这一刻发生的事；回报与帮手自己的那条小时间线都在面板里，
+// 签上不铺回报：主模型接着会把它消化进正文，几名帮手的回报叠在行迹里，正文就被顶到几屏之下了。
+/** @param {Step} step */
+function delegateStepHtml(step) {
+  const { sub, status, meta } = delegateSubState(step);
+  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>差遣</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div></div>`;
 }
-function trimOutput(text) {
-  const value = String(text || "");
-  return value.length > STEP_OUTPUT_KEEP ? `…（前面 ${value.length - STEP_OUTPUT_KEEP} 字略去）\n${value.slice(-STEP_OUTPUT_KEEP)}` : value;
-}
-// 文件工具能不能出目录：设置里的「可及范围」，默认全盘（系统级配置、别处的资料本就该读得到）
-function roamAllowed() {
-  return store.settings.toolReach !== "inside";
-}
-/**
- * @param {Step} step
- * @param {Conversation} conversation
- * @param {Message} assistant
- */
-async function runWorkTool(step, args, conversation, assistant, signal) {
-  const workdir = workRoot(conversation),
-    roam = roamAllowed(),
-    sandbox = sandboxed(),
-    permission = commandPolicyOf(conversation);
-  if (!workdir) return { ok: false, content: "此对话没有可用的目录（本机桥接不在线）", display: "无目录" };
-  const job = requestJob(conversation.id);
-  if (step.name === "run_command") {
-    step.title = String(args.command || "").trim();
-    if (!step.title) return { ok: false, content: "指令为空", display: "指令为空" };
-    step.readOnly = isReadOnlyCommand(step.title);
-    const background = args.background === true;
-    if (background) step.background = true;
-    // 言与行一样：请示条上按「径行」即把这一段对话切成径行，此后不再问
-    let policy = commandPolicyOf(conversation);
-    // 问而后行开着沙箱：先问一声严的沙箱会不会拦。会拦的也请示（只读的也不例外），请示条写明原因；批了这一条就出沙箱跑
-    if (policy === "ask" && sandbox) {
-      const screened = await bridge("/api/work/screen", { workdir, command: step.title }, signal).catch(() => null);
-      step.sandboxWhy = screened?.why || undefined;
-    }
-    let escalated = false;
-    if (policy === "ask" && (!step.readOnly || step.sandboxWhy)) {
-      step.status = "pending";
-      if (job) setJobLabel(conversation, job, "等待确认");
-      refreshSteps(assistant);
-      saveStore();
-      renderHistory();
-      const approved = await awaitApproval(step, conversation, signal);
-      step.status = "running";
-      if (job) setJobLabel(conversation, job, "执行中");
-      refreshSteps(assistant);
-      renderHistory();
-      if (!approved) {
-        step.skipped = true;
-        return { ok: false, content: prompt("work.skipped"), display: "已跳过" };
-      }
-      escalated = !!step.sandboxWhy;
-    } else if (job) setJobLabel(conversation, job, "执行中");
-    // 用户可能在等待条上把这一段对话切成审而后行或径行；执行前再取一次，不沿用旧档位。
-    policy = commandPolicyOf(conversation);
-    const data = await bridge(
-      "/api/work/run",
-      {
-        workdir,
-        sandbox: sandbox && !escalated,
-        permission: policy,
-        command: step.title,
-        timeout: Number(args.timeout) || 120,
-        background
-      },
-      signal
-    );
-    const seconds = (data.durationMs / 1000).toFixed(data.durationMs < 10000 ? 1 : 0),
-      marks = `${escalated ? " · 出沙箱" : ""}${step.readOnly && policy === "ask" && !step.sandboxWhy ? " · 只读免确认" : ""}`;
-    step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
-    if (background) {
-      step.exitCode = data.exitCode ?? undefined;
-      return {
-        ok: data.running || data.exitCode === 0,
-        content: `${data.running ? `后台指令 ${data.id} 仍在跑（已 ${seconds} 秒），用 check_command 取新输出或结束它` : `后台指令 ${data.id} 已结束，退出码：${data.exitCode}`}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
-        display: `${data.running ? `后台 ${data.id} · 在跑` : `后台 ${data.id} · 退出码 ${data.exitCode}`}${marks}`
-      };
-    }
-    step.exitCode = data.exitCode;
-    const display = `${data.timedOut ? `超时终止 · ${seconds}s` : data.exitCode === 0 ? `完成 · ${seconds}s` : `退出码 ${data.exitCode} · ${seconds}s`}${marks}`;
-    return {
-      ok: !data.timedOut && data.exitCode === 0,
-      content: `退出码：${data.exitCode}${data.timedOut ? "（超时被终止）" : ""}\n--- stdout ---\n${data.stdout || "(空)"}\n--- stderr ---\n${data.stderr || "(空)"}`,
-      display
-    };
+// 行迹里那枚签的就地更新：只动头上的状态与标题。帮手自己的时间线与回报不在这儿，在面板里
+/** @param {Step} step */
+function syncDelegateCard(el, step, prev) {
+  const { sub, status, meta } = delegateSubState(step);
+  el.dataset.status = status;
+  const head = el.querySelector(":scope > .tool-step-head");
+  rollText(head.querySelector(".tool-meta"), meta);
+  if (!prev || prev.status !== status) head.querySelector(".tool-state").outerHTML = stepStateHtml(status);
+  // 标题在领命时才定下来，签却在那之前就画出来了
+  const title = head.querySelector(".tool-title");
+  if (title.textContent !== String(step.title || "")) {
+    title.textContent = step.title || "";
+    title.title = sub?.task || step.title || "";
   }
-  // 后台指令：取上次之后的新输出，可顺带等一会儿，或结束它
-  if (step.name === "check_command") {
-    const id = String(args.id || "").trim();
-    step.title = `${id}${args.stop === true ? " · 结束" : ""}`;
-    const data = await bridge("/api/work/check", { id, stop: args.stop === true, wait: Number(args.wait) || 0 }, signal);
-    step.output = trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));
-    if (!data.running) step.exitCode = data.exitCode;
-    return {
-      ok: true,
-      content: `${data.running ? `${data.id} 仍在跑` : `${data.id} 已结束，退出码：${data.exitCode}`}\n--- 新的 stdout ---\n${data.stdout || "(空)"}\n--- 新的 stderr ---\n${data.stderr || "(空)"}`,
-      display: data.running ? "在跑" : args.stop === true ? "已结束" : `退出码 ${data.exitCode}`
-    };
-  }
-  if (step.name === "write_file") {
-    step.title = String(args.path || "");
-    const data = await bridge(
-      "/api/work/write",
-      { workdir, roam, sandbox, permission, path: step.title, content: String(args.content ?? "") },
-      signal
-    );
-    step.title = data.path;
-    markSeen(conversation, data.path, step);
-    step.note = `${data.lines} 行 · ${formatFileSize(data.bytes)}${data.existed ? " · 覆盖" : ""}`;
-    step.change = {
-      path: data.path,
-      added: data.lines,
-      removed: data.existed ? Number(data.previousLines) || 0 : 0,
-      created: !data.existed
-    };
-    return {
-      ok: true,
-      content: `已写入 ${data.path}（${data.bytes} 字节，${data.lines} 行${data.existed ? "，覆盖了原文件" : ""}）`,
-      display: data.existed ? "已覆盖" : "已写入"
-    };
-  }
-  if (step.name === "read_file") {
-    step.title = String(args.path || "");
-    const data = await bridge(
-      "/api/work/read",
-      { workdir, roam, sandbox, permission, path: step.title, offset: args.offset, limit: args.limit },
-      signal
-    );
-    step.title = data.path;
-    markSeen(conversation, data.path, step);
-    return {
-      ok: true,
-      content: `${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行${data.encoding && data.encoding !== "utf-8" ? `；文件是 ${data.encoding === "gbk" ? "GBK" : data.encoding.toUpperCase()} 编码${data.encoding === "gbk" ? "，edit_file 改不了它" : ""}` : ""}）\n${data.text}`,
-      display: `${data.shown}/${data.totalLines} 行`
-    };
-  }
-  if (step.name === "edit_file") {
-    step.title = String(args.path || "");
-    const seen = workSeen.get(seenKey(conversation, step)),
-      normalized = seenPath(conversation, step.title);
-    if (!seen?.has(normalized)) return { ok: false, content: prompt("work.unread", { path: step.title }), display: "需先读取" };
-    const data = await bridge(
-      "/api/work/edit",
-      {
-        workdir,
-        roam,
-        sandbox,
-        permission,
-        path: step.title,
-        old: String(args.old ?? ""),
-        new: String(args.new ?? ""),
-        replaceAll: args.replace_all === true
-      },
-      signal
-    );
-    step.title = data.path;
-    step.diff = { old: String(args.old ?? "").slice(0, 1500), new: String(args.new ?? "").slice(0, 1500) };
-    const counts = diffCounts(String(args.old ?? ""), String(args.new ?? ""));
-    step.change = { path: data.path, added: counts.added * data.replaced, removed: counts.removed * data.replaced };
-    return {
-      ok: true,
-      content: `已修改 ${data.path}：第 ${data.line} 行起替换 ${data.replaced} 处，文件现为 ${data.lines} 行`,
-      display: `第 ${data.line} 行 · ${data.replaced} 处`
-    };
-  }
-  if (step.name === "search_files") {
-    step.title = String(args.query || "");
-    const data = await bridge(
-      "/api/work/search",
-      {
-        workdir,
-        roam,
-        sandbox,
-        permission,
-        query: step.title,
-        path: args.path,
-        glob: args.glob,
-        literal: args.literal === true,
-        limit: args.limit
-      },
-      signal
-    );
-    const lines = data.matches.map(match => `${match.file}:${match.line}: ${match.text}`);
-    step.output = trimOutput(lines.join("\n"));
-    step.note = data.matches.length ? "" : "无匹配";
-    return {
-      ok: true,
-      content: lines.length
-        ? `${lines.join("\n")}${data.truncated ? "\n…（结果已截断，请缩小范围或加 glob）" : ""}`
-        : `未找到匹配「${step.title}」的内容（扫描了 ${data.scanned} 个文件）`,
-      display: `${data.matches.length} 处 · ${data.files} 文件`
-    };
-  }
-  step.title = `${String(args.path || ".")}${args.pattern ? ` · ${args.pattern}` : ""}`;
-  const data = await bridge(
-    "/api/work/list",
-    { workdir, roam, sandbox, permission, path: args.path, depth: args.depth, pattern: args.pattern },
-    signal
-  );
-  step.title = `${data.path}${args.pattern ? ` · ${args.pattern}` : ""}`;
-  step.output = trimOutput(data.entries.join("\n"));
-  return {
-    ok: true,
-    content: data.entries.length
-      ? `${data.entries.join("\n")}${data.truncated ? "\n…（条目过多已截断，请指定子目录）" : ""}`
-      : "（空目录）",
-    display: `${data.entries.length} 项`
-  };
-}
-// 磁盘卷宗里的文档：取回原件，文本直接用，PDF / Office 在本机抽正文；按路径与修改时间缓存几份
-const archiveDocCache = new Map();
-async function archiveDocumentText(doc) {
-  const key = `${doc.archive}|${doc.modifiedAt}`;
-  if (archiveDocCache.has(key)) return archiveDocCache.get(key);
-  const response = await fetch(archiveFileUrl(doc.archive), { signal: AbortSignal.timeout(60000) });
-  if (!response.ok) throw Error("取回失败");
-  const blob = await response.blob();
-  const text = isTextFile({ name: doc.name, type: "" })
-    ? await blob.text()
-    : await extractDocumentText(doc.name, await readFile(blob, "data"));
-  archiveDocCache.set(key, text);
-  if (archiveDocCache.size > 12) archiveDocCache.delete(archiveDocCache.keys().next().value);
-  return text;
-}
-/**
- * @param {Step} step
- * @param {Conversation} conversation
- */
-async function readDocumentTool(step, args, conversation) {
-  const docs = availableDocuments(conversation),
-    wanted = String(args.name || "").toLowerCase();
-  const doc =
-    docs.find(d => d.name.toLowerCase() === wanted) ||
-    docs.find(d => d.name.toLowerCase().includes(wanted)) ||
-    (docs.length === 1 ? docs[0] : null);
-  if (!doc)
-    return { ok: false, content: `未找到文档「${args.name}」。可读文档：${docs.map(d => d.name).join("、") || "无"}`, display: "未找到" };
-  step.title = doc.name;
-  let text = "";
-  if (doc.archive) {
-    try {
-      text = await archiveDocumentText(doc);
-    } catch (error) {
-      return { ok: false, content: `卷宗文档读取失败：${String(error.message || error).slice(0, 120)}`, display: "读取失败" };
-    }
-  } else {
-    const record = await getAttachment(doc.id);
-    text = record ? (record.kind === "text" ? String(record.data || "") : String(record.extractedText || "")) : "";
-  }
-  if (!text) return { ok: false, content: "该文档无可读取的文本", display: "无文本" };
-  const pages = text.split(/^(?=第 \d+ 页$)/m),
-    pageCount = pages.filter(p => /^第 \d+ 页$/m.test(p)).length;
-  if (args.page) {
-    const page = pages.find(p => p.startsWith(`第 ${Number(args.page)} 页`));
-    if (!page) return { ok: false, content: `没有第 ${args.page} 页，共 ${pageCount || 1} 页`, display: "页码超出" };
-    step.note = `第 ${args.page} 页`;
-    return { ok: true, content: page.slice(0, 20000), display: `第 ${args.page} 页 · ${page.length} 字` };
-  }
-  if (args.query) {
-    const needle = String(args.query).toLowerCase(),
-      hits = [];
-    let index = text.toLowerCase().indexOf(needle);
-    while (index >= 0 && hits.length < 8) {
-      hits.push(text.slice(Math.max(0, index - 300), index + needle.length + 300).trim());
-      index = text.toLowerCase().indexOf(needle, index + needle.length + 300);
-    }
-    step.note = `关键词「${args.query}」`;
-    return hits.length
-      ? { ok: true, content: hits.map((hit, i) => `片段 ${i + 1}：…${hit}…`).join("\n\n"), display: `${hits.length} 处匹配` }
-      : { ok: true, content: `全文未出现「${args.query}」`, display: "无匹配" };
-  }
-  const limit = 12000;
-  step.note = `${text.length} 字${pageCount ? ` · ${pageCount} 页` : ""}`;
-  return {
-    ok: true,
-    content:
-      text.length > limit
-        ? `${text.slice(0, limit)}\n\n[文档共 ${text.length} 字${pageCount ? `、${pageCount} 页` : ""}，此处只给出开头；可用 page 或 query 参数读取其余部分]`
-        : text,
-    display: `${Math.min(text.length, limit)} 字`
-  };
 }
 
   // ---- 16-api.js ----

@@ -200,6 +200,10 @@ function prompt(path, vars = {}) {
     console.error(`缺少内置提示词：${path}（prompts/ 目录未加载？）`);
     return "";
   }
+  return fillTemplate(text, vars);
+}
+// 提示词的写法：字符串或按行拼的数组，{{名字}} 在运行时填入
+function fillTemplate(text, vars = {}) {
   return (Array.isArray(text) ? text.join("\n") : String(text)).replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? "")).trim();
 }
 const APP_VERSION = "0.3.0"; // 与 package.json 同步；桥接在线时以桥接返回的为准

@@ -17,6 +17,6 @@
 
 分工原则：模型是把系统提示和工具定义一起读的，同一件事只说一遍——每件工具做什么、何时用、有什么不能猜的规矩，写在 `tools.js` 的 description 里；系统提示只放环境事实（日期、目录、平台、shell）、跨工具的做法（先读再改、改后验证、确认规则）和页面的呈现约定（画图）。改提示词后跑 `node test/prompt-size.cjs` 看各模式的总量（`--dump` 打印模型读到的全文），再跑 `npm test` 过一遍用例。
 
-写法：每个文件往 `window.YAN_PROMPTS` 挂一个对象，值是字符串或按行拼接的字符串数组；`{{名字}}` 是运行时填入的值，名字见各文件注释。装配逻辑在 `src/14-chat-engine.js` 的 `assistantHint` / `workHint` / `toolDefinitions`，只做拼接，不含文案。
+写法：每个文件往 `window.YAN_PROMPTS` 挂一个对象，值是字符串或按行拼接的字符串数组；`{{名字}}` 是运行时填入的值，名字见各文件注释。系统提示的装配在 `src/14-chat-engine.js` 的 `assistantHint` / `workHint`；哪件工具在何处给出、帮手与旁注能不能用，登记在 `src/15-tools/` 的注册表里（`toolDefinitions` 据此挑出并填好说明）。两处都只做拼接，不含文案。
 
 未收入此处、但模型同样会看到的：历史消息的改写（引用以 `>` 引出、执事的「［上一答的行迹］」摘要（冠在下一问开头）、附件超长时的摘要标头，见 `src/14-chat-engine.js` 与 `src/13-files.js` 的 `quotedText` / `stepsDigest` / `summarize`），以及桥接抛出的工具错误（`server/work.js`，如「未找到要替换的文本」）——它们是数据格式与运行时反馈，随代码走。

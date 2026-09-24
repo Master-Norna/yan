@@ -240,16 +240,7 @@ function bindEvents() {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         const waiting = input.id === "chatInput" && !input.value.trim() ? pendingApprovalHere() : null;
-        if (waiting) {
-          if (waiting.step.name !== "ask_user") return settleApproval(waiting.step.id, true);
-          const bar = $("#approvalBar"),
-            page = Number(bar.dataset.page || 0),
-            total = bar.querySelectorAll(".ask-q").length;
-          if (page < total - 1) return formPage(bar, page + 1);
-          const answers = collectForm(bar);
-          if (answers?.some(Boolean)) return settleApproval(waiting.step.id, answers);
-          return toast("请先在上方作答");
-        }
+        if (waiting) return approveByEnter(waiting);
         sendOrStop();
       }
     });
