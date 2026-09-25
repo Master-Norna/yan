@@ -4130,7 +4130,7 @@ function syncChatScrollGrabber() {
 function syncDocumentTitle() {
   const c = currentConversation();
   document.title = view === "library" ? "卷宗 · 言" : view === "groups" ? "分组 · 言" : c ? `${c.title} · 言` : "言";
-  syncRunningHead(); // 标题改了（手改、拟题），书眉跟着换
+  renderRunningHead(); // 标题改了（手改、拟题），书眉跟着换
 }
 
   // ---- 07-render.js ----
@@ -4414,18 +4414,26 @@ function restoreScrollPosition(snapshot) {
 function renderChatMeta(c) {
   $("#chatMeta").innerHTML =
     `${escapeHtml(formatDay(c.createdAt))} · ${escapeHtml(chineseNumber(c.messages.filter(m => m.role === "user").length, true))}问${visibleThreads(c).length ? ` · <button class="chat-meta-notes" type="button" data-open-notes title="打开旁注">旁注 ${visibleThreads(c).length}</button>` : ""}${isWork(c) ? ` · <button type="button" class="chat-meta-path" data-workdir-bind title="工作目录">${escapeHtml(c.workdir || "")}</button>` : c.ended ? "" : ` · <button type="button" class="chat-meta-bind" data-workdir-bind title="绑定工作目录，此后指令与改动落于其中">绑定目录</button>`}${c.messages.some(m => m.role === "assistant" && m.status === "complete") ? ` · <button type="button" class="chat-meta-bind" data-export-md title="${archiveOnline() ? "以 Markdown 存入卷宗" : "以 Markdown 下载"}">${archiveOnline() ? "存入卷宗" : "存为 Markdown"}</button>` : ""}`;
-  syncRunningHead();
+  renderRunningHead();
   requestAnimationFrame(syncRunningHead);
 }
-// 书眉：标题滚出视口后才显出题名与问数；换对话、改标题、一答收尾都随 renderChatMeta 刷新
-function syncRunningHead() {
+// 书眉：标题滚出视口后才显出题名与问数。字随 renderChatMeta 与改标题刷新（renderRunningHead），滚动时只切显隐（syncRunningHead）
+function renderRunningHead() {
   const c = currentConversation(),
     head = $("#runningHead");
-  if (!c) return head.classList.remove("shown");
-  head.querySelector(".running-head-title").textContent = c.title;
-  const notes = visibleThreads(c).length;
-  head.querySelector(".running-head-meta").textContent = `${chineseNumber(c.messages.filter(m => m.role === "user").length, true)}问${notes ? ` · 旁注 ${notes}` : ""}`;
-  head.classList.toggle("shown", $("#chatTitle").getBoundingClientRect().bottom < $("#chatScroll").getBoundingClientRect().top + 4);
+  if (c) {
+    const notes = visibleThreads(c).length;
+    head.querySelector(".running-head-title").textContent = c.title;
+    head.querySelector(".running-head-meta").textContent =
+      `${chineseNumber(c.messages.filter(m => m.role === "user").length, true)}问${notes ? ` · 旁注 ${notes}` : ""}`;
+  }
+  syncRunningHead();
+}
+function syncRunningHead() {
+  $("#runningHead").classList.toggle(
+    "shown",
+    !!currentConversation() && $("#chatTitle").getBoundingClientRect().bottom < $("#chatScroll").getBoundingClientRect().top + 4
+  );
 }
 function renderConversation(shouldScroll = false) {
   const c = currentConversation();
@@ -12357,7 +12365,7 @@ function syncOutline() {
       if (article && article.getBoundingClientRect().top <= line) current = item;
     }
     // 滚到了底便是最后一问：末一轮短问短答时，它的顶未必越得过阅读线
-    if (host.scrollHeight - host.scrollTop - host.clientHeight < 8) current = rail.querySelector(".outline-item:last-child");
+    if (host.scrollHeight - host.scrollTop - host.clientHeight < 8) current = [...rail.querySelectorAll(".outline-item")].at(-1);
     if (!current) current = rail.querySelector(".outline-item");
     rail.querySelectorAll(".outline-item.active").forEach(item => item !== current && item.classList.remove("active"));
     current?.classList.add("active");
@@ -13839,7 +13847,8 @@ $("#history").addEventListener("click", event => {
 // 拖放：对话拖到一组上（组首或组里任一条）即移入那组，拖到组外即移出；拖着经过的组首提亮。只认侧栏里拖起的对话
 const CHAT_DRAG = "application/x-yan-chat";
 /** @param {DragEvent} event */
-const dropGroupOf = event => /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest?.(".history-repo-group.is-set"));
+const dropGroupOf = event =>
+  /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest?.(".history-repo-group.is-set"));
 const clearDropMarks = () => document.querySelectorAll("#history .drop-into").forEach(node => node.classList.remove("drop-into"));
 $("#history").addEventListener("dragstart", event => {
   const item = /** @type {HTMLElement} */ (event.target).closest?.("[data-conversation][draggable]");
