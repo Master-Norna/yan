@@ -366,7 +366,7 @@ async function handleHttp(req, res) {
         headers,
         body: payload,
         timeout: 30000,
-        allowLoopback: true
+        allowLoopback: false
       });
     const type = response.headers.get("content-type") || "",
       textual =
