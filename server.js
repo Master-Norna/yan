@@ -84,7 +84,7 @@ function corsHeaders(req, res) {
   if (req.headers["access-control-request-private-network"] === "true") res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
 // 执事接口能执行本机指令，不能只依赖 CORS：不可信页面即使读不到响应，也可能用简单请求触发副作用。
-// 无 Origin 的本机脚本仍可调用；浏览器只接受本站页面与 VS Code Webview（别的本机端口可对谈，但不开放执事）。
+// 无 Origin 的本机脚本仍可调用（沙箱里跑的脚本也在其列：它本就以用户权限运行，调桥接不多出什么，见 server/sandbox.js 的 callsBridge）；浏览器只接受本站页面与 VS Code Webview（别的本机端口可对谈，但不开放执事）。
 function trustedWorkRequest(req) {
   const origin = req.headers.origin;
   if (!origin) return true;
