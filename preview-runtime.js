@@ -122,7 +122,7 @@ pre.mermaid{margin:0;background:none;text-align:center;font:inherit;white-space:
       logAxis: axis
     };
   }
-  function repairEchartsOption(option) {
+  function repairEchartsOption(option, fresh = true) {
     const list = value => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]);
     const clamp = (item, key, count) => {
       if (typeof item?.[key] !== "number" || item[key] < count) return;
@@ -157,6 +157,39 @@ pre.mermaid{margin:0;background:none;text-align:center;font:inherit;white-space:
           }
           return series;
         });
+    // 直角坐标系的格子：刻度标签算进格子里（ECharts 默认按宽度的一成留边，窄处纵轴标签就出界，只剩「,000」）；
+    // 头一回画、又没写格子的，四边按有无标题、图例、轴名收紧，底下不再空出一大块；旁边挂着别的件（视觉映射、滑条……）的只加前一条
+    if (xs.length || ys.length) {
+      if (grids)
+        option.grid = list(option.grid).map(grid =>
+          grid && typeof grid === "object" && grid.containLabel === undefined ? { ...grid, containLabel: true } : grid
+        );
+      else if (fresh) {
+        const legends = list(option.legend).filter(item => item && typeof item === "object" && item.show !== false),
+          busy =
+            ["visualMap", "timeline", "graphic", "toolbox"].some(key => list(option[key]).length) ||
+            list(option.dataZoom).some(zoom => zoom?.type !== "inside") ||
+            legends.some(item => item.orient === "vertical");
+        if (busy) option.grid = { containLabel: true };
+        else {
+          const titled = list(option.title).find(item => item?.text),
+            legendBelow = legends.some(item => item.bottom !== undefined && item.top === undefined),
+            legendAbove = legends.some(item => !(item.bottom !== undefined && item.top === undefined)),
+            where = axis => (axis && typeof axis === "object" && axis.name ? axis.nameLocation || "end" : ""),
+            xName = xs.map(where).find(Boolean),
+            yName = ys.map(where).find(Boolean);
+          let top = titled?.subtext ? 60 : titled || legendAbove ? 40 : 16;
+          if (yName === "end") top += top > 16 ? 20 : 16;
+          option.grid = {
+            containLabel: true,
+            top,
+            bottom: (legendBelow ? 40 : 12) + (xName === "middle" || xName === "center" ? 24 : 0),
+            left: yName === "middle" || yName === "center" ? 36 : 12,
+            right: xName === "end" ? 48 : 16
+          };
+        }
+      }
+    }
     return option;
   }
   function setupEcharts() {
@@ -169,8 +202,13 @@ pre.mermaid{margin:0;background:none;text-align:center;font:inherit;white-space:
       if (dom instanceof HTMLElement && dom.clientHeight < 40 && !dom.style.height) dom.style.height = "320px";
       const chart = init(dom, name ?? "yan", opts);
       const set = chart.setOption.bind(chart);
-      chart.setOption = (option, ...rest) =>
-        set(option && typeof option === "object" ? repairEchartsOption({ ...option }) : option, ...rest);
+      // 头一回画或整份替换（notMerge）时才补格子的四边；之后的增量更新不去盖模型自己定过的边距
+      let drawn = false;
+      chart.setOption = (option, ...rest) => {
+        const fresh = !drawn || rest[0] === true || rest[0]?.notMerge === true;
+        drawn = true;
+        return set(option && typeof option === "object" ? repairEchartsOption({ ...option }, fresh) : option, ...rest);
+      };
       charts.add(chart);
       chartObserver.observe(dom);
       return chart;
