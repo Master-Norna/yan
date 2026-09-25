@@ -4281,7 +4281,8 @@ function renderHistory() {
     (c.messages || []).some(m => typeof m.content === "string" && m.content.toLowerCase().includes(query));
   const sorted = [...store.conversations].filter(matches).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   // 一条时间线：绑了目录的对话归在各自的「工」组里，组按组内最近动过的那条排（一条有动静，整组靠前），组内按时间；
-  // 没绑目录的对话按自己的时间散在其间；置顶另列；自立的分组（「集」）在置顶之下自成一段，空组也列着。
+  // 自立的分组（「集」）同样按组内最近动过的那条排，空组按立组的时间，与「工」组同一排法；没绑目录的对话按自己的时间散在其间；置顶另列。
+  // 落选的：分组在置顶之下自成一段（组一多，刚写的对话被压到下面，且与置顶之间没有界线，看着像置顶的一部分）。
   // 组可收起，收起时只露出当前打开的那条；查找时不收，也不列没有命中的组
   const collapsed = new Set(store.settings.collapsedRepos || []),
     pinned = sorted.filter(c => c.pinned && !groupOf(c)),
@@ -4308,16 +4309,13 @@ function renderHistory() {
     }
     node.items.push(c);
   }
+  for (const set of sets.values()) if (!query || set.items.length) nodes.push(set);
   nodes.sort((a, b) => b.at.localeCompare(a.at));
   /** @type {Map<string, any[]>} */
   const buckets = new Map();
   buckets.set(
     "置顶",
     pinned.map(c => ({ kind: "chat", c }))
-  );
-  buckets.set(
-    "分组",
-    [...sets.values()].filter(node => !query || node.items.length).sort((a, b) => b.at.localeCompare(a.at))
   );
   for (const label of ["今天", "过去七天", "更早"]) buckets.set(label, []);
   for (const node of nodes) buckets.get(dayBucket(node.at)).push(node);
@@ -4342,7 +4340,7 @@ function renderHistory() {
           : c.pinned && groupOf(c)
             ? `<span class="history-state pinned" title="组内置顶" aria-label="组内置顶"></span>`
             : "";
-    return `<div class="history-item ${c.id === currentId ? "active" : ""} ${running ? "is-running" : ""} ${c.unread ? "has-unread" : ""} ${isWork(c) ? "is-work" : ""}" data-conversation="${escapeHtml(c.id)}"><button class="history-open" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>${state}<span class="history-tools"><button class="history-tool history-more" data-history-action="menu" title="更多" aria-label="更多" aria-haspopup="menu">⋯</button></span></div>`;
+    return `<div class="history-item ${c.id === currentId ? "active" : ""} ${running ? "is-running" : ""} ${c.unread ? "has-unread" : ""} ${isWork(c) ? "is-work" : ""}" data-conversation="${escapeHtml(c.id)}" draggable="true"><button class="history-open" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>${state}<span class="history-tools"><button class="history-tool history-more" data-history-action="menu" title="更多" aria-label="更多" aria-haspopup="menu">⋯</button></span></div>`;
   };
   const repoHtml = node => {
     const name = node.dir.split(/[\\/]/).filter(Boolean).pop() || node.dir || "未定目录",
@@ -4351,7 +4349,8 @@ function renderHistory() {
       running = node.items.filter(c => c.id !== currentId && requestJob(c.id)).length;
     return `<div class="history-repo-group${fold ? " collapsed" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><button type="button" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? "展开" : "收起"}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">工</span><span class="history-repo-name">${escapeHtml(name)}</span><small>${node.items.length}${fold && running ? ` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></button><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="在此目录新建">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
-  // 分组：画法同「工」组，印文是「集」；组首右侧「＋」在此组另起一段、「⋯」改名或解散；改名时组名换成输入框
+  // 分组：画法同「工」组，印文是「集」；组首右侧「＋」在此组另起一段、「⋯」改名、打开组的设置或解散；改名时组名换成输入框。
+  // 对话可拖到组上移入、拖到组外移出（见 24-groups.js）
   const setHtml = node => {
     const { group } = node,
       key = `group:${group.id}`,
@@ -4362,7 +4361,7 @@ function renderHistory() {
     const name = renaming
       ? `<input class="history-rename group-rename" value="${escapeHtml(group.name)}" maxlength="40" aria-label="分组改名">`
       : `<span class="history-repo-name">${escapeHtml(group.name)}</span>`;
-    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">集</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="在此组新建">＋</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
+    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">集</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="在此组新建">＋</button><button type="button" class="history-tool repo-new repo-more" data-group-menu="${escapeHtml(group.id)}" title="更多" aria-label="更多" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(item).join("")}</div>` : ""}</div>`;
   };
   renderingHistory = true;
   try {
@@ -4371,8 +4370,7 @@ function renderHistory() {
         .filter(([, items]) => items.length)
         .map(
           ([label, items]) =>
-            // 「分组」一段不立小标：入口里已有「分组」，组又有「集」印认得出，再写一遍便重了
-            `<div class="history-group">${label === "分组" ? "" : `<div class="history-label">${label}</div>`}${items.map(node => (node.kind === "repo" ? repoHtml(node) : node.kind === "set" ? setHtml(node) : item(node.c))).join("")}</div>`
+            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : node.kind === "set" ? setHtml(node) : item(node.c))).join("")}</div>`
         )
         .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
     const input = $("#history .history-rename");
@@ -13392,16 +13390,16 @@ const GUIDE = [
     steps: [
       {
         h: "立组",
-        body: "侧栏「分组」进入分组页，点「＋ 新建分组」；或在对话「⋯」里择「移入分组」→「新建分组…」，就地立一组并移入。"
+        body: "侧栏「分组」进入分组页，点「＋ 新建分组」；或在对话「⋯」里择「移入分组」→「新建分组…」，就地立一组并移入。已有的组，把对话拖到组上即移入，拖出组外即移出。"
       },
       {
         h: "定其所依",
-        body: "分组页中点开一组：可改组名，择一个预设，定一个默认目录。组里新起的对话皆依此——预设的提示词、工具与模型一并换上，绑定目录即为行。",
+        body: "侧栏组首的「⋯」→「设置」，或分组页中点开一组：可改组名，择一个预设，定一个默认目录。组里新起的对话皆依此——预设的提示词、工具与模型一并换上，绑定目录即为行。",
         note: "这两样只管新起的对话；已在组中的对话照旧。"
       },
       {
         h: "在组中行文",
-        body: "侧栏组首的「＋」或分组页的「在此组新建」另起一段，输入框「＋」旁标着所归之组。组里的对话置顶，只在组内居前。解散只拆组，对话退回散列。"
+        body: "侧栏组首的「＋」或分组页的「在此组新建」另起一段，输入框「＋」旁标着所归之组。侧栏里的组与「工」组一样按时间排，组里一有新言，整组便靠前。组里的对话置顶，只在组内居前，右上角折一小角为记。解散只拆组，对话退回散列。"
       }
     ]
   },
@@ -13525,8 +13523,8 @@ function bindGuideEvents() {
 
   // ---- 24-groups.js ----
 // 言 · 分组：自立的几组，像 Claude 的 project——相关的对话聚在一处，不至散落。
-// 侧栏有两处：历史里「置顶」之下自成一段（画法同「工」组，印文是「集」，组首只一个「＋」在此组另起一段），
-// 以及「翻页」「卷宗」之下的「分组」入口——进去是分组页：列出各组，点开一组可改名、择预设、定默认目录、看组里的对话、解散。
+// 侧栏有两处：历史里与「工」组一样按时间排（印文是「集」，组首「＋」在此组另起一段、「⋯」改名 / 设置 / 解散；对话拖到组上即移入、拖到组外即移出），
+// 以及「翻页」「卷宗」之下的「分组」入口——进去是分组页：列出各组，点开一组可改名、择预设、定默认目录、看组里的对话（可移出）、解散。
 // 组能带的两样都只管新起的对话：预设（提示词、工具、模型、权限一并换上）与默认目录（绑上即为行）。
 // 组里的对话置顶，只在组内排到最前，不跳出组去
 /** @type {string|null} 侧栏里正在改名的那一组 */
@@ -13620,6 +13618,27 @@ async function dissolveGroup(id) {
   renderHistory();
   renderGroupTags();
   if (view === "groups") renderGroupsPage();
+}
+// 组首「⋯」：改名、打开组的设置（分组页里这一组）、解散；在此组新建已有「＋」，不再列
+/** @param {string} id @param {Element} anchor */
+function openGroupMenu(id, anchor) {
+  if (document.querySelector(`.chip-pop[data-kind=group][data-for="${CSS.escape(id)}"]`)) return closeChipPop();
+  const pop = openFloatingPop(
+    anchor,
+    `<button type="button" data-group-act="rename">改名</button><button type="button" data-group-act="settings">设置</button><button type="button" class="danger" data-group-act="dissolve">解散</button>`,
+    { align: "right" }
+  );
+  pop.dataset.kind = "group";
+  pop.dataset.for = id;
+  pop.addEventListener("click", event => {
+    const button = /** @type {HTMLElement} */ (event.target).closest("[data-group-act]");
+    if (!button) return;
+    closeChipPop();
+    const act = button.dataset.groupAct;
+    if (act === "rename") startGroupRename(id);
+    else if (act === "settings") openGroupsPage(id);
+    else void dissolveGroup(id);
+  });
 }
 // 对话「⋯」里的「移入分组」：列出各组，另有新建一组与移出
 /** @param {Conversation} c @param {Element} anchor */
@@ -13728,7 +13747,7 @@ function groupDetailHtml(group) {
       ? `<div class="group-toc">${members
           .map(
             c =>
-              `<button type="button" class="group-row" data-group-chat="${escapeHtml(c.id)}">${c.pinned ? `<span class="group-pin" title="组内置顶" aria-label="组内置顶"></span>` : ""}<span class="group-row-name">${escapeHtml(c.title)}</span><span class="guide-lead-line" aria-hidden="true"></span><span class="group-row-gist">${escapeHtml(formatDay(c.updatedAt))}</span></button>`
+              `<div class="group-member"><button type="button" class="group-row" data-group-chat="${escapeHtml(c.id)}">${c.pinned ? `<span class="group-pin" title="组内置顶" aria-label="组内置顶"></span>` : ""}<span class="group-row-name">${escapeHtml(c.title)}</span><span class="guide-lead-line" aria-hidden="true"></span><span class="group-row-gist">${escapeHtml(formatDay(c.updatedAt))}</span></button><button type="button" class="group-member-out" data-group-out="${escapeHtml(c.id)}" title="移出此组，退回散列">移出</button></div>`
           )
           .join("")}</div>`
       : `<p class="card-note">对话「⋯」里的「移入分组」可把已有的对话移进来。</p>`
@@ -13742,6 +13761,11 @@ $("#groups").addEventListener("click", async event => {
     groupPageId = page.dataset.groupPage || null;
     renderGroupsPage();
     return void ($("#groups").scrollTop = 0);
+  }
+  const out = target.closest("[data-group-out]");
+  if (out) {
+    const c = store.conversations.find(item => item.id === out.dataset.groupOut);
+    return void (c && moveToGroup(c, ""));
   }
   const chat = target.closest("[data-group-chat]");
   if (chat) return openConversation(chat.dataset.groupChat);
@@ -13804,7 +13828,51 @@ $("#history").addEventListener("click", event => {
     return renderHistory();
   }
   const add = target.closest("[data-group-new]");
-  if (add) newChatInGroup(add.dataset.groupNew);
+  if (add) return newChatInGroup(add.dataset.groupNew);
+  const more = target.closest("[data-group-menu]");
+  if (more) {
+    event.stopPropagation();
+    openGroupMenu(more.dataset.groupMenu, more);
+  }
+});
+// 拖放：对话拖到一组上（组首或组里任一条）即移入那组，拖到组外即移出；拖着经过的组首提亮。只认侧栏里拖起的对话
+const CHAT_DRAG = "application/x-yan-chat";
+/** @param {DragEvent} event */
+const dropGroupOf = event => /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest?.(".history-repo-group.is-set"));
+const clearDropMarks = () => document.querySelectorAll("#history .drop-into").forEach(node => node.classList.remove("drop-into"));
+$("#history").addEventListener("dragstart", event => {
+  const item = /** @type {HTMLElement} */ (event.target).closest?.("[data-conversation][draggable]");
+  if (!item) return;
+  event.dataTransfer.setData(CHAT_DRAG, item.dataset.conversation);
+  event.dataTransfer.effectAllowed = "move";
+  item.classList.add("dragging");
+});
+$("#history").addEventListener("dragover", event => {
+  if (!Array.from(event.dataTransfer?.types || []).includes(CHAT_DRAG)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  const group = dropGroupOf(event);
+  if (group?.classList.contains("drop-into")) return;
+  clearDropMarks();
+  group?.classList.add("drop-into");
+});
+$("#history").addEventListener("dragleave", event => {
+  if (!$("#history").contains(/** @type {Node|null} */ (event.relatedTarget))) clearDropMarks();
+});
+$("#history").addEventListener("drop", event => {
+  const id = event.dataTransfer?.getData(CHAT_DRAG);
+  if (!id) return;
+  event.preventDefault();
+  clearDropMarks();
+  const c = store.conversations.find(item => item.id === id),
+    target = dropGroupOf(event)?.dataset.group || "";
+  if (!c || (c.groupId || "") === target) return;
+  moveToGroup(c, target);
+  toast(target ? `移入「${groupsList().find(group => group.id === target)?.name}」` : "已移出分组");
+});
+$("#history").addEventListener("dragend", () => {
+  clearDropMarks();
+  document.querySelectorAll("#history .dragging").forEach(node => node.classList.remove("dragging"));
 });
 $("#history").addEventListener("dblclick", event => {
   const toggle = /** @type {HTMLElement} */ (event.target).closest("[data-group-toggle]");
