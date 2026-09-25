@@ -1213,7 +1213,8 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   flex-direction: column;
 }
 /* 滚动条两侧都留槽：正文列才与下面的输入框同一中线（只留一侧时正文左偏半条滚动条宽）；
-   顶端渐隐 26px，滚到顶栏下的正文淡出而不是被一刀切齐 */
+   顶端渐隐 26px，滚到顶栏下的正文淡出而不是被一刀切齐。
+   留神：mask 会让里面 position: fixed 的元素改以滚动区为定位基准；全屏的可视化（.work-expanded）因此在展开时撤掉渐隐，见 90-motion-responsive.css */
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
@@ -7348,6 +7349,7 @@ body {
    浏览器照样把滚轮截在里面不往外传，鼠标停在上面页面就滚不动，像那一块失灵了。去掉；正文那侧的 chat-scroll 照旧 */
 .work-mode .chat-scroll {
   overflow: hidden;
+  mask-image: none; /* 带着 mask，全屏的那块只能铺在滚动区里、随滚动偏走，「收起」也出了视野 */
 }
 .history-state {
   position: absolute;

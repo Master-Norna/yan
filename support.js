@@ -3535,13 +3535,14 @@ function bindEvents() {
   window.addEventListener("online", refreshConnection);
   window.addEventListener("message", event => {
     const data = event.data;
-    if (!data || !["yan-preview-ready", "yan-preview-state", "yan-preview-size"].includes(data.type)) return;
+    if (!data || !["yan-preview-ready", "yan-preview-state", "yan-preview-size", "yan-preview-escape"].includes(data.type)) return;
     const app = [...document.querySelectorAll(".html-app[data-app-id]")].find(
       el => el.dataset.appId === data.id && el.querySelector("iframe")?.contentWindow === event.source
     );
     if (!app) return;
     if (data.type === "yan-preview-ready") return sendHtmlApp(app);
     if (data.type === "yan-preview-size") return sizeHtmlApp(app, Number(data.height) || 0);
+    if (data.type === "yan-preview-escape") return void (app.classList.contains("work-expanded") && closeExpandedWork());
     app.dataset.appState = data.state;
     app.classList.toggle("html-app-error", data.state === "error");
     const label = app.querySelector(".code-lang");
