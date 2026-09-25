@@ -314,7 +314,8 @@ $("#history").addEventListener("click", event => {
 // 拖放：对话拖到一组上（组首或组里任一条）即移入那组，拖到组外即移出；拖着经过的组首提亮。只认侧栏里拖起的对话
 const CHAT_DRAG = "application/x-yan-chat";
 /** @param {DragEvent} event */
-const dropGroupOf = event => /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest?.(".history-repo-group.is-set"));
+const dropGroupOf = event =>
+  /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest?.(".history-repo-group.is-set"));
 const clearDropMarks = () => document.querySelectorAll("#history .drop-into").forEach(node => node.classList.remove("drop-into"));
 $("#history").addEventListener("dragstart", event => {
   const item = /** @type {HTMLElement} */ (event.target).closest?.("[data-conversation][draggable]");

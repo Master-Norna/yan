@@ -278,18 +278,26 @@ function restoreScrollPosition(snapshot) {
 function renderChatMeta(c) {
   $("#chatMeta").innerHTML =
     `${escapeHtml(formatDay(c.createdAt))} · ${escapeHtml(chineseNumber(c.messages.filter(m => m.role === "user").length, true))}问${visibleThreads(c).length ? ` · <button class="chat-meta-notes" type="button" data-open-notes title="打开旁注">旁注 ${visibleThreads(c).length}</button>` : ""}${isWork(c) ? ` · <button type="button" class="chat-meta-path" data-workdir-bind title="工作目录">${escapeHtml(c.workdir || "")}</button>` : c.ended ? "" : ` · <button type="button" class="chat-meta-bind" data-workdir-bind title="绑定工作目录，此后指令与改动落于其中">绑定目录</button>`}${c.messages.some(m => m.role === "assistant" && m.status === "complete") ? ` · <button type="button" class="chat-meta-bind" data-export-md title="${archiveOnline() ? "以 Markdown 存入卷宗" : "以 Markdown 下载"}">${archiveOnline() ? "存入卷宗" : "存为 Markdown"}</button>` : ""}`;
-  syncRunningHead();
+  renderRunningHead();
   requestAnimationFrame(syncRunningHead);
 }
-// 书眉：标题滚出视口后才显出题名与问数；换对话、改标题、一答收尾都随 renderChatMeta 刷新
-function syncRunningHead() {
+// 书眉：标题滚出视口后才显出题名与问数。字随 renderChatMeta 与改标题刷新（renderRunningHead），滚动时只切显隐（syncRunningHead）
+function renderRunningHead() {
   const c = currentConversation(),
     head = $("#runningHead");
-  if (!c) return head.classList.remove("shown");
-  head.querySelector(".running-head-title").textContent = c.title;
-  const notes = visibleThreads(c).length;
-  head.querySelector(".running-head-meta").textContent = `${chineseNumber(c.messages.filter(m => m.role === "user").length, true)}问${notes ? ` · 旁注 ${notes}` : ""}`;
-  head.classList.toggle("shown", $("#chatTitle").getBoundingClientRect().bottom < $("#chatScroll").getBoundingClientRect().top + 4);
+  if (c) {
+    const notes = visibleThreads(c).length;
+    head.querySelector(".running-head-title").textContent = c.title;
+    head.querySelector(".running-head-meta").textContent =
+      `${chineseNumber(c.messages.filter(m => m.role === "user").length, true)}问${notes ? ` · 旁注 ${notes}` : ""}`;
+  }
+  syncRunningHead();
+}
+function syncRunningHead() {
+  $("#runningHead").classList.toggle(
+    "shown",
+    !!currentConversation() && $("#chatTitle").getBoundingClientRect().bottom < $("#chatScroll").getBoundingClientRect().top + 4
+  );
 }
 function renderConversation(shouldScroll = false) {
   const c = currentConversation();
