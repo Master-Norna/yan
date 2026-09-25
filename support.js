@@ -352,7 +352,7 @@ class JobMap extends Map {
   }
 }
 const requestJobs = new JobMap();
-// 几个页面同开同一个存储时，谁在作答（见 01-store.js 的 syncLeases）：PAGE_ID 是这个页面的名号；
+// 几个页面同开同一个存储时，谁在作答（见 01-store/40-leases.js 的 syncLeases）：PAGE_ID 是这个页面的名号；
 // remoteBusy 是别处正在作答的对话；leaseHold 是这边作答过、最后一次存盘还没落地的对话——落了地才松手，别处读到的才是写完的
 const PAGE_ID = uid();
 const remoteBusy = new Set(),
@@ -379,7 +379,7 @@ let metaRevision = 0,
   metaSaveWarned = false,
   configSaveTimer = null,
   configSyncedAt = 0;
-// 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store.js 开头的说明）
+// 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store/10-state-db.js 开头的说明）
 let chatsBroken = false,
   chatsSyncing = false,
   // 这一回开页后对话已从目录读全过：之后才敢按「没人用」清附件原件
@@ -418,10 +418,9 @@ const thumbCache = new Map();
 let imageViewerAttachmentId = null,
   imageViewerReturnFocus = null;
 
-  // ---- 01-store.js ----
-// 言 · 本地存储：迁移、读写、附件库（IndexedDB）
+  // ---- 01-store/00-records.js ----
+// 言 · 本地存储 · 记录：调桥接的口子、结构迁移、各类数据的规整
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
-
 // 调本机桥接：存储、卷宗、工具都走这一个口子；桥接回的错误是一句话，原样抛出
 async function bridge(path, payload, signal) {
   if (apiBase === null) throw Error("本机工具需要本机桥接");
@@ -619,6 +618,10 @@ function normalizeMemory(memory) {
       }))
   };
 }
+
+  // ---- 01-store/10-state-db.js ----
+// 言 · 本地存储 · 暂存：记录怎么存、IndexedDB 的状态表、配置的本机缓存
+// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // ---------- 记录怎么存 ----------
 // 记录分两半。「配置」（设置、模型含 API Key、浏览器内卷宗、记忆、草稿）小而常改：正本在存储根的 配置.json（默认 ~/.yan，
 // 几个浏览器共用这一份，见 syncConfigWithDisk），localStorage 里那份是缓存，也是没桥接时的暂存。
@@ -734,6 +737,10 @@ function writeMeta({ disk = true } = {}) {
     }
   if (disk && changed) scheduleConfigSave();
 }
+
+  // ---- 01-store/20-config.js ----
+// 言 · 本地存储 · 配置：配置.json 的读写与三方合并（几个浏览器共用一份）
+// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // ---------- 配置.json ----------
 // 改动后一秒内写一次（含 API Key：这是自己机器上的文件，几个浏览器共用一套模型配置靠的就是它；导出的备份仍不含）。
 // 几个浏览器共用一份，靠的是「基准」：记着上次与磁盘对齐时的那一份（configBase，连同它在磁盘上的时间戳 configSyncedAt）。
@@ -999,6 +1006,10 @@ async function refreshConfigFromDisk() {
     if (disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
   } catch {}
 }
+
+  // ---- 01-store/30-chats.js ----
+// 言 · 本地存储 · 对话：一段一个文件落进对话目录，脏标记、落盘、巡检与读回
+// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // 对话目录可用：桥接在线、桥接报了目录、上次读它没出错
 function chatsOnline() {
   return apiBase !== null && !!chatsDir() && !chatsBroken;
@@ -1359,6 +1370,10 @@ async function syncChatsWithDisk() {
     chatsSyncing = false;
   }
 }
+
+  // ---- 01-store/40-leases.js ----
+// 言 · 本地存储 · 租约：几处页面同开时谁在作答
+// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 // ---------- 几处页面同开：谁在作答 ----------
 // 两个浏览器、VS Code 与浏览器同开同一个存储时，各页只知道自己在跑什么：那边正作答的一段，这边刷新后读到的是磁盘上「生成中」的快照，
 // 从前会当成页面刷新而中断、写回磁盘，两边轮流互盖，这边再点「继续生成」就成了两处同写一条回复。
@@ -1428,6 +1443,10 @@ async function followConversations(ids, released) {
 function runningElsewhere(id = currentId) {
   return !!id && remoteBusy.has(id) && !conversationRunning(id);
 }
+
+  // ---- 01-store/50-attachments.js ----
+// 言 · 本地存储 · 附件原件：存储根的 附件/ 与本机 IndexedDB 暂存
+// 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
 function openFileDb() {
   if (fileDbPromise) return fileDbPromise;
   fileDbPromise = new Promise((resolve, reject) => {
@@ -1587,12 +1606,12 @@ async function settleAttachmentStore() {
     attachmentsSettling = false;
   }
 }
-// 分叉：c.messages 始终是当前走的那条路；编辑或重答时被换下来的尾巴整段收进 c.forks（记下它接在哪条消息之后），随时可以切回来。
-// 同一位置的几个版本 = 当前这条 + 接在同一位置的 forks，按首条消息的时间排序
 
   // ---- 02-conversation.js ----
 // 言 · 对话数据：分叉、模型、草稿
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
+// 分叉：c.messages 始终是当前走的那条路；编辑或重答时被换下来的尾巴整段收进 c.forks（记下它接在哪条消息之后），随时可以切回来。
+// 同一位置的几个版本 = 当前这条 + 接在同一位置的 forks，按首条消息的时间排序
 /** @param {Conversation} c */
 function allMessages(c) {
   return [...(c.messages || []), ...(c.forks || []).flatMap(fork => fork.messages || [])];
