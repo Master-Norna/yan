@@ -1,4 +1,4 @@
-// 分组（「集」）：对话移入、组内置顶不跳出组、分组页改名与设预设和目录、组首「＋」起的新对话归组并用组的预设、解散只拆组不删对话
+// 分组（「集」）：对话移入、组内置顶不跳出组、组按时间排、拖入拖出、组首「⋯」→ 设置、分组页改名与设预设和目录、页上移出、组首「＋」起的新对话归组并用组的预设、解散只拆组不删对话
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
@@ -40,12 +40,12 @@ const moved = await evalJs(
   `(s => ({ groups: s.settings.groups.map(g => g.name), a: !!s.conversations.find(c => c.id === "a").groupId, head: document.querySelector("#history .is-set .history-repo-name")?.textContent, seal: document.querySelector("#history .is-set .repo-seal")?.textContent, buttons: document.querySelectorAll("#history .is-set .history-repo-head button").length, labels: [...document.querySelectorAll("#history .history-label")].map(n => n.textContent) }))(__yanState())`
 );
 check(
-  "conversation moves into the new group; its head has only the ＋, like a 工 group",
+  "conversation moves into the new group; its head has the ＋ and a ⋯",
   moved.groups.join() === "读书" &&
     moved.a &&
     moved.head === "读书" &&
     moved.seal === "集" &&
-    moved.buttons === 1 &&
+    moved.buttons === 2 &&
     !moved.labels.includes("分组"),
   JSON.stringify(moved)
 );
@@ -131,6 +131,54 @@ check(
   "plain 翻页 drops the pending group",
   await evalJs(`document.querySelector("#welcomeGroup").classList.contains("hidden") && !__yanState().settings.pendingGroupId`)
 );
+
+// 组按时间排：组里刚有新言，整组落在「今天」一段，不另立「分组」一段
+const placed = await evalJs(
+  `({ label: document.querySelector("#history .is-set").closest(".history-group").querySelector(".history-label")?.textContent, labels: [...document.querySelectorAll("#history .history-label")].map(n => n.textContent) })`
+);
+check("groups sort by time into the day buckets", placed.label === "今天" && !placed.labels.includes("分组"), JSON.stringify(placed));
+
+// 拖放：拖到组首即移入（经过时组首提亮），拖到组外即移出
+const drag = (from, to) =>
+  evalJs(`(() => {
+    const dt = new DataTransfer(), item = document.querySelector(${JSON.stringify(from)}), target = document.querySelector(${JSON.stringify(to)});
+    item.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const lit = !!document.querySelector("#history .drop-into");
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return { lit, gid: __yanState().conversations.find(c => c.id === "b").groupId, left: !!document.querySelector("#history .drop-into") };
+  })()`);
+const dragIn = await drag('#history [data-conversation="b"]', "#history .is-set .history-repo-head");
+check(
+  "dragging a chat onto a group head moves it in, lighting the head on the way",
+  dragIn.lit && dragIn.gid === groupId && !dragIn.left,
+  JSON.stringify(dragIn)
+);
+await sleep(150);
+const dragOut = await drag('#history [data-conversation="b"]', "#history .history-label");
+check("dragging it outside the group moves it out", !dragOut.lit && !dragOut.gid, JSON.stringify(dragOut));
+
+// 组首「⋯」→ 设置：直接打开分组页里这一组；页上「移出」把对话退回散列
+await evalJs(`document.querySelector('#history [data-group-menu="${groupId}"]').click(); true`);
+await sleep(150);
+check(
+  "the group head ⋯ offers rename, settings and dissolve",
+  await evalJs(`[...document.querySelectorAll(".chip-pop [data-group-act]")].map(b => b.textContent).join() === "改名,设置,解散"`)
+);
+await evalJs(`document.querySelector('.chip-pop [data-group-act="settings"]').click(); true`);
+await sleep(200);
+check(
+  "⋯ → 设置 opens that group's page",
+  await evalJs(`!document.querySelector("#groups").classList.contains("hidden") && document.querySelector("#groupName")?.value === "诗书"`)
+);
+await evalJs(`document.querySelector('#groups [data-group-out="a"]').click(); true`);
+await sleep(150);
+check(
+  "移出 on the group page sends the chat back to the loose list",
+  await evalJs(`!__yanState().conversations.find(c => c.id === "a").groupId && !document.querySelector('#groups [data-group-chat="a"]')`)
+);
+await evalJs(`document.querySelector('#history [data-conversation="b"] .history-open').click(); true`);
+await sleep(200);
 
 // 解散：组没了，对话都还在，退回散列
 await evalJs(`document.querySelector("#openGroups").click(); true`);

@@ -260,20 +260,47 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   color: var(--ink-3);
   font-size: 13px;
   transform: rotate(90deg);
-  transition: transform 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    opacity 0.15s;
 }
 .history-repo-group.collapsed .repo-caret {
   transform: none;
 }
+/* 组首右端的「＋」（集组还有「⋯」）悬停时浮出、箭头隐去让位：按钮不占位，工组与集组的箭头才在同一处 */
 .repo-new {
-  flex: none;
-  margin-right: 4px;
+  position: absolute;
+  top: 50%;
+  right: 4px;
   opacity: 0;
+  transform: translateY(-50%);
   transition: opacity 0.15s;
+}
+.repo-new:has(+ .repo-more) {
+  right: 26px;
+}
+.history-repo-head .repo-new:hover {
+  background: var(--paper-3);
 }
 .history-repo-head:hover .repo-new,
 .history-repo-head:focus-within .repo-new {
   opacity: 1;
+}
+.history-repo-head:hover .repo-caret,
+.history-repo-head:focus-within .repo-caret {
+  opacity: 0;
+}
+.repo-more {
+  font-size: 14px;
+}
+/* 拖着一段对话经过某组：组首铺一层淡朱、描一道朱边，松手即移入；被拖的那条淡下去 */
+.history-repo-group.drop-into > .history-repo-head {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.history-item.dragging {
+  opacity: 0.4;
 }
 .history-repo-items {
   position: relative;

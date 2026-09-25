@@ -762,13 +762,14 @@ body {
     transform: scale(1.12);
   }
 }
-/* 组内置顶：一粒朱色小菱形，与设置条目前那粒同样 */
+/* 组内置顶：右上角折一个小墨角，像书页折角作记号。置顶只是排序，用墨；朱色留给未读那粒圆点——有事待看的才醒目。
+   落选的：朱色小菱形（与未读的朱圆点同色同大，一眼分不开）；墨色菱形（分得开，但仍是现代 UI 的小点）；「顶」字小印（9px 的字看不清） */
 .history-state.pinned {
-  width: 5px;
-  height: 5px;
-  margin-top: -2.5px;
-  border-radius: 1px;
-  background: var(--accent);
-  transform: rotate(45deg);
-  opacity: 0.85;
+  top: 3px;
+  right: 5px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 9px 9px 0;
+  border-color: transparent color-mix(in srgb, var(--ink-3) 80%, transparent) transparent transparent;
 }

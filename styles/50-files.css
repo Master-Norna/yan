@@ -404,13 +404,43 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* 组内置顶：与侧栏同一个折角，折在这一行的右上角 */
+.group-member {
+  position: relative;
+}
 .group-pin {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 1px;
-  background: var(--accent);
-  transform: rotate(45deg);
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 9px 9px 0;
+  border-color: transparent color-mix(in srgb, var(--ink-3) 80%, transparent) transparent transparent;
+}
+/* 悬停一行，右端的日期让位给「移出」 */
+.group-member-out {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  color: var(--ink-3);
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.15s;
+}
+.group-member-out:hover {
+  background: var(--paper-3);
+  color: var(--danger);
+}
+.group-member:hover .group-member-out,
+.group-member-out:focus-visible {
+  opacity: 1;
+}
+.group-member:hover .group-row-gist {
+  visibility: hidden;
 }
 .group-title {
   display: flex;

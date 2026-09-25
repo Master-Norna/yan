@@ -1,6 +1,6 @@
 // 言 · 分组：自立的几组，像 Claude 的 project——相关的对话聚在一处，不至散落。
-// 侧栏有两处：历史里「置顶」之下自成一段（画法同「工」组，印文是「集」，组首只一个「＋」在此组另起一段），
-// 以及「翻页」「卷宗」之下的「分组」入口——进去是分组页：列出各组，点开一组可改名、择预设、定默认目录、看组里的对话、解散。
+// 侧栏有两处：历史里与「工」组一样按时间排（印文是「集」，组首「＋」在此组另起一段、「⋯」改名 / 设置 / 解散；对话拖到组上即移入、拖到组外即移出），
+// 以及「翻页」「卷宗」之下的「分组」入口——进去是分组页：列出各组，点开一组可改名、择预设、定默认目录、看组里的对话（可移出）、解散。
 // 组能带的两样都只管新起的对话：预设（提示词、工具、模型、权限一并换上）与默认目录（绑上即为行）。
 // 组里的对话置顶，只在组内排到最前，不跳出组去
 /** @type {string|null} 侧栏里正在改名的那一组 */
@@ -94,6 +94,27 @@ async function dissolveGroup(id) {
   renderHistory();
   renderGroupTags();
   if (view === "groups") renderGroupsPage();
+}
+// 组首「⋯」：改名、打开组的设置（分组页里这一组）、解散；在此组新建已有「＋」，不再列
+/** @param {string} id @param {Element} anchor */
+function openGroupMenu(id, anchor) {
+  if (document.querySelector(`.chip-pop[data-kind=group][data-for="${CSS.escape(id)}"]`)) return closeChipPop();
+  const pop = openFloatingPop(
+    anchor,
+    `<button type="button" data-group-act="rename">改名</button><button type="button" data-group-act="settings">设置</button><button type="button" class="danger" data-group-act="dissolve">解散</button>`,
+    { align: "right" }
+  );
+  pop.dataset.kind = "group";
+  pop.dataset.for = id;
+  pop.addEventListener("click", event => {
+    const button = /** @type {HTMLElement} */ (event.target).closest("[data-group-act]");
+    if (!button) return;
+    closeChipPop();
+    const act = button.dataset.groupAct;
+    if (act === "rename") startGroupRename(id);
+    else if (act === "settings") openGroupsPage(id);
+    else void dissolveGroup(id);
+  });
 }
 // 对话「⋯」里的「移入分组」：列出各组，另有新建一组与移出
 /** @param {Conversation} c @param {Element} anchor */
@@ -202,7 +223,7 @@ function groupDetailHtml(group) {
       ? `<div class="group-toc">${members
           .map(
             c =>
-              `<button type="button" class="group-row" data-group-chat="${escapeHtml(c.id)}">${c.pinned ? `<span class="group-pin" title="组内置顶" aria-label="组内置顶"></span>` : ""}<span class="group-row-name">${escapeHtml(c.title)}</span><span class="guide-lead-line" aria-hidden="true"></span><span class="group-row-gist">${escapeHtml(formatDay(c.updatedAt))}</span></button>`
+              `<div class="group-member"><button type="button" class="group-row" data-group-chat="${escapeHtml(c.id)}">${c.pinned ? `<span class="group-pin" title="组内置顶" aria-label="组内置顶"></span>` : ""}<span class="group-row-name">${escapeHtml(c.title)}</span><span class="guide-lead-line" aria-hidden="true"></span><span class="group-row-gist">${escapeHtml(formatDay(c.updatedAt))}</span></button><button type="button" class="group-member-out" data-group-out="${escapeHtml(c.id)}" title="移出此组，退回散列">移出</button></div>`
           )
           .join("")}</div>`
       : `<p class="card-note">对话「⋯」里的「移入分组」可把已有的对话移进来。</p>`
@@ -216,6 +237,11 @@ $("#groups").addEventListener("click", async event => {
     groupPageId = page.dataset.groupPage || null;
     renderGroupsPage();
     return void ($("#groups").scrollTop = 0);
+  }
+  const out = target.closest("[data-group-out]");
+  if (out) {
+    const c = store.conversations.find(item => item.id === out.dataset.groupOut);
+    return void (c && moveToGroup(c, ""));
   }
   const chat = target.closest("[data-group-chat]");
   if (chat) return openConversation(chat.dataset.groupChat);
@@ -278,7 +304,51 @@ $("#history").addEventListener("click", event => {
     return renderHistory();
   }
   const add = target.closest("[data-group-new]");
-  if (add) newChatInGroup(add.dataset.groupNew);
+  if (add) return newChatInGroup(add.dataset.groupNew);
+  const more = target.closest("[data-group-menu]");
+  if (more) {
+    event.stopPropagation();
+    openGroupMenu(more.dataset.groupMenu, more);
+  }
+});
+// 拖放：对话拖到一组上（组首或组里任一条）即移入那组，拖到组外即移出；拖着经过的组首提亮。只认侧栏里拖起的对话
+const CHAT_DRAG = "application/x-yan-chat";
+/** @param {DragEvent} event */
+const dropGroupOf = event => /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest?.(".history-repo-group.is-set"));
+const clearDropMarks = () => document.querySelectorAll("#history .drop-into").forEach(node => node.classList.remove("drop-into"));
+$("#history").addEventListener("dragstart", event => {
+  const item = /** @type {HTMLElement} */ (event.target).closest?.("[data-conversation][draggable]");
+  if (!item) return;
+  event.dataTransfer.setData(CHAT_DRAG, item.dataset.conversation);
+  event.dataTransfer.effectAllowed = "move";
+  item.classList.add("dragging");
+});
+$("#history").addEventListener("dragover", event => {
+  if (!Array.from(event.dataTransfer?.types || []).includes(CHAT_DRAG)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  const group = dropGroupOf(event);
+  if (group?.classList.contains("drop-into")) return;
+  clearDropMarks();
+  group?.classList.add("drop-into");
+});
+$("#history").addEventListener("dragleave", event => {
+  if (!$("#history").contains(/** @type {Node|null} */ (event.relatedTarget))) clearDropMarks();
+});
+$("#history").addEventListener("drop", event => {
+  const id = event.dataTransfer?.getData(CHAT_DRAG);
+  if (!id) return;
+  event.preventDefault();
+  clearDropMarks();
+  const c = store.conversations.find(item => item.id === id),
+    target = dropGroupOf(event)?.dataset.group || "";
+  if (!c || (c.groupId || "") === target) return;
+  moveToGroup(c, target);
+  toast(target ? `移入「${groupsList().find(group => group.id === target)?.name}」` : "已移出分组");
+});
+$("#history").addEventListener("dragend", () => {
+  clearDropMarks();
+  document.querySelectorAll("#history .dragging").forEach(node => node.classList.remove("dragging"));
 });
 $("#history").addEventListener("dblclick", event => {
   const toggle = /** @type {HTMLElement} */ (event.target).closest("[data-group-toggle]");
