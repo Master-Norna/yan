@@ -514,6 +514,10 @@ button:focus:not(:focus-visible) {
   .hint {
     display: none;
   }
+  /* 提示藏了，底栏就没了高度，靠它定位的计数会掉到窗口外半截；给它留出一行 */
+  .composer-foot:has(.context-gauge:not(.hidden)) {
+    height: 20px;
+  }
   .outline {
     display: none;
   }

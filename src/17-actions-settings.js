@@ -360,6 +360,7 @@ function bindSettingsEvents() {
       chatsBroken = false;
       chatHashes.clear();
       chatStamps.clear();
+      chatDiskStamps.clear();
       chatDiskWrites.clear();
       // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
       if (data.adopted) {

@@ -20,7 +20,7 @@ test("screenCommand：日常的开发指令放行——包管理、git、目录�
     "Get-Content src/a.js",
     "Get-ChildItem E:\\项目\\言\\src",
     "Get-ChildItem e:/项目/言/src/",
-    "curl http://127.0.0.1:8787/api/health",
+    "curl http://127.0.0.1:3000/api/health",
     "python .草稿/x/make.py",
     'node -e "console.log([...a])"',
     "echo shutdown now",
@@ -77,7 +77,7 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
     String.raw`Start-Process powershell -ArgumentList "-Command", "Remove-Item C:\Windows\x"`,
     String.raw`cmd /c "del C:\Windows\x"`,
     String.raw`Invoke-Command -ScriptBlock { Remove-Item C:\Windows\x }`,
-    String.raw`curl http://127.0.0.1:8787/x -o C:\Windows\yan-probe.txt`,
+    String.raw`curl http://127.0.0.1:3000/x -o C:\Windows\yan-probe.txt`,
     String.raw`Invoke-WebRequest http://127.0.0.1:1/x -OutFile C:\Windows\x`,
     String.raw`Start-Process node -RedirectStandardOutput C:\Users\me\log.txt`,
     String.raw`[IO.File]::WriteAllText("C:\Windows\x", "y")`,
@@ -301,4 +301,23 @@ test("screenLoose：审而后行与径行的沙箱只守系统——联网、目
     String.raw`Set-Content C:\Windows\x.txt x`
   ])
     assert.match(screenLoose(command), /沙箱拒绝/, command);
+});
+
+test("三档筛查都不放指令调言的本机桥接：它的接口不经请示与沙箱，调它就绕过了整套门禁", () => {
+  const port = Number(process.env.YAN_PORT || 8787);
+  for (const command of [
+    `curl -X POST http://127.0.0.1:${port}/api/work/run -d "{}"`,
+    `Invoke-RestMethod http://localhost:${port}/api/store`,
+    `node -e "fetch('http://[::1]:${port}/api/work/run')"`,
+    `wget 127.0.0.1:${port}/api/bootstrap`
+  ]) {
+    assert.match(screen(command), /沙箱拒绝：指令不调言的本机桥接/, command);
+    assert.match(screenLoose(command), /沙箱拒绝：指令不调言的本机桥接/, command);
+    assert.match(screenAutoReview(command), /审查拒绝：指令不调言的本机桥接/, command);
+  }
+  // 别的本机端口照常能测；端口只是前缀相同的不算
+  for (const command of ["curl http://127.0.0.1:3000/", `curl http://127.0.0.1:${port}0/`]) {
+    assert.equal(screen(command), null, command);
+    assert.equal(screenAutoReview(command), null, command);
+  }
 });

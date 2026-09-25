@@ -1,14 +1,15 @@
 // 言 · 桥接的对话目录：对话像卷宗一样落在本机的一个目录里，一段对话一个 JSON 文件，页面经桥接读、写、删
-// 由 server.js 装配：require("./server/chats.js")({ sendJson, readJson })
+// 由 server.js 装配：require("./server/chats.js")({ chatsHome })
 // 目录在存储根里（chatsHome()，默认 ~/.yan/对话，见 server/store.js）。文件名带标题便于翻看，末尾缀上按对话 id 算的短码来认身份：
 // 「关于滚动条·3f9a2c1b0e.json」；标题改了文件跟着改名，删对话就删文件。配置不在这里，在存储根的 配置.json
 "use strict";
+const { sendJson, readJson, jsonRoute, errorText, writeAtomic } = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
 
-module.exports = function createChats({ sendJson, readJson, chatsHome }) {
+module.exports = function createChats({ chatsHome }) {
   // 旧版的设置镜像：迁进来的目录里可能还躺着一份，读目录时跳过它
   const META_FILE = "设置.json",
     FILE_LIMIT = 256 * 1024 * 1024,
@@ -73,11 +74,6 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
     return fs.readdirSync(home).filter(name => name.endsWith(suffix));
   }
   // 先写临时文件再改名，写到一半断电也不会留下半个文件顶替原件
-  function writeAtomic(file, text) {
-    const temp = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`;
-    fs.writeFileSync(temp, text, "utf8");
-    fs.renameSync(temp, file);
-  }
   function readConversationFile(home, name) {
     const file = path.join(home, name);
     if (fs.statSync(file).size > FILE_LIMIT) throw Error("文件过大");
@@ -85,6 +81,25 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
     const conversation = data?.conversation;
     if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("不是言的对话文件");
     return { id: String(conversation.id), savedAt: Number(data.savedAt) || 0, file: name, conversation };
+  }
+  // 目录里这段对话现在那份的时间戳（没有就是 0）。只读文件头：写出的文件 savedAt 排在对话内容前面，不必为比一个数解析整段长对话
+  function savedAtOf(home, id) {
+    let latest = 0;
+    for (const name of filesFor(home, id))
+      try {
+        const file = path.join(home, name),
+          fd = fs.openSync(file, "r"),
+          head = Buffer.alloc(256);
+        let read = 0;
+        try {
+          read = fs.readSync(fd, head, 0, head.length, 0);
+        } finally {
+          fs.closeSync(fd);
+        }
+        const match = /^\{"言":"对话","version":\d+,"savedAt":(\d+)/.exec(head.toString("utf8", 0, read));
+        latest = Math.max(latest, match ? Number(match[1]) : readConversationFile(home, name).savedAt);
+      } catch {}
+    return latest;
   }
   // 整个目录读回来（给了 ids 就只读那几段：别处正在作答的，这边跟着看进度）。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
   async function handleLoad(req, res) {
@@ -119,15 +134,29 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
       sendJson(res, 500, { error: `对话目录不可用：${describe(error, home)}` });
     }
   }
-  async function handleSave(req, res) {
-    try {
-      const body = await readJson(req),
-        conversation = body.conversation;
+  const handleSave = jsonRoute(
+    async (body, req, res) => {
+      const conversation = body.conversation;
       if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("缺少对话内容");
       const home = ensureDir(body.root);
       const id = String(conversation.id),
         savedAt = Number(body.savedAt) || Date.now(),
         name = fileNameFor(id, conversation.title);
+      // 页面带着它上次与目录对齐时的时间戳（base）来写：目录里那份比它新，说明别处写过、这边手上的是旧的，
+      // 整份写下去就把别处写的盖掉了。不写，把那份交回去，由页面并起来再写。不带 base 的（导入、测试）照写
+      if (body.base !== undefined && savedAtOf(home, id) > (Number(body.base) || 0)) {
+        const current = filesFor(home, id)
+          .map(name => {
+            try {
+              return readConversationFile(home, name);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.savedAt - a.savedAt)[0];
+        if (current) return sendJson(res, 409, { error: "这段对话已在别处更新", item: current });
+      }
       // 删了以后又存：比删除晚的是真要它（接着在里头说话、从备份导回来），删除记录作废；比删除早的是迟到的旧保存，不写
       const tombstones = readTombstones(home);
       if (tombstones[id]) {
@@ -138,15 +167,13 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
       writeAtomic(path.join(home, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
       // 标题改过：旧名的文件不留
       for (const stale of filesFor(home, id)) if (stale !== name) fs.rmSync(path.join(home, stale), { force: true });
-      sendJson(res, 200, { file: name, savedAt });
-    } catch (error) {
-      sendJson(res, 400, { error: `对话未能落盘：${describe(error)}` });
-    }
-  }
-  async function handleDelete(req, res) {
-    try {
-      const body = await readJson(req),
-        id = String(body.id || "");
+      return { file: name, savedAt };
+    },
+    error => `对话未能落盘：${describe(error)}`
+  );
+  const handleDelete = jsonRoute(
+    async body => {
+      const id = String(body.id || "");
       if (!id) throw Error("缺少对话 id");
       const home = ensureDir(body.root);
       let removed = 0;
@@ -155,20 +182,18 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
         removed += 1;
       }
       writeTombstones(home, { ...readTombstones(home), [id]: Date.now() });
-      sendJson(res, 200, { removed });
-    } catch (error) {
-      sendJson(res, 400, { error: `对话未能删除：${describe(error)}` });
-    }
-  }
+      return { removed };
+    },
+    error => `对话未能删除：${describe(error)}`
+  );
   // 谁在作答：几个页面（两个浏览器、VS Code 与浏览器）同开同一个存储时，正在作答的页面每隔几秒来报一次它在跑哪几段对话，
   // 别的页面借同一次报到得知哪些对话正在别处作答——那几段只看不动、跟着进度，开页时也不当成中断。
   // 只记在内存里：桥接重启，作答的请求也断了，没什么可记；十五秒没来报到的（页面关了、崩了）就算松手
   const LEASE_MS = 15000,
     leases = new Map();
-  async function handleLease(req, res) {
-    try {
-      const body = await readJson(req),
-        owner = String(body.owner || "").slice(0, 80),
+  const handleLease = jsonRoute(
+    async body => {
+      const owner = String(body.owner || "").slice(0, 80),
         ids = (Array.isArray(body.ids) ? body.ids : []).map(String).slice(0, 200),
         now = Date.now();
       if (owner && ids.length) leases.set(owner, { ids, at: now });
@@ -178,11 +203,10 @@ module.exports = function createChats({ sendJson, readJson, chatsHome }) {
         if (now - lease.at > LEASE_MS) leases.delete(who);
         else if (who !== owner) for (const id of lease.ids) busy.add(id);
       }
-      sendJson(res, 200, { busy: [...busy] });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 200) });
-    }
-  }
+      return { busy: [...busy] };
+    },
+    error => errorText(error, 200)
+  );
   return {
     routes: {
       "POST /api/chats/load": handleLoad,

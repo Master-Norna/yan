@@ -1,23 +1,16 @@
 // 言 · 桥接的执事接口：工作目录、指令执行、文件读写与检索、目录选择对话框；卷宗目录的列、收、取、删
-// 由 server.js 装配：require("./server/work.js")({ sendJson, readJson, decodeEntities, fetchPublicResponse, readLimitedBytes })
+// 由 server.js 装配：require("./server/work.js")({ archiveHome, workHome, toolEnv })
 "use strict";
+const { sendJson, readJson, jsonRoute, errorText } = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn, spawnSync } = require("node:child_process");
 const vm = require("node:vm");
 const sandbox = require("./sandbox.js");
+const { decodeEntities, fetchPublicResponse, readLimitedBytes } = require("./web.js");
 
-module.exports = function createWork({
-  sendJson,
-  readJson,
-  decodeEntities,
-  fetchPublicResponse,
-  readLimitedBytes,
-  archiveHome,
-  workHome,
-  toolEnv
-}) {
+module.exports = function createWork({ archiveHome, workHome, toolEnv }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
   // 只做四件事：跑一条指令、写文件、读文件、列目录。路径默认限定在工作目录之内（页面放开后绝对路径可指向目录之外）；指令在工作目录里用本机 shell 执行。
   // 不做进程隔离——这是用户自己的机器，页面上每条指令都看得见，并按问而后行 / 审而后行 / 径行三档处理。
@@ -27,6 +20,8 @@ module.exports = function createWork({
   // 位置在存储根里（archiveHome()，见 server/store.js），随每个请求的 root 传来的也认。
   // 脚本与中间文件放在卷宗里的隐藏目录 .草稿/<对话id>/，页面不列它
   const SCRATCH_DIR = ".草稿";
+  // 各接口出错时回给页面的那句话：截到 300 字
+  const failed = error => errorText(error, 300);
   const WORK_SHELL = process.platform === "win32" ? "PowerShell" : "sh";
   const WORK_OUTPUT_LIMIT = 20000,
     WORK_FILE_LIMIT = 200000,
@@ -267,39 +262,29 @@ module.exports = function createWork({
       });
     });
   }
-  async function handleWorkPick(req, res) {
-    try {
-      const body = await readJson(req),
-        result = await pickFolder(String(body.current || "").trim());
-      if (result.error) throw Error(result.error);
-      sendJson(res, 200, { path: result.path });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
-  async function handleWorkPrepare(req, res) {
-    try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir);
-      const existing = await fs.promises.stat(workdir).catch(() => null);
-      if (existing && !existing.isDirectory()) throw Error(`路径已被文件占用，不是目录：${workdir}`);
-      if (!existing)
-        await fs.promises.mkdir(workdir, { recursive: true }).catch(error => {
-          throw Error(describeFsError(error, workdir));
-        });
-      const entries = await fs.promises.readdir(workdir).catch(() => []);
-      sendJson(res, 200, {
-        workdir,
-        platform: process.platform,
-        shell: WORK_SHELL,
-        home: workHome(),
-        entries: entries.length,
-        created: !existing
+  const handleWorkPick = jsonRoute(async body => {
+    const result = await pickFolder(String(body.current || "").trim());
+    if (result.error) throw Error(result.error);
+    return { path: result.path };
+  }, failed);
+  const handleWorkPrepare = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir);
+    const existing = await fs.promises.stat(workdir).catch(() => null);
+    if (existing && !existing.isDirectory()) throw Error(`路径已被文件占用，不是目录：${workdir}`);
+    if (!existing)
+      await fs.promises.mkdir(workdir, { recursive: true }).catch(error => {
+        throw Error(describeFsError(error, workdir));
       });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
+    const entries = await fs.promises.readdir(workdir).catch(() => []);
+    return {
+      workdir,
+      platform: process.platform,
+      shell: WORK_SHELL,
+      home: workHome(),
+      entries: entries.length,
+      created: !existing
+    };
+  }, failed);
   // PowerShell 脚本一律走 -EncodedCommand（UTF-16LE base64）：引号、换行、$ 符号都不经过命令行解析
   function encodePowerShell(script) {
     return Buffer.from(script, "utf16le").toString("base64");
@@ -543,7 +528,7 @@ module.exports = function createWork({
       if (result.aborted) console.log(`${new Date().toLocaleTimeString("zh-CN", { hour12: false })}   已中止：${command.slice(0, 80)}`);
       if (!res.writableEnded && !res.destroyed) sendJson(res, 200, { ...result, durationMs: Date.now() - started });
     } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+      sendJson(res, 400, { error: failed(error) });
     }
   }
   // ---- 后台指令：开发服务器、监听构建这类不会自己结束的，放到后台跑，先回头几秒的输出与一个编号，之后用 check_command 取新输出或结束它。
@@ -619,104 +604,84 @@ module.exports = function createWork({
           else child.kill("SIGKILL");
         } catch {}
   });
-  async function handleWorkCheck(req, res) {
-    try {
-      const body = await readJson(req),
-        job = backgroundJobs.get(String(body.id || ""));
-      if (!job) throw Error(`没有编号为 ${body.id} 的后台指令（桥接重启过的话，之前的后台指令已随之结束）`);
-      if (body.stop === true && job.exitCode === null) {
-        killTree(job.child);
-        await new Promise(resolve => {
-          const timer = setTimeout(resolve, 3000);
-          job.child.once("close", () => {
-            clearTimeout(timer);
-            resolve(null);
-          });
+  const handleWorkCheck = jsonRoute(async body => {
+    const job = backgroundJobs.get(String(body.id || ""));
+    if (!job) throw Error(`没有编号为 ${body.id} 的后台指令（桥接重启过的话，之前的后台指令已随之结束）`);
+    if (body.stop === true && job.exitCode === null) {
+      killTree(job.child);
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, 3000);
+        job.child.once("close", () => {
+          clearTimeout(timer);
+          resolve(null);
         });
-      }
-      sendJson(res, 200, await backgroundReport(job, clampNumber(Number(body.wait) * 1000, 0, 0, 120000)));
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+      });
     }
-  }
+    return await backgroundReport(job, clampNumber(Number(body.wait) * 1000, 0, 0, 120000));
+  }, failed);
   // 问而后行：发指令前先问一声严的沙箱会不会拦——会拦的照样请示，请示条上写明原因，用户批了这一条就出沙箱跑
-  async function handleWorkScreen(req, res) {
+  const handleWorkScreen = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir);
+    return { why: sandbox.screenCommand(String(body.command || ""), workdir) };
+  }, failed);
+  const handleWorkWrite = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir),
+      file = await targetOf(workdir, body, { write: true });
+    if (file === workdir) throw Error("请给出文件名");
+    const content = String(body.content ?? "");
+    if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
+    const release = await lockFile(workdir, file);
     try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir);
-      sendJson(res, 200, { why: sandbox.screenCommand(String(body.command || ""), workdir) });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
-  async function handleWorkWrite(req, res) {
-    try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir),
-        file = await targetOf(workdir, body, { write: true });
-      if (file === workdir) throw Error("请给出文件名");
-      const content = String(body.content ?? "");
-      if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
-      const release = await lockFile(workdir, file);
-      try {
-        const existing = await fs.promises.stat(file).catch(() => null);
-        if (existing?.isDirectory()) throw Error(`${body.path} 是目录，不能作为文件写入`);
-        await fs.promises.mkdir(path.dirname(file), { recursive: true }).catch(error => {
-          throw Error(describeFsError(error, path.dirname(String(body.path))));
-        });
-        const existed = !!existing,
-          previous = existed ? await fs.promises.readFile(file).catch(() => null) : null;
-        const previousText = previous ? decodeText(previous)?.text : "",
-          previousLines = previousText ? countLines(previousText) : 0;
-        await fs.promises.writeFile(file, content, "utf8").catch(error => {
-          throw Error(describeFsError(error, String(body.path)));
-        });
-        sendJson(res, 200, {
-          path: shownPath(workdir, file),
-          bytes: Buffer.byteLength(content),
-          lines: countLines(content),
-          existed,
-          previousLines
-        });
-      } finally {
-        release();
-      }
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
-  async function handleWorkRead(req, res) {
-    try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir),
-        file = await targetOf(workdir, body);
-      const stat = await fs.promises.stat(file).catch(() => null);
-      if (!stat) throw Error(`文件不存在：${body.path}`);
-      if (stat.isDirectory()) throw Error(`${body.path} 是目录，请改用 list_files`);
-      if (stat.size > 8 * 1024 * 1024) throw Error("文件超过 8 MB，不予读取");
-      const buffer = await fs.promises.readFile(file).catch(error => {
+      const existing = await fs.promises.stat(file).catch(() => null);
+      if (existing?.isDirectory()) throw Error(`${body.path} 是目录，不能作为文件写入`);
+      await fs.promises.mkdir(path.dirname(file), { recursive: true }).catch(error => {
+        throw Error(describeFsError(error, path.dirname(String(body.path))));
+      });
+      const existed = !!existing,
+        previous = existed ? await fs.promises.readFile(file).catch(() => null) : null;
+      const previousText = previous ? decodeText(previous)?.text : "",
+        previousLines = previousText ? countLines(previousText) : 0;
+      await fs.promises.writeFile(file, content, "utf8").catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });
-      const decoded = decodeText(buffer);
-      if (!decoded) throw Error("二进制文件，不予读取");
-      const lines = decoded.text.split(/\r?\n/),
-        offset = Math.floor(clampNumber(body.offset, 1, 1, Math.max(1, lines.length))),
-        limit = Math.floor(clampNumber(body.limit, 400, 1, 2000));
-      const slice = lines.slice(offset - 1, offset - 1 + limit);
-      let text = slice.map((line, i) => `${String(offset + i).padStart(4)}| ${line}`).join("\n");
-      if (text.length > WORK_FILE_LIMIT) text = `${text.slice(0, WORK_FILE_LIMIT)}\n…（内容过长已截断，请缩小 limit）`;
-      sendJson(res, 200, {
+      return {
         path: shownPath(workdir, file),
-        totalLines: lines.length,
-        offset,
-        shown: slice.length,
-        text,
-        encoding: decoded.encoding
-      });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+        bytes: Buffer.byteLength(content),
+        lines: countLines(content),
+        existed,
+        previousLines
+      };
+    } finally {
+      release();
     }
-  }
+  }, failed);
+  const handleWorkRead = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir),
+      file = await targetOf(workdir, body);
+    const stat = await fs.promises.stat(file).catch(() => null);
+    if (!stat) throw Error(`文件不存在：${body.path}`);
+    if (stat.isDirectory()) throw Error(`${body.path} 是目录，请改用 list_files`);
+    if (stat.size > 8 * 1024 * 1024) throw Error("文件超过 8 MB，不予读取");
+    const buffer = await fs.promises.readFile(file).catch(error => {
+      throw Error(describeFsError(error, String(body.path)));
+    });
+    const decoded = decodeText(buffer);
+    if (!decoded) throw Error("二进制文件，不予读取");
+    const lines = decoded.text.split(/\r?\n/),
+      offset = Math.floor(clampNumber(body.offset, 1, 1, Math.max(1, lines.length))),
+      limit = Math.floor(clampNumber(body.limit, 400, 1, 2000));
+    const slice = lines.slice(offset - 1, offset - 1 + limit);
+    let text = slice.map((line, i) => `${String(offset + i).padStart(4)}| ${line}`).join("\n");
+    if (text.length > WORK_FILE_LIMIT) text = `${text.slice(0, WORK_FILE_LIMIT)}\n…（内容过长已截断，请缩小 limit）`;
+    return {
+      path: shownPath(workdir, file),
+      totalLines: lines.length,
+      offset,
+      shown: slice.length,
+      text,
+      encoding: decoded.encoding
+    };
+  }, failed);
   const WORK_SKIP = new Set([
     "node_modules",
     ".git",
@@ -768,74 +733,62 @@ module.exports = function createWork({
       }
     }
   }
-  async function handleWorkList(req, res) {
-    try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir),
-        dir = await targetOf(workdir, body);
-      const stat = await fs.promises.stat(dir).catch(() => null);
-      if (!stat?.isDirectory()) throw Error(`目录不存在：${body.path || "."}`);
-      const filter = globToRegExp(body.pattern),
-        out = [];
-      await listTree(dir, dir, Math.floor(clampNumber(body.depth, filter ? 8 : 2, 1, 8)), out, filter);
-      sendJson(res, 200, { path: shownPath(workdir, dir) || ".", entries: out, truncated: out.length >= WORK_LIST_LIMIT });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
+  const handleWorkList = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir),
+      dir = await targetOf(workdir, body);
+    const stat = await fs.promises.stat(dir).catch(() => null);
+    if (!stat?.isDirectory()) throw Error(`目录不存在：${body.path || "."}`);
+    const filter = globToRegExp(body.pattern),
+      out = [];
+    await listTree(dir, dir, Math.floor(clampNumber(body.depth, filter ? 8 : 2, 1, 8)), out, filter);
+    return { path: shownPath(workdir, dir) || ".", entries: out, truncated: out.length >= WORK_LIST_LIMIT };
+  }, failed);
   // ---- edit_file：精确文本替换。old 必须在文件里唯一出现（或显式 replace_all）；文件是 CRLF 时把片段的换行也换成 CRLF 再匹配
-  async function handleWorkEdit(req, res) {
+  const handleWorkEdit = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir),
+      file = await targetOf(workdir, body, { write: true });
+    const oldText = String(body.old ?? ""),
+      newText = String(body.new ?? ""),
+      replaceAll = body.replaceAll === true;
+    if (file === workdir) throw Error("请给出文件名");
+    if (!oldText) throw Error("old 不能为空；新建文件请用 write_file");
+    if (oldText === newText) throw Error("old 与 new 相同，无需修改");
+    const release = await lockFile(workdir, file);
     try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir),
-        file = await targetOf(workdir, body, { write: true });
-      const oldText = String(body.old ?? ""),
-        newText = String(body.new ?? ""),
-        replaceAll = body.replaceAll === true;
-      if (file === workdir) throw Error("请给出文件名");
-      if (!oldText) throw Error("old 不能为空；新建文件请用 write_file");
-      if (oldText === newText) throw Error("old 与 new 相同，无需修改");
-      const release = await lockFile(workdir, file);
-      try {
-        const stat = await fs.promises.stat(file).catch(() => null);
-        if (!stat) throw Error(`文件不存在：${body.path}`);
-        if (stat.isDirectory()) throw Error(`${body.path} 是目录`);
-        if (stat.size > 8 * 1024 * 1024) throw Error("文件超过 8 MB，不予编辑");
-        const decoded = decodeText(await fs.promises.readFile(file));
-        if (!decoded) throw Error("二进制文件，不予编辑");
-        if (decoded.encoding === "gbk")
-          throw Error(
-            "文件是 GBK 编码，edit_file 只改 UTF-8 / UTF-16 的文件；请用 write_file 整体重写（会存成 UTF-8），或用指令转码后再改"
-          );
-        const source = decoded.text,
-          crlf = source.includes("\r\n") && !oldText.includes("\r\n");
-        const needle = crlf ? oldText.replace(/\r?\n/g, "\r\n") : oldText,
-          replacement = crlf ? newText.replace(/\r?\n/g, "\r\n") : newText;
-        let count = 0;
-        for (let at = source.indexOf(needle); at >= 0; at = source.indexOf(needle, at + needle.length)) count += 1;
-        if (!count) throw Error("未找到要替换的文本：old 必须与文件内容逐字一致（含缩进与空格），请先 read_file 核对");
-        if (count > 1 && !replaceAll) throw Error(`要替换的文本出现了 ${count} 处，请提供更长的唯一片段，或设置 replace_all`);
-        const result = replaceAll ? source.split(needle).join(replacement) : source.replace(needle, () => replacement);
-        // 按原来的编码写回：UTF-16 的还是 UTF-16，带 BOM 的还带 BOM
-        const output = encodeText(result, decoded.encoding);
-        await fs.promises.writeFile(file, output).catch(error => {
-          throw Error(describeFsError(error, String(body.path)));
-        });
-        const line = source.slice(0, source.indexOf(needle)).split(/\r?\n/).length;
-        sendJson(res, 200, {
-          path: shownPath(workdir, file),
-          replaced: replaceAll ? count : 1,
-          line,
-          lines: countLines(result),
-          bytes: output.length
-        });
-      } finally {
-        release();
-      }
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+      const stat = await fs.promises.stat(file).catch(() => null);
+      if (!stat) throw Error(`文件不存在：${body.path}`);
+      if (stat.isDirectory()) throw Error(`${body.path} 是目录`);
+      if (stat.size > 8 * 1024 * 1024) throw Error("文件超过 8 MB，不予编辑");
+      const decoded = decodeText(await fs.promises.readFile(file));
+      if (!decoded) throw Error("二进制文件，不予编辑");
+      if (decoded.encoding === "gbk")
+        throw Error("文件是 GBK 编码，edit_file 只改 UTF-8 / UTF-16 的文件；请用 write_file 整体重写（会存成 UTF-8），或用指令转码后再改");
+      const source = decoded.text,
+        crlf = source.includes("\r\n") && !oldText.includes("\r\n");
+      const needle = crlf ? oldText.replace(/\r?\n/g, "\r\n") : oldText,
+        replacement = crlf ? newText.replace(/\r?\n/g, "\r\n") : newText;
+      let count = 0;
+      for (let at = source.indexOf(needle); at >= 0; at = source.indexOf(needle, at + needle.length)) count += 1;
+      if (!count) throw Error("未找到要替换的文本：old 必须与文件内容逐字一致（含缩进与空格），请先 read_file 核对");
+      if (count > 1 && !replaceAll) throw Error(`要替换的文本出现了 ${count} 处，请提供更长的唯一片段，或设置 replace_all`);
+      const result = replaceAll ? source.split(needle).join(replacement) : source.replace(needle, () => replacement);
+      // 按原来的编码写回：UTF-16 的还是 UTF-16，带 BOM 的还带 BOM
+      const output = encodeText(result, decoded.encoding);
+      await fs.promises.writeFile(file, output).catch(error => {
+        throw Error(describeFsError(error, String(body.path)));
+      });
+      const line = source.slice(0, source.indexOf(needle)).split(/\r?\n/).length;
+      return {
+        path: shownPath(workdir, file),
+        replaced: replaceAll ? count : 1,
+        line,
+        lines: countLines(result),
+        bytes: output.length
+      };
+    } finally {
+      release();
     }
-  }
+  }, failed);
   // ---- search_files：在工作目录里按正则或原文逐行检索；跳过 node_modules 等目录与二进制、超大文件
   // 正则是模型写的：写成 (a+)+$ 这类会灾难性回溯的，一行就能把桥接卡死（单线程，所有对话一起停）。
   // 每个文件的逐行匹配放进 vm 跑、限两秒，超时即中止这次检索，把原因回给模型
@@ -864,144 +817,134 @@ module.exports = function createWork({
   // ---- download_file：把网上的文件存进工作目录。地址门禁与 fetch_page 同一套（不许本机与内网）；path 给目录或省略时按网址里的文件名存，
   // 已有同名文件就加 (2)；最多 64 MB
   const DOWNLOAD_LIMIT = 64 * 1024 * 1024;
-  async function handleWorkDownload(req, res) {
+  const handleWorkDownload = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir);
+    let url;
     try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir);
-      let url;
-      try {
-        url = new URL(String(body.url || "").trim());
-      } catch {
-        throw Error("网址无效");
-      }
-      const given = String(body.path || "").trim(),
-        fromUrl =
-          (() => {
-            try {
-              return decodeURIComponent(path.posix.basename(url.pathname));
-            } catch {
-              return path.posix.basename(url.pathname);
-            }
-          })() || "下载文件";
-      let target = await targetOf(workdir, { ...body, path: given || "." }, { write: true });
-      const stat = await fs.promises.stat(target).catch(() => null);
-      if (!given || /[\\/]$/.test(given) || stat?.isDirectory()) {
-        // 网址末段解码后可能是「../」「..」或带 Windows 不许的字符：取最后一段、去掉怪字符，. 与 .. 一律换成默认名，不能借它落到目录外
-        const base = path
-          .basename(fromUrl)
-          .replace(/[<>:"|?*\u0000-\u001f]/g, "_")
-          .trim();
-        target = path.join(target, base && base !== "." && base !== ".." ? base : "下载文件");
-        if (strictBox(body)) {
-          const why = sandbox.screenPath(relPath(workdir, target), { write: true });
-          if (why) throw Error(why);
-        }
-      }
-      const started = Date.now(),
-        { response } = await fetchPublicResponse(url.href, { timeout: 120000, allowLoopback: true });
-      if (!response.ok) {
-        await response.body?.cancel().catch(() => {});
-        throw Error(`对方返回 ${response.status}`);
-      }
-      const length = Number(response.headers.get("content-length") || 0);
-      if (length > DOWNLOAD_LIMIT) {
-        await response.body?.cancel().catch(() => {});
-        throw Error(`文件超过 ${DOWNLOAD_LIMIT / 1048576} MB`);
-      }
-      const { buffer, truncated } = await readLimitedBytes(response, DOWNLOAD_LIMIT);
-      if (truncated) throw Error(`文件超过 ${DOWNLOAD_LIMIT / 1048576} MB`);
-      const release = await lockFile(workdir, target);
-      try {
-        await fs.promises.mkdir(path.dirname(target), { recursive: true });
-        const extension = path.extname(target),
-          stem = target.slice(0, target.length - extension.length);
-        let file = target;
-        for (let n = 2; fs.existsSync(file); n++) file = `${stem} (${n})${extension}`;
-        await fs.promises.writeFile(file, buffer).catch(error => {
-          throw Error(describeFsError(error, shownPath(workdir, file)));
-        });
-        sendJson(res, 200, {
-          path: shownPath(workdir, file),
-          bytes: buffer.length,
-          type: (response.headers.get("content-type") || "").split(";")[0].trim(),
-          durationMs: Date.now() - started
-        });
-      } finally {
-        release();
-      }
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+      url = new URL(String(body.url || "").trim());
+    } catch {
+      throw Error("网址无效");
     }
-  }
-  async function handleWorkSearch(req, res) {
-    try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir),
-        dir = await targetOf(workdir, body),
-        boxed = strictBox(body);
-      const query = String(body.query || "");
-      if (!query.trim()) throw Error("query 不能为空");
-      let regex;
-      try {
-        regex = new RegExp(
-          body.literal === true ? query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : query,
-          body.caseSensitive === true ? "" : "i"
-        );
-      } catch (error) {
-        throw Error(`正则无效：${error.message}`);
-      }
-      const filter = globToRegExp(body.glob),
-        limit = Math.floor(clampNumber(body.limit, 60, 1, SEARCH_MATCH_LIMIT));
-      const stat = await fs.promises.stat(dir).catch(() => null);
-      if (!stat?.isDirectory()) throw Error(`目录不存在：${body.path || "."}`);
-      const matches = [];
-      let scanned = 0,
-        filesHit = new Set(),
-        truncated = false;
-      const walk = async current => {
-        if (truncated) return;
-        const entries = await fs.promises.readdir(current, { withFileTypes: true }).catch(() => []);
-        entries.sort((a, b) => a.name.localeCompare(b.name));
-        for (const entry of entries) {
-          if (truncated) return;
-          const full = path.join(current, entry.name),
-            rel = relPath(dir, full);
-          if (entry.isSymbolicLink()) continue; // 不顺着链接读：链接指向目录外时，检索会把外面的内容带进来
-          if (entry.isDirectory()) {
-            if (!WORK_SKIP.has(entry.name)) await walk(full);
-            continue;
+    const given = String(body.path || "").trim(),
+      fromUrl =
+        (() => {
+          try {
+            return decodeURIComponent(path.posix.basename(url.pathname));
+          } catch {
+            return path.posix.basename(url.pathname);
           }
-          if (filter && !filter.test(rel)) continue;
-          if (boxed && sandbox.screenPath(rel)) continue; // 沙箱不借检索带出机密文件
-          if (++scanned > SEARCH_FILE_LIMIT) {
+        })() || "下载文件";
+    let target = await targetOf(workdir, { ...body, path: given || "." }, { write: true });
+    const stat = await fs.promises.stat(target).catch(() => null);
+    if (!given || /[\\/]$/.test(given) || stat?.isDirectory()) {
+      // 网址末段解码后可能是「../」「..」或带 Windows 不许的字符：取最后一段、去掉怪字符，. 与 .. 一律换成默认名，不能借它落到目录外
+      const base = path
+        .basename(fromUrl)
+        .replace(/[<>:"|?*\u0000-\u001f]/g, "_")
+        .trim();
+      target = path.join(target, base && base !== "." && base !== ".." ? base : "下载文件");
+      if (strictBox(body)) {
+        const why = sandbox.screenPath(relPath(workdir, target), { write: true });
+        if (why) throw Error(why);
+      }
+    }
+    const started = Date.now(),
+      { response } = await fetchPublicResponse(url.href, { timeout: 120000, allowLoopback: true });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw Error(`对方返回 ${response.status}`);
+    }
+    const length = Number(response.headers.get("content-length") || 0);
+    if (length > DOWNLOAD_LIMIT) {
+      await response.body?.cancel().catch(() => {});
+      throw Error(`文件超过 ${DOWNLOAD_LIMIT / 1048576} MB`);
+    }
+    const { buffer, truncated } = await readLimitedBytes(response, DOWNLOAD_LIMIT);
+    if (truncated) throw Error(`文件超过 ${DOWNLOAD_LIMIT / 1048576} MB`);
+    const release = await lockFile(workdir, target);
+    try {
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      const extension = path.extname(target),
+        stem = target.slice(0, target.length - extension.length);
+      let file = target;
+      for (let n = 2; fs.existsSync(file); n++) file = `${stem} (${n})${extension}`;
+      await fs.promises.writeFile(file, buffer).catch(error => {
+        throw Error(describeFsError(error, shownPath(workdir, file)));
+      });
+      return {
+        path: shownPath(workdir, file),
+        bytes: buffer.length,
+        type: (response.headers.get("content-type") || "").split(";")[0].trim(),
+        durationMs: Date.now() - started
+      };
+    } finally {
+      release();
+    }
+  }, failed);
+  const handleWorkSearch = jsonRoute(async body => {
+    const workdir = resolveWorkdir(body.workdir),
+      dir = await targetOf(workdir, body),
+      boxed = strictBox(body);
+    const query = String(body.query || "");
+    if (!query.trim()) throw Error("query 不能为空");
+    let regex;
+    try {
+      regex = new RegExp(
+        body.literal === true ? query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : query,
+        body.caseSensitive === true ? "" : "i"
+      );
+    } catch (error) {
+      throw Error(`正则无效：${error.message}`);
+    }
+    const filter = globToRegExp(body.glob),
+      limit = Math.floor(clampNumber(body.limit, 60, 1, SEARCH_MATCH_LIMIT));
+    const stat = await fs.promises.stat(dir).catch(() => null);
+    if (!stat?.isDirectory()) throw Error(`目录不存在：${body.path || "."}`);
+    const matches = [];
+    let scanned = 0,
+      filesHit = new Set(),
+      truncated = false;
+    const walk = async current => {
+      if (truncated) return;
+      const entries = await fs.promises.readdir(current, { withFileTypes: true }).catch(() => []);
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        if (truncated) return;
+        const full = path.join(current, entry.name),
+          rel = relPath(dir, full);
+        if (entry.isSymbolicLink()) continue; // 不顺着链接读：链接指向目录外时，检索会把外面的内容带进来
+        if (entry.isDirectory()) {
+          if (!WORK_SKIP.has(entry.name)) await walk(full);
+          continue;
+        }
+        if (filter && !filter.test(rel)) continue;
+        if (boxed && sandbox.screenPath(rel)) continue; // 沙箱不借检索带出机密文件
+        if (++scanned > SEARCH_FILE_LIMIT) {
+          truncated = true;
+          return;
+        }
+        const size = await fs.promises
+          .stat(full)
+          .then(s => s.size)
+          .catch(() => 0);
+        if (!size || size > SEARCH_FILE_BYTES) continue;
+        const buffer = await fs.promises.readFile(full).catch(() => null),
+          decoded = buffer && decodeText(buffer);
+        if (!decoded) continue;
+        const lines = decoded.text.split(/\r?\n/);
+        for (const i of matchLines(regex, lines, rel)) {
+          filesHit.add(rel);
+          matches.push({ file: shownPath(workdir, full), line: i + 1, text: lines[i].trim().slice(0, 240) });
+          if (matches.length >= limit) {
             truncated = true;
             return;
           }
-          const size = await fs.promises
-            .stat(full)
-            .then(s => s.size)
-            .catch(() => 0);
-          if (!size || size > SEARCH_FILE_BYTES) continue;
-          const buffer = await fs.promises.readFile(full).catch(() => null),
-            decoded = buffer && decodeText(buffer);
-          if (!decoded) continue;
-          const lines = decoded.text.split(/\r?\n/);
-          for (const i of matchLines(regex, lines, rel)) {
-            filesHit.add(rel);
-            matches.push({ file: shownPath(workdir, full), line: i + 1, text: lines[i].trim().slice(0, 240) });
-            if (matches.length >= limit) {
-              truncated = true;
-              return;
-            }
-          }
         }
-      };
-      await walk(dir);
-      sendJson(res, 200, { path: shownPath(workdir, dir) || ".", matches, files: filesHit.size, scanned, truncated });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
+      }
+    };
+    await walk(dir);
+    return { path: shownPath(workdir, dir) || ".", matches, files: filesHit.size, scanned, truncated };
+  }, failed);
   // ---- 卷宗目录：页面上的卷宗即这一目录的视图。列出全部文件（含子目录里的），收入 / 取出 / 移出都限定在目录内 ----
   const ARCHIVE_LIST_LIMIT = 600,
     ARCHIVE_FILE_LIMIT = 256 * 1024 * 1024;
@@ -1085,38 +1028,28 @@ module.exports = function createWork({
     await walk(base);
     return { count: dirs.filter(d => d.isDirectory()).length, files, bytes };
   }
-  async function handleArchiveList(req, res) {
-    try {
-      const body = await readJson(req),
-        root = await archiveRoot(body.root);
-      const out = [];
-      await walkArchive(root, root, out);
-      out.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
-      sendJson(res, 200, {
-        archive: root,
-        entries: out,
-        truncated: out.length >= ARCHIVE_LIST_LIMIT,
-        scratch: await measureScratch(root)
-      });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
+  const handleArchiveList = jsonRoute(async body => {
+    const root = await archiveRoot(body.root);
+    const out = [];
+    await walkArchive(root, root, out);
+    out.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+    return {
+      archive: root,
+      entries: out,
+      truncated: out.length >= ARCHIVE_LIST_LIMIT,
+      scratch: await measureScratch(root)
+    };
+  }, failed);
   // 清草稿：给了 id 只清那段对话的，否则整个 .草稿 目录
-  async function handleArchiveClean(req, res) {
-    try {
-      const body = await readJson(req),
-        root = await archiveRoot(body.root),
-        id = String(body.id || "").replace(/[^A-Za-z0-9_-]/g, "");
-      const target = id ? path.join(root, SCRATCH_DIR, id) : path.join(root, SCRATCH_DIR);
-      await fs.promises.rm(target, { recursive: true, force: true, maxRetries: 2 }).catch(error => {
-        throw Error(describeFsError(error, SCRATCH_DIR));
-      });
-      sendJson(res, 200, { cleaned: id || SCRATCH_DIR });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
+  const handleArchiveClean = jsonRoute(async body => {
+    const root = await archiveRoot(body.root),
+      id = String(body.id || "").replace(/[^A-Za-z0-9_-]/g, "");
+    const target = id ? path.join(root, SCRATCH_DIR, id) : path.join(root, SCRATCH_DIR);
+    await fs.promises.rm(target, { recursive: true, force: true, maxRetries: 2 }).catch(error => {
+      throw Error(describeFsError(error, SCRATCH_DIR));
+    });
+    return { cleaned: id || SCRATCH_DIR };
+  }, failed);
   // 收入：页面拖进来的文件以 data: URL 送来；同名文件不覆盖，另取「名 (2).扩展名」
   async function handleArchivePut(req, res) {
     try {
@@ -1143,7 +1076,7 @@ module.exports = function createWork({
         modifiedAt: stat.mtime.toISOString()
       });
     } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
+      sendJson(res, 400, { error: failed(error) });
     }
   }
   // 取出：GET /api/archive/file?path=…（&root=… 指定卷宗根），页面用它做缩略图、置于案上与下载；?download=1 时让浏览器另存
@@ -1167,25 +1100,20 @@ module.exports = function createWork({
       if (req.method === "HEAD") return res.end();
       fs.createReadStream(file).pipe(res);
     } catch (error) {
-      sendJson(res, 404, { error: String(error.message || error).slice(0, 300) });
+      sendJson(res, 404, { error: failed(error) });
     }
   }
-  async function handleArchiveRemove(req, res) {
-    try {
-      const body = await readJson(req),
-        root = await archiveRoot(body.root),
-        file = archivePath(root, body.path);
-      await assertNoEscapingLink(root, file);
-      const stat = await fs.promises.stat(file).catch(() => null);
-      if (!stat?.isFile()) throw Error("文件不存在");
-      await fs.promises.unlink(file).catch(error => {
-        throw Error(describeFsError(error, String(body.path)));
-      });
-      sendJson(res, 200, { removed: relPath(root, file) });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 300) });
-    }
-  }
+  const handleArchiveRemove = jsonRoute(async body => {
+    const root = await archiveRoot(body.root),
+      file = archivePath(root, body.path);
+    await assertNoEscapingLink(root, file);
+    const stat = await fs.promises.stat(file).catch(() => null);
+    if (!stat?.isFile()) throw Error("文件不存在");
+    await fs.promises.unlink(file).catch(error => {
+      throw Error(describeFsError(error, String(body.path)));
+    });
+    return { removed: relPath(root, file) };
+  }, failed);
 
   return {
     workHome,

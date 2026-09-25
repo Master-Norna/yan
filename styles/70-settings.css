@@ -454,6 +454,8 @@
   border-radius: 8px;
   outline: none;
   background: var(--paper-2);
+  /* 填进去的值用正文墨色：不然放在淡色的说明标签里会随它变淡，与占位提示分不出来 */
+  color: var(--ink);
   font-size: 12px;
 }
 .field:focus {

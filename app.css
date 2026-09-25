@@ -2455,6 +2455,10 @@ sup.note-ref.active {
   border-left: 1px solid var(--line);
   color: var(--ink-2);
 }
+/* 引文里末一段的段后距留在竖线里，线就比字长出一截 */
+.markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
 .markdown code {
   padding: 0.1em 0.35em;
   border-radius: 4px;
@@ -2473,11 +2477,15 @@ sup.note-ref.active {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--paper-2);
+  /* 字号与行高定在 pre 上：只定在里头的 code 上时，每行仍被 pre 按正文字号撑出的行高（约 1.85 × 正文）拉开，代码稀得像隔行 */
+  font-size: 85%;
+  line-height: 1.65;
 }
 .markdown pre code {
   padding: 0;
   background: none;
-  line-height: 1.65;
+  font-size: 1em;
+  line-height: inherit;
 }
 .markdown a {
   color: var(--accent);
@@ -4678,6 +4686,8 @@ textarea::placeholder,
   border-radius: 8px;
   outline: none;
   background: var(--paper-2);
+  /* 填进去的值用正文墨色：不然放在淡色的说明标签里会随它变淡，与占位提示分不出来 */
+  color: var(--ink);
   font-size: 12px;
 }
 .field:focus {
@@ -7225,6 +7235,10 @@ button:focus:not(:focus-visible) {
   /* 窄窗里居中的快捷键提示会与右下角的上下文计数撞在一起；窄了就只留计数 */
   .hint {
     display: none;
+  }
+  /* 提示藏了，底栏就没了高度，靠它定位的计数会掉到窗口外半截；给它留出一行 */
+  .composer-foot:has(.context-gauge:not(.hidden)) {
+    height: 20px;
   }
   .outline {
     display: none;

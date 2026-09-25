@@ -4,11 +4,12 @@
 // 配置照通行的 mcpServers 写法：本机进程给 command / args / cwd / env，远端给 url / headers（旧式 SSE 另写 type: "sse"）。
 // 连接按名字复用，连接相关的几项变了就重连；进程随桥接退出一并结束
 "use strict";
+const { sendJson, readJson, jsonRoute, errorText } = require("../http.js");
 const { McpClient } = require("./client.js");
 
 const CONNECTION_KEYS = ["command", "args", "cwd", "env", "url", "headers", "type", "transport"];
 
-module.exports = function createMcp({ sendJson, readJson, version, toolEnv }) {
+module.exports = function createMcp({ version, toolEnv }) {
   /** @type {Map<string, { key: string, client: McpClient, ready: Promise<McpClient> }>} */
   const clients = new Map();
   const keyOf = config => JSON.stringify(CONNECTION_KEYS.map(key => config[key]));
@@ -34,9 +35,8 @@ module.exports = function createMcp({ sendJson, readJson, version, toolEnv }) {
     clients.delete(name);
   }
 
-  async function handleList(req, res) {
-    try {
-      const { servers = {}, restart = [] } = await readJson(req);
+  const handleList = jsonRoute(
+    async ({ servers = {}, restart = [] }) => {
       for (const name of [...clients.keys()]) if (!servers[name] || restart.includes(name)) drop(name);
       const names = Object.keys(servers);
       const settled = await Promise.allSettled(names.map(name => ensure(name, servers[name]).ready));
@@ -58,11 +58,10 @@ module.exports = function createMcp({ sendJson, readJson, version, toolEnv }) {
           }))
         };
       });
-      sendJson(res, 200, { servers: out });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error) });
-    }
-  }
+      return { servers: out };
+    },
+    error => errorText(error, Infinity)
+  );
 
   async function handleCall(req, res) {
     const abort = new AbortController();
