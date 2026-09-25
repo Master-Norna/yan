@@ -3399,7 +3399,9 @@ function bindEvents() {
     } else if (!down && !autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false;
     syncJumpBottom(gap);
     syncOutline();
+    syncRunningHead();
   });
+  $("#runningHead").addEventListener("click", () => $("#chatScroll").scrollTo({ top: 0, behavior: "smooth" }));
   // 跟着的时候，内容不论因何长高（工具输出、图表成图、图片载入、块的开合）都贴着底：不只靠流式的每一帧
   if (typeof ResizeObserver === "function")
     new ResizeObserver(() => {
@@ -4127,6 +4129,7 @@ function syncChatScrollGrabber() {
 function syncDocumentTitle() {
   const c = currentConversation();
   document.title = view === "library" ? "卷宗 · 言" : view === "groups" ? "分组 · 言" : c ? `${c.title} · 言` : "言";
+  syncRunningHead(); // 标题改了（手改、拟题），书眉跟着换
 }
 
   // ---- 07-render.js ----
@@ -4368,7 +4371,8 @@ function renderHistory() {
         .filter(([, items]) => items.length)
         .map(
           ([label, items]) =>
-            `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : node.kind === "set" ? setHtml(node) : item(node.c))).join("")}</div>`
+            // 「分组」一段不立小标：入口里已有「分组」，组又有「集」印认得出，再写一遍便重了
+            `<div class="history-group">${label === "分组" ? "" : `<div class="history-label">${label}</div>`}${items.map(node => (node.kind === "repo" ? repoHtml(node) : node.kind === "set" ? setHtml(node) : item(node.c))).join("")}</div>`
         )
         .join("") || `<div class="history-empty">${query ? "没有匹配的对话" : "尚无旧墨"}</div>`;
     const input = $("#history .history-rename");
@@ -4411,6 +4415,18 @@ function restoreScrollPosition(snapshot) {
 function renderChatMeta(c) {
   $("#chatMeta").innerHTML =
     `${escapeHtml(formatDay(c.createdAt))} · ${escapeHtml(chineseNumber(c.messages.filter(m => m.role === "user").length, true))}问${visibleThreads(c).length ? ` · <button class="chat-meta-notes" type="button" data-open-notes title="打开旁注">旁注 ${visibleThreads(c).length}</button>` : ""}${isWork(c) ? ` · <button type="button" class="chat-meta-path" data-workdir-bind title="工作目录">${escapeHtml(c.workdir || "")}</button>` : c.ended ? "" : ` · <button type="button" class="chat-meta-bind" data-workdir-bind title="绑定工作目录，此后指令与改动落于其中">绑定目录</button>`}${c.messages.some(m => m.role === "assistant" && m.status === "complete") ? ` · <button type="button" class="chat-meta-bind" data-export-md title="${archiveOnline() ? "以 Markdown 存入卷宗" : "以 Markdown 下载"}">${archiveOnline() ? "存入卷宗" : "存为 Markdown"}</button>` : ""}`;
+  syncRunningHead();
+  requestAnimationFrame(syncRunningHead);
+}
+// 书眉：标题滚出视口后才显出题名与问数；换对话、改标题、一答收尾都随 renderChatMeta 刷新
+function syncRunningHead() {
+  const c = currentConversation(),
+    head = $("#runningHead");
+  if (!c) return head.classList.remove("shown");
+  head.querySelector(".running-head-title").textContent = c.title;
+  const notes = visibleThreads(c).length;
+  head.querySelector(".running-head-meta").textContent = `${chineseNumber(c.messages.filter(m => m.role === "user").length, true)}问${notes ? ` · 旁注 ${notes}` : ""}`;
+  head.classList.toggle("shown", $("#chatTitle").getBoundingClientRect().bottom < $("#chatScroll").getBoundingClientRect().top + 4);
 }
 function renderConversation(shouldScroll = false) {
   const c = currentConversation();
@@ -12341,6 +12357,8 @@ function syncOutline() {
       const article = host.querySelector(`#messages [data-message="${CSS.escape(item.dataset.target)}"]`);
       if (article && article.getBoundingClientRect().top <= line) current = item;
     }
+    // 滚到了底便是最后一问：末一轮短问短答时，它的顶未必越得过阅读线
+    if (host.scrollHeight - host.scrollTop - host.clientHeight < 8) current = rail.querySelector(".outline-item:last-child");
     if (!current) current = rail.querySelector(".outline-item");
     rail.querySelectorAll(".outline-item.active").forEach(item => item !== current && item.classList.remove("active"));
     current?.classList.add("active");
