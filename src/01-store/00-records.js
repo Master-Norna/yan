@@ -1,6 +1,6 @@
 // 言 · 本地存储 · 记录：调桥接的口子、结构迁移、各类数据的规整
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
-// 调本机桥接：存储、卷宗、工具都走这一个口子；桥接回的错误是一句话，原样抛出
+// 调本机桥接：存储、卷宗、工具都走这一个口子；桥接回的错误是一句话，原样抛出（状态码与回来的内容挂在 status / data 上）
 async function bridge(path, payload, signal) {
   if (apiBase === null) throw Error("本机工具需要本机桥接");
   const response = await fetch(`${apiBase}${path}`, {
@@ -10,7 +10,7 @@ async function bridge(path, payload, signal) {
     signal
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Error(data.error || `请求失败（${response.status}）`);
+  if (!response.ok) throw Object.assign(Error(data.error || `请求失败（${response.status}）`), { status: response.status, data });
   return data;
 }
 

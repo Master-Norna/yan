@@ -392,6 +392,8 @@ let chatsBroken = false,
 const dirtyChatIds = new Set(),
   chatHashes = new Map(),
   chatStamps = new Map(),
+  // 每段对话上次与目录对齐时目录里那份的时间戳：写的时候带去，目录里那份若更新，桥接就不写（见 mergeConversation）
+  chatDiskStamps = new Map(),
   pendingChatWrites = new Map(),
   activeChatWrites = new Map(),
   chatWritePromises = new Map(),
@@ -421,7 +423,7 @@ let imageViewerAttachmentId = null,
   // ---- 01-store/00-records.js ----
 // 言 · 本地存储 · 记录：调桥接的口子、结构迁移、各类数据的规整
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
-// 调本机桥接：存储、卷宗、工具都走这一个口子；桥接回的错误是一句话，原样抛出
+// 调本机桥接：存储、卷宗、工具都走这一个口子；桥接回的错误是一句话，原样抛出（状态码与回来的内容挂在 status / data 上）
 async function bridge(path, payload, signal) {
   if (apiBase === null) throw Error("本机工具需要本机桥接");
   const response = await fetch(`${apiBase}${path}`, {
@@ -431,7 +433,7 @@ async function bridge(path, payload, signal) {
     signal
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Error(data.error || `请求失败（${response.status}）`);
+  if (!response.ok) throw Object.assign(Error(data.error || `请求失败（${response.status}）`), { status: response.status, data });
   return data;
 }
 
@@ -1022,6 +1024,10 @@ function chatsDir() {
 function markDirty(id) {
   if (id) dirtyChatIds.add(id);
 }
+// 这边正在写它：作答、拟题、压缩中
+function busyHere(id) {
+  return conversationRunning(id) || titlingIds.has(id) || compactingIds.has(id);
+}
 function conversationsToSave() {
   const ids = new Set(dirtyChatIds);
   if (currentId) ids.add(currentId);
@@ -1059,8 +1065,7 @@ function drainChatWrites() {
 async function writeConversation(id) {
   while (pendingChatWrites.has(id) && !deletedChatIds.has(id)) {
     // 先等、后 stringify。生成中三秒一份，收尾与普通编辑最多等一秒多；离页另有同步入 IndexedDB 的兜底，不靠这里抢时间。
-    const interval =
-        conversationRunning(id) || titlingIds.has(id) || compactingIds.has(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
+    const interval = busyHere(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
       wait = unloading ? 0 : interval - (performance.now() - (chatDiskWrites.get(id) || -interval));
     if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
     if (deletedChatIds.has(id)) break;
@@ -1084,9 +1089,10 @@ async function writeConversation(id) {
       try {
         await bridge(
           "/api/chats/save",
-          { root: chatsDir(), savedAt: pending.savedAt, conversation: JSON.parse(pending.json) },
+          { root: chatsDir(), savedAt: pending.savedAt, base: chatDiskStamps.get(id) || 0, conversation: JSON.parse(pending.json) },
           AbortSignal.timeout(60000)
         );
+        chatDiskStamps.set(id, pending.savedAt);
         chatSaveWarned = false;
         if (!deletedChatIds.has(id)) {
           persisted = true;
@@ -1095,6 +1101,12 @@ async function writeConversation(id) {
             await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
         }
       } catch (error) {
+        // 目录里那份比这边上次见过的新（别处写过）：两份并起来，下一轮带着新的时间戳再写
+        if (error.status === 409 && error.data?.item && !deletedChatIds.has(id)) {
+          activeChatWrites.delete(id);
+          catchUpConversation(error.data.item);
+          continue;
+        }
         // 迟到的旧保存撞上了别处的删除：不暂存、不复活，这边也跟着拿掉
         if (/已在别处删除/.test(String(error.message))) {
           activeChatWrites.delete(id);
@@ -1152,6 +1164,7 @@ async function deleteConversationStorage(id) {
   } finally {
     chatHashes.delete(id);
     chatStamps.delete(id);
+    chatDiskStamps.delete(id);
     deletedChatIds.delete(id);
   }
 }
@@ -1161,8 +1174,82 @@ function forgetConversation(id) {
   dirtyChatIds.delete(id);
   chatHashes.delete(id);
   chatStamps.delete(id);
+  chatDiskStamps.delete(id);
   delete store.drafts?.[id];
   void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+}
+// 目录里有一份比这边新的（别处写过）。这边手上的已落过盘、之后没再动过，直接换上；
+// 否则（这边改过、正写着、或只暂存在浏览器里）两份并起来再写回去，谁写的都不丢。返回换上的那份；quiet：调用方自己重画
+function catchUpConversation(item, { quiet = false } = {}) {
+  const index = store.conversations.findIndex(c => c.id === item.id);
+  if (index < 0) return null;
+  const c = store.conversations[index],
+    theirs = normalizeConversation(item.conversation),
+    theirJson = JSON.stringify(theirs),
+    stamp = chatStamps.get(c.id) || 0,
+    clean = chatHashes.get(c.id) === hashText(JSON.stringify(c)) && chatDiskStamps.get(c.id) === stamp && !busyHere(c.id),
+    next = clean ? theirs : mergeConversation(c, theirs);
+  store.conversations[index] = next;
+  chatDiskStamps.set(c.id, item.savedAt);
+  chatStamps.set(c.id, Math.max(stamp, item.savedAt));
+  if (JSON.stringify(next) === theirJson) {
+    chatStamps.set(c.id, item.savedAt);
+    chatHashes.set(c.id, hashText(theirJson));
+  } else {
+    // 并出来的与目录里的不一样：要写回去（chatHashes 不动，下一趟写时指纹对不上，自然会写）
+    // 别处正作答的等它松手再写（脏标记留着，见 flushConversations）
+    markDirty(c.id);
+    if (!runningElsewhere(c.id)) pendingChatWrites.set(c.id, { force: true });
+    // 这边有、目录里没有的内容接了进去，才值得说一声（只差个未读标记之类的不算）
+    const grew = ["messages", "forks", "threads"].some(key => next[key].length > theirs[key].length);
+    if (grew && !mergeNoticed) toast("这段对话在另一处也写过，两边的内容已并在一起");
+    mergeNoticed ||= grew;
+  }
+  if (!quiet) {
+    if (c.id === currentId && view === "chat") renderConversation(false);
+    renderHistory();
+  }
+  return next;
+}
+let mergeNoticed = false;
+// 两份并一份：以目录里那份为底，这边有、那边没有的消息（分支、旁注同理）接在后面，宁可多留一条也不丢。
+// 两边都有的同一条：这边正写着这段就取这边的（原地改，作答中的引用不断），否则取那边的——那边的更新
+function mergeConversation(c, theirs) {
+  const mine = busyHere(c.id),
+    union = (a = [], b = []) => {
+      const own = new Map(a.filter(x => x?.id).map(x => [x.id, x])),
+        seen = new Set(b.map(x => x?.id));
+      return [...b.map(x => (mine && own.get(x?.id)) || x), ...a.filter(x => !seen.has(x?.id))];
+    },
+    messages = union(c.messages, theirs.messages),
+    forks = union(c.forks, theirs.forks),
+    threads = union(c.threads, theirs.threads);
+  if (mine) {
+    c.messages.splice(0, c.messages.length, ...messages);
+    c.forks = forks;
+    c.threads = threads;
+    return c;
+  }
+  // 未读只是这一处的提示：开着看的这段不因为并了一份又亮起来
+  return {
+    ...theirs,
+    messages,
+    forks,
+    threads,
+    ...(c.unread !== theirs.unread ? { unread: c.unread } : {}),
+    ...(messages.length > theirs.messages.length && c.updatedAt > theirs.updatedAt ? { updatedAt: c.updatedAt } : {})
+  };
+}
+// 跟上目录里的这几段：页面切回前台时看的那段。只读这几个文件，便宜
+async function catchUpFromDisk(ids) {
+  if (!chatsOnline() || !ids.length) return;
+  try {
+    const data = await bridge("/api/chats/load", { root: chatsDir(), ids }, AbortSignal.timeout(8000));
+    for (const item of data.items || [])
+      if (item.savedAt > (chatDiskStamps.get(item.id) || 0) && !runningElsewhere(item.id) && !deletedChatIds.has(item.id))
+        catchUpConversation(item);
+    drainChatWrites();
+  } catch {}
 }
 // 全量巡检：每段都算一遍指纹，变了的写下去。低频跑（定时、页面要关时），哪处改了没标脏也兜得住
 function sweepConversations() {
@@ -1312,7 +1399,7 @@ async function syncChatsWithDisk() {
           stamp = chatStamps.get(c.id) || 0,
           hash = hashText(JSON.stringify(c)),
           unsaved = chatHashes.get(c.id) !== hash,
-          busy = conversationRunning(c.id) || titlingIds.has(c.id) || compactingIds.has(c.id);
+          busy = busyHere(c.id);
         if (!item) {
           // 别处删了、这边又没再动过：跟着删，不推回去让它复活；这边删后又说过话的，照推（桥接那头按时间认）
           if (Number(gone[c.id]) > stamp && !unsaved && !busy) {
@@ -1324,15 +1411,16 @@ async function syncChatsWithDisk() {
           push.add(c.id);
           return c;
         }
-        if (item.savedAt > stamp && !unsaved && !busy) {
-          const next = normalizeConversation(item.conversation);
-          chatStamps.set(c.id, item.savedAt);
-          chatHashes.set(c.id, hashText(JSON.stringify(next)));
-          settled.add(c.id);
+        // 目录里的更新：这边没动过的换上，动过的并起来（见 catchUpConversation）
+        if (item.savedAt > stamp) {
+          const next = catchUpConversation(item, { quiet: true });
+          (chatHashes.get(c.id) === hashText(JSON.stringify(next)) ? settled : push).add(c.id);
           changed = true;
           if (c.id === currentId) currentReplaced = true;
           return next;
         }
+        // 这边的不比目录里的旧：以这边的为准写过去（带上目录里那份的时间戳，免得被当成旧份拒掉）
+        chatDiskStamps.set(c.id, item.savedAt);
         if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
         else settled.add(c.id);
         return c;
@@ -1344,6 +1432,7 @@ async function syncChatsWithDisk() {
       if (!known.has(item.id)) {
         const c = normalizeConversation(item.conversation);
         chatStamps.set(c.id, item.savedAt);
+        chatDiskStamps.set(c.id, item.savedAt);
         chatHashes.set(c.id, hashText(JSON.stringify(c)));
         store.conversations.push(c);
         settled.add(c.id);
@@ -1420,13 +1509,10 @@ async function followConversations(ids, released) {
   const data = await bridge("/api/chats/load", { root: chatsDir(), ids }, AbortSignal.timeout(20000));
   let current = false;
   for (const item of data.items || []) {
-    const index = store.conversations.findIndex(c => c.id === item.id);
-    if (index < 0 || item.savedAt <= (chatStamps.get(item.id) || 0) || conversationRunning(item.id)) continue;
-    const next = normalizeConversation(item.conversation);
-    store.conversations[index] = next;
-    chatStamps.set(next.id, item.savedAt);
-    chatHashes.set(next.id, hashText(JSON.stringify(next)));
-    if (next.id === currentId) current = true;
+    if (!store.conversations.some(c => c.id === item.id) || item.savedAt <= (chatStamps.get(item.id) || 0) || conversationRunning(item.id))
+      continue;
+    catchUpConversation(item, { quiet: true });
+    if (item.id === currentId) current = true;
   }
   for (const id of released) {
     const c = store.conversations.find(item => item.id === id);
@@ -2745,7 +2831,11 @@ async function boot() {
   setInterval(() => void syncLeases(), 3000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) sweepConversations();
-    else void refreshConfigFromDisk();
+    else {
+      void refreshConfigFromDisk();
+      // 藏着时报到被浏览器节流，别处在这段里答完了也未必察觉：回到前台先跟上看着的这段，再往里说话
+      if (currentId) void catchUpFromDisk([currentId]);
+    }
   });
 }
 
@@ -3611,6 +3701,7 @@ function bindEvents() {
     if (event.persisted) {
       unloading = false;
       void refreshConfigFromDisk();
+      if (currentId) void catchUpFromDisk([currentId]);
       void refreshEnv();
     }
   });
@@ -4109,6 +4200,8 @@ function openConversation(id) {
     // 新对话照最近看的这段用的预设，与模型一样
     store.settings.presetId = presetOf(c)?.id || "";
     c.profileId && selectProfile(c.profileId, false);
+    // 别处可能在这段里写过而这边没察觉（报到有间隔）：读一下目录里那份，新就跟上
+    void catchUpFromDisk([c.id]);
   }
   render();
   if (isMobile()) toggleSidebar(true);
@@ -11709,6 +11802,7 @@ function bindSettingsEvents() {
       chatsBroken = false;
       chatHashes.clear();
       chatStamps.clear();
+      chatDiskStamps.clear();
       chatDiskWrites.clear();
       // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
       if (data.adopted) {

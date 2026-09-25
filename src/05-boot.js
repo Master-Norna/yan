@@ -127,7 +127,11 @@ async function boot() {
   setInterval(() => void syncLeases(), 3000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) sweepConversations();
-    else void refreshConfigFromDisk();
+    else {
+      void refreshConfigFromDisk();
+      // 藏着时报到被浏览器节流，别处在这段里答完了也未必察觉：回到前台先跟上看着的这段，再往里说话
+      if (currentId) void catchUpFromDisk([currentId]);
+    }
   });
 }
 
@@ -993,6 +997,7 @@ function bindEvents() {
     if (event.persisted) {
       unloading = false;
       void refreshConfigFromDisk();
+      if (currentId) void catchUpFromDisk([currentId]);
       void refreshEnv();
     }
   });

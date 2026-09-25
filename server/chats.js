@@ -82,6 +82,25 @@ module.exports = function createChats({ chatsHome }) {
     if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("不是言的对话文件");
     return { id: String(conversation.id), savedAt: Number(data.savedAt) || 0, file: name, conversation };
   }
+  // 目录里这段对话现在那份的时间戳（没有就是 0）。只读文件头：写出的文件 savedAt 排在对话内容前面，不必为比一个数解析整段长对话
+  function savedAtOf(home, id) {
+    let latest = 0;
+    for (const name of filesFor(home, id))
+      try {
+        const file = path.join(home, name),
+          fd = fs.openSync(file, "r"),
+          head = Buffer.alloc(256);
+        let read = 0;
+        try {
+          read = fs.readSync(fd, head, 0, head.length, 0);
+        } finally {
+          fs.closeSync(fd);
+        }
+        const match = /^\{"言":"对话","version":\d+,"savedAt":(\d+)/.exec(head.toString("utf8", 0, read));
+        latest = Math.max(latest, match ? Number(match[1]) : readConversationFile(home, name).savedAt);
+      } catch {}
+    return latest;
+  }
   // 整个目录读回来（给了 ids 就只读那几段：别处正在作答的，这边跟着看进度）。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
   async function handleLoad(req, res) {
     let home = chatsHome();
@@ -123,6 +142,21 @@ module.exports = function createChats({ chatsHome }) {
       const id = String(conversation.id),
         savedAt = Number(body.savedAt) || Date.now(),
         name = fileNameFor(id, conversation.title);
+      // 页面带着它上次与目录对齐时的时间戳（base）来写：目录里那份比它新，说明别处写过、这边手上的是旧的，
+      // 整份写下去就把别处写的盖掉了。不写，把那份交回去，由页面并起来再写。不带 base 的（导入、测试）照写
+      if (body.base !== undefined && savedAtOf(home, id) > (Number(body.base) || 0)) {
+        const current = filesFor(home, id)
+          .map(name => {
+            try {
+              return readConversationFile(home, name);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.savedAt - a.savedAt)[0];
+        if (current) return sendJson(res, 409, { error: "这段对话已在别处更新", item: current });
+      }
       // 删了以后又存：比删除晚的是真要它（接着在里头说话、从备份导回来），删除记录作废；比删除早的是迟到的旧保存，不写
       const tombstones = readTombstones(home);
       if (tombstones[id]) {

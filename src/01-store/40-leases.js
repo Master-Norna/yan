@@ -46,13 +46,10 @@ async function followConversations(ids, released) {
   const data = await bridge("/api/chats/load", { root: chatsDir(), ids }, AbortSignal.timeout(20000));
   let current = false;
   for (const item of data.items || []) {
-    const index = store.conversations.findIndex(c => c.id === item.id);
-    if (index < 0 || item.savedAt <= (chatStamps.get(item.id) || 0) || conversationRunning(item.id)) continue;
-    const next = normalizeConversation(item.conversation);
-    store.conversations[index] = next;
-    chatStamps.set(next.id, item.savedAt);
-    chatHashes.set(next.id, hashText(JSON.stringify(next)));
-    if (next.id === currentId) current = true;
+    if (!store.conversations.some(c => c.id === item.id) || item.savedAt <= (chatStamps.get(item.id) || 0) || conversationRunning(item.id))
+      continue;
+    catchUpConversation(item, { quiet: true });
+    if (item.id === currentId) current = true;
   }
   for (const id of released) {
     const c = store.conversations.find(item => item.id === id);

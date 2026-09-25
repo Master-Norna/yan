@@ -412,6 +412,8 @@ function openConversation(id) {
     // 新对话照最近看的这段用的预设，与模型一样
     store.settings.presetId = presetOf(c)?.id || "";
     c.profileId && selectProfile(c.profileId, false);
+    // 别处可能在这段里写过而这边没察觉（报到有间隔）：读一下目录里那份，新就跟上
+    void catchUpFromDisk([c.id]);
   }
   render();
   if (isMobile()) toggleSidebar(true);
