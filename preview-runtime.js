@@ -396,5 +396,9 @@ self.postMessage({ type: "loaded" });
     } else if (event.data.type === "yan-preview-theme") applyTheme(event.data.theme);
     else if (event.data.type === "yan-compute") compute(event.data);
   });
+  // 焦点在这块里时，Esc 到不了父页：转告一声，父页若正全屏着这一块就收起（没全屏时父页不理，块里自己的 Esc 照常）
+  addEventListener("keydown", event => {
+    if (event.key === "Escape") parent.postMessage({ type: "yan-preview-escape", id: previewId }, "*");
+  });
   parent.postMessage({ type: "yan-preview-ready", id: previewId }, "*");
 })();

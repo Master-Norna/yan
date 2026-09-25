@@ -44,4 +44,20 @@ check(
   (await evalJs(`[...document.querySelectorAll(".html-app")].map(a => a.dataset.appId).join()`)) === ids
 );
 await shot("viz-dark.png");
+// 全屏：滚到中段再展开，那一块铺满窗口（四边各留 16px），「收起」在视野里，点了能退出
+await evalJs(`document.querySelector("#chatScroll").scrollTop = 400; [...document.querySelectorAll(".html-app [data-work-expand]")].at(-1).click(); true`);
+await sleep(300);
+// 滚动区的顶端渐隐（mask）会把里面的东西按滚动区的框裁掉：全屏时必须撤掉，不然只剩滚动区那一块、「收起」被裁在外面
+const full = await evalJs(`(a => { const r = a.getBoundingClientRect(); return { rect: [r.left, r.top, innerWidth - r.right, innerHeight - r.bottom].map(Math.round), mask: getComputedStyle(document.querySelector("#chatScroll")).maskImage } })(document.querySelector(".work-expanded"))`);
+check("fullscreen covers the window, unclipped by the scroll fade", full.rect.every(v => v === 16) && full.mask === "none", JSON.stringify(full));
+await evalJs(`document.querySelector(".work-expanded [data-work-expand]").click(); true`);
+await sleep(200);
+check("收起 leaves fullscreen", await evalJs(`!document.querySelector(".work-expanded") && !document.documentElement.classList.contains("work-mode")`));
+// 焦点在可视化里时按 Esc：iframe 转告父页，照样退出全屏
+await evalJs(`[...document.querySelectorAll(".html-app [data-work-expand]")].at(-1).click(); document.querySelector(".work-expanded iframe").focus(); true`);
+await sleep(200);
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+await waitFor(`!document.querySelector(".work-expanded")`, 3000).catch(() => {});
+check("Esc inside the visualization leaves fullscreen", await evalJs(`!document.querySelector(".work-expanded")`));
 close();

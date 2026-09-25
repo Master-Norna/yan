@@ -637,6 +637,7 @@ body {
    浏览器照样把滚轮截在里面不往外传，鼠标停在上面页面就滚不动，像那一块失灵了。去掉；正文那侧的 chat-scroll 照旧 */
 .work-mode .chat-scroll {
   overflow: hidden;
+  mask-image: none; /* 带着 mask，全屏的那块只能铺在滚动区里、随滚动偏走，「收起」也出了视野 */
 }
 .history-state {
   position: absolute;
