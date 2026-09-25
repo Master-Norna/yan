@@ -286,6 +286,9 @@ async function assertPublicUrl(url, { allowLoopback = false } = {}) {
   if (!addresses.length || hit) throw Error(`网址解析到了本机或内网地址${hit ? `（${hit.address}）` : ""}`);
 }
 // 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读
+// 桥接自己发出的请求都带这个头；桥接收到带它的 /api/ 请求一律拒绝。http_request / download_file 能打本机，
+// 不设这一道，模型就能借它们调桥接自己的执事接口，绕过请示与沙箱在沙箱外跑指令（无 Origin、Host 也对得上）
+const OUTBOUND_MARK = "x-yan-outbound";
 async function fetchPublicResponse(url, { method = "GET", headers = {}, body = null, timeout = 30000, allowLoopback = false } = {}) {
   let current = new URL(url);
   const signal = AbortSignal.timeout(timeout);
@@ -293,7 +296,7 @@ async function fetchPublicResponse(url, { method = "GET", headers = {}, body = n
     await assertPublicUrl(current, { allowLoopback });
     const response = await fetch(current, {
       method,
-      headers: { "User-Agent": BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7", ...headers },
+      headers: { "User-Agent": BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7", ...headers, [OUTBOUND_MARK]: "1" },
       body: body && !["GET", "HEAD"].includes(method) ? body : undefined,
       redirect: "manual",
       signal
@@ -354,7 +357,8 @@ async function handleHttp(req, res) {
     if (!HTTP_METHODS.has(method)) throw Error(`不支持的方法 ${method}`);
     const headers = {};
     for (const [name, value] of Object.entries(body.headers && typeof body.headers === "object" ? body.headers : {}))
-      if (/^[\w-]+$/.test(name) && !/^(host|content-length|connection|cookie)$/i.test(name)) headers[name] = String(value).slice(0, 4000);
+      if (/^[\w-]+$/.test(name) && !/^(host|content-length|connection|cookie|x-yan-outbound)$/i.test(name))
+        headers[name] = String(value).slice(0, 4000);
     const payload =
       body.body === undefined || body.body === null ? null : typeof body.body === "string" ? body.body : JSON.stringify(body.body);
     if (payload && Buffer.byteLength(payload) > HTTP_BODY_LIMIT) throw Error("请求体超过 1 MB");
@@ -868,6 +872,8 @@ const server = http.createServer(async (req, res) => {
       return res.end("只受理发往本机桥接地址的请求");
     }
     const urlPath = new URL(req.url, `http://${HOST}`).pathname;
+    if (urlPath.startsWith("/api/") && req.headers[OUTBOUND_MARK] !== undefined)
+      return sendJson(res, 403, { error: "桥接不受理自己转出的请求" });
     if (urlPath.startsWith("/api/") && req.headers.origin && !allowedOrigin(req.headers.origin))
       return sendJson(res, 403, { error: "此页面无权调用本机桥接" });
     if (TRUSTED_PATHS.has(urlPath) && !trustedWorkRequest(req))

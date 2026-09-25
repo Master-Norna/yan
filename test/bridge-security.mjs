@@ -621,6 +621,47 @@ check("screen: a harmless command passes", r.status === 200 && r.data.why === nu
     String(r.data?.stdout || JSON.stringify(r.data)).slice(-80)
   );
 }
+// ---- 桥接不受理自己转出的请求：http_request / download_file 能打本机，不能借它们调桥接的执事接口、绕过请示与沙箱 ----
+{
+  const marker = `${WORK}/via-http.txt`,
+    command = win ? `Set-Content -Path "${marker}" -Value x` : `echo x > "${marker}"`;
+  for (const target of [`${BASE}/api/work/run`, `http://localhost:${PORT}/api/work/run`]) {
+    r = await post("/api/http", { url: target, method: "POST", body: { workdir, command } });
+    check(
+      `http_request cannot reach the bridge's own API (${target})`,
+      r.status === 200 && r.data.status === 403 && !existsSync(marker),
+      JSON.stringify(r.data).slice(0, 200)
+    );
+  }
+  r = await post("/api/http", {
+    url: `${BASE}/api/work/run`,
+    method: "POST",
+    headers: { "X-Yan-Outbound": "" },
+    body: { workdir, command }
+  });
+  check(
+    "the outbound mark cannot be cleared by caller headers",
+    r.status === 200 && r.data.status === 403 && !existsSync(marker),
+    JSON.stringify(r.data).slice(0, 200)
+  );
+  r = await post("/api/work/run", {
+    workdir,
+    command: `curl -s -X POST http://127.0.0.1:${PORT}/api/work/run`,
+    sandbox: true,
+    permission: "review"
+  });
+  check("sandboxed command cannot call the bridge", r.status === 400 && /本机桥接/.test(r.data?.error || ""), JSON.stringify(r.data));
+  // 本机别的服务照常能调：这正是 http_request 放行本机的用处
+  const other = http.createServer((req, res) => res.end("local-ok")).listen(0, "127.0.0.1");
+  await new Promise(resolve => other.once("listening", resolve));
+  r = await post("/api/http", { url: `http://127.0.0.1:${other.address().port}/`, method: "GET" });
+  check(
+    "http_request still reaches other local services",
+    r.status === 200 && r.data.text === "local-ok",
+    JSON.stringify(r.data).slice(0, 200)
+  );
+  other.close();
+}
 rmSync(ARCHIVE, { recursive: true, force: true });
 rmSync(WORK, { recursive: true, force: true });
 rmSync(OUTSIDE, { recursive: true, force: true });

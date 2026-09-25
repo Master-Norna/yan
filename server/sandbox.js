@@ -54,9 +54,16 @@ const FORBIDDEN = [
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
 const HOME_SYSTEM_PATH =
   /\$env:(USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)\b|%(USERPROFILE|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)%|\$HOME\b|(^|[\s"'=])~([\\/]|$)/i;
-// 外联工具：只放行目标全在本机的（curl http://127.0.0.1:8787 这样测本地服务是常事）
+// 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）
 const NET_TOOLS = /(^|[\s;&|(])(curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(\.exe)?(\s|$)/i;
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
+// 桥接自己的端口：本机别的服务随便测，唯独桥接不行——它的执事接口不带请示与沙箱，指令借 curl、脚本调它就整个绕过去了。
+// 严宽两档都拦（径行开着沙箱时也拦：径行放开的是这段对话的指令，不是桥接的门禁）；静态筛查，脚本里拼出来的地址管不到
+const BRIDGE_PORT = Number(process.env.YAN_PORT || 8787);
+function callsBridge(text) {
+  return new RegExp(String.raw`(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])\s*:\s*${BRIDGE_PORT}(?!\d)`, "i").test(text);
+}
+const BRIDGE_WHY = "指令不调言的本机桥接（它的接口不经请示与沙箱）；要读写文件、跑指令直接用相应的工具";
 // 文件工具会用 screenPath 拦机密文件；指令通道也得拦显式点名，否则 `Get-Content .env` 能从 shell 绕过去。
 // 这里只认完整的路径片段，避免把 `dotnet user-secrets list`、`env.d.ts` 这类正常参数误判成文件。
 const SECRET_PATH_IN_COMMAND =
@@ -183,6 +190,7 @@ function screenWritePaths(text, workdir, win, prefix) {
  */
 function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const text = String(command || "");
+  if (callsBridge(text)) return `沙箱拒绝：${BRIDGE_WHY}`;
   const win = platform === "win32";
   for (const [pattern, why] of FORBIDDEN) if (pattern.test(text)) return `沙箱拒绝：${why}`;
   if (SECRET_PATH_IN_COMMAND.test(text)) return "沙箱拒绝：指令不读写 .env、密钥或凭据文件；需要普通配置时请改用不含机密的文件";
@@ -206,6 +214,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
  */
 function screenAutoReview(command) {
   const text = String(command || "");
+  if (callsBridge(text)) return `审查拒绝：${BRIDGE_WHY}`;
   for (const [pattern, why] of REVIEW_FORBIDDEN) if (pattern.test(text)) return `审查拒绝：${why}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
   if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
@@ -220,6 +229,7 @@ function screenAutoReview(command) {
  */
 function screenLoose(command) {
   const text = String(command || "");
+  if (callsBridge(text)) return `沙箱拒绝：${BRIDGE_WHY}`;
   for (const [pattern, why] of REVIEW_FORBIDDEN) if (pattern.test(text)) return `沙箱拒绝：${why.replace(/^不代为/, "不")}`;
   if (ALIASING.test(text)) return "沙箱拒绝：不定义别名，直接写出指令";
   if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
