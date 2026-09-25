@@ -273,6 +273,24 @@ test("repairEchartsOption：系列指到不存在的轴、轴指到不存在的�
   const pie = repairEchartsOption({ series: { data: [{ name: "a", value: 1 }] } });
   assert.equal(pie.series[0].type, "pie");
   assert.equal(pie.series[0].xAxisIndex, undefined);
+  assert.equal(pie.grid, undefined);
+});
+test("repairEchartsOption：直角坐标的标签算进格子，没写格子的头一回收紧四边，增量更新不动边距", () => {
+  const bare = repairEchartsOption({ xAxis: { data: ["a"] }, yAxis: {}, series: [{ type: "line", data: [1] }] });
+  assert.deepEqual(bare.grid, { containLabel: true, top: 16, bottom: 12, left: 12, right: 16 });
+  const dressed = repairEchartsOption({
+    title: { text: "t" },
+    legend: { bottom: 0 },
+    xAxis: { name: "n" },
+    yAxis: { name: "次数" },
+    series: [{ type: "line", data: [1] }]
+  });
+  assert.deepEqual(dressed.grid, { containLabel: true, top: 60, bottom: 40, left: 12, right: 48 });
+  const own = repairEchartsOption({ grid: [{ left: 80 }, { containLabel: false }], xAxis: {}, yAxis: {}, series: [] });
+  assert.deepEqual(own.grid, [{ left: 80, containLabel: true }, { containLabel: false }]);
+  const busy = repairEchartsOption({ dataZoom: [{ type: "slider" }], xAxis: {}, yAxis: {}, series: [] });
+  assert.deepEqual(busy.grid, { containLabel: true });
+  assert.equal(repairEchartsOption({ xAxis: { data: ["b"] } }, false).grid, undefined);
 });
 test("anthropicRequest：system 单列、工具结果并进 user、思考块回传、工具定义与思考预算换算", () => {
   const body = f.anthropicRequest({
