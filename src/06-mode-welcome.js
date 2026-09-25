@@ -79,6 +79,11 @@ function renderWelcome() {
 function renderWelcomeNotice() {
   const el = $("#welcomeNotice");
   if (!el) return;
+  if (location.protocol === "file:" && apiBase === null) {
+    el.classList.remove("hidden");
+    el.innerHTML = `<span class="seal" aria-hidden="true">地</span><span>这是直接打开的本地文件页，配置与桥接页面分开保存。要查看原来的模型、对话和环境，请运行 start.cmd 并打开 ${LOCAL_BRIDGE}。</span>`;
+    return;
+  }
   const none = !profiles().length;
   el.classList.toggle("hidden", !none);
   if (!none) return;

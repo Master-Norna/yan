@@ -5,6 +5,9 @@ function servedByBridge() {
   return /^https?:$/.test(location.protocol) && /^(127\.0\.0\.1|localhost)$/i.test(location.hostname);
 }
 async function connectBridge(candidates, timeout = 1400) {
+  // 从文件直接打开的页面不接桥接：它的浏览器存储与桥接页面分开，常是很久以前的旧记录，接上就可能把它当正本写回 配置.json
+  //（VS Code 内置浏览器里曾这样整份冲掉过配置）。桥接那头也不认来源为 null 的请求，这里再守一道，不依赖浏览器发什么头
+  if (location.protocol === "file:") return false;
   for (const candidate of candidates) {
     // 同源探测：首次打开时浏览器还在拉 vendor 里的几个大文件，引导请求排在后面，1.4 秒不够，给足时间
     const wait = candidate === "" && servedByBridge() ? Math.max(timeout, 8000) : timeout;
@@ -987,7 +990,11 @@ function bindEvents() {
   window.addEventListener("pagehide", flushPageState);
   // 从前进 / 后退缓存回来仍是同一份 JS 状态：允许它在下一次离页时再次落盘。
   window.addEventListener("pageshow", event => {
-    if (event.persisted) unloading = false;
+    if (event.persisted) {
+      unloading = false;
+      void refreshConfigFromDisk();
+      void refreshEnv();
+    }
   });
   window.addEventListener("offline", () => setConnection("error", "连接中断"));
   window.addEventListener("online", refreshConnection);

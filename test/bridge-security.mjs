@@ -1,5 +1,5 @@
 // 桥接安全检查：Origin 门禁、工作目录必须完整限定、链接不能越出工作目录；卷宗接口不能越出卷宗目录、网页按纯文本给；沙箱在桥接这头守
-import { mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
 import http from "node:http";
 const PORT = Number(process.env.YAN_PORT || 8797),
   BASE = `http://127.0.0.1:${PORT}`;
@@ -523,6 +523,13 @@ check("screen: a harmless command passes", r.status === 200 && r.data.why === nu
   );
   r = await post("/api/store/config/save", { config: { settings: { name: "新" } }, savedAt: 60, base: 42 });
   check("a config save based on the current copy goes through", r.status === 200 && r.data.savedAt === 60, JSON.stringify(r.data));
+  const backupDir = `${TMP}/security/.yan/配置备份`;
+  const backups = existsSync(backupDir) ? readdirSync(backupDir).filter(name => name.endsWith(".json")) : [];
+  check(
+    "a config rewrite keeps an earlier disk snapshot for recovery",
+    backups.length > 0 && JSON.parse(readFileSync(`${backupDir}/${backups[0]}`, "utf8")).profiles?.[0]?.id === "p",
+    JSON.stringify(backups)
+  );
 }
 // ---- 删除记录：别处删了的对话，迟到的旧保存不让它复活；删后又真存了（在里头说话、从备份导回）的照存
 {

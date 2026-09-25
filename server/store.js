@@ -67,6 +67,20 @@ module.exports = function createStore({ sendJson, readJson }) {
     fs.writeFileSync(temp, text, "utf8");
     fs.renameSync(temp, file);
   }
+  // 配置含模型与工具选择。每小时至多留一份改动前的快照，保留最近 168 份，
+  // 遇到浏览器缓存误写时还能从同一存储根找回；快照与正本一样只在本机。
+  function backupConfig(text) {
+    const dir = path.join(root, "配置备份"),
+      slot = new Date().toISOString().slice(0, 13).replace(/[-T:]/g, ""),
+      file = path.join(dir, `${slot}.json`);
+    fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(file)) writeAtomic(file, text);
+    const backups = fs
+      .readdirSync(dir)
+      .filter(name => /^\d{10}\.json$/.test(name))
+      .sort();
+    for (const name of backups.slice(0, -168)) fs.unlinkSync(path.join(dir, name));
+  }
   // 给 bootstrap：页面据此知道对话与卷宗在哪、这是不是一个还没立起来的新根（要从旧处迁入）
   function describe() {
     const p = paths();
@@ -92,8 +106,10 @@ module.exports = function createStore({ sendJson, readJson }) {
       // 页面带着它上次对齐时的时间戳（base）来写：磁盘上已有别处写过的更新的一份，就不写，把那份交回去，由页面合并后再写。
       // 不带 base 的（头一回立根、以浏览器为准的导入）照写
       let current = 0;
+      let previous = "";
       try {
-        const existing = JSON.parse(fs.readFileSync(paths().config, "utf8")) || {};
+        previous = fs.readFileSync(paths().config, "utf8");
+        const existing = JSON.parse(previous) || {};
         current = Number(existing.savedAt) || 0;
         if (body.base !== undefined && current > (Number(body.base) || 0)) {
           const { 言: _mark, savedAt: _savedAt, ...config } = existing;
@@ -101,7 +117,9 @@ module.exports = function createStore({ sendJson, readJson }) {
         }
       } catch {}
       const savedAt = Math.max(Number(body.savedAt) || Date.now(), current + 1);
-      writeAtomic(paths().config, JSON.stringify({ 言: "配置", ...body.config, savedAt }, null, 1));
+      const next = JSON.stringify({ 言: "配置", ...body.config, savedAt }, null, 1);
+      if (previous && previous !== next) backupConfig(previous);
+      writeAtomic(paths().config, next);
       sendJson(res, 200, { savedAt });
     } catch (error) {
       sendJson(res, 400, { error: `配置未能落盘：${String(error.message || error).slice(0, 200)}` });

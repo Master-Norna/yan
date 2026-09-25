@@ -493,6 +493,46 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
   // 草稿 x 我发出去了（删了）、它没动：删；y 它新写的：留
   assert.deepEqual(Object.keys(merged.drafts), ["y"]);
 });
+test("mergeConfig3：两处各添预设、分组、MCP 与环境工具时都留下", () => {
+  const base = {
+    version: 5,
+    settings: {
+      presets: [{ id: "p0", name: "原有" }],
+      groups: [{ id: "g0", name: "原有" }],
+      mcpServers: { original: { command: "old" } },
+      env: { packs: ["data", "office", "web"], pip: "", npm: "", mirror: "china" }
+    },
+    profiles: [],
+    library: [],
+    memory: { enabled: true, items: [] },
+    drafts: {}
+  };
+  const mine = structuredClone(base),
+    theirs = structuredClone(base);
+  mine.settings.presets.push({ id: "p1", name: "这边" });
+  mine.settings.groups.push({ id: "g1", name: "这边" });
+  mine.settings.mcpServers.alpha = { command: "a" };
+  mine.settings.env.packs.push("image");
+  mine.settings.env.pip = "sympy";
+  theirs.settings.presets.push({ id: "p2", name: "那边" });
+  theirs.settings.groups.push({ id: "g2", name: "那边" });
+  theirs.settings.mcpServers.beta = { command: "b" };
+  theirs.settings.env.packs.push("media");
+  theirs.settings.env.mirror = "official";
+  const merged = f.mergeConfig3(base, mine, theirs).settings;
+  assert.deepEqual(
+    merged.presets.map(p => p.id),
+    ["p0", "p2", "p1"]
+  );
+  assert.deepEqual(
+    merged.groups.map(g => g.id),
+    ["g0", "g2", "g1"]
+  );
+  assert.deepEqual(Object.keys(merged.mcpServers), ["original", "beta", "alpha"]);
+  assert.deepEqual(merged.env.packs, ["data", "office", "web", "media", "image"]);
+  assert.equal(merged.env.pip, "sympy");
+  assert.equal(merged.env.mirror, "official");
+});
 test("looksLikeMermaid / liftBareMermaid：写岔了的流程图照样认得，普通代码与别的 pre 不误伤", () => {
   assert.equal(f.looksLikeMermaid("flowchart TD\n  A --> B"), true);
   assert.equal(f.looksLikeMermaid("%% 注\ngraph LR;\n  A --> B"), true);

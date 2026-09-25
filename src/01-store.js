@@ -54,6 +54,15 @@ function normalizeStoreData(value) {
     if (data.version === 4) migrateStoreV4(data);
     if (data.version > STORE_VERSION) data.version = STORE_VERSION;
     const settings = { ...defaultStore.settings, ...(data.settings || {}) };
+    const env = settings.env && typeof settings.env === "object" ? settings.env : {};
+    settings.env = {
+      ...defaultStore.settings.env,
+      ...env,
+      packs: Array.isArray(env.packs) ? [...new Set(env.packs.map(String))] : [...defaultStore.settings.env.packs],
+      pip: String(env.pip || ""),
+      npm: String(env.npm || ""),
+      mirror: env.mirror === "official" ? "official" : "china"
+    };
     const legacyReasoning = normalizeReasoning(settings.reasoning),
       rawProfiles = Array.isArray(data.profiles) ? data.profiles.filter(p => p && typeof p === "object") : [],
       legacyProfileId = data.settings?.activeProfileId || rawProfiles[0]?.id;
@@ -312,7 +321,8 @@ function writeMeta({ disk = true } = {}) {
 const CONFIG_BASE_KEY = "yan-config-base";
 let configBase = "",
   configSaving = false,
-  configSaveAgain = false;
+  configSaveAgain = false,
+  configSaveFailures = 0;
 function rememberConfigBase(meta, savedAt) {
   configBase = meta;
   configSyncedAt = savedAt;
@@ -326,6 +336,8 @@ function restoreConfigBase() {
   try {
     const saved = JSON.parse(localStorage.getItem(CONFIG_BASE_KEY) || "null");
     if (saved?.meta && saved.root === (bootstrap.store?.root || "")) {
+      const meta = JSON.parse(saved.meta);
+      if (!meta || !meta.settings || typeof meta.settings !== "object" || !Array.isArray(meta.profiles)) return;
       configBase = String(saved.meta);
       configSyncedAt = Math.max(configSyncedAt, Number(saved.savedAt) || 0);
     }
@@ -361,9 +373,17 @@ function saveConfigNow({ force = false } = {}) {
     .then(async response => {
       const data = await response.json().catch(() => ({}));
       if (response.status === 409 && data.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
-      if (response.ok) rememberConfigBase(meta, Number(data.savedAt) || savedAt);
+      if (!response.ok) throw Error(data.error || `请求失败（${response.status}）`);
+      configSaveFailures = 0;
+      rememberConfigBase(meta, Number(data.savedAt) || savedAt);
     })
-    .catch(() => {})
+    .catch(error => {
+      if (unloading) return;
+      if (!configSaveFailures) toast(`配置尚未写入存储目录，稍后重试：${String(error.message || error).slice(0, 60)}`);
+      configSaveFailures += 1;
+      clearTimeout(configSaveTimer);
+      configSaveTimer = setTimeout(saveConfigNow, Math.min(5000 * 2 ** Math.min(configSaveFailures - 1, 4), 60000));
+    })
     .finally(() => {
       configSaving = false;
       if (configSaveAgain) {
@@ -375,6 +395,9 @@ function saveConfigNow({ force = false } = {}) {
 // 磁盘上有一份配置：与这边对一对。磁盘上的不比基准新——这边改过就写下去；磁盘上的更新、这边没改过——换进来；
 // 两边都改过——三方合并后换进来，再写回去
 function reconcileConfig(config, savedAt) {
+  // 基准丢了就无法判断本地缓存的默认值是不是用户刚改的。磁盘是正本；只补入本地独有的记录，
+  // 再以磁盘为基准写回，免得把已装工具、模型等配置退回默认值。
+  if (!configBase) return mergeUnbasedConfig(config, savedAt);
   const mine = JSON.stringify(metaOf()),
     changed = mine !== configBase;
   if (savedAt <= configSyncedAt) {
@@ -421,9 +444,31 @@ function mergeConfig3(base, mine, theirs) {
       out.usedTokens = Math.max(0, Number(m.usedTokens || 0) + Number(t.usedTokens || 0) - Number(b.usedTokens || 0));
     return out;
   };
+  const baseSettings = base.settings || {},
+    mineSettings = mine.settings || {},
+    theirSettings = theirs.settings || {},
+    settings = keyed(baseSettings, mineSettings, theirSettings),
+    has = key => key in baseSettings || key in mineSettings || key in theirSettings;
+  if (has("presets"))
+    settings.presets = byId(baseSettings.presets, mineSettings.presets, theirSettings.presets, (b, m, t) => keyed(b, m, t));
+  if (has("groups")) settings.groups = byId(baseSettings.groups, mineSettings.groups, theirSettings.groups, (b, m, t) => keyed(b, m, t));
+  if (has("mcpServers")) settings.mcpServers = keyed(baseSettings.mcpServers, mineSettings.mcpServers, theirSettings.mcpServers);
+  if (has("env")) {
+    const oldEnv = { ...defaultStore.settings.env, ...(baseSettings.env || {}) },
+      myEnv = mineSettings.env || {},
+      theirEnv = theirSettings.env || {};
+    settings.env = keyed(oldEnv, myEnv, theirEnv);
+    // 勾选清单按每一组的增删合并：两处各添一组，不会让后写者把先写者的整份清单替掉。
+    const oldPacks = new Set(oldEnv.packs || []),
+      myPacks = new Set(myEnv.packs || []),
+      theirPacks = new Set(theirEnv.packs || []);
+    settings.env.packs = [...new Set([...theirPacks, ...myPacks])].filter(id =>
+      (myPacks.has(id) !== oldPacks.has(id) ? myPacks : theirPacks).has(id)
+    );
+  }
   return {
     version: theirs.version ?? mine.version,
-    settings: keyed(base.settings, mine.settings, theirs.settings),
+    settings,
     profiles: byId(base.profiles, mine.profiles, theirs.profiles, mergeProfile),
     library: byId(base.library, mine.library, theirs.library),
     memory: {
@@ -458,12 +503,29 @@ function adoptConfig(config, savedAt, base = "") {
 function mergeConfig(config) {
   const disk = normalizeStoreData({ ...config, conversations: [] }),
     union = (theirs, mine) => [...theirs, ...mine.filter(item => !theirs.some(other => other.id === item.id))];
-  store.settings = { ...store.settings, ...disk.settings };
+  store.settings = {
+    ...store.settings,
+    ...disk.settings,
+    // 旧版磁盘配置根本没有「环境」项时，别让规范化补出的默认三组盖掉本地已有选择。
+    env: config.settings?.env && typeof config.settings.env === "object" ? disk.settings.env : store.settings.env || disk.settings.env,
+    presets: union(disk.settings.presets, store.settings.presets || []),
+    groups: union(disk.settings.groups, store.settings.groups || []),
+    mcpServers: { ...(store.settings.mcpServers || {}), ...(disk.settings.mcpServers || {}) }
+  };
   store.profiles = union(disk.profiles, store.profiles);
   store.library = union(disk.library, store.library);
   store.memory = { enabled: disk.memory.enabled, items: union(disk.memory.items, store.memory.items) };
   store.drafts = { ...store.drafts, ...disk.drafts };
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
+}
+// 没有可用的共同基准（旧版缓存、浏览器只丢了基准、头一回碰到另一个存储根）时，
+// 让磁盘上的设置优先，按 id 补入本地独有的记录；差集仍用时间戳保护后写。
+function mergeUnbasedConfig(config, savedAt) {
+  const disk = JSON.stringify(metaOf(normalizeStoreData({ ...config, conversations: [] })));
+  mergeConfig(config);
+  const merged = metaOf();
+  adoptConfig(merged, savedAt, disk);
+  if (JSON.stringify(metaOf()) !== disk) saveConfigNow();
 }
 const STORE_ROOT_KEY = "yan-store-root";
 // 与 配置.json 对一次：开页接上桥接时、桥接断了又接上时、页面从后台切回来时。
@@ -493,17 +555,12 @@ async function syncConfigWithDisk() {
     delete store.settings.chatsDir;
     delete store.settings.archiveDir;
     restoreConfigBase();
-    if (!disk.config || localSeeded) {
+    if (!disk.config) {
       writeMeta({ disk: false });
       saveConfigNow({ force: true });
     } else if (freshBrowser) adoptConfig(disk.config, Number(disk.savedAt) || 0);
-    else if (met !== (info.root || "")) {
-      mergeConfig(disk.config);
-      writeMeta({ disk: false });
-      saveConfigNow({ force: true });
-      renderHeader();
-      renderQuota();
-    } else reconcileConfig(disk.config, Number(disk.savedAt) || 0);
+    else if (localSeeded || met !== (info.root || "")) mergeUnbasedConfig(disk.config, Number(disk.savedAt) || 0);
+    else reconcileConfig(disk.config, Number(disk.savedAt) || 0);
     freshBrowser = localSeeded = false;
     try {
       localStorage.setItem(STORE_ROOT_KEY, info.root || "");

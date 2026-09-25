@@ -1,7 +1,7 @@
 // 存储根（测试里是 .tmp/.yan）：对话一段一个 JSON 文件落在 对话/，配置（含 API Key）落在 配置.json，几个浏览器共用。
 // 旧版整份 localStorage 记录拆开迁走；改了会落盘、改名文件跟着改名、删了文件就没了；清空浏览器后从存储根恢复对话与配置；
 // 另一个浏览器头一回碰上这个根，两边的模型配置并起来；存储位置换到别处整份拷过去、再换回来用回原来的；导入旧版备份先按启动时同一套迁移规整
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP, HOME, CHATS } from "./lib.mjs";
 const ELSEWHERE = `${TMP}/elsewhere`;
 const native = p => p.split("/").join(process.platform === "win32" ? "\\" : "/");
@@ -21,6 +21,18 @@ for (const dir of [CHATS, ELSEWHERE])
     } catch {}
     if (existsSync(dir)) await sleep(150);
   }
+mkdirSync(`${HOME}/环境`, { recursive: true });
+writeFileSync(
+  `${HOME}/环境/已备.json`,
+  JSON.stringify({
+    python: "Python 3.12",
+    packs: ["python", "data", "office", "web", "image", "media", "node", "c", "go", "rust", "java"],
+    pip: [],
+    npm: [],
+    mirror: "china",
+    at: new Date().toISOString()
+  })
+);
 const seed = {
   version: 5,
   settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false },
@@ -107,6 +119,15 @@ check(
 // ---- 存储位置：换到别处，整份（对话与配置）拷过去；再换回来，用回原来的那份；拷走的那份原样留着
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(200);
+await evalJs(`document.querySelector('[data-tab="env"]').click(); true`);
+await waitFor(`document.querySelector("#envStatus")?.textContent.includes("已备好")`, 5000);
+await evalJs(`document.querySelector("#envPrepare").click(); true`);
+await waitFor(`!document.querySelector("#confirmModal").classList.contains("hidden")`, 3000);
+check(
+  "updating an environment would confirm before removing installed packs",
+  await evalJs(`document.querySelector("#confirmTitle").textContent.includes("卸载")`)
+);
+await evalJs(`document.querySelector("#confirmCancel").click(); document.querySelector('[data-tab="general"]').click(); true`);
 await evalJs(
   `(i => { i.value = ${JSON.stringify(native(ELSEWHERE))}; i.dispatchEvent(new Event("change")); })(document.querySelector("#settingStore")); true`
 );
@@ -124,6 +145,13 @@ check(
   "settings now show the new place",
   (await evalJs(`document.querySelector("#settingStore").value`)).toLowerCase().includes("elsewhere")
 );
+await evalJs(`document.querySelector('[data-tab="env"]').click(); true`);
+await waitFor(`document.querySelector("#envStatus")?.textContent.includes("尚未准备")`, 5000);
+check(
+  "moving storage refreshes the environment status for the new root",
+  await evalJs(`document.querySelector("#envStatus")?.textContent.includes("尚未准备")`)
+);
+await evalJs(`document.querySelector('[data-tab="general"]').click(); true`);
 await evalJs(
   `(i => { i.value = ${JSON.stringify(native(TMP))}; i.dispatchEvent(new Event("change")); })(document.querySelector("#settingStore")); true`
 );
@@ -285,6 +313,46 @@ check(
   );
   check("the page takes in the model added elsewhere", await evalJs(`__yanState().profiles.some(p => p.id === "p3")`));
 }
+// ---- 浏览器只丢了同步基准：旧缓存不能把磁盘里更多的环境选择写回默认三项
+{
+  await send("Page.navigate", { url: PAGE + "preview.html" });
+  await sleep(400);
+  const disk = readConfig();
+  disk.settings.env.packs = ["data", "office", "web", "image", "media", "node", "c", "go", "rust", "java"];
+  disk.savedAt = Date.now() + 5000;
+  writeFileSync(`${HOME}/配置.json`, JSON.stringify(disk));
+  await evalJs(
+    `(() => { const old = JSON.parse(localStorage.getItem("yan-chat-v1")); old.settings.env.packs = ["data", "office", "web"]; localStorage.setItem("yan-chat-v1", JSON.stringify(old)); localStorage.removeItem("yan-config-base"); return true; })()`
+  );
+  await send("Page.navigate", { url: PAGE });
+  await sleep(1800);
+  check(
+    "missing config merge base keeps the disk's installed tool selections",
+    readConfig()?.settings?.env?.packs?.length === 10 && (await evalJs(`__yanState().settings.env.packs.length`)) === 10
+  );
+}
+// ---- 旧版无标记缓存碰到已存在的配置，也不能强制清掉磁盘独有的模型和环境选择
+{
+  await send("Page.navigate", { url: PAGE + "preview.html" });
+  await sleep(400);
+  await evalJs(
+    `(() => { const old = JSON.parse(localStorage.getItem("yan-chat-v1")); old.profiles = old.profiles.filter(p => p.id === "p1"); old.settings.env.packs = ["data", "office", "web"]; delete old.__yanStorage; localStorage.setItem("yan-chat-v1", JSON.stringify(old)); localStorage.removeItem("yan-config-base"); return true; })()`
+  );
+  await send("Page.navigate", { url: PAGE });
+  await sleep(1800);
+  check(
+    "legacy local cache cannot replace the disk's profiles and tool selections",
+    readConfig()?.settings?.env?.packs?.length === 10 && readConfig()?.profiles?.some(p => p.id === "p3")
+  );
+}
+// ---- 配置保存遇到临时故障：页面提示，并且桥接恢复后自动补写，不等下一次手工修改
+await evalJs(
+  `(() => { const real = window.fetch.bind(window); let failed = false; window.fetch = (...args) => { if (!failed && String(args[0]).includes("/api/store/config/save")) { failed = true; return Promise.resolve(new Response('{"error":"临时故障"}', { status: 503, headers: { "Content-Type": "application/json" } })); } return real(...args); }; __yanState().settings.name = "重试后的名"; __yanSave(); return true; })()`
+);
+await waitFor(`document.querySelector("#toast")?.textContent.includes("配置尚未写入")`, 5000);
+t = Date.now();
+while (Date.now() - t < 12000 && readConfig()?.settings?.name !== "重试后的名") await sleep(150);
+check("a failed config save is reported and retried", readConfig()?.settings?.name === "重试后的名");
 // ---- 删对话：即使旧保存已经发出、尚未返回，删除也等它收尾后最后落锤，文件不会复活
 await evalJs(`document.querySelector('[data-conversation="stored-chat"] .history-open').click(); true`);
 await sleep(150);
