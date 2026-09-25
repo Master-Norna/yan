@@ -90,7 +90,7 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   display: flex;
   align-items: center;
   width: 100%;
-  height: 38px;
+  height: 36px;
   padding: 0;
   border-radius: 10px;
   color: var(--ink);
@@ -113,15 +113,16 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   display: grid;
   place-items: center;
 }
+/* 三个入口等距：原先翻页下 4、卷宗下 6，间距 42 / 45 不齐 */
 .new-chat {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
 }
 .new-chat .rail-icon {
   color: var(--ink-2);
   font: 300 17px/1 var(--title);
 }
 .library-open {
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 .rail-btn .count {
   margin-left: auto;
@@ -473,6 +474,53 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   padding: 0 22px;
   position: relative;
   z-index: 5;
+}
+/* 书眉：标题滚走后，顶栏左边留一行题名与问数，与正文同一左缘；没滚过标题时不显示，不与标题重复。点一下回到开头。
+   落选的：居中疏排只留题名（像书页页眉，但与右侧的状态挤在一条线上，题名一长就难看） */
+.running-head {
+  position: absolute;
+  top: 0;
+  left: max(42px, calc(50% - var(--read) / 2));
+  right: 300px;
+  height: 55px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  color: var(--ink-2);
+  font: 500 13px var(--title);
+  letter-spacing: 0.08em;
+  text-align: left;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+.running-head.shown {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.main:has(#chat.hidden) .running-head {
+  display: none;
+}
+.running-head-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.running-head:hover .running-head-title {
+  color: var(--ink);
+}
+.running-head-meta {
+  flex: none;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.14em;
 }
 .model-wrap {
   position: relative;

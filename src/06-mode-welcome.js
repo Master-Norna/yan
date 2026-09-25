@@ -516,4 +516,5 @@ function syncChatScrollGrabber() {
 function syncDocumentTitle() {
   const c = currentConversation();
   document.title = view === "library" ? "卷宗 · 言" : view === "groups" ? "分组 · 言" : c ? `${c.title} · 言` : "言";
+  syncRunningHead(); // 标题改了（手改、拟题），书眉跟着换
 }

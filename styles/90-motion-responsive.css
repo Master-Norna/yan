@@ -551,6 +551,10 @@ button:focus:not(:focus-visible) {
   .topbar {
     padding: 0 14px;
   }
+  .running-head {
+    left: 54px;
+    right: 230px;
+  }
   .welcome {
     padding: 40px 20px 100px;
   }

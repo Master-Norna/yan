@@ -857,7 +857,9 @@ function bindEvents() {
     } else if (!down && !autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false;
     syncJumpBottom(gap);
     syncOutline();
+    syncRunningHead();
   });
+  $("#runningHead").addEventListener("click", () => $("#chatScroll").scrollTo({ top: 0, behavior: "smooth" }));
   // 跟着的时候，内容不论因何长高（工具输出、图表成图、图片载入、块的开合）都贴着底：不只靠流式的每一帧
   if (typeof ResizeObserver === "function")
     new ResizeObserver(() => {

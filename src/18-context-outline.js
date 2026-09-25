@@ -255,6 +255,8 @@ function syncOutline() {
       const article = host.querySelector(`#messages [data-message="${CSS.escape(item.dataset.target)}"]`);
       if (article && article.getBoundingClientRect().top <= line) current = item;
     }
+    // 滚到了底便是最后一问：末一轮短问短答时，它的顶未必越得过阅读线
+    if (host.scrollHeight - host.scrollTop - host.clientHeight < 8) current = rail.querySelector(".outline-item:last-child");
     if (!current) current = rail.querySelector(".outline-item");
     rail.querySelectorAll(".outline-item.active").forEach(item => item !== current && item.classList.remove("active"));
     current?.classList.add("active");

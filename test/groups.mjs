@@ -37,7 +37,7 @@ await evalJs(
 );
 await sleep(150);
 const moved = await evalJs(
-  `(s => ({ groups: s.settings.groups.map(g => g.name), a: !!s.conversations.find(c => c.id === "a").groupId, head: document.querySelector("#history .is-set .history-repo-name")?.textContent, seal: document.querySelector("#history .is-set .repo-seal")?.textContent, buttons: document.querySelectorAll("#history .is-set .history-repo-head button").length, label: document.querySelector("#history .history-label")?.textContent }))(__yanState())`
+  `(s => ({ groups: s.settings.groups.map(g => g.name), a: !!s.conversations.find(c => c.id === "a").groupId, head: document.querySelector("#history .is-set .history-repo-name")?.textContent, seal: document.querySelector("#history .is-set .repo-seal")?.textContent, buttons: document.querySelectorAll("#history .is-set .history-repo-head button").length, labels: [...document.querySelectorAll("#history .history-label")].map(n => n.textContent) }))(__yanState())`
 );
 check(
   "conversation moves into the new group; its head has only the ＋, like a 工 group",
@@ -46,7 +46,7 @@ check(
     moved.head === "读书" &&
     moved.seal === "集" &&
     moved.buttons === 1 &&
-    moved.label === "分组",
+    !moved.labels.includes("分组"),
   JSON.stringify(moved)
 );
 await evalJs(`document.querySelector('[data-conversation="a"] [data-history-action="menu"]').click(); true`);

@@ -4,10 +4,14 @@
   display: flex;
   flex-direction: column;
 }
+/* 滚动条两侧都留槽：正文列才与下面的输入框同一中线（只留一侧时正文左偏半条滚动条宽）；
+   顶端渐隐 26px，滚到顶栏下的正文淡出而不是被一刀切齐 */
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 24px 42px 145px;
+  scrollbar-gutter: stable both-edges;
+  mask-image: linear-gradient(transparent, #000 26px);
 }
 /* 原生细滚动条保持原样，只在它上面铺一层透明的宽命中区；延伸到底边，输入框盖住正文后也仍能抓住。 */
 .chat-scroll-grabber {
@@ -67,6 +71,22 @@ html.work-mode .chat-scroll-grabber {
 }
 .message {
   margin-bottom: 36px;
+}
+/* 问近其答、答远下问：问句下的复制 / 编辑浮在气泡下方不占位，问与它的答贴近，一轮与下一轮拉开。
+   原先两者都隔 36px，加上问句按钮暗占的一行，问离自己的答反比离上一答远，眼睛会把问句归给上一答 */
+#messages > .message.user {
+  position: relative;
+  margin-bottom: 26px;
+}
+#messages > .message.user > .message-actions {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin: 0 -5px 0 0;
+  padding-top: 3px; /* 用内边距而非外边距：指针从气泡挪到按钮上，中间没有失了 :hover 的缝 */
+}
+#messages > .message.assistant {
+  margin-bottom: 64px;
 }
 .message.is-new {
   animation: rise 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -584,7 +604,7 @@ sup.note-ref.active {
   align-items: center;
   gap: 7px;
   height: 18px;
-  margin: -3px 0 22px;
+  margin: -3px 0 18px;
   padding-left: 10px;
   color: var(--ink-3);
   font: 11px var(--title);
