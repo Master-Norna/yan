@@ -9,7 +9,11 @@ function envSettings() {
 // 问桥接要一次环境的状态；正在准备就隔一会儿再问，直到装完
 async function refreshEnv() {
   if (apiBase === null) return;
-  envStatus = await bridge("/api/env/status", {}, AbortSignal.timeout(8000)).catch(() => envStatus);
+  const root = bootstrap.store?.root;
+  const status = await bridge("/api/env/status", {}, AbortSignal.timeout(8000)).catch(() => null);
+  // 换存储位置期间，旧根的慢响应不能再画到新根的环境页上。
+  if (root !== bootstrap.store?.root) return;
+  if (status) envStatus = status;
   renderEnvStatus();
   clearTimeout(envPoll);
   if (envStatus?.job?.running) envPoll = setTimeout(refreshEnv, 1200);
@@ -96,6 +100,20 @@ function bindEnvEvents() {
     }
     if (button.id === "envPrepare") {
       const s = envSettings();
+      const removed = (envStatus?.state?.packs || []).filter(
+        id => !s.packs.includes(id) && !envStatus?.packs?.some(pack => pack.id === id && pack.base)
+      );
+      if (removed.length) {
+        const names = removed.map(id => envStatus.packs.find(pack => pack.id === id)?.name || id);
+        if (
+          !(await askConfirm({
+            title: `卸载 ${removed.length} 组工具？`,
+            body: `当前已安装、但未勾选的 ${names.join("、")} 将在更新环境时卸载。`,
+            ok: "卸载并更新"
+          }))
+        )
+          return;
+      }
       envStatus = await bridge("/api/env/prepare", {
         packs: s.packs,
         pip: splitNames(s.pip),

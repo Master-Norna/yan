@@ -354,6 +354,9 @@ function bindSettingsEvents() {
       if (!data.moved) return;
       bootstrap.store = { root: data.root, parent: data.parent, fresh: false };
       bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive, files: data.files };
+      envStatus = null;
+      clearTimeout(envPoll);
+      void refreshEnv();
       chatsBroken = false;
       chatHashes.clear();
       chatStamps.clear();
