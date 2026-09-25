@@ -9,6 +9,7 @@
 // 接口：POST /api/env/status；/api/env/prepare { packs, pip, npm, mirror } 在后台装，页面轮询 status 看进度；/api/env/clear 整个删掉
 // 准备环境就是把环境对齐到勾选：勾上的装，上回装了、这回没勾的卸掉
 "use strict";
+const { sendJson, readJson, jsonRoute, errorText } = require("../http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Readable } = require("node:stream");
@@ -43,7 +44,7 @@ const MIRRORS = {
   }
 };
 
-module.exports = function createEnv({ sendJson, readJson, envHome }) {
+module.exports = function createEnv({ envHome }) {
   /** @type {{ running: boolean, step: string, log: string[], error: string } | null} */
   let job = null;
   const dirs = () => {
@@ -260,18 +261,16 @@ module.exports = function createEnv({ sendJson, readJson, envHome }) {
     await readJson(req).catch(() => ({}));
     sendJson(res, 200, status());
   }
-  async function handlePrepare(req, res) {
-    try {
-      const body = await readJson(req);
+  const handlePrepare = jsonRoute(
+    async body => {
       if (!job?.running) {
         job = { running: true, step: "", log: [], error: "" };
         void prepare(body);
       }
-      sendJson(res, 200, status());
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error) });
-    }
-  }
+      return status();
+    },
+    error => errorText(error, Infinity)
+  );
   async function handleClear(req, res) {
     await readJson(req).catch(() => ({}));
     if (job?.running) return sendJson(res, 400, { error: "环境正在准备，稍候再清" });
@@ -280,7 +279,7 @@ module.exports = function createEnv({ sendJson, readJson, envHome }) {
       job = null;
       sendJson(res, 200, status());
     } catch (error) {
-      sendJson(res, 400, { error: `没能删干净（可能有进程正用着环境里的程序）：${String(error.message || error).slice(0, 200)}` });
+      sendJson(res, 400, { error: `没能删干净（可能有进程正用着环境里的程序）：${errorText(error, 200)}` });
     }
   }
   return {

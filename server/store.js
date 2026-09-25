@@ -6,13 +6,14 @@
 // 在设置里换了位置，整份拷到新处，%APPDATA%\言\位置.json 写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
 // 条子不放在 ~/.yan 里：旧处是叫人自行删去的，条子若在里头，删了旧数据也就删了条子，下次开又回到默认处。
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
-// 由 server.js 装配：require("./server/store.js")({ sendJson, readJson })
+// 由 server.js 装配：require("./server/store.js")()
 "use strict";
+const { sendJson, readJson, jsonRoute, errorText, writeAtomic } = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 
-module.exports = function createStore({ sendJson, readJson }) {
+module.exports = function createStore() {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
     POINTER = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "言", "位置.json"),
     // 旧版把条子放在默认根里；读到了就搬到 POINTER 去
@@ -62,11 +63,6 @@ module.exports = function createStore({ sendJson, readJson }) {
     fs.mkdirSync(chats, { recursive: true });
     fs.mkdirSync(archive, { recursive: true });
   }
-  function writeAtomic(file, text) {
-    const temp = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`;
-    fs.writeFileSync(temp, text, "utf8");
-    fs.renameSync(temp, file);
-  }
   // 配置含模型与工具选择。每小时至多留一份改动前的快照，保留最近 168 份，
   // 遇到浏览器缓存误写时还能从同一存储根找回；快照与正本一样只在本机。
   function backupConfig(text) {
@@ -95,12 +91,11 @@ module.exports = function createStore({ sendJson, readJson }) {
       const { 言: _mark, savedAt, ...config } = data || {};
       sendJson(res, 200, { config, savedAt: Number(savedAt) || 0 });
     } catch (error) {
-      sendJson(res, 500, { error: `配置读不出来：${String(error.message || error).slice(0, 200)}` });
+      sendJson(res, 500, { error: `配置读不出来：${errorText(error, 200)}` });
     }
   }
-  async function handleConfigSave(req, res) {
-    try {
-      const body = await readJson(req);
+  const handleConfigSave = jsonRoute(
+    async (body, req, res) => {
       if (!body.config || typeof body.config !== "object") throw Error("缺少配置内容");
       ensureRoot();
       // 页面带着它上次对齐时的时间戳（base）来写：磁盘上已有别处写过的更新的一份，就不写，把那份交回去，由页面合并后再写。
@@ -120,11 +115,10 @@ module.exports = function createStore({ sendJson, readJson }) {
       const next = JSON.stringify({ 言: "配置", ...body.config, savedAt }, null, 1);
       if (previous && previous !== next) backupConfig(previous);
       writeAtomic(paths().config, next);
-      sendJson(res, 200, { savedAt });
-    } catch (error) {
-      sendJson(res, 400, { error: `配置未能落盘：${String(error.message || error).slice(0, 200)}` });
-    }
-  }
+      return { savedAt };
+    },
+    error => `配置未能落盘：${errorText(error, 200)}`
+  );
   // 把 from 目录里的东西逐层拷进 to：已有的同名文件不覆盖（新根里的为准），返回拷了几个文件。skip 里的名字（只看顶层）不拷。
   // 不用 fs.cpSync：Node 22 在 Windows 上拿它拷中文路径会把目录名拷成乱码、进程随之崩掉
   function copyInto(from, to, skip = new Set()) {
@@ -147,10 +141,9 @@ module.exports = function createStore({ sendJson, readJson }) {
     return count;
   }
   // 头一回：旧的对话与卷宗拷进新根（拷贝，不是搬移——旧处原样留着）。页面报来它记着的自定义目录，桥接自己知道旧的默认位置
-  async function handleAdopt(req, res) {
-    try {
-      const body = await readJson(req),
-        p = paths();
+  const handleAdopt = jsonRoute(
+    async body => {
+      const p = paths();
       ensureRoot();
       const custom = value => (value && path.isAbsolute(expand(value)) ? path.resolve(expand(value)) : "");
       // 指定了 YAN_HOME（测试）时不碰旧的默认位置：那是真用户的数据
@@ -160,20 +153,18 @@ module.exports = function createStore({ sendJson, readJson }) {
       for (const from of new Set([custom(body.chatsDir), legacy[0]].filter(Boolean)))
         chats += copyInto(from, p.chats, new Set(["设置.json"]));
       for (const from of new Set([custom(body.archiveDir), legacy[1]].filter(Boolean))) archive += copyInto(from, p.archive);
-      sendJson(res, 200, { chats, archive, root });
-    } catch (error) {
-      sendJson(res, 400, { error: `旧数据未能迁入：${String(error.message || error).slice(0, 200)}` });
-    }
-  }
+      return { chats, archive, root };
+    },
+    error => `旧数据未能迁入：${errorText(error, 200)}`
+  );
   // 换位置：parent 下的 .yan 就是新根。那里已有言的数据（另一台机器拷来的、先前搬过去的）就直接用它；
   // 否则把整份拷过去。旧处原样留着（可自行删去），%APPDATA%\言\位置.json 记下新根，桥接重启后也认得
-  async function handleMove(req, res) {
-    try {
-      const body = await readJson(req),
-        parent = path.resolve(expand(String(body.parent || "").trim()));
+  const handleMove = jsonRoute(
+    async body => {
+      const parent = path.resolve(expand(String(body.parent || "").trim()));
       if (!body.parent || !path.isAbsolute(expand(String(body.parent).trim()))) throw Error("存储位置需填写完整的绝对路径");
       const next = path.basename(parent).toLowerCase() === ".yan" ? parent : path.join(parent, ".yan");
-      if (next.toLowerCase() === root.toLowerCase()) return sendJson(res, 200, { ...describe(), moved: false });
+      if (next.toLowerCase() === root.toLowerCase()) return { ...describe(), moved: false };
       const existing = fs.existsSync(path.join(next, CONFIG_FILE));
       if (!existing) {
         fs.mkdirSync(next, { recursive: true });
@@ -184,11 +175,10 @@ module.exports = function createStore({ sendJson, readJson }) {
       root = next;
       ensureRoot();
       if (!process.env.YAN_HOME) writePointer(root);
-      sendJson(res, 200, { ...describe(), moved: true, adopted: existing, previous });
-    } catch (error) {
-      sendJson(res, 400, { error: `存储位置未能更换：${String(error.message || error).slice(0, 200)}` });
-    }
-  }
+      return { ...describe(), moved: true, adopted: existing, previous };
+    },
+    error => `存储位置未能更换：${errorText(error, 200)}`
+  );
   return {
     paths,
     describe,
