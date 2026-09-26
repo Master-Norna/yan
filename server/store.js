@@ -23,6 +23,22 @@ module.exports = function createStore() {
     LEGACY_CHATS = path.join(os.homedir(), "言", "对话"),
     LEGACY_ARCHIVE = path.join(os.homedir(), "言", "卷宗");
   const expand = value => String(value || "").replace(/^~(?=$|[\\/])/, os.homedir());
+  // 把现存祖先的链接也算进去，避免选到旧根内部的 junction 后递归拷贝自身。
+  function physicalPath(value) {
+    let existing = path.resolve(value);
+    const tail = [];
+    while (!fs.existsSync(existing)) {
+      const parent = path.dirname(existing);
+      if (parent === existing) break;
+      tail.unshift(path.basename(existing));
+      existing = parent;
+    }
+    return path.resolve(fs.realpathSync(existing), ...tail);
+  }
+  function inside(from, to) {
+    const relative = path.relative(physicalPath(from).toLowerCase(), physicalPath(to).toLowerCase());
+    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  }
   function readPointer(file) {
     try {
       const pointed = JSON.parse(fs.readFileSync(file, "utf8"))?.root;
@@ -123,6 +139,7 @@ module.exports = function createStore() {
   // 不用 fs.cpSync：Node 22 在 Windows 上拿它拷中文路径会把目录名拷成乱码、进程随之崩掉
   function copyInto(from, to, skip = new Set()) {
     if (!from || !fs.existsSync(from) || path.resolve(from).toLowerCase() === path.resolve(to).toLowerCase()) return 0;
+    if (inside(from, to)) throw Error("目标目录不能位于来源目录内");
     let count = 0;
     const walk = (source, target, top) => {
       fs.mkdirSync(target, { recursive: true });
@@ -165,6 +182,7 @@ module.exports = function createStore() {
       if (!body.parent || !path.isAbsolute(expand(String(body.parent).trim()))) throw Error("存储位置需填写完整的绝对路径");
       const next = path.basename(parent).toLowerCase() === ".yan" ? parent : path.join(parent, ".yan");
       if (next.toLowerCase() === root.toLowerCase()) return { ...describe(), moved: false };
+      if (inside(root, next)) throw Error("新存储位置不能位于当前存储目录内");
       const existing = fs.existsSync(path.join(next, CONFIG_FILE));
       if (!existing) {
         fs.mkdirSync(next, { recursive: true });

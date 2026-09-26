@@ -98,6 +98,33 @@ check(
   (await evalJs(`(async () => (await (${readRecords})).length)()`)) === 0
 );
 check("history shows it", await evalJs(`document.querySelector("#history").textContent.includes("数据库里的长对话")`));
+// 回车应激活当前焦点的「取消」，不能越过它执行清空；设置窗 Tab 也要留在窗内。
+await evalJs(`document.querySelector("#openSettings").focus(); document.querySelector("#openSettings").click(); true`);
+check("settings takes keyboard focus", await evalJs(`document.activeElement?.id === "closeSettings"`));
+await evalJs(`document.querySelector("#clearAll").focus(); true`);
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+check("Tab stays inside settings", await evalJs(`document.activeElement?.id === "closeSettings"`));
+await evalJs(`document.querySelector("#clearAll").focus(); document.querySelector("#clearAll").click(); true`);
+await waitFor(`!document.querySelector("#confirmModal").classList.contains("hidden")`);
+await sleep(30);
+await evalJs(
+  `(() => { const b = document.querySelector("#confirmCancel"); b.focus(); const e = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }); b.dispatchEvent(e); if (!e.defaultPrevented) b.click(); return true; })()`
+);
+await sleep(250);
+check(
+  "Enter on Cancel keeps conversations and returns focus",
+  files().length === 1 && (await evalJs(`__yanState().conversations.length === 1 && document.activeElement?.id === "clearAll"`)),
+  await evalJs(
+    `JSON.stringify({ chats: __yanState().conversations.length, focus: document.activeElement?.id, confirm: document.querySelector("#confirmModal").className })`
+  )
+);
+await evalJs(`document.querySelector("#closeSettings").click(); true`);
+check(
+  "closing settings restores focus",
+  await evalJs(`document.activeElement?.id === "openSettings"`),
+  await evalJs(`document.activeElement?.id`)
+);
 const readConfig = (root = HOME) => {
   try {
     return JSON.parse(readFileSync(`${root}/配置.json`, "utf8"));
@@ -117,6 +144,13 @@ check(
   JSON.stringify(config && Object.keys(config))
 );
 // ---- 存储位置：换到别处，整份（对话与配置）拷过去；再换回来，用回原来的那份；拷走的那份原样留着
+const nested = `${HOME}/nested`;
+const nestedMove = await fetch(PAGE + "api/store/move", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ parent: native(nested) })
+});
+check("moving storage below its current root is rejected before creating directories", nestedMove.status === 400 && !existsSync(nested));
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(200);
 await evalJs(`document.querySelector('[data-tab="env"]').click(); true`);

@@ -167,10 +167,10 @@ function bindEvents() {
     if (e.target === $("#confirmModal")) settleConfirm(false);
   });
   $("#confirmModal").addEventListener("keydown", e => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      settleConfirm(true);
-    }
+    if (e.key === "Tab") trapModalFocus(e, $("#confirmModal"));
+  });
+  $("#settingsModal").addEventListener("keydown", e => {
+    if (e.key === "Tab" && !confirmResolve) trapModalFocus(e, $("#settingsModal"));
   });
   bindViewerEvents();
   bindComposerEvents();

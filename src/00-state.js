@@ -389,6 +389,8 @@ const dirtyChatIds = new Set(),
   chatStamps = new Map(),
   // 每段对话上次与目录对齐时目录里那份的时间戳：写的时候带去，目录里那份若更新，桥接就不写（见 mergeConversation）
   chatDiskStamps = new Map(),
+  // 上次读到的目录原文；并发编辑时以它为共同起点逐字段合并
+  chatBases = new Map(),
   pendingChatWrites = new Map(),
   activeChatWrites = new Map(),
   chatWritePromises = new Map(),

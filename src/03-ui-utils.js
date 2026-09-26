@@ -95,9 +95,11 @@ function isMobile() {
 }
 // 同风格的确认弹层，替代浏览器自带的 confirm()
 let confirmResolve = null;
+let confirmReturnFocus = null;
 function askConfirm({ title, body = "", ok = "确定", danger = true }) {
   return new Promise(resolve => {
     settleConfirm(false);
+    confirmReturnFocus = document.activeElement;
     confirmResolve = resolve;
     $("#confirmTitle").textContent = title;
     $("#confirmBody").textContent = body;
@@ -105,7 +107,9 @@ function askConfirm({ title, body = "", ok = "确定", danger = true }) {
     button.textContent = ok;
     button.className = danger ? "danger-btn solid" : "outline-btn";
     showNow($("#confirmModal"));
-    setTimeout(() => button.focus(), 0);
+    setTimeout(() => {
+      if (confirmResolve === resolve) button.focus();
+    }, 0);
   });
 }
 function settleConfirm(value) {
@@ -114,6 +118,25 @@ function settleConfirm(value) {
   const resolve = confirmResolve;
   confirmResolve = null;
   resolve(value);
+  if (confirmReturnFocus?.isConnected) confirmReturnFocus.focus();
+  confirmReturnFocus = null;
+}
+function trapModalFocus(event, modal) {
+  const focusable = [
+    ...modal.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ].filter(el => el.getClientRects().length);
+  if (!focusable.length) return;
+  const first = focusable[0],
+    last = focusable.at(-1);
+  if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 // ---------- 大体积库按需加载：KaTeX / pdf.js 只在真正用到时才拉，首屏只带 marked + purify + hljs（图表与流程图的库在交互预览里按需载） ----------

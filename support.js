@@ -392,6 +392,8 @@ const dirtyChatIds = new Set(),
   chatStamps = new Map(),
   // 每段对话上次与目录对齐时目录里那份的时间戳：写的时候带去，目录里那份若更新，桥接就不写（见 mergeConversation）
   chatDiskStamps = new Map(),
+  // 上次读到的目录原文；并发编辑时以它为共同起点逐字段合并
+  chatBases = new Map(),
   pendingChatWrites = new Map(),
   activeChatWrites = new Map(),
   chatWritePromises = new Map(),
@@ -1091,6 +1093,7 @@ async function writeConversation(id) {
           AbortSignal.timeout(60000)
         );
         chatDiskStamps.set(id, pending.savedAt);
+        chatBases.set(id, pending.json);
         chatSaveWarned = false;
         if (!deletedChatIds.has(id)) {
           persisted = true;
@@ -1124,7 +1127,9 @@ async function writeConversation(id) {
       }
     if (spilled && !deletedChatIds.has(id))
       try {
-        await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.put({ id, savedAt: pending.savedAt, json: pending.json }));
+        await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db =>
+          db.put({ id, savedAt: pending.savedAt, json: pending.json, baseJson: chatBases.get(id) })
+        );
         persisted = true;
         if (!chatsOnline()) chatSaveWarned = false;
       } catch {
@@ -1163,6 +1168,7 @@ async function deleteConversationStorage(id) {
     chatHashes.delete(id);
     chatStamps.delete(id);
     chatDiskStamps.delete(id);
+    chatBases.delete(id);
     deletedChatIds.delete(id);
   }
 }
@@ -1173,6 +1179,7 @@ function forgetConversation(id) {
   chatHashes.delete(id);
   chatStamps.delete(id);
   chatDiskStamps.delete(id);
+  chatBases.delete(id);
   delete store.drafts?.[id];
   void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
 }
@@ -1186,9 +1193,11 @@ function catchUpConversation(item, { quiet = false } = {}) {
     theirJson = JSON.stringify(theirs),
     stamp = chatStamps.get(c.id) || 0,
     clean = chatHashes.get(c.id) === hashText(JSON.stringify(c)) && chatDiskStamps.get(c.id) === stamp && !busyHere(c.id),
-    next = clean ? theirs : mergeConversation(c, theirs);
+    base = chatBases.has(c.id) ? JSON.parse(chatBases.get(c.id)) : null,
+    next = clean ? theirs : mergeConversation(c, theirs, base);
   store.conversations[index] = next;
   chatDiskStamps.set(c.id, item.savedAt);
+  chatBases.set(c.id, theirJson);
   chatStamps.set(c.id, Math.max(stamp, item.savedAt));
   if (JSON.stringify(next) === theirJson) {
     chatStamps.set(c.id, item.savedAt);
@@ -1210,33 +1219,53 @@ function catchUpConversation(item, { quiet = false } = {}) {
   return next;
 }
 let mergeNoticed = false;
-// 两份并一份：以目录里那份为底，这边有、那边没有的消息（分支、旁注同理）接在后面，宁可多留一条也不丢。
-// 两边都有的同一条：这边正写着这段就取这边的（原地改，作答中的引用不断），否则取那边的——那边的更新
-function mergeConversation(c, theirs) {
-  const mine = busyHere(c.id),
-    union = (a = [], b = []) => {
-      const own = new Map(a.filter(x => x?.id).map(x => [x.id, x])),
-        seen = new Set(b.map(x => x?.id));
-      return [...b.map(x => (mine && own.get(x?.id)) || x), ...a.filter(x => !seen.has(x?.id))];
-    },
-    messages = union(c.messages, theirs.messages),
-    forks = union(c.forks, theirs.forks),
-    threads = union(c.threads, theirs.threads);
+// 共同起点上没改的字段取对方，只有一边改了的取改动；同一字段都改了时本机胜出。
+// 按 id 合并消息和分支，避免「改标题」把另一处的置顶覆盖掉。
+function mergeConversation(c, theirs, base = null) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const merge = (ours, other, old) => {
+    if (same(ours, other)) return ours;
+    if (same(ours, old)) return other;
+    if (same(other, old)) return ours;
+    if (Array.isArray(ours) && Array.isArray(other) && [...ours, ...other].every(item => item?.id)) {
+      const own = new Map(ours.map(item => [item.id, item])),
+        before = new Map((Array.isArray(old) ? old : []).map(item => [item.id, item])),
+        seen = new Set(other.map(item => item.id));
+      return [
+        ...other.map(item => (own.has(item.id) ? merge(own.get(item.id), item, before.get(item.id)) : item)),
+        ...ours.filter(item => !seen.has(item.id))
+      ];
+    }
+    if (ours && other && typeof ours === "object" && typeof other === "object" && !Array.isArray(ours) && !Array.isArray(other)) {
+      const result = {};
+      for (const key of new Set([...Object.keys(other), ...Object.keys(ours)])) {
+        const value = merge(ours[key], other[key], old?.[key]);
+        if (value !== undefined) result[key] = value;
+      }
+      return result;
+    }
+    // 旧版暂存没有共同起点：沿用「目录字段优先、本机新增条目接上」的规则。
+    return base ? ours : other;
+  };
+  const mine = busyHere(c.id);
   if (mine) {
-    c.messages.splice(0, c.messages.length, ...messages);
-    c.forks = forks;
-    c.threads = threads;
+    // 作答中的消息对象要留在原位；独立改动的标题、置顶等字段仍可接收。
+    if (base)
+      for (const key of Object.keys(theirs))
+        if (!["messages", "forks", "threads", "unread"].includes(key) && same(c[key], base[key])) c[key] = theirs[key];
+    for (const key of ["messages", "forks", "threads"]) {
+      const seen = new Set(c[key].map(item => item.id));
+      const added = theirs[key].filter(item => !seen.has(item.id));
+      if (key === "messages") c.messages.push(...added);
+      else c[key].push(...added);
+    }
     return c;
   }
   // 未读只是这一处的提示：开着看的这段不因为并了一份又亮起来
-  return {
-    ...theirs,
-    messages,
-    forks,
-    threads,
-    ...(c.unread !== theirs.unread ? { unread: c.unread } : {}),
-    ...(messages.length > theirs.messages.length && c.updatedAt > theirs.updatedAt ? { updatedAt: c.updatedAt } : {})
-  };
+  const merged = merge(c, theirs, base);
+  if (c.unread !== theirs.unread) merged.unread = c.unread;
+  merged.updatedAt = c.updatedAt > theirs.updatedAt ? c.updatedAt : theirs.updatedAt;
+  return merged;
 }
 // 跟上目录里的这几段：页面切回前台时看的那段。只读这几个文件，便宜
 async function catchUpFromDisk(ids) {
@@ -1271,7 +1300,7 @@ function flushOnUnload() {
       hash = hashText(json);
     if (!pendingChatWrites.has(conversation.id) && !activeChatWrites.has(conversation.id) && chatHashes.get(conversation.id) === hash)
       continue;
-    records.push({ id: conversation.id, savedAt: nextChatStamp(conversation.id), json });
+    records.push({ id: conversation.id, savedAt: nextChatStamp(conversation.id), json, baseJson: chatBases.get(conversation.id) });
   }
   if (!records.length) return;
   try {
@@ -1295,6 +1324,7 @@ function adoptRecord(record) {
     const c = normalizeConversation(JSON.parse(record.json));
     chatStamps.set(c.id, Number(record.savedAt) || 0);
     chatHashes.set(c.id, hashText(JSON.stringify(c)));
+    if (record.baseJson) chatBases.set(c.id, record.baseJson);
     return c;
   } catch {
     return null;
@@ -1419,6 +1449,7 @@ async function syncChatsWithDisk() {
         }
         // 这边的不比目录里的旧：以这边的为准写过去（带上目录里那份的时间戳，免得被当成旧份拒掉）
         chatDiskStamps.set(c.id, item.savedAt);
+        chatBases.set(c.id, JSON.stringify(normalizeConversation(item.conversation)));
         if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
         else settled.add(c.id);
         return c;
@@ -1431,6 +1462,7 @@ async function syncChatsWithDisk() {
         const c = normalizeConversation(item.conversation);
         chatStamps.set(c.id, item.savedAt);
         chatDiskStamps.set(c.id, item.savedAt);
+        chatBases.set(c.id, JSON.stringify(c));
         chatHashes.set(c.id, hashText(JSON.stringify(c)));
         store.conversations.push(c);
         settled.add(c.id);
@@ -2073,9 +2105,11 @@ function isMobile() {
 }
 // 同风格的确认弹层，替代浏览器自带的 confirm()
 let confirmResolve = null;
+let confirmReturnFocus = null;
 function askConfirm({ title, body = "", ok = "确定", danger = true }) {
   return new Promise(resolve => {
     settleConfirm(false);
+    confirmReturnFocus = document.activeElement;
     confirmResolve = resolve;
     $("#confirmTitle").textContent = title;
     $("#confirmBody").textContent = body;
@@ -2083,7 +2117,9 @@ function askConfirm({ title, body = "", ok = "确定", danger = true }) {
     button.textContent = ok;
     button.className = danger ? "danger-btn solid" : "outline-btn";
     showNow($("#confirmModal"));
-    setTimeout(() => button.focus(), 0);
+    setTimeout(() => {
+      if (confirmResolve === resolve) button.focus();
+    }, 0);
   });
 }
 function settleConfirm(value) {
@@ -2092,6 +2128,25 @@ function settleConfirm(value) {
   const resolve = confirmResolve;
   confirmResolve = null;
   resolve(value);
+  if (confirmReturnFocus?.isConnected) confirmReturnFocus.focus();
+  confirmReturnFocus = null;
+}
+function trapModalFocus(event, modal) {
+  const focusable = [
+    ...modal.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ].filter(el => el.getClientRects().length);
+  if (!focusable.length) return;
+  const first = focusable[0],
+    last = focusable.at(-1);
+  if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 // ---------- 大体积库按需加载：KaTeX / pdf.js 只在真正用到时才拉，首屏只带 marked + purify + hljs（图表与流程图的库在交互预览里按需载） ----------
@@ -2926,10 +2981,10 @@ function bindEvents() {
     if (e.target === $("#confirmModal")) settleConfirm(false);
   });
   $("#confirmModal").addEventListener("keydown", e => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      settleConfirm(true);
-    }
+    if (e.key === "Tab") trapModalFocus(e, $("#confirmModal"));
+  });
+  $("#settingsModal").addEventListener("keydown", e => {
+    if (e.key === "Tab" && !confirmResolve) trapModalFocus(e, $("#settingsModal"));
   });
   bindViewerEvents();
   bindComposerEvents();
@@ -6257,7 +6312,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     );
     // 旁注带只查不改的工具（检索、翻网页、翻文档、翻记忆）：模型说「我去查一下」就真能查，不会说完就断在那里；
     // 没有工具可用时（模型关了本机工具、没桥接）在提示里说明，免得它许诺去查
-    if (profile.tools !== false) await mcpReady();
+    if (profile.tools !== false) await mcpForTurn();
     const tools = profile.tools !== false ? toolDefinitions(conversation, { lookup: true }) : null;
     const overrides = {
       systemPrompt: systemPrompt(conversation, tools, { role: "side", anchor: !!thread.anchor.text }),
@@ -8380,7 +8435,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     // 先把这一答预计的用量记到预留里（提示 + 最大输出），别的对话同时开工时看得见；收尾时换成实际用量
     // 预留只是估个数：一答的输出按八千算，不必与接口实际的上限一致
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
-    if (profile.tools !== false) await mcpReady();
+    if (profile.tools !== false) await mcpForTurn();
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
     const overrides = {
@@ -8594,7 +8649,11 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     }
     // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错。429 是限流（「tokens per min」也带 token 与 limit），不算
-    if (response.status !== 429 && contextOverflow(message) && (await keepInWindow(profile, history, signal, overrides, { overflow: true })))
+    if (
+      response.status !== 429 &&
+      contextOverflow(message) &&
+      (await keepInWindow(profile, history, signal, overrides, { overflow: true }))
+    )
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     throw Error(message);
   }
@@ -10468,8 +10527,8 @@ function noteStepHtml(step) {
  */
 // 一个服务的工具定义超过这么多字就按需给（配置里写 load: "inline" 或 "lazy" 可以指定）
 const MCP_INLINE_LIMIT = 12000;
-/** @type {{ key: string, loading: Promise<void>|null, servers: Record<string, McpServerState>, lazy: string[] }} */
-const mcp = { key: "", loading: null, servers: {}, lazy: [] };
+/** @type {{ key: string, loading: Promise<void>|null, servers: Record<string, McpServerState>, lazy: string[], retryAt: number, waitWarned: boolean }} */
+const mcp = { key: "", loading: null, servers: {}, lazy: [], retryAt: 0, waitWarned: false };
 
 /** 设置里的全部配置：{ 名字: { command, args, cwd, env } 或 { url, headers, type }，另可带 disabled / autoApprove / timeout / load } */
 function mcpConfigs() {
@@ -10483,24 +10542,52 @@ function mcpReady(restart = []) {
   if (apiBase === null) return Promise.resolve();
   const servers = mcpActiveConfigs(),
     key = JSON.stringify(servers);
-  if (key === mcp.key && !restart.length) return mcp.loading || Promise.resolve();
+  if (key === mcp.key && !restart.length && (mcp.loading || !mcp.retryAt || Date.now() < mcp.retryAt))
+    return mcp.loading || Promise.resolve();
+  if (key !== mcp.key) {
+    mcp.loading = null;
+    mcp.servers = {};
+    registerMcpTools();
+    renderMcpStatus();
+  }
   mcp.key = key;
+  mcp.retryAt = 0;
+  mcp.waitWarned = false;
+  if (!Object.keys(servers).length) return Promise.resolve();
   const loading = bridge("/api/mcp/list", { servers, restart }, AbortSignal.timeout(90000))
     .then(
-      data => (mcp.servers = data.servers),
+      data => {
+        if (mcp.loading !== loading) return;
+        mcp.servers = data.servers || {};
+        if (Object.values(mcp.servers).some(state => !state.ok)) mcp.retryAt = Date.now() + 30000;
+      },
       error => {
-        // 桥接本身不认（旧桥接没有这个接口）或没回话：记下原因，下次再试
-        mcp.key = "";
+        if (mcp.loading !== loading) return;
+        // 桥接本身不认或没回话：记下原因，下一问到期再试
+        mcp.retryAt = Date.now() + 30000;
         mcp.servers = Object.fromEntries(Object.keys(servers).map(name => [name, { ok: false, error: String(error.message || error) }]));
       }
     )
     .then(() => {
       if (mcp.loading !== loading) return;
+      mcp.loading = null;
       registerMcpTools();
       renderMcpStatus();
     });
   mcp.loading = loading;
   return loading;
+}
+// 首问等一个短窗口；慢或坏掉的外部服务不应挡住内置工具与正文。
+async function mcpForTurn() {
+  const loading = mcpReady();
+  if (!mcp.loading) return loading;
+  let timer;
+  const ready = await Promise.race([loading.then(() => true), new Promise(resolve => (timer = setTimeout(() => resolve(false), 10000)))]);
+  clearTimeout(timer);
+  if (!ready && !mcp.waitWarned) {
+    mcp.waitWarned = true;
+    toast("外部服务仍在连接，本问先使用已就绪的工具");
+  }
 }
 function registerMcpTools() {
   for (const [name, tool] of TOOLS) if (tool.mcp) TOOLS.delete(name);
@@ -11622,15 +11709,20 @@ async function copyText(text) {
   }
 }
 
+let settingsReturnFocus = null;
 function openSettings(tab = settingsTab) {
+  if ($("#settingsModal").classList.contains("hidden")) settingsReturnFocus = document.activeElement;
   persistDraft();
   rememberScrollPosition();
   settingsTab = tab;
   showNow($("#settingsModal"));
   renderSettings();
+  $("#closeSettings").focus();
 }
 function closeSettings() {
   hideWithFade($("#settingsModal"));
+  if (settingsReturnFocus?.isConnected) settingsReturnFocus.focus();
+  settingsReturnFocus = null;
   // 「手记一条」后没写字就关了窗：那条空的不留（文本框随窗撤掉时未必触发 blur）
   const kept = store.memory.items.filter(item => String(item.text || "").trim());
   if (kept.length !== store.memory.items.length) {
@@ -11869,6 +11961,7 @@ function bindSettingsEvents() {
       chatHashes.clear();
       chatStamps.clear();
       chatDiskStamps.clear();
+      chatBases.clear();
       chatDiskWrites.clear();
       // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
       if (data.adopted) {

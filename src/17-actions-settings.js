@@ -114,15 +114,20 @@ async function copyText(text) {
   }
 }
 
+let settingsReturnFocus = null;
 function openSettings(tab = settingsTab) {
+  if ($("#settingsModal").classList.contains("hidden")) settingsReturnFocus = document.activeElement;
   persistDraft();
   rememberScrollPosition();
   settingsTab = tab;
   showNow($("#settingsModal"));
   renderSettings();
+  $("#closeSettings").focus();
 }
 function closeSettings() {
   hideWithFade($("#settingsModal"));
+  if (settingsReturnFocus?.isConnected) settingsReturnFocus.focus();
+  settingsReturnFocus = null;
   // 「手记一条」后没写字就关了窗：那条空的不留（文本框随窗撤掉时未必触发 blur）
   const kept = store.memory.items.filter(item => String(item.text || "").trim());
   if (kept.length !== store.memory.items.length) {
@@ -361,6 +366,7 @@ function bindSettingsEvents() {
       chatHashes.clear();
       chatStamps.clear();
       chatDiskStamps.clear();
+      chatBases.clear();
       chatDiskWrites.clear();
       // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
       if (data.adopted) {

@@ -14,6 +14,7 @@ const { pickFolder } = require("./folder-picker.js");
 const createShell = require("./shell.js");
 const createLocks = require("./locks.js");
 const createArchive = require("./archive.js");
+const writeTextAtomic = require("./atomic.js");
 
 module.exports = function createWork({ archiveHome, workHome, toolEnv }) {
   // ---- 执事模式：给模型一个工作目录，能跑指令、读写文件 ----
@@ -140,7 +141,7 @@ module.exports = function createWork({ archiveHome, workHome, toolEnv }) {
         previous = existed ? await fs.promises.readFile(file).catch(() => null) : null;
       const previousText = previous ? decodeText(previous)?.text : "",
         previousLines = previousText ? countLines(previousText) : 0;
-      await fs.promises.writeFile(file, content, "utf8").catch(error => {
+      await writeTextAtomic(file, content).catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });
       return {
@@ -258,7 +259,7 @@ module.exports = function createWork({ archiveHome, workHome, toolEnv }) {
       const result = replaceAll ? source.split(needle).join(replacement) : source.replace(needle, () => replacement);
       // 按原来的编码写回：UTF-16 的还是 UTF-16，带 BOM 的还带 BOM
       const output = encodeText(result, decoded.encoding);
-      await fs.promises.writeFile(file, output).catch(error => {
+      await writeTextAtomic(file, output).catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });
       const line = source.slice(0, source.indexOf(needle)).split(/\r?\n/).length;

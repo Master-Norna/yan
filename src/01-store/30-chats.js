@@ -81,6 +81,7 @@ async function writeConversation(id) {
           AbortSignal.timeout(60000)
         );
         chatDiskStamps.set(id, pending.savedAt);
+        chatBases.set(id, pending.json);
         chatSaveWarned = false;
         if (!deletedChatIds.has(id)) {
           persisted = true;
@@ -114,7 +115,9 @@ async function writeConversation(id) {
       }
     if (spilled && !deletedChatIds.has(id))
       try {
-        await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.put({ id, savedAt: pending.savedAt, json: pending.json }));
+        await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db =>
+          db.put({ id, savedAt: pending.savedAt, json: pending.json, baseJson: chatBases.get(id) })
+        );
         persisted = true;
         if (!chatsOnline()) chatSaveWarned = false;
       } catch {
@@ -153,6 +156,7 @@ async function deleteConversationStorage(id) {
     chatHashes.delete(id);
     chatStamps.delete(id);
     chatDiskStamps.delete(id);
+    chatBases.delete(id);
     deletedChatIds.delete(id);
   }
 }
@@ -163,6 +167,7 @@ function forgetConversation(id) {
   chatHashes.delete(id);
   chatStamps.delete(id);
   chatDiskStamps.delete(id);
+  chatBases.delete(id);
   delete store.drafts?.[id];
   void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
 }
@@ -176,9 +181,11 @@ function catchUpConversation(item, { quiet = false } = {}) {
     theirJson = JSON.stringify(theirs),
     stamp = chatStamps.get(c.id) || 0,
     clean = chatHashes.get(c.id) === hashText(JSON.stringify(c)) && chatDiskStamps.get(c.id) === stamp && !busyHere(c.id),
-    next = clean ? theirs : mergeConversation(c, theirs);
+    base = chatBases.has(c.id) ? JSON.parse(chatBases.get(c.id)) : null,
+    next = clean ? theirs : mergeConversation(c, theirs, base);
   store.conversations[index] = next;
   chatDiskStamps.set(c.id, item.savedAt);
+  chatBases.set(c.id, theirJson);
   chatStamps.set(c.id, Math.max(stamp, item.savedAt));
   if (JSON.stringify(next) === theirJson) {
     chatStamps.set(c.id, item.savedAt);
@@ -200,33 +207,53 @@ function catchUpConversation(item, { quiet = false } = {}) {
   return next;
 }
 let mergeNoticed = false;
-// 两份并一份：以目录里那份为底，这边有、那边没有的消息（分支、旁注同理）接在后面，宁可多留一条也不丢。
-// 两边都有的同一条：这边正写着这段就取这边的（原地改，作答中的引用不断），否则取那边的——那边的更新
-function mergeConversation(c, theirs) {
-  const mine = busyHere(c.id),
-    union = (a = [], b = []) => {
-      const own = new Map(a.filter(x => x?.id).map(x => [x.id, x])),
-        seen = new Set(b.map(x => x?.id));
-      return [...b.map(x => (mine && own.get(x?.id)) || x), ...a.filter(x => !seen.has(x?.id))];
-    },
-    messages = union(c.messages, theirs.messages),
-    forks = union(c.forks, theirs.forks),
-    threads = union(c.threads, theirs.threads);
+// 共同起点上没改的字段取对方，只有一边改了的取改动；同一字段都改了时本机胜出。
+// 按 id 合并消息和分支，避免「改标题」把另一处的置顶覆盖掉。
+function mergeConversation(c, theirs, base = null) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const merge = (ours, other, old) => {
+    if (same(ours, other)) return ours;
+    if (same(ours, old)) return other;
+    if (same(other, old)) return ours;
+    if (Array.isArray(ours) && Array.isArray(other) && [...ours, ...other].every(item => item?.id)) {
+      const own = new Map(ours.map(item => [item.id, item])),
+        before = new Map((Array.isArray(old) ? old : []).map(item => [item.id, item])),
+        seen = new Set(other.map(item => item.id));
+      return [
+        ...other.map(item => (own.has(item.id) ? merge(own.get(item.id), item, before.get(item.id)) : item)),
+        ...ours.filter(item => !seen.has(item.id))
+      ];
+    }
+    if (ours && other && typeof ours === "object" && typeof other === "object" && !Array.isArray(ours) && !Array.isArray(other)) {
+      const result = {};
+      for (const key of new Set([...Object.keys(other), ...Object.keys(ours)])) {
+        const value = merge(ours[key], other[key], old?.[key]);
+        if (value !== undefined) result[key] = value;
+      }
+      return result;
+    }
+    // 旧版暂存没有共同起点：沿用「目录字段优先、本机新增条目接上」的规则。
+    return base ? ours : other;
+  };
+  const mine = busyHere(c.id);
   if (mine) {
-    c.messages.splice(0, c.messages.length, ...messages);
-    c.forks = forks;
-    c.threads = threads;
+    // 作答中的消息对象要留在原位；独立改动的标题、置顶等字段仍可接收。
+    if (base)
+      for (const key of Object.keys(theirs))
+        if (!["messages", "forks", "threads", "unread"].includes(key) && same(c[key], base[key])) c[key] = theirs[key];
+    for (const key of ["messages", "forks", "threads"]) {
+      const seen = new Set(c[key].map(item => item.id));
+      const added = theirs[key].filter(item => !seen.has(item.id));
+      if (key === "messages") c.messages.push(...added);
+      else c[key].push(...added);
+    }
     return c;
   }
   // 未读只是这一处的提示：开着看的这段不因为并了一份又亮起来
-  return {
-    ...theirs,
-    messages,
-    forks,
-    threads,
-    ...(c.unread !== theirs.unread ? { unread: c.unread } : {}),
-    ...(messages.length > theirs.messages.length && c.updatedAt > theirs.updatedAt ? { updatedAt: c.updatedAt } : {})
-  };
+  const merged = merge(c, theirs, base);
+  if (c.unread !== theirs.unread) merged.unread = c.unread;
+  merged.updatedAt = c.updatedAt > theirs.updatedAt ? c.updatedAt : theirs.updatedAt;
+  return merged;
 }
 // 跟上目录里的这几段：页面切回前台时看的那段。只读这几个文件，便宜
 async function catchUpFromDisk(ids) {
@@ -261,7 +288,7 @@ function flushOnUnload() {
       hash = hashText(json);
     if (!pendingChatWrites.has(conversation.id) && !activeChatWrites.has(conversation.id) && chatHashes.get(conversation.id) === hash)
       continue;
-    records.push({ id: conversation.id, savedAt: nextChatStamp(conversation.id), json });
+    records.push({ id: conversation.id, savedAt: nextChatStamp(conversation.id), json, baseJson: chatBases.get(conversation.id) });
   }
   if (!records.length) return;
   try {
@@ -285,6 +312,7 @@ function adoptRecord(record) {
     const c = normalizeConversation(JSON.parse(record.json));
     chatStamps.set(c.id, Number(record.savedAt) || 0);
     chatHashes.set(c.id, hashText(JSON.stringify(c)));
+    if (record.baseJson) chatBases.set(c.id, record.baseJson);
     return c;
   } catch {
     return null;
@@ -409,6 +437,7 @@ async function syncChatsWithDisk() {
         }
         // 这边的不比目录里的旧：以这边的为准写过去（带上目录里那份的时间戳，免得被当成旧份拒掉）
         chatDiskStamps.set(c.id, item.savedAt);
+        chatBases.set(c.id, JSON.stringify(normalizeConversation(item.conversation)));
         if (item.savedAt < stamp || unsaved || hashText(JSON.stringify(normalizeConversation(item.conversation))) !== hash) push.add(c.id);
         else settled.add(c.id);
         return c;
@@ -421,6 +450,7 @@ async function syncChatsWithDisk() {
         const c = normalizeConversation(item.conversation);
         chatStamps.set(c.id, item.savedAt);
         chatDiskStamps.set(c.id, item.savedAt);
+        chatBases.set(c.id, JSON.stringify(c));
         chatHashes.set(c.id, hashText(JSON.stringify(c)));
         store.conversations.push(c);
         settled.add(c.id);

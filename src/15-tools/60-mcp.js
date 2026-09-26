@@ -8,8 +8,8 @@
  */
 // 一个服务的工具定义超过这么多字就按需给（配置里写 load: "inline" 或 "lazy" 可以指定）
 const MCP_INLINE_LIMIT = 12000;
-/** @type {{ key: string, loading: Promise<void>|null, servers: Record<string, McpServerState>, lazy: string[] }} */
-const mcp = { key: "", loading: null, servers: {}, lazy: [] };
+/** @type {{ key: string, loading: Promise<void>|null, servers: Record<string, McpServerState>, lazy: string[], retryAt: number, waitWarned: boolean }} */
+const mcp = { key: "", loading: null, servers: {}, lazy: [], retryAt: 0, waitWarned: false };
 
 /** 设置里的全部配置：{ 名字: { command, args, cwd, env } 或 { url, headers, type }，另可带 disabled / autoApprove / timeout / load } */
 function mcpConfigs() {
@@ -23,24 +23,52 @@ function mcpReady(restart = []) {
   if (apiBase === null) return Promise.resolve();
   const servers = mcpActiveConfigs(),
     key = JSON.stringify(servers);
-  if (key === mcp.key && !restart.length) return mcp.loading || Promise.resolve();
+  if (key === mcp.key && !restart.length && (mcp.loading || !mcp.retryAt || Date.now() < mcp.retryAt))
+    return mcp.loading || Promise.resolve();
+  if (key !== mcp.key) {
+    mcp.loading = null;
+    mcp.servers = {};
+    registerMcpTools();
+    renderMcpStatus();
+  }
   mcp.key = key;
+  mcp.retryAt = 0;
+  mcp.waitWarned = false;
+  if (!Object.keys(servers).length) return Promise.resolve();
   const loading = bridge("/api/mcp/list", { servers, restart }, AbortSignal.timeout(90000))
     .then(
-      data => (mcp.servers = data.servers),
+      data => {
+        if (mcp.loading !== loading) return;
+        mcp.servers = data.servers || {};
+        if (Object.values(mcp.servers).some(state => !state.ok)) mcp.retryAt = Date.now() + 30000;
+      },
       error => {
-        // 桥接本身不认（旧桥接没有这个接口）或没回话：记下原因，下次再试
-        mcp.key = "";
+        if (mcp.loading !== loading) return;
+        // 桥接本身不认或没回话：记下原因，下一问到期再试
+        mcp.retryAt = Date.now() + 30000;
         mcp.servers = Object.fromEntries(Object.keys(servers).map(name => [name, { ok: false, error: String(error.message || error) }]));
       }
     )
     .then(() => {
       if (mcp.loading !== loading) return;
+      mcp.loading = null;
       registerMcpTools();
       renderMcpStatus();
     });
   mcp.loading = loading;
   return loading;
+}
+// 首问等一个短窗口；慢或坏掉的外部服务不应挡住内置工具与正文。
+async function mcpForTurn() {
+  const loading = mcpReady();
+  if (!mcp.loading) return loading;
+  let timer;
+  const ready = await Promise.race([loading.then(() => true), new Promise(resolve => (timer = setTimeout(() => resolve(false), 10000)))]);
+  clearTimeout(timer);
+  if (!ready && !mcp.waitWarned) {
+    mcp.waitWarned = true;
+    toast("外部服务仍在连接，本问先使用已就绪的工具");
+  }
 }
 function registerMcpTools() {
   for (const [name, tool] of TOOLS) if (tool.mcp) TOOLS.delete(name);
