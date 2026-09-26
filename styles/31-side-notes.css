@@ -135,6 +135,8 @@
 }
 /* 目录页：不列范围、不设输入；目录钮只在看某一条时出现 */
 .side-panel[data-mode="index"] .side-composer,
+.side-panel[data-mode="index"] .side-back,
+.side-panel[data-mode="index"] .side-back-sep,
 .side-panel[data-mode="index"] #sideRemove {
   display: none;
 }
@@ -195,12 +197,14 @@
   color: var(--ink);
   transform: none;
 }
-/* 左下角回目录的箭头：与右边的模型签同一分量 */
+/* 回目录立在页头最左，隔一道细竖线再是印与题，与右端 × 前那道线左右对称：回去是导航，不与输入挤在一行。
+   比过两种：题下小字换成「‹ 回目录」（入口只剩 9.5px 的小字，不好找）；所注一段之上一行路标（多占一行，窄栏里挤） */
 .side-back {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 3px;
-  margin-right: auto;
+  margin: 0 -2px 0 -4px;
   padding: 3px 7px 3px 4px;
   border-radius: 6px;
   color: var(--ink-3);
@@ -211,12 +215,21 @@
     background 0.16s;
 }
 .side-back span {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
 }
 .side-back:hover {
   color: var(--ink);
   background: var(--paper-3);
+}
+.side-back-sep {
+  flex: none;
+  width: 1px;
+  height: 15px;
+  background: var(--line);
+}
+.side-composer .composer-right {
+  margin-left: auto;
 }
 .side-index {
   display: flex;
@@ -392,7 +405,7 @@
   font: 12px/1.9 var(--title);
   letter-spacing: 0.06em;
 }
-/* 输入与主页同一个框：寄在框里右下，模型签在它左边；左下是回目录。窄栏里字小一号、阴影浅些 */
+/* 输入与主页同一个框：寄在框里右下，模型签在它左边（回目录在页头最左）。窄栏里字小一号、阴影浅些 */
 .side-composer {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
