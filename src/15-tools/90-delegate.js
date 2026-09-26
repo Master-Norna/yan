@@ -85,8 +85,9 @@ async function runDelegate(step, args, ctx) {
       if (sub.usage) for (const key of Object.keys(usage)) usage[key] += Number(sub.usage[key] || 0);
       const calls = (sub.toolCalls || []).filter(call => call.name);
       if (!calls.length || !overrides.tools) break;
+      // 进 history 的只是这一轮新写的：断线前那截在接续时已经单独进过 history 了（reportStart 管的是回报，续写前的也算在内）
       if (++sub.rounds > subRoundLimit()) {
-        const said = sub.content.slice(reportStart).trim();
+        const said = sub.content.slice(roundStart).trim();
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("delegate.limit") });
         overrides.tools = null;
@@ -107,7 +108,7 @@ async function runDelegate(step, args, ctx) {
       refreshSteps(assistant);
       history.push({
         role: "assistant",
-        content: sub.content.slice(reportStart) || null,
+        content: sub.content.slice(roundStart) || null,
         tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: replayArguments(s.arguments) } })),
         ...(sub.thinkingBlocks?.length ? { thinking_blocks: sub.thinkingBlocks } : {})
       });

@@ -8637,9 +8637,7 @@ async function readReply(profile, history, signal, overrides, target, retried = 
   if (!retried) await keepInWindow(profile, history, signal, overrides);
   const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    // 桥接回的 error 是一句话；直连 Anthropic 回的是 { error: { message } }
-    const message = (typeof data.error === "string" ? data.error : data.error?.message) || `请求失败（${response.status}）`;
+    const message = await describeResponseError(response);
     // 接口不认这个思考档位：记下它认的几档，换成最接近的一档重发一次；再不行才算失败
     const sent = reasoningFields(profile, overrides.reasoning).reasoning_effort;
     if (!retried && sent && learnReasoningLevels(profile, message, sent)) {
@@ -8649,11 +8647,9 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     }
     // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错。429 是限流（「tokens per min」也带 token 与 limit），不算
-    if (
-      response.status !== 429 &&
-      contextOverflow(message) &&
-      (await keepInWindow(profile, history, signal, overrides, { overflow: true }))
-    )
+    const overflow = response.status !== 429 && contextOverflow(message);
+    if (overflow) learnContextWindow(profile, message);
+    if (overflow && (await keepInWindow(profile, history, signal, overrides, { overflow: true })))
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     throw Error(message);
   }
@@ -10870,8 +10866,9 @@ async function runDelegate(step, args, ctx) {
       if (sub.usage) for (const key of Object.keys(usage)) usage[key] += Number(sub.usage[key] || 0);
       const calls = (sub.toolCalls || []).filter(call => call.name);
       if (!calls.length || !overrides.tools) break;
+      // 进 history 的只是这一轮新写的：断线前那截在接续时已经单独进过 history 了（reportStart 管的是回报，续写前的也算在内）
       if (++sub.rounds > subRoundLimit()) {
-        const said = sub.content.slice(reportStart).trim();
+        const said = sub.content.slice(roundStart).trim();
         if (said) history.push({ role: "assistant", content: said });
         history.push({ role: "user", content: prompt("delegate.limit") });
         overrides.tools = null;
@@ -10892,7 +10889,7 @@ async function runDelegate(step, args, ctx) {
       refreshSteps(assistant);
       history.push({
         role: "assistant",
-        content: sub.content.slice(reportStart) || null,
+        content: sub.content.slice(roundStart) || null,
         tool_calls: steps.map(s => ({ id: s.id, type: "function", function: { name: s.name, arguments: replayArguments(s.arguments) } })),
         ...(sub.thinkingBlocks?.length ? { thinking_blocks: sub.thinkingBlocks } : {})
       });
@@ -11171,9 +11168,12 @@ function reasoningManual(profile) {
 }
 // 走到这里就是身份变了（或亲手要求重探）：此前记的档位是旧模型的，一律不沿用——接口照单全收就按通用四档，
 // 不然旧模型的 none 会跟着新模型走，把一个认档位的模型永远标成不认
-/** @param {Profile} profile */
-async function probeReasoningLevels(profile) {
-  if (!profile?.model || reasoningProbed(profile)) return null;
+/**
+ * @param {Profile} profile
+ * @param {boolean} [force] 探过也再探（测试连接）；亲手填的由调用方拦下
+ */
+async function probeReasoningLevels(profile, force = false) {
+  if (!profile?.model || (!force && reasoningProbed(profile))) return null;
   const key = reasoningProbeKey(profile);
   if (anthropicLike(profile) || /dashscope|aliyuncs/i.test(profile.baseUrl || "")) {
     profile.reasoningLevels = "";
@@ -11194,8 +11194,7 @@ async function probeReasoningLevels(profile) {
     let learned;
     if (response.ok) learned = REASONING_DEFAULT_LEVELS;
     else {
-      const data = await response.json().catch(() => ({})),
-        message = (typeof data.error === "string" ? data.error : data.error?.message) || "";
+      const message = await describeResponseError(response);
       const found = parseReasoningLevels(message, "probe");
       if (found.length) learned = found;
       // 只有明说不认识这个字段的才记成不认；「Invalid reasoning_effort value」这种只是嫌 probe 不对、又没列它认的几档——
@@ -11214,6 +11213,25 @@ async function probeReasoningLevels(profile) {
     clearTimeout(timer);
     controller.abort();
   }
+}
+// 接口没接下请求时回的那句话。各家的样子不一：OpenAI 系 { error: { message } }、桥接 { error: "…" }、旧版 vLLM { message }、
+// FastAPI 写的自建服务 { detail }（参数校验错是一串对象，整串交出去，思考档位的报错才读得出它认哪几档）；不是 JSON 的取原文开头
+async function describeResponseError(response) {
+  const raw = await response.text().catch(() => "");
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return raw.trim().slice(0, 300) || `请求失败（${response.status}）`;
+  }
+  const error = data?.error,
+    detail = data?.detail;
+  return (
+    (typeof error === "string" ? error : error?.message) ||
+    (typeof data?.message === "string" ? data.message : "") ||
+    (typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : "") ||
+    `请求失败（${response.status}）`
+  );
 }
 /** @param {Profile} profile */
 async function requestChat(profile, messages, signal, overrides = {}) {
@@ -12160,15 +12178,16 @@ function bindSettingsEvents() {
 const probeSerial = new Map();
 /** @param {Profile} profile */
 async function reportReasoningProbe(profile, card, force = false) {
-  if (force && !reasoningManual(profile)) profile.reasoningProbed = "";
   if (!profile.model) return;
+  // 重探不能靠清掉「探过」的标记：reasoningProbed 会把「有档位、没标记」当旧版手填的，重探一回反倒成了手填
+  const redo = force && !reasoningManual(profile);
   const status = () => document.querySelector(`[data-profile-card="${profile.id}"] .profile-status`);
   // 状态行上此前的话留着（「可用 · 4 ms」），但上一回探到的档位不留——刷新列表探了一次、再从下拉里选一个又探一次，不能越接越长
   const before = (status()?.textContent || "")
     .split(" · ")
     .filter(part => !/^(探测)?思考档位/.test(part))
     .join(" · ");
-  if (reasoningProbed(profile)) {
+  if (!redo && reasoningProbed(profile)) {
     if (force && status()) {
       const levels = profileReasoningLevels(profile);
       status().textContent = `${before ? `${before} · ` : ""}思考档位 ${levels.length ? levels.map(reasoningLabel).join(" / ") : "此模型不认"}${reasoningManual(profile) ? "（手填）" : ""}`;
@@ -12178,7 +12197,7 @@ async function reportReasoningProbe(profile, card, force = false) {
   const serial = (probeSerial.get(profile.id) || 0) + 1;
   probeSerial.set(profile.id, serial);
   if (status()) status().textContent = `${before ? `${before} · ` : ""}探测思考档位…`;
-  const levels = await probeReasoningLevels(profile);
+  const levels = await probeReasoningLevels(profile, redo);
   const el = status();
   if (!el || probeSerial.get(profile.id) !== serial) return;
   if (levels === null) el.textContent = before;
@@ -12265,9 +12284,7 @@ async function handleProfileAction(profile, action, card) {
               body: JSON.stringify({ profile: profileForRequest(profile) })
             })
           : await fetch(directModelsRequest(profile).url, { headers: directModelsRequest(profile).headers });
-      const type = response.headers.get("content-type") || "";
-      const data = type.includes("application/json") ? await response.json() : {};
-      if (!response.ok) throw Error(data.error || data.message || `连接失败（${response.status}）`);
+      if (!response.ok) throw Error(await describeResponseError(response));
       status.textContent = `可用 · ${Math.round(performance.now() - started)} ms`;
       // 测试连接是亲手要的一次核对：档位也重探一遍
       void reportReasoningProbe(profile, card, true);
@@ -12292,8 +12309,8 @@ async function fetchModelList(profile) {
     return [...new Set(data.models || [])].sort();
   }
   response = await fetch(directModelsRequest(profile).url, { headers: directModelsRequest(profile).headers });
+  if (!response.ok) throw Error(await describeResponseError(response));
   data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Error(data.error?.message || data.message || `请求失败（${response.status}）`);
   return [
     ...new Set((Array.isArray(data.data) ? data.data : []).map(item => (typeof item === "string" ? item : item?.id)).filter(Boolean))
   ].sort();
@@ -12575,7 +12592,12 @@ async function compactContext(c, { auto = false, before = null, profile = active
   try {
     // 转写可能很长、模型可能先思考再写：超时给足五分钟。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
     const timeout = AbortSignal.timeout(300000),
-      summary = await summarize(profile, prompt("assistant.compact", { transcript }), signal ? AbortSignal.any([signal, timeout]) : timeout, c.reasoning);
+      summary = await summarize(
+        profile,
+        prompt("assistant.compact", { transcript }),
+        signal ? AbortSignal.any([signal, timeout]) : timeout,
+        c.reasoning
+      );
     const at = c.messages.indexOf(lastCompacted);
     if (at < 0) throw Error("对话在压缩期间已改动");
     // 期间又压过一次（分隔已在这条之后）就作废，以后来的为准
@@ -12601,11 +12623,6 @@ async function compactContext(c, { auto = false, before = null, profile = active
   } finally {
     compactingIds.delete(c.id);
   }
-}
-async function describeResponseError(response) {
-  const data = await response.json().catch(() => ({}));
-  const error = data.error;
-  return (typeof error === "string" ? error : error?.message) || `请求失败（${response.status}）`;
 }
 // 请模型把一段文字压成摘要：前文压缩与轮内压缩共用。不带系统提示；输出上限不另给，随平时的走；花的墨记在模型上
 /** @param {Profile} profile */
@@ -12663,21 +12680,38 @@ function maybeAutoCompact(c, profile) {
 const FOLD_KEEP_ROUNDS = 2;
 // 各家接口「放不下」的说法：OpenAI 系 maximum context length、Anthropic prompt is too long / exceed context limit、
 // Gemini exceeds the maximum number of tokens、Qwen Range of input length、Kimi token limit、GLM exceeds max length……
-// 输出上限（max_tokens）太大、上游超时（context deadline exceeded）不算
+// 输出上限（max_tokens）太大、上游超时（context deadline exceeded）不算。vLLM 的说法两样都列（you requested 0 output tokens and
+// your prompt contains at least 32769 input tokens）：要的输出本身放得进窗口，就是输入太长、压了有用；输出一项就超窗口才是 max_tokens 给大了
 function contextOverflow(message) {
   const text = String(message || "");
-  return (
-    /context.{0,24}(length|window|limit|size)|prompt is too long|too many tokens|token.{0,20}limit|exceed.{0,40}(limit|length|tokens)|input.{0,20}(too long|length)|上下文.{0,8}(长度|窗口|上限|超)|超出.{0,12}(上下文|长度|限制)|超长/i.test(
+  if (
+    !/context.{0,24}(length|window|limit|size)|prompt is too long|too many tokens|token.{0,20}limit|exceed.{0,40}(limit|length|tokens)|input.{0,20}(too long|length)|上下文.{0,8}(长度|窗口|上限|超)|超出.{0,12}(上下文|长度|限制)|超长/i.test(
       text
-    ) && !/deadline|output tokens?|max_completion/i.test(text)
-  );
+    ) ||
+    /deadline|max_completion/i.test(text)
+  )
+    return false;
+  if (!/output tokens?/i.test(text)) return true;
+  const limit = Number(text.match(/context length is (\d+)/i)?.[1]),
+    output = Number(text.match(/(\d+) output tokens?/i)?.[1]);
+  return /input tokens?/i.test(text) && limit > 0 && output < limit;
+}
+// 报错里说了窗口多大（maximum context length is 32768 tokens）而模型上没填：记下来，此后送出前就按它提前压，不必每回先撞一次放不下
+/** @param {Profile} profile */
+function learnContextWindow(profile, message) {
+  const limit = Number(String(message || "").match(/context length is (\d+)/i)?.[1]);
+  if (Number(profile.contextWindow) > 0 || !(limit >= 1000)) return;
+  profile.contextWindow = limit;
+  saveStoreSoon();
 }
 // 下一次请求约有多大：上一轮接口报了实际的提示用量就以它为底，只估此后新添的；没报就整份估（连同系统提示与工具定义）
 function requestSize(history, overrides) {
   const seen = overrides.seen;
   if (seen && seen.at <= history.length) return seen.tokens + estimateTokens(history.slice(seen.at));
   return (
-    estimateTokens(history) + estimateText(String(overrides.systemPrompt || "")) + (overrides.tools ? estimateText(JSON.stringify(overrides.tools)) : 0)
+    estimateTokens(history) +
+    estimateText(String(overrides.systemPrompt || "")) +
+    (overrides.tools ? estimateText(JSON.stringify(overrides.tools)) : 0)
   );
 }
 const plainContent = content =>
@@ -12691,7 +12725,10 @@ function foldTranscript(region, budget) {
       if (m.role === "tool") return `结果：${clip(plainContent(m.content), limit)}`;
       if (m.role === "user") return `用户：${clip(plainContent(m.content), 4000)}`;
       const said = plainContent(m.content).trim();
-      return [said && `你：${clip(said, 4000)}`, ...(m.tool_calls || []).map(c => `调用 ${c.function?.name}：${clip(String(c.function?.arguments || ""), limit / 4)}`)]
+      return [
+        said && `你：${clip(said, 4000)}`,
+        ...(m.tool_calls || []).map(c => `调用 ${c.function?.name}：${clip(String(c.function?.arguments || ""), limit / 4)}`)
+      ]
         .filter(Boolean)
         .join("\n");
     });
@@ -12750,7 +12787,12 @@ async function keepInWindow(profile, history, signal, overrides, { overflow = fa
       AbortSignal.any([signal, AbortSignal.timeout(300000)]),
       overrides.reasoning
     );
-    history.splice(head, cut - head, { role: "assistant", content: `［工作笔记］\n${note}` }, { role: "user", content: prompt("assistant.folded") });
+    history.splice(
+      head,
+      cut - head,
+      { role: "assistant", content: `［工作笔记］\n${note}` },
+      { role: "user", content: prompt("assistant.folded") }
+    );
     overrides.seen = null;
     overrides.folds = (overrides.folds || 0) + 1;
     return true;
