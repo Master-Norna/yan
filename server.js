@@ -280,7 +280,7 @@ async function handleChat(req, res) {
 const STORE = require("./server/store.js")();
 // 沙箱环境：存储根里的 环境/，桥接起的进程（指令、MCP 服务）都接上它
 const ENV = require("./server/env/index.js")({ envHome: () => STORE.paths().env });
-const WORK = require("./server/work.js")({
+const WORK = require("./server/work/index.js")({
   archiveHome: () => STORE.paths().archive,
   workHome: () => STORE.paths().work,
   toolEnv: ENV.apply
@@ -448,7 +448,7 @@ server.headersTimeout = 66000;
 process.on("uncaughtException", error => console.error(`${stamp()} 桥接内部错误（已忽略）：`, error));
 process.on("unhandledRejection", error => console.error(`${stamp()} 桥接内部错误（已忽略）：`, error));
 // Ctrl+C、关掉窗口、结束进程时 Node 默认直接退出，不发 exit 事件：还在跑的指令与后台指令（开发服务器之类）就留在了后台占着端口。
-// 接住这几个信号走一遍正常退出，exit 里的收尾（见 server/work.js）才会执行
+// 接住这几个信号走一遍正常退出，exit 里的收尾（见 server/work/shell.js）才会执行
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) process.on(signal, () => process.exit(signal === "SIGINT" ? 130 : 0));
 server.listen(PORT, HOST, () => {
   const address = `http://${HOST}:${PORT}`;

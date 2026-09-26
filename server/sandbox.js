@@ -8,7 +8,7 @@
 // 以上是严的一档（screenCommand），给「问而后行」：拦下的由页面转给用户请示，批了这一条就出沙箱跑。
 // 「审而后行」「径行」用宽的一档（screenLoose），只守系统本身，见其说明。
 // 这是静态筛查，不是进程隔离：脚本里的代码仍以用户的权限跑。筛出来的每一条都带一句原因回给模型，它改一改就能过。
-// 纯函数，不碰文件系统；由 server/work.js 装配，test/unit 直接测
+// 纯函数，不碰文件系统；由 server/work/index.js 装配，test/unit 直接测
 "use strict";
 const path = require("node:path");
 

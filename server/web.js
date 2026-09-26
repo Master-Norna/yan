@@ -1,5 +1,5 @@
 // 言 · 桥接的联网：地址门禁（公网才放行，http_request / download_file 另放本机回环）、按量读正文、翻网页、免 Key 检索、调接口
-// 地址门禁与读正文是纯函数，server/work.js 的 download_file 直接 require；routes 由 server.js 装进接口表
+// 地址门禁与读正文是纯函数，server/work/ 的 download_file 与 CLIXML 还原直接 require；routes 由 server.js 装进接口表
 "use strict";
 const dns = require("node:dns").promises;
 const net = require("node:net");
