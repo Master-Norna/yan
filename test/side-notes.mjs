@@ -147,7 +147,7 @@ check(
 check(
   "index entry shows the anchored passage and where it sits",
   await evalJs(
-    `(i => i.querySelector("strong").textContent === "术语 X" && i.querySelector("small").textContent.startsWith("第一答 · 一问"))(document.querySelector("#sideMessages .side-index-item"))`
+    `(i => i.querySelector("strong").textContent === "术语 X" && i.querySelector("small").textContent.startsWith("一问") && i.previousElementSibling?.querySelector("span")?.textContent === "第一答")(document.querySelector("#sideMessages .side-index-item"))`
   )
 );
 await evalJs(`getSelection().removeAllRanges(); document.querySelector("#sideMessages [data-side-new]").click(); true`);
