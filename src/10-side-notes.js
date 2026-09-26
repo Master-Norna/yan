@@ -570,7 +570,8 @@ async function streamSideReply(conversation, thread, assistant, profile) {
     const overrides = {
       systemPrompt: systemPrompt(conversation, tools, { role: "side", anchor: !!thread.anchor.text }),
       tools,
-      reasoning: conversation.reasoning || ""
+      reasoning: conversation.reasoning || "",
+      head: history.length
     };
     const onFrame = () => {
       if (sideThreadId !== thread.id || !sideFollow) return;

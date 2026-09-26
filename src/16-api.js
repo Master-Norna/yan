@@ -11,6 +11,8 @@ function estimateTokens(messages) {
   let score = 0;
   for (const message of messages) {
     score += 4;
+    // 工具调用的参数也随请求送出（写文件时整份内容都在这里），不算就会把长活的上下文估得太轻
+    for (const call of message.tool_calls || []) score += 8 + estimateText(String(call.function?.arguments || ""));
     if (typeof message.content === "string") {
       score += estimateText(message.content);
       continue;

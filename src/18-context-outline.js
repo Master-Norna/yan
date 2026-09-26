@@ -116,30 +116,8 @@ async function compactContext(c, { auto = false } = {}) {
   compactingIds.add(c.id);
   renderConversation();
   try {
-    // 转写可能很长、模型可能先思考再写：超时给足五分钟；输出上限不另给，随平时的走。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
-    const response = await requestChat(
-      profile,
-      [{ role: "user", content: prompt("assistant.compact", { transcript }) }],
-      AbortSignal.timeout(300000),
-      {
-        temperature: 0.2,
-        systemPrompt: "",
-        reasoning: c.reasoning ? "low" : ""
-      }
-    );
-    if (!response.ok) throw Error(await describeResponseError(response));
-    /** @type {Message} */
-    const temp = { id: `compact-${uid()}`, role: "assistant", content: "", timestamp: now() };
-    if ((response.headers.get("content-type") || "").includes("text/event-stream")) await readSse(response, temp);
-    else {
-      const data = await response.json();
-      temp.content = extractContent(data);
-      temp.reasoning = normalizeContent(data?.choices?.[0]?.message?.reasoning_content ?? data?.choices?.[0]?.message?.reasoning);
-    }
-    const summary = String(temp.content || "")
-      .replace(/<think>[\s\S]*?<\/think>/g, "")
-      .trim();
-    if (!summary) throw Error(temp.reasoning ? "模型只写了思考、没写出摘要（输出被上限截断）" : "模型没有写出摘要");
+    // 转写可能很长、模型可能先思考再写：超时给足五分钟。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
+    const summary = await summarize(profile, prompt("assistant.compact", { transcript }), AbortSignal.timeout(300000), c.reasoning);
     const at = c.messages.indexOf(lastCompacted);
     if (at < 0) throw Error("对话在压缩期间已改动");
     // 期间又压过一次（分隔已在这条之后）就作废，以后来的为准
@@ -169,6 +147,34 @@ async function describeResponseError(response) {
   const error = data.error;
   return (typeof error === "string" ? error : error?.message) || `请求失败（${response.status}）`;
 }
+// 请模型把一段文字压成摘要：前文压缩与轮内压缩共用。不带系统提示；输出上限不另给，随平时的走；花的墨记在模型上
+/** @param {Profile} profile */
+async function summarize(profile, ask, signal, reasoning = "") {
+  const response = await requestPatiently(profile, [{ role: "user", content: ask }], signal, {
+    temperature: 0.2,
+    systemPrompt: "",
+    reasoning: reasoning ? "low" : ""
+  });
+  if (!response.ok) throw Error(await describeResponseError(response));
+  /** @type {Message} */
+  const temp = { id: `summary-${uid()}`, role: "assistant", content: "", timestamp: now() };
+  if ((response.headers.get("content-type") || "").includes("text/event-stream")) await readSse(response, temp);
+  else {
+    const data = await response.json();
+    temp.content = extractContent(data);
+    temp.reasoning = normalizeContent(data?.choices?.[0]?.message?.reasoning_content ?? data?.choices?.[0]?.message?.reasoning);
+    temp.usage = data.usage;
+  }
+  profile.usedTokens =
+    Math.max(0, Number(profile.usedTokens || 0)) +
+    (Number(temp.usage?.total_tokens || 0) || estimateTokens([{ content: ask }, { content: temp.content }]));
+  renderQuota();
+  const summary = String(temp.content || "")
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .trim();
+  if (!summary) throw Error(temp.reasoning ? "模型只写了思考、没写出摘要（输出被上限截断）" : "模型没有写出摘要");
+  return summary;
+}
 // 分隔上的摘要进历史：一问一答的样子，各家接口都认
 /** @returns {Array<Record<string, any>>} */
 function summaryMessages(marker) {
@@ -185,6 +191,102 @@ function maybeAutoCompact(c) {
   if (!limit || !c || c.ended) return;
   if (contextEstimate(c) < limit) return;
   void compactContext(c, { auto: true });
+}
+// ---------- 轮内压缩：一答之内工具轮次叠得太长时，把较早的往来压成一份工作笔记，只留最近几轮原样 ----------
+// 上面的压缩只在两答之间动手；长活（执事连跑几百轮、帮手审一整个仓库）在一答之内就能把窗口撑破，接口回一句放不下，整段活就白做了。
+// 主答、旁注、帮手三条工具循环都经 readReply 发请求，所以在那里一并接上：overrides.head 记这一答自己的往来从 history 哪一格起，
+// 之前的（对话历史、任务说明）原样保留。两个时机：送出前估算已过窗口的七成半（填了上下文窗口才有）；接口回说放不下（没填窗口也接得住）
+const FOLD_KEEP_ROUNDS = 2;
+// 各家接口「放不下」的说法：OpenAI 系 maximum context length、Anthropic prompt is too long / exceed context limit、
+// Gemini exceeds the maximum number of tokens、Qwen Range of input length、Kimi token limit、GLM exceeds max length……
+// 输出上限（max_tokens）太大、上游超时（context deadline exceeded）不算
+function contextOverflow(message) {
+  const text = String(message || "");
+  return (
+    /context.{0,24}(length|window|limit|size)|prompt is too long|too many tokens|token.{0,20}limit|exceed.{0,40}(limit|length|tokens)|input.{0,20}(too long|length)|上下文.{0,8}(长度|窗口|上限|超)|超出.{0,12}(上下文|长度|限制)|超长/i.test(
+      text
+    ) && !/deadline|output tokens?|max_completion/i.test(text)
+  );
+}
+// 下一次请求约有多大：上一轮接口报了实际的提示用量就以它为底，只估此后新添的；没报就整份估（连同系统提示与工具定义）
+function requestSize(history, overrides) {
+  const seen = overrides.seen;
+  if (seen && seen.at <= history.length) return seen.tokens + estimateTokens(history.slice(seen.at));
+  return (
+    estimateTokens(history) + estimateText(String(overrides.systemPrompt || "")) + (overrides.tools ? estimateText(JSON.stringify(overrides.tools)) : 0)
+  );
+}
+const plainContent = content =>
+  typeof content === "string" ? content : Array.isArray(content) ? content.map(part => part?.text || "").join("\n") : "";
+// 往来的转写：工具结果与调用参数按预算逐级截短，仍放不下就从最早的删起（上一份笔记留着）
+function foldTranscript(region, budget) {
+  const clip = (text, n) => (text.length > n ? `${text.slice(0, n)}…（余 ${text.length - n} 字略）` : text);
+  let lines = [];
+  for (const limit of [2000, 800, 300]) {
+    lines = region.map(m => {
+      if (m.role === "tool") return `结果：${clip(plainContent(m.content), limit)}`;
+      if (m.role === "user") return `用户：${clip(plainContent(m.content), 4000)}`;
+      const said = plainContent(m.content).trim();
+      return [said && `你：${clip(said, 4000)}`, ...(m.tool_calls || []).map(c => `调用 ${c.function?.name}：${clip(String(c.function?.arguments || ""), limit / 4)}`)]
+        .filter(Boolean)
+        .join("\n");
+    });
+    if (estimateText(lines.join("\n\n")) <= budget) return lines.join("\n\n");
+  }
+  let total = estimateText(lines.join("\n\n"));
+  for (let i = 0; i < lines.length && total > budget; i++) {
+    if (lines[i].startsWith("你：［工作笔记］")) continue;
+    total -= estimateText(lines[i]);
+    lines[i] = "";
+  }
+  return lines.filter(Boolean).join("\n\n");
+}
+/**
+ * 需要时把 history 里这一答较早的往来压成笔记（就地改 history），压了返回 true
+ * @param {Profile} profile
+ * @param {Array<Record<string, any>>} history
+ * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold；seen 由 readReply 记下
+ */
+async function keepInWindow(profile, history, signal, overrides, { overflow = false } = {}) {
+  const head = overrides.head,
+    window = Number(profile.contextWindow) || 0;
+  if (typeof head !== "number") return false;
+  if (!overflow && (!window || requestSize(history, overrides) < window * 0.75)) return false;
+  // 一轮从带工具调用的 assistant 起，连同它的工具结果不拆开。留最近两轮原样，但留下的不过窗口的四分之一；接口已回说放不下的一轮不留
+  const starts = [];
+  for (let i = head; i < history.length; i++) if (history[i].role === "assistant" && history[i].tool_calls?.length) starts.push(i);
+  let cut = history.length;
+  for (let keep = overflow ? 0 : FOLD_KEEP_ROUNDS; keep > 0; keep--) {
+    const at = starts[starts.length - keep];
+    if (at > head && estimateTokens(history.slice(at)) <= window * 0.25) {
+      cut = at;
+      break;
+    }
+  }
+  const region = history.slice(head, cut);
+  // 没有新的工具往来可压（只剩上一份笔记，或放不下的是前面的对话本身）：压了也白压
+  if (!region.some(m => m.role === "tool")) return false;
+  const task = plainContent(history.slice(0, head).findLast(m => m.role === "user")?.content).slice(0, 4000);
+  overrides.onFold?.(true);
+  try {
+    const note = await summarize(
+      profile,
+      prompt("assistant.fold", { task, transcript: foldTranscript(region, window ? window * 0.5 : CONTEXT_HEAVY) }),
+      AbortSignal.any([signal, AbortSignal.timeout(300000)]),
+      overrides.reasoning
+    );
+    history.splice(head, cut - head, { role: "assistant", content: `［工作笔记］\n${note}` }, { role: "user", content: prompt("assistant.folded") });
+    overrides.seen = null;
+    overrides.folds = (overrides.folds || 0) + 1;
+    return true;
+  } catch (error) {
+    if (signal.aborted) throw error;
+    // 没压成：送出前的那次照原样发，也许还放得下；接口已回说放不下的，由 readReply 把原来的错交回去
+    console.warn("轮内压缩失败", error);
+    return false;
+  } finally {
+    overrides.onFold?.(false);
+  }
 }
 // 点右下角的计数：问一句就压，压缩期间计数处显示「压缩中」
 async function openContextMenu(anchor) {

@@ -20,6 +20,8 @@ const delta = (d, extra = {}) => ({
   choices: [{ index: 0, delta: d, finish_reason: null }],
   ...extra
 });
+// 长活（LONGSUB 帮手、LONGMAIN 主答）：每轮读一个大文件，请求超过 limit 字就回「放不下」；轮数记在这里，压掉的往来不影响它
+const long = { rounds: {}, folds: {}, overflows: {}, limit: { LONGSUB: 60000, LONGMAIN: 200000 } };
 let calls = 0,
   flaky503 = 0,
   titleFailed = false,
@@ -85,6 +87,11 @@ http
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ data: [{ id: "claude-test", type: "model" }] }));
     }
+    // 长活用例读一下：各自压过几回、撞过几回「放不下」
+    if (req.url.endsWith("/long-stats") && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify(long));
+    }
     // 用例读一下到目前为止收到过几次请求（探档位只探一次之类的断言）
     if (req.url.endsWith("/calls") && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "text/plain" });
@@ -124,6 +131,48 @@ http
           res.end(JSON.stringify({ error: { message, type: "invalid_request_error", param: "reasoning_effort" } }));
         };
         return model.includes("slow") ? setTimeout(reply, 1500) : reply();
+      }
+      // 长活：轮内压缩的请求（开头是 fold 提示）回一份笔记；其余按任务里的记号分派
+      const firstUser = String(msgs.find(m => m.role === "user")?.content || ""),
+        longKey = ["LONGSUB", "LONGMAIN"].find(k => firstUser.includes(k) && !firstUser.includes("LONGRUN"));
+      if (typeof lastUser === "string" && lastUser.startsWith("你在做下面这件事")) {
+        const key = ["LONGSUB", "LONGMAIN"].find(k => lastUser.includes(k)) || "?";
+        long.folds[key] = (long.folds[key] || 0) + 1;
+        const read = [...new Set(lastUser.match(/big\d+\.txt/g) || [])];
+        return sse(res, [delta({ content: `- 已读 ${read.join("、")}，各有 8000 字\n- 下一步：接着读` }), delta({}, { usage: { total_tokens: 9 } })]);
+      }
+      if (longKey) {
+        const size = JSON.stringify(msgs).length;
+        if (size > long.limit[longKey]) {
+          long.overflows[longKey] = (long.overflows[longKey] || 0) + 1;
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(
+            JSON.stringify({ error: { message: `This model's maximum context length is 16000 tokens. However, your messages resulted in ${Math.ceil(size / 4)} tokens.`, code: "context_length_exceeded" } })
+          );
+        }
+        const n = (long.rounds[longKey] = (long.rounds[longKey] || 0) + 1) - 1,
+          usage = { prompt_tokens: Math.ceil((size + JSON.stringify(payload.tools || []).length) / 4), completion_tokens: 20, total_tokens: 0 };
+        usage.total_tokens = usage.prompt_tokens + 20;
+        if (n < 12)
+          return sse(res, [
+            delta({ content: `读第 ${n + 1} 个。` }),
+            delta({ tool_calls: [{ index: 0, id: `call_long${n}`, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: `big${n}.txt` }) } }] }),
+            delta({}, { usage })
+          ]);
+        const note = msgs.find(m => m.role === "assistant" && String(m.content || "").startsWith("［工作笔记］"));
+        return sse(res, [
+          delta({ content: `${longKey} done|note:${note ? "yes" : "no"}|folded:${msgs.some(m => m.role === "user" && String(m.content).includes("原文不再保留")) ? "yes" : "no"}|task:${firstUser.includes(longKey) ? "yes" : "no"}|n:${msgs.length}` }),
+          delta({}, { usage })
+        ]);
+      }
+      if (typeof lastUser === "string" && lastUser.includes("LONGRUN-SUB")) {
+        if (!toolResults.length)
+          return sse(res, [
+            delta({ content: "派一名帮手。" }),
+            delta({ tool_calls: [{ index: 0, id: "call_lr0", type: "function", function: { name: "delegate", arguments: JSON.stringify({ title: "读十二个大文件", task: "LONGSUB：依次读 big0.txt 到 big11.txt，然后回报。" }) } }] }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [delta({ content: `LONGRUN-SUB done｜${String(toolResults.at(-1).content).replace(/\s+/g, " ").slice(0, 200)}` }), delta({}, { usage: { total_tokens: 5 } })]);
       }
       // 带附件的一问是分段内容：正文在第一段
       const lastText = Array.isArray(lastUser) ? String(lastUser.find(part => part.type === "text")?.text || "") : lastUser;

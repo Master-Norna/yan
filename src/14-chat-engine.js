@@ -441,7 +441,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       onRetry: n => {
         retrying = true;
         setJobLabel(conversation, job, `网络不稳 · 第 ${n} 次重试`);
-      }
+      },
+      head: history.length,
+      onFold: busy => setJobLabel(conversation, job, busy ? "上下文将满 · 整理中" : "生成中")
     };
     const toolCache = new Map();
     let rounds = 0,
@@ -618,6 +620,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
  */
 async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
   target.thinkingBlocks = null;
+  // 长活：这一答的工具往来快撑满窗口了，先压掉较早的几轮再发（见 18-context-outline.js 的 keepInWindow）
+  if (!retried) await keepInWindow(profile, history, signal, overrides);
   const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -631,14 +635,22 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       renderModelTriggers();
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     }
+    // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错
+    if (contextOverflow(message) && (await keepInWindow(profile, history, signal, overrides, { overflow: true })))
+      return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     throw Error(message);
   }
   onOpen?.();
   const type = response.headers.get("content-type") || "";
   // 帮手与消息的流式字段一致（content / reasoning / toolCalls / usage），readSse 按消息处理
   const sink = /** @type {Message} */ (target);
+  // 记下这次请求实际的提示用量，下一轮据此估算会不会撑破窗口
+  const sentAt = history.length,
+    note = () => {
+      if (Number(target.usage?.prompt_tokens) > 0) overrides.seen = { at: sentAt, tokens: Number(target.usage.prompt_tokens) };
+    };
   if (type.includes("text/event-stream"))
-    return readSse(response, sink, { onFrame }).catch(error => {
+    return readSse(response, sink, { onFrame }).then(note, error => {
       // 开了口才断的（掉线、上游掐线、静默超时）：记一笔，streamReply 据此接着写而不是整答作废
       if (error.name !== "AbortError") error.midStream = true;
       throw error;
@@ -656,6 +668,7 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       name: call.function?.name || "",
       arguments: call.function?.arguments || ""
     }));
+  note();
 }
 // 网络一晃就断太脆：接口没接下请求时（连不上、限流、5xx、过载）等一等再试，间隔渐长，接口给了 Retry-After 就照它等；
 // 断网时等网回来再试。参数错、鉴权错这类 4xx 试也白试，原样交回。overrides.onRetry 用来在页面上说一声「第几次重试」

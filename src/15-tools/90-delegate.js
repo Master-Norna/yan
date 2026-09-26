@@ -43,7 +43,10 @@ async function runDelegate(step, args, ctx) {
   const overrides = {
     systemPrompt: systemPrompt(conversation, tools, { role: "sub" }),
     tools,
-    reasoning: conversation.reasoning || ""
+    reasoning: conversation.reasoning || "",
+    // 跑得久了上下文会满：任务说明之后的往来由 readReply 按需压成工作笔记（见 keepInWindow），帮手接着做
+    head: history.length,
+    onFold: busy => job && setJobLabel(conversation, job, busy ? "帮手整理上下文" : "帮手工作中")
   };
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     toolCache = new Map(),
@@ -138,7 +141,7 @@ async function runDelegate(step, args, ctx) {
     stats = changeStats({ steps: [step] }),
     changedNote = changed.length ? `，改了 ${changed.length} 个文件：${changed.join("、")}（+${stats.added} −${stats.removed}）` : "",
     seconds = Math.round(sub.durationMs / 1000),
-    display = `${sub.steps.length} 步${changed.length ? ` · 改 ${changed.length} 个文件` : ""} · ${seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分`}`;
+    display = `${sub.steps.length} 步${changed.length ? ` · 改 ${changed.length} 个文件` : ""}${overrides.folds ? ` · 压缩 ${overrides.folds} 回` : ""} · ${seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分`}`;
   if (sub.status !== "complete")
     return {
       ok: false,
