@@ -179,10 +179,6 @@ html.work-mode .chat-scroll-grabber {
   background: var(--grain), var(--wash), var(--paper);
   --side-gutter: max(34px, calc((100% - var(--read)) / 2));
 }
-.side-panel.wide .side-head {
-  padding: 16px var(--side-gutter) 12px;
-  border-bottom-color: transparent;
-}
 .side-panel.wide .side-anchor {
   width: auto;
   margin: 18px var(--side-gutter) 0;
@@ -297,21 +293,62 @@ html.work-mode .chat-scroll-grabber {
 .side-panel[data-mode="index"] #sideRemove {
   display: none;
 }
+/* 页头右边：阔 / 窄、删是两枚小字印，与左边的「注」同一种印；收起的 × 隔一道细竖线另立，与顶栏状态之间的分隔同一写法 */
 .side-tools {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-left: 4px;
+  gap: 5px;
+  margin-left: 6px;
 }
 .side-tools .icon-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  font: 12px var(--title);
-  letter-spacing: 0.04em;
+  width: 24px;
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--ink-3) 35%, var(--line));
+  border-radius: 4px;
+  color: var(--ink-2);
+  font: 12px/1 var(--title);
+  transition:
+    color 0.16s,
+    border-color 0.16s,
+    background 0.16s,
+    transform 0.25s cubic-bezier(0.22, 0.72, 0.2, 1);
+}
+.side-tools .icon-btn:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--accent);
+  transform: rotate(-4deg);
+}
+.side-tools #sideExpand[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.side-tools #sideRemove:hover {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
 }
 .side-tools #sideClose {
-  font-size: 15px;
+  position: relative;
+  margin-left: 7px;
+  border-color: transparent;
+  border-radius: 7px;
+  color: var(--ink-3);
+  font-size: 16px;
+}
+.side-tools #sideClose::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 5px;
+  bottom: 5px;
+  border-left: 1px solid var(--line);
+}
+.side-tools #sideClose:hover {
+  border-color: transparent;
+  background: var(--paper-3);
+  color: var(--ink);
+  transform: none;
 }
 /* 左下角回目录的箭头：与右边的模型签同一分量 */
 .side-back {
@@ -342,7 +379,7 @@ html.work-mode .chat-scroll-grabber {
 }
 /* 目录页头：几条旁注与「另起一条」同一行；题名只在铺满整页时出现（侧边时正文就在左边，不必再说） */
 .side-index-head {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
 }
 .side-index-head h2 {
   display: none;
@@ -388,31 +425,6 @@ html.work-mode .chat-scroll-grabber {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
-/* 组头：落在第几答，后面淡淡列那一答的开头，与侧栏「对话历史」同一种小标 */
-.side-index-group {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-  margin: 16px 0 4px;
-  padding: 0 4px;
-}
-.side-index-group span {
-  flex: none;
-  color: var(--accent);
-  font: 10.5px var(--title);
-  letter-spacing: 0.14em;
-}
-.side-index-group em {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--ink-3);
-  font: 11px var(--body);
-  font-style: normal;
-}
 .side-index-item {
   position: relative;
   display: flex;
@@ -442,28 +454,30 @@ html.work-mode .chat-scroll-grabber {
 .side-index-item:hover + .side-index-item::after {
   opacity: 0;
 }
-/* 从哪条回复进来的，那几条压一道朱色竖线——与所注一段、脚注号同一个标记 */
-.side-index-item.here {
-  color: var(--ink);
-}
-.side-index-item.here::before {
-  content: "";
-  position: absolute;
-  left: -2px;
-  top: 11px;
-  bottom: 11px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--accent);
-}
+/* 序号是一方小印：从哪条回复进来的，那几条的印是实的，其余是空的——各条一个样子，只差虚实 */
 .side-index-num {
   flex: none;
+  display: grid;
+  place-items: center;
   width: 18px;
-  padding-top: 3px;
+  height: 18px;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 3px;
   color: var(--accent);
-  font: 10.5px var(--title);
-  letter-spacing: 0.04em;
-  text-align: center;
+  font: 10px/1 var(--title);
+  transform: rotate(-3deg);
+  transition:
+    background 0.16s,
+    color 0.16s;
+}
+.side-index-item.here .side-index-num {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+}
+.side-index-item.here {
+  color: var(--ink);
 }
 .side-index-copy {
   flex: 1;
@@ -503,15 +517,12 @@ html.work-mode .chat-scroll-grabber {
 .side-panel.wide .side-index-head h2 {
   display: block;
 }
-.side-panel.wide .side-index-group {
-  margin-top: 26px;
-}
 .side-panel.wide .side-index-item {
   gap: 14px;
   padding: 13px 12px 13px 4px;
 }
 .side-panel.wide .side-index-item + .side-index-item::after {
-  left: 36px;
+  left: 38px;
 }
 .side-panel.wide .side-index-copy strong {
   font-size: 14.5px;
@@ -521,8 +532,10 @@ html.work-mode .chat-scroll-grabber {
   font-size: 10.5px;
 }
 .side-panel.wide .side-index-num {
-  padding-top: 4px;
-  font-size: 11.5px;
+  width: 20px;
+  height: 20px;
+  margin-top: 3px;
+  font-size: 11px;
 }
 .side-panel.wide .side-index-foot {
   margin-top: 40px;

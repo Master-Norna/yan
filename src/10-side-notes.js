@@ -227,8 +227,8 @@ function renderSidePanel() {
   const scroller = $("#sideScroll");
   if (sideFollow) scroller.scrollTop = scroller.scrollHeight;
 }
-// 目录：按所注消息在对话里的先后排，同一条消息上的按起注时间排，落在同一问 / 答上的归作一组，组头列第几答与那一答的开头；
-// 每条列所注的一段（整条回复的列第一问），下面一行是几问几答、最近一次动笔。铺满整页时顶上另有题名，正文让了位也知道注的是哪段对话
+// 目录：按所注消息在对话里的先后排，同一条消息上的按起注时间排；每条列所注的一段（整条回复的列第一问），
+// 下面一行是落在第几答、几问几答、最近一次动笔。铺满整页时顶上另有题名，正文让了位也知道注的是哪段对话
 /** @param {Conversation} c */
 function renderSideIndex(c) {
   $("#sidePanel").dataset.mode = "index";
@@ -238,32 +238,18 @@ function renderSideIndex(c) {
     list = [...visibleThreads(c)].sort(
       (a, b) => order.get(a.anchor.messageId) - order.get(b.anchor.messageId) || String(a.createdAt).localeCompare(String(b.createdAt))
     );
-  const where = messageId => {
-    const index = order.get(messageId),
+  const where = thread => {
+    const index = order.get(thread.anchor.messageId),
       message = c.messages[index],
       nth = c.messages.slice(0, index + 1).filter(m => m.role === message.role).length;
     return `第${chineseNumber(nth)}${message.role === "user" ? "问" : "答"}`;
   };
-  const opening = messageId =>
-    String(c.messages[order.get(messageId)]?.content || "")
-      .replace(/```[\s\S]*?(```|$)/g, " ")
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/[#>*_`~|]/g, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 80);
-  let group = null;
   const items = list
     .map((thread, i) => {
       const asked = thread.messages.filter(m => m.role === "user").length,
         lead = thread.anchor.text || thread.messages.find(m => m.role === "user")?.content || "尚未落笔",
-        running = !!sideJob(thread),
-        head =
-          thread.anchor.messageId === group
-            ? ""
-            : `<div class="side-index-group"><span>${escapeHtml(where(thread.anchor.messageId))}</span><em>${escapeHtml(opening(thread.anchor.messageId))}</em></div>`;
-      group = thread.anchor.messageId;
-      return `${head}<button type="button" class="side-index-item${thread.anchor.messageId === sideIndexFor ? " here" : ""}" data-side-open="${escapeHtml(thread.id)}"><span class="side-index-num">${i + 1}</span><span class="side-index-copy"><strong>${escapeHtml(lead)}</strong><small>${asked ? `${escapeHtml(chineseNumber(asked, true))}问` : "未问"}${running ? " · 作答中" : ""} · ${escapeHtml(formatDay(thread.updatedAt || thread.createdAt))}</small></span></button>`;
+        running = !!sideJob(thread);
+      return `<button type="button" class="side-index-item${thread.anchor.messageId === sideIndexFor ? " here" : ""}" data-side-open="${escapeHtml(thread.id)}"><span class="side-index-num">${i + 1}</span><span class="side-index-copy"><strong>${escapeHtml(lead)}</strong><small>${escapeHtml(where(thread))} · ${asked ? `${escapeHtml(chineseNumber(asked, true))}问` : "未问"}${running ? " · 作答中" : ""} · ${escapeHtml(formatDay(thread.updatedAt || thread.createdAt))}</small></span></button>`;
     })
     .join("");
   // 「＋」另起一条：正文里划着一段就注在那一段上；没划就是就整条回复而谈（从哪条回复进来的就是哪条，否则是最末一答）
