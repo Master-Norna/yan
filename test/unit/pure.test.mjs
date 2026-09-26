@@ -26,6 +26,9 @@ const f = load([
   "parseReasoningLevels",
   "reasoningProbed",
   "learnReasoningLevels",
+  "contextOverflow",
+  "learnContextWindow",
+  "describeResponseError",
   "isReadOnlyCommand",
   "clampLines",
   "normalizeDraft",
@@ -562,4 +565,42 @@ test("looksLikeMermaid / liftBareMermaid：写岔了的流程图照样认得，�
   assert.match(lifted, /后文 <pre>别的<\/pre>/);
   const fenced = '```html\n<pre class="mermaid">graph TD\nA-->B</pre>\n```';
   assert.equal(f.liftBareMermaid(fenced), fenced);
+});
+test("contextOverflow / learnContextWindow：vLLM 连带列出 0 个输出 token 的也算放不下，max_tokens 给大了不算", () => {
+  const vllm =
+    "This model's maximum context length is 32768 tokens. However, you requested 0 output tokens and your prompt contains at least 32769 input tokens, for a total of at least 32769 tokens.";
+  assert.equal(f.contextOverflow(vllm), true);
+  assert.equal(
+    f.contextOverflow("This model's maximum context length is 16000 tokens. However, your messages resulted in 20000 tokens."),
+    true
+  );
+  assert.equal(f.contextOverflow("prompt is too long: 210000 tokens > 200000 maximum"), true);
+  assert.equal(
+    f.contextOverflow(
+      "This model's maximum context length is 32768 tokens. However, you requested 500000 output tokens and your prompt contains at least 20 input tokens."
+    ),
+    false
+  );
+  assert.equal(f.contextOverflow("max_tokens is too large: this model supports at most 8192 output tokens"), false);
+  assert.equal(f.contextOverflow("context deadline exceeded"), false);
+  const p = { contextWindow: "" };
+  f.learnContextWindow(p, vllm);
+  assert.equal(p.contextWindow, 32768);
+  const set = { contextWindow: 20000 };
+  f.learnContextWindow(set, vllm);
+  assert.equal(set.contextWindow, 20000);
+});
+test("describeResponseError：各家报错的样子都取得出那句话，不是 JSON 的取原文", async () => {
+  const says = (body, status = 400) =>
+    f.describeResponseError(new Response(typeof body === "string" ? body : JSON.stringify(body), { status }));
+  assert.equal(await says({ error: { message: "bad key" } }), "bad key");
+  assert.equal(await says({ error: "桥接的话" }), "桥接的话");
+  assert.equal(await says({ object: "error", message: "old vllm" }), "old vllm");
+  assert.equal(await says({ detail: "Not Found" }, 404), "Not Found");
+  assert.match(
+    await says({ detail: [{ loc: ["body", "reasoning_effort"], msg: "Input should be 'low', 'medium' or 'high'" }] }),
+    /reasoning_effort.*'low'/
+  );
+  assert.equal(await says("modal-http: app stopped", 502), "modal-http: app stopped");
+  assert.equal(await says("", 500), "请求失败（500）");
 });

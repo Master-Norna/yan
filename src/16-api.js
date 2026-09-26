@@ -194,9 +194,12 @@ function reasoningManual(profile) {
 }
 // 走到这里就是身份变了（或亲手要求重探）：此前记的档位是旧模型的，一律不沿用——接口照单全收就按通用四档，
 // 不然旧模型的 none 会跟着新模型走，把一个认档位的模型永远标成不认
-/** @param {Profile} profile */
-async function probeReasoningLevels(profile) {
-  if (!profile?.model || reasoningProbed(profile)) return null;
+/**
+ * @param {Profile} profile
+ * @param {boolean} [force] 探过也再探（测试连接）；亲手填的由调用方拦下
+ */
+async function probeReasoningLevels(profile, force = false) {
+  if (!profile?.model || (!force && reasoningProbed(profile))) return null;
   const key = reasoningProbeKey(profile);
   if (anthropicLike(profile) || /dashscope|aliyuncs/i.test(profile.baseUrl || "")) {
     profile.reasoningLevels = "";
@@ -217,8 +220,7 @@ async function probeReasoningLevels(profile) {
     let learned;
     if (response.ok) learned = REASONING_DEFAULT_LEVELS;
     else {
-      const data = await response.json().catch(() => ({})),
-        message = (typeof data.error === "string" ? data.error : data.error?.message) || "";
+      const message = await describeResponseError(response);
       const found = parseReasoningLevels(message, "probe");
       if (found.length) learned = found;
       // 只有明说不认识这个字段的才记成不认；「Invalid reasoning_effort value」这种只是嫌 probe 不对、又没列它认的几档——
@@ -237,6 +239,25 @@ async function probeReasoningLevels(profile) {
     clearTimeout(timer);
     controller.abort();
   }
+}
+// 接口没接下请求时回的那句话。各家的样子不一：OpenAI 系 { error: { message } }、桥接 { error: "…" }、旧版 vLLM { message }、
+// FastAPI 写的自建服务 { detail }（参数校验错是一串对象，整串交出去，思考档位的报错才读得出它认哪几档）；不是 JSON 的取原文开头
+async function describeResponseError(response) {
+  const raw = await response.text().catch(() => "");
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return raw.trim().slice(0, 300) || `请求失败（${response.status}）`;
+  }
+  const error = data?.error,
+    detail = data?.detail;
+  return (
+    (typeof error === "string" ? error : error?.message) ||
+    (typeof data?.message === "string" ? data.message : "") ||
+    (typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : "") ||
+    `请求失败（${response.status}）`
+  );
 }
 /** @param {Profile} profile */
 async function requestChat(profile, messages, signal, overrides = {}) {

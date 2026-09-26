@@ -637,9 +637,7 @@ async function readReply(profile, history, signal, overrides, target, retried = 
   if (!retried) await keepInWindow(profile, history, signal, overrides);
   const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    // 桥接回的 error 是一句话；直连 Anthropic 回的是 { error: { message } }
-    const message = (typeof data.error === "string" ? data.error : data.error?.message) || `请求失败（${response.status}）`;
+    const message = await describeResponseError(response);
     // 接口不认这个思考档位：记下它认的几档，换成最接近的一档重发一次；再不行才算失败
     const sent = reasoningFields(profile, overrides.reasoning).reasoning_effort;
     if (!retried && sent && learnReasoningLevels(profile, message, sent)) {
@@ -649,11 +647,9 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     }
     // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错。429 是限流（「tokens per min」也带 token 与 limit），不算
-    if (
-      response.status !== 429 &&
-      contextOverflow(message) &&
-      (await keepInWindow(profile, history, signal, overrides, { overflow: true }))
-    )
+    const overflow = response.status !== 429 && contextOverflow(message);
+    if (overflow) learnContextWindow(profile, message);
+    if (overflow && (await keepInWindow(profile, history, signal, overrides, { overflow: true })))
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     throw Error(message);
   }
