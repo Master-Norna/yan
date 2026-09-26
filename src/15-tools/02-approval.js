@@ -81,3 +81,61 @@ function approveByEnter(entry) {
   if (answers?.some(Boolean)) return settleApproval(entry.step.id, answers);
   toast("请先在上方作答");
 }
+
+// 请示条：批与不批、ask_user 的表单；输入框旁的权限档位切换（切宽了，这段对话里等着的请示一并放行）
+function bindApprovalEvents() {
+  $("#approvalBar").addEventListener("click", event => {
+    const bar = $("#approvalBar"),
+      button = event.target.closest("[data-approve]");
+    if (button) {
+      event.preventDefault();
+      return approveFrom(button);
+    }
+    const opt = event.target.closest(".ask-opt");
+    if (opt) {
+      const block = opt.closest(".ask-q"),
+        on = opt.getAttribute("aria-checked") === "true",
+        single = block.dataset.multi !== "true";
+      if (single) {
+        // 单选：选项与「自行填写」二选一——点了选项就清掉填的字，反之亦然（见下面的 input 监听）
+        block.querySelectorAll(".ask-opt").forEach(b => b.setAttribute("aria-checked", "false"));
+        const other = block.querySelector(".ask-other");
+        if (other && !on) other.value = "";
+      }
+      opt.setAttribute("aria-checked", on ? "false" : "true");
+      return;
+    }
+    const form = event.target.closest("[data-form]");
+    if (!form || !bar.dataset.stepId) return;
+    event.preventDefault();
+    if (form.dataset.form === "prev" || form.dataset.form === "next")
+      return formPage(bar, Number(bar.dataset.page || 0) + (form.dataset.form === "next" ? 1 : -1));
+    const answers = form.dataset.form === "submit" ? collectForm(bar) : false;
+    settleApproval(bar.dataset.stepId, answers && answers.some(Boolean) ? answers : false);
+  });
+  $("#approvalBar").addEventListener("input", event => {
+    if (!event.target.classList.contains("ask-other")) return;
+    const block = event.target.closest(".ask-q");
+    if (block?.dataset.multi !== "true" && event.target.value.trim())
+      block.querySelectorAll(".ask-opt").forEach(b => b.setAttribute("aria-checked", "false"));
+  });
+  $("#approvalBar").addEventListener("keydown", event => {
+    if (event.key !== "Enter" || !event.target.classList.contains("ask-other")) return;
+    event.preventDefault();
+    const bar = $("#approvalBar"),
+      page = Number(bar.dataset.page || 0),
+      total = bar.querySelectorAll(".ask-q").length;
+    if (page < total - 1) return formPage(bar, page + 1);
+    const answers = collectForm(bar);
+    if (answers && answers.some(Boolean)) settleApproval(bar.dataset.stepId, answers);
+  });
+  $("#workAuto").onclick = () => {
+    const c = currentConversation();
+    if (!c) return;
+    c.commandPolicy = nextCommandPolicy(commandPolicyOf(c));
+    saveStore();
+    renderWorkAuto();
+    if (c.commandPolicy !== "ask")
+      for (const [stepId, entry] of pendingApprovals) if (entry.conversationId === c.id) settleApproval(stepId, true);
+  };
+}

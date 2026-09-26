@@ -525,3 +525,101 @@ function syncDocumentTitle() {
   document.title = view === "library" ? "卷宗 · 言" : view === "groups" ? "分组 · 言" : c ? `${c.title} · 言` : "言";
   renderRunningHead(); // 标题改了（手改、拟题），书眉跟着换
 }
+
+// 侧栏的对话历史（检索、点开、改名）与正文顶上的题名
+function bindHistoryEvents() {
+  $("#historySearch").addEventListener("input", e => {
+    historyQuery = e.target.value;
+    clearTimeout(historySearchTimer);
+    historySearchTimer = setTimeout(renderHistory, 120);
+  });
+  $("#historySearch").addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      toggleHistorySearch(false);
+    }
+  });
+  $("#historySearchToggle").onclick = () => toggleHistorySearch();
+  $("#historySearchClose").onclick = () => toggleHistorySearch(false);
+  $("#history").addEventListener("dblclick", e => {
+    const item = e.target.closest("[data-conversation]");
+    if (item && !e.target.closest(".history-rename, [data-history-action]")) startRename(item.dataset.conversation);
+  });
+  $("#history").addEventListener("click", e => {
+    const toggle = e.target.closest("[data-repo-toggle]");
+    if (toggle) {
+      const dir = toggle.dataset.repoToggle,
+        set = new Set(store.settings.collapsedRepos || []);
+      set.has(dir) ? set.delete(dir) : set.add(dir);
+      store.settings.collapsedRepos = [...set];
+      saveStoreSoon();
+      renderHistory();
+      return;
+    }
+    const repo = e.target.closest("[data-history-workdir]");
+    if (repo) {
+      store.settings.pendingWorkdir = repo.dataset.historyWorkdir;
+      saveStore();
+      newChat();
+      return;
+    }
+    const item = e.target.closest("[data-conversation]");
+    if (!item) return;
+    const id = item.dataset.conversation,
+      action = e.target.closest("[data-history-action]")?.dataset.historyAction;
+    if (action === "menu") {
+      e.stopPropagation();
+      openHistoryMenu(id, e.target.closest("[data-history-action]"));
+    } else if (!e.target.closest(".history-rename")) openConversation(id);
+  });
+  $("#history").addEventListener("keydown", e => {
+    const input = e.target.closest(".history-rename");
+    if (!input) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // Enter 本身就是明确提交；也照顾脚本/输入法最后一拍尚未来得及冒 input 事件的情形。
+      renamingDirty = true;
+      commitRename(input.value);
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      renamingId = null;
+      renamingDirty = false;
+      renderHistory();
+    }
+  });
+  $("#history").addEventListener("input", e => {
+    if (e.target.closest(".history-rename") && renamingId) renamingDirty = true;
+  });
+  $("#history").addEventListener("focusout", e => {
+    const input = e.target.closest(".history-rename");
+    if (input && renamingId && !renderingHistory) commitRename(input.value);
+  });
+  const title = $("#chatTitle");
+  let titleDirty = false,
+    titleCanceled = false;
+  title.addEventListener("focus", () => {
+    titleDirty = false;
+    titleCanceled = false;
+  });
+  title.addEventListener("input", () => (titleDirty = true));
+  title.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      title.blur();
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      titleCanceled = true;
+      title.textContent = currentConversation()?.title || "";
+      title.blur();
+    }
+  });
+  title.addEventListener("blur", () => {
+    const c = currentConversation();
+    if (!c) return;
+    const value = title.textContent.replace(/\s+/g, " ").trim();
+    if (!titleCanceled && titleDirty && value && value !== c.title) renameConversation(c.id, value);
+    else title.textContent = c.title;
+    titleDirty = false;
+    titleCanceled = false;
+  });
+}

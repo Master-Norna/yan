@@ -448,3 +448,60 @@ function stableCut(content) {
   }
   return Math.max(0, cut);
 }
+
+// 正文里的代码块与交互作品：复制、源码 / 预览、重来、下载、放大；预览 iframe 报来的状态与高度
+function bindContentEvents() {
+  document.addEventListener("click", e => {
+    const copy = e.target.closest("[data-copy-code]");
+    if (copy) {
+      void copyText(copy.closest(".code-block, .html-app")?.querySelector("code")?.textContent || "");
+      copy.textContent = "已复制";
+      setTimeout(() => (copy.textContent = "复制"), 1200);
+      return;
+    }
+    const appToggle = e.target.closest("[data-app-toggle]");
+    if (appToggle) {
+      const app = appToggle.closest(".html-app"),
+        source = app.querySelector(".html-app-source"),
+        showSource = source.classList.contains("hidden");
+      source.classList.toggle("hidden", !showSource);
+      app.querySelector(".html-app-stage").classList.toggle("hidden", showSource);
+      appToggle.textContent = showSource ? "预览" : "源码";
+      return;
+    }
+    const appRestart = e.target.closest("[data-app-restart]");
+    if (appRestart) {
+      mountHtmlApp(appRestart.closest(".html-app"));
+      return;
+    }
+    const appDownload = e.target.closest("[data-app-download]");
+    if (appDownload) {
+      downloadText(htmlAppSource(appDownload.closest(".html-app")), "text/html;charset=utf-8", "言-交互作品.html");
+      return;
+    }
+    const expand = e.target.closest("[data-work-expand]");
+    if (expand) {
+      toggleWorkExpanded(expand.closest(".html-app"), expand);
+      return;
+    }
+  });
+  window.addEventListener("message", event => {
+    const data = event.data;
+    if (!data || !["yan-preview-ready", "yan-preview-state", "yan-preview-size", "yan-preview-escape"].includes(data.type)) return;
+    const app = [...document.querySelectorAll(".html-app[data-app-id]")].find(
+      el => el.dataset.appId === data.id && el.querySelector("iframe")?.contentWindow === event.source
+    );
+    if (!app) return;
+    if (data.type === "yan-preview-ready") return sendHtmlApp(app);
+    if (data.type === "yan-preview-size") return sizeHtmlApp(app, Number(data.height) || 0);
+    if (data.type === "yan-preview-escape") return void (app.classList.contains("work-expanded") && closeExpandedWork());
+    app.dataset.appState = data.state;
+    app.classList.toggle("html-app-error", data.state === "error");
+    const label = app.querySelector(".code-lang");
+    if (label) {
+      label.textContent = data.state === "error" ? "html · 运行有误" : "html · 可交互";
+      label.title = data.detail || "";
+    }
+    if (data.state === "ready" && followBottom) requestAnimationFrame(scrollBottom);
+  });
+}

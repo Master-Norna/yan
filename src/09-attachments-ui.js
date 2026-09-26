@@ -151,3 +151,47 @@ function setupQuoteTip() {
     input.setSelectionRange(input.value.length, input.value.length);
   });
 }
+
+// 附件：案上的移除、收入卷宗，各处附件的预览、打开、下载（键盘同样可用）
+function bindAttachmentEvents() {
+  document.addEventListener("click", e => {
+    const remove = e.target.closest("[data-remove-attachment]");
+    if (remove) {
+      const [file] = pendingAttachments.splice(Number(remove.dataset.removeAttachment), 1);
+      persistDraft();
+      void deleteAttachments([file?.id]);
+      renderAttachments();
+      return;
+    }
+    const save = e.target.closest("[data-save-attachment]");
+    if (save) {
+      void saveToLibrary(save.dataset.saveAttachment);
+      return;
+    }
+    const preview = e.target.closest("[data-open-image]");
+    if (preview) {
+      void openImageViewer(preview.dataset.openImage, preview);
+      return;
+    }
+    const open = e.target.closest("[data-open-attachment]");
+    if (open) {
+      void openFileViewer({ attachmentId: open.dataset.openAttachment }, open.dataset.name || "", open);
+      return;
+    }
+    const download = e.target.closest("[data-download-attachment]");
+    if (download) void downloadAttachment(download.dataset.downloadAttachment);
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (e.target.matches?.("[data-open-image]")) {
+      e.preventDefault();
+      void openImageViewer(e.target.dataset.openImage, e.target);
+    } else if (e.target.matches?.("[data-open-attachment]")) {
+      e.preventDefault();
+      void openFileViewer({ attachmentId: e.target.dataset.openAttachment }, e.target.dataset.name || "", e.target);
+    } else if (e.target.matches?.("[data-download-attachment]")) {
+      e.preventDefault();
+      void downloadAttachment(e.target.dataset.downloadAttachment);
+    }
+  });
+}

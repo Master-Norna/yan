@@ -406,3 +406,99 @@ const FONT_STACKS = {
   kai: { body: SANS, title: KAI },
   fangsong: { body: SANS, title: FANGSONG }
 };
+
+// 输入：欢迎页的提示词、两处输入框（回车发送、粘贴图片）、输入区高度、引文
+function bindComposerEvents() {
+  const welcomeInput = $("#welcomeInput"),
+    restPlaceholder = welcomeInput.placeholder;
+  chatSuggestionsHtml = $("#welcome .suggestions").innerHTML;
+  bindSuggestions = () =>
+    document.querySelectorAll(".suggestion").forEach(button => {
+      const prompt = button.dataset.prompt || button.textContent;
+      button.onclick = () => {
+        welcomeInput.value = prompt;
+        welcomeInput.placeholder = restPlaceholder;
+        welcomeInput.classList.remove("previewing");
+        grow(welcomeInput);
+        persistDraft();
+        welcomeInput.focus();
+        const start = prompt.indexOf("（"),
+          end = start < 0 ? prompt.length : prompt.indexOf("）", start) + 1;
+        welcomeInput.setSelectionRange(start < 0 ? prompt.length : start, end);
+      };
+      // 预览只占一行：取提示词首句并加省略号，不撑高输入框、不推挤按钮
+      const preview = `${prompt.split(/\r?\n/)[0].slice(0, 60)}…`;
+      button.addEventListener("pointerenter", () => {
+        if (welcomeInput.value) return;
+        welcomeInput.placeholder = preview;
+        welcomeInput.classList.add("previewing");
+      });
+      button.addEventListener("pointerleave", () => {
+        if (welcomeInput.placeholder === preview) {
+          welcomeInput.placeholder = restPlaceholder;
+          welcomeInput.classList.remove("previewing");
+        }
+      });
+    });
+  bindSuggestions();
+  [$("#welcomeInput"), $("#chatInput")].forEach(input => {
+    input.addEventListener("input", () => {
+      grow(input);
+      persistDraft();
+      renderSendButtons();
+    });
+    input.addEventListener("keydown", e => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const waiting = input.id === "chatInput" && !input.value.trim() ? pendingApprovalHere() : null;
+        if (waiting) return approveByEnter(waiting);
+        sendOrStop();
+      }
+    });
+    input.addEventListener("paste", e => {
+      const images = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith("image/"));
+      if (!images.length) return;
+      e.preventDefault();
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "").slice(4);
+      void addFiles(
+        images.map(
+          (file, index) =>
+            new File(
+              [file],
+              `粘贴图片-${stamp}${images.length > 1 ? `-${index + 1}` : ""}.${file.type.split("/")[1]?.replace("jpeg", "jpg") || "png"}`,
+              { type: file.type }
+            )
+        )
+      );
+    });
+  });
+  // 输入框上方多了请示条、帮手条与改动摘要，正文底部留白随之增减，末句不被盖住
+  if ("ResizeObserver" in window)
+    new ResizeObserver(() => {
+      const area = $("#composerArea");
+      if (area && !area.classList.contains("hidden")) {
+        $("#chatScroll").style.paddingBottom = `${area.offsetHeight + 16}px`;
+        document.documentElement.style.setProperty("--composer-h", `${area.offsetHeight}px`);
+        syncChatScrollGrabber();
+      }
+    }).observe($("#composerArea"));
+  $("#composerQuoteClose").onclick = () => {
+    pendingQuote = null;
+    renderQuote();
+    persistDraft();
+    $("#chatInput").focus();
+  };
+  $("#messages").addEventListener("click", event => {
+    const block = event.target.closest(".user-quote");
+    if (!block) return;
+    const source =
+      block.dataset.quoteSource && document.querySelector(`#messages [data-message="${CSS.escape(block.dataset.quoteSource)}"]`);
+    if (!source) return toast("出处已不在当前页面");
+    followBottom = false;
+    scrollChatTo(source, "center");
+    source.classList.remove("flash");
+    void source.offsetWidth;
+    source.classList.add("flash");
+  });
+}

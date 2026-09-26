@@ -462,3 +462,26 @@ async function exportConversationMarkdown(c) {
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// 压缩过的前文展开与折起；右侧的问题导航；右下角的上下文计数
+function bindOutlineEvents() {
+  $("#messages").addEventListener("click", event => {
+    const button = event.target.closest("[data-toggle-compacted]");
+    if (!button) return;
+    const c = currentConversation();
+    if (!c) return;
+    c.showCompacted = !c.showCompacted;
+    foldCompacted(c);
+    renderOutline();
+    if (!c.showCompacted) scrollChatTo(button.closest(".context-divider"), "center");
+  });
+  $("#outline").addEventListener("click", event => {
+    const item = event.target.closest(".outline-item");
+    if (item) jumpToOutline(item.dataset.target);
+  });
+  $("#contextGauge").addEventListener("click", event => {
+    event.stopPropagation();
+    openContextMenu(event.currentTarget);
+  });
+  $("#chatInput").addEventListener("input", () => scheduleContextGauge());
+}

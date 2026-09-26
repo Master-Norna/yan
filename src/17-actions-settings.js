@@ -842,3 +842,13 @@ async function importData(file) {
     toast(`导入失败：${String(error.message || error).slice(0, 80)}`);
   }
 }
+
+// 消息上的动作（复制、编辑、重答……）；编辑框里 Ctrl+Enter 保存
+function bindMessageActionEvents() {
+  $("#messages").addEventListener("click", handleMessageAction);
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || !e.target.classList?.contains("message-edit-input")) return;
+    e.preventDefault();
+    e.target.closest(".message-editor")?.querySelector('[data-action="save-edit"]')?.click();
+  });
+}

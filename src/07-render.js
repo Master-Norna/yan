@@ -626,3 +626,168 @@ function finalizeAssistant(conversation, assistant, leadTrim = 0) {
   renderHelperBar();
   if (followBottom) requestAnimationFrame(scrollBottom);
 }
+
+// 模型菜单：各处的模型签点开同一张菜单，挂到被点的那枚旁边；菜单里选模型、选思考档位、选预设
+function bindModelMenuEvents() {
+  document.querySelectorAll(".model-trigger").forEach(button => {
+    button.setAttribute("aria-haspopup", "dialog");
+    button.setAttribute("aria-controls", "modelMenu");
+    button.setAttribute("aria-expanded", "false");
+    button.onclick = e => {
+      e.stopPropagation();
+      const menu = $("#modelMenu"),
+        opening = menu.classList.contains("hidden") || menu.classList.contains("leaving");
+      if (menu.parentElement !== button.parentElement) {
+        menu.classList.add("hidden");
+        menu.classList.remove("leaving", "drop-up");
+        button.parentElement.append(menu);
+      }
+      if (!opening) {
+        closeModelMenu();
+        return;
+      }
+      renderModelMenu();
+      showNow(menu);
+      button.setAttribute("aria-expanded", "true");
+      positionModelMenu(button);
+    };
+  });
+  document.addEventListener("click", closeModelMenu);
+  window.addEventListener("resize", () => {
+    const trigger = document.querySelector('.model-trigger[aria-expanded="true"]');
+    if (trigger) positionModelMenu(trigger);
+  });
+  $("#modelMenu").addEventListener("click", e => {
+    const level = e.target.closest("[data-reasoning]");
+    if (level) {
+      e.stopPropagation();
+      const c = currentConversation();
+      const profile = activeProfile();
+      if (!profile) return;
+      profile.reasoning = normalizeReasoning(level.dataset.reasoning);
+      if (c) c.reasoning = profile.reasoning;
+      saveStore();
+      renderModelMenu();
+      renderModelTriggers();
+      const trigger = document.querySelector('.model-trigger[aria-expanded="true"]');
+      if (trigger) positionModelMenu(trigger);
+      return;
+    }
+    const preset = e.target.closest("[data-preset]");
+    if (preset) return selectPreset(preset.dataset.preset);
+    const item = e.target.closest("[data-profile]");
+    if (!item) return;
+    selectProfile(item.dataset.profile);
+    // 这个模型还没探过认哪几档：探一下，发送键旁的标签与菜单跟着换（探不成就按通用四档，撞了错再学）
+    const picked = activeProfile();
+    if (picked && !reasoningProbed(picked))
+      void probeReasoningLevels(picked).then(levels => {
+        if (levels === null || activeProfile() !== picked) return;
+        renderModelTriggers();
+        if ($("#modelMenu")?.classList.contains("hidden") === false) renderModelMenu();
+      });
+  });
+}
+
+// 正文的滚动：跟随到底、回到最新、右侧加宽的滚动条命中层
+function bindScrollEvents() {
+  // 跟随的规矩：往下滚到离底不远就算到底、开始跟随（生成中内容一直在长，硬要滚到最后一像素常常追不上）；
+  // 往上滚离底超过阈值才算离开。内容自己长高、缩短引起的滚动不算用户的意思
+  let lastScrollTop = 0;
+  $("#chatScroll").addEventListener("scroll", () => {
+    const el = $("#chatScroll"),
+      gap = el.scrollHeight - el.scrollTop - el.clientHeight,
+      down = el.scrollTop > lastScrollTop;
+    lastScrollTop = el.scrollTop;
+    if (gap < 8 || (down && gap < FOLLOW_THRESHOLD)) {
+      followBottom = true;
+      autoScrolling = false;
+    } else if (!down && !autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false;
+    syncJumpBottom(gap);
+    syncOutline();
+    syncRunningHead();
+  });
+  $("#runningHead").addEventListener("click", () => $("#chatScroll").scrollTo({ top: 0, behavior: "smooth" }));
+  // 跟着的时候，内容不论因何长高（工具输出、图表成图、图片载入、块的开合）都贴着底：不只靠流式的每一帧
+  if (typeof ResizeObserver === "function")
+    new ResizeObserver(() => {
+      if (followBottom && view === "chat" && currentId) scrollBottom();
+      syncChatScrollGrabber();
+    }).observe($("#messages"));
+  $("#chatScroll").addEventListener(
+    "wheel",
+    e => {
+      if (e.deltaY < 0 && !wheelScrollsInner(e)) followBottom = false;
+    },
+    { passive: true }
+  );
+  $("#chatScroll").addEventListener(
+    "pointerdown",
+    () => {
+      autoScrolling = false;
+    },
+    { passive: true }
+  );
+  // 右侧透明命中层把细滚动条的可抓宽度放大，也越过输入框覆盖区一直延伸到底部。
+  // 按下轨道会把滑块移到指针处；按住近似滑块则保留抓取点，拖动手感与原生滚动条一致。
+  const scrollGrabber = $("#chatScrollGrabber"),
+    chatScroll = $("#chatScroll");
+  let scrollDrag = null;
+  const scrollGeometry = () => {
+    const max = Math.max(0, chatScroll.scrollHeight - chatScroll.clientHeight),
+      track = chatScroll.clientHeight,
+      thumb = Math.min(track, Math.max(28, (track * track) / Math.max(chatScroll.scrollHeight, 1)));
+    return { rect: chatScroll.getBoundingClientRect(), max, track, thumb, travel: Math.max(1, track - thumb) };
+  };
+  const moveScrollGrabber = event => {
+    if (!scrollDrag || event.pointerId !== scrollDrag.pointerId) return;
+    const geometry = scrollGeometry(),
+      pointer = Math.max(0, Math.min(geometry.track, event.clientY - geometry.rect.top));
+    chatScroll.scrollTop = Math.max(0, Math.min(geometry.max, ((pointer - scrollDrag.offset) / geometry.travel) * geometry.max));
+  };
+  const stopScrollGrabber = event => {
+    if (!scrollDrag || event.pointerId !== scrollDrag.pointerId) return;
+    try {
+      scrollGrabber.releasePointerCapture(event.pointerId);
+    } catch {}
+    scrollDrag = null;
+  };
+  scrollGrabber.addEventListener("pointerdown", event => {
+    const geometry = scrollGeometry();
+    if (event.button !== 0 || !geometry.max || getComputedStyle(chatScroll).overflowY === "hidden") return;
+    event.preventDefault();
+    autoScrolling = false;
+    followBottom = false;
+    const pointer = Math.max(0, Math.min(geometry.track, event.clientY - geometry.rect.top)),
+      thumbTop = (chatScroll.scrollTop / geometry.max) * geometry.travel,
+      withinThumb = pointer >= thumbTop && pointer <= thumbTop + geometry.thumb;
+    scrollDrag = {
+      pointerId: event.pointerId,
+      offset: withinThumb ? pointer - thumbTop : geometry.thumb / 2
+    };
+    try {
+      scrollGrabber.setPointerCapture(event.pointerId);
+    } catch {}
+    moveScrollGrabber(event);
+  });
+  scrollGrabber.addEventListener("pointermove", moveScrollGrabber);
+  scrollGrabber.addEventListener("pointerup", stopScrollGrabber);
+  scrollGrabber.addEventListener("pointercancel", stopScrollGrabber);
+  scrollGrabber.addEventListener(
+    "wheel",
+    event => {
+      if (!scrollGrabber.classList.contains("active")) return;
+      const scale = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? chatScroll.clientHeight : 1;
+      if (event.deltaY < 0) followBottom = false;
+      chatScroll.scrollTop += event.deltaY * scale;
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+  // 生成时向上翻阅后，给一枚「回到最新」；贴近底部自动隐去
+  $("#jumpBottom").onclick = () => {
+    const el = $("#chatScroll");
+    followBottom = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: reducedMotion.matches ? "instant" : "smooth" });
+  };
+}

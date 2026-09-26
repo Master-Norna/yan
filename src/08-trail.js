@@ -854,3 +854,161 @@ function sourceCardsHtml(message) {
   const all = [...list, ...local];
   return `<details class="source-stack"><summary><span>出处</span><small>${all.length} 条</small></summary><div class="source-grid">${all.map(card).join("")}</div></details>`;
 }
+
+// 行迹：步骤的开合与看全、思绪跟随滚动、改动摘要、思绪与行迹的开合（正文、旁注、差遣三处同一套）
+function bindTrailEvents() {
+  $("#messages").addEventListener("click", event => {
+    const button = event.target.closest("[data-approve]");
+    if (button) {
+      event.preventDefault();
+      event.stopPropagation();
+      return approveFrom(button);
+    }
+    // 差遣的签不在此列：点它是去右侧开面板，不是折叠（见下面的 openHelperPanel）
+    const head = event.target.closest(".tool-step.foldable > .tool-step-head");
+    if (!head || event.target.closest("a, button")) return;
+    const el = head.parentElement,
+      c = currentConversation(),
+      step =
+        c &&
+        allMessages(c)
+          .flatMap(m => allSteps(m))
+          .find(s => s.id === el.dataset.stepId);
+    // 指令输出默认折起，开合记在步骤上，重画不丢
+    const wasFolded = el.classList.contains("folded");
+    if (step) step.expanded = wasFolded;
+    morphHeight(el, () => el.classList.toggle("folded", !wasFolded));
+    head.title = wasFolded ? "收起输出" : "展开输出";
+    saveStoreSoon();
+  });
+  $("#messages").addEventListener("click", event => {
+    const button = event.target.closest("[data-step-more]");
+    if (!button) return;
+    const el = button.closest(".tool-step"),
+      c = currentConversation(),
+      step =
+        c &&
+        allMessages(c)
+          .flatMap(m => allSteps(m))
+          .find(s => s.id === el?.dataset.stepId);
+    if (!step) return;
+    step.full = !step.full;
+    step.expanded = true;
+    saveStoreSoon();
+    // 节点留在原处只换内容，高度才好从旧高动到新高
+    const fresh = document.createElement("div");
+    fresh.innerHTML = stepHtml(step);
+    const next = fresh.firstElementChild;
+    morphHeight(el, () => {
+      el.className = next.className;
+      el.innerHTML = next.innerHTML;
+    });
+  });
+  // 出处也是一块可开合的，与思绪、行迹同一种开合
+  $("#messages").addEventListener("click", event => {
+    const summary = event.target.closest(".source-stack > summary");
+    if (!summary) return;
+    event.preventDefault();
+    const details = summary.parentElement;
+    setProcessDetails(details, details._motionAnimation ? !details._motionTarget : !details.open);
+  });
+  $("#messages").addEventListener(
+    "scroll",
+    event => {
+      const body = event.target;
+      if (body?.classList?.contains("reasoning-body")) body._follow = body.scrollTop + body.clientHeight >= body.scrollHeight - 24;
+    },
+    true
+  );
+  $("#messages").addEventListener("click", event => {
+    const summary = event.target.closest(".change-summary");
+    if (!summary) return;
+    const files = summary.parentElement.querySelector(".change-files"),
+      open = files.classList.toggle("hidden");
+    summary.setAttribute("aria-expanded", String(!open));
+  });
+  // 思绪与行迹的开合：正文、旁注面板与差遣面板同一套——用户亲手开合的记在消息上，流式期间的自动开合就不再替他动
+  const onProcessToggle = event => {
+    const summary = event.target.closest(".reasoning > summary, .tool-stack > summary");
+    if (!summary) return;
+    event.preventDefault();
+    const details = summary.parentElement;
+    const nextOpen = details._motionAnimation ? !details._motionTarget : !details.open;
+    // 用户亲手动了，程序排着的那次自动收起作废
+    clearTimeout(details._settleTimer);
+    details._settleTimer = null;
+    // 时间线里各轮的思绪与帮手各轮的步骤不记在消息上；用户开合过的记一笔，就地更新时不再替它开合
+    if (details.classList.contains("trail-reasoning") || details.classList.contains("sub-steps")) {
+      details.dataset.touched = "1";
+      return setProcessDetails(details, nextOpen);
+    }
+    const id = details.closest("[data-message]")?.dataset.message,
+      side = !!details.closest("#sideMessages");
+    const message = (side ? currentThread()?.messages : currentConversation()?.messages)?.find(item => item.id === id);
+    if (!message) return setProcessDetails(details, nextOpen);
+    const reasoning = details.classList.contains("reasoning");
+    message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
+    message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
+    saveStoreSoon();
+    setProcessDetails(details, nextOpen);
+  };
+  $("#messages").addEventListener("click", onProcessToggle);
+  $("#sideMessages").addEventListener("click", onProcessToggle);
+  $("#helperPanelBody").addEventListener("click", onProcessToggle);
+}
+
+// 差遣面板：帮手条与行迹里的签打开它，遮罩与合起关上它，‹ › 与列表翻帮手
+function bindHelperEvents() {
+  // 帮手条点一下开差遣面板：帮手的活在右边看，行迹里只留一枚签
+  $("#helperBar").addEventListener("click", event => {
+    const id = event.target.closest(".helper-row")?.dataset.helper || $("#helperBar").dataset.stepId || "";
+    if (id) openHelperPanel(id);
+  });
+  // 行迹里的那枚签：点它（或敲回车 / 空格）同样开面板
+  $("#messages").addEventListener("click", event => {
+    const head = event.target.closest(".tool-step-delegate > .tool-step-head");
+    if (head) openHelperPanel(head.parentElement.dataset.stepId || "");
+  });
+  $("#messages").addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const head = event.target.closest?.(".tool-step-delegate > .tool-step-head");
+    if (!head) return;
+    event.preventDefault();
+    openHelperPanel(head.parentElement.dataset.stepId || "");
+  });
+  // 合起即回到行迹里那一步——原先「合」与「行迹」两个按钮做的本是同一件事
+  $("#helperClose").onclick = () => {
+    const id = helperStepId;
+    closeHelperPanel();
+    const card = document.querySelector(`#messages .tool-step-delegate[data-step-id="${CSS.escape(id || "")}"]`);
+    if (!card) return;
+    const stack = card.closest(".tool-stack");
+    if (stack && !stack.open) setProcessDetails(stack, true);
+    scrollChatTo(card, "center");
+  };
+  // 点遮罩、按 Esc 都关得掉，与设置、文件查看器一个脾气。纸张之外的空白由 .helper-stage 铺满，点在它上面也算点了遮罩；
+  // 按下与松开都得落在空白处——在纸上选字、拖到纸外松手，click 会落到两者的共同祖先上，那不是要关窗
+  const helperBackdrop = target => target === $("#helperModal") || target === $("#helperScroll");
+  let helperPressedBackdrop = false;
+  $("#helperModal").addEventListener("pointerdown", event => {
+    helperPressedBackdrop = helperBackdrop(event.target);
+  });
+  $("#helperModal").addEventListener("click", event => {
+    if (helperPressedBackdrop && helperBackdrop(event.target)) closeHelperPanel();
+    helperPressedBackdrop = false;
+  });
+  // ‹ › 翻帮手；中间的计数点开是一张列表——帮手多了一个个翻就难受
+  $("#helperNav").addEventListener("click", event => {
+    const move = event.target.closest("[data-helper-step]")?.dataset.helperStep;
+    if (move) return stepHelperPanel(Number(move));
+    if (event.target.closest("[data-helper-list]")) {
+      const list = $("#helperList");
+      list.classList.toggle("hidden");
+      if (!list.classList.contains("hidden")) renderHelperList();
+    }
+  });
+  $("#helperList").addEventListener("click", event => {
+    const id = event.target.closest("[data-helper-pick]")?.dataset.helperPick;
+    if (id) openHelperPanel(id);
+  });
+}
