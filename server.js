@@ -171,8 +171,20 @@ function handleBootstrap(req, res) {
     }
   });
 }
+// 转发接口没有限流的话，本机恶意页面能借桥接无限刷上游接口，白白烧掉 API 配额；这里做个简单的滑动窗口限流
+const UPSTREAM_RATE_LIMIT = { windowMs: 60_000, max: 60 };
+const upstreamRate = { count: 0, resetAt: 0 };
+function upstreamRateLimited() {
+  const now = Date.now();
+  if (now > upstreamRate.resetAt) {
+    upstreamRate.count = 0;
+    upstreamRate.resetAt = now + UPSTREAM_RATE_LIMIT.windowMs;
+  }
+  return ++upstreamRate.count > UPSTREAM_RATE_LIMIT.max;
+}
 async function handleTest(req, res) {
   const started = Date.now();
+  if (upstreamRateLimited()) return sendJson(res, 429, { error: "请求过于频繁，请稍后再试" });
   try {
     const body = await readJson(req),
       config = resolveProfile(body.profile, true);
