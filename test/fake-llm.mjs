@@ -165,6 +165,18 @@ http
           delta({}, { usage })
         ]);
       }
+      // 前文放不下（LONGHEAD 没填窗口、LHWIN 填了窗口）：请求超过 30000 字回「放不下」；答里写明见没见到前文摘要
+      const headKey = typeof lastUser === "string" && !lastUser.startsWith("把下面这段对话") && ["LONGHEAD", "LHWIN", "LH-SEED"].find(k => lastUser.includes(k));
+      if (headKey) {
+        const size = JSON.stringify(msgs).length;
+        if (size > 30000) {
+          long.overflows[headKey] = (long.overflows[headKey] || 0) + 1;
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: { message: `This model's maximum context length is 8000 tokens. However, your messages resulted in ${Math.ceil(size / 4)} tokens.` } }));
+        }
+        const summary = msgs.some(m => m.role === "user" && String(m.content || "").startsWith("［前文摘要］"));
+        return sse(res, [delta({ content: `${headKey} ok|summary:${summary ? "yes" : "no"}|size:${size}` }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
       if (typeof lastUser === "string" && lastUser.includes("LONGRUN-SUB")) {
         if (!toolResults.length)
           return sse(res, [

@@ -61,7 +61,6 @@ function updateContextGauge() {
       draft,
       draft || pendingAttachments.length || pendingQuote ? { text: draft, attachments: pendingAttachments, quote: pendingQuote } : null
     ),
-    limit = Number(store.settings.compactAt) || 0,
     window = Number(activeProfile()?.contextWindow) || 0,
     heavy = window ? n >= window * 0.75 : n >= CONTEXT_HEAVY;
   gauge.classList.remove("hidden");
@@ -70,7 +69,7 @@ function updateContextGauge() {
   gauge.style.setProperty("--ratio", window ? `${Math.min(100, Math.round((n / window) * 100))}%` : "0%");
   rollText(gauge.querySelector(".context-gauge-value"), formatTokens(n));
   gauge.querySelector(".context-gauge-window").textContent = window ? `/ ${formatTokens(window)}` : "";
-  gauge.title = `下一问约送出 ${formatTokens(n)} token${window ? `，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : ""}（估算，含系统提示、工具定义与上次压缩以来的历史）${limit ? `；超过 ${formatTokens(limit)} 自动压成摘要` : ""}${heavy ? "\n上下文已重，可压缩前文" : "\n压缩前文"}`;
+  gauge.title = `下一问约送出 ${formatTokens(n)} token${window ? `，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : ""}（估算，含系统提示、工具定义与上次压缩以来的历史）${window ? "；过七成半自动压成摘要" : "；放不下时自动压成摘要"}${heavy ? "\n上下文已重，可压缩前文" : "\n压缩前文"}`;
 }
 function scheduleContextGauge(delay = 160) {
   clearTimeout(gaugeTimer);
@@ -80,19 +79,20 @@ function scheduleContextGauge(delay = 160) {
 // 分隔（role: "context"）带 summary 的是压缩；不带的是旧版「另起一纸」留下的硬切，仍照旧生效
 // 正在压缩的对话：只在内存里记，页面上画一行「正在压缩」
 const compactingIds = new Set();
+// before：作答途中压前文（见 keepInWindow）——只取这一问之前的，这一问与正在写的答原样留在分隔之后
 /** @param {Conversation} c */
-function compactable(c) {
-  if (!c || conversationRunning(c.id) || runningElsewhere(c.id) || c.ended) return [];
-  const contextIndex = c.messages.map(m => m.role).lastIndexOf("context");
+function compactable(c, before = null) {
+  if (!c || c.ended || (!before && (conversationRunning(c.id) || runningElsewhere(c.id)))) return [];
+  const contextIndex = c.messages.map(m => m.role).lastIndexOf("context"),
+    until = before ? c.messages.indexOf(before) : c.messages.length;
   return c.messages
-    .slice(contextIndex + 1)
+    .slice(contextIndex + 1, Math.max(contextIndex + 1, until))
     .filter(m => m.status !== "error" && m.status !== "streaming" && ["user", "assistant"].includes(m.role));
 }
 /** @param {Conversation} c */
-async function compactContext(c, { auto = false } = {}) {
-  const source = compactable(c),
-    profile = activeProfile();
-  if (source.filter(m => m.role === "user").length < 2) {
+async function compactContext(c, { auto = false, before = null, profile = activeProfile(), signal = null } = {}) {
+  const source = compactable(c, before);
+  if (source.filter(m => m.role === "user").length < (before ? 1 : 2)) {
     if (!auto) toast("对话还短，不必压缩");
     return false;
   }
@@ -117,7 +117,8 @@ async function compactContext(c, { auto = false } = {}) {
   renderConversation();
   try {
     // 转写可能很长、模型可能先思考再写：超时给足五分钟。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
-    const summary = await summarize(profile, prompt("assistant.compact", { transcript }), AbortSignal.timeout(300000), c.reasoning);
+    const timeout = AbortSignal.timeout(300000),
+      summary = await summarize(profile, prompt("assistant.compact", { transcript }), signal ? AbortSignal.any([signal, timeout]) : timeout, c.reasoning);
     const at = c.messages.indexOf(lastCompacted);
     if (at < 0) throw Error("对话在压缩期间已改动");
     // 期间又压过一次（分隔已在这条之后）就作废，以后来的为准
@@ -134,6 +135,8 @@ async function compactContext(c, { auto = false } = {}) {
   } catch (error) {
     compactingIds.delete(c.id);
     renderConversation();
+    // 作答途中压的，用户点了停止：不必再说压缩失败
+    if (signal?.aborted) return false;
     console.warn("压缩失败", error);
     const reason = error?.name === "TimeoutError" ? "模型五分钟内未写出摘要" : friendlyError(String(error?.message || error));
     toast(`压缩失败：${reason.slice(0, 80)}`);
@@ -184,18 +187,22 @@ function summaryMessages(marker) {
     { role: "assistant", content: "已了解前文，请继续。" }
   ];
 }
-// 一答收尾后：估算超过设置的阈值就自动压缩（0 为关）
-/** @param {Conversation} c */
-function maybeAutoCompact(c) {
-  const limit = Number(store.settings.compactAt) || 0;
-  if (!limit || !c || c.ended) return;
-  if (contextEstimate(c) < limit) return;
-  void compactContext(c, { auto: true });
+// 一答收尾后：下一问估算已过这个模型窗口的七成半，就趁用户读、写的工夫把前文压成摘要。
+// 没填窗口的不猜：等接口回说放不下，作答途中再压（见 keepInWindow）
+/**
+ * @param {Conversation} c
+ * @param {Profile} profile
+ */
+function maybeAutoCompact(c, profile) {
+  const window = Number(profile?.contextWindow) || 0;
+  if (!window || !c || c.ended || contextEstimate(c) < window * 0.75) return;
+  void compactContext(c, { auto: true, profile });
 }
 // ---------- 轮内压缩：一答之内工具轮次叠得太长时，把较早的往来压成一份工作笔记，只留最近几轮原样 ----------
 // 上面的压缩只在两答之间动手；长活（执事连跑几百轮、帮手审一整个仓库）在一答之内就能把窗口撑破，接口回一句放不下，整段活就白做了。
 // 主答、旁注、帮手三条工具循环都经 readReply 发请求，所以在那里一并接上：overrides.head 记这一答自己的往来从 history 哪一格起，
-// 之前的（对话历史、任务说明）原样保留。两个时机：送出前估算已过窗口的七成半（填了上下文窗口才有）；接口回说放不下（没填窗口也接得住）
+// 之前的（对话历史、任务说明）原样保留。两个时机：送出前估算已过窗口的七成半（填了上下文窗口才有）；接口回说放不下（没填窗口也接得住）。
+// 这一答还没有可压的往来（刚开口，放不下的是前面的对话本身）：主答给了 compactHead 的，把这一问之前的对话压成摘要，与右下角「压缩前文」同一份，一答只压一回
 const FOLD_KEEP_ROUNDS = 2;
 // 各家接口「放不下」的说法：OpenAI 系 maximum context length、Anthropic prompt is too long / exceed context limit、
 // Gemini exceeds the maximum number of tokens、Qwen Range of input length、Kimi token limit、GLM exceeds max length……
@@ -245,7 +252,7 @@ function foldTranscript(region, budget) {
  * 需要时把 history 里这一答较早的往来压成笔记（就地改 history），压了返回 true
  * @param {Profile} profile
  * @param {Array<Record<string, any>>} history
- * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold；seen 由 readReply 记下
+ * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold、compactHead；seen 由 readReply 记下
  */
 async function keepInWindow(profile, history, signal, overrides, { overflow = false } = {}) {
   const head = overrides.head,
@@ -264,8 +271,19 @@ async function keepInWindow(profile, history, signal, overrides, { overflow = fa
     }
   }
   const region = history.slice(head, cut);
-  // 没有新的工具往来可压（只剩上一份笔记，或放不下的是前面的对话本身）：压了也白压
-  if (!region.some(m => m.role === "tool")) return false;
+  // 没有新的工具往来可压（只剩上一份笔记，或放不下的是前面的对话本身）：压前文
+  if (!region.some(m => m.role === "tool")) {
+    if (!overrides.compactHead || overrides.headCompacted) return false;
+    overrides.headCompacted = true;
+    overrides.onFold?.(true);
+    try {
+      if (!(await overrides.compactHead(signal))) return false;
+      overrides.seen = null;
+      return true;
+    } finally {
+      overrides.onFold?.(false);
+    }
+  }
   const task = plainContent(history.slice(0, head).findLast(m => m.role === "user")?.content).slice(0, 4000);
   overrides.onFold?.(true);
   try {

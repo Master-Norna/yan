@@ -182,7 +182,6 @@
  * @property {string[]} collapsedRepos
  * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
- * @property {number} compactAt
  * @property {"anywhere"|"inside"} toolReach
  * @property {boolean} archiveRead
  * @property {number} toolRounds
@@ -282,7 +281,6 @@ const defaultStore = {
     collapsedRepos: [],
     commandPolicyDefault: "ask",
     sandbox: true,
-    compactAt: 0,
     toolReach: "anywhere",
     archiveRead: true,
     toolRounds: DEFAULT_TOOL_ROUNDS,
@@ -8387,21 +8385,25 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     roundStart = 0,
     releaseQuota = () => {};
   try {
-    const contextIndex = conversation.messages.map(m => m.role).lastIndexOf("context");
-    const source = conversation.messages
-      .slice(contextIndex + 1)
-      .filter(m => m.id !== assistant.id && m.status !== "error" && ["user", "assistant"].includes(m.role));
-    const lastUserId = source.filter(m => m.role === "user").at(-1)?.id,
-      budget = inlineTextBudget(profile);
-    history = summaryMessages(contextIndex >= 0 ? conversation.messages[contextIndex] : null);
-    history.push(...(await historyForApi(source, lastUserId, budget)));
+    const budget = inlineTextBudget(profile),
+      resumeFrom = resume ? assistant.content : "";
+    let lastUserId = "";
+    // 这一问之前的历史：上次压缩的摘要、此后的往来、续写时已写的那截。开头装一次；作答途中压了前文（compactHead）再装一次
+    const buildHead = async () => {
+      const contextIndex = conversation.messages.map(m => m.role).lastIndexOf("context");
+      const source = conversation.messages
+        .slice(contextIndex + 1)
+        .filter(m => m.id !== assistant.id && m.status !== "error" && ["user", "assistant"].includes(m.role));
+      lastUserId = source.filter(m => m.role === "user").at(-1)?.id;
+      const head = summaryMessages(contextIndex >= 0 ? conversation.messages[contextIndex] : null);
+      head.push(...(await historyForApi(source, lastUserId, budget)));
+      if (resumeFrom) head.push({ role: "assistant", content: resumeFrom }, { role: "user", content: prompt("assistant.resume") });
+      return head;
+    };
+    history = await buildHead();
     // 先把这一答预计的用量记到预留里（提示 + 最大输出），别的对话同时开工时看得见；收尾时换成实际用量
     // 预留只是估个数：一答的输出按八千算，不必与接口实际的上限一致
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
-    if (resume && assistant.content) {
-      history.push({ role: "assistant", content: assistant.content });
-      history.push({ role: "user", content: prompt("assistant.resume") });
-    }
     if (profile.tools !== false) await mcpReady();
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
@@ -8414,7 +8416,16 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         setJobLabel(conversation, job, `网络不稳 · 第 ${n} 次重试`);
       },
       head: history.length,
-      onFold: busy => setJobLabel(conversation, job, busy ? "上下文将满 · 整理中" : "生成中")
+      onFold: busy => setJobLabel(conversation, job, busy ? "上下文将满 · 整理中" : "生成中"),
+      // 放不下的是这一问之前的对话：压成摘要落成分隔（下一问也用得上），换掉 history 里这一问之前的那截
+      compactHead: async signal => {
+        const user = conversation.messages.find(m => m.id === lastUserId);
+        if (!user || !(await compactContext(conversation, { auto: true, before: user, profile, signal }))) return false;
+        const head = await buildHead();
+        history.splice(0, overrides.head, ...head);
+        overrides.head = head.length;
+        return true;
+      }
     };
     const toolCache = new Map();
     let rounds = 0,
@@ -8534,7 +8545,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       );
     assistant.status = "complete";
     conversation.updatedAt = now();
-    setTimeout(() => maybeAutoCompact(conversation), 0);
+    setTimeout(() => maybeAutoCompact(conversation, profile), 0);
     // 言里动过文件的，卷宗目录多半有了新东西：重新翻一遍，新出的、改过的成品挂在答末，侧栏的件数跟着更新
     if (archiveBefore && allSteps(assistant).some(step => TOOLS.get(step.name)?.writes)) {
       await refreshArchive();
@@ -11638,7 +11649,7 @@ function storageSettingsHtml() {
   return `<div class="setting-row"><div class="setting-copy"><strong>存储位置</strong><small>对话、卷宗与配置（含模型配置）都在 <code title="${escapeHtml(info.root || "")}">${escapeHtml(info.root || "")}</code> 里，几个浏览器共用这一份。填一个目录，就在它下面立 .yan 并把整份拷过去，旧处原样留着；那里已有言的数据则直接用它</small></div><div class="setting-actions setting-directory"><input id="settingStore" class="field" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(parent)}" value="${escapeHtml(parent)}"><button id="settingStorePick" class="outline-btn" type="button">选择…</button></div></div>`;
 }
 function generalSettingsHtml() {
-  return `<h2>通用</h2><p class="settings-lead">数据只存于本机；桥接在线时，对话、卷宗与配置都落在存储位置里。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div><div class="setting-row"><div class="setting-copy"><strong>自动压缩上下文</strong><small>一答收尾后，若下一问估算送出的 token 超过此数，便请模型把前文压成摘要；留空为不自动。右下角的计数亦可随时手动压缩</small></div><div class="setting-actions"><label class="setting-inline">超过<input id="settingCompactAt" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="不自动" value="${Number(store.settings.compactAt) || ""}"></label></div></div>${storageSettingsHtml()}<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
+  return `<h2>通用</h2><p class="settings-lead">数据只存于本机；桥接在线时，对话、卷宗与配置都落在存储位置里。</p><div class="setting-row"><div class="setting-copy"><strong>显示名称</strong><small>侧栏中显示的称呼</small></div><input id="settingName" class="field" value="${escapeHtml(store.settings.name)}"></div><div class="setting-row"><div class="setting-copy"><strong>自动拟题</strong><small>首次问答后由模型拟题，略耗额度；手动修改过的标题不再覆盖</small></div><div class="segmented"><button data-setting="autoTitle" data-value="true" class="${store.settings.autoTitle ? "active" : ""}">开</button><button data-setting="autoTitle" data-value="false" class="${store.settings.autoTitle ? "" : "active"}">关</button></div></div>${storageSettingsHtml()}<div class="setting-row"><div class="setting-copy"><strong>本机数据</strong><small>${store.conversations.length} 段对话 · ${store.library.length} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">含附件原件</label><button id="exportData" class="outline-btn">导出备份</button><button id="importData" class="outline-btn">导入备份</button></div></div><div class="setting-row"><div class="setting-copy"><strong>清空所有对话</strong><small>模型配置、个性化与卷宗将保留</small></div><button id="clearAll" class="danger-btn">清空对话</button></div>`;
 }
 // 工具：沙箱、三档指令权限、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
 function toolsSettingsHtml() {
@@ -11774,7 +11785,7 @@ function profileCardHtml(p) {
   ]
     .map(([v, label]) => `<option value="${v}"${quota.unit === v ? " selected" : ""}>${label}</option>`)
     .join("")}</select></div>`;
-  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}"></label><label>用量上限${quotaField}<small>留空不限，只计已耗；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}">OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}">Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}"></label><label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label><label class="profile-full">模型${modelField}<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small></label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${p.tools === false ? "本机工具关" : ""}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label>${anthropicLike(p) ? `<label><code>max_tokens</code><input type="number" min="16" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens) || ""}" placeholder="${DEFAULT_MAX_TOKENS}"><small>Messages API 必填的输出上限；留空按 ${DEFAULT_MAX_TOKENS}，模型嫌大会报错，照报错调小即可</small></label>` : ""}<label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即提醒</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；选定模型时会自动探测并填在这里（none 是不认）；留空按 low / medium / high / max 四档列，接口拒绝某档时也会记下</small></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}<button class="danger-btn" data-profile-action="delete">删除</button><span class="profile-status">${invalidQuota ? "请填写大于 0 的数值，或留空不限" : ""}</span></div></div>`;
+  return `<div class="profile-card" data-profile-card="${escapeHtml(p.id)}"><div class="profile-head"><strong>${escapeHtml(p.name)}</strong>${p.id === store.settings.activeProfileId ? `<span class="profile-badge">默认</span>` : ""}</div><div class="profile-grid"><label>显示名称<input class="field wide" data-field="name" value="${escapeHtml(p.name)}"></label><label>用量上限${quotaField}<small>留空不限，只计已耗；改动后重新计量</small></label><label>接口<div class="segmented"><button data-choice-field="api" data-value="openai" class="${anthropicLike(p) ? "" : "active"}">OpenAI 兼容</button><button data-choice-field="api" data-value="anthropic" class="${anthropicLike(p) ? "active" : ""}">Anthropic</button></div><small>${anthropicLike(p) ? "Messages API；思考档位换算成思考预算" : "chat/completions；大多数服务与中转站"}</small></label><label class="profile-full">Base URL<input class="field wide" data-field="baseUrl" value="${escapeHtml(p.baseUrl || "")}" placeholder="${anthropicLike(p) ? "https://api.anthropic.com" : "https://example.com/v1"}"></label><label class="profile-full">API Key<input type="password" class="field wide" data-field="apiKey" value="${escapeHtml(p.apiKey || "")}" placeholder="sk-…" autocomplete="off"></label><label class="profile-full">模型${modelField}<small>填写 Base URL 与 API Key 后可获取列表，亦可手动输入</small></label></div><details class="profile-advanced"${advancedOpen.has(p.id) ? " open" : ""}><summary><span class="advanced-title">高级配置</span><small>${p.tools === false ? "本机工具关" : ""}</small></summary><div class="profile-grid"><label>本机联网与文档工具<div class="segmented"><button data-toggle-field="tools" data-value="true" class="${p.tools !== false ? "active" : ""}">开</button><button data-toggle-field="tools" data-value="false" class="${p.tools === false ? "active" : ""}">关</button></div><small>由本机桥接执行检索、网页读取与文档翻阅；需接口支持 function calling</small></label><label><code>temperature</code><input type="number" min="0" max="2" step="0.1" class="field wide" data-field="temperature" value="${Number(p.temperature ?? 0.7)}"><small>0–2，默认 0.7；数值越高越发散</small></label>${anthropicLike(p) ? `<label><code>max_tokens</code><input type="number" min="16" class="field wide" data-field="maxTokens" value="${Number(p.maxTokens) || ""}" placeholder="${DEFAULT_MAX_TOKENS}"><small>Messages API 必填的输出上限；留空按 ${DEFAULT_MAX_TOKENS}，模型嫌大会报错，照报错调小即可</small></label>` : ""}<label>上下文窗口<input type="number" min="1000" step="1000" class="field wide" data-field="contextWindow" value="${Number(p.contextWindow) || ""}" placeholder="如 128000"><small>此模型一次可读的 token 数；填写后右下角按比例计量，逾七成半即把前文自动压成摘要。留空则等接口回说放不下时再压；想早些压、省些墨，填小一点即可</small></label><label>思考档位<input class="field wide" data-field="reasoningLevels" value="${escapeHtml(p.reasoningLevels || "")}" placeholder="low, medium, high"><small>此模型所认的 <code>reasoning_effort</code> 档位，逗号分隔（minimal、low、medium、high、xhigh、max）；选定模型时会自动探测并填在这里（none 是不认）；留空按 low / medium / high / max 四档列，接口拒绝某档时也会记下</small></label></div></details><div class="profile-actions"><button class="outline-btn" data-profile-action="test">测试连接</button>${p.id !== store.settings.activeProfileId ? `<button class="outline-btn" data-profile-action="default">设为默认</button>` : ""}<button class="danger-btn" data-profile-action="delete">删除</button><span class="profile-status">${invalidQuota ? "请填写大于 0 的数值，或留空不限" : ""}</span></div></div>`;
 }
 function storageSize() {
   const bytes = new Blob([JSON.stringify(store)]).size;
@@ -11863,12 +11874,6 @@ function bindSettingsEvents() {
     } finally {
       button.disabled = false;
     }
-  });
-  $("#settingCompactAt")?.addEventListener("input", e => {
-    const value = Math.floor(Number(String(e.target.value).replace(/[^\d]/g, "")));
-    store.settings.compactAt = value >= 1000 ? value : 0;
-    saveStoreSoon();
-    updateContextGauge();
   });
   $("#exportData")?.addEventListener("click", () => exportData($("#exportFiles")?.checked));
   $("#importData")?.addEventListener("click", () => $("#importInput").click());
@@ -12376,7 +12381,6 @@ function updateContextGauge() {
       draft,
       draft || pendingAttachments.length || pendingQuote ? { text: draft, attachments: pendingAttachments, quote: pendingQuote } : null
     ),
-    limit = Number(store.settings.compactAt) || 0,
     window = Number(activeProfile()?.contextWindow) || 0,
     heavy = window ? n >= window * 0.75 : n >= CONTEXT_HEAVY;
   gauge.classList.remove("hidden");
@@ -12385,7 +12389,7 @@ function updateContextGauge() {
   gauge.style.setProperty("--ratio", window ? `${Math.min(100, Math.round((n / window) * 100))}%` : "0%");
   rollText(gauge.querySelector(".context-gauge-value"), formatTokens(n));
   gauge.querySelector(".context-gauge-window").textContent = window ? `/ ${formatTokens(window)}` : "";
-  gauge.title = `下一问约送出 ${formatTokens(n)} token${window ? `，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : ""}（估算，含系统提示、工具定义与上次压缩以来的历史）${limit ? `；超过 ${formatTokens(limit)} 自动压成摘要` : ""}${heavy ? "\n上下文已重，可压缩前文" : "\n压缩前文"}`;
+  gauge.title = `下一问约送出 ${formatTokens(n)} token${window ? `，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : ""}（估算，含系统提示、工具定义与上次压缩以来的历史）${window ? "；过七成半自动压成摘要" : "；放不下时自动压成摘要"}${heavy ? "\n上下文已重，可压缩前文" : "\n压缩前文"}`;
 }
 function scheduleContextGauge(delay = 160) {
   clearTimeout(gaugeTimer);
@@ -12395,19 +12399,20 @@ function scheduleContextGauge(delay = 160) {
 // 分隔（role: "context"）带 summary 的是压缩；不带的是旧版「另起一纸」留下的硬切，仍照旧生效
 // 正在压缩的对话：只在内存里记，页面上画一行「正在压缩」
 const compactingIds = new Set();
+// before：作答途中压前文（见 keepInWindow）——只取这一问之前的，这一问与正在写的答原样留在分隔之后
 /** @param {Conversation} c */
-function compactable(c) {
-  if (!c || conversationRunning(c.id) || runningElsewhere(c.id) || c.ended) return [];
-  const contextIndex = c.messages.map(m => m.role).lastIndexOf("context");
+function compactable(c, before = null) {
+  if (!c || c.ended || (!before && (conversationRunning(c.id) || runningElsewhere(c.id)))) return [];
+  const contextIndex = c.messages.map(m => m.role).lastIndexOf("context"),
+    until = before ? c.messages.indexOf(before) : c.messages.length;
   return c.messages
-    .slice(contextIndex + 1)
+    .slice(contextIndex + 1, Math.max(contextIndex + 1, until))
     .filter(m => m.status !== "error" && m.status !== "streaming" && ["user", "assistant"].includes(m.role));
 }
 /** @param {Conversation} c */
-async function compactContext(c, { auto = false } = {}) {
-  const source = compactable(c),
-    profile = activeProfile();
-  if (source.filter(m => m.role === "user").length < 2) {
+async function compactContext(c, { auto = false, before = null, profile = activeProfile(), signal = null } = {}) {
+  const source = compactable(c, before);
+  if (source.filter(m => m.role === "user").length < (before ? 1 : 2)) {
     if (!auto) toast("对话还短，不必压缩");
     return false;
   }
@@ -12432,7 +12437,8 @@ async function compactContext(c, { auto = false } = {}) {
   renderConversation();
   try {
     // 转写可能很长、模型可能先思考再写：超时给足五分钟。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
-    const summary = await summarize(profile, prompt("assistant.compact", { transcript }), AbortSignal.timeout(300000), c.reasoning);
+    const timeout = AbortSignal.timeout(300000),
+      summary = await summarize(profile, prompt("assistant.compact", { transcript }), signal ? AbortSignal.any([signal, timeout]) : timeout, c.reasoning);
     const at = c.messages.indexOf(lastCompacted);
     if (at < 0) throw Error("对话在压缩期间已改动");
     // 期间又压过一次（分隔已在这条之后）就作废，以后来的为准
@@ -12449,6 +12455,8 @@ async function compactContext(c, { auto = false } = {}) {
   } catch (error) {
     compactingIds.delete(c.id);
     renderConversation();
+    // 作答途中压的，用户点了停止：不必再说压缩失败
+    if (signal?.aborted) return false;
     console.warn("压缩失败", error);
     const reason = error?.name === "TimeoutError" ? "模型五分钟内未写出摘要" : friendlyError(String(error?.message || error));
     toast(`压缩失败：${reason.slice(0, 80)}`);
@@ -12499,18 +12507,22 @@ function summaryMessages(marker) {
     { role: "assistant", content: "已了解前文，请继续。" }
   ];
 }
-// 一答收尾后：估算超过设置的阈值就自动压缩（0 为关）
-/** @param {Conversation} c */
-function maybeAutoCompact(c) {
-  const limit = Number(store.settings.compactAt) || 0;
-  if (!limit || !c || c.ended) return;
-  if (contextEstimate(c) < limit) return;
-  void compactContext(c, { auto: true });
+// 一答收尾后：下一问估算已过这个模型窗口的七成半，就趁用户读、写的工夫把前文压成摘要。
+// 没填窗口的不猜：等接口回说放不下，作答途中再压（见 keepInWindow）
+/**
+ * @param {Conversation} c
+ * @param {Profile} profile
+ */
+function maybeAutoCompact(c, profile) {
+  const window = Number(profile?.contextWindow) || 0;
+  if (!window || !c || c.ended || contextEstimate(c) < window * 0.75) return;
+  void compactContext(c, { auto: true, profile });
 }
 // ---------- 轮内压缩：一答之内工具轮次叠得太长时，把较早的往来压成一份工作笔记，只留最近几轮原样 ----------
 // 上面的压缩只在两答之间动手；长活（执事连跑几百轮、帮手审一整个仓库）在一答之内就能把窗口撑破，接口回一句放不下，整段活就白做了。
 // 主答、旁注、帮手三条工具循环都经 readReply 发请求，所以在那里一并接上：overrides.head 记这一答自己的往来从 history 哪一格起，
-// 之前的（对话历史、任务说明）原样保留。两个时机：送出前估算已过窗口的七成半（填了上下文窗口才有）；接口回说放不下（没填窗口也接得住）
+// 之前的（对话历史、任务说明）原样保留。两个时机：送出前估算已过窗口的七成半（填了上下文窗口才有）；接口回说放不下（没填窗口也接得住）。
+// 这一答还没有可压的往来（刚开口，放不下的是前面的对话本身）：主答给了 compactHead 的，把这一问之前的对话压成摘要，与右下角「压缩前文」同一份，一答只压一回
 const FOLD_KEEP_ROUNDS = 2;
 // 各家接口「放不下」的说法：OpenAI 系 maximum context length、Anthropic prompt is too long / exceed context limit、
 // Gemini exceeds the maximum number of tokens、Qwen Range of input length、Kimi token limit、GLM exceeds max length……
@@ -12560,7 +12572,7 @@ function foldTranscript(region, budget) {
  * 需要时把 history 里这一答较早的往来压成笔记（就地改 history），压了返回 true
  * @param {Profile} profile
  * @param {Array<Record<string, any>>} history
- * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold；seen 由 readReply 记下
+ * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold、compactHead；seen 由 readReply 记下
  */
 async function keepInWindow(profile, history, signal, overrides, { overflow = false } = {}) {
   const head = overrides.head,
@@ -12579,8 +12591,19 @@ async function keepInWindow(profile, history, signal, overrides, { overflow = fa
     }
   }
   const region = history.slice(head, cut);
-  // 没有新的工具往来可压（只剩上一份笔记，或放不下的是前面的对话本身）：压了也白压
-  if (!region.some(m => m.role === "tool")) return false;
+  // 没有新的工具往来可压（只剩上一份笔记，或放不下的是前面的对话本身）：压前文
+  if (!region.some(m => m.role === "tool")) {
+    if (!overrides.compactHead || overrides.headCompacted) return false;
+    overrides.headCompacted = true;
+    overrides.onFold?.(true);
+    try {
+      if (!(await overrides.compactHead(signal))) return false;
+      overrides.seen = null;
+      return true;
+    } finally {
+      overrides.onFold?.(false);
+    }
+  }
   const task = plainContent(history.slice(0, head).findLast(m => m.role === "user")?.content).slice(0, 4000);
   overrides.onFold?.(true);
   try {

@@ -179,7 +179,6 @@
  * @property {string[]} collapsedRepos
  * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
- * @property {number} compactAt
  * @property {"anywhere"|"inside"} toolReach
  * @property {boolean} archiveRead
  * @property {number} toolRounds
@@ -279,7 +278,6 @@ const defaultStore = {
     collapsedRepos: [],
     commandPolicyDefault: "ask",
     sandbox: true,
-    compactAt: 0,
     toolReach: "anywhere",
     archiveRead: true,
     toolRounds: DEFAULT_TOOL_ROUNDS,

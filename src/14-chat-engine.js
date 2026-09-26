@@ -416,21 +416,25 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     roundStart = 0,
     releaseQuota = () => {};
   try {
-    const contextIndex = conversation.messages.map(m => m.role).lastIndexOf("context");
-    const source = conversation.messages
-      .slice(contextIndex + 1)
-      .filter(m => m.id !== assistant.id && m.status !== "error" && ["user", "assistant"].includes(m.role));
-    const lastUserId = source.filter(m => m.role === "user").at(-1)?.id,
-      budget = inlineTextBudget(profile);
-    history = summaryMessages(contextIndex >= 0 ? conversation.messages[contextIndex] : null);
-    history.push(...(await historyForApi(source, lastUserId, budget)));
+    const budget = inlineTextBudget(profile),
+      resumeFrom = resume ? assistant.content : "";
+    let lastUserId = "";
+    // 这一问之前的历史：上次压缩的摘要、此后的往来、续写时已写的那截。开头装一次；作答途中压了前文（compactHead）再装一次
+    const buildHead = async () => {
+      const contextIndex = conversation.messages.map(m => m.role).lastIndexOf("context");
+      const source = conversation.messages
+        .slice(contextIndex + 1)
+        .filter(m => m.id !== assistant.id && m.status !== "error" && ["user", "assistant"].includes(m.role));
+      lastUserId = source.filter(m => m.role === "user").at(-1)?.id;
+      const head = summaryMessages(contextIndex >= 0 ? conversation.messages[contextIndex] : null);
+      head.push(...(await historyForApi(source, lastUserId, budget)));
+      if (resumeFrom) head.push({ role: "assistant", content: resumeFrom }, { role: "user", content: prompt("assistant.resume") });
+      return head;
+    };
+    history = await buildHead();
     // 先把这一答预计的用量记到预留里（提示 + 最大输出），别的对话同时开工时看得见；收尾时换成实际用量
     // 预留只是估个数：一答的输出按八千算，不必与接口实际的上限一致
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
-    if (resume && assistant.content) {
-      history.push({ role: "assistant", content: assistant.content });
-      history.push({ role: "user", content: prompt("assistant.resume") });
-    }
     if (profile.tools !== false) await mcpReady();
     const tools = profile.tools !== false ? toolDefinitions(conversation) : null;
     let retrying = false;
@@ -443,7 +447,16 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         setJobLabel(conversation, job, `网络不稳 · 第 ${n} 次重试`);
       },
       head: history.length,
-      onFold: busy => setJobLabel(conversation, job, busy ? "上下文将满 · 整理中" : "生成中")
+      onFold: busy => setJobLabel(conversation, job, busy ? "上下文将满 · 整理中" : "生成中"),
+      // 放不下的是这一问之前的对话：压成摘要落成分隔（下一问也用得上），换掉 history 里这一问之前的那截
+      compactHead: async signal => {
+        const user = conversation.messages.find(m => m.id === lastUserId);
+        if (!user || !(await compactContext(conversation, { auto: true, before: user, profile, signal }))) return false;
+        const head = await buildHead();
+        history.splice(0, overrides.head, ...head);
+        overrides.head = head.length;
+        return true;
+      }
     };
     const toolCache = new Map();
     let rounds = 0,
@@ -563,7 +576,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       );
     assistant.status = "complete";
     conversation.updatedAt = now();
-    setTimeout(() => maybeAutoCompact(conversation), 0);
+    setTimeout(() => maybeAutoCompact(conversation, profile), 0);
     // 言里动过文件的，卷宗目录多半有了新东西：重新翻一遍，新出的、改过的成品挂在答末，侧栏的件数跟着更新
     if (archiveBefore && allSteps(assistant).some(step => TOOLS.get(step.name)?.writes)) {
       await refreshArchive();
