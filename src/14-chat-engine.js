@@ -635,8 +635,8 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       renderModelTriggers();
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     }
-    // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错
-    if (contextOverflow(message) && (await keepInWindow(profile, history, signal, overrides, { overflow: true })))
+    // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错。429 是限流（「tokens per min」也带 token 与 limit），不算
+    if (response.status !== 429 && contextOverflow(message) && (await keepInWindow(profile, history, signal, overrides, { overflow: true })))
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     throw Error(message);
   }
