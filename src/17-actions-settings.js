@@ -565,15 +565,16 @@ function bindSettingsEvents() {
 const probeSerial = new Map();
 /** @param {Profile} profile */
 async function reportReasoningProbe(profile, card, force = false) {
-  if (force && !reasoningManual(profile)) profile.reasoningProbed = "";
   if (!profile.model) return;
+  // 重探不能靠清掉「探过」的标记：reasoningProbed 会把「有档位、没标记」当旧版手填的，重探一回反倒成了手填
+  const redo = force && !reasoningManual(profile);
   const status = () => document.querySelector(`[data-profile-card="${profile.id}"] .profile-status`);
   // 状态行上此前的话留着（「可用 · 4 ms」），但上一回探到的档位不留——刷新列表探了一次、再从下拉里选一个又探一次，不能越接越长
   const before = (status()?.textContent || "")
     .split(" · ")
     .filter(part => !/^(探测)?思考档位/.test(part))
     .join(" · ");
-  if (reasoningProbed(profile)) {
+  if (!redo && reasoningProbed(profile)) {
     if (force && status()) {
       const levels = profileReasoningLevels(profile);
       status().textContent = `${before ? `${before} · ` : ""}思考档位 ${levels.length ? levels.map(reasoningLabel).join(" / ") : "此模型不认"}${reasoningManual(profile) ? "（手填）" : ""}`;
@@ -583,7 +584,7 @@ async function reportReasoningProbe(profile, card, force = false) {
   const serial = (probeSerial.get(profile.id) || 0) + 1;
   probeSerial.set(profile.id, serial);
   if (status()) status().textContent = `${before ? `${before} · ` : ""}探测思考档位…`;
-  const levels = await probeReasoningLevels(profile);
+  const levels = await probeReasoningLevels(profile, redo);
   const el = status();
   if (!el || probeSerial.get(profile.id) !== serial) return;
   if (levels === null) el.textContent = before;
@@ -670,9 +671,7 @@ async function handleProfileAction(profile, action, card) {
               body: JSON.stringify({ profile: profileForRequest(profile) })
             })
           : await fetch(directModelsRequest(profile).url, { headers: directModelsRequest(profile).headers });
-      const type = response.headers.get("content-type") || "";
-      const data = type.includes("application/json") ? await response.json() : {};
-      if (!response.ok) throw Error(data.error || data.message || `连接失败（${response.status}）`);
+      if (!response.ok) throw Error(await describeResponseError(response));
       status.textContent = `可用 · ${Math.round(performance.now() - started)} ms`;
       // 测试连接是亲手要的一次核对：档位也重探一遍
       void reportReasoningProbe(profile, card, true);
@@ -697,8 +696,8 @@ async function fetchModelList(profile) {
     return [...new Set(data.models || [])].sort();
   }
   response = await fetch(directModelsRequest(profile).url, { headers: directModelsRequest(profile).headers });
+  if (!response.ok) throw Error(await describeResponseError(response));
   data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Error(data.error?.message || data.message || `请求失败（${response.status}）`);
   return [
     ...new Set((Array.isArray(data.data) ? data.data : []).map(item => (typeof item === "string" ? item : item?.id)).filter(Boolean))
   ].sort();

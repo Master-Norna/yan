@@ -172,4 +172,9 @@ check(
   "advanced config shows the learned levels",
   (await evalJs(`document.querySelector('[data-profile-card="p2"] [data-field="reasoningLevels"]').value`)) === "low, medium, high"
 );
+check(
+  "a re-probe from test connection is not taken for a hand-filled value",
+  !/（手填）/.test(status) && !(await stored("p2")).includes("|manual|"),
+  await stored("p2")
+);
 close();

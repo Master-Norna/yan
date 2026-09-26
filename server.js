@@ -131,8 +131,15 @@ function upstreamModelsUrl(config) {
 async function upstreamError(response) {
   const raw = await response.text().catch(() => "");
   try {
-    const json = JSON.parse(raw);
-    return json.error?.message || json.message || `上游接口返回 ${response.status}`;
+    const json = JSON.parse(raw),
+      detail = json.detail;
+    // OpenAI 系 { error: { message } }、有的中转站 { error: "…" }、旧版 vLLM { message }、FastAPI 写的自建服务 { detail }
+    return (
+      (typeof json.error === "string" ? json.error : json.error?.message) ||
+      (typeof json.message === "string" ? json.message : "") ||
+      (typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : "") ||
+      `上游接口返回 ${response.status}`
+    );
   } catch {
     return raw.slice(0, 300) || `上游接口返回 ${response.status}`;
   }
