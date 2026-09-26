@@ -1,6 +1,6 @@
 // 言 · 对话引擎：历史装配、发送、流式回合、工具定义与系统提示
 // 本文件是 support.js 的一段，由桥接（或 node build.js）按文件名顺序拼进同一个闭包；无需模块系统
-function summarize(text, name, label) {
+function attachmentExcerpt(text, name, label) {
   const value = String(text || "");
   return value.length > HISTORY_TEXT_CHARS
     ? `\n\n--- 附件：${name}（${label}，摘要）---\n${value.slice(0, HISTORY_TEXT_CHARS)}\n[全文共 ${value.length} 字，此前已完整发送]`
@@ -87,7 +87,7 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
         ? tooLongToInline(file.data, budget)
           ? `\n\n[附件 ${file.name}：文本 ${String(file.data).length} 字，过长未随消息附上；需要时用 read_document 按页或关键词读取]`
           : `\n\n--- 附件：${file.name} ---\n${file.data}`
-        : summarize(file.data, file.name, "文本");
+        : attachmentExcerpt(file.data, file.name, "文本");
       continue;
     }
     if (file.kind !== "image" && file.extractedText) {
@@ -95,7 +95,7 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
         ? tooLongToInline(file.extractedText, budget)
           ? `\n\n[附件 ${file.name}：本机提取文本 ${String(file.extractedText).length} 字，过长未随消息附上；需要时用 read_document 按页或关键词读取]`
           : `\n\n--- 附件：${file.name}（本机提取）---\n${file.extractedText}`
-        : summarize(file.extractedText, file.name, "本机提取");
+        : attachmentExcerpt(file.extractedText, file.name, "本机提取");
       continue;
     }
     if (!latest) {
