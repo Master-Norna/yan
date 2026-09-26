@@ -199,9 +199,13 @@ html.work-mode .chat-scroll-grabber {
   border-top: 0;
   background: none;
 }
-.side-panel.wide .side-composer textarea {
-  border-radius: 12px;
-  box-shadow: 0 8px 30px rgba(58, 45, 29, 0.06);
+.side-panel.wide .side-composer .composer {
+  border-radius: 17px;
+  padding: 11px 13px 9px;
+  box-shadow: 0 8px 30px rgba(58, 45, 29, 0.08);
+}
+.side-panel.wide .side-composer .composer textarea {
+  font-size: 14px;
 }
 .side-panel.leaving {
   opacity: 0;
@@ -547,51 +551,24 @@ html.work-mode .chat-scroll-grabber {
   font: 12px/1.9 var(--title);
   letter-spacing: 0.06em;
 }
+/* 输入与主页同一个框：寄在框里右下，模型签在它左边；左下是回目录。窄栏里字小一号、阴影浅些 */
 .side-composer {
-  padding: 10px 12px 8px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
-  background: var(--paper);
 }
-.side-composer-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
+.side-composer .composer {
+  width: 100%;
+  border-radius: 14px;
+  padding: 9px 11px 7px;
+  box-shadow: 0 6px 22px rgba(58, 45, 29, 0.06);
 }
-.side-foot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-  color: var(--ink-3);
-  font: 10.5px var(--title);
-  letter-spacing: 0.06em;
-}
-.side-foot .model-trigger {
-  padding: 3px 6px;
-  font-size: 11px;
-}
-.side-composer textarea {
-  flex: 1;
-  min-height: 38px;
+.side-composer .composer textarea {
   max-height: 160px;
-  padding: 9px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--paper);
-  resize: none;
-  outline: none;
   font-size: 13px;
-  line-height: 1.5;
-  color: var(--ink);
 }
-.side-composer textarea:focus {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-}
-.side-composer .send-btn {
-  width: 34px;
-  height: 34px;
-  flex: none;
+.side-composer .model-trigger {
+  max-width: 170px;
+  font-size: 11.5px;
 }
 mark.note-anchor {
   background: none;
