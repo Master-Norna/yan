@@ -9630,7 +9630,7 @@ function commandApprovalHtml(step) {
 
   // ---- 15-tools/21-files.js ----
 // 言 · 文件：读、写、改、列、搜、下载。绑了目录落在工作目录（执事的六件），没绑落在卷宗（言只带产出所需的读、写、列与指令）。
-// 路径与沙箱在桥接那头管（server/work.js）；这里只管呈现与「改之前先读过」这条规矩
+// 路径与沙箱在桥接那头管（server/work/）；这里只管呈现与「改之前先读过」这条规矩
 defineTool({
   name: "write_file",
   group: "work",
