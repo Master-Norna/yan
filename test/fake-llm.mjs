@@ -405,7 +405,10 @@ http
                   index: 0,
                   id: "call_hbgm",
                   type: "function",
-                  function: { name: "delegate", arguments: JSON.stringify({ title: "后台活", task: "HBG-SUB：后台跑一条指令，等它跑完再回报。" }) }
+                  function: {
+                    name: "delegate",
+                    arguments: JSON.stringify({ title: "后台活", task: "HBG-SUB：后台跑一条指令，等它跑完再回报。" })
+                  }
                 }
               ]
             }),
@@ -658,7 +661,9 @@ http
       if (firstUser.includes("RELAYWAKE")) {
         if (helperReports.length)
           return sse(res, [
-            delta({ content: `RELAYWAKE done｜reports:${helperReports.length}｜resumed:${msgs.some(m => m.role === "assistant" && String(m.content).includes("派一名慢帮手"))}` }),
+            delta({
+              content: `RELAYWAKE done｜reports:${helperReports.length}｜resumed:${msgs.some(m => m.role === "assistant" && String(m.content).includes("派一名慢帮手"))}`
+            }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         if (!toolResults.length)
@@ -666,7 +671,12 @@ http
             delta({ content: "派一名慢帮手。" }),
             delta({
               tool_calls: [
-                { index: 0, id: "call_rw0", type: "function", function: { name: "delegate", arguments: JSON.stringify({ title: "慢活", task: "SLOWSUB：慢慢做完回报。" }) } }
+                {
+                  index: 0,
+                  id: "call_rw0",
+                  type: "function",
+                  function: { name: "delegate", arguments: JSON.stringify({ title: "慢活", task: "SLOWSUB：慢慢做完回报。" }) }
+                }
               ]
             }),
             delta({}, { usage: { total_tokens: 5 } })

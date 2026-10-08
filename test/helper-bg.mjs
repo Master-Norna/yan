@@ -36,10 +36,9 @@ check(
 );
 
 // 醒来：指令结束的消息寄给帮手，它看到输出、交差；主模型再被叫醒一回，两份都收到
-await waitFor(
-  `${conv}?.messages.at(-1)?.content.includes("wait,done") && ${conv}.messages.at(-1).status === "complete"`,
-  25000
-).catch(() => {});
+await waitFor(`${conv}?.messages.at(-1)?.content.includes("wait,done") && ${conv}.messages.at(-1).status === "complete"`, 25000).catch(
+  () => {}
+);
 const done = await evalJs(
   `(c => { const s = c.messages[1].steps.find(x => x.name === "delegate"); return { shape: c.messages.map(m => m.role + (m.relay ? ":relay" : "")).join(","), last: c.messages.at(-1).content, status: s.status, report: s.sub.report, waiting: !!s.sub.waiting, bg: s.sub.steps.find(x => x.name === "run_command")?.bg?.state, relay: s.sub.steps.filter(x => x.name === "relay_note").map(x => x.status + ":" + x.relay?.kind), mainRelays: c.messages.flatMap(m => m.steps || []).filter(x => x.name === "relay_note").length, bar: document.querySelector("#helperBar")?.classList.contains("hidden") }; })(${conv})`
 );
@@ -58,5 +57,8 @@ check(
   done.shape === "user,assistant,user:relay,assistant,user:relay,assistant" && done.last === "HELPERBG got|wait,done",
   done.shape + " " + done.last
 );
-check("nothing is left running once the helper is done", await evalJs(`!__yanState().conversations.some(c => c.messages.some(m => m.status === "streaming"))`));
+check(
+  "nothing is left running once the helper is done",
+  await evalJs(`!__yanState().conversations.some(c => c.messages.some(m => m.status === "streaming"))`)
+);
 close();
