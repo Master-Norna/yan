@@ -6,6 +6,16 @@ const titlingIds = new Set(),
   titleRetries = new Set();
 /** @param {Conversation} conversation 用户亲手改过题（拟题期间也可能改，收尾前得再看一眼） */
 const renamedByHand = conversation => conversation.titleAuto === false;
+// 用户亲手改过的题（连同那段的头一问）：口味就在这里，拿最近的几个作参照
+/** @param {Conversation} conversation */
+function handNamed(conversation) {
+  const list = store.conversations
+    .filter(c => c !== conversation && renamedByHand(c) && c.title)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, 5)
+    .map(c => `「${String(c.messages.find(m => m.role === "user")?.content || "").replace(/\s+/g, " ").slice(0, 40)}」→ ${c.title}`);
+  return list.length ? `${prompt("assistant.titleNamed", { list: list.join("\n") })}\n\n` : "";
+}
 /**
  * @param {Conversation} conversation
  * @param {Profile} profile
@@ -27,6 +37,7 @@ async function maybeAutoTitle(conversation, profile) {
   conversation.titleTries = (conversation.titleTries || 0) + 1;
   try {
     const ask = prompt("assistant.title", {
+      named: handNamed(conversation),
       user: String(first.content || (first.attachments || []).map(a => a.name).join("、") || "（附件）").slice(0, 1200),
       assistant: reply ? `\n\n助手：${String(reply.content).slice(0, 1200)}` : ""
     });

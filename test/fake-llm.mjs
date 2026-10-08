@@ -680,7 +680,7 @@ http
         );
       // 带附件的一问是分段内容：正文在第一段
       const lastText = Array.isArray(lastUser) ? String(lastUser.find(part => part.type === "text")?.text || "") : lastUser;
-      if (typeof lastUser === "string" && lastUser.includes("这件事用几个字称呼")) {
+      if (typeof lastUser === "string" && lastUser.includes("靠一个称呼认出这段对话")) {
         // TITLEFAIL：头一次拟题时装作网络出错，页面不该就此把这段对话标成「已拟题」
         if (lastUser.includes("TITLEFAIL") && !titleFailed) {
           titleFailed = true;
