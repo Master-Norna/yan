@@ -82,8 +82,11 @@
 .side-nav {
   margin-right: 2px;
 }
+/* 所注的那一段：至多四行。限行与裁切放在没有内边距的内层——line-clamp 只给第四行加省略号，其后的行照排，
+   靠 overflow 裁；裁在外层时裁的是内边距外缘，第五行会探进底边那 10px 露出半截。flex: none：消息再多也不被压扁 */
 .side-anchor {
-  display: -webkit-box;
+  display: block;
+  flex: none;
   width: 100%;
   margin: 0;
   padding: 10px 14px 10px 15px;
@@ -93,10 +96,13 @@
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
+  transition: color 0.16s;
+}
+.side-anchor-text {
+  display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  transition: color 0.16s;
 }
 .side-anchor:hover {
   color: var(--ink);

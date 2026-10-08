@@ -207,7 +207,7 @@ function renderSidePanel() {
   // 所注的一段列在顶上，点它回到出处；就整条回复起的旁注没有范围可言，不列
   const { live, any } = anchorState(c, thread),
     anchorEl = $("#sideAnchor");
-  anchorEl.textContent = thread.anchor.text;
+  anchorEl.firstElementChild.textContent = thread.anchor.text;
   anchorEl.classList.toggle("hidden", !thread.anchor.text);
   anchorEl.classList.toggle("lost", !live);
   anchorEl.disabled = !live;
