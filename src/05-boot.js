@@ -9,6 +9,8 @@ function recoverConversation(conversation) {
       message.status = "interrupted";
       message.error = "页面刷新或连接中断，已生成的内容已保留";
       message.interruptedAt = now();
+      // 用时停在最后一次存盘时（作答时每秒记一回），起始时刻不再有用
+      delete message.startedAt;
       settleSteps(message, "连接中断");
       changed = true;
     } else if ((message.steps || []).some(step => step.sub && step.status === "running") && !crewRunning(conversation.id)) {

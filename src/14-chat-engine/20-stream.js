@@ -25,9 +25,13 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
   const started = performance.now(),
     spentBefore = resume ? Number(assistant.durationMs) || 0 : 0;
   const gaugeTicker = conversation.id === currentId ? setInterval(updateContextGauge, 600) : null;
-  // 行迹题头的用时边做边走：长指令跑着时没有新字进来、不会重画，另起一只每秒一跳的钟。续写接着此前的用时走，不从零起
+  // 行迹题头的用时边做边走：长指令跑着时没有新字进来、不会重画，另起一只每秒一跳的钟。续写接着此前的用时走，不从零起。
+  // 已用的时长跟着钟一并记下、随存盘落下：页面半途崩了，续写时接的是崩前的数，而不是上一截收尾时的旧数
   assistant.startedAt = Date.now() - spentBefore;
-  const clock = setInterval(() => tickTrailClock(assistant), 1000);
+  const clock = setInterval(() => {
+    assistant.durationMs = Date.now() - assistant.startedAt;
+    tickTrailClock(assistant);
+  }, 1000);
   // 言里做文件：记下开工前卷宗的样子，收尾时新出的、改过的成品挂在答末
   const archiveBefore = !isWork(conversation) ? new Map((archiveEntries || []).map(e => [e.path, e.modifiedAt])) : null;
   // 用量在 finally 里结算：停止、断网、工具链中途出错，前面几轮已经花掉的墨也得记上，不能只在整答顺利收尾时记账
