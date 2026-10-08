@@ -3,6 +3,11 @@
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
+// 从一答的长串（思绪可有几百万字）里切出要久留的一段：引擎的切片只是指着原串的一扇窗，留着它就留住整串。
+// 长串每追加一回就是一份新的整串，每轮留一片便多钉住一份，长活跑上几百轮页面撑爆。前面接一个字再切掉，逼它另抄一份短的
+function ownCopy(text) {
+  return (" " + text).slice(1);
+}
 function safeWebUrl(value) {
   try {
     const url = new URL(String(value || ""));

@@ -374,8 +374,9 @@ function paintTimeline(body, source, o) {
     reasoning = String(source.reasoning || ""),
     base = last ? last.at : 0,
     thinking = reasoningLive({ .../** @type {Message} */ (source), content: o.visible }),
-    thought = reasoning.slice(groups.reduce((max, group) => Math.max(max, group.rat), 0)).trim(),
-    said = o.visible.slice(base);
+    // 画上去的字会挂在节点上久留：都另抄一份，免得每组钉住一份当时的整串（见 ownCopy）
+    thought = ownCopy(reasoning.slice(groups.reduce((max, group) => Math.max(max, group.rat), 0)).trim()),
+    said = ownCopy(o.visible.slice(base));
   const merged = !!(o.merge && o.live && last && thought && reasoning.slice(last.rfrom, last.rat).trim());
   /** @type {Part[]} */
   const parts = groups.map((group, i) => {
@@ -390,11 +391,13 @@ function paintTimeline(body, source, o) {
           el,
           {
             at: group.at,
-            thought: reasoning.slice(group.rfrom, tip && merged ? undefined : group.rat).trim(),
+            thought: ownCopy(reasoning.slice(group.rfrom, tip && merged ? undefined : group.rat).trim()),
             thinking: tip && merged && thinking,
-            note: String(source.content || "")
-              .slice(group.from, group.at)
-              .trim(),
+            note: ownCopy(
+              String(source.content || "")
+                .slice(group.from, group.at)
+                .trim()
+            ),
             steps: group.steps
           },
           source,

@@ -162,7 +162,7 @@ async function runRounds(target, history, run) {
     refreshSteps(host);
     history.push({
       role: "assistant",
-      content: target.content.slice(roundStart) || null,
+      content: ownCopy(target.content.slice(roundStart)) || null,
       tool_calls: steps.map(step => ({
         id: step.id,
         type: "function",
@@ -187,7 +187,7 @@ const echolessProfiles = new Set();
 function thoughtEcho(target, from, profile) {
   if (target.thinkingBlocks?.length) return { thinking_blocks: target.thinkingBlocks };
   const thought = String(target.reasoning || "").slice(from);
-  return thought.trim() && !echolessProfiles.has(profile.id) ? { reasoning_content: thought } : {};
+  return thought.trim() && !echolessProfiles.has(profile.id) ? { reasoning_content: ownCopy(thought) } : {};
 }
 /** 请求被拒、报错说起思考或多出的字段：去掉送回的思绪，有可去的才算数 @param {Profile} profile */
 function dropThoughtEcho(history, profile, message) {
