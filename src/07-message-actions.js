@@ -68,13 +68,7 @@ const MESSAGE_ACTIONS = {
       const profile = activeProfile();
       if (!profile) return openSettings("models");
       if (quotaBlocked(profile)) return toast("余墨已尽，请调高上限或更换模型");
-      if (!(await preparing(() => prepareTurn(c)))) return;
-      message.status = "streaming";
-      message.error = "";
-      delete message.interruptedAt;
-      saveStore();
-      renderConversation(false);
-      await streamReply(c, message, profile, { resume: true });
+      await resumeAnswer(c, message, profile);
     }
   },
   regenerate: { brush: "reload", run: regenerateAt },
@@ -93,6 +87,19 @@ async function handleMessageAction(event) {
     index = c.messages.findIndex(m => m.id === id);
   if (index < 0) return;
   return action.run({ c, index, message: c.messages[index], button, event });
+}
+// 续写一答：手点「继续生成」，或这一答断着时帮手回报到了（见 wakeWithReports）
+/** @param {Conversation} c @param {Message} message @param {Profile} profile */
+async function resumeAnswer(c, message, profile) {
+  if (!(await preparing(() => prepareTurn(c)))) return;
+  foldRelayTail(c, message);
+  message.status = "streaming";
+  message.error = "";
+  delete message.interruptedAt;
+  saveStore();
+  if (currentId === c.id && view === "chat") renderConversation(false);
+  else renderHistory();
+  await streamReply(c, message, profile, { resume: true });
 }
 // 重答、重试：这一答连同其后的整段留作一个版本，就着上一问另起一答
 /** @param {MessageActionContext} context */

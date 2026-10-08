@@ -41,6 +41,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
   /** @type {Array<Record<string, any>>} 送给接口的消息列表 */
   let history = [];
   let releaseQuota = () => {};
+  /** @type {ReturnType<typeof takeHeldReports>} */
+  let held = [];
   try {
     const budget = inlineTextBudget(profile),
       resumeFrom = resume ? assistant.content : "";
@@ -78,6 +80,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     };
     await loadLedger(conversation, job.controller.signal);
     history = await buildHead();
+    // 上一答断着时回来的回报（见 wakeWithReports）：开工即递上，模型续写时就知道帮手怎样了
+    held = takeHeldReports(conversation, job);
+    if (held.length) await deliverSupplements(job, history, budget, assistant);
     // 先把这一答预计的用量记到预留里（提示 + 最大输出），别的对话同时开工时看得见；收尾时换成实际用量
     // 预留只是估个数：一答的输出按八千算，不必与接口实际的上限一致
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
@@ -131,6 +136,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       if (!assistant.deliverables.length) delete assistant.deliverables;
     }
   } catch (error) {
+    // 一个字没等到就又断了：模型没读到那几份回报，原样还回去等下一答
+    if (!tally.opened) returnHeldReports(conversation, assistant, held);
     settleSteps(assistant, error.name === "AbortError" ? "已停止" : "已中断");
     if (error.name === "AbortError") assistant.status = "stopped";
     else if (assistant.content || assistant.reasoning || assistant.steps?.length) {

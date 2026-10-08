@@ -248,16 +248,30 @@ function wakeWithReports(conversation, items) {
   // 攒着的这一会儿里有人开了一答（用户发了话、上一答收尾时补言另起了一问）：交给它
   const job = requestJob(conversation.id);
   if (job) return void items.forEach(item => deliverInline(conversation, job, item));
+  const profile = profiles().find(p => p.id === items[0].profile?.id) || activeProfile(),
+    ready = profile && !quotaBlocked(profile);
+  // 上一答断着（断网中断、报错）：另起一答会在断处底下留一截，续上那一答时它就成了残留，主线也从此分成两头。
+  // 回报先记在这段对话上，下一答开工时递上（见 takeHeldReports）；中断的那一答就此续上，还断着就原样记着，等下一回
+  const last = conversation.messages.at(-1);
+  if (last?.role === "assistant" && (last.status === "interrupted" || last.status === "error")) {
+    (conversation.heldReports ||= []).push(...items.map(item => ({ report: item.report, relay: relayOf(item) })));
+    markDirty(conversation.id);
+    saveStore();
+    if (last.status === "interrupted" && ready) void resumeAnswer(conversation, last, profile);
+    return;
+  }
   /** @type {Message} */
   const user = {
     id: uid(),
     role: "user",
-    content: items.map(item => item.report).join("\n\n"),
+    content: items
+      .map(item => item.report)
+      .filter(Boolean)
+      .join("\n\n"),
     timestamp: now(),
     relay: items.map(relayOf)
   };
-  const profile = profiles().find(p => p.id === items[0].profile?.id) || activeProfile();
-  if (profile && !quotaBlocked(profile)) return void startTurn(conversation, user, profile, { follow: false });
+  if (ready) return void startTurn(conversation, user, profile, { follow: false });
   // 没有可用的模型或余墨已尽：回报先记下，等用户换了模型再问
   conversation.messages.push(user);
   conversation.updatedAt = now();
@@ -266,6 +280,43 @@ function wakeWithReports(conversation, items) {
   if (currentId === conversation.id && view === "chat") renderConversation();
   else renderHistory();
   toast(profile ? "余墨已尽，帮手的回报先记下了" : "没有可用的模型，帮手的回报先记下了");
+}
+// 断着时记下的回报交给开工的这一答：行迹里落一步「回报」，随后当即递上。派它的那一步已不在眼前这条路上的（重答把那一答收成了版本）不递，
+// 免得张冠李戴。返回交出去的几项，这一答一个字没等到就又断了，原样还回去
+/** @param {Conversation} conversation @returns {Array<{ report: string, relay: any, note?: Step }>} */
+function takeHeldReports(conversation, job) {
+  const held = conversation.heldReports || [];
+  delete conversation.heldReports;
+  const onPath = new Set(conversation.messages.flatMap(message => (message.steps || []).map(step => step.id)));
+  return held
+    .filter(item => onPath.has(item.relay.step))
+    .map(item => {
+      deliverInline(conversation, job, item);
+      return job.queue.at(-1);
+    });
+}
+/** @param {Conversation} conversation @param {Message} host */
+function returnHeldReports(conversation, host, taken) {
+  if (!taken.length) return;
+  const notes = new Set(taken.map(item => item.note?.id));
+  host.steps = (host.steps || []).filter(step => !notes.has(step.id));
+  if (!host.steps.length) delete host.steps;
+  conversation.heldReports = [...taken.map(({ report, relay }) => ({ report, relay })), ...(conversation.heldReports || [])];
+}
+// 续写一答时，它底下只有回报另起、又没写出东西就断了或停了的几答（断网时帮手回报的常见残留）：收回来，回报交给续上的这一答
+/** @param {Conversation} conversation @param {Message} message */
+function foldRelayTail(conversation, message) {
+  const at = conversation.messages.indexOf(message),
+    tail = conversation.messages.slice(at + 1),
+    ids = new Set([message.id, ...tail.map(m => m.id)]);
+  const empty = m =>
+    m.role === "user" ? !!m.relay?.length : m.role === "assistant" && m.status !== "streaming" && !m.content.trim() && !m.steps?.length;
+  if (at < 0 || !tail.length || !tail.every(empty) || (conversation.forks || []).some(fork => ids.has(fork.parentId))) return;
+  conversation.messages = conversation.messages.slice(0, at + 1);
+  const folded = tail
+    .filter(m => m.role === "user")
+    .flatMap(m => (m.relay || []).map((relay, i) => ({ report: i ? "" : m.content, relay })));
+  conversation.heldReports = [...folded, ...(conversation.heldReports || [])];
 }
 // 派它的那一答收尾时它还没做完，墨没算进去：做完了记回那一答
 /** @param {Message} assistant @param {Profile|null} profile */

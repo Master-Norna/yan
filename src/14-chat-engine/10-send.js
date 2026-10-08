@@ -249,7 +249,8 @@ async function deliverSupplements(job, history, budget, assistant, { steer = fal
   job.queue = [];
   for (const { user, step, report, note } of queue) {
     if (report !== undefined) {
-      history.push({ role: "user", content: report });
+      // 几份回报并作一问的：原文都在头一份上，其余几份只落行迹里那一步
+      if (report) history.push({ role: "user", content: report });
       if (note) {
         note.status = "done";
         note.result = steer ? "已递 · 引路" : "已递";

@@ -203,6 +203,16 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      // 断着时回来的回报（relay-hold）：报回请求里有没有那几份回报原文、各在第几条 user 里
+      if (msgs.some(m => m.role === "user" && typeof m.content === "string" && m.content.includes("RELAYHOLD"))) {
+        const users = msgs.filter(m => m.role === "user").map(m => String(typeof m.content === "string" ? m.content : ""));
+        return sse(res, [
+          delta({
+            content: `RELAYHOLD|kept:${users.some(u => u.includes("REPORT-KEPT"))}|dropped:${users.some(u => u.includes("REPORT-GONE"))}|empty:${users.some(u => !u.trim())}`
+          }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       // 多任务压力用例：占着流连接，直到测试结束或请求取消。
       if (typeof lastUser === "string" && lastUser.includes("HOLDSTREAM")) {
         res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -596,6 +606,26 @@ http
           );
         if (!helperReports.length) return sse(res, [delta({ content: "等回报。" }), delta({}, { usage: { total_tokens: 5 } })]);
         return sse(res, [delta({ content: `BGWORK done｜reports:${helperReports.length}` }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
+      // RELAYWAKE：派一名慢帮手（约 3 秒）后这一答断了（接口报错）；回报到了，断着的那一答自己续上、回报递进去，据此收尾
+      if (firstUser.includes("RELAYWAKE")) {
+        if (helperReports.length)
+          return sse(res, [
+            delta({ content: `RELAYWAKE done｜reports:${helperReports.length}｜resumed:${msgs.some(m => m.role === "assistant" && String(m.content).includes("派一名慢帮手"))}` }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        if (!toolResults.length)
+          return sse(res, [
+            delta({ content: "派一名慢帮手。" }),
+            delta({
+              tool_calls: [
+                { index: 0, id: "call_rw0", type: "function", function: { name: "delegate", arguments: JSON.stringify({ title: "慢活", task: "SLOWSUB：慢慢做完回报。" }) } }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: { message: "bad request (fake)" } }));
       }
       // BGLONG：主模型差一名长活帮手（约 12 秒），说「等回报」；回报到了收尾
       if (firstUser.includes("BGLONG")) {

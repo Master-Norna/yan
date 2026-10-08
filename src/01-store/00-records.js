@@ -145,6 +145,7 @@
  * @property {boolean} [titled]
  * @property {number} [titleTries]
  * @property {boolean} [showCompacted]
+ * @property {{ report: string, relay: { step: string, title: string, ok: boolean, kind?: "bg", exitCode?: number } }[]} [heldReports] 上一答断着时回来的回报，下一答开工时递上
  */
 /**
  * @typedef {Object} Profile 一份模型配置
