@@ -297,12 +297,13 @@ async function readLimitedText(response, limit = FETCH_TEXT_LIMIT) {
   }
   return { text, type, truncated: size >= limit };
 }
-async function fetchText(url, timeout = 15000) {
+async function fetchText(url, timeout = 15000, headers = {}) {
   const response = await fetch(url, {
     headers: {
       "User-Agent": BROWSER_UA,
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
-      Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"
+      Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+      ...headers
     },
     redirect: "follow",
     signal: AbortSignal.timeout(timeout)
@@ -312,7 +313,7 @@ async function fetchText(url, timeout = 15000) {
     throw Error(`网页返回 ${response.status}`);
   }
   const { text, type } = await readLimitedText(response);
-  return { text, url: response.url, type };
+  return { text, url: response.url, type, headers: response.headers };
 }
 async function fetchPublicText(url, timeout = 20000) {
   let current = new URL(url);
@@ -344,7 +345,7 @@ async function fetchPublicText(url, timeout = 20000) {
   }
   throw Error("网页跳转次数过多");
 }
-// 免 Key 的检索：先 Bing（国内可达；ensearch=1 走国际索引，国内索引对脚本请求会返回无关结果），失败或无结果再试 DuckDuckGo
+// 免 Key 的检索：先 Bing（国内可达；ensearch=1 走国际索引），失败或无结果再试 DuckDuckGo（连搜几回就回 202，只作后备）
 // Bing 结果链接是 /ck/a?…&u=a1<base64url> 形式的跳转，还原成真实地址
 function resolveBingUrl(href) {
   const raw = decodeEntities(href);
@@ -359,8 +360,24 @@ function resolveBingUrl(href) {
     return raw;
   }
 }
+// Bing 认人：不带 Cookie 的请求当作脚本，查询词只认一个、其余丢掉，照样回十条（搜 Modal 的 GPU 定价出来的是莫代尔面料）。
+// 像浏览器一样留着它给的 Cookie：头一回先进首页讨一份，此后每次回话里新给的随手记上，自然续期
+const bingJar = new Map();
+function keepCookies(headers) {
+  for (const line of headers.getSetCookie?.() || []) {
+    const pair = line.split(";")[0],
+      at = pair.indexOf("=");
+    if (at > 0) bingJar.set(pair.slice(0, at).trim(), pair.slice(at + 1));
+  }
+}
 async function searchBing(query, count) {
-  const { text } = await fetchText(`https://www.bing.com/search?q=${encodeURIComponent(query)}&ensearch=1&count=${count}`);
+  if (!bingJar.size) keepCookies((await fetchText("https://www.bing.com/")).headers);
+  const { text, headers } = await fetchText(
+    `https://www.bing.com/search?q=${encodeURIComponent(query)}&ensearch=1&count=${count}&form=QBLH`,
+    15000,
+    { Cookie: [...bingJar].map(([name, value]) => `${name}=${value}`).join("; "), Referer: "https://www.bing.com/" }
+  );
+  keepCookies(headers);
   const results = [];
   for (const match of text.matchAll(
     /<li class="b_algo"[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h2>([\s\S]*?)<\/li>/g
