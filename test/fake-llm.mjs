@@ -368,6 +368,53 @@ http
               .map(content => ({ content }))
           ),
         firstTurn = msgs.filter(m => m.role === "user").length === 1;
+      // HBG-SUB（帮手）：挂一条约 4 秒的后台指令就收工（只剩等待：先交进展、睡下）；指令结束的消息到了，醒来据它的输出交差
+      if (firstUser.includes("HBG-SUB")) {
+        const woke = msgs.some(m => m.role === "user" && String(m.content).includes("BG-OUT-42"));
+        if (woke)
+          return sse(res, [
+            delta({ content: `HBG-SUB done|saw:BG-OUT-42|tools:${toolResults.length}` }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        if (!toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_hbg0",
+                  type: "function",
+                  function: {
+                    name: "run_command",
+                    arguments: JSON.stringify({ command: "Start-Sleep -Seconds 4; Write-Output 'BG-OUT-42'", background: true })
+                  }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [delta({ content: "HBG-SUB 等后台跑完" }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
+      // HELPERBG（主模型）：派一名帮手就收尾；之后每到一份回报醒一回，报出至今收到的几份各是进展（wait）还是交差（done）
+      if (firstUser.includes("HELPERBG")) {
+        if (firstTurn && !toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_hbgm",
+                  type: "function",
+                  function: { name: "delegate", arguments: JSON.stringify({ title: "后台活", task: "HBG-SUB：后台跑一条指令，等它跑完再回报。" }) }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        if (firstTurn) return sse(res, [delta({ content: "派出去了。" }), delta({}, { usage: { total_tokens: 5 } })]);
+        const kinds = helperReports.map(r => (r.content.includes("暂告一段") ? "wait" : r.content.includes("HBG-SUB done") ? "done" : "?"));
+        return sse(res, [delta({ content: `HELPERBG got|${kinds.join(",")}` }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
       if (firstUser.includes("LONGRUN-SUB")) {
         if (firstTurn && !toolResults.length)
           return sse(res, [

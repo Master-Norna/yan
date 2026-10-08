@@ -222,7 +222,8 @@ function delegateSubState(step) {
       ...(live
         ? [
             steps.length ? `${steps.length} 步` : "领命中",
-            (sub?.startedAt && spentText(Date.now() - sub.startedAt)) || (steps.length ? "进行中" : "")
+            (sub?.startedAt && spentText(Date.now() - sub.startedAt)) || (steps.length ? "进行中" : ""),
+            sub?.waiting ? "等后台" : ""
           ]
         : [String(step.result || "")]),
       sub?.effort ? `思考${reasoningLabel(sub.effort)}` : ""
@@ -271,6 +272,11 @@ function delegateDoing(step) {
     current = [...steps].reverse().find(s => s.status === "running" || s.status === "pending") || steps.at(-1);
   if (current && (current.status === "running" || current.status === "pending"))
     return `${current.status === "pending" ? "等待确认" : "正在"} ${toolLabel(current.name)} ${String(current.title || "").slice(0, 60)}`.trim();
+  // 睡着等自己挂的后台指令
+  if (sub?.waiting)
+    return `等后台 ${helperWaits(sub)
+      .map(s => s.bg?.id)
+      .join("、")}`;
   const base = Math.max(0, ...steps.map(s => Number(s.at) || 0)),
     said = String(sub?.content || "")
       .slice(base)
