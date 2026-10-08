@@ -11,8 +11,9 @@ await evalJs(
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
+// 按问句认这段对话：上一个用例的页面离开时可能补写进来，第一段未必是它
 const reply = n =>
-  `(__yanState().conversations[0]?.messages || []).filter(m => m.role === "assistant" && m.status === "complete")[${n}]?.content || ""`;
+  `((__yanState().conversations.find(c => c.messages[0]?.content === "LEDGER 开工")?.messages || []).filter(m => m.role === "assistant" && m.status === "complete")[${n}]?.content || "")`;
 try {
   await evalJs(
     `document.querySelector("#welcomeInput").value = "LEDGER 开工"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
@@ -32,6 +33,24 @@ try {
   await waitFor(`${reply(1)}.startsWith("LEDGER|")`, 30000);
   const second = await evalJs(reply(1));
   check("next question carries the edited ledger, and only once", /tail:yes\|once:yes/.test(second) && second.includes("now:0.95"), second);
+
+  // 记多少不设限，附多少随窗口：四百行的账本、两万窗口的模型，只附开头并写明共几行；截过的不算读过，不读就改被挡下
+  writeFileSync(
+    WORK + "/.yan/账本.md",
+    ["# 目标 TOPMARK", ...Array.from({ length: 400 }, (_, i) => `- 第${i}条：实验记录良好，继续推进下一步`), "- 末条 TAILMARK"].join("\n")
+  );
+  await evalJs(
+    `__yanState().profiles[0].contextWindow = 20000; document.querySelector("#newChat").click(); setTimeout(() => { document.querySelector("#welcomeInput").value = "LEDGERBIG 开工"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
+  );
+  const big = `__yanState().conversations.find(c => c.messages[0]?.content === "LEDGERBIG 开工")?.messages.at(-1)`;
+  await waitFor(`${big}?.status === "complete"`, 30000);
+  const cut = await evalJs(`${big}.content`);
+  check(
+    "a long ledger is kept whole on disk but only its head rides along, with the line count",
+    cut === "LEDGERBIG|cut:yes|head:yes|tail:no|edit:no",
+    cut
+  );
+  check("the cut ledger was not overwritten unread", readFileSync(WORK + "/.yan/账本.md", "utf8").includes("# 目标 TOPMARK\n"));
 } finally {
   // 工作目录各用例共用：别让账本冠到后面用例的问上
   rmSync(WORK + "/.yan", { recursive: true, force: true });

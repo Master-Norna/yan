@@ -200,8 +200,9 @@ const SEEING_TOOLS = new Set(["read_file", "write_file", "edit_file"]);
 function seenBefore(conversation, step, file) {
   const root = workRoot(conversation),
     wanted = seenPath(conversation, file);
-  // 账本每一问都附着全文（见 ledgerNote），主模型不必再读一遍才能改
-  if (!step.scope && ledgers.get(conversation.id) && wanted === seenPath(conversation, LEDGER_PATH)) return true;
+  // 账本每一问都附着（见 ledgerNote）：附的是全文，主模型不必再读一遍才能改；截过的不算，没看到的后半截不能被一笔覆盖掉
+  if (!step.scope && ledgers.get(conversation.id) && !ledgersCut.has(conversation.id) && wanted === seenPath(conversation, LEDGER_PATH))
+    return true;
   return conversation.messages.some(message =>
     allSteps(message).some(
       seen =>
@@ -266,29 +267,54 @@ async function ensureWorkReady(conversation) {
 // 账本：跨多答的长活，任务活在目录里、不活在哪一段对话里——目录下 .yan/账本.md 由主模型自己立、自己维护，
 // 只记对这件工程持续有约束的（目标与达标标准、约束与取舍、计划与进展、走不通的路），旧的随手淘汰。
 // 每一答开工时读一回，附在这一问之后（见 ledgerNote 与 streamReply）：压缩了、被回报叫醒另起一答、换一段对话接着做，看到的都是同一份。
-// 附在问上而不进系统提示：账本改了也不冲掉前面的缓存。没有这个文件就什么都不附
-const LEDGER_PATH = ".yan/账本.md",
-  LEDGER_CHARS = 3000, // 过了就请它取舍
-  LEDGER_SHOWN = 12000; // 附上去的至多这么多：手写进来的一大篇不能把每一问都撑胖
-/** @type {Map<string, string>} 最近读到的账本，按对话：每一答开工时读，差遣帮手时再现读一回 */
+// 附在问上而不进系统提示：账本改了也不冲掉前面的缓存。没有这个文件就什么都不附。
+// 账本记多少不设上限——有的活真要记很多；限的只是每一问附多少：随模型窗口走，取附件那把尺子的一半（它每一问都附）。
+// 超出就附开头一段并写明其余用 read_file 看——所以账本是索引：常看的写在前面，细的记录（实验数据、长清单）另立 .yan/ 下的文件、账本里留一行指向它
+const LEDGER_PATH = ".yan/账本.md";
+/** @type {Map<string, { text: string, lines: number, partial: boolean }>} 最近读到的账本，按对话：每一答开工时读，差遣帮手时再现读一回。
+ * text 是读到的那截，lines 是整份的行数；partial：读接口一回给得有限，长账本只拿到了前面 */
 const ledgers = new Map();
+/** @type {Set<string>} 上回附上去的账本被截过的对话：截过就不算读过全文，改它得先读 */
+const ledgersCut = new Set();
+/** 每一问附多少账本（token） @param {Profile|null} profile */
+function ledgerBudget(profile) {
+  return Math.floor(inlineTextBudget(profile || activeProfile()) / 2);
+}
 /** @param {Conversation} conversation */
 async function loadLedger(conversation, signal) {
   if (!isWork(conversation)) return void ledgers.delete(conversation.id);
   const data = await bridge("/api/work/read", { ...workScope(conversation), path: LEDGER_PATH, limit: 2000 }, signal).catch(() => null);
-  const text = String(data?.text || "")
-    .replace(/^ *\d+\| /gm, "")
-    .trim();
-  if (text) ledgers.set(conversation.id, text);
+  const raw = String(data?.text || ""),
+    clip = /\n…（内容过长已截断[^\n]*$/,
+    text = raw
+      .replace(clip, "")
+      .replace(/^ *\d+\| /gm, "")
+      .trimEnd();
+  if (text.trim())
+    ledgers.set(conversation.id, {
+      text,
+      lines: Number(data.totalLines) || text.split("\n").length,
+      partial: clip.test(raw) || Number(data.shown) < Number(data.totalLines)
+    });
   else ledgers.delete(conversation.id);
 }
 // 附在这一问之后的一段；帮手的是只读的一份（账本只由主对话写，星形）
-/** @param {Conversation} conversation @param {"main"|"sub"} role */
-function ledgerNote(conversation, role = "main") {
-  const text = ledgers.get(conversation.id);
-  if (!text) return "";
-  const shown = text.length > LEDGER_SHOWN ? `${text.slice(0, LEDGER_SHOWN)}\n…（其后 ${text.length - LEDGER_SHOWN} 字未附）` : text,
-    full =
-      role === "main" && text.length > LEDGER_CHARS ? `\n${prompt("work.ledgerFull", { chars: text.length, limit: LEDGER_CHARS })}` : "";
-  return `${prompt(role === "main" ? "work.ledgerHead" : "work.ledgerSub", { path: LEDGER_PATH, text: shown })}${full}\n\n`;
+/** @param {Conversation} conversation @param {"main"|"sub"} role @param {Profile|null} [profile] */
+function ledgerNote(conversation, role = "main", profile = null) {
+  const ledger = ledgers.get(conversation.id);
+  if (!ledger) return "";
+  const { text, lines, partial } = ledger,
+    tokens = estimateText(text),
+    budget = ledgerBudget(profile);
+  let shown = text;
+  if (tokens > budget) {
+    // 按 token 比例截到预算内，落在行尾
+    const at = Math.floor((text.length * budget) / tokens),
+      end = text.lastIndexOf("\n", at);
+    shown = text.slice(0, end > 0 ? end : at);
+  }
+  const shownLines = shown.split("\n").length,
+    cut = partial || shown.length < text.length;
+  if (role === "main") cut ? ledgersCut.add(conversation.id) : ledgersCut.delete(conversation.id);
+  return `${prompt(role === "main" ? "work.ledgerHead" : "work.ledgerSub", { path: LEDGER_PATH, text: shown })}${cut ? `\n${prompt("work.ledgerCut", { lines, shown: shownLines })}` : ""}\n\n`;
 }

@@ -251,6 +251,34 @@ http
       const firstUser = String(msgs.find(m => m.role === "user")?.content || ""),
         longKey = ["LONGSUB", "LONGMAIN"].find(k => firstUser.includes(k) && !firstUser.includes("LONGRUN"));
       // LEDGER：账本只接在这一问之后另起一段（首段是问本身；缓存标记桥接只给 Claude 留着，这里看不到，由单元测试管）、系统提示里有立账本那句；第一问不读就改账本（附着全文即算读过），第二问看到的是改后的那份
+      // LEDGERBIG：账本远超这台模型每一问能附的量——只附开头、写明共几行，末尾不附；附的是截过的，不读就改应被挡下
+      if (firstUser.includes("LEDGERBIG")) {
+        if (!toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_lb0",
+                  type: "function",
+                  function: { name: "edit_file", arguments: JSON.stringify({ path: ".yan/账本.md", old: "TOPMARK", new: "TOPMARK2" }) }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        const ask = msgs
+            .filter(m => m.role === "user")
+            .map(m => String(m.content))
+            .join("\n"),
+          marks = [
+            `cut:${/账本共 402 行，此处只附了开头 \d+ 行/.test(ask) ? "yes" : "no"}`,
+            `head:${ask.includes("TOPMARK") ? "yes" : "no"}`,
+            `tail:${ask.includes("TAILMARK") ? "yes" : "no"}`,
+            `edit:${String(toolResults[0].content).startsWith("已修改") ? "yes" : "no"}`
+          ].join("|");
+        return sse(res, [delta({ content: `LEDGERBIG|${marks}` }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
       if (firstUser.includes("LEDGER")) {
         const sys = String(msgs[0]?.role === "system" ? msgs[0].content : ""),
           users = msgs.filter(m => m.role === "user").map(m => String(m.content)),

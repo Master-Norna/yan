@@ -449,7 +449,7 @@ async function runDelegate(step, args, ctx, profile, past, progress) {
   const lead = past ? stepsDigest(past.sub, "上一答的行迹") : "";
   const history = [
     ...(past ? helperHistory(conversation, past) : []),
-    { role: "user", content: `${ledgerNote(conversation, "sub")}${lead ? `${lead}\n\n` : ""}${task}` }
+    { role: "user", content: `${ledgerNote(conversation, "sub", profile)}${lead ? `${lead}\n\n` : ""}${task}` }
   ];
   const overrides = {
     systemPrompt: systemPrompt(conversation, tools, { role: "sub" }),
