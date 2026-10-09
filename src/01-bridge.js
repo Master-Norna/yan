@@ -96,9 +96,13 @@ async function bridgeFetch(path, body, signal) {
   const direct = () => fetch(`${apiBase}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body, signal });
   if (!(await busReady())) return direct();
   signal?.throwIfAborted();
+  // 回话一定读完：不读，浏览器就一直攥着这次请求连同发出去的整段 body（GC 也收不掉）。
+  // 长活每三秒存一次整段对话，十几 MB 一份，几小时就把页面撑爆
   const id = uid(),
     post = (to, payload) =>
-      fetch(`${apiBase}${to}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      fetch(`${apiBase}${to}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(
+        async response => ({ ok: response.ok, status: response.status, data: await response.json().catch(() => ({})) })
+      );
   return new Promise((resolve, reject) => {
     const encoder = new TextEncoder();
     /** @type {ReadableStreamDefaultController<Uint8Array>} */
@@ -138,12 +142,12 @@ async function bridgeFetch(path, body, signal) {
     signal?.addEventListener("abort", abort, { once: true });
     busJobs.set(id, job);
     post("/api/bus/send", { page: PAGE_ID, id, path, body }).then(
-      async response => {
-        if (response.ok || !busJobs.has(id)) return;
+      ({ ok, status, data }) => {
+        if (ok || !busJobs.has(id)) return;
         finish();
         // 桥接那头这一页的流恰好断了：这一次改为直接 fetch
-        if (response.status === 409) return direct().then(resolve, reject);
-        reject(Error((await response.json().catch(() => ({}))).error || `请求失败（${response.status}）`));
+        if (status === 409) return direct().then(resolve, reject);
+        reject(Error(data.error || `请求失败（${status}）`));
       },
       error => job.fail(error)
     );
