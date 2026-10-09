@@ -43,6 +43,7 @@
  * @property {number} [startedAt] 正在做时的起始时刻（毫秒），题头据此走用时；收工即删
  * @property {boolean} [waiting] 交过进展、睡着等自己挂的后台指令（醒来即删）
  * @property {Break[]} [breaks]
+ * @property {{ steps: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest）
  * @property {ToolCall[]|null} [toolCalls]
  */
 /**
@@ -109,6 +110,7 @@
  * @property {string} [error]
  * @property {string} [interruptedAt]
  * @property {Break[]} [breaks]
+ * @property {{ steps: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest）
  * @property {number} [durationMs]
  * @property {number} [startedAt] 正在作答时的起始时刻（毫秒），行迹题头据此走用时；收尾即删
  * @property {{ path: string, name: string, size: number }[]} [deliverables] 言里这一答做出的成品

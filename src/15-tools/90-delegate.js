@@ -231,7 +231,7 @@ function helperHistory(conversation, past) {
     mine = runs.slice(0, runs.indexOf(past) + 1).filter(run => helperKey(run) === key),
     history = [];
   mine.forEach((run, i) => {
-    const trail = i ? stepsDigest(mine[i - 1].sub, "上一答的行迹") : "";
+    const trail = i ? settledDigest(mine[i - 1].sub) : "";
     history.push(
       { role: "user", content: `${trail ? `${trail}\n\n` : ""}${run.sub.task}` },
       { role: "assistant", content: String(run.sub.report || run.sub.content || "").trim() || "（未留回报）" }
@@ -281,7 +281,7 @@ async function runDelegate(step, args, ctx, profile, past, progress) {
   await loadLedger(conversation, ctx.signal);
   // 读账本这一会儿里按了「止」：它把中止吞了，这里补上——帮手还没登记，过了这里 stopCrew 就找不到它
   ctx.signal?.throwIfAborted();
-  const lead = past ? stepsDigest(past.sub, "上一答的行迹") : "";
+  const lead = past ? settledDigest(past.sub) : "";
   const history = [
     ...(past ? helperHistory(conversation, past) : []),
     { role: "user", content: `${ledgerNote(conversation, "sub", profile)}${lead ? `${lead}\n\n` : ""}${task}` }

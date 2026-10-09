@@ -19,6 +19,15 @@ function quotedText(message) {
 }
 // 上一答动过文件、请示过、差遣过、检索翻阅过的，压成一行带给下一问：模型才记得自己读过、改过哪些文件、查到过哪几条，不必从头再探。
 // 哪些步骤带、怎么写，由各工具登记的 digest 定。label 是方括号里的标头：进历史时写「上一答的行迹」（见 historyForApi），存卷宗与压缩转写里写「行迹」
+// 送出过的前文不再改写：一答的行迹头一回随下一问送出时定格、记在这一答上，此后照抄。帮手、后台指令收工后签上的字会变
+// （「后台进行中」→ 几步几秒、改了哪些文件），照现写的话前文中间改了一处，那里往后的提示缓存全断；它们的结果另有回报送到。
+// 步数变了（续写又做了几步）才重写
+/** @param {Message|SubAgent} message */
+function settledDigest(message) {
+  const steps = (message.steps || []).length;
+  if (message.trailDigest?.steps !== steps) message.trailDigest = { steps, text: stepsDigest(message, "上一答的行迹") };
+  return message.trailDigest.text;
+}
 /** @param {Message|SubAgent} message 帮手的一趟也一样：续派时它上一趟的行迹冠在新的活前面 */
 function stepsDigest(message, label = "行迹") {
   const steps = (message.steps || []).filter(step => TOOLS.get(step.name)?.digest);
@@ -95,7 +104,7 @@ async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
                 budget
               )
         );
-      trail = stepsDigest(m, "上一答的行迹");
+      trail = settledDigest(m);
       continue;
     }
     const entry = await messageForApi(m, m.id === lastUserId, budget);
