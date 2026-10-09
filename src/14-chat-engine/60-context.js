@@ -198,13 +198,44 @@ function foldTranscript(region, budget) {
   }
   return lines.filter(Boolean).join("\n\n");
 }
+// 撮要在行迹里记作一步（不是工具，画法登记在 15-tools/51-fold.js）：落在它发生的那一刻，正撮着转圈、撮完一勾，点开是笔记——
+// 模型此后只凭笔记做事，看行迹的人得知道。拟题、压缩这些临时对象不走这里（它们没有 head）
+/** @param {Message|SubAgent|null} target @param {NonNullable<Step["fold"]>} fold */
+function foldMark(target, fold) {
+  if (!target) return null;
+  /** @type {Step} */
+  const step = {
+    id: `fold_${uid().slice(0, 8)}`,
+    name: "fold",
+    arguments: "{}",
+    status: "running",
+    at: String(target.content || "").length,
+    rat: String(target.reasoning || "").length,
+    fold
+  };
+  (target.steps ||= []).push(step);
+  return step;
+}
+// 撮要没成事（前文太短不必压、压前文失败另有提示）：那一步撤下，不留痕
+function dropFoldMark(target, step) {
+  if (!target?.steps || !step) return;
+  target.steps = target.steps.filter(s => s !== step);
+  if (!target.steps.length) delete target.steps;
+}
+// 被撮的往来有多少字：说的话、工具结果与调用参数
+const regionChars = region =>
+  region.reduce(
+    (n, m) => n + plainContent(m.content).length + (m.tool_calls || []).reduce((k, c) => k + String(c.function?.arguments || "").length, 0),
+    0
+  );
 /**
  * 需要时把 history 里这一答较早的往来压成笔记（就地改 history），压了返回 true
  * @param {Profile} profile
  * @param {Array<Record<string, any>>} history
  * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold、compactHead；seen 由 readReply 记下
+ * 末一个参数里 target 是撮要那一步记在谁的行迹上（主答、帮手）
  */
-async function keepInWindow(profile, history, signal, overrides, { overflow = false } = {}) {
+async function keepInWindow(profile, history, signal, overrides, { overflow = false, target = null } = {}) {
   const head = overrides.head,
     window = Number(profile.contextWindow) || 0;
   if (typeof head !== "number") return false;
@@ -225,16 +256,27 @@ async function keepInWindow(profile, history, signal, overrides, { overflow = fa
   if (!region.some(m => m.role === "tool")) {
     if (!overrides.compactHead || overrides.headCompacted) return false;
     overrides.headCompacted = true;
+    // 已在做事的答才记进行迹；还没开工的不为它起一条行迹，问句之上那道摘要分隔就是它的痕迹
+    const mark = target?.steps?.length ? foldMark(target, { head: true }) : null;
     overrides.onFold?.(true);
     try {
-      if (!(await overrides.compactHead(signal))) return false;
+      if (!(await overrides.compactHead(signal))) {
+        dropFoldMark(target, mark);
+        return false;
+      }
+      if (mark) mark.status = "done";
       overrides.seen = null;
+      overrides.folds = (overrides.folds || 0) + 1;
       return true;
+    } catch (error) {
+      if (!signal.aborted) dropFoldMark(target, mark);
+      throw error;
     } finally {
       overrides.onFold?.(false);
     }
   }
   const task = plainContent(history.slice(0, head).findLast(m => m.role === "user")?.content).slice(0, 4000);
+  const mark = foldMark(target, { steps: region.filter(m => m.role === "tool").length, from: regionChars(region) });
   overrides.onFold?.(true);
   try {
     const note = await summarize(
@@ -249,13 +291,16 @@ async function keepInWindow(profile, history, signal, overrides, { overflow = fa
       { role: "assistant", content: `［工作笔记］\n${note}` },
       { role: "user", content: prompt("assistant.folded") }
     );
+    if (mark) Object.assign(mark, { status: "done", note, fold: { ...mark.fold, to: note.length } });
     overrides.seen = null;
     overrides.folds = (overrides.folds || 0) + 1;
     return true;
   } catch (error) {
+    // 停止了：那一步由收尾的 settleSteps 记成已停止
     if (signal.aborted) throw error;
     // 没压成：送出前的那次照原样发，也许还放得下；接口已回说放不下的，由 readReply 把原来的错交回去
     console.warn("轮内压缩失败", error);
+    if (mark) Object.assign(mark, { status: "error", result: "未撮成" });
     return false;
   } finally {
     overrides.onFold?.(false);

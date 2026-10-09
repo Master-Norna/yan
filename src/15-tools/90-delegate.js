@@ -294,7 +294,8 @@ async function runDelegate(step, args, ctx, profile, past, progress) {
     head: history.length,
     onFold: busy => {
       const job = requestJob(conversation.id);
-      if (job) setJobLabel(conversation, job, busy ? "帮手整理上下文" : "");
+      if (job) setJobLabel(conversation, job, busy ? "帮手正删繁就简" : "");
+      refreshSteps(assistant);
     }
   };
   // 帮手自己的收件口与中止器，与主答的 job 同形，轮次循环照收：主模型经 helper 递来的话等它说到落点再递（同补言）。
@@ -448,7 +449,7 @@ function helperSummary(step, sub, overrides, ms) {
     seconds = Math.round(ms / 1000);
   return {
     changedNote: changed.length ? `，改了 ${changed.length} 个文件：${changed.join("、")}（+${stats.added} −${stats.removed}）` : "",
-    display: `${sub.steps.length} 步${changed.length ? ` · 改 ${changed.length} 个文件` : ""}${overrides.folds ? ` · 压缩 ${overrides.folds} 回` : ""} · ${seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分`}`
+    display: `${sub.steps.filter(s => !isFold(s)).length} 步${changed.length ? ` · 改 ${changed.length} 个文件` : ""}${overrides.folds ? ` · 撮要 ${overrides.folds} 回` : ""} · ${seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分`}`
   };
 }
 // 睡下之前交的进展：此刻说的话，连同在等哪几条后台指令；主模型读了知道它还在、结束后会再回报

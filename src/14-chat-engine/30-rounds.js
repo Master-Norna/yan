@@ -248,7 +248,7 @@ function trimReply(target) {
 async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
   target.thinkingBlocks = null;
   // 长活：这一答的工具往来快撑满窗口了，先压掉较早的几轮再发（见 14-chat-engine/60-context.js 的 keepInWindow）
-  if (!retried) await keepInWindow(profile, history, signal, overrides);
+  if (!retried) await keepInWindow(profile, history, signal, overrides, { target });
   const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
     const message = await describeResponseError(response);
@@ -263,7 +263,7 @@ async function readReply(profile, history, signal, overrides, target, retried = 
     // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错。429 是限流（「tokens per min」也带 token 与 limit），不算
     const overflow = response.status !== 429 && contextOverflow(message);
     if (overflow) learnContextWindow(profile, message);
-    if (overflow && (await keepInWindow(profile, history, signal, overrides, { overflow: true })))
+    if (overflow && (await keepInWindow(profile, history, signal, overrides, { overflow: true, target })))
       return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
     // 送回的思绪不收（见 thoughtEcho）、附了工具交回的图被拒（多半是看不了图的模型）：去掉再发一回
     if (

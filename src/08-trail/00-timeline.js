@@ -3,15 +3,19 @@
 function toolStackLabel() {
   return "行迹";
 }
-function toolStackMeta(steps = []) {
-  if (steps.some(step => step.status === "pending")) return "等待确认";
-  const running = steps.some(step => step.status === "running"),
+// 撮要不算一步：它是言替模型删繁就简，另记「撮要 n 回」
+const isFold = step => step.name === "fold";
+function toolStackMeta(all = []) {
+  if (all.some(step => step.status === "pending")) return "等待确认";
+  const steps = all.filter(step => !isFold(step)),
+    folds = all.filter(step => isFold(step) && step.status === "done").length,
+    running = all.some(step => step.status === "running"),
     failed = steps.filter(step => step.status === "error").length,
     skipped = steps.filter(step => step.status === "skipped").length,
     reused = steps.filter(step => step.cached).length;
   return running
     ? `进行中${reused ? ` · ${reused} 复用` : ""}`
-    : `${steps.length} 步${reused ? ` · ${reused} 复用` : ""}${skipped ? ` · ${skipped} 跳过` : ""}${failed ? ` · ${failed} 失败` : ""}`;
+    : `${steps.length} 步${reused ? ` · ${reused} 复用` : ""}${skipped ? ` · ${skipped} 跳过` : ""}${failed ? ` · ${failed} 失败` : ""}${folds ? ` · 撮要 ${folds} 回` : ""}`;
 }
 // 等待确认是阻塞式的提问，无论用户之前有没有收起，都把折叠区展开，别让生成静静停在看不见的地方
 // 用了工具的答（行与言都是）画成一条时间线：模型边做边说的话与各步穿插排列，做的时候摊开看过程，做完整条收起，只留最后的总结在外——
@@ -85,6 +89,7 @@ function subStepsLabel(steps) {
 }
 function subStepsMeta(sub, steps) {
   if (subStepsRunning(sub, steps)) return "进行中";
+  steps = steps.filter(step => !isFold(step));
   const failed = steps.filter(step => step.status === "error").length,
     skipped = steps.filter(step => step.status === "skipped").length;
   return `${steps.length} 步${skipped ? ` · ${skipped} 跳过` : ""}${failed ? ` · ${failed} 失败` : ""}`;

@@ -49,7 +49,7 @@
 /**
  * @typedef {Object} Step 行迹里的一步：一次工具调用及其结果、呈现与开合状态
  * @property {string} id
- * @property {string} name 工具名；user_note 是作答途中用户寄来的补言，不是工具
+ * @property {string} name 工具名；user_note 是作答途中用户寄来的补言，fold 是一答之内的撮要，都不是工具
  * @property {string} arguments 模型给的参数原文（JSON）
  * @property {StepStatus} status
  * @property {string} [title] 标题行：指令、路径、关键词……
@@ -88,6 +88,7 @@
  * @property {string[]} [answers]
  * @property {string} [conversationId] 翻旧谈
  * @property {string} [date]
+ * @property {{ steps?: number, from?: number, to?: number, head?: boolean }} [fold] 撮要：并了几步、撮前撮后各几字；head 是压的这一问之前的前文（笔记在 note）
  */
 /**
  * @typedef {Object} Message

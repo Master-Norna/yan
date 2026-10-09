@@ -368,6 +368,49 @@
   min-width: 52px;
   white-space: nowrap;
 }
+/* 撮要：一答之内言替模型删繁就简的那一步，模型此后只凭笔记做事。一张淡染的小笺、右上一个折角，题与笔记用题字、大半号——
+   这一步是读的，不是扫的。折角是剪出来的（clip-path），帮手面板里底色不同也不露馅。
+   不设专色：色说「在哪儿动」，撮要哪儿也没去，标签用墨、比只看的几步深一档，分量全在笺上。
+   落选（设计稿/50–52）：当作「思绪」那样一块（不像一步）、折起被撮的前段（压完行迹缩一大截）、朱印 / 束痕 / 笔意小画；
+   色上落选朱（朱已说「在别处落了笔」，一色说两件事）、入潢的淡黄底（与差遣那层金挨得太近） */
+.tool-step-fold {
+  position: relative;
+  margin: 4px 0;
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--paper-3) 70%, transparent);
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%);
+}
+.tool-step-fold:after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 9px;
+  background: linear-gradient(225deg, transparent 50%, color-mix(in srgb, var(--ink) 14%, var(--paper-3)) 50%);
+  border-bottom-left-radius: 2px;
+}
+.tool-step-fold > .tool-step-head .tool-label {
+  color: var(--ink-2);
+}
+.tool-step-fold > .tool-step-head .tool-title {
+  color: var(--ink-2);
+  font-family: var(--title);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.tool-step-fold > .tool-step-head .tool-meta {
+  font-family: var(--title);
+}
+.tool-step-fold > .tool-note {
+  padding: 4px 12px 9px 50px;
+  color: var(--ink-2);
+  font: 12px/1.75 var(--title);
+}
+.tool-step-fold > .tool-note :is(ul, ol) {
+  margin: 0;
+  padding-left: 1.2em;
+}
 .tool-note-files {
   margin-top: 4px;
   color: var(--ink-3);

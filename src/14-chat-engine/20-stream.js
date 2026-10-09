@@ -97,7 +97,11 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       tools,
       reasoning: conversation.reasoning || "",
       head: history.length,
-      onFold: busy => setJobLabel(conversation, job, busy ? "上下文将满 · 整理中" : ""),
+      // 撮要那一步由 keepInWindow 记进行迹（见 60-context.js 的 foldMark），这里只管重画与作业条上的一句
+      onFold: busy => {
+        setJobLabel(conversation, job, busy ? "正删繁就简" : "");
+        refreshSteps(assistant);
+      },
       // 放不下的是这一问之前的对话：压成摘要落成分隔（下一问也用得上），换掉 history 里这一问之前的那截
       compactHead: async signal => {
         const user = conversation.messages.find(m => m.id === lastUserId);

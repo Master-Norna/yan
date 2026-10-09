@@ -46,7 +46,7 @@ check(
 );
 check("the helper ran all twelve reads", s.rounds.LONGSUB === 13, JSON.stringify(s));
 const meta = await evalJs(`document.querySelector(".message.assistant .tool-step-delegate .tool-meta")?.textContent || ""`);
-check("the errand marker says how many times it folded", /12 步 · 压缩 \d+ 回/.test(meta), meta);
+check("the errand marker says how many times it folded", /12 步 · 撮要 \d+ 回/.test(meta), meta);
 
 // 主答：填了窗口（20k）。按接口报的提示用量估，到七成半就先压，一次「放不下」都不该撞上
 await evalJs(`__yanState().profiles[0].contextWindow = 20000; document.querySelector("#newChat").click(); true`);
@@ -58,6 +58,19 @@ check(
   "the main answer completed with the note and its own question kept",
   main.status === "complete" && /LONGMAIN done\|note:yes\|folded:yes\|task:yes/.test(main.content),
   JSON.stringify(main).slice(0, 400)
+);
+const folds = main.steps.filter(x => x.startsWith("fold:done")).length;
+check("each fold left a step in the trail", folds >= 1 && folds === s.folds.LONGMAIN, JSON.stringify({ steps: main.steps, s }));
+const slip = await evalJs(
+  `(el => el && { title: el.querySelector(".tool-title").textContent, meta: el.querySelector(".tool-meta").textContent, folded: el.classList.contains("folded"), stack: document.querySelector(".message.assistant .tool-stack.is-work > summary .tool-stack-meta")?.textContent || "" })([...document.querySelectorAll(".message.assistant .tool-step-fold")].at(-1))`
+);
+check(
+  "the fold step reads as a note slip: what was folded, how much, folded shut",
+  /^已删繁就简，前.+步并作一则笔记$/.test(slip?.title) &&
+    /→ .+字$/.test(slip?.meta) &&
+    slip?.folded &&
+    /^12 步 · 撮要 \d+ 回$/.test(slip?.stack),
+  JSON.stringify(slip)
 );
 check(
   "every read step stays on the page after folding",

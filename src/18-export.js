@@ -17,7 +17,7 @@ function exportToolTrail(message) {
   const text = steps
     .map(
       (step, index) =>
-        `${index + 1}. ${TOOLS.get(step.name)?.label || step.name} · ${step.title || step.note || ""} → ${step.result || step.status || ""}`
+        `${index + 1}. ${TOOLS.get(step.name)?.label || step.name} · ${step.name === "fold" ? foldTitle(step) : step.title || step.note || ""} → ${step.result || step.status || ""}`
     )
     .join("\n");
   const fence = "`".repeat(Math.max(3, ...Array.from(text.matchAll(/`+/g), match => match[0].length + 1)));
