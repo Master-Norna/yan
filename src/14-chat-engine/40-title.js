@@ -13,7 +13,12 @@ function handNamed(conversation) {
     .filter(c => c !== conversation && renamedByHand(c) && c.title)
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
     .slice(0, 5)
-    .map(c => `「${String(c.messages.find(m => m.role === "user")?.content || "").replace(/\s+/g, " ").slice(0, 40)}」→ ${c.title}`);
+    .map(
+      c =>
+        `「${String(c.messages.find(m => m.role === "user")?.content || "")
+          .replace(/\s+/g, " ")
+          .slice(0, 40)}」→ ${c.title}`
+    );
   return list.length ? `${prompt("assistant.titleNamed", { list: list.join("\n") })}\n\n` : "";
 }
 /**

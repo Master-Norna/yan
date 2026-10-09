@@ -18,7 +18,10 @@ await evalJs(
 );
 const lastDone = `[...document.querySelectorAll(".message.assistant")].at(-1)?.dataset.status === "complete"`;
 await waitFor(lastDone, 15000);
-check("the first ask carries the image", (await evalJs(`[...document.querySelectorAll(".message.assistant")].at(-1).textContent`)).includes("IMGCOUNT|1"));
+check(
+  "the first ask carries the image",
+  (await evalJs(`[...document.querySelectorAll(".message.assistant")].at(-1).textContent`)).includes("IMGCOUNT|1")
+);
 
 // 改问：附件随编辑框摆出来，各带 ×
 await evalJs(`document.querySelector('.message.user [data-action="edit"]').click(); true`);
@@ -41,7 +44,10 @@ await shot("edit-drop-attachment.png");
 await evalJs(`document.querySelector('[data-action="save-edit"]').click(); true`);
 await sleep(300);
 await waitFor(lastDone, 15000);
-check("the re-ask goes out without the image", (await evalJs(`[...document.querySelectorAll(".message.assistant")].at(-1).textContent`)).includes("IMGCOUNT|0"));
+check(
+  "the re-ask goes out without the image",
+  (await evalJs(`[...document.querySelectorAll(".message.assistant")].at(-1).textContent`)).includes("IMGCOUNT|0")
+);
 check(
   "the new ask keeps only the csv, the old version still holds the image",
   await evalJs(
@@ -52,7 +58,9 @@ check(
 // 字不改、只摘附件：也算改过，照样重答
 await evalJs(`document.querySelector('.message.user [data-action="edit"]').click(); true`);
 await waitFor(`!!document.querySelector('.message.user [data-action="drop-attachment"]')`, 3000);
-await evalJs(`document.querySelector('.message.user [data-action="drop-attachment"]').click(); document.querySelector('[data-action="save-edit"]').click(); true`);
+await evalJs(
+  `document.querySelector('.message.user [data-action="drop-attachment"]').click(); document.querySelector('[data-action="save-edit"]').click(); true`
+);
 await sleep(300);
 await waitFor(lastDone, 15000);
 check(

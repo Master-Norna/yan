@@ -4,12 +4,7 @@ import { load } from "./harness.mjs";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { marked } = require("../../vendor/marked.umd.js");
-const f = load([
-  "conversationMarkdown",
-  "dataUrlFromText",
-  "markdownVisuals",
-  "setMarked: value => { window.marked = value; }"
-]);
+const f = load(["conversationMarkdown", "dataUrlFromText", "markdownVisuals", "setMarked: value => { window.marked = value; }"]);
 f.setMarked(marked);
 const conversation = messages => ({ title: "中文导出", createdAt: "2026-09-28", messages });
 

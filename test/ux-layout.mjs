@@ -1,7 +1,8 @@
 // 版面细处：代码块的行距、引文的竖线、窄窗里的上下文计数、设置里填进去的值——都是截图里看得出、单测抓不到的走样
 import { connect, check, sleep, PAGE } from "./lib.mjs";
 const BASE = PAGE.replace(/\/$/, "");
-const post = (p, b) => fetch(BASE + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json());
+const post = (p, b) =>
+  fetch(BASE + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json());
 const md = "代码：\n\n```js\nfunction add(a, b) {\n  return a + b;\n}\nconsole.log(add(1, 2));\n```\n\n> 引用一段话。\n\n末段。";
 await post("/api/chats/save", {
   root: "",
@@ -34,7 +35,11 @@ await waitFor(`!!document.querySelector("#messages pre code")`, 5000);
 const code = await evalJs(
   `(() => { const code = document.querySelector("#messages pre code"), lines = code.textContent.replace(/\\n$/, "").split("\\n").length, lh = parseFloat(getComputedStyle(code).lineHeight); pre = code.closest("pre"), ps = getComputedStyle(pre); return { per: (pre.clientHeight - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom)) / lines, lh }; })()`
 );
-check("code lines are spaced by the code's own line height, not stretched by the block", Math.abs(code.per - code.lh) < 1.5, JSON.stringify(code));
+check(
+  "code lines are spaced by the code's own line height, not stretched by the block",
+  Math.abs(code.per - code.lh) < 1.5,
+  JSON.stringify(code)
+);
 const quote = await evalJs(
   `(() => { const q = document.querySelector("#messages blockquote"), last = q.lastElementChild; return q.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom; })()`
 );

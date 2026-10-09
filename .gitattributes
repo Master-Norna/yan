@@ -1,0 +1,6 @@
+# 换行一律 LF（与 Prettier 一致）；只有 Windows 批处理留 CRLF，cmd 读 LF 的批处理遇标签会跳错
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.bcmap binary

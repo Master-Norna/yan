@@ -24,8 +24,7 @@ test("Windows MCP 关闭进程时不会同步等待 taskkill", () => {
     module,
     process: { platform: "win32" },
     require(name) {
-      if (name === "node:child_process")
-        return { spawn: (...args) => (calls.push(args), killer) };
+      if (name === "node:child_process") return { spawn: (...args) => (calls.push(args), killer) };
       return require(name);
     }
   });

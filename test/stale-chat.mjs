@@ -48,7 +48,11 @@ check("this page's new turn follows it on disk", ids.length === 6 && ids.indexOf
 check("and this page shows the merged conversation", JSON.stringify(await state()) === JSON.stringify(ids), JSON.stringify(await state()));
 
 // 二、那一处又写了一问；这边藏着没察觉，回到前台时先跟上
-const third = [...(await disk()).conversation.messages, message("s-u3", "user", "那边的第三问"), message("s-a3", "assistant", "那边的第三答")];
+const third = [
+  ...(await disk()).conversation.messages,
+  message("s-u3", "user", "那边的第三问"),
+  message("s-a3", "assistant", "那边的第三答")
+];
 await post("/api/chats/save", { root: "", savedAt: Date.now(), conversation: conversation(third) });
 await evalJs(`document.dispatchEvent(new Event("visibilitychange")); true`);
 await waitFor(`__yanState().conversations.find(c => c.id === "stale-1").messages.some(m => m.id === "s-a3")`, 5000).catch(() => {});

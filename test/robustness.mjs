@@ -77,7 +77,10 @@ check(
 await evalJs(
   `document.querySelector("#chatInput").value = "FLAKY503 试试"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
-const retryLabel = await waitFor(`/网络不稳 · 第 \\d 次重试/.test(document.querySelector("#helperBar .work-notice")?.textContent || "")`, 5000).then(
+const retryLabel = await waitFor(
+  `/网络不稳 · 第 \\d 次重试/.test(document.querySelector("#helperBar .work-notice")?.textContent || "")`,
+  5000
+).then(
   () => true,
   () => false
 );

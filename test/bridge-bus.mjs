@@ -33,7 +33,11 @@ try {
     const { value } = await reader.read();
     return { type: window.__bus.responses[0].headers.get('content-type'), text: new TextDecoder().decode(value) };
   })()`);
-  check("stream chunks and headers arrive through the bus", /event-stream/.test(first.type) && first.text.includes("已接通"), JSON.stringify(first));
+  check(
+    "stream chunks and headers arrive through the bus",
+    /event-stream/.test(first.type) && first.text.includes("已接通"),
+    JSON.stringify(first)
+  );
   const control = await evalJs(`(async () => {
     const started = performance.now();
     const viaBus = (path, body) => __yanBridgeFetch(path, JSON.stringify(body), AbortSignal.timeout(2500));

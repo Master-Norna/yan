@@ -126,16 +126,7 @@ function builtinConfig(stage, root) {
     browser = BROWSERS.includes(String(stage?.browser)) ? String(stage.browser) : "msedge";
   return {
     command: process.execPath,
-    args: [
-      at.cli,
-      "--browser",
-      browser,
-      "--user-data-dir",
-      at.profile,
-      "--output-dir",
-      at.output,
-      "--allow-unrestricted-file-access"
-    ],
+    args: [at.cli, "--browser", browser, "--user-data-dir", at.profile, "--output-dir", at.output, "--allow-unrestricted-file-access"],
     cwd: at.home,
     env: browser === "chromium" ? { PLAYWRIGHT_BROWSERS_PATH: at.engine } : {}
   };
@@ -179,7 +170,9 @@ const MIRROR_HOST = "https://cdn.npmmirror.com/binaries/playwright";
 /** 跑一下、拿它的标准输出 @returns {Promise<string>} */
 const outputOf = (/** @type {string} */ file, /** @type {string[]} */ args, env = {}) =>
   new Promise(resolve =>
-    execFile(file, args, { env: { ...process.env, ...env }, windowsHide: true, timeout: 20000 }, (_error, stdout) => resolve(String(stdout || "")))
+    execFile(file, args, { env: { ...process.env, ...env }, windowsHide: true, timeout: 20000 }, (_error, stdout) =>
+      resolve(String(stdout || ""))
+    )
   );
 /**
  * 内核走哪个下载源：拿要下的那个文件本身两边比（见 mirror.js）——Playwright 新出的内核镜像要现去源站拉，
@@ -187,9 +180,9 @@ const outputOf = (/** @type {string} */ file, /** @type {string[]} */ args, env 
  * @param {string} cli playwright-core 的 cli.js @returns {Promise<Record<string, string>>} 装时添的环境变量
  */
 async function engineHost(cli) {
-  const mirror = (await outputOf(process.execPath, [cli, "install", "chromium", "--no-shell", "--dry-run"], { PLAYWRIGHT_DOWNLOAD_HOST: MIRROR_HOST })).match(
-    /Download url:\s*(\S+)/
-  )?.[1];
+  const mirror = (
+    await outputOf(process.execPath, [cli, "install", "chromium", "--no-shell", "--dry-run"], { PLAYWRIGHT_DOWNLOAD_HOST: MIRROR_HOST })
+  ).match(/Download url:\s*(\S+)/)?.[1];
   if (!mirror?.startsWith(MIRROR_HOST)) return { PLAYWRIGHT_DOWNLOAD_HOST: MIRROR_HOST };
   const { side } = await fasterSide(mirror, mirror.replace(MIRROR_HOST, "https://cdn.playwright.dev"));
   // 官方源不设变量：Playwright 自带几个备用地址，一个不通换下一个

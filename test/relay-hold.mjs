@@ -11,7 +11,18 @@ const helper = (id, title) => ({
   status: "error",
   title,
   result: "1 步 · 3 秒 · 未完成",
-  sub: { id: `sub-${id}`, helper: `sub-${id}`, task: "做点事", content: "", reasoning: "", steps: [], status: "error", usage: null, report: "", charged: true }
+  sub: {
+    id: `sub-${id}`,
+    helper: `sub-${id}`,
+    task: "做点事",
+    content: "",
+    reasoning: "",
+    steps: [],
+    status: "error",
+    usage: null,
+    report: "",
+    charged: true
+  }
 });
 const conversations = [
   {
@@ -24,7 +35,15 @@ const conversations = [
     threads: [],
     messages: [
       { id: "u1", role: "user", content: "RELAYHOLD 起手", timestamp: T },
-      { id: "a1", role: "assistant", content: "做到一半。", timestamp: T, status: "interrupted", error: "网络中断", steps: [helper("d1", "甲"), helper("d2", "乙")] },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "做到一半。",
+        timestamp: T,
+        status: "interrupted",
+        error: "网络中断",
+        steps: [helper("d1", "甲"), helper("d2", "乙")]
+      },
       {
         id: "u2",
         role: "user",
@@ -52,7 +71,15 @@ const conversations = [
     ],
     messages: [
       { id: "u3", role: "user", content: "RELAYHOLD 起手", timestamp: T },
-      { id: "a3", role: "assistant", content: "做到一半。", timestamp: T, status: "interrupted", error: "网络中断", steps: [helper("d3", "丙")] }
+      {
+        id: "a3",
+        role: "assistant",
+        content: "做到一半。",
+        timestamp: T,
+        status: "interrupted",
+        error: "网络中断",
+        steps: [helper("d3", "丙")]
+      }
     ]
   }
 ];
@@ -73,8 +100,16 @@ const fold = JSON.parse(
     `(c => JSON.stringify({ shape: c.messages.map(m => m.id).join(","), content: c.messages[1].content, notes: c.messages[1].steps.filter(s => s.name === "relay_note").map(s => s.title + ":" + s.status), held: c.heldReports || null, relayLines: document.querySelectorAll("#messages .message.relay").length }))(${chat("fold")})`
   )
 );
-check("resuming folds the empty relay turn back; nothing is left below", fold.shape === "u1,a1" && fold.relayLines === 0, JSON.stringify(fold));
-check("the folded reports reach the resumed answer, without empty questions", /kept:true\|dropped:false\|empty:false/.test(fold.content), fold.content);
+check(
+  "resuming folds the empty relay turn back; nothing is left below",
+  fold.shape === "u1,a1" && fold.relayLines === 0,
+  JSON.stringify(fold)
+);
+check(
+  "the folded reports reach the resumed answer, without empty questions",
+  /kept:true\|dropped:false\|empty:false/.test(fold.content),
+  fold.content
+);
 check("each report lands as a delivered step in the trail", fold.notes.join("|") === "甲:done|乙:done" && !fold.held, JSON.stringify(fold));
 
 // 二：记在对话上的回报，下一答（这里是新的一问）开工时递上；派它的那一步已不在眼前这条路上的不递
@@ -122,7 +157,11 @@ const woke = JSON.parse(
 check("the answer broke off while its helper was still out", sawBreak, JSON.stringify(woke));
 check(
   "the report resumes the broken answer instead of opening a new one",
-  woke.shape === "user,assistant" && woke.status === "complete" && /RELAYWAKE done｜reports:1｜resumed:true/.test(woke.content) && woke.notes.join() === "done" && !woke.held,
+  woke.shape === "user,assistant" &&
+    woke.status === "complete" &&
+    /RELAYWAKE done｜reports:1｜resumed:true/.test(woke.content) &&
+    woke.notes.join() === "done" &&
+    !woke.held,
   JSON.stringify(woke)
 );
 
