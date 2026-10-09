@@ -108,8 +108,14 @@ module.exports = function createChatgpt({ home }) {
     })().finally(() => (refreshing = null));
     return refreshing;
   }
-  async function headers() {
-    return { "Content-Type": "application/json", Authorization: `Bearer ${await accessToken()}` };
+  // 缓存键另放进请求头的 session_id：后端照它把请求送到存着前文缓存的那一处，光有请求体里的 prompt_cache_key 一回也不中
+  // （2026-10-09 实测：同一前缀隔半分钟再发，带它读到 99%，不带一直是 0）
+  async function headers(_config, body) {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${await accessToken()}`,
+      ...(body?.prompt_cache_key ? { session_id: body.prompt_cache_key } : {})
+    };
   }
 
   // 登录：桥接在 127.0.0.1 上临时开一个回调口，用系统浏览器打开授权页；用户点了同意，浏览器带着 code 回到回调口，
@@ -236,7 +242,7 @@ module.exports = function createChatgpt({ home }) {
   const provider = {
     needsBaseUrl: false,
     url: () => `${API}/responses`,
-    headers: () => headers(),
+    headers: (config, body) => headers(config, body),
     request: payload => responsesRequest(payload),
     stream: model => responsesToOpenAiStream(model),
     models: () => models(),

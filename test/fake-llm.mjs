@@ -135,7 +135,7 @@ function chatgpt(req, res) {
       const send = data => res.write(`data: ${JSON.stringify(data)}\n\n`);
       send({
         type: "response.output_text.delta",
-        delta: `CHATGPT|bearer:${bearer}|store:${payload.store}|instr:${!!payload.instructions}|effort:${payload.reasoning?.effort || ""}`
+        delta: `CHATGPT|bearer:${bearer}|store:${payload.store}|instr:${!!payload.instructions}|effort:${payload.reasoning?.effort || ""}|session:${!!payload.prompt_cache_key && req.headers.session_id === payload.prompt_cache_key}`
       });
       send({ type: "response.completed", response: { usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 } } });
       return res.end();

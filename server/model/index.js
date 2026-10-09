@@ -2,7 +2,7 @@
 // 言 · 模型转发：测试连接、列模型、对话。页面只说 OpenAI chat.completions 的话，各家接口的差异都收在下面的 PROVIDERS 表里，
 // 加一家只需加一份登记。一份登记有这几样：
 //   url(config)               对话发往哪
-//   headers(config)           带什么头（可以是异步的：ChatGPT 订阅的令牌要换新）
+//   headers(config, body)     带什么头（可以是异步的：ChatGPT 订阅的令牌要换新；对话时 body 是已换好的请求体）
 //   request(payload, config)  OpenAI 格式的请求体换成这家的
 //   stream(model)             这家的事件流换回 chat.completions 分块的 TransformStream；不给即原样透传
 //   modelsUrl(config) / models(config)  列模型：给地址的照通行的 { data: [...] } 读，自有说法的自己列
@@ -131,10 +131,11 @@ module.exports = function createModel({ home }) {
       });
       console.log(`${stamp()} → ${config.model}：${messages.length} 条消息${payload.tools ? `，工具 ${payload.tools.length} 个` : ""}`);
       // 上游的状态码原样带回页面（连不上记作 502）：429、5xx、过载这些页面会等一等再试，参数错之类的 4xx 不试
+      const upstream = provider.request(payload, config);
       const response = await fetch(provider.url(config), {
         method: "POST",
-        headers: await provider.headers(config),
-        body: JSON.stringify(provider.request(payload, config)),
+        headers: await provider.headers(config, upstream),
+        body: JSON.stringify(upstream),
         signal: abort.signal
       }).catch(error => {
         throw Object.assign(Error(`连不上上游接口：${error.cause?.code || error.cause?.message || error.message}`), {
