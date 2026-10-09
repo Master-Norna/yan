@@ -1,0 +1,286 @@
+/* 记忆分栏（设计稿/49 甲）：左一列类目，右边选着那一类的条目。条目平时只读、一条一行摘要，点开就地摊开全文，
+   「改」才换输入框。落选：先列分类、点进去再列条目（一层套一层，回来只靠一枚小「‹ 记忆」）；条目常开输入框、
+   长的半截淡出（像没画完），条下重写类名（碎字） */
+.memory-split {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.memory-cats {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 14px 0;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+}
+.memory-cat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 0 7px 10px;
+  border-left: 2px solid transparent;
+  color: var(--ink-2);
+  font: 13.5px var(--title);
+  text-align: left;
+  transition: color 0.15s;
+}
+.memory-cat span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memory-cat em {
+  margin-left: auto;
+  color: var(--ink-3);
+  font: normal 11px var(--title);
+}
+.memory-cat:hover {
+  color: var(--ink);
+}
+.memory-cat.active {
+  border-left-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+/* 末尾的「另起一类」淡一档；点开就地换成同位置的输入框 */
+.memory-cat-new {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+input.memory-cat-new {
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  outline: 0;
+  background: none;
+  color: var(--ink);
+}
+.memory-pane {
+  min-width: 0;
+  padding-left: 18px;
+}
+.memory-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 6px;
+  border-bottom: 1px solid var(--line);
+}
+.memory-cat-count {
+  color: var(--ink-3);
+  font: 11px var(--title);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+/* 分类名就地可改：改成已有的名字即并入那一类 */
+.memory-cat-name {
+  field-sizing: content;
+  min-width: 3em;
+  max-width: 100%;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font: 600 15px var(--title);
+  letter-spacing: 0.06em;
+}
+.memory-cat-name:hover,
+.memory-cat-name:focus {
+  border-bottom-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.memory-item {
+  border-bottom: 1px solid var(--line);
+}
+.memory-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 0;
+  text-align: left;
+}
+.memory-gist {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.memory-row:hover .memory-gist {
+  color: var(--ink);
+}
+.memory-day {
+  color: var(--ink-3);
+  font: 11px var(--title);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+/* 摊开的一条：左侧一道淡墨竖痕 */
+.memory-item.open {
+  margin: 4px 0;
+  padding: 12px 0 8px 12px;
+  border-left: 1.5px solid color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.memory-body,
+.memory-text {
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.memory-body {
+  white-space: pre-wrap;
+  cursor: default;
+}
+.memory-body b {
+  font-weight: 600;
+}
+.memory-text {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+}
+.memory-text:focus {
+  outline: none;
+}
+.memory-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--ink-3);
+  font: 11px var(--title);
+  letter-spacing: 0.04em;
+}
+.memory-source {
+  border-bottom: 1px dashed color-mix(in srgb, var(--ink) 25%, transparent);
+  color: var(--ink-3);
+  font: inherit;
+  letter-spacing: inherit;
+  transition: color 0.16s;
+}
+.memory-source:hover {
+  color: var(--accent);
+}
+.memory-spacer {
+  flex: 1;
+}
+/* 改 · 归入别类 · 删去：三枚小画，删的那一笔透一点朱 */
+.memory-ops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.memory-ops button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-s);
+  transition: background 0.15s;
+}
+.memory-ops button:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.memory-ops svg {
+  width: 15px;
+  height: 15px;
+}
+.memory-ops .memory-del svg .ink {
+  fill: color-mix(in srgb, var(--accent) 85%, var(--ink));
+}
+/* 另起一类时就地换成的输入框 */
+.memory-move {
+  field-sizing: content;
+  min-width: 4em;
+  max-width: 12em;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px dashed var(--line);
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font: 11px var(--title);
+  letter-spacing: 0.04em;
+}
+.memory-empty {
+  margin: 0;
+  padding: 18px 0;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.memory-foot {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.welcome-notice {
+  width: min(100%, var(--read));
+  margin: 12px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: var(--radius-m) var(--radius-l) var(--radius-l) var(--radius-l);
+  background: color-mix(in srgb, var(--paper-2) 60%, transparent);
+  color: var(--ink-2);
+  font: 12px/1.6 var(--title);
+  letter-spacing: 0.02em;
+}
+.welcome-notice .seal {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+.welcome-notice span {
+  flex: 1;
+}
+.welcome-notice button {
+  flex: none;
+  color: var(--accent);
+  font-family: var(--title);
+  letter-spacing: 0.04em;
+}
+.welcome-notice button:hover {
+  text-decoration: underline;
+}
+.history-empty {
+  padding: 10px;
+  color: var(--ink-3);
+  font: 12px/1.7 var(--title);
+}
+.context-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 34px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.12em;
+}
+.context-divider:before,
+.context-divider:after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+.context-divider.compacting span {
+  color: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}

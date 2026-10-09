@@ -795,7 +795,7 @@ html[data-sidebar="collapsed"] .sidebar .wide {
 .theme-toggle[data-theme="dark"]:hover .theme-wash {
   transform: rotate(204deg);
 }
-/* 余墨：一笔墨色短横（画法见 src/07-render.js 的 quotaInk），数目与上限在靠近时浮出的纸签上（方角顶朱，同浮签一式）。
+/* 余墨：一笔墨色短横（画法见 src/07-render/00-frame.js 的 quotaInk），数目与上限在靠近时浮出的纸签上（方角顶朱，同浮签一式）。
    用尽时那一笔转朱。落选的：「余墨」二字 + 朱色渐变一笔 + 等宽数目常显（设计稿/30） */
 .quota {
   position: relative;

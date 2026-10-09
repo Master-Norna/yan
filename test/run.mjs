@@ -40,7 +40,7 @@ const jsFiles = [
   ...readdirSync(path.join(ROOT, "prompts"))
     .filter(f => f.endsWith(".js"))
     .map(f => `prompts/${f}`),
-  // 源码逐个查、连同子目录（src/15-tools、server/work……）：上面的 support.js 是提交里的产物，未必跟得上源码
+  // 源码逐个查、连同子目录（src/15-tools、server/work……）
   ...["src", "server"].flatMap(dir =>
     existsSync(path.join(ROOT, dir))
       ? readdirSync(path.join(ROOT, dir), { recursive: true })

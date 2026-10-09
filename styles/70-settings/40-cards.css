@@ -1,0 +1,286 @@
+/* 设置里的卡片列表：MCP 的各个服务、环境的各组工具。一张卡一行头（名、标签、状态、动作），下面一行说明，可展开细目或就地改 */
+.card-list {
+  display: grid;
+  /* 格子默认不肯比里面最长的一行字窄：卡里一长串包名、路径会把整张卡撑出面板 */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 14px 0 12px;
+}
+.card {
+  box-sizing: border-box;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s); /* 与卷宗的簿录长条同是方角；落选的 12px 圆角成块，见 设计稿/26 五 */
+  transition: border-color 0.2s;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.card-name {
+  font: 500 14px var(--title);
+  color: var(--ink);
+}
+.card-tag {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  color: var(--ink-3);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.card-state {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.card-state.ok {
+  color: var(--ink-2);
+}
+.card-state.err {
+  color: var(--danger);
+}
+.card-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.card-actions .outline-btn {
+  padding: 4px 9px;
+}
+.card-sub {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.card-more {
+  margin-top: 6px;
+}
+.card-more > summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 11px;
+  list-style: none;
+}
+.card-more > summary::-webkit-details-marker {
+  display: none;
+}
+.card-more > summary::before {
+  content: "▸ ";
+}
+.card-more[open] > summary::before {
+  content: "▾ ";
+}
+.card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+.card-chips span {
+  padding: 2px 7px;
+  border-radius: var(--radius-m);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.card-chips small {
+  margin-left: 4px;
+  color: var(--ink-3);
+  font-family: var(--body);
+}
+.card.editing {
+  border-color: var(--ink-3);
+}
+.card .profile-grid {
+  margin-top: 4px;
+}
+.card-form-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+}
+.card-form-foot .danger-btn {
+  margin-left: auto;
+}
+.card-error {
+  color: var(--danger);
+  font-size: 11px;
+}
+.card-foot {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+/* 可勾选的卡：整张可点；名称与说明在左，状态在右——空框、朱框里一粒朱（待装）、一笔勾（已装）。
+   落选的：待装是朱色实心块（比已装那一笔勾还重） */
+.card.pickable {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding-left: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+.card.pickable:hover {
+  border-color: var(--ink-3);
+}
+.card.pickable[aria-disabled="true"] {
+  cursor: default;
+}
+.card-tick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ink-3);
+  border-radius: var(--radius-s);
+  transition:
+    border-color 0.18s,
+    background-color 0.18s;
+}
+.card.pickable[aria-checked="true"] .card-tick {
+  border-color: var(--accent);
+}
+.card.pickable[aria-checked="true"]:not([data-state="done"]) .card-tick:after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.card.pickable[data-state="done"] {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+.card.pickable[data-state="done"] .card-tick {
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.card-tick svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.env-pack-word {
+  flex: none;
+  min-width: 2.4em;
+  color: var(--accent);
+  font-size: 11px;
+  text-align: right;
+}
+.card.pickable[data-state="drop"] .env-pack-word {
+  color: var(--ink-3);
+}
+.card-body {
+  flex: 1;
+  min-width: 0;
+}
+.card-body > span {
+  display: block;
+}
+.card-body > .card-head {
+  display: flex;
+}
+.card-note {
+  margin-top: 3px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.json-box {
+  margin-bottom: 14px;
+}
+.json-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.json-editor {
+  width: 100%;
+  min-height: 220px;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-note {
+  margin-top: 14px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.settings-sub {
+  margin: 22px 0 0;
+  color: var(--ink-2);
+  font: 500 13px var(--title);
+}
+/* 环境：状态一张卡，准备中时下面滚着输出 */
+.env-log {
+  max-height: 180px;
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border-radius: var(--radius-m);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font:
+    11px/1.6 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.env-extra .field {
+  width: 150px;
+}
+/* 预设：表单里工具与 MCP 各一排勾选 */
+.preset-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.preset-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.preset-checks .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.preset-prompt {
+  min-height: 120px;
+}

@@ -1,0 +1,46 @@
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 42px;
+  background: rgba(30, 28, 24, 0.22);
+  backdrop-filter: blur(3px);
+  animation: fadeIn 0.18s ease;
+}
+.modal-panel {
+  position: relative;
+  width: min(860px, 100%);
+  height: min(650px, 100%);
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  animation: panelIn 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.settings-nav {
+  width: 186px;
+  flex: none;
+  padding: 24px 12px;
+  background: var(--paper-2);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+.settings-nav-title {
+  padding: 0 10px 14px;
+  color: var(--ink-3);
+  font: 10px var(--title);
+  letter-spacing: 0.16em;
+}
+.settings-nav-spacer {
+  flex: 1;
+}
+.settings-nav-foot {
+  padding: 0 10px;
+  color: var(--ink-3);
+  font: 11px/1.7 var(--title);
+}

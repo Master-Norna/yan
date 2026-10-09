@@ -1,0 +1,106 @@
+/* 压成摘要的分隔：折起是一行，点开可读摘要本身 */
+.context-summary {
+  max-width: min(100%, 520px);
+}
+.context-summary > summary {
+  list-style: none;
+  cursor: pointer;
+  text-align: center;
+  color: var(--ink-3);
+  transition: color 0.15s;
+}
+.context-summary > summary::-webkit-details-marker {
+  display: none;
+}
+.context-summary > summary:before {
+  content: "›";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.18s ease;
+}
+.context-summary[open] > summary:before {
+  transform: rotate(90deg);
+}
+.context-summary > summary:hover {
+  color: var(--ink-2);
+}
+.context-summary-body {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border: 1px dashed color-mix(in srgb, var(--line) 85%, transparent);
+  border-radius: var(--radius-l);
+  color: var(--ink-2);
+  font: 12.5px/1.75 var(--title);
+  letter-spacing: 0.02em;
+  text-align: left;
+}
+.context-summary-body > *:first-child {
+  margin-top: 0;
+}
+.context-summary-body > *:last-child {
+  margin-bottom: 0;
+}
+.context-summary-body ul,
+.context-summary-body ol {
+  padding-left: 1.4em;
+}
+.context-divider.has-summary {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.context-toggle {
+  flex: none;
+  padding: 0 6px;
+  color: var(--ink-3);
+  font: inherit;
+  letter-spacing: inherit;
+}
+.context-toggle:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+/* 压缩过的前文折起：节点还在，只是不显示 */
+#messages > .compacted {
+  display: none;
+}
+.ended-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 30px;
+}
+.profile-add {
+  width: 100%;
+  margin-top: 14px;
+}
+.profile-grid .segmented {
+  margin-top: 4px;
+}
+.field[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius-m);
+  text-align: left;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.tab-btn.active,
+.tab-btn:hover {
+  background: var(--paper-3);
+  color: var(--ink);
+}
+.settings-content {
+  flex: 1;
+  overflow: auto;
+  padding: 32px 38px;
+}
+.settings-content h2 {
+  margin: 0 0 5px;
+  font: 500 21px var(--title);
+}

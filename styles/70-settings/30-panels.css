@@ -1,0 +1,397 @@
+/* 设置各栏的题头与卷宗、分组页同一个样子：笔意图标、标题（一行事实或导语跟在后面），下压一道墨线；条与条之间一道淡线。
+   落选的：「八行笺」——文武线挂在导语上，只有个性化、文档两栏有，别的栏借第一行的朱丝栏或干脆没有，一个弹窗里三种题头；
+   条目前一粒朱菱形，一页五六粒，朱用泛了（朱留给要人注意的）。见 设计稿/26 四。
+   更早落选的：整块套朱色版框（框占宽度、内容挤）；一条设置一张纸条（歪斜的纸条一多就乱）；右下角垫一个极淡的大字（会被控件压住，单个的字也不好看） */
+.settings-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ink-3);
+}
+.settings-head h2 {
+  margin: 0;
+}
+/* 题后一行事实（记忆的条数、文档的版本） */
+.settings-meta {
+  color: var(--ink-3);
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  letter-spacing: 0.04em;
+}
+.settings-lead {
+  margin: 0 0 10px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.settings-head .settings-lead {
+  flex-basis: 100%;
+  margin: 2px 0 0 38px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 15px 0;
+  border-top: 1px solid var(--line);
+}
+/* 题下线即是第一道线：紧跟的一行、模型列表不再自画上边；环境的状态卡离线留一点空（卡片列表自带） */
+.settings-head + :is(.setting-row, #profileList) {
+  border-top: 0;
+}
+.settings-head + #envStatus {
+  margin-top: 14px;
+}
+.setting-copy strong {
+  display: block;
+  font: 600 13.5px var(--title);
+}
+.setting-copy small {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.setting-copy small:empty {
+  display: none;
+}
+.setting-actions {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.setting-row > .segmented,
+.setting-row > .field,
+.setting-row > .danger-btn {
+  flex: none;
+}
+.setting-copy {
+  min-width: 0;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.check input {
+  margin: 0;
+}
+.field {
+  width: 250px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-m);
+  outline: none;
+  background: var(--paper-2);
+  /* 填进去的值用正文墨色：不然放在淡色的说明标签里会随它变淡，与占位提示分不出来 */
+  color: var(--ink);
+  font-size: 12px;
+}
+.field:focus {
+  border-color: var(--ink-3);
+}
+.field.wide {
+  width: 100%;
+}
+.field-area {
+  min-height: 86px;
+  resize: vertical;
+}
+/* 下拉框：去掉原生的箭头，右侧一道淡墨的折线；展开的列表仍是系统的，随 color-scheme 换明暗 */
+.select {
+  appearance: none;
+  padding-right: 26px;
+  background: var(--paper-2)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a847a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 10px center / 9px 6px;
+  cursor: pointer;
+}
+.profile-advanced {
+  margin-top: 12px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+}
+.profile-advanced summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.profile-advanced summary::-webkit-details-marker {
+  display: none;
+}
+.profile-advanced summary:before {
+  content: "▸";
+  color: var(--ink-3);
+  font-size: 10px;
+}
+.profile-advanced[open] summary:before {
+  content: "▾";
+}
+/* 标题不许被右边的小字挤成两行；折起时只提一句偏离默认的设置（工具关、原生联网开、有 system prompt），具体数值点开再看 */
+.profile-advanced summary .advanced-title {
+  flex: none;
+  white-space: nowrap;
+}
+.profile-advanced summary small {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 10.5px;
+}
+.profile-advanced .profile-grid {
+  padding: 2px 0 14px;
+}
+.profile-grid code {
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  color: var(--ink-2);
+}
+.profile-grid label small,
+.profile-grid .profile-cell small {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+.field-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.field-row .field {
+  margin-top: 0;
+  min-width: 0;
+}
+.field-row .select {
+  width: auto;
+  flex: none;
+}
+.field-row [data-model-select] {
+  flex: 1;
+  min-width: 0;
+}
+.field-row .outline-btn {
+  flex: none;
+  white-space: nowrap;
+}
+.danger-btn,
+.outline-btn {
+  flex: none;
+  white-space: nowrap;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.danger-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.outline-btn:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+/* 一个模型平时收成一行（名字、模型 ID 与接口、默认），点开才是整张表；行与行之间一道线，不成块。
+   开合用行迹题头那枚细折角（画法见 80-trail.css）。落选：一张张圆角卡片全摊开——模型一多就翻不过来 */
+#profileList {
+  border-top: 1px solid var(--line);
+}
+.profile-card {
+  border-bottom: 1px solid var(--line);
+}
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 2px;
+  cursor: pointer;
+  list-style: none;
+}
+.profile-head::-webkit-details-marker {
+  display: none;
+}
+.profile-head:before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid var(--ink-3);
+  border-bottom: 1px solid var(--ink-3);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.profile-card[open] > .profile-head:before {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.profile-head:hover .profile-name {
+  color: var(--accent);
+}
+.profile-name {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  font: 500 14px var(--title);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.profile-gist {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font: 11.5px var(--body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-badge {
+  flex: none;
+  color: var(--accent);
+  font: 11px var(--title);
+  letter-spacing: 0.12em;
+}
+.profile-body {
+  padding: 2px 0 16px 17px;
+}
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.profile-grid label,
+.profile-grid .profile-cell {
+  display: block;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+.profile-grid input,
+.profile-grid textarea {
+  margin-top: 4px;
+}
+.profile-full {
+  grid-column: 1/-1;
+}
+.profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+}
+.profile-status {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.segmented {
+  display: flex;
+  padding: 3px;
+  border-radius: var(--radius-m);
+  background: var(--paper-2);
+}
+.segmented button {
+  white-space: nowrap;
+  min-width: 62px;
+  padding: 6px 9px;
+  border-radius: var(--radius-m);
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.segmented button.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+}
+.font-segmented button {
+  min-width: 54px;
+  font-size: 13px;
+}
+.close-modal {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  z-index: 2;
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 30px;
+  z-index: 80;
+  transform: translateX(-50%);
+  max-width: min(92vw, 560px);
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  animation: rise 0.2s ease-out;
+}
+.server-notice {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.hidden {
+  display: none !important;
+}
+/* 通用页里并排的小数字框（工具轮次上限） */
+.setting-inline {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.field-num {
+  width: 72px;
+  text-align: right;
+}
+.setting-directory {
+  flex: 1;
+  max-width: 420px;
+}
+.setting-directory .field {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+.setting-directory .outline-btn {
+  flex: none;
+  white-space: nowrap;
+}
