@@ -1,22 +1,31 @@
 // 言 · 本地存储 · 租约：几处页面同开时谁在作答
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 const remoteBusy = new Set(),
-  leaseHold = new Set();
+  leaseHold = new Set(),
+  leaseClaims = new Map();
 // ---------- 几处页面同开：谁在作答 ----------
 // 两个浏览器、VS Code 与浏览器同开同一个存储时，各页只知道自己在跑什么：那边正作答的一段，这边刷新后读到的是磁盘上「生成中」的快照，
 // 从前会当成页面刷新而中断、写回磁盘，两边轮流互盖，这边再点「继续生成」就成了两处同写一条回复。
 // 现在每隔几秒向桥接报到一次：报的是这边正作答的（以及作答完、最后一次存盘还没落地的）对话，回来的是别处正作答的。
 // 别处正作答的那几段，这边只看不动：不当成中断、不存盘、不让发问与改动，每次报到顺带从磁盘读回最新进度；
 // 别处松了手（写完，或页面关了、崩了，十五秒没来报到），再读一回：还停在「生成中」的，才按中断处理
-let leasing = null;
+let leasing = null,
+  leasePosting = Promise.resolve();
 function syncLeases() {
   if (!chatsOnline()) return Promise.resolve();
+  // 认领本身会报上全部持有的对话；它回话前还没有生成任务，不能以「没在跑」把这段报没了。
+  if (leaseClaims.size) return Promise.all([...leaseClaims.values()]);
   if (leasing) return leasing;
   // 正作答的都算上（旁注的作业按它所在的对话记），后台还有帮手在做的也算；作答完了、最后一次存盘也落了地的松手
   const running = new Set([...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys()]);
   for (const id of running) leaseHold.add(id);
   for (const id of [...leaseHold]) if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) leaseHold.delete(id);
-  leasing = bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold] }, AbortSignal.timeout(5000))
+  const posting = bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold] }, AbortSignal.timeout(5000));
+  leasePosting = posting.then(
+    () => {},
+    () => {}
+  );
+  leasing = posting
     .then(async ({ busy = [] }) => {
       const released = [...remoteBusy].filter(id => !busy.includes(id));
       remoteBusy.clear();
@@ -31,21 +40,29 @@ function syncLeases() {
 }
 // 开工前认领：报到每隔几秒才一次，两页几乎同时点发送时都以为没人在写。认领就是一次带上这段的报到，
 // 桥接一次只办一件，先到的那页记上了，后到的一页看见它已有主就让开。桥接连不上时不拦（只剩这一页能写）
-async function claimConversation(id) {
-  if (!chatsOnline()) return true;
-  // 先记进自己手里：认领途中若恰有一趟报到发出，也带着它，不会把刚认下的又报没了
-  const held = leaseHold.has(id);
-  leaseHold.add(id);
-  try {
-    const { busy = [] } = await bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold], claim: id }, AbortSignal.timeout(3000));
-    if (!busy.includes(id)) return true;
-    if (!held) leaseHold.delete(id);
-    remoteBusy.add(id);
-    renderSendButtons();
-    return false;
-  } catch {
-    return true;
-  }
+function claimConversation(id) {
+  if (!chatsOnline()) return Promise.resolve(true);
+  if (leaseClaims.has(id)) return leaseClaims.get(id);
+  // 旧报到先落定，再认领；不同对话的认领也依次送出，避免迟到的旧清单撤回后来的持有项。
+  // 只等租约回话，不等随后读回别处的对话；慢读取不拖住发送。
+  const before = [...leaseClaims.values(), leasePosting];
+  const claiming = (async () => {
+    await Promise.all(before);
+    const held = leaseHold.has(id);
+    leaseHold.add(id);
+    try {
+      const { busy = [] } = await bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold], claim: id }, AbortSignal.timeout(3000));
+      if (!busy.includes(id)) return true;
+      if (!held) leaseHold.delete(id);
+      remoteBusy.add(id);
+      renderSendButtons();
+      return false;
+    } catch {
+      return true;
+    }
+  })().finally(() => leaseClaims.delete(id));
+  leaseClaims.set(id, claiming);
+  return claiming;
 }
 // 页面要关或刷新：先松手。不然刷新后的自己会把刷新前的自己当成「别处在作答」，停在半途的那一答就不收束了
 function releaseLeases() {
