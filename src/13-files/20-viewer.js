@@ -234,8 +234,10 @@ function showInFileViewer(title, html, trigger = null) {
   $("#fileViewerStage").innerHTML = html;
   $("#fileViewerClose").focus();
 }
-let imageViewerArchivePath = null;
+let imageViewerArchivePath = null,
+  imageViewerRevision = 0;
 function openArchiveImage(path, trigger = null) {
+  imageViewerRevision++;
   const entry = (archiveEntries || []).find(file => file.path === path);
   imageViewerAttachmentId = null;
   imageViewerArchivePath = path;
@@ -308,6 +310,7 @@ function toggleImageViewerZoom() {
 let imageViewerAttachmentId = null,
   imageViewerReturnFocus = null;
 function closeImageViewer() {
+  imageViewerRevision++;
   const viewer = $("#imageViewer");
   if (viewer.classList.contains("hidden")) return;
   viewer.classList.add("hidden");
@@ -321,8 +324,10 @@ function closeImageViewer() {
   if (target?.isConnected) target.focus();
 }
 async function openImageViewer(id, trigger = null) {
+  const revision = ++imageViewerRevision;
   try {
     const file = await getAttachment(id);
+    if (revision !== imageViewerRevision) return;
     if (!file) return toast("图片原件已找不到");
     if (file.kind !== "image") return openFileViewer({ attachmentId: id }, file.name, trigger);
     imageViewerAttachmentId = id;
@@ -338,7 +343,7 @@ async function openImageViewer(id, trigger = null) {
     $("#imageViewer").classList.remove("hidden");
     $("#imageViewerClose").focus();
   } catch {
-    toast("图片读取失败");
+    if (revision === imageViewerRevision) toast("图片读取失败");
   }
 }
 // 图片查看器盖在卷宗预览之上，先收它（连同底下的预览）；CSV、Markdown、PDF 这些预览单独开着时，Esc 也得关得掉
