@@ -144,6 +144,25 @@ await evalJs(
 );
 await sleep(400);
 check("editing the text saves", (await memory()).items[0].text === "改过的记忆");
+await evalJs(
+  `(a => { a.value = "长".repeat(2005); a.dispatchEvent(new Event("input")); })(document.querySelector("#settingsContent .memory-text")); true`
+);
+check(
+  "an overlong manual edit stays in the field and does not overwrite the saved memory",
+  (await memory()).items[0].text === "改过的记忆" &&
+    (await evalJs(
+      `(a => a.value.length === 2005 && !a.validity.valid && a.validationMessage.includes("2000"))(document.querySelector("#settingsContent .memory-text"))`
+    ))
+);
+await evalJs(`document.querySelector("#settingsContent [data-memory-edit]").click(); true`);
+check(
+  "an invalid edit cannot be completed",
+  await evalJs(`document.querySelector("#settingsContent .memory-text")?.value.length === 2005`)
+);
+await evalJs(
+  `(a => { a.value = "改过的记忆"; a.dispatchEvent(new Event("input")); })(document.querySelector("#settingsContent .memory-text")); true`
+);
+check("shortening the edit clears the error", await evalJs(`document.querySelector("#settingsContent .memory-text").validity.valid`));
 await evalJs(`document.querySelector("#addMemory").click(); true`);
 await sleep(100);
 await evalJs(

@@ -203,7 +203,14 @@ function bindMemoryEvents() {
       grow(area);
       area.addEventListener("input", () => {
         grow(area);
-        const text = cleanMemoryText(area.value).slice(0, MEMORY_TEXT_CHARS);
+        const text = cleanMemoryText(area.value);
+        const tooLong = text.length > MEMORY_TEXT_CHARS;
+        area.setCustomValidity(tooLong ? `记忆最多 ${MEMORY_TEXT_CHARS} 字，当前内容尚未保存，请缩短后再完成` : "");
+        area.setAttribute("aria-invalid", String(tooLong));
+        if (tooLong) {
+          area.reportValidity();
+          return;
+        }
         if (text) {
           item.text = text;
           item.updatedAt = now();
@@ -213,6 +220,10 @@ function bindMemoryEvents() {
       // 焦点离开这一条即改完、回到只读；挪到这一条的小画上不算，免得重画吞了那一下点按。改空了即删去
       area.addEventListener("blur", e => {
         if (row.contains(e.relatedTarget)) return;
+        if (!area.reportValidity()) {
+          area.focus();
+          return;
+        }
         memoryItemEditing = "";
         if (!area.value.trim()) {
           store.memory.items = store.memory.items.filter(entry => entry !== item);
@@ -227,6 +238,7 @@ function bindMemoryEvents() {
       });
     }
     row.querySelector("[data-memory-edit]")?.addEventListener("click", () => {
+      if (memoryItemEditing === item.id && area && !area.reportValidity()) return;
       memoryItemEditing = memoryItemEditing === item.id ? "" : item.id;
       memoryItemOpen = item.id;
       renderSettings();
