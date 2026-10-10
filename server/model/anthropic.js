@@ -218,10 +218,10 @@ function anthropicToOpenAiStream(model = "") {
     transform(bytes, controller) {
       feed(controller, decoder.decode(bytes, { stream: true }));
     },
+    // 没等到 message_stop 就断了：不补 [DONE]，页面按「连接中断」处理、可续写（已收到 message_delta 的，页面凭结束原因照常收尾）
     flush(controller) {
       feed(controller, decoder.decode());
       if (buffer) feed(controller, "\n");
-      if (!stopped) controller.enqueue(encoder.encode("data: [DONE]\n\n"));
     }
   });
 }

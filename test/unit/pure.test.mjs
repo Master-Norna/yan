@@ -467,6 +467,18 @@ test("anthropicToOpenAiStream：流到半途的 error 事件按流里的报错�
   assert.equal(last.choices, undefined);
   assert.ok(!chunks.some(c => c.includes("接口错误")));
 });
+test("anthropicToOpenAiStream：没等到 message_stop 就断流，不补 [DONE]、不冒充写完", async () => {
+  const raw = [
+    ["message_start", { type: "message_start", message: { model: "claude-x", usage: { input_tokens: 3 } } }],
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "写到一半" } }]
+  ]
+    .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
+    .join("");
+  const text = await new Response(new Blob([raw]).stream().pipeThrough(f.anthropicToOpenAiStream("claude"))).text();
+  assert.ok(!text.includes("[DONE]"));
+  assert.ok(!text.includes('"finish_reason":"'));
+});
 test("isReadOnlyCommand：git 带 --output / --ext-diff 不算只读", () => {
   assert.equal(f.isReadOnlyCommand("git log --oneline"), true);
   assert.equal(f.isReadOnlyCommand("git log --output=out.txt"), false);
