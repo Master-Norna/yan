@@ -76,6 +76,7 @@ export async function connect() {
   };
   await send("Page.enable");
   await send("Runtime.enable");
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await send("Emulation.setDeviceMetricsOverride", { width: 1380, height: 900, deviceScaleFactor: 1, mobile: false });
   return { send, evalJs, waitFor, shot, close: () => ws.close() };
 }
