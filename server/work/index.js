@@ -520,7 +520,7 @@ module.exports = function createWork({ archiveHome, workHome, toolEnv, playable 
       "POST /api/work/edit": handleWorkEdit,
       "POST /api/work/search": handleWorkSearch,
       "POST /api/work/download": handleWorkDownload,
-      ...createArchive({ archiveHome, playable })
+      ...createArchive({ archiveHome, playable, lockFile })
     }
   };
 };

@@ -3,6 +3,7 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const createLocks = require("./locks.js");
 const { sendJson, readJson, jsonRoute, errorText, sendFile, openWithSystem } = require("../http.js");
 const {
   SCRATCH_DIR,
@@ -15,7 +16,7 @@ const {
   assertNoEscapingLink
 } = require("./paths.js");
 
-module.exports = function createArchive({ archiveHome, playable }) {
+module.exports = function createArchive({ archiveHome, playable, lockFile = createLocks().lockFile }) {
   const failed = error => errorText(error, 300);
   // ---- 卷宗目录：页面上的卷宗即这一目录的视图。列出全部文件与子目录（页面逐层看、查找时平铺），收入 / 取出 / 挪动 / 移出都限定在目录内 ----
   const ARCHIVE_LIST_LIMIT = 3000,
@@ -111,18 +112,21 @@ module.exports = function createArchive({ archiveHome, playable }) {
     if (!stat?.isDirectory()) throw Error(`卷宗里没有这一层：${rel}`);
     return dir;
   }
-  // 同名不覆盖，另取「名 (2).扩展名」。占名与落笔是同一下：make 遇已有的就以 EEXIST 失败（wx 写、mkdir），换下一个名字再来——
-  // 两次同时收入同名文件，先查后写会挑中同一个名字互盖
-  async function placeFree(dir, name, make) {
+  // 同名不覆盖，另取「名 (2).扩展名」。每个候选名在写锁内检查与落笔，rename 也不会因同时挪入而互盖。
+  // 明着改名（exact）遇同名就报错，不替用户另取名。
+  async function placeFree(dir, name, make, exact = false) {
     const extension = path.extname(name),
       stem = name.slice(0, name.length - extension.length);
     for (let n = 1; ; n++) {
       const target = path.join(dir, n === 1 ? name : `${stem} (${n})${extension}`);
+      const release = await lockFile(target);
       try {
         await make(target);
         return target;
       } catch (error) {
-        if (error.code !== "EEXIST") throw error;
+        if (error.code !== "EEXIST" || exact) throw error;
+      } finally {
+        release();
       }
     }
   }
@@ -200,13 +204,18 @@ module.exports = function createArchive({ archiveHome, playable }) {
       name = renaming ? cleanName(body.name) : path.basename(from);
     const wanted = path.join(dir, name);
     if (wanted === from) return describeItem(root, from);
-    // 只改大小写（Windows 上视作同一个）：照改。rename 遇同名文件会盖掉，占名只能先看一眼
-    const sameFile = wanted.toLowerCase() === from.toLowerCase();
-    if (renaming && !sameFile && fs.existsSync(wanted)) throw Error(`这一层已有「${name}」`);
-    const to = await placeFree(dir, name, async to => {
-      if (!sameFile && fs.existsSync(to)) throw Object.assign(Error(), { code: "EEXIST" });
-      await fs.promises.rename(from, to);
-    }).catch(error => {
+    // Windows 上只改大小写仍是同一个文件；其他系统的大小写不同可以是两件文件。
+    const sameFile = process.platform === "win32" && wanted.toLowerCase() === from.toLowerCase();
+    const to = await placeFree(
+      dir,
+      name,
+      async to => {
+        if (!sameFile && fs.existsSync(to)) throw Object.assign(Error(), { code: "EEXIST" });
+        await fs.promises.rename(from, to);
+      },
+      renaming
+    ).catch(error => {
+      if (renaming && error.code === "EEXIST") throw Error(`这一层已有「${name}」`);
       throw Error(describeFsError(error, String(body.path)));
     });
     return describeItem(root, to);
