@@ -83,9 +83,27 @@ function attachmentIds(messages = []) {
     .map(file => file.id)
     .filter(Boolean);
 }
-// 仍在用的附件：各段对话（含换下的版本、旁注，连同行迹里补言带的、工具交回的画面）、草稿、案上待发的
+// 点发送时拿住的原件：开工前的等待里，用户可能已从草稿里摘掉它，消息还没接手，不能按无人引用删掉。
+const attachmentHolds = new Map();
+function holdAttachments(files) {
+  const ids = [...new Set((files || []).map(file => file?.id).filter(Boolean))];
+  for (const id of ids) attachmentHolds.set(id, (attachmentHolds.get(id) || 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    for (const id of ids) {
+      const count = attachmentHolds.get(id) - 1;
+      if (count) attachmentHolds.set(id, count);
+      else attachmentHolds.delete(id);
+    }
+    // 发成了由消息接手；没发成且已从草稿摘掉的，解除保留后照常清掉。
+    void deleteAttachments(ids);
+  };
+}
+// 仍在用的附件：各段对话（含换下的版本、旁注，连同行迹里补言带的、工具交回的画面）、草稿、案上待发的与发送快照
 function attachmentKeepIds() {
-  const ids = new Set();
+  const ids = new Set(attachmentHolds.keys());
   const add = files => {
     for (const file of files || []) if (file?.id) ids.add(file.id);
   };

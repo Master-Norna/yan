@@ -37,6 +37,7 @@ async function sendOrStop() {
   if (!text && !pendingAttachments.length && !pendingQuote) return;
   sendPreparing = true;
   renderSendButtons();
+  let releaseAttachments = () => {};
   try {
     const profile = activeProfile();
     if (!profile) {
@@ -52,6 +53,7 @@ async function sendOrStop() {
     // 输入框、待发的附件与引文都换成了那一段的草稿，不能等完了再去读
     const sendingDraftKey = draftKey(),
       snapshot = composerSnapshot(input);
+    releaseAttachments = holdAttachments(snapshot.attachments);
     let c = currentConversation(),
       fresh = false;
     if (c && !(await prepareTurn(c))) return;
@@ -100,6 +102,7 @@ async function sendOrStop() {
     }
     return startTurn(c, user, profile);
   } finally {
+    releaseAttachments();
     sendPreparing = false;
     renderSendButtons();
   }

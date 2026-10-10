@@ -94,4 +94,55 @@ check(
   )
 );
 await evalJs(`window.fetch = window.__preflight.original; true`);
+// 已点发送的附件由快照拿住：等待里摘掉也不能删原件；准备失败则解除保留、清掉孤件。
+await evalJs(`__yanState().conversations.find(c => c.id === "switch-b").workdir = ${JSON.stringify(WORK)}; true`);
+for (const ready of [false, true]) {
+  await evalJs(`(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["发送快照的原件"], "快照.txt", { type: "text/plain" }));
+    window.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+  })(); true`);
+  await waitFor(`document.querySelectorAll("#attachments [data-remove-attachment]").length === 1`);
+  const id = await evalJs(`__yanState().drafts["switch-b"].attachments[0].id`);
+  await evalJs(`(() => {
+    const original = window.fetch.bind(window);
+    let release;
+    const gate = new Promise(resolve => release = resolve);
+    window.__preflight = { calls: 0, release, original };
+    window.fetch = (...args) => {
+      const prepare = String(args[0]).includes("/api/work/prepare") || String(args[1]?.body || "").includes('"path":"/api/work/prepare"');
+      if (prepare && ++window.__preflight.calls === 1)
+        return gate.then(() => ${ready ? "original(...args)" : 'new Response(\'{"error":"临时故障"}\', { status: 503, headers: { "Content-Type": "application/json" } })'});
+      return original(...args);
+    };
+    const input = document.querySelector("#chatInput");
+    input.value = "PLAIN 查看附件";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  })(); true`);
+  await waitFor(`window.__preflight.calls === 1`);
+  await evalJs(`document.querySelector("#attachments [data-remove-attachment]").click(); true`);
+  await sleep(300);
+  check(
+    "removing an attachment during preflight keeps the snapshot's original",
+    (await fetch(`${PAGE}api/files/raw?id=${id}`)).status === 200
+  );
+  await evalJs(`window.__preflight.release(); true`);
+  if (ready) {
+    await waitFor(`__yanState().conversations.find(c => c.id === "switch-b").messages.length >= 2`);
+    check(
+      "a successful preflight passes the attachment to the sent message with its original intact",
+      (await evalJs(`__yanState().conversations.find(c => c.id === "switch-b").messages[0].attachments[0].id`)) === id &&
+        (await fetch(`${PAGE}api/files/raw?id=${id}`)).status === 200
+    );
+  } else {
+    await waitFor(`!document.querySelector("#chatSend").disabled`);
+    await waitFor(`fetch("/api/files/raw?id=${id}").then(r => r.status === 404)`);
+    check(
+      "a failed preflight cleans up an attachment removed from the draft",
+      await evalJs(`__yanState().conversations.find(c => c.id === "switch-b").messages.length === 0`)
+    );
+  }
+  await evalJs(`window.fetch = window.__preflight.original; true`);
+}
 close();
