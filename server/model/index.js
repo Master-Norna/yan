@@ -91,7 +91,7 @@ module.exports = function createModel({ home }) {
     }
   }
   async function handleChat(req, res) {
-    const meter = { model: "", opened: 0, last: 0, bytes: 0 };
+    const meter = { model: "", opened: 0, last: 0, bytes: 0, finish: "" };
     try {
       const body = await readJson(req),
         { config, provider } = resolveProfile(body.profile, true);
@@ -166,11 +166,29 @@ module.exports = function createModel({ home }) {
         Connection: "keep-alive",
         "X-Accel-Buffering": "no"
       });
+      // 各家的流换成 chat.completions 分块之后，顺路认出结束原因：收尾时记一行，半截话停下时看得出对面发的是 stop 还是 abort
+      const decoder = new TextDecoder();
+      let tail = "";
+      const watched = (provider.stream ? metered.pipeThrough(provider.stream(config.model)) : metered).pipeThrough(
+        new TransformStream({
+          transform(chunk, controller) {
+            tail = (tail + decoder.decode(chunk, { stream: true })).slice(-4096);
+            for (const match of tail.matchAll(/"finish_reason"\s*:\s*"([^"]+)"/g)) meter.finish = match[1];
+            tail = tail.slice(tail.lastIndexOf("\n") + 1);
+            controller.enqueue(chunk);
+          }
+        })
+      );
       // 不用 pipeline：上游一断它连页面这头也一并销毁，下面 catch 里那条「连接中断」的报错事件就补不上了，页面只见一句 network error
-      const source = Readable.fromWeb(provider.stream ? metered.pipeThrough(provider.stream(config.model)) : metered);
+      const source = Readable.fromWeb(watched);
       source.pipe(res, { end: false });
       await finished(source);
       res.end();
+      const finish = meter.finish,
+        normal = ["stop", "tool_calls", "function_call"].includes(finish);
+      console.log(
+        `${stamp()} ${normal ? "←" : "⚠"} ${meter.model}：${finish ? `收尾 ${finish}` : "流到头了却没有结束原因"} · ${Math.round((Date.now() - meter.opened) / 1000)} 秒、${meter.bytes} 字节`
+      );
     } catch (error) {
       // 底层的原因码（UND_ERR_SOCKET 对面掐线、UND_ERR_BODY_TIMEOUT 静默五分钟……）比一句「terminated」有用，一并带上
       const code = error?.cause?.code || error?.code || "",

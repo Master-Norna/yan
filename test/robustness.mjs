@@ -156,4 +156,16 @@ check(
   JSON.stringify(gone)
 );
 await shot("robust-deliver-gone.png");
+
+// ---- 带着结束标志的半途被掐（vLLM 引擎里中止报 abort）：不能因为有 finish_reason 就当写完了，照断线自动接着写
+await evalJs(
+  `document.querySelector("#chatInput").value = "ABORTCUT 试试"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
+);
+await waitFor(`document.querySelectorAll(".message.assistant").length === 8 && ${lastAssistant}.dataset.status !== "streaming"`, 20000);
+const aborted = await evalJs(`(m => ({ status: m.status, text: m.content, breaks: (m.breaks || []).map(b => b.why) }))(__yanState().conversations[0].messages.at(-1))`);
+check(
+  "a finish_reason of abort mid-sentence is treated as a break and resumed, not taken as the end",
+  aborted.status === "complete" && aborted.text === "写到一半 back接着写完。" && aborted.breaks.length === 1 && /abort/.test(aborted.breaks[0]),
+  JSON.stringify(aborted)
+);
 close();

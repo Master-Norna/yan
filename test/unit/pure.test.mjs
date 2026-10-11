@@ -24,6 +24,7 @@ const f = load([
   "reasoningChoices",
   "reasoningFields",
   "parseReasoningLevels",
+  "finishFault",
   "reasoningProbed",
   "learnReasoningLevels",
   "contextOverflow",
@@ -153,6 +154,11 @@ test("nearestReasoning：认的原样用，不认取最近的一档，同样近�
   assert.equal(f.reasoningChoices(none).join(), "");
   assert.equal(f.nearestReasoning(none, "high"), "");
   assert.deepEqual(f.reasoningFields(none, "high"), {});
+});
+test("finishFault：stop、调工具与各家别名是正常收尾；length 与 abort、error 之类是半途被掐", () => {
+  for (const reason of ["", null, undefined, "stop", "tool_calls", "end_turn"]) assert.equal(f.finishFault(reason), "");
+  assert.match(f.finishFault("length"), /输出长度上限/);
+  for (const reason of ["abort", "error", "content_filter"]) assert.match(f.finishFault(reason), new RegExp(reason));
 });
 test("parseReasoningLevels：报错里列的几档由低到高排；不提档位的报错、只提一档的都给空", () => {
   assert.deepEqual(f.parseReasoningLevels("Invalid value: 'probe'. Supported values are: 'high', 'low', and 'medium'.", "probe"), [

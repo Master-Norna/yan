@@ -282,6 +282,14 @@ function withCached(usage) {
   const cached = Number(usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0) || 0;
   return { ...usage, cached_tokens: cached };
 }
+// 结束原因只认几个正常的：说完了（stop 及各家的别名）、要调工具。别的——vLLM 引擎里中止的 abort、出错的 error、
+// 内容拦截——都是半途被掐，可它照样带着结束标志来，不查就把半截话当写完了。没给原因的（只有 [DONE]）照常收尾
+const NORMAL_FINISH = new Set(["stop", "tool_calls", "function_call", "end_turn", "stop_sequence", "eos", "eos_token"]);
+/** 这一轮的结束原因不对时给一句说明（按中断处理、可续写）；正常给空 */
+function finishFault(reason) {
+  if (!reason || NORMAL_FINISH.has(reason)) return "";
+  return reason === "length" ? "模型达到输出长度上限，回复尚未完成" : `接口异常收尾（finish_reason: ${reason}），回复尚未完成`;
+}
 /** @param {Message} assistant 主消息、帮手，或拟题 / 压缩用的临时消息 */
 async function readSse(response, assistant, { onFrame = null } = {}) {
   const reader = response.body.getReader(),
@@ -393,7 +401,8 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     await pump();
     flushThink();
     if (!ended) throw Error("接口未发送结束标志，连接已中断");
-    if (finishReason === "length") throw Error("模型达到输出长度上限，回复尚未完成");
+    const fault = finishFault(finishReason);
+    if (fault) throw Error(fault);
   } catch (error) {
     flushThink();
     closed = true;

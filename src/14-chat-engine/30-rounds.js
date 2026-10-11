@@ -312,7 +312,8 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       arguments: call.function?.arguments || ""
     }));
   note();
-  if (data?.choices?.[0]?.finish_reason === "length") throw Object.assign(Error("模型达到输出长度上限，回复尚未完成"), { midStream: true });
+  const fault = finishFault(data?.choices?.[0]?.finish_reason);
+  if (fault) throw Object.assign(Error(fault), { midStream: true });
 }
 // 途中断过一回记一笔：只留最近十回，续写不清
 function noteBreak(target, why, auto = false) {

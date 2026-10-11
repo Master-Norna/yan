@@ -933,6 +933,12 @@ http
           delta({ content: "再写半句。" }),
           { error: { message: "rate limited (fake)", type: "rate_limit_error" } }
         ]);
+      // 写到半个词，结束标志却照常来，原因是 abort（vLLM 引擎里中止）：页面该按中断接着写
+      if (typeof lastUser === "string" && lastUser.includes("ABORTCUT"))
+        return sse(res, [
+          delta({ content: "写到一半 back" }),
+          { ...delta({}, { usage: { total_tokens: 5 } }), choices: [{ index: 0, delta: {}, finish_reason: "abort" }] }
+        ]);
       if (typeof lastUser === "string" && lastUser.includes("STREAMCUT")) {
         // 写了半截上游就掐线：桥接得补一条报错事件给页面，页面按中断处理，而不是把半截当写完
         res.writeHead(200, { "Content-Type": "text/event-stream" });
