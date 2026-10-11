@@ -99,9 +99,8 @@ async function runRounds(target, history, run) {
       // 补言停下的：这一轮写到落点为止，已写的话与补言一起进历史，没执行的工具调用一律作废，随即再开一轮
       const said = trimToBoundary(target.content.slice(roundStart)).replace(/\n+$/, "");
       target.content = target.content.slice(0, roundStart) + said;
-      // 退回去的是这一轮的话：落在这一轮里的补言（与递给帮手的话）跟着前移；回报的那一步在别处，不动
-      for (const { user, step, note } of inbox.queue)
-        for (const item of [user && step, note]) if (typeof item?.at === "number") item.at = Math.min(item.at, target.content.length);
+      // 退回去的是这一轮的话：落在这一轮里的递给帮手的话跟着前移（补言递上时自会挪到落点）；回报的那一步在别处，不动
+      for (const { note } of inbox.queue) if (typeof note?.at === "number") note.at = Math.min(note.at, target.content.length);
       chargePartial(said);
       target.toolCalls = null;
       if (said.trim()) history.push({ role: "assistant", content: said });

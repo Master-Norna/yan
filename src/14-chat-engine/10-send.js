@@ -261,6 +261,10 @@ async function deliverSupplements(job, history, budget, assistant, { steer = fal
       continue;
     }
     history.push(await supplementForApi(user, budget, { latest: true, steer }));
+    // 那一步挪到递上的地方：到达之后、递上之前写下的话（想着想着起笔的一句、拟调用前的一段）是模型读到补言之前写的，
+    // 往后重装历史按 at 拆开这一答（见 replyParts），留在到达处，模型下一问看到的先后就与当时不同
+    step.at = assistant.content.length;
+    step.rat = String(assistant.reasoning || "").length;
     step.status = "done";
     step.result = steer ? "已递 · 引路" : "已递";
   }
