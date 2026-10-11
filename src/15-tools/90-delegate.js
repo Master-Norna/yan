@@ -41,14 +41,22 @@ defineTool({
   name: "relay_note",
   label: "回报",
   offer: false,
-  html: relayStepHtml
+  html: relayStepHtml,
+  replay: replayReport
 });
+// 回报、传话递上时的原话记在那一步上（见 deliverSupplements），往后重装这一答照原样插回原处。
+// 几份回报并作一问的，原文都在头一份上，其余几份没有可重装的；早先存下、没记原话的也一样
+/** @param {Step} step */
+function replayReport(step) {
+  return step.report ? { role: "user", content: step.report } : null;
+}
 // 递给帮手的话：落在帮手自己的时间线里它到达的那一刻，待递转圈、递到打勾（与补言同一种画法）
 defineTool({
   name: "helper_note",
   label: "传话",
   offer: false,
-  html: step => noteStepHtml(step, { seal: "传", label: "传话" })
+  html: step => noteStepHtml(step, { seal: "传", label: "传话" }),
+  replay: replayReport
 });
 /** 这段对话里帮手的每一趟（差遣与续派），按先后 @param {Conversation|null} conversation */
 function helperRuns(conversation) {
@@ -363,7 +371,7 @@ async function runDelegate(step, args, ctx, profile, past, progress) {
           break;
         }
       }
-      await deliverSupplements(box, history, undefined, assistant);
+      await deliverSupplements(box, history, undefined, assistant, { target: sub });
       sub.content = paragraphBreak(sub.content);
     }
     sub.status = "complete";

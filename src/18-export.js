@@ -13,7 +13,7 @@ function exportMarkdownLabel(value) {
 function exportToolTrail(message) {
   const steps = message.steps || [];
   if (!steps.length) return "";
-  // 模型上下文的 stepsDigest 会截短、只取前 16 步；导出单独排成纯文本，不把命令当 Markdown 解析。
+  // 模型上下文的 stepsDigest 会截短、步数多了只留头尾；导出单独排成纯文本，不把命令当 Markdown 解析。
   const text = steps
     .map(
       (step, index) =>

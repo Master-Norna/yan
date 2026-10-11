@@ -28,18 +28,29 @@ function settledDigest(message) {
   if (message.trailDigest?.steps !== steps) message.trailDigest = { steps, text: stepsDigest(message, "上一答的行迹") };
   return message.trailDigest.text;
 }
-/** @param {Message|SubAgent} message 帮手的一趟也一样：续派时它上一趟的行迹冠在新的活前面 */
+/** @param {{ steps?: Step[] }} message 一答；帮手的一趟也一样：续派时它上一趟的行迹冠在新的活前面 */
 function stepsDigest(message, label = "行迹") {
   const steps = (message.steps || []).filter(step => TOOLS.get(step.name)?.digest);
   if (!steps.length) return "";
-  const items = steps.slice(0, 16).map(step => {
+  const line = step => {
     const digest = TOOLS.get(step.name).digest;
     return digest === true
       ? `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? "用户跳过" : step.result || step.status}`
       : digest(step);
-  });
-  return `［${label}］${items.join("；")}${steps.length > 16 ? `；…共 ${steps.length} 步` : ""}`;
+  };
+  // 步数多了留头留尾：开头几步是怎么起的，末尾是做到了哪——续写、下一问最要紧的是后者，只留开头的话长活做到哪全丢了
+  const items =
+    steps.length > DIGEST_HEAD + DIGEST_TAIL
+      ? [
+          ...steps.slice(0, DIGEST_HEAD).map(line),
+          `…中间 ${steps.length - DIGEST_HEAD - DIGEST_TAIL} 步从略…`,
+          ...steps.slice(-DIGEST_TAIL).map(line)
+        ]
+      : steps.map(line);
+  return `［${label}］${items.join("；")}`;
 }
+const DIGEST_HEAD = 4,
+  DIGEST_TAIL = 12;
 // 最新一问的文本附件能整份随消息送出的上限：按模型窗口的一成半算（没填窗口按 24k token）。超过的只给一行元数据，
 // 模型要看就用 read_document 按页、按关键词取——有 read_document 在，没必要把一整本硬塞进提示把窗口撑爆
 /** @param {Profile} profile */
@@ -56,28 +67,42 @@ function attachmentTokens(file, latest, budget) {
 function tooLongToInline(text, budget) {
   return estimateText(text) > budget;
 }
-// 一答途中递到的补言，按它到达的位置把这一答拆开：答的前半 → 补言 → 接着答。往后每一问装历史、压缩时转写都照这个次序，
-// 模型看到的与当时一样。若把补言折成一行冠在下一问头上，它读不出先后，会把上一答里的一句「不用了，我来」当成这一问的吩咐
-/** @typedef {{ role: "assistant", content: string } | { role: "user", note: Step }} ReplyPart */
-/** @param {Message} message @returns {ReplyPart[]} */
-function replyParts(message) {
+// 一答怎么交给模型：正文按途中递进来的话（补言、回报、传话）到达的位置拆开，那句话由它那一步登记的 replay 写成、插回原处——
+// 与作答当时递上的同一个写法（见 deliverSupplements），模型往后读到的先后与字句都与当时一样。下一问装历史、续写、压缩转写、
+// 上下文计数都经这里，不各写一份：当时递得进去的，往后就重装得出来，加一种递进来的话只需在登记表里给它一个 replay。
+// 若把补言折成一行冠在下一问头上，它读不出先后，会把上一答里的一句「不用了，我来」当成这一问的吩咐
+/** @typedef {{ role: "assistant", content: string } | { role: "user", step: Step, entry: Promise<Record<string, any>>|Record<string, any> }} AnswerPart */
+/** @param {{ content?: string, steps?: Step[] }} message 一答、帮手的一趟，或续写时那一答开工前的样子 @returns {AnswerPart[]} */
+function answerParts(message, budget = inlineTextBudget()) {
   const content = String(message.content || "");
-  /** @type {ReplyPart[]} */
+  /** @type {AnswerPart[]} */
   const parts = [];
   let from = 0;
-  for (const note of deliveredNotes(message)) {
-    const at = Math.min(Math.max(from, Number(note.at) || 0), content.length);
+  for (const step of message.steps || []) {
+    const replay = step.status === "done" && TOOLS.get(step.name)?.replay,
+      entry = replay && replay(step, { latest: false, budget });
+    if (!entry) continue;
+    const at = Math.min(Math.max(from, Number(step.at) || 0), content.length);
     if (content.slice(from, at).trim()) parts.push({ role: "assistant", content: content.slice(from, at).trimEnd() });
-    parts.push({ role: "user", note });
+    parts.push({ role: "user", step, entry });
     from = at;
   }
-  if (!parts.length) return [{ role: "assistant", content: message.content }];
+  if (!parts.length) return [{ role: "assistant", content }];
   if (content.slice(from).trim()) parts.push({ role: "assistant", content: content.slice(from).trimStart() });
   return parts;
 }
-/** @param {Message} message */
-function deliveredNotes(message) {
-  return (message.steps || []).filter(step => step.name === "user_note" && step.status === "done");
+/** 一答装成送给接口的几条消息 @param {{ content?: string, steps?: Step[] }} message */
+function answerForApi(message, budget = inlineTextBudget()) {
+  return Promise.all(answerParts(message, budget).map(part => (part.role === "assistant" ? part : part.entry)));
+}
+/** 一条消息里给模型读的字（压缩转写、计数用） */
+function entryText(entry) {
+  return typeof entry?.content === "string"
+    ? entry.content
+    : (entry?.content || [])
+        .filter(part => part?.type === "text")
+        .map(part => part.text)
+        .join("\n\n");
 }
 // 补言进历史：与作答途中递给模型时同一个样子（前缀注明是途中补的）。latest：正递着的这一句，附件整份带上；往后重装历史时只带摘要
 /** @param {Message} user */
@@ -88,26 +113,25 @@ async function supplementForApi(user, budget, { latest = false, steer = false } 
   else entry.content[0].text = `${prefix}${entry.content[0].text}`;
   return entry;
 }
+// 用户发的图只留最新的一批：这一问带着的整份送出，此前最近一回带图的那一问也还带着（「刚才那张图的左下角」才答得上），
+// 再早的换成一行字。与工具交回的图同一条规矩（见 attachToolImages）；新的一批来了才换，前文不会每问都变，缓存只在那时断一回
+/** @param {Message[]} source @param {string|null|undefined} current 这一问（它的附件本就整份送） */
+function keptImageQuestion(source, current) {
+  return source.findLast(m => m.role === "user" && m.id !== current && m.attachments?.some(file => file.kind === "image"))?.id || "";
+}
 // 上次压缩以来的往来装成送给接口的历史。每一答的行迹摘要不接在助手自己的话后面——那样模型会把「［行迹］…」学成自己回复的
 // 格式，答末照样写一行出来；而是冠在下一问的开头，当作系统附上的记录。末尾的一答后面没有下一问时（旁注锚在一答上）才退回接在它话后
 async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
-  const history = [];
+  const history = [],
+    pictured = keptImageQuestion(source, lastUserId);
   let trail = "";
   for (const m of source) {
     if (m.role === "assistant") {
-      for (const part of replyParts(m))
-        history.push(
-          part.role === "assistant"
-            ? part
-            : await supplementForApi(
-                { id: part.note.id, role: "user", content: part.note.note || "", timestamp: "", attachments: part.note.attachments },
-                budget
-              )
-        );
+      history.push(...(await answerForApi(m, budget)));
       trail = settledDigest(m);
       continue;
     }
-    const entry = await messageForApi(m, m.id === lastUserId, budget);
+    const entry = await messageForApi(m, m.id === lastUserId, budget, m.id === lastUserId || m.id === pictured);
     if (trail && m.role === "user") {
       if (typeof entry.content === "string") entry.content = `${trail}\n\n${entry.content}`;
       else entry.content[0].text = `${trail}\n\n${entry.content[0].text}`;
@@ -119,8 +143,8 @@ async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
   if (trail && typeof last?.content === "string") last.content = `${last.content}\n\n${trail}`.trim();
   return history;
 }
-/** @param {Message} message */
-async function messageForApi(message, latest, budget = inlineTextBudget()) {
+/** @param {Message} message @param {boolean} [images] 图片整份送（这一问、或最近带图的那一问，见 keptImageQuestion） */
+async function messageForApi(message, latest, budget = inlineTextBudget(), images = latest) {
   if (message.role === "assistant") return { role: "assistant", content: message.content };
   if (message.role !== "user" || !message.attachments?.length)
     return { role: message.role, content: message.role === "user" ? quotedText(message) : message.content };
@@ -130,9 +154,10 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
   const content = [{ type: "text", text: quotedText(message) || "请查看附件。" }];
   let notes = "";
   for (const metadata of message.attachments) {
-    // 早先消息里的图片只留一行占位，用不着原件：不必每问都把它从存储目录整份取回来
-    if (!latest && metadata.kind === "image") {
-      notes += `\n\n[图片：${metadata.name}，${formatFileSize(metadata.size)}，已在此前发送]`;
+    // 早先消息里的图片只留一行占位，用不着原件：不必每问都把它从存储目录整份取回来。
+    // 占位照实说图已不在：写「已在此前发送」，模型会当自己还看得见，问起图里的细节便凭空作答
+    if (!images && metadata.kind === "image") {
+      notes += `\n\n[图片：${metadata.name}，${formatFileSize(metadata.size)}，先前发过，原图已不在上下文中]`;
       continue;
     }
     const file = metadata.data !== undefined ? metadata : await getAttachment(metadata.id);
@@ -156,8 +181,8 @@ async function messageForApi(message, latest, budget = inlineTextBudget()) {
         : attachmentExcerpt(file.extractedText, file.name, "本机提取");
       continue;
     }
-    if (!latest) {
-      notes += `\n\n[${file.kind === "image" ? "图片" : "文件"}：${file.name}，${formatFileSize(file.size)}，已在此前发送]`;
+    if (file.kind === "image" ? !images : !latest) {
+      notes += `\n\n[${file.kind === "image" ? "图片" : "文件"}：${file.name}，${formatFileSize(file.size)}，先前发过，原件已不在上下文中]`;
       continue;
     }
     if (file.kind === "image") content.push({ type: "image_url", image_url: { url: file.data, detail: "auto" } });

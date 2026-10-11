@@ -104,7 +104,7 @@ async function runRounds(target, history, run) {
       chargePartial(said);
       target.toolCalls = null;
       if (said.trim()) history.push({ role: "assistant", content: said });
-      await deliverSupplements(inbox, history, run.budget, host, { steer: true });
+      await deliverSupplements(inbox, history, run.budget, host, { steer: true, target });
       target.content = paragraphBreak(target.content);
       continue;
     } finally {
@@ -130,7 +130,7 @@ async function runRounds(target, history, run) {
       if (!inbox?.queue.some(item => item.report !== undefined)) break;
       const said = target.content.slice(roundStart).trim();
       if (said) history.push({ role: "assistant", content: said });
-      await deliverSupplements(inbox, history, run.budget, host);
+      await deliverSupplements(inbox, history, run.budget, host, { target });
       target.content = paragraphBreak(target.content);
       continue;
     }
@@ -173,7 +173,7 @@ async function runRounds(target, history, run) {
       { outcomes, images } = await runSteps(steps, conversation, host, signal, toolCache, offered);
     for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
     if (images.length) attachToolImages(history, images, profile);
-    if (inbox) await deliverSupplements(inbox, history, run.budget, host);
+    if (inbox) await deliverSupplements(inbox, history, run.budget, host, { target });
     target.content = paragraphBreak(target.content);
   }
 }
@@ -229,13 +229,27 @@ function attachToolImages(history, images, profile) {
 /** 请求被拒、报错说起图时去掉附上的图：有图可去才算数。别的 4xx（思考签名、参数）不能算到「看不了图」头上，不然这一页再不给它附图 @param {Profile} profile */
 function dropToolImages(history, profile, message) {
   if (!/image|vision|multi-?modal|图/i.test(message)) return false;
-  const carried = history.filter(message => toolImageMessages.has(message));
-  for (const message of carried) {
-    toolImageMessages.delete(message);
-    message.content = prompt("assistant.toolImagesBlind");
+  const dropped = stripImages(history);
+  if (dropped) blindProfiles.add(profile.id);
+  return dropped > 0;
+}
+// 历史里的图一概换成一句话：工具交回的整条换掉，用户发的（这一问、最近带图的那一问，见 keptImageQuestion）逐张换。
+// 已认定看不了图的模型，每次发出前先过一遍（见 readReply），不必每问先被拒一回
+function stripImages(history) {
+  let dropped = 0;
+  for (const message of history) {
+    if (toolImageMessages.has(message)) {
+      toolImageMessages.delete(message);
+      message.content = prompt("assistant.toolImagesBlind");
+      dropped += 1;
+    } else if (Array.isArray(message.content) && message.content.some(part => part?.type === "image_url")) {
+      message.content = message.content.map(part =>
+        part?.type === "image_url" ? { type: "text", text: prompt("assistant.imageBlind") } : part
+      );
+      dropped += 1;
+    }
   }
-  if (carried.length) blindProfiles.add(profile.id);
-  return carried.length > 0;
+  return dropped;
 }
 // 收尾：裁掉正文首尾的空行；开头裁了几行，步骤记的偏移一起前移，不然时间线上每段话都错位、被切在字中间
 /** @param {Message|SubAgent} target */
@@ -255,6 +269,7 @@ async function readReply(profile, history, signal, overrides, target, retried = 
   target.thinkingBlocks = null;
   // 长活：这一答的工具往来快撑满窗口了，先压掉较早的几轮再发（见 14-chat-engine/60-context.js 的 keepInWindow）
   if (!retried) await keepInWindow(profile, history, signal, overrides, { target });
+  if (blindProfiles.has(profile.id)) stripImages(history);
   const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
     const message = await describeResponseError(response);
