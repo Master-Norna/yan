@@ -1,4 +1,4 @@
-// 新添的几件工具：run_js 在隔离沙箱里算（超时能杀掉）、http_request 与 download_file 走桥接的地址门禁、update_plan 在行迹里画成清单
+// 新添的几件工具：run_js 在隔离沙箱里算（超时能杀掉）、http_request 与 download_file 走桥接的地址门禁、update_graph 在行迹里画成纲卡（暂借计划卡的样子）
 import { existsSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
@@ -16,7 +16,7 @@ await evalJs(
 );
 await waitFor(`${lastAssistant}?.dataset.status === "complete"`, 30000);
 const steps = await evalJs(
-  `(c => (c.messages.at(-1).steps || []).map(s => ({ name: s.name, status: s.status, result: s.result, title: s.title, output: s.output, plan: s.plan })))(__yanState().conversations[0])`
+  `(c => (c.messages.at(-1).steps || []).map(s => ({ name: s.name, status: s.status, result: s.result, title: s.title, output: s.output, view: s.view })))(__yanState().conversations[0])`
 );
 const byName = name => steps.filter(s => s.name === name);
 check(
@@ -56,32 +56,38 @@ check(
   JSON.stringify(byName("download_file")[1])
 );
 check(
-  "update_plan keeps the list on the step and titles it with the item in progress",
-  byName("update_plan")[0]?.status === "done" && byName("update_plan")[0].plan?.length === 4 && byName("update_plan")[0].title === "调接口",
-  JSON.stringify(byName("update_plan")[0])
+  "update_graph keeps the graph view on the step (dropped left out, premises first) and titles it with the item in progress",
+  byName("update_graph")[0]?.status === "done" &&
+    byName("update_graph")[0]
+      .view?.map(item => item.id)
+      .join() === "square,api,wrap" &&
+    byName("update_graph")[0].title === "调接口",
+  JSON.stringify(byName("update_graph")[0])
+);
+check(
+  "the graph is left open, so the closing gate passes the gap once and lets go when nothing new holds",
+  byName("graph_gate").length === 1,
+  JSON.stringify(byName("graph_gate"))
 );
 const ui = await evalJs(
   `(m => ({ plan: [...m.querySelectorAll(".plan-item")].map(li => li.dataset.plan).join(","), doing: m.querySelector('.plan-item[data-plan="doing"] .plan-text')?.textContent, code: !!m.querySelector(".tool-code"), labels: [...m.querySelectorAll(".tool-label")].map(n => n.textContent.trim()).join(","), frames: document.querySelectorAll(".compute-frame").length }))(${lastAssistant})`
 );
 check(
-  "trail: plan card lists the four states, run_js shows its code, labels are 计算 / 调接口 / 下载 / 计划; compute iframes are cleaned up",
-  ui.plan === "done,doing,pending,skipped" &&
-    ui.doing === "调接口" &&
-    ui.code &&
-    /计算.*调接口.*下载.*计划/.test(ui.labels) &&
-    ui.frames === 0,
+  "trail: graph card lists its items, run_js shows its code, labels are 计算 / 调接口 / 下载 / 纲; compute iframes are cleaned up",
+  ui.plan === "pending,doing,pending" && ui.doing === "调接口" && ui.code && /计算.*调接口.*下载.*纲/.test(ui.labels) && ui.frames === 0,
   JSON.stringify(ui)
 );
-const reply = await evalJs(`${lastAssistant}.textContent`);
+// 读存下的正文：纲没立住，收尾的闸递了一回缺口，回显那段成了行迹里的过程话，页面上折在行迹里
+const reply = await evalJs(`__yanState().conversations[0].messages.at(-1).content`);
 check(
-  "the model gets the value, the timeout, both refusals and the plan count back",
+  "the model gets the value, the timeout, both refusals and the graph back",
   /NEWTOOLS\|/.test(reply) &&
     /返回值：\[/.test(reply) &&
     /超时/.test(reply) &&
     /HTTP 200/.test(reply) &&
     /内网/.test(reply) &&
     /已存为 下载\/models\.json/.test(reply) &&
-    /计划已更新：1\/4/.test(reply),
+    /［纲］立住 0 \/ 3 - \[未做\] square/.test(reply),
   reply
 );
 close();

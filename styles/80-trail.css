@@ -277,6 +277,16 @@
 .plan-item[data-plan="skipped"] .plan-text {
   text-decoration: line-through;
 }
+/* 纲卡（暂借计划卡的样子）：没立住的几项行末注一个小字——未过用朱（--accent），复验、待验、待前提用淡墨 */
+.plan-tag {
+  flex: none;
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.plan-item[data-state="fails"] .plan-tag {
+  color: var(--accent);
+}
 .plan-row {
   display: inline-flex;
   gap: 2px;

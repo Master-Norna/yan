@@ -22,8 +22,10 @@ function newTally() {
  * @param {Array<Record<string, any>>} history 送给接口的消息，就地追加
  * @param {{ profile: Profile, conversation: Conversation, host: Message, signal: AbortSignal, overrides: Record<string, any>,
  *   tally: ReturnType<typeof newTally>, roundLimit: number, scope?: string, inbox?: any, budget?: number,
- *   onFrame?: (() => void)|null, onStatus?: (label?: string) => void }} run
- *   host：步骤画在哪条消息上（帮手的步骤画在主答的差遣卡里）；scope：步骤记上属于哪名帮手；onStatus：网络重试这类状态
+ *   onFrame?: (() => void)|null, onStatus?: (label?: string) => void,
+ *   gate?: () => Promise<{ entry: Record<string, any>, final: boolean }|null> }} run
+ *   host：步骤画在哪条消息上（帮手的步骤画在主答的差遣卡里）；scope：步骤记上属于哪名帮手；onStatus：网络重试这类状态；
+ *   gate：模型说完要收尾时先过的闸（主答过纲的闸，见 19-graph/20-gate.js），递回一句话即接着做
  */
 async function runRounds(target, history, run) {
   const { profile, conversation, host, signal, overrides, tally, inbox = null } = run,
@@ -127,8 +129,19 @@ async function runRounds(target, history, run) {
     if (!calls.length || !overrides.tools || overrides.toolChoice === "none") {
       // 说完了就收尾，帮手还在后台也不等：回报到了另起一答（见 mailReport），等着的时候没有谁醒着。
       // 只剩用户的补言也照旧收尾，补言由 settleSupplements 作下一问送出。这一轮说着时已到的回报（或递给帮手的话）才当场递上接着做
-      if (!inbox?.queue.some(item => item.report !== undefined)) break;
       const said = target.content.slice(roundStart).trim();
+      if (!inbox?.queue.some(item => item.report !== undefined)) {
+        // 收尾前过闸：闸递回一句话（还没立住的缺口）就接着做。轮次到顶、闸已放过最后一回（tool_choice: none）就不再拦
+        const gate = run.gate && overrides.toolChoice !== "none" ? await run.gate() : null;
+        if (!gate) break;
+        if (said) history.push({ role: "assistant", content: said });
+        history.push(gate.entry);
+        // 回血：接着做之前上下文已过半的，下一次请求先把较早的往来撮成笔记（见 keepInWindow）；最后一回只请它交代、收尾
+        if (gate.final) overrides.toolChoice = "none";
+        else overrides.foldAt = 0.5;
+        target.content = paragraphBreak(target.content);
+        continue;
+      }
       if (said) history.push({ role: "assistant", content: said });
       await deliverSupplements(inbox, history, run.budget, host, { target });
       target.content = paragraphBreak(target.content);

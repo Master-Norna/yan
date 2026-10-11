@@ -88,7 +88,7 @@ function tellHelper(step, args, ctx) {
     stop = args.stop === true,
     boxes = crews.get(ctx.conversation.id) || [],
     past = helperRuns(ctx.conversation)
-      .filter(run => run.title === name && run !== step)
+      .filter(run => run.title === name && run !== step && run.name !== "graph_check")
       .at(-1),
     // 名字对不上、又只有一名在做：多半说的就是它。可名字对得上一名收了工的，那就是要续派那一名
     box = boxes.find(item => item.title === name) || (!past && boxes.length === 1 ? boxes[0] : null),
@@ -483,10 +483,10 @@ function waitingOutcome(step, sub, tally, overrides) {
 // 这里只记「此刻遣了谁、做到哪一步」——那确实是这一刻发生的事；回报与帮手自己的那条小时间线都在面板里，
 // 签上不铺回报：主模型接着会把它消化进正文，几名帮手的回报叠在行迹里，正文就被顶到几屏之下了。
 // 续派是同一名帮手的又一趟，签上标「续派」与「已更新」
-/** @param {Step} step @param {string} [kind] 签上的标签：差遣 / 续派 */
+/** @param {Step} step @param {string} [kind] 签上的标签：差遣 / 续派 / 验（纲的验的人，见 graph_check） */
 function delegateStepHtml(step, kind = "差遣") {
   const { sub, status, meta } = delegateSubState(step);
-  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-kind="${kind}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>${kind}</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span>${kind === "差遣" ? "" : `<span class="helper-fresh">已更新</span>`}<span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div></div>`;
+  return `<div class="tool-step tool-step-delegate" data-step-id="${escapeHtml(step.id)}" data-kind="${kind}" data-status="${escapeHtml(status)}"><div class="tool-step-head" role="button" tabindex="0" title="展开帮手的行迹"><span class="tool-label"><span class="seal sub-seal" aria-hidden="true">遣</span>${kind}</span><span class="tool-title" title="${escapeHtml(sub?.task || step.title || "")}">${escapeHtml(step.title || "")}</span>${kind === "续派" ? `<span class="helper-fresh">已更新</span>` : ""}<span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || "未完成") : ""}">${escapeHtml(meta)}</span>${stepStateHtml(status)}</div></div>`;
 }
 // 行迹里那枚签的就地更新：只动头上的状态与标题。帮手自己的时间线与回报不在这儿，在面板里。返回真即已就地画好
 /** @param {Step} step */

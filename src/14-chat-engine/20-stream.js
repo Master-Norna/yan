@@ -65,13 +65,16 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       const head = summaryMessages(contextIndex >= 0 ? before[contextIndex] : null);
       head.push(...(await historyForApi(source, lastUserId, budget)));
       // 这一问的首段往后各问里一字不差，标作缓存点：下一问时连它在内的整段历史都从缓存读（桥接只给 Claude 留着这个标，别家去掉）。
-      // 账本只附在这一问（之前的问不带，免得一份账本背上几十遍），所以接在后面另起一段——冠在开头，这一问每问都变，缓存只接得到上一答之前
+      // 账本只附在这一问（之前的问不带，免得一份账本背上几十遍），所以接在后面另起一段——冠在开头，这一问每问都变，缓存只接得到上一答之前。
+      // 纲也一样：近几答动过、还没立住的那几项，每问现折（续写时连这一答已改的也折进去），压缩了前文也还在
       const ask = head.findLast(entry => entry.role === "user"),
-        ledger = ledgerNote(conversation, "main", profile);
+        ledger = ledgerNote(conversation, "main", profile),
+        graph = graphNote(conversation.messages.slice(0, at < 0 ? undefined : at + 1));
       if (ask) {
         if (typeof ask.content === "string") ask.content = [{ type: "text", text: ask.content }];
         ask.content[0].cache_control = { type: "ephemeral" };
         if (ledger) ask.content.push({ type: "text", text: ledger.trimEnd() });
+        if (graph) ask.content.push({ type: "text", text: graph.trimEnd() });
       }
       // 续写：已写的话连同途中递进来的补言、回报照原处排上（与下一问装上一答同一个写法，见 answerParts），
       // 做过的步骤也得让它知道（另发一句「继续」时上一答的行迹本就随着去），不然从头再做一遍。只做了几步、一个字没写就断的也一样
@@ -123,7 +126,15 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       roundLimit: toolRoundLimit(),
       inbox: job,
       budget,
-      onStatus: label => setJobLabel(conversation, job, label)
+      onStatus: label => setJobLabel(conversation, job, label),
+      gate: () =>
+        graphGate({
+          conversation,
+          assistant,
+          signal: job.controller.signal,
+          profile,
+          onStatus: label => setJobLabel(conversation, job, label)
+        })
     });
     trimReply(assistant);
     if (!assistant.content)

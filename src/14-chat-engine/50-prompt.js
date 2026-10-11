@@ -21,7 +21,7 @@ const PROMPT_VARS = {
 /**
  * @param {Conversation} conversation
  * @param {any[]|null} tools 这回交给模型的工具定义
- * @param {{ role?: "main"|"side"|"sub", anchor?: boolean }} [options] anchor：旁注注的是划选的一段（否则是整条回复）
+ * @param {{ role?: "main"|"side"|"sub"|"audit", anchor?: boolean }} [options] anchor：旁注注的是划选的一段（否则是整条回复）
  */
 function systemPrompt(conversation, tools, { role = "main", anchor = false } = {}) {
   const preset = presetOf(conversation),

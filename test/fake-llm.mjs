@@ -213,6 +213,76 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      // 纲（GRAPHRUN）：验的人的请求认系统提示。验 parse 先读 src/p.js，里头有 OK 才判成立；验 ship 直接判成立。
+      // 收尾报回它拿到的工具里有没有 verdict、有没有写文件的
+      const systemText = String(msgs.find(m => m.role === "system")?.content || "");
+      if (systemText.includes("你是验收的人")) {
+        const brief = String(msgs.find(m => m.role === "user")?.content || ""),
+          n = toolResults.length,
+          names = (payload.tools || []).map(t => t.function?.name),
+          call = (name, args) =>
+            delta({ tool_calls: [{ index: 0, id: `call_v${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] });
+        const done = () =>
+          sse(res, [
+            delta({
+              content: `AUDIT|verdict:${names.includes("verdict")}|write:${names.includes("write_file")}|graph:${names.includes("update_graph")}`
+            }),
+            delta({}, { usage: { total_tokens: 3 } })
+          ]);
+        if (brief.includes("［要验的一项］parse")) {
+          if (n === 0) return sse(res, [call("read_file", { path: "src/p.js" }), delta({}, { usage: { total_tokens: 3 } })]);
+          if (n === 1) {
+            const ok = String(toolResults[0].content).includes("OK");
+            return sse(res, [
+              call("verdict", { holds: ok, gap: ok ? "" : "src/p.js 里没有 OK", files: ["src/p.js"] }),
+              delta({}, { usage: { total_tokens: 3 } })
+            ]);
+          }
+          return done();
+        }
+        if (n === 0) return sse(res, [call("verdict", { holds: true }), delta({}, { usage: { total_tokens: 3 } })]);
+        return done();
+      }
+      // 主答（GRAPHRUN）：立纲 → 写坏 → 自称成立被判不成立 → 改好 → 成立 → 又改一遍（成立的转待复验）→ 收尾时闸先复验、
+      // 再请它把根做完 → 根自称成立 → 收尾放行。按已收到的工具结果数走到哪一步
+      if (msgs.some(m => m.role === "user" && typeof m.content === "string" && m.content.includes("GRAPHRUN"))) {
+        const n = toolResults.length,
+          gated = msgs.at(-1)?.role === "user" && String(msgs.at(-1).content).startsWith("［收尾前查纲］"),
+          tool = (index, name, args) => ({
+            index,
+            id: `call_g${n}_${index}`,
+            type: "function",
+            function: { name, arguments: JSON.stringify(args) }
+          }),
+          calls = list => sse(res, [delta({ tool_calls: list.map((c, i) => tool(i, ...c)) }), delta({}, { usage: { total_tokens: 5 } })]),
+          say = text => sse(res, [delta({ content: text }), delta({}, { usage: { total_tokens: 5 } })]);
+        if (n === 0)
+          return calls([
+            [
+              "update_graph",
+              {
+                nodes: [
+                  { id: "parse", claim: "p.js 写着 OK", check: "读 src/p.js，里头有 OK", status: "doing" },
+                  { id: "ship", claim: "可以发版", check: "parse 立住即可", needs: ["parse"] }
+                ]
+              }
+            ],
+            ["write_file", { path: "src/p.js", content: "BAD\n" }]
+          ]);
+        if (n === 2) return calls([["update_graph", { nodes: [{ id: "parse", status: "claimed", evidence: "写好了" }] }]]);
+        if (n === 3) return calls([["write_file", { path: "src/p.js", content: "OK v1\n" }]]);
+        if (n === 4) return calls([["update_graph", { nodes: [{ id: "parse", status: "claimed", evidence: "改成 OK 了" }] }]]);
+        if (n === 5) return calls([["write_file", { path: "src/p.js", content: "OK v2\n" }]]);
+        if (n === 6 && !gated)
+          return say(
+            `GRAPHSTEP1|first:${/不成立/.test(String(toolResults[2].content))}|second:${/parse：验过，成立/.test(String(toolResults[4].content))}`
+          );
+        if (n === 6) return calls([["update_graph", { nodes: [{ id: "ship", status: "claimed" }] }]]);
+        return say(`GRAPHDONE|gate:${msgs.some(m => m.role === "user" && String(m.content).startsWith("［收尾前查纲］"))}`);
+      }
+      // 别的用例动了纲又没做完（NEWTOOLS 列了一张）：收尾的闸递来缺口，答一句就收，闸见没有新立住的便放行
+      if (typeof lastUser === "string" && lastUser.startsWith("［收尾前查纲］"))
+        return sse(res, [delta({ content: "GATE-ACK" }), delta({}, { usage: { total_tokens: 5 } })]);
       // 多任务压力用例：占着流连接，直到测试结束或请求取消。
       if (typeof lastUser === "string" && lastUser.includes("HOLDSTREAM")) {
         res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -842,7 +912,7 @@ http
         ]);
       }
       if (typeof lastUser === "string" && lastUser.includes("NEWTOOLS")) {
-        // 新工具一轮全用上：算一段 JS、调本机服务（放行）与内网地址（该拒）、下载本机文件与内网地址、列一份计划；第二轮把各结果回显
+        // 新工具一轮全用上：算一段 JS、调本机服务（放行）与内网地址（该拒）、下载本机文件与内网地址、立一张纲；第二轮把各结果回显
         const n = toolResults.length;
         const tool = (index, name, args) => ({
           index,
@@ -863,12 +933,12 @@ http
                 tool(3, "http_request", { url: "http://192.168.0.1/x" }),
                 tool(4, "download_file", { url: "http://127.0.0.1:8798/v1/models", path: "下载/models.json" }),
                 tool(5, "download_file", { url: "http://10.0.0.1/a.txt" }),
-                tool(6, "update_plan", {
-                  items: [
-                    { text: "算平方", status: "done" },
-                    { text: "调接口", status: "doing" },
-                    { text: "收尾", status: "pending" },
-                    { text: "不做的", status: "skipped" }
+                tool(6, "update_graph", {
+                  nodes: [
+                    { id: "square", claim: "算平方", check: "看返回值" },
+                    { id: "api", claim: "调接口", check: "看状态码", status: "doing" },
+                    { id: "wrap", claim: "收尾", check: "看回复", needs: ["square", "api"] },
+                    { id: "skip", claim: "不做的", check: "无", status: "dropped" }
                   ]
                 })
               ]

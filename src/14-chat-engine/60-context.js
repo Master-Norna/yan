@@ -236,14 +236,17 @@ const regionChars = region =>
  * 需要时把 history 里这一答较早的往来压成笔记（就地改 history），压了返回 true
  * @param {Profile} profile
  * @param {Array<Record<string, any>>} history
- * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold、compactHead；seen 由 readReply 记下
+ * @param {Record<string, any>} overrides 读 head、systemPrompt、tools、reasoning、onFold、compactHead、foldAt；seen 由 readReply 记下
  * 末一个参数里 target 是撮要那一步记在谁的行迹上（主答、帮手）
  */
 async function keepInWindow(profile, history, signal, overrides, { overflow = false, target = null } = {}) {
   const head = overrides.head,
     window = Number(profile.contextWindow) || 0;
   if (typeof head !== "number") return false;
-  if (!overflow && (!window || requestSize(history, overrides) < window * 0.75)) return false;
+  // 平常过了七成半才撮；收尾的闸请它接着做时（foldAt）过半即撮，只算这一回
+  const ratio = overrides.foldAt || 0.75;
+  delete overrides.foldAt;
+  if (!overflow && (!window || requestSize(history, overrides) < window * ratio)) return false;
   // 一轮从带工具调用的 assistant 起，连同它的工具结果不拆开。留最近两轮原样，但留下的不过窗口的四分之一；接口已回说放不下的一轮不留
   const starts = [];
   for (let i = head; i < history.length; i++) if (history[i].role === "assistant" && history[i].tool_calls?.length) starts.push(i);

@@ -18,6 +18,7 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {string[]} offered 登记在前、此处已经给出的工具
  * @property {Preset|null} preset 这段对话用的预设：只给它挑中的几组与几个 MCP 服务
  * @property {Profile|null} profile 这一答用的模型：参数里有随模型而定的（帮手的思考档位）
+ * @property {boolean} [audit] 给验的人（见 src/19-graph/10-check.js）：只读的几件与 verdict
  *
  * @typedef {{ ok: boolean, content: string, display: string, background?: boolean, images?: string[] }} ToolOutcome content 回给模型，display 写在标题行右侧；background：活在后台接着做，步骤由它自己收尾；images：交回的图（data: 地址），随工具结果给模型看
  * @typedef {{ url?: string, title?: string, read?: boolean, talk?: string, date?: string, memory?: string }} Source 答末「出处」的一条：网页、旧谈或记忆
@@ -35,6 +36,7 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {{ description: string, brief?: string, parameters: Record<string, any> }} [schema] 自带的说明与参数；不写则取 prompts/tools.js
  * @property {boolean} [parallel] 可与相邻的同类一起跑
  * @property {boolean} [sideEffect] 有副作用：参数 JSON 残缺就不执行
+ * @property {boolean} [audit] 有副作用也给验的人：它要跑检验（只看不改由它的系统提示交代）
  * @property {boolean} [writes] 会在目录里出新文件：言里据此收成品
  * @property {true | ((args: Record<string, any>) => Record<string, any> | null)} [cache] 同一答里同样的参数直接复用结果；函数给出规范化后的参数，给 null 即这次不复用
  * @property {(step: Step, args: Record<string, any>, ctx: ToolContext) => ToolOutcome | Promise<ToolOutcome>} [run]
@@ -69,10 +71,11 @@ function toolLabel(name) {
 function toolSpec(name) {
   return TOOLS.get(name)?.schema || PROMPTS.tools[name];
 }
-// 此处交给模型的工具。sub：帮手的一套（只给主模型的除外）；lookup：旁注的一套，只查不改。
+// 此处交给模型的工具。sub：帮手的一套（只给主模型的除外）；lookup：旁注的一套，只查不改；audit：验的人的一套，帮手那套里
+// 没有副作用的（跑检验的指令除外，登记里标了 audit），外加只给它的 verdict。
 // 言（对谈）里带 brief 的用短说明：对谈的每一问都背着这份定义，越轻越好
-/** @param {Conversation} conversation @param {{ sub?: boolean, lookup?: boolean, profile?: Profile|null }} [o] */
-function toolDefinitions(conversation, { sub = false, lookup = false, profile = null } = {}) {
+/** @param {Conversation} conversation @param {{ sub?: boolean, lookup?: boolean, audit?: boolean, profile?: Profile|null }} [o] */
+function toolDefinitions(conversation, { sub = false, lookup = false, audit = false, profile = null } = {}) {
   /** @type {OfferContext} */
   const ctx = {
     conversation,
@@ -81,7 +84,8 @@ function toolDefinitions(conversation, { sub = false, lookup = false, profile = 
     docs: availableDocuments(conversation),
     offered: [],
     preset: presetOf(conversation),
-    profile
+    profile,
+    audit
   };
   const tools = [];
   for (const tool of TOOLS.values()) {
@@ -89,6 +93,7 @@ function toolDefinitions(conversation, { sub = false, lookup = false, profile = 
       !tool.run ||
       (sub && tool.mainOnly) ||
       (lookup && !tool.lookup) ||
+      (audit && tool.sideEffect && !tool.audit) ||
       !presetAllows(ctx.preset, tool) ||
       (tool.offer && !tool.offer(ctx))
     )
