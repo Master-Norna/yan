@@ -88,7 +88,7 @@
  * @property {string} [report] 回报、传话递上时给模型的原话：往后重装这一答时插回原处（见 replay）
  * @property {boolean} [steer] 补言是把正在写的一轮停在句尾递上的（前缀与接在工具结果之后的不同）
  * @property {GraphOp[]} [graph] update_graph 理顺后记下的改动：这段对话的纲由各步的这一份折出（见 19-graph/00-core.js 的 graphOf）
- * @property {{ id: string, text: string, state: string }[]} [view] update_graph 做完那一刻的纲，卡上画它
+ * @property {GraphView[]} [view] update_graph 做完那一刻的纲，卡上画它
  * @property {GraphVerdict} [verdict] graph_check：验的人的判词
  * @property {{ standing: number, final: boolean }} [gate] graph_gate：递话时立住了几项、是不是最后一回
  * @property {{ questions: AskQuestion[] }} [form]
@@ -97,6 +97,7 @@
  * @property {string} [date]
  * @property {{ steps?: number, from?: number, to?: number, head?: boolean }} [fold] 撮要：并了几步、撮前撮后各几字；head 是压的这一问之前的前文（笔记在 note）
  */
+/** @typedef {{ id: string, text: string, state: string, needs?: string[], any?: boolean, when?: string, gap?: string, stale?: string, check?: string }} GraphView 纲卡上的一项：结论、此刻的状态、前提与情形、缺口或复验的缘由（先前一版只记了前三样） */
 /**
  * @typedef {Object} Message
  * @property {string} id

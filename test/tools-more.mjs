@@ -70,11 +70,11 @@ check(
   JSON.stringify(byName("graph_gate"))
 );
 const ui = await evalJs(
-  `(m => ({ plan: [...m.querySelectorAll(".plan-item")].map(li => li.dataset.plan).join(","), doing: m.querySelector('.plan-item[data-plan="doing"] .plan-text')?.textContent, code: !!m.querySelector(".tool-code"), labels: [...m.querySelectorAll(".tool-label")].map(n => n.textContent.trim()).join(","), frames: document.querySelectorAll(".compute-frame").length }))(${lastAssistant})`
+  `(m => ({ plan: [...m.querySelectorAll(".tool-step-graph:not(.plan-old) .graph-node")].map(g => g.dataset.state).join(","), doing: m.querySelector('.graph-node[data-state="doing"] .graph-label')?.textContent, code: !!m.querySelector(".tool-code"), labels: [...m.querySelectorAll(".tool-label")].map(n => n.textContent.trim()).join(","), frames: document.querySelectorAll(".compute-frame").length }))(${lastAssistant})`
 );
 check(
-  "trail: graph card lists its items, run_js shows its code, labels are 计算 / 调接口 / 下载 / 纲; compute iframes are cleaned up",
-  ui.plan === "pending,doing,pending" && ui.doing === "调接口" && ui.code && /计算.*调接口.*下载.*纲/.test(ui.labels) && ui.frames === 0,
+  "trail: graph card draws its items (label is the id), run_js shows its code, labels are 计算 / 调接口 / 下载 / 纲; compute iframes are cleaned up",
+  ui.plan === "open,doing,open" && ui.doing === "api" && ui.code && /计算.*调接口.*下载.*纲/.test(ui.labels) && ui.frames === 0,
   JSON.stringify(ui)
 );
 // 读存下的正文：纲没立住，收尾的闸递了一回缺口，回显那段成了行迹里的过程话，页面上折在行迹里

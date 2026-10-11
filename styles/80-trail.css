@@ -296,6 +296,169 @@
 :root[data-ink-motion="on"] .tool-stack[data-state="streaming"] .tool-step-plan:not(.plan-old) .plan-svg[data-plan="doing"] circle {
   animation: pulse 1.4s ease-in-out infinite;
 }
+/* 纲卡（设计稿 乙二 · 批注）：题头下一行写「差」，一张图（前提在左、根在右），图下逐条批注。
+   图里字在列里、线在列间、汇点在记号前（摆法见 src/19-graph/30-layout.js），用色照计划卡：墨三档，朱只给不成立与在做。
+   旧的几张只留题头，右侧一枚缩图代替那排记号 */
+.tool-step-graph > .tool-step-head .tool-meta {
+  max-width: none;
+  display: inline-flex;
+  align-items: center;
+}
+.tool-step-graph .graph-count {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.tool-step-graph .graph-micro {
+  display: none;
+  margin-left: 6px;
+  vertical-align: -3px;
+}
+.tool-step-graph.plan-old .graph-micro {
+  display: inline-flex;
+}
+.tool-step-graph.plan-old > :not(.tool-step-head) {
+  display: none;
+}
+.graph-gaps {
+  margin: 0 9px 2px 52px;
+  color: var(--ink-2);
+  font: 12px/1.7 var(--title);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.graph-gaps-k {
+  margin-right: 8px;
+  color: var(--accent);
+  font: 10.5px var(--body);
+  letter-spacing: 0.08em;
+}
+.graph-wrap {
+  margin: 4px 4px 2px 48px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+.graph-svg {
+  display: block;
+}
+.graph-svg text {
+  font-family: var(--body);
+}
+.graph-edge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 17%, transparent);
+  stroke-width: 1.15;
+}
+.graph-edge.solid {
+  stroke: color-mix(in srgb, var(--ink) 40%, transparent);
+}
+.graph-edge.broken {
+  stroke: var(--accent);
+  stroke-dasharray: 2.5 3;
+}
+.graph-edge.gone {
+  stroke: color-mix(in srgb, var(--ink) 12%, transparent);
+  stroke-dasharray: 1 3.5;
+}
+.graph-knot {
+  fill: var(--paper);
+  stroke: color-mix(in srgb, var(--ink) 30%, transparent);
+  stroke-width: 1;
+}
+.graph-knot-dot {
+  fill: color-mix(in srgb, var(--ink) 40%, transparent);
+}
+.graph-or {
+  fill: var(--ink-3);
+  font-size: 8px;
+}
+.graph-label {
+  fill: var(--ink-2);
+  font-size: 12px;
+}
+.graph-node[data-state="open"] .graph-label,
+.graph-node[data-state="claimed"] .graph-label {
+  fill: var(--ink-3);
+}
+.graph-node[data-state="doing"] .graph-label,
+.graph-node[data-state="fails"] .graph-label {
+  fill: var(--ink);
+  font-weight: 600;
+}
+.graph-node[data-state="dropped"] .graph-label {
+  fill: var(--ink-3);
+  text-decoration: line-through;
+}
+.graph-node.root .graph-label {
+  fill: var(--ink);
+  font: 600 13.5px var(--title);
+}
+.graph-chip {
+  fill: none;
+  stroke: var(--line);
+}
+.graph-chip-t {
+  fill: var(--ink-2);
+  font-size: 10.5px;
+}
+.graph-tag,
+.graph-more {
+  fill: var(--ink-3);
+  font-size: 10px;
+}
+.graph-tag.zhu,
+.graph-num-mark {
+  fill: var(--accent);
+}
+.graph-num-mark {
+  font-size: 10px;
+  font-weight: 600;
+}
+.graph-svg .plan-svg[data-plan="premised"] path,
+.graph-svg .plan-svg[data-plan="stale"] path {
+  fill: color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.graph-notes {
+  margin: 2px 9px 8px 52px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+  font-size: 12px;
+  line-height: 1.75;
+}
+.graph-notes li {
+  display: grid;
+  grid-template-columns: 1.4em minmax(0, 1fr);
+  gap: 4px;
+  color: var(--ink-2);
+}
+.graph-num {
+  padding-top: 1px;
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.graph-note-what {
+  color: var(--ink);
+  font-family: var(--title);
+}
+.graph-note-why.quiet {
+  color: var(--ink-3);
+}
+.graph-micro {
+  gap: 5px;
+}
+.graph-micro-col {
+  display: inline-flex;
+  gap: 1px;
+}
+.graph-micro .plan-svg {
+  width: 10px;
+  height: 9px;
+}
 /* 算一段 JS 用的隐形沙箱页 */
 .compute-frame {
   position: fixed;

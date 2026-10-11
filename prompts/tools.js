@@ -68,7 +68,7 @@
           items: {
             type: "object",
             properties: {
-              id: { type: "string", description: "短名" },
+              id: { type: "string", description: "短名，图上就写它：用对话的语言，八字以内；分情况的项写情形本身" },
               claim: { type: "string", description: "要成立的那句话" },
               check: { type: "string", description: "怎么算成立：验的人照它判，可写要跑的检验、要看的现象" },
               needs: { type: "array", items: { type: "string" }, description: "前提的 id" },

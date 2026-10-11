@@ -53,11 +53,11 @@ check(
   JSON.stringify(byName("update_graph").at(-1)?.view)
 );
 const ui = await evalJs(
-  `(m => ({ checks: m.querySelectorAll('.tool-step-delegate[data-kind="验"]').length, gate: !!m.querySelector('.tool-step-note[data-tool="graph_gate"]'), tags: [...m.querySelectorAll(".tool-step-plan:not(.plan-old) .plan-tag")].length }))(${lastAssistant})`
+  `(m => ({ checks: m.querySelectorAll('.tool-step-delegate[data-kind="验"]').length, gate: !!m.querySelector('.tool-step-note[data-tool="graph_gate"]'), tags: m.querySelectorAll(".tool-step-graph:not(.plan-old) .graph-tag").length, nodes: [...m.querySelectorAll(".tool-step-graph:not(.plan-old) .graph-node")].map(g => g.querySelector(".graph-label")?.textContent + (g.querySelector(".graph-more")?.textContent || "")).join(), old: m.querySelectorAll(".tool-step-graph.plan-old .graph-micro").length }))(${lastAssistant})`
 );
 check(
-  "trail: four 验 markers, one gate note, the latest graph card has nothing left to flag",
-  ui.checks === 4 && ui.gate && ui.tags === 0,
+  "trail: four 验 markers, one gate note; the latest graph card folds the settled premise into the root (+1) and flags nothing, older cards keep one folded line",
+  ui.checks === 4 && ui.gate && ui.tags === 0 && ui.nodes === "ship+1" && ui.old >= 1,
   JSON.stringify(ui)
 );
 // 点开验的那一枚签：差遣面板里是验的人的时间线（读了 p.js、交了判词）
@@ -66,7 +66,11 @@ await sleep(500);
 const panel = await evalJs(
   `({ open: !document.querySelector("#helperModal").classList.contains("hidden"), steps: [...document.querySelectorAll("#helperModal .tool-step")].map(s => s.dataset.tool || s.querySelector(".tool-label")?.textContent).join(",") })`
 );
-check("the 验 marker opens the checker's own timeline in the helper panel", panel.open && panel.steps === "read_file,verdict", JSON.stringify(panel));
+check(
+  "the 验 marker opens the checker's own timeline in the helper panel",
+  panel.open && panel.steps === "read_file,verdict",
+  JSON.stringify(panel)
+);
 // 下一问：纲已立住，不再附着；问一句无关的，闸不拦
 const sent = await evalJs(`__yanState().conversations[0].messages.length`);
 await evalJs(
