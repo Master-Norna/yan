@@ -37,7 +37,7 @@
  * @property {Usage|null} usage
  * @property {boolean} [charged] 用量已记进派它的那一答（帮手收工时自己记、或那一答收尾时并入），另一边不再记
  * @property {string} [effort] 这一趟的思考档位（模型实际认的那一档）；没有即不带字段、由接口定
- * @property {{ thinking: string, signature: string }[]|null} [thinkingBlocks]
+ * @property {{ thinking?: string, signature?: string, redacted?: string }[]|null} [thinkingBlocks]
  * @property {string} [report] 最后一轮说的话，即交回主模型的回报
  * @property {number} [durationMs]
  * @property {number} [startedAt] 正在做时的起始时刻（毫秒），题头据此走用时；收工即删
@@ -106,7 +106,7 @@
  * @property {string} [reasoning]
  * @property {Step[]} [steps]
  * @property {ToolCall[]|null} [toolCalls] 只在流式期间用
- * @property {{ thinking: string, signature: string }[]|null} [thinkingBlocks] 这一轮的思考块（Anthropic 带工具调用时要回传），只在流式期间用
+ * @property {{ thinking?: string, signature?: string, redacted?: string }[]|null} [thinkingBlocks] 这一轮的思考块（Anthropic 带工具调用时要回传），只在流式期间用
  * @property {Usage|null} [usage]
  * @property {number} [tokenCount] 这一答耗的墨
  * @property {boolean} [tokenEstimated]

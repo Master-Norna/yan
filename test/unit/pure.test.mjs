@@ -661,3 +661,54 @@ test("OpenAI 兼容：DashScope 的档位换成预算，别家原样；思考块
   assert.deepEqual(openaiProvider.levels({ baseUrl: "https://dashscope.aliyuncs.com/v1" }), ["low", "medium", "high", "max"]);
   assert.equal(openaiProvider.levels({ baseUrl: "https://example.com/v1" }), null);
 });
+test("结束原因：认不出的原样交出，由页面的白名单判半途被掐；被遮蔽的思考块照原样回传", async () => {
+  const stopWith = async reason => {
+    const raw = [
+      ["message_start", { type: "message_start", message: { model: "claude-x", usage: { input_tokens: 3 } } }],
+      ["message_delta", { type: "message_delta", delta: { stop_reason: reason }, usage: { output_tokens: 1 } }],
+      ["message_stop", { type: "message_stop" }]
+    ]
+      .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
+      .join("");
+    const text = await new Response(new Blob([raw]).stream().pipeThrough(f.anthropicToOpenAiStream("claude"))).text();
+    return JSON.parse(
+      text
+        .split("\n\n")
+        .filter(Boolean)
+        .at(-2)
+        .replace(/^data: /, "")
+    ).choices[0].finish_reason;
+  };
+  assert.equal(await stopWith("end_turn"), "stop");
+  assert.equal(await stopWith("max_tokens"), "length");
+  assert.equal(await stopWith("refusal"), "refusal");
+  const redacted = [
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "redacted_thinking", data: "密文" } }],
+    ["content_block_stop", { type: "content_block_stop", index: 0 }]
+  ]
+    .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
+    .join("");
+  const out = await new Response(new Blob([redacted]).stream().pipeThrough(f.anthropicToOpenAiStream("claude"))).text();
+  assert.deepEqual(JSON.parse(out.replace(/^data: /, "")).choices[0].delta.thinking_block, { redacted: "密文" });
+  const body = f.anthropicRequest({
+    model: "claude-opus-5",
+    messages: [
+      { role: "user", content: "x" },
+      {
+        role: "assistant",
+        content: "",
+        thinking_blocks: [{ redacted: "密文" }, { thinking: "想", signature: "s" }],
+        tool_calls: [{ id: "t", function: { name: "f", arguments: "{}" } }]
+      },
+      { role: "tool", tool_call_id: "t", content: "好" }
+    ]
+  });
+  assert.deepEqual(
+    body.messages[1].content.map(block => block.type),
+    ["redacted_thinking", "thinking", "tool_use"]
+  );
+  const { responsesToOpenAiStream } = requireFrom(import.meta.url)("../../server/model/chatgpt.js");
+  const incomplete = `data: ${JSON.stringify({ type: "response.incomplete", response: { usage: {}, incomplete_details: { reason: "content_filter" } } })}\n\n`;
+  const cut = await new Response(new Blob([incomplete]).stream().pipeThrough(responsesToOpenAiStream("gpt"))).text();
+  assert.equal(JSON.parse(cut.split("\n\n")[0].replace(/^data: /, "")).choices[0].finish_reason, "content_filter");
+});

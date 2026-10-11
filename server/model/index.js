@@ -185,7 +185,8 @@ module.exports = function createModel({ home }) {
       await finished(source);
       res.end();
       const finish = meter.finish,
-        normal = ["stop", "tool_calls", "function_call"].includes(finish);
+        // 与页面的 NORMAL_FINISH 同一张单子（中转站原样转来的 end_turn 之类也算正常）
+        normal = ["stop", "tool_calls", "function_call", "end_turn", "stop_sequence", "eos", "eos_token"].includes(finish);
       console.log(
         `${stamp()} ${normal ? "←" : "⚠"} ${meter.model}：${finish ? `收尾 ${finish}` : "流到头了却没有结束原因"} · ${Math.round((Date.now() - meter.opened) / 1000)} 秒、${meter.bytes} 字节`
       );

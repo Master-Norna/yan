@@ -75,8 +75,11 @@ function anthropicRequest(payload) {
     } else if (role === "user") push("user", anthropicUserBlocks(message.content));
     else if (role === "assistant") {
       const blocks = [];
+      // 思考块按原样、原次序回传；被遮蔽的（redacted_thinking）只有一段密文，同样要回传，少了它带工具调用的那一轮会被拒
       for (const block of Array.isArray(message.thinking_blocks) ? message.thinking_blocks : [])
-        if (block?.thinking && block.signature) blocks.push({ type: "thinking", thinking: block.thinking, signature: block.signature });
+        if (block?.redacted) blocks.push({ type: "redacted_thinking", data: block.redacted });
+        else if (block?.thinking && block.signature)
+          blocks.push({ type: "thinking", thinking: block.thinking, signature: block.signature });
       const text = typeof message.content === "string" ? message.content : "";
       if (text.trim()) blocks.push({ type: "text", text });
       for (const call of Array.isArray(message.tool_calls) ? message.tool_calls : []) {
@@ -135,9 +138,18 @@ function anthropicRequest(payload) {
   if (body.tools && payload.tool_choice === "none") body.tool_choice = { type: "none" };
   return body;
 }
+// 结束原因换成 chat.completions 的说法；认不出的（refusal、pause_turn……）原样交给页面，由它的白名单判是不是半途被掐（见 finishFault），
+// 不一概说成 stop——那样拒答、被掐的半截话都冒充写完了
+const ANTHROPIC_FINISH = {
+  end_turn: "stop",
+  stop_sequence: "stop",
+  tool_use: "tool_calls",
+  max_tokens: "length",
+  model_context_window_exceeded: "length"
+};
 // Messages API 的事件流 → OpenAI 风格的 SSE 分块（data: {...}\n\n，末尾 [DONE]）。
 // text_delta → content，thinking_delta → reasoning_content，tool_use 块 → tool_calls（按出现顺序编号），思考块收尾时整块带上签名
-// 作 thinking_block 交给页面（带工具调用的那一轮要回传）；message_delta 里的用量换成 usage
+// 作 thinking_block 交给页面（带工具调用的那一轮要回传；被遮蔽的那种只有密文，记作 redacted）；message_delta 里的用量换成 usage
 function anthropicToOpenAiStream(model = "") {
   const decoder = new TextDecoder(),
     encoder = new TextEncoder(),
@@ -184,10 +196,11 @@ function anthropicToOpenAiStream(model = "") {
       const block = blocks.get(data.index);
       if (block?.type === "thinking" && block.signature)
         controller.enqueue(chunk({ thinking_block: { thinking: block.text, signature: block.signature } }));
+      else if (block?.type === "redacted_thinking" && block.data) controller.enqueue(chunk({ thinking_block: { redacted: block.data } }));
     } else if (name === "message_delta") {
       if (data.usage?.output_tokens !== undefined) usage.completion_tokens = Number(data.usage.output_tokens) || 0;
       const reason = data.delta?.stop_reason,
-        finish = reason === "tool_use" ? "tool_calls" : reason === "max_tokens" ? "length" : reason ? "stop" : null;
+        finish = reason ? ANTHROPIC_FINISH[reason] || reason : null;
       controller.enqueue(chunk({}, { usage: { ...usage, total_tokens: usage.prompt_tokens + usage.completion_tokens } }, finish));
     } else if (name === "message_stop") {
       stopped = true;

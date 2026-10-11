@@ -451,8 +451,9 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
             ingest(text);
             refresh();
           }
-          // Anthropic 的思考块（带签名）：这一轮带工具调用时要原样回传，记在消息上
-          if (delta?.thinking_block?.signature) (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
+          // Anthropic、ChatGPT 订阅的思考块（带签名，或被遮蔽的只有密文）：这一轮带工具调用时要原样回传，记在消息上
+          if (delta?.thinking_block?.signature || delta?.thinking_block?.redacted)
+            (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
           if (Array.isArray(delta?.tool_calls)) {
             for (const call of delta.tool_calls) {
               const slot = ((assistant.toolCalls ||= [])[call.index ?? 0] ||= { id: "", name: "", arguments: "" });

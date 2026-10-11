@@ -381,14 +381,16 @@ function responsesToOpenAiStream(model = "") {
       );
     else if (type === "response.completed" || type === "response.incomplete") {
       const u = data.response?.usage || {},
-        length = data.response?.incomplete_details?.reason === "max_output_tokens";
+        // 没写完（incomplete）的原因：到输出上限即 length；内容拦截之类原样交给页面，由它判作半途被掐，不冒充写完
+        cut = type === "response.incomplete" ? data.response?.incomplete_details?.reason || "incomplete" : "",
+        finish = !cut ? (calls.size ? "tool_calls" : "stop") : cut === "max_output_tokens" ? "length" : cut;
       const usage = {
         prompt_tokens: Number(u.input_tokens) || 0,
         completion_tokens: Number(u.output_tokens) || 0,
         total_tokens: Number(u.total_tokens) || 0,
         prompt_tokens_details: { cached_tokens: Number(u.input_tokens_details?.cached_tokens) || 0 }
       };
-      controller.enqueue(chunk({}, { usage }, length ? "length" : calls.size ? "tool_calls" : "stop"));
+      controller.enqueue(chunk({}, { usage }, finish));
       stopped = true;
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
     } else if (type === "response.failed") fail(controller, data.response?.error);
