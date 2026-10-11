@@ -42,6 +42,8 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {(el: Element, step: Step, prev: { status: string } | undefined) => boolean} [sync] 卡片就地更新，返回真即已画好；不写或返回假则变了就整张换
  * @property {(step: Step) => string} [approval] 请示条的内容
  * @property {true | ((step: Step) => string)} [digest] 带给下一问的一行；true 用通用写法，不写即不带
+ * @property {(step: Step, opts: { latest: boolean, budget?: number }) => Promise<Record<string, any>>|Record<string, any>|null} [replay] 作答途中从外面递进来的话（补言、回报、传话）：
+ *   写成给模型的一条消息。当场递上（latest，附件整份带上）与往后重装这一答（见 answerParts，只带摘要）都经它，模型往后读到的与当时一字不差；给 null 即无可重装
  * @property {(step: Step) => Source[]} [sources] 答末「出处」里列的条目
  * @property {boolean} [mcp] 由 MCP 服务登记的（配置一变就整批换掉）
  */

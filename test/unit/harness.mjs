@@ -49,6 +49,7 @@ const stubs = {
   indexedDB: { open: () => ({}) },
   performance: globalThis.performance,
   crypto: globalThis.crypto,
+  CSS: { escape: value => String(value) },
   // 页面代码自己排的定时器（存盘的退避重试之类）不拖住测试进程：测完就退
   setTimeout: (...args) => setTimeout(...args).unref(),
   clearTimeout,

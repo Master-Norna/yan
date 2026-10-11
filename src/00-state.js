@@ -49,7 +49,7 @@
 /**
  * @typedef {Object} Step 行迹里的一步：一次工具调用及其结果、呈现与开合状态
  * @property {string} id
- * @property {string} name 工具名；user_note 是作答途中用户寄来的补言，fold 是一答之内的撮要，都不是工具
+ * @property {string} name 工具名；user_note 是作答途中用户寄来的补言，relay_note 是递回来的回报，fold 是一答之内的撮要，都不是工具
  * @property {string} arguments 模型给的参数原文（JSON）
  * @property {StepStatus} status
  * @property {string} [title] 标题行：指令、路径、关键词……
@@ -84,6 +84,8 @@
  * @property {string} [ref] 传话、叫停说到的那一趟（步骤 id）
  * @property {string} [noteId] 传话递去的那句话在帮手时间线里的步骤 id
  * @property {{ step: string, title: string, ok: boolean, kind?: "bg", exitCode?: number }} [relay] 作答途中回来的回报（relay_note）是谁
+ * @property {string} [report] 回报、传话递上时给模型的原话：往后重装这一答时插回原处（见 replay）
+ * @property {boolean} [steer] 补言是把正在写的一轮停在句尾递上的（前缀与接在工具结果之后的不同）
  * @property {{ questions: AskQuestion[] }} [form]
  * @property {string[]} [answers]
  * @property {string} [conversationId] 翻旧谈

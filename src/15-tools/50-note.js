@@ -1,10 +1,15 @@
-// 言 · 补言：不是工具，是作答途中用户寄来的话，也记作行迹里的一步（见 14-chat-engine/10-send.js 的 sendSupplement）；在这张表里只登记画法，从不交给模型。
-// 往后的历史里它按到达的位置还原成一句用户的话（见 replyParts），不进行迹摘要
+// 言 · 补言：不是工具，是作答途中用户寄来的话，也记作行迹里的一步（见 14-chat-engine/10-send.js 的 sendSupplement）；从不作为工具交给模型。
+// 递上时与往后重装历史时都由 replay 写成同一句用户的话，按到达的位置插回这一答（见 answerParts），不进行迹摘要
 defineTool({
   name: "user_note",
   label: "补言",
   offer: false,
-  html: step => noteStepHtml(step)
+  html: step => noteStepHtml(step),
+  replay: (step, { latest, budget }) =>
+    supplementForApi({ id: step.id, role: "user", content: step.note || "", timestamp: "", attachments: step.attachments }, budget, {
+      latest,
+      steer: !!step.steer
+    })
 });
 // 补言：作答途中用户寄来的话，落在行迹里它到达的那一刻；待寄时转着圈，递给模型后打勾。话不止一行、或带着附件时摊开在下面。
 // 主模型递给帮手的话（传话）在帮手的时间线里也是这个样子，只是印与标签不同、没有「即刻递上」

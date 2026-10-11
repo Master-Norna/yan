@@ -29,26 +29,30 @@ async function compactContext(c, { auto = false, before = null, profile = active
     if (!auto) toast("正在压缩");
     return false;
   }
-  // 补言按到达的位置排进这一答（见 replyParts），摘要才分得清先后
-  const clip = text => String(text || "").slice(0, 6000),
-    transcript = source
-      .flatMap(m =>
-        m.role === "user"
-          ? [`用户：${clip(m.content)}`]
-          : [
-              ...replyParts(m).map(part =>
-                part.role === "user" ? `用户（途中补言）：${clip(part.note.note)}` : `助手：${clip(part.content)}`
-              ),
-              stepsDigest(m)
-            ].filter(Boolean)
-      )
-      .join("\n\n");
   // 摘要先在外面生成，成了再一次性插进分隔（生成期间只有页面上一行「正在压缩」，不进消息、不落盘）：
   // 中途关页面不会留下半成品分隔把历史截掉；期间用户接着发的消息也不受影响——分隔插在被压缩的最后一条之后，之后的消息照旧在分隔之后
   const lastCompacted = source.at(-1);
   compactingIds.add(c.id);
   renderConversation();
   try {
+    // 途中递进来的补言、回报按到达的位置排进这一答（见 answerParts），摘要才分得清先后
+    const clip = text => String(text || "").slice(0, 6000),
+      transcript = (
+        await Promise.all(
+          source.map(async m =>
+            m.role === "user"
+              ? [`用户：${clip(m.content)}`]
+              : [
+                  ...(await answerForApi(m)).map(entry =>
+                    entry.role === "user" ? `途中递来：${clip(entryText(entry))}` : `助手：${clip(entry.content)}`
+                  ),
+                  stepsDigest(m)
+                ].filter(Boolean)
+          )
+        )
+      )
+        .flat()
+        .join("\n\n");
     // 转写可能很长、模型可能先思考再写：超时给足五分钟。这段对话开了思考档位的，压缩时降到最低一档：摘要用不着深想
     const timeout = AbortSignal.timeout(300000),
       summary = await summarize(

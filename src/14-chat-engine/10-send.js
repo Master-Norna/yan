@@ -246,33 +246,39 @@ function trimToBoundary(text) {
   return match && text.length - match[1].length < 120 ? match[1] : text;
 }
 // 回合边界：把收件口里排着的递给模型（历史里接在工具结果之后，或接在被掐断的半截话之后）——补言的那一步打勾；
-// 帮手的回报原样作一条消息递上（它那一步在帮手做完时已收尾）；主模型递给帮手的话（note）同回报一样递，那一步打勾
-async function deliverSupplements(job, history, budget, assistant, { steer = false } = {}) {
+// 帮手的回报原样作一条消息递上（它那一步在帮手做完时已收尾）；主模型递给帮手的话（note）同回报一样递，那一步打勾。
+// host 是步骤画在哪条消息上，target 是这几步落在谁的时间线上（帮手的落在它自己的正文里，画在主答的差遣卡上）
+/** @param {Message} host @param {{ steer?: boolean, target?: Message|SubAgent }} [options] */
+async function deliverSupplements(job, history, budget, host, options = {}) {
+  const { steer = false } = options,
+    target = options.target || host;
   const queue = job.queue || [];
   job.queue = [];
   for (const { user, step, report, note } of queue) {
-    if (report !== undefined) {
-      // 几份回报并作一问的：原文都在头一份上，其余几份只落行迹里那一步
+    const mark = report !== undefined ? note : step;
+    // 没落进行迹的回报（找不到挂它的那一答）：照原话递上，往后无处重装
+    if (!mark) {
       if (report) history.push({ role: "user", content: report });
-      if (note) {
-        note.status = "done";
-        note.result = steer ? "已递 · 引路" : "已递";
-      }
       continue;
     }
-    history.push(await supplementForApi(user, budget, { latest: true, steer }));
-    // 那一步挪到递上的地方：到达之后、递上之前写下的话（想着想着起笔的一句、拟调用前的一段）是模型读到补言之前写的，
-    // 往后重装历史按 at 拆开这一答（见 replyParts），留在到达处，模型下一问看到的先后就与当时不同
-    step.at = assistant.content.length;
-    step.rat = String(assistant.reasoning || "").length;
-    step.status = "done";
-    step.result = steer ? "已递 · 引路" : "已递";
+    // 递上的话由那一步登记的 replay 写成，往后重装这一答也经它（见 answerParts）：模型往后读到的与此刻一字不差。
+    // 几份回报并作一问的：原文都在头一份上，其余几份只落行迹里那一步
+    if (report) mark.report = report;
+    if (steer && user) mark.steer = true;
+    const entry = await TOOLS.get(mark.name)?.replay?.(mark, { latest: true, budget });
+    if (entry) history.push(entry);
+    // 那一步挪到递上的地方：到达之后、递上之前写下的话（想着想着起笔的一句、拟调用前的一段）是模型读到它之前写的，
+    // 往后重装按 at 拆开这一答，留在到达处，模型下一问看到的先后就与当时不同
+    mark.at = target.content.length;
+    mark.rat = String(target.reasoning || "").length;
+    mark.status = "done";
+    mark.result = steer ? "已递 · 引路" : "已递";
   }
   // 递出去就立刻打勾。不补这一下，纯文字作答里没有下一个工具轮来顺带重画，
   // 那枚「待寄」会一直转到整答写完——模型早读到了，页面上还像没送出去
   if (queue.length) {
     saveStoreSoon();
-    refreshSteps(assistant);
+    refreshSteps(host);
   }
 }
 // 收尾时还没递出去的补言：从行迹里撤下，整答顺利写完的作为新的一问接着送；停了、断了的放回案上，话不能丢

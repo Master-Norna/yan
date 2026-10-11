@@ -49,7 +49,8 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
   let held = [];
   try {
     const budget = inlineTextBudget(profile),
-      resumeFrom = resume ? assistant.content : "";
+      // 续写：这一答开工前的样子（已写的话与那时的行迹）。作答途中压了前文要重装时，照的仍是这一份，这一截新做的在历史后段
+      resumed = resume ? { content: assistant.content, steps: [...(assistant.steps || [])] } : null;
     let lastUserId = "";
     // 这一问之前的历史：上次压缩的摘要、此后的往来、续写时已写的那截。开头装一次；作答途中压了前文（compactHead）再装一次
     const buildHead = async () => {
@@ -72,13 +73,13 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         ask.content[0].cache_control = { type: "ephemeral" };
         if (ledger) ask.content.push({ type: "text", text: ledger.trimEnd() });
       }
-      // 续写只递已写的话，做过的步骤也得让它知道（另发一句「继续」时上一答的行迹本就随着去），不然从头再做一遍
-      if (resumeFrom) {
-        const trail = stepsDigest(assistant);
-        head.push(
-          { role: "assistant", content: resumeFrom },
-          { role: "user", content: `${trail ? `${trail}\n\n` : ""}${prompt("assistant.resume")}` }
-        );
+      // 续写：已写的话连同途中递进来的补言、回报照原处排上（与下一问装上一答同一个写法，见 answerParts），
+      // 做过的步骤也得让它知道（另发一句「继续」时上一答的行迹本就随着去），不然从头再做一遍。只做了几步、一个字没写就断的也一样
+      if (resumed) {
+        const parts = (await answerForApi(resumed, budget)).filter(part => part.role !== "assistant" || part.content),
+          trail = stepsDigest(resumed);
+        if (parts.length || trail)
+          head.push(...parts, { role: "user", content: `${trail ? `${trail}\n\n` : ""}${prompt("assistant.resume")}` });
       }
       return head;
     };
