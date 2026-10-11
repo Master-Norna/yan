@@ -180,20 +180,27 @@ async function runRounds(target, history, run) {
 }
 // 一答之内思考接得上：带工具调用的那一轮，模型为什么调这件工具的思考随调用一起送回。Anthropic、ChatGPT 订阅有带签名的思考块，
 // 经 thinking_blocks 原样送回（桥接各换成该家的格式）；OpenAI 兼容接口（DeepSeek、Kimi、自部署的 Qwen 之类）没有签名，
-// 这一轮的思绪原样作 reasoning_content 送回——模板照它生成时的样子排出思考，前缀不变，缓存也接得上。
+// 这一轮的思绪原样送回——模板照它生成时的样子排出思考，前缀不变，缓存也接得上。字段名两家各认一个：DeepSeek、Kimi 认
+// reasoning_content，新版 vLLM 只认 reasoning、旧名一声不响地丢掉（模型看不到自己这一答里先前想过什么，每轮从头想起，
+// 一句补言能被它每轮重新「收到」一遍），所以两个都带，模板只取其一。
 // 只在一答之内：下一问起前文是摘要，思考随之不带。不收这个字段的接口，去掉重发一回，此后这一页不再给它带
 const echolessProfiles = new Set();
 /** @param {Message|SubAgent} target @param {number} from 这一轮的思绪从哪起 @param {Profile} profile */
 function thoughtEcho(target, from, profile) {
   if (target.thinkingBlocks?.length) return { thinking_blocks: target.thinkingBlocks };
   const thought = String(target.reasoning || "").slice(from);
-  return thought.trim() && !echolessProfiles.has(profile.id) ? { reasoning_content: ownCopy(thought) } : {};
+  if (!thought.trim() || echolessProfiles.has(profile.id)) return {};
+  const echo = ownCopy(thought);
+  return { reasoning_content: echo, reasoning: echo };
 }
 /** 请求被拒、报错说起思考或多出的字段：去掉送回的思绪，有可去的才算数 @param {Profile} profile */
 function dropThoughtEcho(history, profile, message) {
   if (!/reasoning|thinking|signature|extra|unrecognized|additional|unknown|not permitted/i.test(message)) return false;
   const carried = history.filter(item => item.reasoning_content !== undefined);
-  for (const item of carried) delete item.reasoning_content;
+  for (const item of carried) {
+    delete item.reasoning_content;
+    delete item.reasoning;
+  }
   if (carried.length) echolessProfiles.add(profile.id);
   return carried.length > 0;
 }

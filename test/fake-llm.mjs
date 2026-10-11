@@ -1148,7 +1148,8 @@ http
           res,
           [
             delta({
-              content: `回报乙：已新建 src/b.js。｜echo:${String(msgs.find(m => m.role === "assistant" && m.tool_calls)?.reasoning_content || "").startsWith("帮手乙想第 1 步。") ? "yes" : "no"}｜effort:${payload.reasoning_effort ?? "none"}`
+              // 两个字段名都得带：新版 vLLM 只认 reasoning
+              content: `回报乙：已新建 src/b.js。｜echo:${[msgs.find(m => m.role === "assistant" && m.tool_calls)].every(m => String(m?.reasoning_content || "").startsWith("帮手乙想第 1 步。") && m.reasoning === m.reasoning_content) ? "yes" : "no"}｜effort:${payload.reasoning_effort ?? "none"}`
             }),
             delta({}, { usage: { total_tokens: 7 } })
           ],
