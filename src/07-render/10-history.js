@@ -1,6 +1,8 @@
 // 言 · 渲染 · 历史：侧栏的对话列表
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 function renderHistory() {
+  // 别处删掉的、或者与主页面当前那段重复的栏：只收对应那一栏（远程删除也走这条路，见 30-chats.js 的读回）
+  pruneSplitPanes();
   const query = historyQuery.trim().toLowerCase();
   const matches = c =>
     !query ||
@@ -57,6 +59,7 @@ function renderHistory() {
   const item = c => {
     if (renamingId === c.id)
       return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed && renamingDirty ? typed.value : c.title)}" maxlength="60" aria-label="${t(`重命名对话`)}"></div>`;
+    const splitSlot = splitSlotOf(c.id);
     // 这一答写完了、帮手还在后台做，也算在忙；帮手的请示没有哪一答替它挂「等待确认」，按请示本身认
     const job = requestJob(c.id),
       running = !!job || crewRunning(c.id),
@@ -71,7 +74,7 @@ function renderHistory() {
           : c.pinned && groupOf(c)
             ? `<span class="history-state pinned" title="${t(`组内置顶`)}" aria-label="${t(`组内置顶`)}"></span>`
             : "";
-    return `<div class="history-item ${c.id === currentId ? "active" : ""} ${running ? "is-running" : ""} ${c.unread ? "has-unread" : ""} ${isWork(c) ? "is-work" : ""}" data-conversation="${escapeHtml(c.id)}" draggable="true"><button class="history-open" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>${state}<span class="history-tools"><button class="history-tool history-more" data-history-action="menu" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></span></div>`;
+    return `<div class="history-item ${c.id === currentId ? "active" : ""} ${running ? "is-running" : ""} ${c.unread ? "has-unread" : ""} ${isWork(c) ? "is-work" : ""} ${splitSlot >= 0 ? "in-split" : ""}" data-conversation="${escapeHtml(c.id)}" draggable="true"><button class="history-open" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>${splitSlot >= 0 ? `<span class="split-mark" title="${t(`开在右栏`)}">${split.panes.length > 1 ? t`右${splitSlot + 1}` : t(`右`)}</span>` : ""}${state}<span class="history-tools"><button class="history-tool history-more" data-history-action="menu" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></span></div>`;
   };
   const repoHtml = node => {
     const name = node.dir.split(/[\\/]/).filter(Boolean).pop() || node.dir || t("未定目录"),

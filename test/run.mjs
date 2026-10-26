@@ -223,7 +223,8 @@ try {
         await send("Page.navigate", { url: "about:blank" });
         // 离页时补写的配置（防抖一秒、再加一次往返）要在清目录前落完：否则它落进下一个用例的空根，
         // 下一个用例灌的浏览器记录又不再压过磁盘，就会带着上一个用例的模型开跑
-        await sleep(1500);
+        // 五页上限：上一轮若开过多栏，事件流连接要稍久才收干净；留足再清目录，免得下一轮开局就撞六条连接的上限
+        await sleep(3000);
         close();
       } catch {}
       tryRm(path.join(TMP, "work"));

@@ -61,6 +61,7 @@ function openSidePanel(threadId) {
   sideFollow = true;
   bindSideScroll();
   showNow($("#sidePanel"));
+  layoutRail({ mayCollapseSidebar: true });
   renderSidePanel();
   syncActiveAnchor();
   setTimeout(() => $("#sideInput")?.focus(), 0);
@@ -70,6 +71,7 @@ function openSideIndex(messageId = null) {
   sideThreadId = null;
   sideIndexFor = messageId;
   showNow($("#sidePanel"));
+  layoutRail({ mayCollapseSidebar: true });
   renderSidePanel();
   syncActiveAnchor();
 }
@@ -83,6 +85,7 @@ function closeSidePanel() {
   syncActiveAnchor();
   const panel = $("#sidePanel");
   if (panel && !panel.classList.contains("hidden")) hideWithFade(panel);
+  layoutRail({ mayCollapseSidebar: true });
 }
 function syncActiveAnchor() {
   for (const mark of document.querySelectorAll("#messages mark.note-anchor, #messages sup.note-ref"))

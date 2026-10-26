@@ -11,6 +11,14 @@ if (location.protocol === "file:") {
 (() => {
   // 头一回画好之前不露 index.html 里写死的初稿（见 styles/00-base.css 与 src/99-start.js）
   if (location.protocol !== "file:") document.documentElement.dataset.booting = "";
+  // 右栏（同源页面并排，最多四栏）：先挂上，侧栏与游目在样式里就不露面（见 src/27-split.js）
+  const paneQuery = new URLSearchParams(location.search);
+  if (paneQuery.get("pane") === "side") {
+    document.documentElement.dataset.pane = "side";
+    const slot = Number(paneQuery.get("slot"));
+    // 4 即 src/00-state.js 的 MAX_SPLIT_PANES：这份脚本先于主脚本跑、拿不到那个常量，改栏数时两处一起改
+    document.documentElement.dataset.paneSlot = String(Number.isInteger(slot) && slot >= 0 && slot < 4 ? slot : 0);
+  }
   try {
     const settings = JSON.parse(localStorage.getItem("yan-chat-v1") || "{}").settings || {},
       html = document.documentElement;

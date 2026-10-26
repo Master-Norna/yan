@@ -134,6 +134,8 @@ function renderConversation(shouldScroll = false) {
 }
 // 停在哪一页记在设置里：刷新后回到原处——正看着的那段对话、或卷宗；开机时由 boot 读回
 function rememberPlace() {
+  // 右栏不记：记了，主页面刷新后会回到右栏那段
+  if (PANE) return;
   const s = store.settings,
     /** @type {{ view: "chat"|"library"|"groups", id: string }} */
     next = { view: view === "library" || view === "groups" ? view : "chat", id: view === "chat" ? currentId || "" : "" };
@@ -143,6 +145,15 @@ function rememberPlace() {
   saveStoreSoon();
 }
 function restorePlace() {
+  // 右栏只开地址里点名的那一段
+  if (PANE) {
+    const id = new URLSearchParams(location.search).get("c") || "";
+    if (store.conversations.some(c => c.id === id)) {
+      currentId = id;
+      /** @type {Conversation} */ (currentConversation()).unread = false;
+    }
+    return;
+  }
   const { lastView, lastConversationId } = store.settings;
   if (lastView === "library" || lastView === "groups") view = lastView;
   else if (lastConversationId && store.conversations.some(c => c.id === lastConversationId)) {

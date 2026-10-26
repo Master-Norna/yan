@@ -11,6 +11,14 @@ const remoteBusy = new Set(),
 // 别处松了手（写完，或页面关了、崩了，十五秒没来报到），再读一回：还停在「生成中」的，才按中断处理
 let leasing = null,
   leasePosting = Promise.resolve();
+// 这一页要跟的：主页面当前那段，以及右栏里开着的那几段（最多四段）；别处正作答但没开在这页的不读。
+// 刚松手的那几段总要读一回：别处没写完就走了的，要在这里收束成中断。四栏同开时，
+// 别让每页每三秒把别处正作答的对话都读一遍；remoteBusy 仍是全量，供删除与发送按钮判断。
+function leaseFollowIds(currentId, busy, released, visible = []) {
+  const ids = new Set(released);
+  for (const id of [currentId, ...visible]) if (id && busy.has(id)) ids.add(id);
+  return [...ids];
+}
 function syncLeases() {
   if (!chatsOnline()) return Promise.resolve();
   // 认领本身会报上全部持有的对话；它回话前还没有生成任务，不能以「没在跑」把这段报没了。
@@ -30,7 +38,12 @@ function syncLeases() {
       const released = [...remoteBusy].filter(id => !busy.includes(id));
       remoteBusy.clear();
       for (const id of busy) remoteBusy.add(id);
-      const follow = [...remoteBusy, ...released].filter(id => store.conversations.some(c => c.id === id));
+      const follow = leaseFollowIds(
+        currentId,
+        remoteBusy,
+        released,
+        split.panes.map(pane => pane.id)
+      ).filter(id => store.conversations.some(c => c.id === id));
       if (follow.length) await followConversations(follow, released);
       if (currentId && (remoteBusy.has(currentId) || released.includes(currentId))) renderSendButtons();
     })

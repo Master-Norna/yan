@@ -1,0 +1,46 @@
+{
+  "title": "Yan two-session browser-window vs iframe resource benchmark",
+  "schema_version": 1,
+  "result": {
+    "sessions_per_mode": 2,
+    "trials_per_mode": 3,
+    "runtime_memory_metric": "Median proportional set size (PSS) across the Chromium process tree, KiB; each trial sampled 12 times after warm-up.",
+    "windows_median_pss_kib": 777447,
+    "iframe_median_pss_kib": 608408,
+    "iframe_pss_reduction_kib": 169039,
+    "iframe_pss_reduction_percent": 21.74,
+    "windows_median_browser_profile_growth_bytes": 3416399,
+    "iframe_median_browser_profile_growth_bytes": 3665866,
+    "iframe_profile_growth_difference_bytes": 249467,
+    "iframe_profile_growth_difference_percent": 7.3,
+    "windows_median_local_storage_bytes": 1684,
+    "iframe_median_local_storage_bytes": 1732,
+    "content_rendered_and_input_enabled_checks": "passed in all six trials"
+  },
+  "trial_data": {
+    "windows": [
+      {"trial": 1, "median_pss_kib": 762766, "sampled_pss_min_kib": 706005, "sampled_pss_max_kib": 781005, "browser_profile_growth_bytes": 3414812, "local_storage_bytes": 1684, "both_sessions_rendered_and_input_enabled": true},
+      {"trial": 4, "median_pss_kib": 777447, "sampled_pss_min_kib": 705632, "sampled_pss_max_kib": 783509, "browser_profile_growth_bytes": 3436931, "local_storage_bytes": 1684, "both_sessions_rendered_and_input_enabled": true},
+      {"trial": 5, "median_pss_kib": 787364, "sampled_pss_min_kib": 707310, "sampled_pss_max_kib": 791383, "browser_profile_growth_bytes": 3416399, "local_storage_bytes": 1684, "both_sessions_rendered_and_input_enabled": true}
+    ],
+    "iframe": [
+      {"trial": 2, "median_pss_kib": 608518, "sampled_pss_min_kib": 562334, "sampled_pss_max_kib": 613179, "browser_profile_growth_bytes": 3687054, "local_storage_bytes": 1732, "both_sessions_rendered_and_input_enabled": true},
+      {"trial": 3, "median_pss_kib": 599267, "sampled_pss_min_kib": 567556, "sampled_pss_max_kib": 609131, "browser_profile_growth_bytes": 3665866, "local_storage_bytes": 1732, "both_sessions_rendered_and_input_enabled": true},
+      {"trial": 6, "median_pss_kib": 608408, "sampled_pss_min_kib": 569153, "sampled_pss_max_kib": 611408, "browser_profile_growth_bytes": 3646835, "local_storage_bytes": 1732, "both_sessions_rendered_and_input_enabled": true}
+    ]
+  },
+  "method": {
+    "comparison": "Two separate Chromium windows, each with one Yan conversation, versus one Yan page with one active iframe pane; exactly two synthetic idle conversations in both modes.",
+    "project_revision": "CaramelizedCUDA/yan-local-chat experiment/iframe-split, 87ed348",
+    "browser_environment": "Headless Chromium 156.0.8078.47 on Debian GNU/Linux 12; 1920x1080 viewport; same local server and browser build; fresh browser profile for each trial; modes alternated across six trials.",
+    "model_activity": "None; no model requests or generated replies.",
+    "browser_profile_growth_definition": "Bytes added to the fresh browser profile relative to its blank-browser baseline during a trial. This is browser-profile growth, not installed application size or a clean measurement of app-only disk use.",
+    "functional_check_definition": "For each of the two conversations, verify its expected content rendered and its input was enabled. No typing, sending, response streaming, or subjective usability rating was measured."
+  },
+  "interpretation_limits": [
+    "In this two-session idle test, iframe used 21.74% less median browser-process-tree PSS; this is specific to the measured Linux headless setup, not a universal or device-specific result.",
+    "Iframe browser-profile growth was 249467 bytes higher (about 0.25 MB); this small difference may include browser background/cache writes and does not establish a meaningful application disk-size penalty.",
+    "The checks establish both conversations were visible and inputs usable, not that pane switching feels better than switching windows. Real-device, active-generation, and subjective interaction tests remain unmeasured."
+  ],
+  "privacy": "Contains aggregate synthetic-test measurements only; no conversation content, account identifiers, credentials, local filesystem paths, or personal data."
+}

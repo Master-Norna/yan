@@ -22,7 +22,7 @@ const cmd = (names, tail = String.raw`(?:\.exe|\.com)?(?:\s|$)`) => new RegExp(`
 // 改「项」的 cmdlet 与它们在 Windows PowerShell 里的别名（ni = New-Item、sp = Set-ItemProperty……）：注册表那条与写动词表都用
 const ITEM_WRITERS = String.raw`(?:New|Set|Remove|Clear|Rename|Copy|Move)-Item(?:Property)?|ni|si|ri|cli|rni|rn|cpi|mi|sp|rp|clp|rnp|mp`;
 // 定义别名等于给写动词换个名字，静态筛查就认不出来了；与 Invoke-Expression 同属「藏字」
-const ALIASING = /\b(?:Set|New)-Alias\b|(^|[\s;&|({])(?:sal|nal)\s/i;
+const ALIASING = /\b(?:Set|New)-Alias\b|(^|[\s;&|({])(?:sal|nal)\s|(^|[\s;&|({])alias\s+[A-Za-z_][\w-]*\s*=/i;
 // 指令里禁用的写法：[正则, 一句原因]。逐条对整段指令文本查，命中即拒
 /** @type {[RegExp, string][]} */
 const FORBIDDEN = [

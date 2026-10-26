@@ -45,8 +45,9 @@ check("meta 待你定夺", (await evalJs(`document.querySelector(".tool-stack-me
 check(
   "approval bar above composer shows the command",
   await evalJs(
-    `!document.querySelector("#approvalBar").classList.contains("hidden") && document.querySelector("#approvalBar .approval-cmd").textContent === "Write-Output '你好，世界'" && document.querySelector("#approvalBar").dataset.stepId === document.querySelector('.tool-step[data-status="pending"]').dataset.stepId`
-  )
+    `!document.querySelector("#approvalBar").classList.contains("hidden") && document.querySelector("#approvalBar .approval-cmd").textContent === ${JSON.stringify(process.platform === "win32" ? "Write-Output '你好，世界'" : "printf '你好，世界\n'")} && document.querySelector("#approvalBar").dataset.stepId === document.querySelector('.tool-step[data-status="pending"]').dataset.stepId`
+  ),
+  await evalJs(`JSON.stringify({ actual: document.querySelector("#approvalBar .approval-cmd").textContent, expected: ${JSON.stringify(process.platform === "win32" ? "Write-Output '你好，世界'" : "printf '你好，世界\n'")} })`)
 );
 // 请示条入场时输入区还在长高；留白由 ResizeObserver 在下一帧跟上，等它站定再量
 await sleep(500);

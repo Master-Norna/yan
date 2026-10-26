@@ -26,6 +26,21 @@ interface Window {
     sendFiles: (files: File[], node?: number) => Promise<void>;
     markPinned: () => void;
   }; // 端到端测试读看台的状态、立即去连、在当前页打开、递文件、当作执事亲手定了视口
+  __yanSplit: {
+    open: (id: string) => void;
+    add: (id: string) => boolean;
+    close: (slot?: number, id?: string) => void;
+    focus: (slot: number) => void;
+    state: () => any;
+    setWidth: (slot: number, px: number) => void;
+  }; // 端到端测试读栏的状态、增删与调宽
+  __yanPane: {
+    busy: () => boolean;
+    id: () => string;
+    slot: number;
+    refresh: () => void;
+    bus: () => boolean;
+  }; // 栏页报给主页面：这一栏是谁、在忙什么
 }
 
 // ---- 宽松的 DOM：代码里 querySelector / closest / e.target 拿到的节点直接当表单控件、details、文本节点用，

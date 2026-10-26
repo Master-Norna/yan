@@ -25,6 +25,7 @@ function openStage() {
   } catch {}
   stageSetWidth(stage.width || saved || innerWidth * 0.46);
   showNow($("#stagePanel"));
+  layoutRail({ mayCollapseSidebar: false });
   stageWake();
   // 浏览器早开着、看台却没连上的（桥接重启过、浏览器是别处起的）：开时再找一回
   if (!stage.ws) void stageLocate();
@@ -38,6 +39,7 @@ function openStage() {
 function closeStage() {
   stageSetWide(false);
   hideWithFade($("#stagePanel"));
+  layoutRail({ mayCollapseSidebar: true });
   clearInterval(stage.poll);
   stageWake();
 }

@@ -286,6 +286,18 @@ let pendingProfileId = "";
 let pendingQuote = null;
 // 这个页面的名号：总线认它回话（01-bridge.js），几个页面同开时租约认它是谁在作答（01-store/40-leases.js）
 const PAGE_ID = uid();
+// 右栏最多四栏：主页面 + 四份同源 iframe = 五处页面。每处常占一条 EventSource，
+// 浏览器对同一 host:port 的 HTTP/1.1 连接上限为六，余一条给普通请求；开到第 6 处页面时六条全被事件流占满，所有页面的普通请求都会排队（见 27-split.js）
+const MAX_SPLIT_PANES = 4;
+// 同一个浏览器里言最多几处页面同开（每处一条常驻事件流，六条连接留一条给普通请求）——别的标签页、窗口也算在内
+const MAX_BROWSER_PAGES = MAX_SPLIT_PANES + 1;
+// 这一页是嵌在主页面右侧的第几栏（0..3）；主页面为 -1。关一栏不重排其余栏
+const PANE = new URLSearchParams(location.search).get("pane") === "side";
+const PANE_SLOT = (() => {
+  if (!PANE) return -1;
+  const raw = Number(new URLSearchParams(location.search).get("slot"));
+  return Number.isInteger(raw) && raw >= 0 && raw < MAX_SPLIT_PANES ? raw : 0;
+})();
 let suppressViz = false;
 let followBottom = true,
   autoScrolling = false;

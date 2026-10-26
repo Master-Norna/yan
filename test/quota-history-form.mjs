@@ -60,7 +60,8 @@ const seed = {
 };
 await evalJs(`localStorage.setItem("yan-chat-v1", JSON.stringify(${JSON.stringify(seed)})); true`);
 await send("Page.navigate", { url: PAGE });
-await sleep(1200);
+// 前面几个用例可能刚收掉多栏，页面起来会慢一些：等历史真的画出来再点，不赌固定时长
+await waitFor(`!!document.querySelector("#history .history-item")`, 20000);
 // 余墨已尽：打开旧对话（旧数据里还带着 ended 锁）
 await evalJs(
   `[...document.querySelectorAll("#history .history-item")].find(n => n.textContent.includes("干墨对话")).querySelector(".history-open").click(); true`
@@ -190,9 +191,9 @@ check(
 await evalJs(`document.querySelector('#history [data-conversation="w2"] .history-more').click(); true`);
 await sleep(150);
 check(
-  "⋯ opens a floating menu with the six actions",
+  "⋯ opens a floating menu with the seven actions",
   (await evalJs(`[...document.querySelectorAll(".chip-pop[data-kind=history] [data-menu]")].map(b => b.textContent).join()`)) ===
-    "置顶,改名,更换目录,移入分组,导出存入卷宗,删除"
+    "在右栏打开并排看,置顶,改名,更换目录,移入分组,导出存入卷宗,删除"
 );
 await evalJs(`document.querySelector('.chip-pop[data-kind=history] [data-menu="pin"]').click(); true`);
 await sleep(200);

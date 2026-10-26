@@ -1,6 +1,6 @@
 // 审查（设置 → 专司）：审而后行里规则标疑的那一步交另配的审查模型判——准了照做（宽沙箱会拦的指令也跑），驳了理由回给主模型、不请示；
 // 没开审查照旧按规则回绝；审查连不上退回规则
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { connect, check, usageOf, sleep, PAGE, TMP } from "./lib.mjs";
 
 const WORK = `${TMP}/review-duty`.split("/").join(process.platform === "win32" ? "\\" : "/");
@@ -37,6 +37,10 @@ const fresh = async () => {
 };
 
 // 一、开着审查
+if (process.platform !== "win32") {
+  mkdirSync(`${TMP}/review-duty`, { recursive: true });
+  writeFileSync(`${TMP}/review-duty/duty-target.txt`, "test fixture\n");
+}
 let state = await ask();
 check(
   "宽沙箱会拦的指令：审查准了，照跑、行迹上标审准",

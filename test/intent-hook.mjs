@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
 const dir = `${TMP}/intent-hook`,
-  workdir = dir.split("/").join("\\");
+  workdir = dir.split("/").join(process.platform === "win32" ? "\\" : "/");
 rmSync(dir, { recursive: true, force: true });
 mkdirSync(dir, { recursive: true });
 writeFileSync(`${dir}/a.txt`, "ok");

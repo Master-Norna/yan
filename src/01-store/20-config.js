@@ -12,6 +12,7 @@ const CONFIG_BASE_KEY = "yan-config-base",
 let configBase = "",
   configSaving = false,
   configSaveAgain = false,
+  configRefreshQueued = false,
   configSaveFailures = 0;
 // 发出去的几份（按 savedAt 记，连同那时这边花了多少墨）：写进了磁盘却没听到回音——超时、页面关了——下回读到的「别处的新版」
 // 其实是自己这份，认出来先作基准再比，不然三方合并把自己的改动当成对方的再算一遍
@@ -112,6 +113,8 @@ function saveConfigNow({ force = false } = {}) {
       const written = Number(data.savedAt) || savedAt;
       if (written > configSyncedAt) rememberConfigBase(meta, written);
       settleSpend(spent);
+      // 配置已落盘：主页面叫每一栏读一回，明暗/字体/朱色不必等下一次布局变动
+      if (!PANE) splitRefreshPanes();
     })
     .catch(error => {
       if (unloading) return;
@@ -130,6 +133,9 @@ function saveConfigNow({ force = false } = {}) {
       if (configSaveAgain) {
         configSaveAgain = false;
         saveConfigNow();
+      } else if (configRefreshQueued) {
+        configRefreshQueued = false;
+        void refreshConfigFromDisk();
       }
     });
 }
@@ -325,9 +331,15 @@ function followLanguage() {
 }
 // 从后台切回来：另一个浏览器可能改过配置，与磁盘上的对一对（这边有没写下去的改动也不丢，见 reconcileConfig）
 async function refreshConfigFromDisk() {
-  if (configSaving) return;
+  // 正在写盘：记下来，写完再读，别把这次设置漏掉（多栏同开时，栏页可能正存着自己的配置）
+  if (configSaving) {
+    configRefreshQueued = true;
+    return;
+  }
   try {
     const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
-    if (disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
+    if (!disk.config) return;
+    if (configSaving) configRefreshQueued = true;
+    else reconcileConfig(disk.config, Number(disk.savedAt) || 0);
   } catch {}
 }

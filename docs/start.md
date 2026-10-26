@@ -30,7 +30,7 @@ npm start
 ## 在 VS Code 内使用
 
 1. 通过「终端 → 运行任务」执行「言：启动模型桥接」，并保持该任务终端开启。
-2. 用系统浏览器打开 `http://127.0.0.1:8787`。Simple Browser 以 iframe 嵌入页面，会被言的 `frame-ancestors 'none'` 策略阻止；桥接也不向扩展 Webview 来源开放执事接口。
+2. 用系统浏览器打开 `http://127.0.0.1:8787`。Simple Browser 以 iframe 嵌入页面；它是跨源的，仍会被言的 `frame-ancestors 'self'` 策略阻止（`'self'` 只放开同源的右栏）；桥接也不向扩展 Webview 来源开放执事接口。
 3. 在「设置 → 模型」中填写配置；可先点「获取列表」，再点「测试连接」；联网检索在「设置 → 工具」里测。
 
 ## 直接打开 index.html

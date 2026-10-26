@@ -29,7 +29,7 @@ Packaging: run `npm run pack` in the repository to get `dist/yan-<version>-win-x
 ## Use inside VS Code
 
 1. Run the task "言：启动模型桥接" (start the model bridge) via **Terminal → Run Task**, and keep its terminal open.
-2. Open `http://127.0.0.1:8787` in your system browser. Simple Browser embeds the page in an iframe, which Yan's `frame-ancestors 'none'` policy blocks; the bridge also doesn't open the agent API to extension webview origins.
+2. Open `http://127.0.0.1:8787` in your system browser. Simple Browser embeds the page in an iframe from a different origin, which Yan's `frame-ancestors 'self'` policy still blocks (`'self'` only allows the same-origin right panes); the bridge also doesn't open the agent API to extension webview origins.
 3. Fill in your settings in **Settings → Model**; you can click **Fetch list** and then **Test connection**. Web search is tested in **Settings → Tools**.
 
 ## Opening index.html directly

@@ -89,6 +89,7 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
   // 别名定义与注册表别名：给写动词换个名字就认不出来了，一律拒
   assert.match(screen("sal zz Remove-Item; zz C:\\Windows\\x"), /别名/);
   assert.match(screen("Set-Alias zz Remove-Item"), /别名/);
+  assert.match(screen("alias zz=rm"), /别名/);
   assert.match(screen("sp HKCU:\\Software\\x -Name a -Value 1"), /注册表/);
   assert.match(screen('powershell -c "reg add HKLM\\Software\\x"'), /注册表/);
   // 同名的别的东西照常：sc query 是看服务，Get-Process powershell 只是列进程，gcc -o 写在目录内
@@ -208,6 +209,7 @@ test("screenAutoReview：只拦伤及系统与难以恢复的；目录、机密�
     "Get-Content .env",
     "Set-Content .git/config x",
     "sal zz Remove-Item",
+    "alias zz=rm",
     String.raw`Move-Item .\dist D:\code\other\dist`,
     String.raw`Set-Content C:\Users\me\note.txt x`,
     String.raw`Set-Content $env:TEMP\yan.txt x`,

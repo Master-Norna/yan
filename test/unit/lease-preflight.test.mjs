@@ -93,7 +93,7 @@ test("心跳已报到、仍在读别处对话时：新认领不等磁盘读取",
   const f = load([
     "claimConversation",
     "syncLeases",
-    "setup: (fn, follow) => { chatsOnline = () => true; bridge = fn; store.conversations = [{ id: 'remote', messages: [] }]; followConversations = follow; renderHistory = renderSendButtons = () => {}; }"
+    "setup: (fn, follow) => { chatsOnline = () => true; bridge = fn; store.conversations = [{ id: 'remote', messages: [] }]; currentId = 'remote'; followConversations = follow; renderHistory = renderSendButtons = () => {}; }"
   ]);
   f.setup(
     async (_path, body) => {

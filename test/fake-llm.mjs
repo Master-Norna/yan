@@ -1,5 +1,6 @@
 // 假的 OpenAI 兼容接口：第一轮回 run_command 工具调用，收到 tool 结果后回正文；可通过 X-Mode 切换行为
 import http from "node:http";
+const shellCommand = (windows, posix) => (process.platform === "win32" ? windows : posix);
 const sse = (res, chunks, gap = 30) => {
   res.writeHead(200, { "Content-Type": "text/event-stream" });
   let i = 0;
@@ -209,7 +210,7 @@ http
         const text = String(lastUser),
           quick = text.endsWith("只答一个字：准，或疑。");
         reviewAsks.push({ quick, tool: text.match(/［将要做的］\n(\w+)/)?.[1] || "" });
-        const answer = text.includes("Set-Alias") ? "准" : quick ? "疑" : "驳，用户没让把这串参数发出去";
+        const answer = /Set-Alias|(?:^|[\s;&|({])alias\s+\w+\s*=|不定义别名/.test(text) ? "准" : quick ? "疑" : "驳，用户没让把这串参数发出去";
         return sse(res, [delta({ content: answer }), delta({}, { usage: { total_tokens: 3 } })]);
       }
       // IMAGE-DUTY：画一幅，下一轮报回工具结果、请求里附了几幅图，正文引那幅图的文件名
@@ -282,7 +283,7 @@ http
               }),
               delta({}, { usage: { total_tokens: 5 } })
             ]);
-        if (results.length === 0) return call("run_command", { command: "Set-Alias yanrv Get-Date; Set-Content duty-ok.txt ok" });
+        if (results.length === 0) return call("run_command", { command: shellCommand("Set-Alias yanrv Get-Date; Set-Content duty-ok.txt ok", "alias yanrv=date; printf ok > duty-ok.txt") });
         if (results.length === 1) return call("fetch_page", { url: "https://example.com/c?k=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789xyz" });
         return sse(res, [
           delta({ content: `REVIEW-DUTY done｜${results.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 120)).join(" ▸ ")}` }),
@@ -528,7 +529,7 @@ http
                   type: "function",
                   function: {
                     name: "run_command",
-                    arguments: JSON.stringify({ command: "Start-Sleep -Seconds 4; Write-Output 'BG-OUT-42'", background: true })
+                    arguments: JSON.stringify({ command: shellCommand("Start-Sleep -Seconds 4; Write-Output 'BG-OUT-42'", "sleep 4; printf 'BG-OUT-42\n'"), background: true })
                   }
                 }
               ]
@@ -609,7 +610,7 @@ http
           delta({ tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] });
         if (firstTurn && !toolResults.length)
           return sse(res, [
-            call("call_bs0", "run_command", { command: "Add-Content -Path .yan/账本.md -Value '- 乙' -Encoding utf8" }),
+            call("call_bs0", "run_command", { command: shellCommand("Add-Content -Path .yan/账本.md -Value '- 乙' -Encoding utf8", "printf '%s\n' '- 乙' >> .yan/账本.md") }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         if (firstTurn && toolResults.length === 1)
@@ -720,7 +721,7 @@ http
                   type: "function",
                   function: {
                     name: "run_command",
-                    arguments: JSON.stringify({ command: `Start-Sleep -Seconds ${sleepFor}; Write-Output wake-ok`, ...runArgs })
+                    arguments: JSON.stringify({ command: shellCommand(`Start-Sleep -Seconds ${sleepFor}; Write-Output wake-ok`, `sleep ${sleepFor}; printf 'wake-ok\n'`), ...runArgs })
                   }
                 }
               ]
@@ -1482,10 +1483,13 @@ http
         ]);
       }
       // 人点名的技能：问话里「/写信」已换成一件附件，说明正文随问附上
-      const userText = Array.isArray(lastUser) ? lastUser.map(part => part.text || "").join("\n") : String(lastUser);
+      const userParts = Array.isArray(lastUser) ? lastUser : [{ type: "text", text: String(lastUser) }],
+        userText = userParts.map(part => part.text || "").join("\n"),
+        // The first text part is the typed question; later text may be an attached skill whose path contains /写信.
+        userPrompt = userParts.find(part => part.type === "text")?.text || "";
       if (userText.includes("SKILLCMD"))
         return sse(res, [
-          delta({ content: `CMD|body:${userText.includes("先写称谓") ? "yes" : "no"}|slash:${userText.includes("/写信") ? "yes" : "no"}` }),
+          delta({ content: `CMD|body:${userText.includes("先写称谓") ? "yes" : "no"}|slash:${/(?:^|\s)\/写信(?=\s|$)/.test(userPrompt) ? "yes" : "no"}` }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       if (typeof lastUser === "string" && lastUser.includes("SKILLTEST")) {
@@ -1759,7 +1763,7 @@ http
         if (n === 0) return sse(res, call("edit_file", { path: "src/a.js", old: "return 1;", new: "return 2;" }));
         if (n === 1) return sse(res, call("read_file", { path: "src/a.js" }));
         if (n === 2) return sse(res, call("edit_file", { path: "src/a.js", old: "return 1;", new: "return 2;" }));
-        if (n === 3) return sse(res, call("run_command", { command: "Get-Content src/a.js" }));
+        if (n === 3) return sse(res, call("run_command", { command: shellCommand("Get-Content src/a.js", "cat src/a.js") }));
         if (n === 4) return sse(res, call("search_files", { query: "return", glob: "*.js" }));
         if (n === 5) return sse(res, call("list_files", { pattern: "**/*.js" }));
         return sse(res, [
@@ -1958,7 +1962,7 @@ http
                   type: "function",
                   function: {
                     name: "run_command",
-                    arguments: JSON.stringify({ command: `Write-Output 'chat-${turnToolResults.length + 1}'` })
+                    arguments: JSON.stringify({ command: shellCommand(`Write-Output 'chat-${turnToolResults.length + 1}'`, `printf 'chat-${turnToolResults.length + 1}\n'`) })
                   }
                 }
               ]
@@ -1981,7 +1985,7 @@ http
                   type: "function",
                   function: {
                     name: "run_command",
-                    arguments: JSON.stringify({ command: "Set-Content ../escalate-probe.txt ok; Write-Output wrote" })
+                    arguments: JSON.stringify({ command: shellCommand("Set-Content ../escalate-probe.txt ok; Write-Output wrote", "printf ok > ../escalate-probe.txt; printf wrote") })
                   }
                 }
               ]
@@ -2004,7 +2008,7 @@ http
               }),
               delta({}, { usage: { total_tokens: 5 } })
             ]);
-        if (n === 0) return call("run_command", { command: "Set-Content review-ok.txt ok" });
+        if (n === 0) return call("run_command", { command: shellCommand("Set-Content review-ok.txt ok", "printf ok > review-ok.txt") });
         if (n === 1) return call("run_command", { command: "Set-ExecutionPolicy Unrestricted" });
         return sse(res, [
           delta({
@@ -2017,7 +2021,7 @@ http
         return sse(res, [
           delta({ content: "我先执行一条指令。" }),
           delta({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "run_command", arguments: "" } }] }),
-          delta({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify({ command: "Write-Output '你好，世界'" }) } }] }),
+          delta({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify({ command: shellCommand("Write-Output '你好，世界'", "printf '你好，世界\n'") }) } }] }),
           delta({}, { usage: { total_tokens: 20 } })
         ]);
       const result = String(toolResults.at(-1).content);

@@ -65,6 +65,7 @@ async function boot() {
   toggleSidebar(isMobile() || localStorage.getItem("yan-sidebar") === "collapsed");
   delete document.documentElement.dataset.sidebar;
   restorePlace();
+  restoreSplit();
   render();
   // 低频巡检：哪段改了没标到也兜得住——前台轮着巡，页面藏起来时整份巡一趟（手机切走常常就不回来了）
   setInterval(() => {
@@ -85,8 +86,8 @@ async function boot() {
 }
 
 function bindEvents() {
-  $("#collapseSidebar").onclick = () => toggleSidebar();
-  $("#mobileMenu").onclick = () => toggleSidebar(false);
+  $("#collapseSidebar").onclick = () => toggleSidebar(undefined, { user: true });
+  $("#mobileMenu").onclick = () => toggleSidebar(false, { user: true });
   // 侧栏的翻页是散列的一段；要归进某组从组首「＋」起
   $("#newChat").onclick = () => {
     delete store.settings.pendingGroupId;
@@ -131,6 +132,8 @@ function bindEvents() {
   bindAttachmentEvents();
   bindStage();
   bindStageInk();
+  bindSplit();
+  bindPane();
   // 输入法组字中的按键（选词的 Enter、取消组字的 Esc）归输入法：在最外层先拦下，各处的快捷键都不必各自判一回
   window.addEventListener(
     "keydown",
@@ -155,10 +158,12 @@ function bindEvents() {
   // flushOnUnload 自身幂等，不会因为两者都到而重复写。
   window.addEventListener("beforeunload", flushPageState);
   window.addEventListener("pagehide", flushPageState);
+  window.addEventListener("pagehide", busPageHide);
   // 从前进 / 后退缓存回来仍是同一份 JS 状态：允许它在下一次离页时再次落盘。
   window.addEventListener("pageshow", event => {
     if (event.persisted) {
       unloading = false;
+      busPageShow();
       void refreshConfigFromDisk();
       if (currentId) void catchUpFromDisk([currentId]);
       void refreshEnv();
@@ -172,7 +177,7 @@ function bindEvents() {
     syncScrim();
     syncChatScrollGrabber();
   });
-  $("#sidebarScrim").onclick = () => toggleSidebar(true);
+  $("#sidebarScrim").onclick = () => toggleSidebar(true, { user: true });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
     if (store.settings.theme === "system") {
       applyAppearance();
@@ -187,11 +192,17 @@ function bindEvents() {
 function syncScrim() {
   $("#sidebarScrim").classList.toggle("hidden", !isMobile() || $("#sidebar").classList.contains("collapsed"));
 }
-function toggleSidebar(force) {
+function toggleSidebar(force, { persist = true, relayout = true, user = false } = {}) {
   const sidebar = $("#sidebar"),
     collapsed = force ?? !sidebar.classList.contains("collapsed");
+  // 用户亲手开合：之后不被右栏的自动收起覆盖
+  if (user && !PANE && !isMobile()) {
+    split.sidebarOverride = true;
+    split.autoSidebar = null;
+  }
   sidebar.classList.toggle("collapsed", collapsed);
-  if (!isMobile())
+  // 右栏的侧栏不露面，开合也不记，免得改了主页面的
+  if (!isMobile() && !PANE && persist)
     try {
       localStorage.setItem("yan-sidebar", collapsed ? "collapsed" : "open");
     } catch {}
@@ -199,6 +210,7 @@ function toggleSidebar(force) {
   const button = $("#collapseSidebar");
   button.textContent = collapsed ? "›" : "‹";
   button.title = collapsed ? t("展开侧栏") : t("收起侧栏");
+  if (relayout && !PANE) layoutRail({ mayCollapseSidebar: false });
 }
 function toggleHistorySearch(force) {
   const wrap = $("#historySearchWrap"),

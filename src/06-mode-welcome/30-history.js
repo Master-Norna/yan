@@ -10,6 +10,19 @@ function openHistoryMenu(id, anchor) {
   openMenu(
     anchor,
     [
+      ...(PANE || isMobile()
+        ? []
+        : [
+            splitHolds(id)
+              ? {
+                  id: "split",
+                  label: split.panes.length > 1 ? t`收起第 ${splitSlotOf(id) + 1} 栏` : t("收起右栏"),
+                  run: () => void closeSplit(splitSlotOf(id), id)
+                }
+              : split.panes.length >= MAX_SPLIT_PANES || splitRoom() <= 0
+                ? { id: "split", label: t("在右栏打开"), note: splitFullByOthers() ? t("别处占着") : t("已满四栏"), disabled: true, run: () => {} }
+                : { id: "split", label: t("在右栏打开"), note: t("并排看"), run: () => void openSplit(id) }
+          ]),
       { id: "pin", label: c.pinned ? t("取消置顶") : t("置顶"), run: () => togglePin(id) },
       { id: "rename", label: t("改名"), run: () => startRename(id) },
       {
@@ -47,6 +60,10 @@ function newChat() {
   if (isMobile()) toggleSidebar(true);
 }
 function openConversation(id) {
+  // 右栏里要换对话的交回主页面开；开在某一栏的那段，左边不再开一份，光标送过去
+  if (PANE && id !== currentId && splitHandOff(id)) return;
+  const held = splitSlotOf(id);
+  if (held >= 0) return focusSplit(held);
   if (id !== currentId) {
     closeSidePanel();
     persistDraft();

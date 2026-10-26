@@ -425,7 +425,10 @@ check("zoom resets", (await evalJs(`__yanStage.state.zoom === 1`)) && (await win
 await evalJs(`document.querySelector("#stageMenuBtn").click(); true`);
 
 // 下载：网页里一开始下载，纸签上「下载」后记着数，下载签里列出来
-await browserSend("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: TMP.replace(/\//g, "\\") });
+await browserSend("Browser.setDownloadBehavior", {
+  behavior: "allow",
+  downloadPath: process.platform === "win32" ? TMP.replace(/\//g, "\\") : TMP
+});
 const dlPage =
   "data:text/html;charset=utf-8," +
   encodeURIComponent(`<title>下</title><a id="d" download="下载测.txt" href="data:text/plain,hi">下载</a>`);

@@ -95,6 +95,8 @@ const stage = {
 // ---------- 连上浏览器 ----------
 // 已连着时也问一回：模型若把别的页请到了前台（选签、新开），看台跟过去
 function stageLocate() {
+  // 栏页不接游目：调试口只有一个，几处页面同连会互抢画面与输入（见 27-split.js）
+  if (PANE) return Promise.resolve();
   if (stage.locating) return stage.locating;
   stage.locating = bridge("/api/stage", stageService())
     .then(({ ws, front, marks, port, output }) => {

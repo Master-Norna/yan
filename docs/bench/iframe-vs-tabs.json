@@ -1,0 +1,177 @@
+{
+  "branch": "experiment/iframe-split @ 87ed348",
+  "browser": "Chromium 130.0.6723.31 headless=new",
+  "os": "Debian 13 arm64, 2 vCPU, 8 GB",
+  "data": "30 conversations x 40 messages (~1.5 KB each, ~1.8 MB), fake OpenAI-compatible model",
+  "method": "K pages = main + (K-1) same-origin iframes, vs K separate windows each on a different conversation; settle 10 s, then Chrome-wide PSS (sum of smaps_rollup) and JS heap after GC; idle CPU over 20 s; all K send SLOWTEXT simultaneously (~8 s ideal)",
+  "results": [
+    {
+      "mode": "tabs",
+      "K": 2,
+      "renderers": 3,
+      "pssMB": 595.1,
+      "jsHeapMB": 23,
+      "openMs": [
+        730,
+        1166
+      ],
+      "idleChromeCores": 0.009,
+      "idleServerCores": 0.002,
+      "streamDoneMs": [
+        7822,
+        7822
+      ],
+      "streamChromeCores": 0.22
+    },
+    {
+      "mode": "iframe",
+      "K": 2,
+      "renderers": 2,
+      "pssMB": 502.7,
+      "jsHeapMB": 19.7,
+      "openMs": [
+        772,
+        1154
+      ],
+      "idleChromeCores": 0.007,
+      "idleServerCores": 0.001,
+      "streamDoneMs": [
+        7819,
+        7819
+      ],
+      "streamChromeCores": 0.22
+    },
+    {
+      "mode": "tabs",
+      "K": 3,
+      "renderers": 4,
+      "pssMB": 807.8,
+      "jsHeapMB": 34.5,
+      "openMs": [
+        813,
+        1537,
+        1502
+      ],
+      "idleChromeCores": 0.012,
+      "idleServerCores": 0.001,
+      "streamDoneMs": [
+        7915,
+        7857,
+        7914
+      ],
+      "streamChromeCores": 0.32
+    },
+    {
+      "mode": "iframe",
+      "K": 3,
+      "renderers": 2,
+      "pssMB": 523.1,
+      "jsHeapMB": 27.8,
+      "openMs": [
+        805,
+        611,
+        1222
+      ],
+      "idleChromeCores": 0.009,
+      "idleServerCores": 0.003,
+      "streamDoneMs": [
+        7914,
+        7914,
+        7914
+      ],
+      "streamChromeCores": 0.26
+    },
+    {
+      "mode": "tabs",
+      "K": 4,
+      "renderers": 5,
+      "pssMB": 979.8,
+      "jsHeapMB": 46.1,
+      "openMs": [
+        856,
+        1191,
+        1454,
+        1487
+      ],
+      "idleChromeCores": 0.014,
+      "idleServerCores": 0.004,
+      "streamDoneMs": [
+        8041,
+        8040,
+        8041,
+        8041
+      ],
+      "streamChromeCores": 0.42
+    },
+    {
+      "mode": "iframe",
+      "K": 4,
+      "renderers": 2,
+      "pssMB": 537.1,
+      "jsHeapMB": 36.1,
+      "openMs": [
+        843,
+        1269,
+        1199,
+        1163
+      ],
+      "idleChromeCores": 0.02,
+      "idleServerCores": 0.004,
+      "streamDoneMs": [
+        8096,
+        8148,
+        8148,
+        8148
+      ],
+      "streamChromeCores": 0.34
+    },
+    {
+      "mode": "tabs",
+      "K": 5,
+      "renderers": 6,
+      "pssMB": 1159.3,
+      "jsHeapMB": 57.6,
+      "openMs": [
+        858,
+        1610,
+        1238,
+        1562,
+        1536
+      ],
+      "idleChromeCores": 0.018,
+      "idleServerCores": 0.003,
+      "streamDoneMs": [
+        8183,
+        8127,
+        8075,
+        8183,
+        8114
+      ],
+      "streamChromeCores": 0.57
+    },
+    {
+      "mode": "iframe",
+      "K": 5,
+      "renderers": 2,
+      "pssMB": 606.5,
+      "jsHeapMB": 44.3,
+      "openMs": [
+        826,
+        1197,
+        1141,
+        1188,
+        602
+      ],
+      "idleChromeCores": 0.014,
+      "idleServerCores": 0.004,
+      "streamDoneMs": [
+        8015,
+        8016,
+        8068,
+        8069,
+        8069
+      ],
+      "streamChromeCores": 0.41
+    }
+  ]
+}
