@@ -138,7 +138,7 @@
  */
 /** @typedef {{ at: string, why: string, auto?: boolean }} Break 途中断过的一回：何时、为何；auto 是自动接着写上了的。续写不清，查「为何总断」时翻它 */
 /** @typedef {{ id: string, parentId: string|null, messages: Message[], createdAt: string }} Fork 被换下来的一段尾巴 */
-/** @typedef {{ id: string, anchor: { messageId: string, text: string, occurrence?: number }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注；occurrence 是所注的那段在正文里第几次出现（从 0 起） */
+/** @typedef {{ id: string, anchor: { messageId: string, text: string, occurrence?: number, trail?: boolean }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注；occurrence 是所注的那段在正文或行迹里第几次出现（从 0 起），trail 记行迹内的落点 */
 /**
  * @typedef {Object} Conversation
  * @property {string} id

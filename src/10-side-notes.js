@@ -45,7 +45,8 @@ function createThread(anchor) {
     anchor: {
       messageId: anchor.messageId,
       text: whole ? "" : String(anchor.text).slice(0, 1200),
-      occurrence: whole ? 0 : Number(anchor.occurrence) || 0
+      occurrence: whole ? 0 : Number(anchor.occurrence) || 0,
+      ...(anchor.trail ? { trail: true } : {})
     },
     createdAt: now(),
     updatedAt: now(),
@@ -97,11 +98,15 @@ function decorateNoteAnchors(article) {
   const bodies = [...article.querySelectorAll(".markdown, .user-bubble")].filter(
     body => !body.closest(".message-editor") && !body.parentElement?.closest(".markdown")
   );
+  const trail = article.querySelector(".tool-stack-body");
   for (const body of bodies) clearNoteAnchors(body);
+  if (trail) clearNoteAnchors(trail);
   const threads = threadsOf(c).filter(t => t.anchor.messageId === article.dataset.message && t.anchor.text);
-  if (!threads.length || !bodies.length) return; // 整条回复的旁注没有落点，靠元信息行的「注」标进入
-  // 正文可能不止一段（执事时间线里边做边说的话各在自己的分组里，末尾才是总结）：哪段里找得到就落在哪段
-  threads.forEach((thread, index) => bodies.some(body => markAnchor(body, thread, index + 1)));
+  if (!threads.length || (!bodies.length && !trail)) return; // 整条回复的旁注没有落点，靠元信息行的「注」标进入
+  // 旧旁注仍按正文找；行迹里的选择只落在行迹，正文里有同样的词也不抢落点。
+  threads.forEach((thread, index) =>
+    (thread.anchor.trail ? (trail ? [trail] : []) : bodies).some(body => markAnchor(body, thread, index + 1))
+  );
 }
 function clearNoteAnchors(body) {
   if (!body.querySelector("mark.note-anchor, sup.note-ref")) return;

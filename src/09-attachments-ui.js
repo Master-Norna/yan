@@ -105,7 +105,7 @@ function countOccurrences(haystack, needle) {
   for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) count += 1;
   return count;
 }
-// 正文里此刻划选的一段：所在消息、文字、第几次出现，以及它在页面上的位置。没划、划在正文之外、太短，都是 null
+// 消息里此刻划选的一段：正文与行迹各自数「第几次出现」，免得同文落到另一处。没划、划在消息之外、太短，都是 null
 function selectionAnchor() {
   const selection = getSelection();
   if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return null;
@@ -118,12 +118,19 @@ function selectionAnchor() {
     text = picked.textContent.trim();
   }
   const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
-  const body = host?.closest("#messages .message .markdown, #messages .message .user-bubble"),
-    article = body?.closest("[data-message]");
+  const article = host?.closest("#messages .message[data-message]"),
+    trail = article?.querySelector(".tool-stack-body"),
+    body = trail?.contains(host) ? trail : host?.closest(".markdown, .user-bubble");
   if (!body || !article || text.length < 2 || body.closest(".message-editor")) return null;
   const rect = range.getBoundingClientRect();
   if (!rect.width && !rect.height) return null;
-  return { text: text.slice(0, 1200), messageId: article.dataset.message, occurrence: occurrenceBefore(body, range, text), rect };
+  return {
+    text: text.slice(0, 1200),
+    messageId: article.dataset.message,
+    occurrence: occurrenceBefore(body, range, text),
+    ...(body === trail ? { trail: true } : {}),
+    rect
+  };
 }
 function setupQuoteTip() {
   const tip = $("#quoteTip");
