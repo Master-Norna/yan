@@ -46,7 +46,7 @@ function createThread(anchor) {
       messageId: anchor.messageId,
       text: whole ? "" : String(anchor.text).slice(0, 1200),
       occurrence: whole ? 0 : Number(anchor.occurrence) || 0,
-      ...(anchor.trail ? { trail: true } : {})
+      ...(anchor.trail ? { trail: anchor.trail } : {})
     },
     createdAt: now(),
     updatedAt: now(),
@@ -103,10 +103,13 @@ function decorateNoteAnchors(article) {
   if (trail) clearNoteAnchors(trail);
   const threads = threadsOf(c).filter(t => t.anchor.messageId === article.dataset.message && t.anchor.text);
   if (!threads.length || (!bodies.length && !trail)) return; // 整条回复的旁注没有落点，靠元信息行的「注」标进入
-  // 旧旁注仍按正文找；行迹里的选择只落在行迹，正文里有同样的词也不抢落点。
-  threads.forEach((thread, index) =>
-    (thread.anchor.trail ? (trail ? [trail] : []) : bodies).some(body => markAnchor(body, thread, index + 1))
-  );
+  // 旧旁注照原规则找；新行迹旁注只在保存的步骤／过程段内计数，别的步骤展开多少不影响它。
+  threads.forEach((thread, index) => {
+    const source = thread.anchor.trail;
+    const targets =
+      source === true ? (trail ? [trail] : []) : source ? [trailQuoteBodies(article, source)[source.index || 0]].filter(Boolean) : bodies;
+    targets.some(body => markAnchor(body, thread, index + 1));
+  });
 }
 function clearNoteAnchors(body) {
   if (!body.querySelector("mark.note-anchor, sup.note-ref")) return;
@@ -269,7 +272,7 @@ function renderSideIndex(c) {
 /** @param {Conversation} c */
 function indexNewAnchor(c) {
   const picked = selectionAnchor();
-  if (picked) return { messageId: picked.messageId, text: picked.text, occurrence: picked.occurrence };
+  if (picked) return picked;
   const id =
     (sideIndexFor && c.messages.some(m => m.id === sideIndexFor) ? sideIndexFor : null) ||
     [...c.messages].reverse().find(m => m.role === "assistant" && m.status !== "streaming")?.id ||

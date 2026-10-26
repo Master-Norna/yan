@@ -326,6 +326,11 @@ function bindTrailEvents() {
     morphHeight(el, () => {
       el.className = next.className;
       el.innerHTML = next.innerHTML;
+      const article = el.closest("#messages .message[data-message]");
+      if (article) {
+        decorateNoteAnchors(article);
+        syncActiveAnchor();
+      }
     });
     void loadThumbnails(el);
   };

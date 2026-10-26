@@ -105,7 +105,34 @@ function countOccurrences(haystack, needle) {
   for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) count += 1;
   return count;
 }
-// 消息里此刻划选的一段：正文与行迹各自数「第几次出现」，免得同文落到另一处。没划、划在消息之外、太短，都是 null
+// 行迹落点只认所选的步骤或过程段，不把别的步骤展开前后多出的文字算进同文序号。
+const TRAIL_QUOTE_BODIES = {
+  note: ".trail-note",
+  reasoning: ".reasoning-body",
+  code: ".tool-output.tool-code",
+  output: ".tool-output:not(.tool-code)",
+  results: ".tool-results",
+  result: ".tool-note",
+  report: ".sub-report"
+};
+/** @param {Element} article @param {TrailAnchor} source */
+function trailQuoteBodies(article, source) {
+  const selector = TRAIL_QUOTE_BODIES[source.kind],
+    step = source.stepId ? article.querySelector(`.tool-step[data-step-id="${CSS.escape(source.stepId)}"]`) : null,
+    scope = source.stepId ? step : article.querySelector(".tool-stack-body");
+  if (!selector || !scope) return [];
+  const group =
+    source.at === undefined
+      ? null
+      : [...scope.querySelectorAll(".trail-group[data-at]")].find(
+          el => Number(el.dataset.at) === source.at && el.closest(".tool-step[data-step-id]") === step
+        );
+  if (source.at !== undefined && !group) return [];
+  return [...(group || scope).querySelectorAll(selector)].filter(
+    body => body.closest(".tool-step[data-step-id]") === step && (!group || body.closest(".trail-group") === group)
+  );
+}
+// 消息里此刻划选的一段：所在消息、局部落点、同文序号与位置。没划、划在消息之外、太短，都是 null。
 function selectionAnchor() {
   const selection = getSelection();
   if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return null;
@@ -119,16 +146,32 @@ function selectionAnchor() {
   }
   const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
   const article = host?.closest("#messages .message[data-message]"),
-    trail = article?.querySelector(".tool-stack-body"),
-    body = trail?.contains(host) ? trail : host?.closest(".markdown, .user-bubble");
-  if (!body || !article || text.length < 2 || body.closest(".message-editor")) return null;
+    trail = article?.querySelector(".tool-stack-body");
+  let body = host?.closest(".markdown, .user-bubble");
+  /** @type {TrailAnchor|undefined} */
+  let source;
+  const part = host?.closest(Object.values(TRAIL_QUOTE_BODIES).join(", "));
+  if (part && trail?.contains(part)) {
+    const kind = Object.keys(TRAIL_QUOTE_BODIES).find(key => part.matches(TRAIL_QUOTE_BODIES[key])),
+      group = kind === "note" || kind === "reasoning" ? part.closest(".trail-group") : null;
+    // 流式末轮还可能移到最终正文：里面原有的 .markdown 仍走正文规则，不锁在临时行迹里。
+    if (!group || group.hasAttribute("data-at")) {
+      const step = part.closest(".tool-step[data-step-id]");
+      source = { kind, ...(step ? { stepId: step.dataset.stepId } : {}), ...(group ? { at: Number(group.dataset.at) } : {}) };
+      const index = trailQuoteBodies(article, source).indexOf(part);
+      if (index < 0) return null;
+      source.index = index;
+      body = part;
+    }
+  }
+  if (!body || !article || text.length < 2 || host.closest(".message-editor")) return null;
   const rect = range.getBoundingClientRect();
   if (!rect.width && !rect.height) return null;
   return {
     text: text.slice(0, 1200),
     messageId: article.dataset.message,
     occurrence: occurrenceBefore(body, range, text),
-    ...(body === trail ? { trail: true } : {}),
+    ...(source ? { trail: source } : {}),
     rect
   };
 }
