@@ -128,13 +128,13 @@ function textNodesIn(root) {
   while (walker.nextNode()) nodes.push(walker.currentNode);
   return nodes;
 }
-// 第 n 次出现的位置（n 从 0 起）；不够 n 次就退到第一次，一次也没有才是 -1
-function nthIndexOf(haystack, needle, n) {
+// 第 n 次出现的位置（n 从 0 起）；正文沿用不够时保留已有匹配，行迹 exact 则必须找到指定那一次。
+function nthIndexOf(haystack, needle, n, exact = false) {
   if (!needle) return -1;
   let at = haystack.indexOf(needle);
   for (let i = 0; i < n && at >= 0; i++) {
     const next = haystack.indexOf(needle, at + 1);
-    if (next < 0) break;
+    if (next < 0) return exact ? -1 : at;
     at = next;
   }
   return at;
@@ -149,10 +149,12 @@ function markAnchor(body, thread, ordinal) {
     starts.push(joined.length);
     joined += node.data;
   }
-  // 同样的词在这条回复里出现不止一次时，按记下的「第几次」落；这一版里没那么多次了（改过、另一版本）就退到第一处
+  // 行迹会只展示前十行：所注的那一次暂时不可见，就不借用前面的同文；展开后再恢复。
+  // 同文序号与 occurrenceBefore 一样按去空白后的文字找，免得前面的空白写法不同，落到后面去了。正文保留原有回退。
   const needle = thread.anchor.text,
-    occurrence = Number(thread.anchor.occurrence) || 0;
-  let from = nthIndexOf(joined, needle, occurrence),
+    occurrence = Number(thread.anchor.occurrence) || 0,
+    exact = !!thread.anchor.trail;
+  let from = exact ? -1 : nthIndexOf(joined, needle, occurrence),
     to = from + needle.length;
   if (from < 0) {
     // 划选得到的文字与渲染文字在空白上多半不一致（换行、缩进；跨段划选时段与段之间有换行、而文字节点连起来没有）：
@@ -165,7 +167,7 @@ function markAnchor(body, thread, ordinal) {
       map.push(i);
     }
     const target = needle.replace(/\s+/g, ""),
-      at = nthIndexOf(folded, target, occurrence);
+      at = nthIndexOf(folded, target, occurrence, exact);
     if (at < 0 || !target) return false;
     from = map[at];
     to = map[at + target.length - 1] + 1;

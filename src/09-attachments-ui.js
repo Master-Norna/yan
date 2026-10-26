@@ -121,13 +121,15 @@ function trailQuoteBodies(article, source) {
     step = source.stepId ? article.querySelector(`.tool-step[data-step-id="${CSS.escape(source.stepId)}"]`) : null,
     scope = source.stepId ? step : article.querySelector(".tool-stack-body");
   if (!selector || !scope) return [];
-  const group =
-    source.at === undefined
+  // 过程组认其中一步的 id：收尾裁掉开头空行时 data-at 会前移，步骤身份不变。
+  const group = source.groupId
+    ? scope.querySelector(`.tool-step[data-step-id="${CSS.escape(source.groupId)}"]`)?.closest(".trail-group")
+    : source.at === undefined
       ? null
       : [...scope.querySelectorAll(".trail-group[data-at]")].find(
           el => Number(el.dataset.at) === source.at && el.closest(".tool-step[data-step-id]") === step
         );
-  if (source.at !== undefined && !group) return [];
+  if ((source.groupId || source.at !== undefined) && (!group || group.closest(".tool-step[data-step-id]") !== step)) return [];
   return [...(group || scope).querySelectorAll(selector)].filter(
     body => body.closest(".tool-step[data-step-id]") === step && (!group || body.closest(".trail-group") === group)
   );
@@ -156,8 +158,10 @@ function selectionAnchor() {
       group = kind === "note" || kind === "reasoning" ? part.closest(".trail-group") : null;
     // 流式末轮还可能移到最终正文：里面原有的 .markdown 仍走正文规则，不锁在临时行迹里。
     if (!group || group.hasAttribute("data-at")) {
-      const step = part.closest(".tool-step[data-step-id]");
-      source = { kind, ...(step ? { stepId: step.dataset.stepId } : {}), ...(group ? { at: Number(group.dataset.at) } : {}) };
+      const step = part.closest(".tool-step[data-step-id]"),
+        groupId = group?.querySelector(".tool-step[data-step-id]")?.dataset.stepId;
+      if (group && !groupId) return null;
+      source = { kind, ...(step ? { stepId: step.dataset.stepId } : {}), ...(groupId ? { groupId } : {}) };
       const index = trailQuoteBodies(article, source).indexOf(part);
       if (index < 0) return null;
       source.index = index;

@@ -1,7 +1,7 @@
-// 审阅回归：目录另起旁注、流式尾段收尾、前一步展开后定位、工具输出重画。
+// 审阅回归：目录入口、流式收尾、局部定位、输出重画与隐藏位置。
 import { mkdirSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, WORK } from "./lib.mjs";
-const { send, evalJs, waitFor, close } = await connect();
+const { send, evalJs, waitFor, shot, close } = await connect();
 mkdirSync(WORK + "/src", { recursive: true });
 writeFileSync(WORK + "/src/a.js", "export const value = 1;\n");
 await send("Page.navigate", { url: PAGE + "preview.html" });
@@ -11,9 +11,15 @@ await evalJs(
 );
 const first = "先读取文件。\n\n",
   later = "目录片段在这里，重复片段也在这一步核对。\n\n",
-  output = ["输出首行需要核对。", ...Array.from({ length: 9 }, (_, i) => `第 ${i + 2} 行`), "重复片段藏在第十一行。", "最后一行。"].join(
-    "\n"
-  ),
+  output = [
+    "输出首行需要核对，重复片段在首行。",
+    "空白 片段在第二行。",
+    "空白片段在第三行。",
+    "空白片段在第四行。",
+    ...Array.from({ length: 6 }, (_, i) => `第 ${i + 5} 行`),
+    "重复片段藏在第十一行。",
+    "最后一行。"
+  ].join("\n"),
   process = `#messages .trail-group[data-at="${first.length + later.length}"] .trail-note`,
   step = '#messages .tool-step[data-step-id="first-read"]';
 await fetch(PAGE + "api/chats/save", {
@@ -77,11 +83,11 @@ await waitFor(`!!document.querySelector('[data-conversation="trail-lifecycle"]')
 await evalJs(`document.querySelector('[data-conversation="trail-lifecycle"] .history-open').click(); true`);
 await waitFor(`!!document.querySelector(${JSON.stringify(process)})`);
 await sleep(400);
-const select = async (selector, text, streaming = false) => {
+const select = async (selector, text, streaming = false, occurrence = 0) => {
   await evalJs(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: "center", behavior: "instant" }); true`);
   if (!streaming) await sleep(150);
   await evalJs(
-    `(() => { const body = document.querySelector(${JSON.stringify(selector)}), w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT); let n; while (n = w.nextNode()) { const at = n.data.indexOf(${JSON.stringify(text)}); if (at < 0) continue; const r = document.createRange(); r.setStart(n, at); r.setEnd(n, at + ${text.length}); getSelection().removeAllRanges(); getSelection().addRange(r); return true; } return false; })()`
+    `(() => { const body = document.querySelector(${JSON.stringify(selector)}), w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT); let n, found = 0; while (n = w.nextNode()) { for (let at = n.data.indexOf(${JSON.stringify(text)}); at >= 0; at = n.data.indexOf(${JSON.stringify(text)}, at + 1)) { if (found++ !== ${occurrence}) continue; const r = document.createRange(); r.setStart(n, at); r.setEnd(n, at + ${text.length}); getSelection().removeAllRanges(); getSelection().addRange(r); return true; } } return false; })()`
   );
   await waitFor(`!document.querySelector('#quoteTip').classList.contains('hidden')`, 3000);
 };
@@ -107,12 +113,12 @@ await closeSide();
 // 第一份输出的同文原先不在 DOM 中，展开它不应改变后一步旁注的身份。
 check(
   "earlier matching output starts clipped",
-  !(await evalJs(`document.querySelector(${JSON.stringify(step + " .tool-output")}).textContent.includes('重复片段')`))
+  !(await evalJs(`document.querySelector(${JSON.stringify(step + " .tool-output")}).textContent.includes('第十一行')`))
 );
 await select(process, "重复片段");
 await noteSelection();
 await evalJs(`document.querySelector(${JSON.stringify(step + " [data-step-more]")}).click(); true`);
-await waitFor(`document.querySelector(${JSON.stringify(step + " .tool-output")}).textContent.includes('重复片段')`);
+await waitFor(`document.querySelector(${JSON.stringify(step + " .tool-output")}).textContent.includes('第十一行')`);
 await sleep(1200);
 await send("Page.reload");
 await sleep(1200);
@@ -137,6 +143,45 @@ for (const mode of ["clipped", "full"]) {
 }
 await closeSide();
 
+// 第二处同文在第十一行：收短只是藏起目标，不能把它借给首行；重新展开才恢复。
+await select(step + " .tool-output", "重复片段", false, 1);
+await noteSelection();
+const hiddenThread = await evalJs(`document.querySelector(${JSON.stringify(step + " mark.note-anchor.active")}).dataset.thread`),
+  hiddenMark = `${step} mark.note-anchor[data-thread="${hiddenThread}"]`,
+  hiddenRef = `${step} sup.note-ref[data-thread="${hiddenThread}"]`;
+check("second output occurrence gets its own note", await evalJs(`!!document.querySelector(${JSON.stringify(hiddenMark)})`));
+await evalJs(`document.querySelector(${JSON.stringify(step + " [data-step-more]")}).click(); true`);
+await sleep(450);
+check(
+  "clipping hides the second occurrence without marking the first",
+  await evalJs(`!document.querySelector(${JSON.stringify(hiddenMark + ", " + hiddenRef)})`)
+);
+await sleep(1200);
+await send("Page.reload");
+await waitFor(`!!document.querySelector(${JSON.stringify(step + " [data-step-more]")})`);
+await sleep(500);
+check(
+  "clipped reload does not borrow the visible occurrence",
+  await evalJs(`!document.querySelector(${JSON.stringify(hiddenMark + ", " + hiddenRef)})`)
+);
+await evalJs(`document.querySelector(${JSON.stringify(step + " [data-step-more]")}).click(); true`);
+await sleep(450);
+check(
+  "expanding restores the second occurrence and its reference",
+  await evalJs(
+    `(() => { const mark = document.querySelector(${JSON.stringify(hiddenMark)}), body = document.querySelector(${JSON.stringify(step + " .tool-output")}); if (!mark || !document.querySelector(${JSON.stringify(hiddenRef)})) return false; const r = document.createRange(); r.selectNodeContents(body); r.setEndBefore(mark); return r.toString().split('重复片段').length - 1 === 1; })()`
+  )
+);
+await select(step + " .tool-output", "空白片段");
+await noteSelection();
+check(
+  "local occurrence uses the same whitespace folding when saved and restored",
+  await evalJs(
+    `(() => { const body = document.querySelector(${JSON.stringify(step + " .tool-output")}), mark = body.querySelector('mark.note-anchor.active'); if (!mark) return false; const r = document.createRange(); r.selectNodeContents(body); r.setEndBefore(mark); return r.toString().includes('第二行') && !r.toString().includes('第三行'); })()`
+  )
+);
+await closeSide();
+
 // 使用既有慢流式模型，真实经过尾段从行迹移到最终正文的生命周期。
 await evalJs(`document.querySelector('#newChat').click(); true`);
 await sleep(200);
@@ -156,4 +201,50 @@ await send("Page.reload");
 await sleep(1200);
 await waitFor(`!!document.querySelector('#messages .assistant-block > .markdown')`);
 check("streaming tail note stays in final body after reload", await evalJs(hasMark("#messages .assistant-block > .markdown", "尾段第1句")));
+
+// 已固定的过程组也能在生成中建注；收尾裁掉开头空行时，组的内容偏移会前移。
+await evalJs(`document.querySelector('#newChat').click(); true`);
+await sleep(200);
+await evalJs(
+  `document.querySelector('#welcomeInput').value = 'TRAILLEAD'; document.querySelector('#welcomeInput').dispatchEvent(new Event('input')); document.querySelector('#welcome .send-trigger').click(); true`
+);
+const fixed = "#messages .trail-group[data-at]";
+await waitFor(`document.querySelector('#messages .trail-live .markdown')?.textContent.includes('收尾第1句')`, 10000);
+const oldAt = await evalJs(`Number(document.querySelector(${JSON.stringify(fixed)}).dataset.at)`);
+await select(fixed + " .trail-note", "固定过程", true);
+await noteSelection();
+await closeSide();
+await evalJs(`document.querySelector(${JSON.stringify(fixed + " .reasoning summary")}).click(); true`);
+await select(fixed + " .reasoning-body", "固定思绪", true);
+await noteSelection();
+check(
+  "both fixed-group notes are created while still streaming",
+  await evalJs(`document.querySelector('#messages .message.assistant').dataset.status === 'streaming'`)
+);
+await waitFor(`document.querySelector('#messages .message.assistant')?.dataset.status === 'complete'`, 12000);
+check(
+  "completion trims the fixed group's leading offset",
+  await evalJs(`Number(document.querySelector(${JSON.stringify(fixed)}).dataset.at) === ${oldAt - 2}`)
+);
+check("fixed process note survives leading newline trim", await evalJs(hasMark(fixed + " .trail-note", "固定过程")));
+check("fixed reasoning note survives leading newline trim", await evalJs(hasMark(fixed + " .reasoning-body", "固定思绪")));
+await sleep(1200);
+await send("Page.reload");
+await waitFor(`!!document.querySelector(${JSON.stringify(fixed + " .trail-note")})`);
+await sleep(500);
+check("trimmed process note survives reload", await evalJs(hasMark(fixed + " .trail-note", "固定过程")));
+check("trimmed reasoning note survives reload", await evalJs(hasMark(fixed + " .reasoning-body", "固定思绪")));
+await evalJs(
+  `const stack = document.querySelector('#messages .tool-stack'); if (!stack.open) stack.querySelector(':scope > summary').click(); true`
+);
+await sleep(400);
+await evalJs(`document.querySelector(${JSON.stringify(fixed + " .trail-note mark.note-anchor")})?.click(); true`);
+await sleep(250);
+check(
+  "trimmed process note reopens from its visible text",
+  await evalJs(
+    `document.querySelector(${JSON.stringify(fixed + " .trail-note mark.note-anchor")})?.getBoundingClientRect().height > 0 && !document.querySelector('#sidePanel').classList.contains('hidden') && document.querySelector('#sideAnchor').textContent.includes('固定过程')`
+  )
+);
+await shot("trail-selection-trim.png");
 close();

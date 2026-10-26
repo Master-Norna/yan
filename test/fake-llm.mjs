@@ -1675,6 +1675,30 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      // TRAILLEAD：开头空行在收尾时会被裁掉；留出慢流式末轮，供固定过程话与思绪建旁注。
+      if (typeof lastUser === "string" && lastUser.includes("TRAILLEAD")) {
+        if (!toolResults.length)
+          return sse(res, [
+            delta({ reasoning_content: "固定思绪需要保留落点。" }),
+            delta({ content: "\n\n固定过程需要保留落点。\n\n" }),
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_lead",
+                  type: "function",
+                  function: { name: "read_file", arguments: JSON.stringify({ path: "src/a.js" }) }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(
+          res,
+          [...Array.from({ length: 24 }, (_, i) => delta({ content: `收尾第${i + 1}句。` })), delta({}, { usage: { total_tokens: 5 } })],
+          250
+        );
+      }
       // DUPTAIL：第一轮调 read_file，第二轮慢慢说一段话（约 3 秒）；用于确认生成中切走再回来，最后一步之后的话不被画两份
       if (typeof lastUser === "string" && lastUser.includes("DUPTAIL")) {
         if (!toolResults.length)

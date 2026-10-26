@@ -20,7 +20,7 @@
  * @property {string} [skill] 点名用的技能（「＋」→「技能」置入的那份说明）：附件条画锦囊、写这个名字
  * @property {boolean} [quoted] 随引文的画面（游目圈点）：不进附件栏，画在引文里；引文撤了它跟着撤
  */
-/** @typedef {{ kind: string, stepId?: string, at?: number, index?: number }} TrailAnchor 行迹局部落点：步骤 id 或过程段的内容边界，加上其中哪一类文字；index 区分同一处的同类容器 */
+/** @typedef {{ kind: string, stepId?: string, groupId?: string, at?: number, index?: number }} TrailAnchor 行迹局部落点：步骤 id、过程组中一步的 id 与文字种类；at 兼容早先的边界记录，index 区分同一处的同类容器 */
 /** @typedef {{ text: string, messageId?: string, model?: string, url?: string, image?: string, trail?: TrailAnchor|true }} Quote 引用追问：划选的一段与它所在的消息（旁注锚文本作引文时没有 messageId）；游目圈点的另带给模型的一份与网址，image 是那幅画面的附件 id（附件照常随消息走，只是画在引文里） */
 /** @typedef {{ id: string, name: string, arguments: string }} ToolCall 流式拼出的一次工具调用 */
 /** @typedef {{ prompt_tokens: number, completion_tokens: number, total_tokens: number, cached_tokens?: number }} Usage cached_tokens：提示里读自缓存的部分 */
