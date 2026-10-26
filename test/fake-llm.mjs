@@ -1727,6 +1727,17 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      // TRAILPENDING：没有句尾落点，补言一直待寄；其后正文仍在流，供停止时核对旁注来源迁移。
+      if (typeof lastUser === "string" && lastUser.includes("TRAILPENDING"))
+        return sse(
+          res,
+          [
+            delta({ content: "前段重复短语缓缓写出" }),
+            ...Array.from({ length: 30 }, (_, i) => delta({ content: `接续文字${i + 1}${i === 8 ? "目标短语和重复短语" : ""}` })),
+            delta({}, { usage: { total_tokens: 5 } })
+          ],
+          300
+        );
       // TRAILMOVE：工具后的新思绪暂并入旧组；随后收尾、停止或再调工具，都应按文字来源保住旁注。
       if (typeof lastUser === "string" && lastUser.includes("TRAILMOVE")) {
         const call = id => ({

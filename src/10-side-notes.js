@@ -8,6 +8,29 @@ const noteCounts = new Map(); // messageId → 旁注数；参与消息签名，
 function threadsOf(c) {
   return c?.threads || [];
 }
+// 待寄步骤撤下时，跟着它的过程话并没有消失；把旁注改认前一条仍在的步骤。
+function rebaseRemovedStepNotes(conversation, assistant, removed) {
+  const steps = assistant.steps || [],
+    kept = steps.filter(step => !removed.has(step.id));
+  for (const thread of threadsOf(conversation)) {
+    const anchor = thread.anchor,
+      source = anchor?.trail;
+    if (anchor.messageId !== assistant.id || source?.kind !== "note" || !removed.has(source.after)) continue;
+    const index = steps.findIndex(step => step.id === source.after);
+    if (index < 0) continue;
+    const prior = steps
+        .slice(0, index)
+        .reverse()
+        .find(step => !removed.has(step.id)),
+      from = Number(prior?.at) || 0,
+      to = Number(steps[index]?.at) || 0;
+    // 撤下后两段话合在一起，原先局部同文序号要算上前一段。
+    anchor.occurrence =
+      (Number(anchor.occurrence) || 0) + countOccurrences(foldSpace(assistant.content.slice(from, to)), foldSpace(anchor.text));
+    if (kept.length) source.after = prior?.id || "";
+    else delete anchor.trail;
+  }
+}
 // 旁注跟着它所注的那一问一答走：换到另一条分支，注在被换下去的那几条上的旁注便不在眼前（仍在册，换回来就回来）
 /** @param {Conversation} c */
 function visibleThreads(c) {

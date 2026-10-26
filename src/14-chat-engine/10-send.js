@@ -291,17 +291,18 @@ async function deliverSupplements(job, history, budget, host, options = {}) {
  */
 function settleSupplements(conversation, assistant, job, profile) {
   const queue = (job.queue || []).filter(item => item.user),
-    reports = (job.queue || []).filter(item => item.report !== undefined);
+    reports = (job.queue || []).filter(item => item.report !== undefined),
+    ids = new Set(queue.map(item => item.step.id));
   job.queue = [];
   // 回报在行迹里落的那一步还没递到：撤下，回报另起一答（那里有它自己的细线）
   const unsent = new Set(reports.map(item => item.note?.id).filter(Boolean));
+  if (ids.size || unsent.size) rebaseRemovedStepNotes(conversation, assistant, new Set([...ids, ...unsent]));
   if (unsent.size) assistant.steps = (assistant.steps || []).filter(step => !unsent.has(step.id));
   for (const item of reports) delete item.note;
   // 收尾前才到、没来得及递的帮手回报：照没在作答时寄（见 mailReport）。补言若另起一问，回报就并进那一答——
   // 所以先排补言的那一问、后寄回报。用户按了停的，帮手一并停了，已到的回报也不再另起一答
   const mail = () => assistant.status !== "stopped" && reports.forEach(item => mailReport(conversation, item));
   if (!queue.length) return mail();
-  const ids = new Set(queue.map(item => item.step.id));
   assistant.steps = (assistant.steps || []).filter(step => !ids.has(step.id));
   if (!assistant.steps.length) delete assistant.steps;
   const users = queue.map(item => item.user),
