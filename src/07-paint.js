@@ -121,6 +121,7 @@ function paintBlock(block, message, o) {
     work = trailWork(message),
     // 收尾前对照放了行（见 trailCoda）：它不进行迹，正文从它处断开——之前的答复、这一步、它引出的思绪与几句，照实际的先后排
     coda = work ? trailCoda(message) : null,
+    noteAfter = (coda ? source.steps?.at(-2) : source.steps?.at(-1))?.id || "",
     cut = coda ? Math.max(trailBase(message), Number(coda.at) || 0) : content.length,
     rcut = coda ? Math.max(trailReasoningBase(message), Number(coda.rat) || 0) : reasoning.length;
   /** @type {Part[]} */
@@ -145,9 +146,13 @@ function paintBlock(block, message, o) {
     if (text)
       parts.push({
         key: "main",
-        sig: `${streaming}|${text}`,
+        sig: `${streaming}|${noteAfter}|${text}`,
         html: () => `<div class="markdown"></div>`,
-        paint: el => paintMarkdown(el, text, { streaming, fresh })
+        paint: el => {
+          if (work) el.dataset.noteAfter = noteAfter;
+          else delete el.dataset.noteAfter;
+          paintMarkdown(el, text, { streaming, fresh });
+        }
       });
   }
   if (coda) {
@@ -161,7 +166,10 @@ function paintBlock(block, message, o) {
         key: "coda-said",
         sig: after,
         html: () => `<div class="markdown"></div>`,
-        paint: el => paintMarkdown(el, after, { streaming: false, fresh: [] })
+        paint: el => {
+          el.dataset.noteAfter = coda.id;
+          paintMarkdown(el, after, { streaming: false, fresh: [] });
+        }
       });
   }
   const drafting = !work && streaming ? draftingLabel(message) : "";
@@ -257,6 +265,9 @@ function paintMarkdown(el, text, { streaming = false, fresh = [] } = {}) {
   if (el._mdText === src && el._mdFinal === !streaming) return;
   let stable = el._mdStable,
     tail = el.querySelector(":scope > .md-tail");
+  // 用户正划着尾段时先留住这批文字节点，免得下一帧重画把选区撤掉。
+  const selection = streaming && tail && getSelection();
+  if (selection?.rangeCount && !selection.isCollapsed && selection.getRangeAt(0).intersectsNode(tail)) return;
   const cached = stable !== undefined && !!tail && src.startsWith(stable);
   el._mdText = src;
   el._mdFinal = !streaming;
@@ -470,6 +481,7 @@ function paintTimeline(body, source, o) {
           el,
           {
             at: group.at,
+            after: i ? groups[i - 1].steps.at(-1).id : "",
             thought: ownCopy(reasoning.slice(group.rfrom, tip && merged ? undefined : group.rat).trim()),
             thinking: tip && merged && thinking,
             note: ownCopy(
@@ -486,6 +498,7 @@ function paintTimeline(body, source, o) {
   });
   const tail = {
     tail: true,
+    after: last?.steps.at(-1)?.id || "",
     thought: merged ? "" : thought,
     thinking,
     note: o.helper ? (o.live ? said.trim() : "") : o.live ? said : "",
@@ -504,7 +517,7 @@ function paintTimeline(body, source, o) {
 /**
  * 一组：思绪、说的话、各步；末尾进行中的那一组另有正拟的调用、帮手的「正在凝神」
  * @param {Element} el
- * @param {{ tail?: boolean, at?: number, thought: string, thinking: boolean, note: string, steps?: Step[], drafting?: string, idle?: boolean }} g
+ * @param {{ tail?: boolean, at?: number, after: string, thought: string, thinking: boolean, note: string, steps?: Step[], drafting?: string, idle?: boolean }} g
  * @param {Message|SubAgent} source
  */
 function paintTrailGroup(el, g, source, o) {
@@ -530,9 +543,10 @@ function paintTrailGroup(el, g, source, o) {
   if (g.note.trim())
     parts.push({
       key: "note",
-      sig: `${streamingNote}|${g.note}`,
+      sig: `${streamingNote}|${g.after}|${g.note}`,
       html: () => `<div class="trail-note"></div>`,
       paint: node => {
+        node.dataset.noteAfter = g.after;
         node.classList.toggle("sub-said", tail && !!o.helper);
         if (!streamingNote) return paintMarkdown(node, g.note);
         if (node.childElementCount !== 1 || !node.firstElementChild.classList.contains("markdown")) {

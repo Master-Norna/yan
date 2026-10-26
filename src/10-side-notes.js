@@ -98,17 +98,38 @@ function decorateNoteAnchors(article) {
   const bodies = [...article.querySelectorAll(".markdown, .user-bubble")].filter(
     body => !body.closest(".message-editor") && !body.parentElement?.closest(".markdown")
   );
-  const trail = article.querySelector(".tool-stack-body");
+  const trail = article.querySelector(".tool-stack-body"),
+    thoughts = [...article.querySelectorAll(".reasoning-body")];
   for (const body of bodies) clearNoteAnchors(body);
   if (trail) clearNoteAnchors(trail);
+  for (const body of thoughts) clearNoteAnchors(body);
   const threads = threadsOf(c).filter(t => t.anchor.messageId === article.dataset.message && t.anchor.text);
-  if (!threads.length || (!bodies.length && !trail)) return; // 整条回复的旁注没有落点，靠元信息行的「注」标进入
-  // 旧旁注照原规则找；新行迹旁注只在保存的步骤／过程段内计数，别的步骤展开多少不影响它。
+  if (!threads.length || (!bodies.length && !trail && !thoughts.length)) return; // 整条回复的旁注没有落点，靠元信息行的「注」标进入
+  // 思绪跟随文字范围，正文认它前面的步骤，工具内容只在所属步骤里计数；已有正文旁注照原规则找。
   threads.forEach((thread, index) => {
     const source = thread.anchor.trail;
-    const targets =
-      source === true ? (trail ? [trail] : []) : source ? [trailQuoteBodies(article, source)[source.index || 0]].filter(Boolean) : bodies;
+    if (source?.offset !== undefined) return markStreamAnchor(article, thread, index + 1);
+    const targets = source ? [trailQuoteBodies(article, source)[source.index || 0]].filter(Boolean) : bodies;
     targets.some(body => markAnchor(body, thread, index + 1));
+  });
+}
+// 先核对文字流中保存的范围，再按此刻的容器分段落墨；跨过收尾后拆开的思绪也只在末端留一枚脚注。
+/** @param {Thread} thread */
+function markStreamAnchor(article, thread, ordinal) {
+  const source = thread.anchor.trail;
+  if (!source || typeof source.offset !== "number") return;
+  const bodies = trailThoughtBodies(article, source.stepId),
+    texts = bodies.map(body => foldSpace(quoteBodyText(body))),
+    needle = foldSpace(thread.anchor.text),
+    from = source.offset,
+    to = from + needle.length;
+  if (!Number.isInteger(from) || from < 0 || !needle || texts.join("").slice(from, to) !== needle) return;
+  let start = 0;
+  bodies.forEach((body, i) => {
+    const left = Math.max(0, from - start),
+      right = Math.min(texts[i].length, to - start);
+    if (left < right) markAnchor(body, thread, start + right === to ? ordinal : 0, { from: left, text: texts[i].slice(left, right) });
+    start += texts[i].length;
   });
 }
 function clearNoteAnchors(body) {
@@ -121,7 +142,7 @@ function textNodesIn(root) {
   const nodes = [],
     walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: node =>
-        node.parentElement?.closest(".viz-pending, .html-app, .math-pending, sup.note-ref")
+        node.parentElement?.closest(".viz, .viz-pending, .html-app, .math-pending, .katex, .katex-error, sup.note-ref")
           ? NodeFilter.FILTER_REJECT
           : NodeFilter.FILTER_ACCEPT
     });
@@ -139,9 +160,10 @@ function nthIndexOf(haystack, needle, n, exact = false) {
   }
   return at;
 }
-/** @param {Thread} thread */
-function markAnchor(body, thread, ordinal) {
-  const nodes = textNodesIn(body);
+/** @param {Thread} thread @param {{ from: number, text: string }|null} [span] */
+function markAnchor(body, thread, ordinal, span = null) {
+  const nodes = textNodesIn(body),
+    active = thread.id === sideThreadId ? " active" : "";
   if (!nodes.length) return false;
   const starts = [];
   let joined = "";
@@ -151,10 +173,11 @@ function markAnchor(body, thread, ordinal) {
   }
   // 行迹会只展示前十行：所注的那一次暂时不可见，就不借用前面的同文；展开后再恢复。
   // 同文序号与 occurrenceBefore 一样按去空白后的文字找，免得前面的空白写法不同，落到后面去了。正文保留原有回退。
-  const needle = thread.anchor.text,
+  const needle = span?.text ?? thread.anchor.text,
     occurrence = Number(thread.anchor.occurrence) || 0,
-    exact = !!thread.anchor.trail;
-  let from = exact ? -1 : nthIndexOf(joined, needle, occurrence),
+    local = !!thread.anchor.trail,
+    exact = local && thread.anchor.trail.kind !== "note";
+  let from = span || local ? -1 : nthIndexOf(joined, needle, occurrence),
     to = from + needle.length;
   if (from < 0) {
     // 划选得到的文字与渲染文字在空白上多半不一致（换行、缩进；跨段划选时段与段之间有换行、而文字节点连起来没有）：
@@ -167,7 +190,7 @@ function markAnchor(body, thread, ordinal) {
       map.push(i);
     }
     const target = needle.replace(/\s+/g, ""),
-      at = nthIndexOf(folded, target, occurrence, exact);
+      at = span ? span.from : nthIndexOf(folded, target, occurrence, exact);
     if (at < 0 || !target) return false;
     from = map[at];
     to = map[at + target.length - 1] + 1;
@@ -185,20 +208,20 @@ function markAnchor(body, thread, ordinal) {
     if (s > nodeStart) target = node.splitText(s - nodeStart);
     if (e < nodeEnd) target.splitText(e - s);
     const mark = document.createElement("mark");
-    mark.className = "note-anchor";
+    mark.className = `note-anchor${active}`;
     mark.dataset.thread = thread.id;
     mark.title = t("打开这条旁注");
     target.replaceWith(mark);
     mark.append(target);
-    if (!tagged) {
+    if (!tagged && ordinal) {
       const ref = document.createElement("sup");
-      ref.className = "note-ref";
+      ref.className = `note-ref${active}`;
       ref.dataset.thread = thread.id;
       ref.textContent = String(ordinal);
       ref.title = t("打开这条旁注");
       mark.after(ref);
-      tagged = true;
     }
+    tagged = true;
   }
   return tagged;
 }
@@ -274,7 +297,7 @@ function renderSideIndex(c) {
 /** @param {Conversation} c */
 function indexNewAnchor(c) {
   const picked = selectionAnchor();
-  if (picked) return picked;
+  if (picked) return picked.canNote ? picked : null;
   const id =
     (sideIndexFor && c.messages.some(m => m.id === sideIndexFor) ? sideIndexFor : null) ||
     [...c.messages].reverse().find(m => m.role === "assistant" && m.status !== "streaming")?.id ||

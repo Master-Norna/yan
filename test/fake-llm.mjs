@@ -1078,6 +1078,58 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      // TRAILCODA：真正经过立意和自动收尾对照；留出划选窗口，比较对照后收尾与继续调工具两种去向。
+      if (firstUser.includes("TRAILCODA")) {
+        const call = id => ({
+          index: 0,
+          id,
+          type: "function",
+          function: { name: "read_file", arguments: JSON.stringify({ path: "src/a.js" }) }
+        });
+        if (lastUser.startsWith("［收尾前对照意］")) {
+          if (toolResults.some(t => t.tool_call_id === "call_after_gate"))
+            return sse(res, [delta({ content: "对照之后又读过文件，收尾。" }), delta({}, { usage: { total_tokens: 5 } })]);
+          return sse(
+            res,
+            [
+              delta({ reasoning_content: "门后思绪。同文思绪在对照后。" }),
+              ...Array.from({ length: 24 }, (_, i) => delta({ content: `对照后第${i + 1}句。` })),
+              ...(firstUser.includes("MORE") ? [delta({ tool_calls: [call("call_after_gate")] })] : []),
+              delta({}, { usage: { total_tokens: 5 } })
+            ],
+            250
+          );
+        }
+        if (!toolResults.length)
+          return sse(res, [
+            delta({ reasoning_content: "同文思绪在旧过程。" }),
+            delta({ content: "\n\n门前重复在旧过程。\n\n" }),
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_coda_intent",
+                  type: "function",
+                  function: {
+                    name: "update_intent",
+                    arguments: JSON.stringify({
+                      nodes: [
+                        { id: "核对", claim: "核对输出", check: "文字完整", root: true, needs: ["读取"] },
+                        { id: "读取", claim: "文件已读", check: "已核对内容", anchors: ["file:src/a.js"] }
+                      ]
+                    })
+                  }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [
+          delta({ reasoning_content: "同文思绪在对照前。" }),
+          delta({ content: "**门前重复**在最终答复。" }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       // 收尾前对照意：递来的那句话原样回显，就此收尾（只拦一回，回显之后不该再来）
       // HOOK2 被拦下后要接着改，由下面 HOOK 那一段接
       if (
@@ -1674,6 +1726,37 @@ http
           }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
+      }
+      // TRAILMOVE：工具后的新思绪暂并入旧组；随后收尾、停止或再调工具，都应按文字来源保住旁注。
+      if (typeof lastUser === "string" && lastUser.includes("TRAILMOVE")) {
+        const call = id => ({
+          index: 0,
+          id,
+          type: "function",
+          function: { name: "read_file", arguments: JSON.stringify({ path: "src/a.js" }) }
+        });
+        if (!toolResults.length)
+          return sse(res, [
+            delta({ reasoning_content: "同文思绪在旧过程。跨段起点。" }),
+            delta({ content: "\n\n旧过程先读取文件。\n\n" }),
+            delta({ tool_calls: [call("call_move_first")] }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        if (toolResults.length > 1)
+          return sse(res, [delta({ content: "新思绪已归入第二轮，收尾。" }), delta({}, { usage: { total_tokens: 5 } })]);
+        return sse(
+          res,
+          [
+            delta({ reasoning_content: "跨段终点。同文思绪在新一轮。末轮唯一思绪。" }),
+            ...Array.from({ length: 24 }, (_, i) =>
+              delta({ content: `${i === 0 ? "已写段落。\n\n**未闭合标记 目标短语。" : ""}末轮第${i + 1}句。` })
+            ),
+            delta({ content: "**" }),
+            ...(lastUser.includes("MORE") ? [delta({ tool_calls: [call("call_move_second")] })] : []),
+            delta({}, { usage: { total_tokens: 5 } })
+          ],
+          250
+        );
       }
       // TRAILLEAD：开头空行在收尾时会被裁掉；留出慢流式末轮，供固定过程话与思绪建旁注。
       if (typeof lastUser === "string" && lastUser.includes("TRAILLEAD")) {

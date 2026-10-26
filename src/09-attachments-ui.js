@@ -86,17 +86,18 @@ function quoteShotHtml(id, text) {
 }
 // 划选的这段在正文里是第几次出现：同一条回复里同样的词可能出现不止一次，重画后单靠 indexOf 会落到第一处。
 // 数的是划选起点之前出现过几回，空白全去掉再数——与 markAnchor 里的找法一致
-function occurrenceBefore(body, range, text) {
+function quoteTextBefore(body, range) {
   try {
     const pre = document.createRange();
     pre.selectNodeContents(body);
     pre.setEnd(range.startContainer, range.startOffset);
-    const picked = pre.cloneContents();
-    picked.querySelectorAll?.(".viz, .html-app, .math-pending, sup.note-ref").forEach(node => node.remove());
-    return countOccurrences(foldSpace(picked.textContent), foldSpace(text));
+    return quoteBodyText(pre.cloneContents());
   } catch {
-    return 0;
+    return null;
   }
+}
+function occurrenceBefore(body, range, text) {
+  return countOccurrences(foldSpace(quoteTextBefore(body, range)), foldSpace(text));
 }
 const foldSpace = value => String(value || "").replace(/\s+/g, "");
 function countOccurrences(haystack, needle) {
@@ -105,9 +106,9 @@ function countOccurrences(haystack, needle) {
   for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) count += 1;
   return count;
 }
-// 行迹落点只认所选的步骤或过程段，不把别的步骤展开前后多出的文字算进同文序号。
+// 可读文字的入口共用这张表；正文、思绪与工具输出按各自来源恢复落点。
 const TRAIL_QUOTE_BODIES = {
-  note: ".trail-note",
+  note: ".trail-note, .markdown[data-note-after]",
   reasoning: ".reasoning-body",
   code: ".tool-output.tool-code",
   output: ".tool-output:not(.tool-code)",
@@ -115,24 +116,31 @@ const TRAIL_QUOTE_BODIES = {
   result: ".tool-note",
   report: ".sub-report"
 };
+// 思绪是纯文本：临时合并或收尾拆分只换容器，不换文字次序。不混入工具输出或别的帮手。
+function trailThoughtBodies(article, stepId = "") {
+  const step = stepId ? article.querySelector(`.tool-step[data-step-id="${CSS.escape(stepId)}"]`) : null,
+    scope = stepId ? step : article;
+  return scope
+    ? [...scope.querySelectorAll(".reasoning-body")].filter(
+        body => body.closest(".tool-step[data-step-id]") === step && !body.closest(".message-editor")
+      )
+    : [];
+}
+function quoteBodyText(body) {
+  return textNodesIn(body)
+    .map(node => node.data)
+    .join("");
+}
 /** @param {Element} article @param {TrailAnchor} source */
 function trailQuoteBodies(article, source) {
   const selector = TRAIL_QUOTE_BODIES[source.kind],
     step = source.stepId ? article.querySelector(`.tool-step[data-step-id="${CSS.escape(source.stepId)}"]`) : null,
-    scope = source.stepId ? step : article.querySelector(".tool-stack-body");
-  if (!selector || !scope) return [];
-  // 过程组认其中一步的 id：收尾裁掉开头空行时 data-at 会前移，步骤身份不变。
-  const group = source.groupId
-    ? scope.querySelector(`.tool-step[data-step-id="${CSS.escape(source.groupId)}"]`)?.closest(".trail-group")
-    : source.at === undefined
-      ? null
-      : [...scope.querySelectorAll(".trail-group[data-at]")].find(
-          el => Number(el.dataset.at) === source.at && el.closest(".tool-step[data-step-id]") === step
-        );
-  if ((source.groupId || source.at !== undefined) && (!group || group.closest(".tool-step[data-step-id]") !== step)) return [];
-  return [...(group || scope).querySelectorAll(selector)].filter(
-    body => body.closest(".tool-step[data-step-id]") === step && (!group || body.closest(".trail-group") === group)
-  );
+    scope = source.stepId ? step : article;
+  return scope && selector
+    ? [...scope.querySelectorAll(selector)].filter(
+        body => body.closest(".tool-step[data-step-id]") === step && (source.kind !== "note" || body.dataset.noteAfter === source.after)
+      )
+    : [];
 }
 // 消息里此刻划选的一段：所在消息、局部落点、同文序号与位置。没划、划在消息之外、太短，都是 null。
 function selectionAnchor() {
@@ -147,21 +155,29 @@ function selectionAnchor() {
     text = picked.textContent.trim();
   }
   const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+  const canNote = !host?.closest(".math-pending, .katex, .katex-error") && !picked.querySelector?.(".math-pending, .katex, .katex-error");
   const article = host?.closest("#messages .message[data-message]"),
     trail = article?.querySelector(".tool-stack-body");
   let body = host?.closest(".markdown, .user-bubble");
   /** @type {TrailAnchor|undefined} */
   let source;
   const part = host?.closest(Object.values(TRAIL_QUOTE_BODIES).join(", "));
-  if (part && trail?.contains(part)) {
+  if (part) {
     const kind = Object.keys(TRAIL_QUOTE_BODIES).find(key => part.matches(TRAIL_QUOTE_BODIES[key])),
-      group = kind === "note" || kind === "reasoning" ? part.closest(".trail-group") : null;
-    // 流式末轮还可能移到最终正文：里面原有的 .markdown 仍走正文规则，不锁在临时行迹里。
-    if (!group || group.hasAttribute("data-at")) {
-      const step = part.closest(".tool-step[data-step-id]"),
-        groupId = group?.querySelector(".tool-step[data-step-id]")?.dataset.stepId;
-      if (group && !groupId) return null;
-      source = { kind, ...(step ? { stepId: step.dataset.stepId } : {}), ...(groupId ? { groupId } : {}) };
+      stepId = part.closest(".tool-step[data-step-id]")?.dataset.stepId,
+      stream = article && kind === "reasoning" ? trailThoughtBodies(article, stepId) : [],
+      index = stream.indexOf(part);
+    if (index >= 0) {
+      const before = quoteTextBefore(part, range);
+      if (before === null) return null;
+      source = {
+        kind,
+        ...(stepId ? { stepId } : {}),
+        offset: stream.slice(0, index).reduce((n, body) => n + foldSpace(quoteBodyText(body)).length, foldSpace(before).length)
+      };
+      body = part;
+    } else if (trail?.contains(part) || part.hasAttribute("data-note-after")) {
+      source = { kind, ...(stepId ? { stepId } : {}), ...(kind === "note" ? { after: part.dataset.noteAfter } : {}) };
       const index = trailQuoteBodies(article, source).indexOf(part);
       if (index < 0) return null;
       source.index = index;
@@ -176,22 +192,28 @@ function selectionAnchor() {
     messageId: article.dataset.message,
     occurrence: occurrenceBefore(body, range, text),
     ...(source ? { trail: source } : {}),
+    canNote,
     rect
   };
 }
 function setupQuoteTip() {
   const tip = $("#quoteTip");
   let current = null,
+    canNote = false,
     timer = null;
   const hide = () => {
     current = null;
+    canNote = false;
     if (!tip.classList.contains("hidden")) tip.classList.add("hidden");
   };
   const check = () => {
     const picked = selectionAnchor();
     if (!picked) return hide();
-    const { rect, ...anchor } = picked;
+    const { rect, canNote: noteable, ...anchor } = picked;
     current = anchor;
+    canNote = noteable;
+    tip.querySelector('[data-tip="note"]').classList.toggle("hidden", !canNote);
+    tip.querySelector(".quote-tip-sep").classList.toggle("hidden", !canNote);
     tip.style.left = `${Math.min(innerWidth - 40, Math.max(40, rect.left + rect.width / 2))}px`;
     tip.style.top = `${Math.max(8, rect.top - 34)}px`;
     tip.classList.remove("hidden");
@@ -204,7 +226,7 @@ function setupQuoteTip() {
   tip.addEventListener("pointerdown", event => event.preventDefault()); // 别让点击把划选清掉
   tip.addEventListener("click", event => {
     const button = event.target.closest("[data-tip]");
-    if (!button || !current) return hide();
+    if (!button || !current || (button.dataset.tip === "note" && !canNote)) return hide();
     const picked = current;
     getSelection()?.removeAllRanges();
     hide();
