@@ -35,10 +35,11 @@ await evalJs(
 );
 await send("Page.navigate", { url: PAGE });
 await waitFor(`!!document.querySelector('[data-conversation="multi-1"]')`, 8000);
+// 侧栏读完磁盘就画出来了，点它的处理要等开页时问过租约才绑上（bindEvents）：CI 的机器慢，先点就白点，这段对话始终打不开
+await waitFor(`typeof document.querySelector("#openLibrary")?.onclick === "function"`, 8000);
 const status = id => evalJs(`__yanState().conversations.find(c => c.id === "${id}")?.messages[1]?.status`);
 check("opening the page does not mark an answer still being written elsewhere as interrupted", (await status("multi-1")) === "streaming");
 await evalJs(`document.querySelector('[data-conversation="multi-1"] .history-open').click(); true`);
-// 等这段对话真打开了再看：CI 的机器慢，固定等 300 毫秒常常还没开，后面几条都跟着落空
 await waitFor(`document.querySelector("#chatSend").title === "另一个页面正在这段对话里作答，这里跟着看"`, 8000).catch(() => {});
 check(
   "the status shows it is being answered elsewhere",
