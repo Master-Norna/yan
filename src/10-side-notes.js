@@ -24,9 +24,10 @@ function rebaseRemovedStepNotes(conversation, assistant, removed) {
         .find(step => !removed.has(step.id)),
       from = Number(prior?.at) || 0,
       to = Number(steps[index]?.at) || 0;
-    // 撤下后两段话合在一起，原先局部同文序号要算上前一段。
-    anchor.occurrence =
-      (Number(anchor.occurrence) || 0) + countOccurrences(foldSpace(assistant.content.slice(from, to)), foldSpace(anchor.text));
+    // 撤下后两段话合在一起；同文序号与划选、重标一样按渲染后的可读文字计。
+    const before = document.createElement("div");
+    before.innerHTML = renderMarkdown(assistant.content.slice(from, to).trim());
+    anchor.occurrence = (Number(anchor.occurrence) || 0) + countOccurrences(foldSpace(quoteBodyText(before)), foldSpace(anchor.text));
     if (kept.length) source.after = prior?.id || "";
     else delete anchor.trail;
   }
@@ -200,24 +201,19 @@ function markAnchor(body, thread, ordinal, span = null) {
     occurrence = Number(thread.anchor.occurrence) || 0,
     local = !!thread.anchor.trail,
     exact = local && thread.anchor.trail.kind !== "note";
-  let from = span || local ? -1 : nthIndexOf(joined, needle, occurrence),
-    to = from + needle.length;
-  if (from < 0) {
-    // 划选得到的文字与渲染文字在空白上多半不一致（换行、缩进；跨段划选时段与段之间有换行、而文字节点连起来没有）：
-    // 两边把空白全去掉再找，再把位置映射回原文
-    const map = [];
-    let folded = "";
-    for (let i = 0; i < joined.length; i++) {
-      if (/\s/.test(joined[i])) continue;
-      folded += joined[i];
-      map.push(i);
-    }
-    const target = needle.replace(/\s+/g, ""),
-      at = span ? span.from : nthIndexOf(folded, target, occurrence, exact);
-    if (at < 0 || !target) return false;
-    from = map[at];
-    to = map[at + target.length - 1] + 1;
+  // 划选与迁移都按去空白后的同文序号计；先按原样找会漏掉前面含空白的同文，误标后面那一次。
+  const map = [];
+  let folded = "";
+  for (let i = 0; i < joined.length; i++) {
+    if (/\s/.test(joined[i])) continue;
+    folded += joined[i];
+    map.push(i);
   }
+  const target = needle.replace(/\s+/g, ""),
+    at = span ? span.from : nthIndexOf(folded, target, occurrence, exact);
+  if (at < 0 || !target) return false;
+  const from = map[at],
+    to = map[at + target.length - 1] + 1;
   // 从后往前包：splitText 只影响后面的节点，前面的偏移保持有效；句末（最后一段）缀一枚小标，像脚注号
   let tagged = false;
   for (let i = nodes.length - 1; i >= 0; i--) {

@@ -1728,16 +1728,28 @@ http
         ]);
       }
       // TRAILPENDING：没有句尾落点，补言一直待寄；其后正文仍在流，供停止时核对旁注来源迁移。
-      if (typeof lastUser === "string" && lastUser.includes("TRAILPENDING"))
+      if (typeof lastUser === "string" && lastUser.includes("TRAILPENDING")) {
+        const linked = lastUser.includes("TRAILPENDING LINK"),
+          bold = lastUser.includes("TRAILPENDING BOLD"),
+          spaced = lastUser.includes("TRAILPENDING SPACE"),
+          prefix = linked
+            ? "前段[可见标签](https://example.invalid/重复短语)缓缓写出"
+            : bold
+              ? "前段**重复**短语缓缓写出"
+              : spaced
+                ? "前段重 复短语缓缓写出"
+                : "前段重复短语缓缓写出",
+          suffix = linked || bold || spaced ? "这里的重复短语是目标短语后面的重复短语不是目标" : "目标短语和重复短语";
         return sse(
           res,
           [
-            delta({ content: "前段重复短语缓缓写出" }),
-            ...Array.from({ length: 30 }, (_, i) => delta({ content: `接续文字${i + 1}${i === 8 ? "目标短语和重复短语" : ""}` })),
+            delta({ content: prefix }),
+            ...Array.from({ length: 30 }, (_, i) => delta({ content: `接续文字${i + 1}${i === 8 ? suffix : ""}` })),
             delta({}, { usage: { total_tokens: 5 } })
           ],
           300
         );
+      }
       // TRAILMOVE：工具后的新思绪暂并入旧组；随后收尾、停止或再调工具，都应按文字来源保住旁注。
       if (typeof lastUser === "string" && lastUser.includes("TRAILMOVE")) {
         const call = id => ({
