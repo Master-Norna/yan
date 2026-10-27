@@ -20,8 +20,7 @@
  * @property {string} [skill] 点名用的技能（「＋」→「技能」置入的那份说明）：附件条画锦囊、写这个名字
  * @property {boolean} [quoted] 随引文的画面（游目圈点）：不进附件栏，画在引文里；引文撤了它跟着撤
  */
-/** @typedef {{ kind: string, stepId?: string, after?: string, offset?: number, index?: number }} TrailAnchor 行迹落点：正文按前一步 id 认轮次，思绪用去空白后的文字偏移，工具内容用步骤 id 与容器序号 */
-/** @typedef {{ text: string, messageId?: string, model?: string, url?: string, image?: string, trail?: TrailAnchor }} Quote 引用追问：划选的一段与它所在的消息（旁注锚文本作引文时没有 messageId）；游目圈点的另带给模型的一份与网址，image 是那幅画面的附件 id（附件照常随消息走，只是画在引文里） */
+/** @typedef {{ text: string, messageId?: string, model?: string, url?: string, image?: string }} Quote 引用追问：划选的一段与它所在的消息（旁注锚文本作引文时没有 messageId）；游目圈点的另带给模型的一份与网址，image 是那幅画面的附件 id（附件照常随消息走，只是画在引文里） */
 /** @typedef {{ id: string, name: string, arguments: string }} ToolCall 流式拼出的一次工具调用 */
 /** @typedef {{ prompt_tokens: number, completion_tokens: number, total_tokens: number, cached_tokens?: number }} Usage cached_tokens：提示里读自缓存的部分 */
 /** @typedef {"ask"|"review"|"auto"} CommandPolicy 问而后行 / 审而后行 / 径行 */
@@ -139,7 +138,7 @@
  */
 /** @typedef {{ at: string, why: string, auto?: boolean }} Break 途中断过的一回：何时、为何；auto 是自动接着写上了的。续写不清，查「为何总断」时翻它 */
 /** @typedef {{ id: string, parentId: string|null, messages: Message[], createdAt: string }} Fork 被换下来的一段尾巴 */
-/** @typedef {{ id: string, anchor: { messageId: string, text: string, occurrence?: number, trail?: TrailAnchor }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注；occurrence 是所注的那段在正文或工具容器里第几次出现（从 0 起），trail 为行迹文字的来源 */
+/** @typedef {{ id: string, anchor: { messageId: string, text: string, occurrence?: number, part?: number }, createdAt: string, updatedAt: string, messages: Message[] }} Thread 旁注；occurrence 是所注文字在所在块里的第几次出现（从 0 起），part 是收尾后第几块可读文字；旧旁注没有 part */
 /**
  * @typedef {Object} Conversation
  * @property {string} id

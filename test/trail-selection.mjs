@@ -1,5 +1,8 @@
-// 行迹里的过程话、思绪与工具输出也能划选引用、起旁注；同文的正文不能抢走落点。
+// 收尾后的过程话、思绪可引用和旁注；生成中的行迹、工具输出只引用。
+import { mkdirSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, WORK } from "./lib.mjs";
+mkdirSync(WORK + "/src", { recursive: true });
+writeFileSync(WORK + "/src/a.js", "return 1;\n");
 const note = "我先看一下重复片段是从哪里进来的，确认是读取了两次，还是显示时重复拼上了。\n\n",
   thought = "先沿着测试词查一下调用顺序，再看渲染时有没有重复追加。",
   content = note + "看过了，重复片段不是读了两遍，是显示时又追加了一次。可以先从这处入手，其他流程暂时不用动。";
@@ -50,6 +53,11 @@ await fetch(PAGE + "api/chats/save", {
   })
 });
 const { send, evalJs, waitFor, shot, close } = await connect();
+await send("Page.navigate", { url: PAGE + "preview.html" });
+await sleep(600);
+await evalJs(
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", mode: "work", activeProfileId: "p1", pendingWorkdir: ${JSON.stringify(WORK)}, autoTitle: false }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
+);
 await send("Page.navigate", { url: PAGE });
 await waitFor(`!!document.querySelector('[data-conversation="trail-selection"]')`);
 await evalJs(`document.querySelector('[data-conversation="trail-selection"] .history-open').click(); true`);
@@ -86,6 +94,10 @@ if (noted) {
     )
   );
   check(
+    "trail note remembers its completed text block",
+    await evalJs(`Number.isInteger(__yanState().conversations.find(c => c.id === 'trail-selection').threads.at(-1).anchor.part)`)
+  );
+  check(
     "anchor stays in trail, not matching final reply",
     await evalJs(
       `document.querySelectorAll('#messages .tool-stack-body mark.note-anchor').length > 0 && [...document.querySelectorAll('#messages .markdown mark.note-anchor')].every(mark => mark.closest('.tool-stack-body'))`
@@ -110,8 +122,52 @@ if (noted) {
 }
 await evalJs(`document.querySelector('#messages .trail-reasoning').open = true; true`);
 await sleep(300);
-check("trail reasoning can be quoted", await select("#messages .reasoning-body", "测试词"));
+check("trail reasoning offers quote and note", await select("#messages .reasoning-body", "测试词"));
+await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').click(); true`);
+await sleep(250);
+check("reasoning note lands in reasoning", await evalJs(`!!document.querySelector('#messages .reasoning-body mark.note-anchor')`));
+await evalJs(`document.querySelector('#sideClose').click(); true`);
+check("final reply offers quote and note", await select("#messages .assistant-block .markdown", "重复片段"));
+await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').click(); true`);
+await sleep(250);
+check(
+  "same words in trail and final reply retain separate marks",
+  await evalJs(
+    `!!document.querySelector('#messages .trail-note mark.note-anchor') && !!document.querySelector('#messages .assistant-block > .markdown mark.note-anchor')`
+  )
+);
+await evalJs(`document.querySelector('#sideClose').click(); true`);
 check("tool output can be quoted", await select("#messages .tool-output", "测试结果"));
+check(
+  "tool output does not offer a note",
+  await evalJs(
+    `!document.querySelector('#quoteTip [data-tip="quote"]').classList.contains('hidden') && document.querySelector('#quoteTip [data-tip="note"]').classList.contains('hidden')`
+  )
+);
 check("trail heading is not a quote body", !(await select("#messages .tool-stack > summary", "行迹")));
-check("final reply selection still works", await select("#messages .assistant-block .markdown", "重复片段"));
+await send("Page.reload");
+await waitFor(`!!document.querySelector('#messages .trail-note mark.note-anchor')`);
+check(
+  "reload keeps process, reasoning, and final reply marks in their own blocks",
+  await evalJs(
+    `!!document.querySelector('#messages .trail-note mark.note-anchor') && !!document.querySelector('#messages .reasoning-body mark.note-anchor') && !!document.querySelector('#messages .assistant-block > .markdown mark.note-anchor')`
+  )
+);
+await evalJs(`document.querySelector('#newChat').click(); true`);
+await waitFor(`!!document.querySelector('#welcome:not(.hidden)')`);
+await evalJs(
+  `document.querySelector('#welcomeInput').value = 'DUPTAIL QUOTE'; document.querySelector('#welcomeInput').dispatchEvent(new Event('input')); document.querySelector('#welcome .send-trigger').click(); true`
+);
+await waitFor(`document.querySelector('#messages .trail-live .markdown')?.textContent.includes('尾段第2句')`, 10000);
+check("streaming trail text can be quoted", await select("#messages .trail-live .markdown", "尾段第2句"));
+check(
+  "streaming trail text does not offer a note",
+  await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').classList.contains('hidden')`)
+);
+await waitFor(`document.querySelector('#messages .message.assistant')?.dataset.status === 'complete'`, 10000);
+check("completed final text offers a note", await select("#messages .assistant-block > .markdown", "尾段第2句"));
+check(
+  "note button returns after completion",
+  await evalJs(`!document.querySelector('#quoteTip [data-tip="note"]').classList.contains('hidden')`)
+);
 close();

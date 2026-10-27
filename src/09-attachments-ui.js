@@ -86,18 +86,17 @@ function quoteShotHtml(id, text) {
 }
 // 划选的这段在正文里是第几次出现：同一条回复里同样的词可能出现不止一次，重画后单靠 indexOf 会落到第一处。
 // 数的是划选起点之前出现过几回，空白全去掉再数——与 markAnchor 里的找法一致
-function quoteTextBefore(body, range) {
+function occurrenceBefore(body, range, text) {
   try {
     const pre = document.createRange();
     pre.selectNodeContents(body);
     pre.setEnd(range.startContainer, range.startOffset);
-    return quoteBodyText(pre.cloneContents());
+    const picked = pre.cloneContents();
+    picked.querySelectorAll?.(".viz, .html-app, .math-pending, sup.note-ref").forEach(node => node.remove());
+    return countOccurrences(foldSpace(picked.textContent), foldSpace(text));
   } catch {
-    return null;
+    return 0;
   }
-}
-function occurrenceBefore(body, range, text) {
-  return countOccurrences(foldSpace(quoteTextBefore(body, range)), foldSpace(text));
 }
 const foldSpace = value => String(value || "").replace(/\s+/g, "");
 function countOccurrences(haystack, needle) {
@@ -106,43 +105,9 @@ function countOccurrences(haystack, needle) {
   for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) count += 1;
   return count;
 }
-// 可读文字的入口共用这张表；正文、思绪与工具输出按各自来源恢复落点。
-const TRAIL_QUOTE_BODIES = {
-  note: ".trail-note, .markdown[data-note-after]",
-  reasoning: ".reasoning-body",
-  code: ".tool-output.tool-code",
-  output: ".tool-output:not(.tool-code)",
-  results: ".tool-results",
-  result: ".tool-note",
-  report: ".sub-report"
-};
-// 思绪是纯文本：临时合并或收尾拆分只换容器，不换文字次序。不混入工具输出或别的帮手。
-function trailThoughtBodies(article, stepId = "") {
-  const step = stepId ? article.querySelector(`.tool-step[data-step-id="${CSS.escape(stepId)}"]`) : null,
-    scope = stepId ? step : article;
-  return scope
-    ? [...scope.querySelectorAll(".reasoning-body")].filter(
-        body => body.closest(".tool-step[data-step-id]") === step && !body.closest(".message-editor")
-      )
-    : [];
-}
-function quoteBodyText(body) {
-  return textNodesIn(body)
-    .map(node => node.data)
-    .join("");
-}
-/** @param {Element} article @param {TrailAnchor} source */
-function trailQuoteBodies(article, source) {
-  const selector = TRAIL_QUOTE_BODIES[source.kind],
-    step = source.stepId ? article.querySelector(`.tool-step[data-step-id="${CSS.escape(source.stepId)}"]`) : null,
-    scope = source.stepId ? step : article;
-  return scope && selector
-    ? [...scope.querySelectorAll(selector)].filter(
-        body => body.closest(".tool-step[data-step-id]") === step && (source.kind !== "note" || body.dataset.noteAfter === source.after)
-      )
-    : [];
-}
-// 消息里此刻划选的一段：所在消息、局部落点、同文序号与位置。没划、划在消息之外、太短，都是 null。
+// 可引用的文字：正文、过程话、思绪与工具内容；只有收尾后稳定的文字块可以建旁注。
+const QUOTE_BODIES = ".markdown, .user-bubble, .trail-note, .reasoning-body, .tool-output, .tool-results, .tool-note, .sub-report";
+/** @returns {{ text: string, messageId: string, rect: DOMRect, occurrence?: number, part?: number, quoteOnly?: boolean } | null} */
 function selectionAnchor() {
   const selection = getSelection();
   if (!selection || selection.isCollapsed || !selection.rangeCount || view !== "chat" || !currentId) return null;
@@ -154,66 +119,37 @@ function selectionAnchor() {
     picked.querySelectorAll("sup.note-ref").forEach(node => node.remove());
     text = picked.textContent.trim();
   }
-  const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
-  const canNote = !host?.closest(".math-pending, .katex, .katex-error") && !picked.querySelector?.(".math-pending, .katex, .katex-error");
-  const article = host?.closest("#messages .message[data-message]"),
-    trail = article?.querySelector(".tool-stack-body");
-  let body = host?.closest(".markdown, .user-bubble");
-  /** @type {TrailAnchor|undefined} */
-  let source;
-  const part = host?.closest(Object.values(TRAIL_QUOTE_BODIES).join(", "));
-  if (part) {
-    const kind = Object.keys(TRAIL_QUOTE_BODIES).find(key => part.matches(TRAIL_QUOTE_BODIES[key])),
-      stepId = part.closest(".tool-step[data-step-id]")?.dataset.stepId,
-      stream = article && kind === "reasoning" ? trailThoughtBodies(article, stepId) : [],
-      index = stream.indexOf(part);
-    if (index >= 0) {
-      const before = quoteTextBefore(part, range);
-      if (before === null) return null;
-      source = {
-        kind,
-        ...(stepId ? { stepId } : {}),
-        offset: stream.slice(0, index).reduce((n, body) => n + foldSpace(quoteBodyText(body)).length, foldSpace(before).length)
-      };
-      body = part;
-    } else if (trail?.contains(part) || part.hasAttribute("data-note-after")) {
-      source = { kind, ...(stepId ? { stepId } : {}), ...(kind === "note" ? { after: part.dataset.noteAfter } : {}) };
-      const index = trailQuoteBodies(article, source).indexOf(part);
-      if (index < 0) return null;
-      source.index = index;
-      body = part;
-    }
-  }
-  if (!body || !article || text.length < 2 || host.closest(".message-editor")) return null;
+  const host = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement,
+    article = host?.closest("#messages .message[data-message]"),
+    quoted = host?.closest(QUOTE_BODIES);
+  if (!quoted || !article || text.length < 2 || quoted.closest(".message-editor")) return null;
   const rect = range.getBoundingClientRect();
   if (!rect.width && !rect.height) return null;
-  return {
-    text: text.slice(0, 1200),
-    messageId: article.dataset.message,
-    occurrence: occurrenceBefore(body, range, text),
-    ...(source ? { trail: source } : {}),
-    canNote,
-    rect
-  };
+  const anchor = { text: text.slice(0, 1200), messageId: article.dataset.message, rect },
+    quoteOnly =
+      !!quoted.closest(".tool-step, .tool-run") || (article.dataset.status === "streaming" && !!quoted.closest(".tool-stack-body")),
+    parts = quoteOnly || article.dataset.status === "streaming" ? [] : noteBodies(article),
+    part = parts.findIndex(body => body.contains(host));
+  if (part >= 0) return { ...anchor, occurrence: occurrenceBefore(parts[part], range, text), part };
+  if (quoteOnly) return { ...anchor, quoteOnly: true };
+  // 生成中仍在正文位置的字沿用原来的旁注入口；其余仅可引用。
+  const body = host.closest(".markdown, .user-bubble");
+  return body ? { ...anchor, occurrence: occurrenceBefore(body, range, text) } : { ...anchor, quoteOnly: true };
 }
 function setupQuoteTip() {
   const tip = $("#quoteTip");
   let current = null,
-    canNote = false,
     timer = null;
   const hide = () => {
     current = null;
-    canNote = false;
     if (!tip.classList.contains("hidden")) tip.classList.add("hidden");
   };
   const check = () => {
     const picked = selectionAnchor();
     if (!picked) return hide();
-    const { rect, canNote: noteable, ...anchor } = picked;
+    const { rect, ...anchor } = picked;
     current = anchor;
-    canNote = noteable;
-    tip.querySelector('[data-tip="note"]').classList.toggle("hidden", !canNote);
-    tip.querySelector(".quote-tip-sep").classList.toggle("hidden", !canNote);
+    tip.querySelectorAll('[data-tip="note"], .quote-tip-sep').forEach(el => el.classList.toggle("hidden", !!anchor.quoteOnly));
     tip.style.left = `${Math.min(innerWidth - 40, Math.max(40, rect.left + rect.width / 2))}px`;
     tip.style.top = `${Math.max(8, rect.top - 34)}px`;
     tip.classList.remove("hidden");
@@ -226,11 +162,11 @@ function setupQuoteTip() {
   tip.addEventListener("pointerdown", event => event.preventDefault()); // 别让点击把划选清掉
   tip.addEventListener("click", event => {
     const button = event.target.closest("[data-tip]");
-    if (!button || !current || (button.dataset.tip === "note" && !canNote)) return hide();
-    const picked = current;
+    if (!button || !current) return hide();
+    const { quoteOnly, ...picked } = current;
     getSelection()?.removeAllRanges();
     hide();
-    if (button.dataset.tip === "note") return createThread(picked);
+    if (button.dataset.tip === "note") return quoteOnly || createThread(picked);
     pendingQuote = picked;
     renderQuote();
     persistDraft();
