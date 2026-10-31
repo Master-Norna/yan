@@ -51,21 +51,24 @@ async function stageAttach() {
   }
   void stageFit();
 }
+// 网页视口的 CSS 宽高（innerWidth 带滚动条，与截图、推来的帧同宽）；量不出的给 0
+/** @param {string} sessionId */
+async function stageInner(sessionId) {
+  const inner = await stageSend("Runtime.evaluate", { expression: "[innerWidth, innerHeight]", returnByValue: true }, sessionId),
+    [width, height] = inner?.result?.value || [0, 0];
+  return { width: Number(width) || 0, height: Number(height) || 0 };
+}
 // 静着的页不重绘就不出帧：截一张垫底；调窗后补的要视口尺寸对上才画，免得把旧画面画上去
 /** @param {string} sessionId @param {{ width: number, height: number }} [want] */
 async function stageBaseFrame(sessionId, want) {
   try {
     const [shot, inner] = await Promise.race([
-      Promise.all([
-        stageSend("Page.captureScreenshot", { format: "jpeg", quality: 90 }, sessionId),
-        stageSend("Runtime.evaluate", { expression: "[innerWidth, innerHeight]", returnByValue: true }, sessionId)
-      ]),
+      Promise.all([stageSend("Page.captureScreenshot", { format: "jpeg", quality: 90 }, sessionId), stageInner(sessionId)]),
       new Promise((_, reject) => setTimeout(() => reject(Error("timeout")), 2000))
     ]);
     if (stage.session !== sessionId || !stageVisible()) return;
-    const [innerWidth, innerHeight] = inner?.result?.value || [0, 0],
-      cw = Math.round(Number(innerWidth) || 0),
-      ch = Math.round(Number(innerHeight) || 0);
+    const cw = Math.round(inner.width),
+      ch = Math.round(inner.height);
     if (!shot?.data || !cw || !ch) return;
     if (want && (Math.abs(cw - want.width) > 2 || Math.abs(ch - want.height) > 2)) return;
     if (!want && stage.framed) return;
@@ -89,17 +92,15 @@ async function stageFit() {
   try {
     const [{ windowId, bounds }, inner] = await Promise.all([
       stageSend("Browser.getWindowForTarget", { targetId: target }),
-      stageSend("Runtime.evaluate", { expression: "[innerWidth, innerHeight]", returnByValue: true }, session)
+      stageInner(session)
     ]);
-    const [innerWidth, innerHeight] = inner.result?.value || [0, 0],
-      port = { clientWidth: Number(innerWidth) || 0, clientHeight: Number(innerHeight) || 0 };
-    if (!port.clientWidth) return;
-    const edgeX = bounds.width - port.clientWidth,
-      edgeY = bounds.height - port.clientHeight;
+    if (!inner.width) return;
+    const edgeX = bounds.width - inner.width,
+      edgeY = bounds.height - inner.height;
     // 网页的视口被定死了（执事 setViewportSize / browser_resize 过）：窗口管不着它，多出的边不是边，再照着调只会一回小一圈。
     // 记下定死的大小：留白处写一行，开着「适应页面」的等执事歇手后放开
     const pinned = edgeX < 0 || edgeY < 0 || edgeX > 120 || edgeY > 320;
-    stagePin(pinned ? { width: Math.round(port.clientWidth), height: Math.round(port.clientHeight) } : null);
+    stagePin(pinned ? { width: Math.round(inner.width), height: Math.round(inner.height) } : null);
     if (pinned) return;
     const width = Math.round(edgeX + want.width),
       height = Math.round(edgeY + want.height);
