@@ -560,7 +560,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
           m.role === "user" && index === 0 && thread.anchor.text ? quotedText({ ...m, quote: { text: thread.anchor.text } }) : m.content
       })
     );
-    // 旁注带只查不改的工具（检索、翻网页、翻文档、翻记忆）：模型说「我去查一下」就真能查，不会说完就断在那里；
+    // 旁注带只查不改的工具（能读的都给：检索、翻网页、读文件、只读的指令、MCP 标了只读的……，见各工具登记的 lookup）：模型说「我去查一下」就真能查，不会说完就断在那里；
     // 没有工具可用时（模型关了本机工具）在提示里说明，免得它许诺去查
     if (profile.tools !== false) await mcpForTurn();
     const tools = profile.tools !== false ? toolDefinitions(conversation, { lookup: true }) : null;

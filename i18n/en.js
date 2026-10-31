@@ -1215,6 +1215,9 @@ var YAN_EN = {
   非只读: "Not read-only",
   "旁注只查不改：{0} 的 {1} 不是只读的工具，此处不调":
     "Side notes only look things up: {1} on {0} is not read-only, so it is not called here",
+  "旁注只查不改：{0} 不调，只许 GET、HEAD": "Side notes only look things up: {0} is not sent, only GET and HEAD",
+  "旁注里不出沙箱：{0}": "Side notes don't leave the sandbox: {0}",
+  沙箱拦下: "Blocked by sandbox",
   "工具执行失败：{0}": "Tool failed: {0}",
   "复用 · {0}": "Reused · {0}",
   复用: "Reused",

@@ -1171,6 +1171,37 @@ http
           ]);
         return sse(res, [delta({ content: "CHKPT|done" }), delta({}, { usage: { total_tokens: 5 } })]);
       }
+      // SIDEREAD：旁注里读文件、跑只读与会写的指令、发 POST——读的照办，会写的回绝；第二轮报回拿到了哪几件与各结果
+      if (typeof lastUser === "string" && lastUser.includes("SIDEREAD")) {
+        const names = (payload.tools || []).map(t => t.function.name),
+          call = (index, name, args) => ({
+            index,
+            id: `call_sr${index}`,
+            type: "function",
+            function: { name, arguments: JSON.stringify(args) }
+          });
+        if (!toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                call(0, "read_file", { path: "note.txt" }),
+                call(1, "run_command", { command: process.platform === "win32" ? "Get-ChildItem" : "ls" }),
+                call(2, "run_command", {
+                  command: process.platform === "win32" ? "Set-Content -Path side.txt -Value x" : "echo x > side.txt"
+                }),
+                call(3, "http_request", { url: "http://127.0.0.1:8798/v1/models", method: "POST" }),
+                call(4, "search_files", { query: "旁注可读" })
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [
+          delta({
+            content: `SIDEREAD|tools:${["read_file", "list_files", "search_files", "run_command", "write_file", "edit_file"].filter(n => names.includes(n)).join("+")}|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 50)).join(" ▸ ")}`
+          }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       // SIDEMCP：旁注里用按需给的 MCP——只读的照调，会写的不调；第二轮报回拿到了哪几件、目录里列没列会写的、各结果
       if (typeof lastUser === "string" && lastUser.includes("SIDEMCP")) {
         const names = (payload.tools || []).map(t => t.function.name),

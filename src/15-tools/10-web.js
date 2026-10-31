@@ -76,13 +76,17 @@ defineTool({
   name: "http_request",
   group: "web",
   label: t("问接口"),
+  // 旁注也给，只许 GET、HEAD
+  lookup: true,
   sideEffect: true,
   digest: step => t`调接口 ${String(step.title || "").slice(0, 120)} → ${step.result || step.status}`,
-  async run(step, args, { signal }) {
+  async run(step, args, { signal, lookup }) {
     const url = args.url.trim(),
       method = (args.method || "GET").trim().toUpperCase();
     step.url = url;
     step.title = `${method} ${url}`.slice(0, 200);
+    if (lookup && !["GET", "HEAD"].includes(method))
+      return { ok: false, content: t`旁注只查不改：${method} 不调，只许 GET、HEAD`, display: "非只读" };
     const data = await bridge("/api/http", { url, method, headers: args.headers, body: args.body }, signal);
     const headers = Object.entries(data.headers)
       .map(([name, value]) => `${name}: ${String(value).slice(0, 300)}`)

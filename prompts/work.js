@@ -54,6 +54,10 @@
   // 沙箱环境备好时接在后面（{{kits}} 是装了什么）：python、pip、npm 已指向它，缺的装进它，不必动系统
   env: "此机另备一套开发环境：{{kits}}。python、pip、uv、npm 与所列工具链都指向它，缺的库直接 pip / npm i -g / go get / cargo 装进来，不动系统。",
 
+  // 旁注里的 run_command 只跑明确只读的（见 src/15-tools/20-command.js 的 isReadOnlyCommand）：不在其列时回给模型的话
+  sideReadOnly:
+    "旁注只查不改：这条指令不算只读，不跑。可跑 git status / log / diff / show、ls、cat、type、Get-Content、Get-ChildItem、Select-String 这类，接管道过滤也行，不带重定向、分号与脚本块。",
+
   // 后台指令：bgStarted 是挂上时回给模型的话（结束会叫醒开它的那一个：主模型，或帮手自己）；
   // bgDone 是结束时送给它的一条消息（正作答就进这一答，没在作答就另起一答、帮手则睡醒接着做），不是系统提示
   bgStarted: "后台指令 {{id}} 已开始（头 {{seconds}} 秒的输出如下）。它结束时结果会作为一条消息送到，不必轮询。",

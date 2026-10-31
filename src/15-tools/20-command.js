@@ -5,6 +5,8 @@ defineTool({
   group: "work",
   label: t("运行"),
   offer: ctx => ctx.files,
+  // 旁注也给，只跑明确只读的那几类（git log、Get-Content、ls……，见 isReadOnlyCommand），不请示、不转后台
+  lookup: true,
   sideEffect: true,
   writes: true,
   html: workStepHtml,
@@ -16,7 +18,8 @@ defineTool({
     step.title = args.command.trim();
     if (!step.title) return { ok: false, content: t("指令为空"), display: "指令为空" };
     step.readOnly = isReadOnlyCommand(step.title);
-    const background = args.background === true;
+    if (ctx.lookup && !step.readOnly) return { ok: false, content: prompt("work.sideReadOnly"), display: "非只读" };
+    const background = args.background === true && !ctx.lookup;
     if (background) step.background = true;
     let policy = commandPolicyOf(conversation);
     // 问而后行开着沙箱：先问一声严的沙箱会不会拦。会拦的也请示（只读的也不例外），请示条写明原因；批了这一条就出沙箱跑
@@ -26,6 +29,7 @@ defineTool({
     }
     let escalated = false;
     // 守的关口刚批过这一条（见 keepHook）：不再另问，除非还要出沙箱
+    if (ctx.lookup && step.sandboxWhy) return { ok: false, content: t`旁注里不出沙箱：${step.sandboxWhy}`, display: "沙箱拦下" };
     if (policy === "ask" && (!step.readOnly || step.sandboxWhy) && !(step.granted && !step.sandboxWhy)) {
       if (!(await askApproval(step, ctx))) {
         step.skipped = true;
@@ -36,7 +40,8 @@ defineTool({
     // 用户可能在请示条上把这一段对话切成了径行：执行前再取一次，不沿用旧档位
     policy = commandPolicyOf(conversation);
     // 前台的带上 ticket：等满 timeout、或有话要递（见 releaseForeground），桥接就把它转入后台接着跑，回话里带 handedOff
-    const ticket = background ? undefined : `${step.id}-${uid().slice(0, 6)}`;
+    // 旁注不带：等满 timeout 就作罢，不转后台（后台结束要叫醒的是正文那一答）
+    const ticket = background || ctx.lookup ? undefined : `${step.id}-${uid().slice(0, 6)}`;
     if (ticket) foregroundRuns.set(ticket, { conversation: conversation.id, scope: step.scope });
     const data = await bridge(
       "/api/work/run",
