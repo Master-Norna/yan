@@ -55,7 +55,7 @@ async function viewerReader(source) {
   if (head?.ok) return urlReader(url);
   const file = await getAttachment(source.attachmentId);
   if (!file) throw Error(t("附件原件已找不到"));
-  const blob = file.kind === "text" ? new Blob([file.data], { type: file.mime || "text/plain" }) : await (await fetch(file.data)).blob();
+  const blob = attachmentBlob(file);
   return {
     url: () => viewerBlobUrl(blob),
     text: async () => (file.kind === "text" ? String(file.data) : blob.text()),

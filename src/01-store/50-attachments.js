@@ -61,13 +61,23 @@ async function putAttachment(record, body = null) {
 }
 /** @param {Record<string, any>} record @param {Blob|null} [body] */
 function uploadAttachment(record, body = null) {
-  const { data, ...meta } = record;
-  return bridgeUpload(
-    "/api/files/put",
-    { record: meta },
-    body || (record.kind === "text" ? new Blob([String(data ?? "")], { type: "text/plain;charset=utf-8" }) : dataUrlBlob(data)),
-    AbortSignal.timeout(120000)
+  const { data: _data, ...meta } = record;
+  return bridgeUpload("/api/files/put", { record: meta }, body || attachmentBlob(record), AbortSignal.timeout(120000));
+}
+// 记录里的原件换成 Blob：文本附件的 data 是正文，别的是 data: URL
+/** @param {Record<string, any>} record */
+function attachmentBlob(record) {
+  return record.kind === "text" ? new Blob([String(record.data ?? "")], { type: record.mime || "text/plain" }) : dataUrlBlob(record.data);
+}
+// 要整份原件交出去时（收入卷宗）：在存储目录里的照同源地址取，浏览器自己托着字节，不读成 data: URL；只暂存在浏览器里的从表里取
+/** @param {string} id @returns {Promise<Blob|null>} */
+async function attachmentBody(id) {
+  const response = await fetch(`${apiBase}/api/files/raw?id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(120000) }).catch(
+    () => null
   );
+  if (response?.ok) return response.blob();
+  const record = await getAttachment(id);
+  return record ? attachmentBlob(record) : null;
 }
 async function getAttachment(id) {
   if (!id) return null;

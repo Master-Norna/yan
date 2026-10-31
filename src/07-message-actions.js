@@ -158,19 +158,6 @@ async function saveEditedMessage(conversation, index, value) {
   if (sidePanelOpen()) renderSidePanel();
   await streamReply(conversation, assistant, profile);
 }
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const t = document.createElement("textarea");
-    t.value = text;
-    document.body.append(t);
-    t.select();
-    document.execCommand("copy");
-    t.remove();
-  }
-}
-
 // 消息上的动作（复制、编辑、重答……）；编辑框里 Ctrl+Enter 保存
 function bindMessageActionEvents() {
   $("#messages").addEventListener("click", handleMessageAction);

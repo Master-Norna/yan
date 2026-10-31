@@ -1,7 +1,8 @@
 // 言 · 文件 · 接入：选取、拖入、粘贴的文件读成附件；附件原件的下载
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // 附件的上限：单件（置于案上与收入卷宗同一道）；界面上的提示都从这里取数（见 limitLabel），改一处即可。
-// 单件卡在原件以 data: URL 经 JSON 交给桥接这一路：256 MB 编出来三百多 MB，再大就逼近浏览器的字符串上限。
+// 原件直传进存储目录、不经页面的字符串（见 bridgeUpload）；单件仍卡在 256 MB：桥接不在时暂存进浏览器、导出备份，都要整份读成 data: URL，
+// 256 MB 编出来三百多 MB，再大就逼近浏览器的字符串上限。
 // 能过页面整份进上下文的另有一道 INLINE_FILE_BYTES：超过它的文本不当文本读、没抽出正文的不整份送，交给模型的是本机原件路径（同压缩包）
 const MB = 1024 * 1024;
 const MAX_FILE_BYTES = 256 * MB;
@@ -151,15 +152,12 @@ async function downloadAttachment(id) {
   try {
     const file = await getAttachment(id);
     if (!file) return toast(t("附件原件已找不到"));
-    const anchor = document.createElement("a");
-    let objectUrl = "";
-    if (file.kind === "text") {
-      objectUrl = URL.createObjectURL(new Blob([file.data], { type: file.mime || "text/plain" }));
-      anchor.href = objectUrl;
-    } else anchor.href = file.data;
+    const anchor = document.createElement("a"),
+      objectUrl = URL.createObjectURL(attachmentBlob(file));
+    anchor.href = objectUrl;
     anchor.download = file.name || t("附件");
     anchor.click();
-    if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   } catch {
     toast(t("附件读取失败"));
   }

@@ -54,7 +54,7 @@ const pad2 = n => String(n).padStart(2, "0");
 /** 给模型看的时刻：2026-10-31 09:00 */
 function clockText(ms) {
   const d = new Date(ms);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${localDay(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 /** 给人看的几时到：今天写钟点，明天写「明」，再远写月日 */
 function dueLabel(ms) {

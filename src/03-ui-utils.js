@@ -80,6 +80,19 @@ function toast(message, ms = 2200) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => hideWithFade(el), ms);
 }
+// 写进剪贴板；页面没得到剪贴板的准许（VS Code 内置预览、非安全上下文）时借一个文本框走 execCommand
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+}
 // 把正文里的某条消息滚到视口：只滚 #chatScroll 自己，不用 scrollIntoView——它会连带滚动外层容器（页面整体跟着偏一截，尤其在 VS Code 预览与移动端）。
 // 要去看别处就不再贴底：生成中落墨的下一帧会把平滑滚动拽回底部，只抖一下
 function scrollChatTo(article, block = "start", margin = 12) {

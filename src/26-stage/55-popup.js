@@ -203,11 +203,7 @@ function stageMenuOpen(box) {
       {
         id: "link-copy",
         label: t("复制链接"),
-        run: () =>
-          void navigator.clipboard.writeText(stageReadable(box.link)).then(
-            () => toast(t("链接已复制")),
-            () => toast(t("复制失败"))
-          )
+        run: () => void copyText(stageReadable(box.link)).then(() => toast(t("链接已复制")))
       }
     ]);
   if (box.img) groups.push([{ id: "img-open", label: t("新标签看图"), run: () => stageOpenBehind(box.img) }]);

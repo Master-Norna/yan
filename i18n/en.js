@@ -439,7 +439,6 @@ var YAN_EN = {
   // ---- 附件与卷宗 ----
   "一次最多置入 10 件附件": "Up to 10 attachments at a time",
   "{0} 超过 {1}，未置入": "{0} is larger than {1} and was not added",
-  "本次附件合计不超过 {0}": "Attachments must total no more than {0}",
   "{0} 读取失败": "Failed to read {0}",
   "已置入 {0} 件附件": "{0} {0|attachment|attachments} added",
   图片: "Image",
@@ -986,7 +985,6 @@ var YAN_EN = {
   "游目阅不了此件，已在本机程序中打开": "The browser panel can't show this file; opened it in its app",
   复制网址: "Copy URL",
   网址已复制: "URL copied",
-  复制失败: "Copy failed",
   用系统浏览器打开: "Open in system browser",
   "仅网页（http / https）可交系统浏览器打开": "Only web pages (http / https) can open in the system browser",
   已交给系统浏览器: "Opened in system browser",
@@ -1630,7 +1628,6 @@ var YAN_EN = {
   "卷宗路径已被文件占用：{0}": "The Files path is taken by a file: {0}",
   请给出文件路径: "Provide a file path",
   "卷宗里没有这一层：{0}": "No such folder in Files: {0}",
-  文件内容格式无效: "Invalid file content format",
   "单个文件不超过 {0} MB": "Each file must be at most {0} MB",
   不能动卷宗根本身: "The Files root itself can't be changed",
   "卷宗里没有这一项：{0}": "No such item in Files: {0}",
