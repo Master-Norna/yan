@@ -9,6 +9,7 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {Message} assistant 页面上的那一答（帮手的步骤也画在它的行迹里）
  * @property {AbortSignal} signal
  * @property {Set<string>} [offered] 这一轮交给模型的工具名：不在其中的一律不执行
+ * @property {boolean} [lookup] 旁注：只查不改（按需给的 MCP 只放只读的几件）
  *
  * @typedef {Object} OfferContext 此处给不给某件工具，看这几样
  * @property {Conversation} conversation
@@ -18,6 +19,7 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {string[]} offered 登记在前、此处已经给出的工具
  * @property {Preset|null} preset 这段对话用的预设：只给它挑中的几组与几个 MCP 服务
  * @property {Profile|null} profile 这一答用的模型：参数里有随模型而定的（帮手的思考档位）
+ * @property {boolean} [lookup] 旁注的一套：只查不改
  *
  * @typedef {{ ok: boolean, content: string, display: string, background?: boolean, images?: string[] }} ToolOutcome content 回给模型，display 写在标题行右侧；background：活在后台接着做，步骤由它自己收尾；images：交回的图（data: 地址），随工具结果给模型看
  * @typedef {{ url?: string, title?: string, read?: boolean, talk?: string, date?: string, memory?: string }} Source 答末「出处」的一条：网页、旧谈或记忆
@@ -88,7 +90,8 @@ function toolDefinitions(conversation, { sub = false, lookup = false, profile = 
     docs: availableDocuments(conversation),
     offered: [],
     preset: presetOf(conversation),
-    profile
+    profile,
+    lookup
   };
   const tools = [];
   for (const tool of TOOLS.values()) {
@@ -208,11 +211,12 @@ function toolPresentation(step) {
  * @param {Step[]} steps
  * @param {Conversation} conversation
  * @param {Message} assistant
+ * @param {boolean} [lookup] 旁注：只查不改
  */
-async function runSteps(steps, conversation, assistant, signal, toolCache, offered) {
+async function runSteps(steps, conversation, assistant, signal, toolCache, offered, lookup = false) {
   const outcomes = new Map(),
     images = [],
-    ctx = { conversation, assistant, signal, offered };
+    ctx = { conversation, assistant, signal, offered, lookup };
   const runOne = async step => {
     // 一批里前一件跑着时按了停：后面排着的不再动手（写记忆、起请示都算动手）
     signal.throwIfAborted();

@@ -142,15 +142,17 @@ const MCP_LAZY_TOOLS = [
     name: "mcp_describe",
     label: "MCP",
     mcp: true,
-    offer: ctx => mcpLazyServers(ctx.preset).length > 0,
-    vars: ctx => ({ directory: mcpDirectory(ctx.preset) }),
+    // 旁注也给：目录只列只读的几件，mcp_call 也只放这几件（逐件摊开的同此，见 mcpInlineTool 的 lookup）
+    lookup: true,
+    offer: ctx => mcpLazyServers(ctx.preset).some(server => mcpServerTools(server, ctx.lookup).length),
+    vars: ctx => ({ directory: mcpDirectory(ctx.preset, ctx.lookup) }),
     parallel: true,
     cache: true,
     run(step, args, ctx) {
       const state = mcpLazyServers(presetOf(ctx.conversation)).includes(args.server) ? mcp.servers[args.server] : null;
       step.title = `${args.server} · ${args.tools.join("、")}`;
       if (!state?.ok) return mcpUnknown(args.server, "");
-      const found = args.tools.map(name => state.tools.find(tool => tool.name === name)).filter(Boolean);
+      const found = args.tools.map(name => mcpServerTools(args.server, ctx.lookup).find(tool => tool.name === name)).filter(Boolean);
       if (!found.length) return mcpUnknown(args.server, args.tools.join("、"));
       const text = found
         .map(
@@ -166,7 +168,8 @@ const MCP_LAZY_TOOLS = [
     name: "mcp_call",
     label: "MCP",
     mcp: true,
-    offer: ctx => mcpLazyServers(ctx.preset).length > 0,
+    lookup: true,
+    offer: ctx => mcpLazyServers(ctx.preset).some(server => mcpServerTools(server, ctx.lookup).length),
     sideEffect: true,
     approval: mcpApprovalHtml,
     digest: true,
@@ -174,6 +177,8 @@ const MCP_LAZY_TOOLS = [
       const spec = mcp.servers[args.server]?.tools?.find(tool => tool.name === args.tool);
       step.title = `${args.server} · ${args.tool}`;
       if (!spec) return mcpUnknown(args.server, args.tool);
+      if (ctx.lookup && !mcpReadOnly(spec))
+        return { ok: false, content: t`旁注只查不改：${args.server} 的 ${args.tool} 不是只读的工具，此处不调`, display: "非只读" };
       // 外层只核了 server / tool；params 对着目标工具自己的参数表再理一遍
       const { args: inner, problems } = normalizeArguments(spec.inputSchema, args.params);
       if (problems.length)
@@ -196,14 +201,20 @@ const MCP_LAZY_TOOLS = [
 function mcpLazyServers(preset) {
   return mcp.lazy.filter(server => !preset?.mcp || preset.mcp.includes(server));
 }
+/** 一个按需给的服务此处可用的几件：旁注（lookup）只要只读的 @param {string} server @param {boolean} [lookup] */
+function mcpServerTools(server, lookup = false) {
+  const tools = mcp.servers[server]?.tools || [];
+  return lookup ? tools.filter(mcpReadOnly) : tools;
+}
 // 目录：一服务一段，一件一行（名字与说明的头一句）；只读的标出来
-/** @param {Preset|null} preset */
-function mcpDirectory(preset) {
+/** @param {Preset|null} preset @param {boolean} [lookup] */
+function mcpDirectory(preset, lookup = false) {
   return mcpLazyServers(preset)
+    .filter(server => mcpServerTools(server, lookup).length)
     .map(server => {
       const state = mcp.servers[server],
         head = [state.server?.title || state.server?.name, state.server?.description].filter(Boolean).join("：");
-      const lines = state.tools.map(tool => {
+      const lines = mcpServerTools(server, lookup).map(tool => {
         const first = String(tool.description || tool.title || "")
           .split("\n")[0]
           .trim()

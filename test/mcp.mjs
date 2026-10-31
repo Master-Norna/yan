@@ -89,6 +89,23 @@ check(
   `${trail} ${steps}`
 );
 
+// 旁注也用得上按需给的那一对：目录只列只读的，只读的照调，会写的不调（也不请示）
+await evalJs(`${lastAssistant}.querySelector('[data-action="note"]').click(); true`);
+await waitFor(`!!document.querySelector("#sideMessages [data-side-new]")`, 5000);
+await evalJs(`getSelection().removeAllRanges(); document.querySelector("#sideMessages [data-side-new]").click(); true`);
+await waitFor(`!!document.querySelector(".side-empty")`, 5000);
+await evalJs(`document.querySelector("#sideInput").value = "SIDEMCP 看看"; document.querySelector("#sideSend").click(); true`);
+await waitFor(`[...document.querySelectorAll('#sideMessages .message.assistant')].at(-1)?.dataset.status === "complete"`, 60000);
+const side = await evalJs(`[...document.querySelectorAll('#sideMessages .message.assistant .markdown')].at(-1).textContent.trim()`);
+check(
+  "a side note gets the lazy MCP pair with only read-only tools listed; the read-only call runs, the writing one is refused",
+  /lazy:true\|dirRead:true\|dirWrite:false\|/.test(side) && /"n": ?3/.test(side) && /旁注只查不改/.test(side) && !/已记/.test(side),
+  side.slice(0, 300)
+);
+check("the refused call did not raise an approval", await evalJs(`document.querySelector("#approvalBar").classList.contains("hidden")`));
+await evalJs(`document.querySelector("#sideClose").click(); true`);
+await sleep(200);
+
 // 设置 → MCP：一服务一张卡；停用、表单新增、以 JSON 改（密钥遮着、原样存回沿用原值）、粘错了的不收、旧式 SSE 自动退回
 const card = name => `document.querySelector('#mcpList [data-mcp="${name}"]')`;
 const setJson = text => `document.querySelector("#mcpConfig").value = ${text}; document.querySelector("#mcpJsonSave").click(); true`;

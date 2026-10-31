@@ -203,7 +203,7 @@ async function runRounds(target, history, run) {
       ...thoughtEcho(target, thoughtStart, profile)
     });
     const offered = new Set(overrides.tools.map(tool => tool.function?.name)),
-      { outcomes, images } = await runSteps(steps, conversation, host, signal, toolCache, offered);
+      { outcomes, images } = await runSteps(steps, conversation, host, signal, toolCache, offered, run.kind === "side");
     for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
     // 它这一轮自己撮了要：此前的往来换成它写的笔记（见 60-context.js 的 foldByModel）
     foldByModel(history, overrides, steps);

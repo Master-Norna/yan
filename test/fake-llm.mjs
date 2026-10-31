@@ -1142,6 +1142,33 @@ http
       }
       // MCPTEST：接入的 MCP 服务一轮全用上——逐件给的 echo（stdio）、按需给的先查再调（stdio，工具多）、HTTP 服务上会写的 write_note（要请示）；
       // 第二轮把看到的报回去：系统提示里有没有服务自带的用法、拿到了哪几件、各结果是什么
+      // SIDEMCP：旁注里用按需给的 MCP——只读的照调，会写的不调；第二轮报回拿到了哪几件、目录里列没列会写的、各结果
+      if (typeof lastUser === "string" && lastUser.includes("SIDEMCP")) {
+        const names = (payload.tools || []).map(t => t.function.name),
+          call = (index, args) => ({
+            index,
+            id: `call_side${index}`,
+            type: "function",
+            function: { name: "mcp_call", arguments: JSON.stringify(args) }
+          });
+        if (!toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                call(0, { server: "big", tool: "tool_07", params: { n: 3 } }),
+                call(1, { server: "big", tool: "write_note", params: { text: "不该写" } })
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        const describe = payload.tools.find(t => t.function.name === "mcp_describe")?.function.description || "";
+        return sse(res, [
+          delta({
+            content: `SIDEMCP|lazy:${names.includes("mcp_call")}|dirRead:${/tool_07/.test(describe)}|dirWrite:${/write_note/.test(describe)}|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 60)).join(" ▸ ")}`
+          }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       if (typeof lastUser === "string" && lastUser.includes("MCPTEST")) {
         const n = toolResults.length,
           names = (payload.tools || []).map(t => t.function.name);

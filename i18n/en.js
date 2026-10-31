@@ -1197,6 +1197,9 @@ var YAN_EN = {
   参数解析失败: "Invalid arguments",
   参数不完整: "Incomplete arguments",
   参数不合要求: "Invalid arguments",
+  非只读: "Not read-only",
+  "旁注只查不改：{0} 的 {1} 不是只读的工具，此处不调":
+    "Side notes only look things up: {1} on {0} is not read-only, so it is not called here",
   "工具执行失败：{0}": "Tool failed: {0}",
   "复用 · {0}": "Reused · {0}",
   复用: "Reused",
