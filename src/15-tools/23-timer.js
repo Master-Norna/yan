@@ -1,6 +1,6 @@
 // 言 · 候 · 等时刻：模型约好几点叫醒自己（隔一阵再叫亦可）。与后台指令同是「候」，只是叫醒的条件是时刻到、不是进程结束：
 // 时刻记在桥接（存储根/候/约.json，见 server/timers.js），不占进程，桥接重启后照旧、错过的补叫；到点时交给页面（见 14-chat-engine/75-timers.js），
-// 照回报的路子叫醒它。看与取消同后台指令，走 check_command；用户停了这段对话，它的候一并取消
+// 照回报的路子叫醒它。看与取消同后台指令，走 check_command。「止」不碰它；重答、删对话时挂它的那一步没了，才一并取消（见 releaseBackground）
 defineTool({
   name: "set_timer",
   group: "work",

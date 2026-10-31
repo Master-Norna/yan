@@ -81,11 +81,19 @@ module.exports = function createTimers({ home, known }) {
 
   // ---------- 约好的时刻 ----------
   /** @type {{ seq: number, timers: Array<{ id: string, to: string, step: string, note: string, due: number, every?: number, created: number }> }} */
-  let book = { seq: 0, timers: [] };
-  try {
-    const saved = JSON.parse(fs.readFileSync(bookFile(), "utf8"));
-    if (saved && Array.isArray(saved.timers)) book = { seq: Number(saved.seq) || 0, timers: saved.timers };
-  } catch {}
+  let book = { seq: 0, timers: [] },
+    bookAt = "";
+  // 约.json 随存储根：换了存储位置，读那边的一份重排，不把这边的带过去盖掉它
+  function sync() {
+    if (bookAt === bookFile()) return;
+    bookAt = bookFile();
+    book = { seq: 0, timers: [] };
+    try {
+      const saved = JSON.parse(fs.readFileSync(bookAt, "utf8"));
+      if (saved && Array.isArray(saved.timers)) book = { seq: Number(saved.seq) || 0, timers: saved.timers };
+    } catch {}
+    arm();
+  }
   let armed = null;
   function save() {
     fs.mkdirSync(home(), { recursive: true });
@@ -100,6 +108,7 @@ module.exports = function createTimers({ home, known }) {
   }
   // 到点的各落一回给那段对话；隔一阵再叫的排到此后头一个时刻（睡过去的几回不补，只记迟了多久）
   function fire() {
+    sync();
     const now = Date.now();
     let changed = false;
     for (const timer of [...book.timers]) {
@@ -130,6 +139,7 @@ module.exports = function createTimers({ home, known }) {
     arm();
   }
   const handleSet = jsonRoute(body => {
+    sync();
     const to = String(body.to || ""),
       due = Number(body.due),
       every = Number(body.every) || 0;
@@ -152,6 +162,7 @@ module.exports = function createTimers({ home, known }) {
   });
   // 取消：到点前叫停；没有的（已叫过、已取消）回 found: false
   const handleCancel = jsonRoute(body => {
+    sync();
     const id = String(body.id || ""),
       timer = book.timers.find(item => item.id === id && (!body.to || item.to === body.to));
     if (!timer) return { found: false };
@@ -160,8 +171,11 @@ module.exports = function createTimers({ home, known }) {
     arm();
     return { found: true, timer };
   });
-  const handleList = jsonRoute(() => ({ timers: book.timers }));
-  arm();
+  const handleList = jsonRoute(() => {
+    sync();
+    return { timers: book.timers };
+  });
+  sync();
 
   return {
     routes: {

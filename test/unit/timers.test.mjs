@@ -100,3 +100,34 @@ test("桥接重启后读回，错过的当场补叫并记下迟了多久；编�
     await close();
   }
 });
+
+test("换了存储位置：读那边的约，不把这边的带过去盖掉", async () => {
+  const a = fs.mkdtempSync(path.join(os.tmpdir(), "yan-timer-")),
+    b = fs.mkdtempSync(path.join(os.tmpdir(), "yan-timer-"));
+  fs.writeFileSync(
+    path.join(b, "约.json"),
+    JSON.stringify({ seq: 7, timers: [{ id: "t7", to: "c1", step: "s7", note: "那边的", due: Date.now() + 3600000, created: 1 }] })
+  );
+  let home = a;
+  const { routes } = createTimers({ home: () => home, known: () => true });
+  const server = http.createServer((req, res) => routes[`POST ${req.url}`](req, res)).listen(0, "127.0.0.1");
+  await new Promise(resolve => server.once("listening", resolve));
+  const post = (route, body) =>
+    fetch(`http://127.0.0.1:${server.address().port}${route}`, { method: "POST", body: JSON.stringify(body) }).then(r => r.json());
+  try {
+    await post("/api/timer/set", { to: "c1", step: "s1", note: "这边的", due: Date.now() + 3600000 });
+    home = b;
+    assert.deepEqual(
+      (await post("/api/timer/list", {})).timers.map(timer => timer.note),
+      ["那边的"]
+    );
+    assert.equal((await post("/api/timer/set", { to: "c1", step: "s8", note: "又一个", due: Date.now() + 3600000 })).id, "t8");
+    home = a;
+    assert.deepEqual(
+      (await post("/api/timer/list", {})).timers.map(timer => timer.note),
+      ["这边的"]
+    );
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
