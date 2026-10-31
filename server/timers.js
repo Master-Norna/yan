@@ -6,7 +6,7 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
-const { jsonRoute, readJson, requestSignal, sendJson, writeAtomic } = require("./http.js");
+const { jsonRoute, readJson, requestSignal, sendJson, writeAtomic, readJsonFile } = require("./http.js");
 
 // setTimeout 至多等这么久（约 24.8 天），再远的到时候再排一回
 const MAX_DELAY = 2 ** 31 - 1;
@@ -33,12 +33,10 @@ module.exports = function createTimers({ home, known }) {
     try {
       names = fs.readdirSync(firedDir()).filter(name => name.endsWith(".json"));
     } catch {}
-    const list = [];
-    for (const name of names)
-      try {
-        list.push(JSON.parse(fs.readFileSync(path.join(firedDir(), name), "utf8")));
-      } catch {}
-    return list.sort((a, b) => a.at - b.at);
+    return names
+      .map(name => readJsonFile(path.join(firedDir(), name)))
+      .filter(Boolean)
+      .sort((a, b) => a.at - b.at);
   }
   // 认领：改名成功的才算拿到，再删；几页同时认领同一回，只有一页改名得手
   function take(ids) {
@@ -87,11 +85,8 @@ module.exports = function createTimers({ home, known }) {
   function sync() {
     if (bookAt === bookFile()) return;
     bookAt = bookFile();
-    book = { seq: 0, timers: [] };
-    try {
-      const saved = JSON.parse(fs.readFileSync(bookAt, "utf8"));
-      if (saved && Array.isArray(saved.timers)) book = { seq: Number(saved.seq) || 0, timers: saved.timers };
-    } catch {}
+    const saved = readJsonFile(bookAt);
+    book = Array.isArray(saved?.timers) ? { seq: Number(saved.seq) || 0, timers: saved.timers } : { seq: 0, timers: [] };
     arm();
   }
   let armed = null;

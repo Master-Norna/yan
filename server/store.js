@@ -10,17 +10,17 @@
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
 // 由 server.js 装配：require("./server/store.js")({ working })——working 报各页正作答的有几段（见 server/chats.js）
 "use strict";
-const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText } = require("./http.js");
+const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const { expandHome } = require("./work/paths.js");
 
 /** @param {{ working?: () => number }} [options] */
 module.exports = function createStore({ working = () => 0 } = {}) {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
     POINTER = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "言", "位置.json"),
     CONFIG_FILE = "配置.json";
-  const expand = value => String(value || "").replace(/^~(?=$|[\\/])/, os.homedir());
   // 把现存祖先的链接也算进去，避免选到旧根内部的 junction 后递归拷贝自身。
   function physicalPath(value) {
     let existing = path.resolve(value);
@@ -38,12 +38,8 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
   }
   function readPointer(file) {
-    try {
-      const pointed = JSON.parse(fs.readFileSync(file, "utf8"))?.root;
-      return pointed && path.isAbsolute(pointed) ? path.resolve(pointed) : "";
-    } catch {
-      return "";
-    }
+    const pointed = readJsonFile(file)?.root;
+    return typeof pointed === "string" && path.isAbsolute(pointed) ? path.resolve(pointed) : "";
   }
   function writePointer(target) {
     if (target.toLowerCase() === HOME_ROOT.toLowerCase()) return fs.rmSync(POINTER, { force: true });
@@ -51,7 +47,7 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     writeAtomic(POINTER, JSON.stringify({ 言: "位置", root: target }, null, 1));
   }
   function initialRoot() {
-    if (process.env.YAN_HOME) return path.resolve(expand(process.env.YAN_HOME));
+    if (process.env.YAN_HOME) return path.resolve(expandHome(process.env.YAN_HOME));
     return readPointer(POINTER) || HOME_ROOT;
   }
   let root = initialRoot();
@@ -158,8 +154,8 @@ module.exports = function createStore({ working = () => 0 } = {}) {
   // 否则把整份拷过去。旧处原样留着（可自行删去），%APPDATA%\言\位置.json 记下新根，桥接重启后也认得
   const handleMove = jsonRoute(
     async body => {
-      const parent = path.resolve(expand(String(body.parent || "").trim()));
-      if (!body.parent || !path.isAbsolute(expand(String(body.parent).trim()))) throw Error("存储位置需填写完整的绝对路径");
+      const parent = path.resolve(expandHome(body.parent));
+      if (!body.parent || !path.isAbsolute(expandHome(body.parent))) throw Error("存储位置需填写完整的绝对路径");
       const next = path.basename(parent).toLowerCase() === ".yan" ? parent : path.join(parent, ".yan");
       if (next.toLowerCase() === root.toLowerCase()) return { ...describe(), moved: false };
       if (inside(root, next)) throw Error("新存储位置不能位于当前存储目录内");

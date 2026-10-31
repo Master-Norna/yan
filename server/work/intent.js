@@ -4,7 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
-const { jsonRoute, requestSignal } = require("../http.js");
+const { jsonRoute, requestSignal, fileHash } = require("../http.js");
 const { WORK_SKIP, SCRATCH_DIR, describeFsError, relPath } = require("./paths.js");
 const writeTextAtomic = require("./atomic.js");
 
@@ -52,11 +52,6 @@ module.exports = function createIntent(work) {
   // 不在的、读不了的给 null
   const PRINT_DIR_FILES = 2000,
     PRINT_DIR_BYTES = 32 * 1024 * 1024;
-  const fileHash = async file => {
-    const hash = createHash("sha1");
-    for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
-    return hash.digest("hex");
-  };
   async function dirHash(dir) {
     const files = [],
       directories = [];

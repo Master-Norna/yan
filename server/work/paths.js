@@ -23,9 +23,11 @@ const WORK_SKIP = new Set([
   ".vscode",
   "coverage"
 ]);
+// 打头的 ~ 换成家目录（只认 ~ 与 ~/、~\ 开头；~user 不认）
 function expandHome(value) {
-  const text = String(value || "").trim();
-  return text.startsWith("~") ? path.join(os.homedir(), text.slice(1)) : text;
+  return String(value || "")
+    .trim()
+    .replace(/^~(?=$|[\\/])/, os.homedir());
 }
 // home：没给目录时的退路（执事的 工作/ 目录）
 // 工作目录必须是完整限定的路径：path.isAbsolute 在 Windows 上会把「\foo」「/foo」也算作绝对，实际却跟着桥接进程所在的盘符走；

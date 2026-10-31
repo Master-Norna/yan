@@ -139,7 +139,6 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       modifiedAt: stat.mtime.toISOString()
     };
   }
-  // 收入：页面拖进来的文件以 data: URL 送来，落进页面此刻所在的那一层（dir）
   // 收入卷宗：原件直传（见 http.js 的 receiveUpload），说明是 { root, dir, name }。先收进那一层里的一个点开头的临时文件
   // （列卷宗时当隐藏项跳过），收全了再在写锁里挪成不重名的正名
   async function handleArchivePut(req, res) {

@@ -3,11 +3,10 @@
 // 请求直发公开的 Responses API（api.openai.com/v1/responses），带言自己的提示与工具，不经 Codex 那一层。
 // 与 Anthropic 适配一个路数：页面照旧送 OpenAI 格式，这里把请求换成 Responses 的，事件流再换回 chat.completions 的分块（登记的样子见 index.js 开头）。
 // 凭证只在桥接里：存储根下的「ChatGPT 登录.json」，不进页面、不进备份
-const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { createHash, randomBytes, randomUUID } = require("node:crypto");
-const { jsonRoute, writeAtomic } = require("../http.js");
+const { jsonRoute, writeAtomic, readJsonFile } = require("../http.js");
 const { translateSse } = require("./sse.js");
 const { openUrl } = require("../platform.js");
 
@@ -60,11 +59,7 @@ module.exports = function createChatgpt({ home }) {
   const file = () => path.join(home(), "ChatGPT 登录.json");
   /** @returns {{ hostId?: string, clientId?: string, email?: string, tokens?: { access_token: string, refresh_token: string, id_token?: string, expires_at: number } }} */
   function load() {
-    try {
-      return JSON.parse(fs.readFileSync(file(), "utf8")) || {};
-    } catch {
-      return {};
-    }
+    return readJsonFile(file()) || {};
   }
   const save = data => writeAtomic(file(), JSON.stringify(data, null, 1));
   /** @param {Record<string, any>} fresh 令牌端点的回应 @param {Record<string, any>} [kept] 先前的那份 */

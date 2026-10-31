@@ -1,8 +1,9 @@
-// 言 · 桥接各接口共用的几件：回 JSON、读 JSON、收直传的原件、原子写盘，以及把「读请求体 → 办事 → 出错回 400」收成一处的 jsonRoute
+// 言 · 桥接各接口共用的几件：回 JSON、读 JSON、收直传的原件、原子写盘、读盘上的 JSON 与算文件指纹，以及把「读请求体 → 办事 → 出错回 400」收成一处的 jsonRoute
 // 纯工具，不持状态；server.js 与 server/ 下各模块直接 require
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { openPath } = require("./platform.js");
 
 function sendJson(res, status, data) {
@@ -255,6 +256,20 @@ function openWithSystem(file) {
 function parseJsonText(text) {
   return JSON.parse(String(text).replace(/^\uFEFF/, ""));
 }
+// \u8BFB\u6865\u63A5\u81EA\u5DF1\u8BB0\u7684\u4E00\u4EFD JSON\uFF08\u767B\u5F55\u3001\u7C3F\u8BB0\u3001\u7D22\u5F15\u2026\u2026\uFF09\uFF1A\u6CA1\u6709\u3001\u8BFB\u4E0D\u4E86\u3001\u574F\u4E86\u90FD\u5F53\u6CA1\u6709\uFF0C\u56DE fallback
+function readJsonFile(file, fallback = null) {
+  try {
+    return parseJsonText(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+// \u4E00\u4EF6\u6587\u4EF6\u5185\u5BB9\u7684 SHA-1\uFF1A\u8FB9\u8BFB\u8FB9\u7B97\uFF0C\u4E0D\u628A\u6574\u4EFD\u8BFB\u8FDB\u5185\u5B58
+async function fileHash(file) {
+  const hash = crypto.createHash("sha1");
+  for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
+  return hash.digest("hex");
+}
 module.exports = {
   sendJson,
   readJson,
@@ -268,5 +283,7 @@ module.exports = {
   fileMime,
   sendFile,
   openWithSystem,
-  parseJsonText
+  parseJsonText,
+  readJsonFile,
+  fileHash
 };

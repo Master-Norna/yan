@@ -4,11 +4,11 @@
 // 「关于滚动条·3f9a2c1b0e.json」；标题改了文件跟着改名，删对话就删文件。配置不在这里，在存储根的 配置.json
 // 收了尾的一答，思绪与帮手的经过另存在 行迹/<短码>/ 里，一答一份、写下就不再改；对话文件里那一答只留 cold 记号（见 src/01-store/35-cold.js）
 "use strict";
-const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText } = require("./http.js");
+const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
-const os = require("node:os");
 const crypto = require("node:crypto");
+const { expandHome, describeFsError: describe } = require("./work/paths.js");
 
 module.exports = function createChats({ chatsHome, onDelete = (/** @type {string} */ _id) => {} }) {
   // 旧版的设置镜像：迁进来的目录里可能还躺着一份，读目录时跳过它
@@ -23,12 +23,8 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     // 没人引用的行迹放够一天才清：别处刚写下、对话文件还没跟上的那份不能当场删
     TRAIL_GRACE_MS = 24 * 60 * 60 * 1000;
   function readTombstones(home) {
-    try {
-      const data = JSON.parse(fs.readFileSync(path.join(home, TOMBSTONE_FILE), "utf8"));
-      return data && typeof data.deleted === "object" ? data.deleted : {};
-    } catch {
-      return {};
-    }
+    const deleted = readJsonFile(path.join(home, TOMBSTONE_FILE))?.deleted;
+    return deleted && typeof deleted === "object" ? deleted : {};
   }
   function writeTombstones(home, deleted) {
     const cutoff = Date.now() - TOMBSTONE_DAYS * 86400000,
@@ -38,10 +34,9 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
   }
   // 请求可带来目录；留空用存储根里的对话目录
   function ensureDir(raw) {
-    const value = String(raw || "").trim();
+    const expanded = expandHome(raw);
     let home = chatsHome();
-    if (value) {
-      const expanded = value.replace(/^~(?=$|[\\/])/, os.homedir());
+    if (expanded) {
       if (!path.isAbsolute(expanded)) throw Error("对话目录需填写完整的绝对路径");
       home = path.resolve(expanded);
       if (home.toLowerCase() === path.parse(home).root.toLowerCase()) throw Error("不能把整个磁盘当作对话目录");
@@ -49,14 +44,6 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     fs.mkdirSync(home, { recursive: true });
     if (!fs.statSync(home).isDirectory()) throw Error(`路径已被文件占用，不是目录：${home}`);
     return home;
-  }
-  function describe(error, target = "") {
-    const code = error?.code,
-      where = target ? `：${target}` : "";
-    if (code === "ENOENT") return `路径不存在${where}`;
-    if (code === "EACCES" || code === "EPERM") return `没有访问权限${where}`;
-    if (code === "EBUSY") return `文件正被占用${where}`;
-    return String(error?.message || error).slice(0, 200);
   }
   // 对话 id 的短码：文件名靠它认对话。老版本的 id 是「时间戳-随机数」，头几位彼此相同，不能直接截，按整个 id 取哈希
   function codeOf(id) {
@@ -113,7 +100,6 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     const suffix = `·${codeOf(id)}.json`;
     return fs.readdirSync(home).filter(name => name.endsWith(suffix));
   }
-  // 先写临时文件再改名，写到一半断电也不会留下半个文件顶替原件
   function readConversationFile(home, name) {
     const file = path.join(home, name);
     if (fs.statSync(file).size > FILE_LIMIT) throw Error("文件过大");
@@ -264,11 +250,10 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
       const home = ensureDir(body.root),
         dir = trailDir(home, String(body.id || "")),
         pieces = {};
-      for (const key of Array.isArray(body.keys) ? body.keys.map(String) : [])
-        if (TRAIL_KEY.test(key))
-          try {
-            pieces[key] = parseJsonText(fs.readFileSync(path.join(dir, `${key}.json`), "utf8"));
-          } catch {}
+      for (const key of Array.isArray(body.keys) ? body.keys.map(String) : []) {
+        const piece = TRAIL_KEY.test(key) && readJsonFile(path.join(dir, `${key}.json`));
+        if (piece) pieces[key] = piece;
+      }
       return { pieces };
     },
     error => `行迹未能读回：${describe(error)}`

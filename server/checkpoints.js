@@ -12,7 +12,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Transform } = require("node:stream");
-const { jsonRoute, errorText, writeAtomic } = require("./http.js");
+const { jsonRoute, errorText, writeAtomic, readJsonFile, fileHash } = require("./http.js");
 const { WORK_SKIP } = require("./work/paths.js");
 
 const KEY = /^[\w-]{1,80}~[\w-]{1,80}$/;
@@ -86,6 +86,8 @@ function ignored(rules, rel, dir) {
 /** @param {{ home: () => string, skip?: () => string[] }} options */
 module.exports = function createCheckpoints({ home, skip = () => [] }) {
   const same = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  /** @param {string} dir */
+  const storeAt = dir => ({ dir, objects: path.join(dir, "对象"), book: path.join(dir, "册"), index: path.join(dir, "索引.json") });
   /** @param {string} root */
   function storeOf(root) {
     const full = path.resolve(root),
@@ -93,9 +95,8 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
         .createHash("sha1")
         .update(process.platform === "win32" ? full.toLowerCase() : full)
         .digest("hex")
-        .slice(0, 12),
-      dir = path.join(home(), code);
-    return { full, dir, objects: path.join(dir, "对象"), book: path.join(dir, "册"), index: path.join(dir, "索引.json") };
+        .slice(0, 12);
+    return { full, ...storeAt(path.join(home(), code)) };
   }
   const objectPath = (store, hash) => path.join(store.objects, hash.slice(0, 2), hash.slice(2));
   // 同一个目录一回只办一件（两段对话同绑一个目录、同时动手）：索引、对象都不至于互相踩
@@ -109,13 +110,6 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       run.catch(() => {})
     );
     return run;
-  }
-  function readJsonFile(file, fallback) {
-    try {
-      return JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      return fallback;
-    }
   }
   function putObject(store, text) {
     const hash = crypto.createHash("sha1").update(text).digest("hex"),
@@ -154,11 +148,6 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       fs.rmSync(temp, { force: true });
       throw error;
     }
-  }
-  async function hashFile(abs) {
-    const hash = crypto.createHash("sha1");
-    for await (const chunk of fs.createReadStream(abs)) hash.update(chunk);
-    return hash.digest("hex");
   }
   // 走一遍目录：每件文件交给 visit（拿到相对路径与 stat），返回这一层的条目；跳过的与读不了的照上面的规矩
   async function walk(root, visit) {
@@ -260,7 +249,7 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       try {
         const stat = await fs.promises.stat(abs),
           seen = index[rel];
-        files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await hashFile(abs));
+        files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await fileHash(abs));
       } catch {
         files.set(rel, null);
       }
@@ -321,11 +310,7 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       mark = hash => {
         if (keep.has(hash)) return;
         keep.add(hash);
-        let items = [];
-        try {
-          items = JSON.parse(fs.readFileSync(objectPath(store, hash), "utf8"));
-        } catch {}
-        for (const item of items)
+        for (const item of readJsonFile(objectPath(store, hash), []))
           if (item[0] === "d") mark(item[2]);
           else if (item[0] === "f") keep.add(item[2]);
       };
@@ -345,13 +330,11 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
     const prefix = `${String(conversation).replace(/[^\w-]/g, "")}~`;
     if (prefix === "~" || !fs.existsSync(home())) return;
     for (const code of fs.readdirSync(home())) {
-      const dir = path.join(home(), code),
-        book = path.join(dir, "册"),
-        pages = fs.existsSync(book) ? fs.readdirSync(book).filter(name => name.startsWith(prefix)) : [];
+      const store = storeAt(path.join(home(), code)),
+        pages = fs.existsSync(store.book) ? fs.readdirSync(store.book).filter(name => name.startsWith(prefix)) : [];
       if (!pages.length) continue;
-      const store = { dir, objects: path.join(dir, "对象"), book, index: path.join(dir, "索引.json") };
       await serial(store, async () => {
-        for (const name of pages) fs.rmSync(path.join(book, name), { force: true });
+        for (const name of pages) fs.rmSync(path.join(store.book, name), { force: true });
         collect(store);
       });
     }

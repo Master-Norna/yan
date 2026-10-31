@@ -3,7 +3,17 @@
 // 一件附件两份文件：原件本身「<id>.<扩展名>」（文本就是文本，图片就是图片，双击能开）与「<id>.json」（名字、类型、大小、抽出的正文）。
 // 页面按 id 存取，交出去的还是它原先在 IndexedDB 里的样子：{ id, kind, name, mime, size, data, extractedText… }，data 是文本或 data: URL
 "use strict";
-const { sendJson, jsonRoute, errorText, writeAtomic, replaceFile, receiveUpload, sendFile, openWithSystem } = require("./http.js");
+const {
+  sendJson,
+  jsonRoute,
+  errorText,
+  writeAtomic,
+  replaceFile,
+  receiveUpload,
+  sendFile,
+  openWithSystem,
+  readJsonFile
+} = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -33,13 +43,7 @@ module.exports = function createFiles({ filesHome, playable }) {
     if (meta?.file && fs.existsSync(path.join(dir, meta.file))) return meta.file;
     return fs.readdirSync(dir).find(name => name === id || (name.startsWith(`${id}.`) && name !== `${id}.json`)) || "";
   }
-  function readMeta(dir, id) {
-    try {
-      return JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), "utf8"));
-    } catch {
-      return null;
-    }
-  }
+  const readMeta = (dir, id) => readJsonFile(path.join(dir, `${id}.json`));
   // 原件直传（见 http.js 的 receiveUpload）：说明是 { record }——附件的元数据与抽出的正文，不带 data；其后是原件的字节（文本附件是 UTF-8 的正文）
   async function handlePut(req, res) {
     try {

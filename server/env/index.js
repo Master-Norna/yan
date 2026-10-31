@@ -9,7 +9,7 @@
 // 接口：POST /api/env/status；/api/env/prepare { packs, pip, npm } 在后台装，页面轮询 status 看进度；/api/env/clear 整个删掉
 // 准备环境就是把环境对齐到勾选：勾上的装，上回装了、这回没勾的卸掉
 "use strict";
-const { sendJson, readJson, jsonRoute, errorText } = require("../http.js");
+const { sendJson, readJson, jsonRoute, errorText, readJsonFile } = require("../http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Readable } = require("node:stream");
@@ -60,13 +60,7 @@ module.exports = function createEnv({ envHome }) {
       cache: path.join(home, "cache")
     };
   };
-  function readState() {
-    try {
-      return JSON.parse(fs.readFileSync(path.join(envHome(), STATE_FILE), "utf8"));
-    } catch {
-      return null;
-    }
-  }
+  const readState = () => readJsonFile(path.join(envHome(), STATE_FILE));
   function uvVars(mirror) {
     const d = dirs();
     return {
