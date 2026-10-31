@@ -268,7 +268,7 @@ function prompt(path, vars = {}) {
 function fillTemplate(text, vars = {}) {
   return (Array.isArray(text) ? text.join("\n") : String(text)).replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? "")).trim();
 }
-const APP_VERSION = "1.1.11"; // 与 package.json 同步；以桥接返回的为准
+const APP_VERSION = "1.1.12"; // 与 package.json 同步；以桥接返回的为准
 const FOLLOW_THRESHOLD = 80;
 // 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；按轮计，同一轮并发的几次调用只算一轮。
 // 默认值在这里，实际值在「设置 → 工具」里可改，留空（记作 0）即不限

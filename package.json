@@ -1,6 +1,6 @@
 {
   "name": "yan-local-chat",
-  "version": "1.1.11",
+  "version": "1.1.12",
   "private": true,
   "license": "Apache-2.0",
   "description": "清简纸墨风格的本地聊天前端与轻量执事：接 OpenAI 兼容、Anthropic 与 ChatGPT 订阅，绑上目录即可读写文件、执行指令、推进长活",
