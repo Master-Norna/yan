@@ -41,13 +41,14 @@ async function maybeAutoTitle(conversation, profile) {
     });
     if (!response.ok) return;
     const temp = await readAside(response, profile, ask);
-    const line =
+    // 不截字数：长短由提示词定，放不下由侧栏、书眉自己省略，文件名另有上限（见 server/chats.js 的 safeTitle）。
+    // 原先截在 24 个码点，字母空格也算一个，「Nushell bytes remove 技术博客」就成了「…技术博」
+    const title =
       temp.content
         .split("\n")
         .map(line => line.trim())
         .find(Boolean)
         ?.replace(/^[\s"'“”‘’《》「」【】#*]+|[\s"'“”‘’《》「」【】。！？!?.、,，]+$/g, "") || "";
-    const title = [...line].slice(0, 24).join("");
     if (!title || renamedByHand(conversation)) return;
     // 拟题的这一会儿里首问变了：拟的是旧内容的题，不写，按新的再拟（同步可能原地改同一个 id）。
     const currentFirst = conversation.messages.find(m => m.role === "user");
