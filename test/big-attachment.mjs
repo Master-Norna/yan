@@ -3,6 +3,7 @@
 // 120 MB 起页面在读完 data: URL 之后卡住、一分半钟不答话，什么也没落成。改成直传（bridgeUpload）后 200 MB 四百多毫秒落成、堆不涨。
 // BIG_MB 可改原件大小（默认 200 MB）
 import fs from "node:fs";
+import path from "node:path";
 import { connect, check, sleep, PAGE, TMP, HOME } from "./lib.mjs";
 const { send, evalJs, close } = await connect();
 const MB = 1024 * 1024,
@@ -42,7 +43,7 @@ const sampler = (async () => {
 const started = Date.now();
 const { root } = await send("DOM.getDocument");
 const { nodeId } = await send("DOM.querySelector", { nodeId: root.nodeId, selector: "#fileInput" });
-await send("DOM.setFileInputFiles", { nodeId, files: [FILE.split("/").join("\\")] });
+await send("DOM.setFileInputFiles", { nodeId, files: [path.resolve(FILE)] });
 let landed = false,
   longest = 0,
   heard = started;
