@@ -106,8 +106,10 @@ export async function connect() {
       const p = pending.get(m.id);
       pending.delete(m.id);
       m.error ? p.reject(Error(m.error.message)) : p.resolve(m.result);
-    } else if (m.method === "Runtime.exceptionThrown")
-      console.log("  [exception]", JSON.stringify(m.params.exceptionDetails).slice(0, 300));
+    } else if (m.method === "Inspector.targetCrashed")
+      // 页面崩了（多半是内存撑爆）：此后求值都不再回话，先记一笔，免得只看到一串超时
+      console.log("  [crashed] 页面崩了");
+    else if (m.method === "Runtime.exceptionThrown") console.log("  [exception]", JSON.stringify(m.params.exceptionDetails).slice(0, 300));
     else if (m.method === "Runtime.consoleAPICalled" && ["error", "warning"].includes(m.params.type))
       console.log(
         `  [console.${m.params.type}]`,
@@ -118,6 +120,7 @@ export async function connect() {
       );
   };
   await send("Page.enable");
+  await send("Inspector.enable");
   // 默认中文，不依赖执行机器的系统语言；i18n 用例仍可显式切换语言。
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `Object.defineProperty(navigator, "language", { get: () => "zh-CN", configurable: true }); Object.defineProperty(navigator, "languages", { get: () => ["zh-CN", "zh"], configurable: true });`
