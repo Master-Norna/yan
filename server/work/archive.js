@@ -4,7 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const createLocks = require("./locks.js");
-const { sendJson, readJson, jsonRoute, errorText, sendFile, openWithSystem } = require("../http.js");
+const { sendJson, readJson, jsonRoute, errorText, sendFile, openWithSystem, receiveUpload } = require("../http.js");
 const {
   SCRATCH_DIR,
   WORK_SKIP,
@@ -140,25 +140,33 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     };
   }
   // 收入：页面拖进来的文件以 data: URL 送来，落进页面此刻所在的那一层（dir）
+  // 收入卷宗：原件直传（见 http.js 的 receiveUpload），说明是 { root, dir, name }。先收进那一层里的一个点开头的临时文件
+  // （列卷宗时当隐藏项跳过），收全了再在写锁里挪成不重名的正名
   async function handleArchivePut(req, res) {
+    let temp = "";
     try {
-      const body = await readJson(req, 400 * 1024 * 1024),
-        root = await archiveRoot(body.root),
+      let root, dir, name;
+      const received = await receiveUpload(req, ARCHIVE_FILE_LIMIT, async head => {
+        root = await archiveRoot(head?.root);
         // 点开头的（.gitignore、标题是「.NET 8」的导出）列卷宗时当隐藏项跳过，收进来就再也看不见、删不掉：去掉首尾的点与空格，与改名同一个规矩
-        name = path.basename(String(body.name || "").trim()).replace(/^[. ]+|[. ]+$/g, "") || "未命名文件";
-      const data = String(body.data || ""),
-        comma = data.indexOf(",");
-      if (!data.startsWith("data:") || comma < 0) throw Error("文件内容格式无效");
-      const bytes = Buffer.from(data.slice(comma + 1), /;base64/i.test(data.slice(0, comma)) ? "base64" : "utf8");
-      if (bytes.length > ARCHIVE_FILE_LIMIT) throw Error(`单个文件不超过 ${ARCHIVE_FILE_LIMIT / 1048576} MB`);
-      const target = await placeFree(await archiveDirOf(root, body.dir), name, to =>
-        fs.promises.writeFile(to, bytes, { flag: "wx" })
-      ).catch(error => {
+        name = path.basename(String(head?.name || "").trim()).replace(/^[. ]+|[. ]+$/g, "") || "未命名文件";
+        dir = await archiveDirOf(root, head?.dir);
+        return path.join(dir, `.yan-upload-${process.pid}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.tmp`);
+      }).catch(error => {
+        throw error.tooLarge ? Error(`单个文件不超过 ${ARCHIVE_FILE_LIMIT / 1048576} MB`) : error;
+      });
+      temp = received.file;
+      const target = await placeFree(dir, name, async to => {
+        if (fs.existsSync(to)) throw Object.assign(Error("同名已在"), { code: "EEXIST" });
+        await fs.promises.rename(temp, to);
+      }).catch(error => {
         throw Error(describeFsError(error, name));
       });
+      temp = "";
       sendJson(res, 200, await describeItem(root, target));
     } catch (error) {
-      sendJson(res, 400, { error: failed(error) });
+      if (temp) fs.rmSync(temp, { force: true });
+      if (!res.headersSent) sendJson(res, 400, { error: failed(error) });
     }
   }
   // 取出：GET /api/archive/file?path=…（&root=… 指定卷宗根），页面用它做缩略图、置于案上与下载；?download=1 时让浏览器另存

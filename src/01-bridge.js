@@ -165,6 +165,28 @@ function bridgeTimedOut(error) {
 async function bridge(path, payload, signal) {
   return bridgeJson(path, JSON.stringify(payload), signal);
 }
+// 原件直传（附件、收入卷宗）：头一段是 JSON 的说明，紧跟原件的字节，一个请求送到（桥接那头见 server/http.js 的 receiveUpload）。
+// 页面只递一个 Blob，不把原件编成 data: URL、再拼进 JSON——那样一份原件在 JS 堆里要托住几整份，120 MB 起页面就卡死
+/** @param {string} path @param {Record<string, any>} head @param {Blob} body @param {AbortSignal} [signal] */
+async function bridgeUpload(path, head, body, signal) {
+  const json = new TextEncoder().encode(JSON.stringify(head)),
+    response = await fetch(`${apiBase}${path}?head=${json.length}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: new Blob([json, body]),
+      signal
+    });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(Error(data.error || t`请求失败（${response.status}）`), { status: response.status, data });
+  return data;
+}
+// 手上只有 data: URL 的（模型画的图、MCP 交回的画面、备份与浏览器暂存里的附件）：解成字节交给 bridgeUpload
+/** @param {string} dataUrl */
+function dataUrlBlob(dataUrl) {
+  const text = String(dataUrl || ""),
+    head = text.slice(0, text.indexOf(","));
+  return new Blob([bytesFromDataUrl(text)], { type: head.slice(5).split(";")[0] || "application/octet-stream" });
+}
 // 请求体已是 JSON 原文时（整段对话、一答的行迹）直接送：手上的串不必拆成对象再拼回去
 async function bridgeJson(path, body, signal) {
   const response = await bridgeFetch(path, body, signal);

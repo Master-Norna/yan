@@ -118,6 +118,13 @@ function legacyVizHtml(language, text) {
 function htmlAppSource(el) {
   return el.querySelector(".html-app-source code")?.textContent || "";
 }
+// 文字编成 data: URL（UTF-8）：独立作品里内嵌的脚本
+function dataUrlFromText(text, mime = "text/plain") {
+  const bytes = new TextEncoder().encode(String(text || ""));
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${mime};base64,${btoa(binary)}`;
+}
 // 下载的是能独立打开的作品：把同一份沙箱运行时、所需本地库和主题装进文件，不依赖 yan: 地址或本站。
 async function standaloneHtmlApp(source) {
   const parsed = new DOMParser().parseFromString(source, "text/html"),

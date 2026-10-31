@@ -1,4 +1,4 @@
-// 言 · 桥接各接口共用的几件：回 JSON、读 JSON、原子写盘，以及把「读请求体 → 办事 → 出错回 400」收成一处的 jsonRoute
+// 言 · 桥接各接口共用的几件：回 JSON、读 JSON、收直传的原件、原子写盘，以及把「读请求体 → 办事 → 出错回 400」收成一处的 jsonRoute
 // 纯工具，不持状态；server.js 与 server/ 下各模块直接 require
 "use strict";
 const fs = require("node:fs");
@@ -68,22 +68,68 @@ function jsonRoute(handle, describe = errorText, limit = undefined) {
     }
   };
 }
+// 原件直传：请求体头一段是 JSON 的说明（多长写在网址的 head= 里），紧跟原件的字节（页面的 bridgeUpload 这样送）。
+// 说明读完交给 place，由它核过、定下写进哪个临时文件；其余的字节边收边写，不在内存里攒整份——几百 MB 的原件，
+// 先前编成 data: URL 拼进 JSON，页面与桥接两头各要托住几整份。原件超过 limit 即作罢；出错都删掉写了一半的
+/** @param {import("node:http").IncomingMessage} req @param {number} limit @param {(head: any) => string | Promise<string>} place */
+async function receiveUpload(req, limit, place) {
+  const headLength = Number(new URL(req.url || "", "http://127.0.0.1").searchParams.get("head"));
+  if (!Number.isInteger(headLength) || headLength <= 0 || headLength > 16 * 1024 * 1024) throw Error("上传缺少说明");
+  let head = Buffer.alloc(0),
+    size = 0,
+    temp = "",
+    /** @type {import("node:fs/promises").FileHandle | null} */
+    out = null,
+    meta;
+  try {
+    for await (const chunk of req) {
+      let rest = chunk;
+      if (!temp) {
+        const need = headLength - head.length;
+        head = Buffer.concat([head, rest.subarray(0, need)]);
+        rest = rest.subarray(need);
+        if (head.length < headLength) continue;
+        try {
+          meta = JSON.parse(head.toString("utf8"));
+        } catch {
+          throw Error("上传的说明不是 JSON");
+        }
+        temp = await place(meta);
+        out = await fs.promises.open(temp, "wx");
+      }
+      size += rest.length;
+      if (size > limit) throw Object.assign(Error("请求内容过大"), { tooLarge: true });
+      if (rest.length) await out?.write(rest);
+    }
+    if (!out) throw Error("上传的内容不完整");
+    await out.close();
+    return { head: meta, file: temp, bytes: size };
+  } catch (error) {
+    await out?.close().catch(() => {});
+    if (temp) fs.rmSync(temp, { force: true });
+    if (error.tooLarge) req.destroy();
+    throw error;
+  }
+}
+// 临时文件换成正本。Windows 上目标文件被索引器或杀毒程序短暂打开时，替换可能报 EPERM / EBUSY：
+// 等几个很短的间隔再试同一份临时文件；永久错误仍原样交给调用方
+function replaceFile(temp, file) {
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 0; ; attempt++)
+    try {
+      fs.renameSync(temp, file);
+      return;
+    } catch (error) {
+      if (attempt >= 3 || !["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
+      Atomics.wait(wait, 0, 0, 15 * 2 ** attempt);
+    }
+}
 // 先写临时文件再改名：写到一半断电、进程被杀，正本也不会只剩半截
 function writeAtomic(file, data) {
   const temp = `${file}.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.tmp`;
   try {
     fs.writeFileSync(temp, data, typeof data === "string" ? "utf8" : undefined);
-    // Windows 上目标文件被索引器或杀毒程序短暂打开时，替换可能报 EPERM / EBUSY。
-    // 等几个很短的间隔再试同一份临时文件；永久错误仍原样交给调用方。
-    const wait = new Int32Array(new SharedArrayBuffer(4));
-    for (let attempt = 0; ; attempt++)
-      try {
-        fs.renameSync(temp, file);
-        break;
-      } catch (error) {
-        if (attempt >= 3 || !["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
-        Atomics.wait(wait, 0, 0, 15 * 2 ** attempt);
-      }
+    replaceFile(temp, file);
   } catch (error) {
     try {
       fs.rmSync(temp, { force: true });
@@ -217,6 +263,8 @@ module.exports = {
   stamp,
   errorText,
   writeAtomic,
+  replaceFile,
+  receiveUpload,
   fileMime,
   sendFile,
   openWithSystem,

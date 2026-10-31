@@ -48,13 +48,26 @@ function uncacheAttachment(id) {
   attachmentCache.delete(id);
   attachmentCacheSize -= String(record.data || "").length + String(record.extractedText || "").length;
 }
-async function putAttachment(record) {
+// body：原件（置入的 File）；没给的照 record.data 现做——文本附件的 data 是正文，别的是 data: URL。桥接不在时暂存进浏览器，那时才读成 data
+/** @param {Record<string, any>} record @param {Blob|null} [body] */
+async function putAttachment(record, body = null) {
   uncacheAttachment(record?.id);
   try {
-    await bridge("/api/files/put", { record }, AbortSignal.timeout(120000));
+    await uploadAttachment(record, body);
     return;
   } catch {}
-  return fileStoreRequest("readwrite", db => db.put(record));
+  const data = record.data ?? (body ? await readFile(body, record.kind === "text" ? "text" : "data") : undefined);
+  return fileStoreRequest("readwrite", db => db.put({ ...record, data }));
+}
+/** @param {Record<string, any>} record @param {Blob|null} [body] */
+function uploadAttachment(record, body = null) {
+  const { data, ...meta } = record;
+  return bridgeUpload(
+    "/api/files/put",
+    { record: meta },
+    body || (record.kind === "text" ? new Blob([String(data ?? "")], { type: "text/plain;charset=utf-8" }) : dataUrlBlob(data)),
+    AbortSignal.timeout(120000)
+  );
 }
 async function getAttachment(id) {
   if (!id) return null;
@@ -172,7 +185,7 @@ async function settleAttachmentStore() {
           const record = await fileStoreRequest("readonly", db => db.get(id)).catch(() => null);
           if (!record) continue;
           // 推不上去就留在表里，下回再推；推上去了才删表里的
-          const pushed = await bridge("/api/files/put", { record }, AbortSignal.timeout(120000)).then(
+          const pushed = await uploadAttachment(record).then(
             () => true,
             () => false
           );

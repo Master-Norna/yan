@@ -14,6 +14,20 @@ writeFileSync(`${OUTSIDE}/secret.txt`, "OUTSIDE-SECRET line\n");
 writeFileSync(`${WORK}/inside.txt`, "inside line\n");
 symlinkSync(OUTSIDE, `${WORK}/escape`, "junction"); // 目录 junction 不需要管理员权限
 const check = (label, ok, detail = "") => console.log(`${ok ? "PASS" : "FAIL"} ${label}${detail ? " — " + detail : ""}`);
+// 原件直传（同页面的 bridgeUpload）：说明之后紧跟原件的字节
+const upload = async (path, head, dataUrl) => {
+  const json = Buffer.from(JSON.stringify(head)),
+    r = await fetch(`${BASE}${path}?head=${json.length}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: Buffer.concat([json, Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64")])
+    });
+  let data = null;
+  try {
+    data = await r.json();
+  } catch {}
+  return { status: r.status, data };
+};
 const post = async (path, body, headers = {}) => {
   const r = await fetch(BASE + path, {
     method: "POST",
@@ -219,25 +233,22 @@ check(
 );
 // ---- 卷宗接口
 const ARCHIVE = `${TMP}/security/.yan/卷宗`;
-r = await post("/api/archive/put", { name: "../escaped.txt", data: "data:text/plain;base64,aGk=" });
+r = await upload("/api/archive/put", { name: "../escaped.txt" }, "data:text/plain;base64,aGk=");
 check(
   "archive put keeps only the basename",
   r.status === 200 && r.data.path === "escaped.txt" && existsSync(`${ARCHIVE}/escaped.txt`) && !existsSync(`${TMP}/escaped.txt`),
   `${r.status} ${JSON.stringify(r.data)}`
 );
-r = await post("/api/archive/put", { name: "escaped.txt", data: "data:text/plain;base64,aGk=" });
+r = await upload("/api/archive/put", { name: "escaped.txt" }, "data:text/plain;base64,aGk=");
 check("archive put never overwrites: same name gets (2)", r.status === 200 && r.data.name === "escaped (2).txt", JSON.stringify(r.data));
-r = await post("/api/archive/put", { name: "page.html", data: "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==" });
+r = await upload("/api/archive/put", { name: "page.html" }, "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==");
 let f = await fetch(`${BASE}/api/archive/file?path=page.html`);
 check(
   "archive html is served as plain text in a sandbox",
   f.status === 200 && /^text\/plain/.test(f.headers.get("content-type") || "") && f.headers.get("content-security-policy") === "sandbox",
   `${f.status} ${f.headers.get("content-type")}`
 );
-await post("/api/archive/put", {
-  name: "图.svg",
-  data: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4="
-});
+await upload("/api/archive/put", { name: "图.svg" }, "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=");
 f = await fetch(`${BASE}/api/archive/file?path=${encodeURIComponent("图.svg")}`);
 check(
   "archive svg is served as an image, still in a sandbox",
@@ -269,7 +280,7 @@ check("archive move refuses a folder into itself", r.status === 400, `${r.status
 r = await post("/api/archive/move", { path: "跑出去", name: "外层" });
 check("archive rename renames a folder", r.status === 200 && existsSync(`${ARCHIVE}/外层/里层`), `${r.status} ${r.data?.error}`);
 // 以本机程序打开：可执行的一类不开（对它们「打开」就是运行）；不存在的也不开
-await post("/api/archive/put", { name: "run.bat", data: "data:text/plain;base64,ZWNobyBoaQ==" });
+await upload("/api/archive/put", { name: "run.bat" }, "data:text/plain;base64,ZWNobyBoaQ==");
 r = await post("/api/archive/open", { path: "run.bat" });
 check(
   "opening with the local program refuses executables",
@@ -288,7 +299,7 @@ r = await post("/api/archive/list", { root: win ? "C:\\" : "/" });
 check("archive root refuses a whole disk", r.status === 400, `${r.status} ${r.data?.error}`);
 r = await post("/api/archive/list", { root: "relative/dir" });
 check("archive root must be absolute", r.status === 400, `${r.status} ${r.data?.error}`);
-r = await post("/api/archive/put", { root: workdir, name: "in-work.txt", data: "data:text/plain;base64,aGk=" });
+r = await upload("/api/archive/put", { root: workdir, name: "in-work.txt" }, "data:text/plain;base64,aGk=");
 check(
   "archive root can be redirected to another absolute directory",
   r.status === 200 && existsSync(`${WORK}/in-work.txt`),

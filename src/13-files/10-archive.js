@@ -299,15 +299,9 @@ async function newArchiveFolder() {
   }
 }
 // 文本以 UTF-8 编成 data: URL；二进制附件本就是 data: URL
-function dataUrlFromText(text, mime = "text/plain") {
-  const bytes = new TextEncoder().encode(String(text || ""));
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return `data:${mime};base64,${btoa(binary)}`;
-}
-/** dir：落进卷宗的哪一层，缺省为根（导出、附件上的「藏」都落在根上；卷宗页上拖入的落在此刻所在的那一层） */
-async function putArchiveFile(name, data, dir = "", root = archiveDir()) {
-  const saved = await bridge("/api/archive/put", { root, name, data, dir }, AbortSignal.timeout(120000));
+/** dir：落进卷宗的哪一层，缺省为根（导出、附件上的「藏」都落在根上；卷宗页上拖入的落在此刻所在的那一层） @param {string} name @param {Blob} body 原件 */
+async function putArchiveFile(name, body, dir = "", root = archiveDir()) {
+  const saved = await bridgeUpload("/api/archive/put", { root, name, dir }, body, AbortSignal.timeout(120000));
   noteArchiveWrite(saved.path);
   return saved;
 }
@@ -374,7 +368,7 @@ async function storeLibraryFiles(items, folders = 0, root = archiveDir()) {
       continue;
     }
     try {
-      await putArchiveFile(file.name, await readFile(file, "data"), dir, root);
+      await putArchiveFile(file.name, file, dir, root);
       added += 1;
     } catch (error) {
       toast(t`${file.name} 收入失败：${String(error.message || error).slice(0, 60)}`);
@@ -438,7 +432,10 @@ async function saveToLibrary(id) {
   const file = metadata && (await getAttachment(id));
   if (!file) return toast(t("附件原件已找不到"));
   try {
-    const saved = await putArchiveFile(metadata.name, file.kind === "text" ? dataUrlFromText(file.data, file.mime) : file.data);
+    const saved = await putArchiveFile(
+      metadata.name,
+      file.kind === "text" ? new Blob([String(file.data ?? "")], { type: file.mime || "text/plain" }) : dataUrlBlob(file.data)
+    );
     void refreshArchive();
     toast(t`${saved.name} 已收入卷宗`);
   } catch (error) {

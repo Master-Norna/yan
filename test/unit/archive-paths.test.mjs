@@ -11,7 +11,7 @@ test("目录拖入期间导航和更换卷宗根：整批目录和文件仍落�
     "addLibraryEntries",
     "navigate: dir => { libraryDir = dir; }",
     `setup: (request, getRoot) => {
-      bridge = request; archiveDir = getRoot; libraryDir = 'original';
+      bridge = request; bridgeUpload = (route, head) => request(route, head); archiveDir = getRoot; libraryDir = 'original';
       readFile = async file => file.data;
       refreshArchive = async () => {}; toast = () => {};
     }`

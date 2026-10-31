@@ -75,7 +75,7 @@ test("真实上传 ZIP 后可定位原件，并在严格沙箱中复制、解压
   const files = createFiles({ filesHome: () => originals }),
     work = createWork({ archiveHome: () => workdir, workHome: () => workdir, toolEnv: env => env }),
     routes = { ...files.routes, ...work.routes },
-    server = http.createServer((req, res) => routes[`${req.method} ${req.url}`](req, res));
+    server = http.createServer((req, res) => routes[`${req.method} ${req.url.split("?")[0]}`](req, res));
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const post = async (route, body) => {
     const res = await fetch(`http://127.0.0.1:${server.address().port}${route}`, {
@@ -89,9 +89,12 @@ test("真实上传 ZIP 后可定位原件，并在严格沙箱中复制、解压
   };
   try {
     const bytes = zipSample();
-    await post("/api/files/put", {
-      record: { id: "zip-local", kind: "file", name: "项目.zip", data: `data:application/zip;base64,${bytes.toString("base64")}` }
+    const head = Buffer.from(JSON.stringify({ record: { id: "zip-local", kind: "file", name: "项目.zip" } }));
+    const put = await fetch(`http://127.0.0.1:${server.address().port}/api/files/put?head=${head.length}`, {
+      method: "POST",
+      body: Buffer.concat([head, bytes])
     });
+    assert.equal(put.status, 200, await put.text());
     const original = await post("/api/files/path", { id: "zip-local" });
     assert.deepEqual(fs.readFileSync(original.path), bytes);
     const quoted = `'${original.path.replaceAll("'", "'\\''")}'`,

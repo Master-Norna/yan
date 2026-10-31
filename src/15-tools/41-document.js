@@ -139,7 +139,7 @@ async function archiveDocumentText(doc) {
   const blob = await response.blob();
   const text = isTextFile({ name: doc.name, type: "" })
     ? decodeTextBytes(await blob.arrayBuffer())
-    : await extractDocumentText(doc.name, await readFile(blob, "data"));
+    : await extractDocumentText(doc.name, blob);
   archiveDocCache.set(key, text);
   if (archiveDocCache.size > 12) archiveDocCache.delete(archiveDocCache.keys().next().value);
   return text;

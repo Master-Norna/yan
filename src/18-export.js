@@ -106,9 +106,9 @@ async function exportConversationMarkdown(c) {
     for (const [index, source] of sources.entries())
       files.push({ name: t`${name.slice(0, -3)}-可视化-${index + 1}.html`, text: await standaloneHtmlApp(source) });
     const savedFiles = [];
-    for (const file of files) savedFiles.push(await putArchiveFile(file.name, dataUrlFromText(file.text, "text/html;charset=utf-8")));
+    for (const file of files) savedFiles.push(await putArchiveFile(file.name, new Blob([file.text], { type: "text/html;charset=utf-8" })));
     const text = original + markdownAssetLinks(savedFiles);
-    const saved = await putArchiveFile(name, dataUrlFromText(text, "text/markdown"));
+    const saved = await putArchiveFile(name, new Blob([text], { type: "text/markdown" }));
     void refreshArchive();
     toast(t`已存入卷宗：${saved.name}${files.length ? t`（附 ${files.length} 个交互作品）` : ""}`);
   } catch (error) {

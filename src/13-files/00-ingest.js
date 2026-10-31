@@ -110,7 +110,8 @@ async function ingestFile(original) {
           ? "text"
           : "file",
     id = uid();
-  const data = await readFile(file, kind === "text" ? "text" : "data");
+  // 文本读成正文（GBK 的也转成 UTF-8 存）；别的不读进页面，原件径直交给桥接（见 putAttachment）
+  const text = kind === "text" ? await readFile(file, "text") : "";
   const metadata = {
     id,
     kind,
@@ -123,14 +124,15 @@ async function ingestFile(original) {
     extractionError = unreadable;
   if (kind === "file" && !unreadable)
     try {
-      extractedText = await extractDocumentText(metadata.name, data);
+      extractedText = await extractDocumentText(metadata.name, file);
     } catch (error) {
       extractionError = String(error.message || error).slice(0, 200);
     }
-  await putAttachment({ ...metadata, data, extractedText, extractionError });
+  if (kind === "text") await putAttachment({ ...metadata, data: text, extractedText, extractionError });
+  else await putAttachment({ ...metadata, extractedText, extractionError }, file);
   // 顺手记下文字量的估算：上下文计数与「是否整份塞进提示」都按它算，不再拿文件字节数粗估（压缩过的 docx 字节数与字数没什么关系）
-  const text = kind === "text" ? String(data || "") : extractedText;
-  return { ...metadata, extracted: !!extractedText, ...(text ? { tokens: estimateText(text) } : {}) };
+  const words = kind === "text" ? text : extractedText;
+  return { ...metadata, extracted: !!extractedText, ...(words ? { tokens: estimateText(words) } : {}) };
 }
 
 async function downloadAttachment(id) {

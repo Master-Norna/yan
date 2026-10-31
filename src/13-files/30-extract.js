@@ -55,17 +55,24 @@ function trimExtractedText(value) {
     ? t`${text.slice(0, MAX_EXTRACTED_CHARS)}\n\n[文档内容过长，已在本机截取前 ${MAX_EXTRACTED_CHARS} 个字符]`
     : text;
 }
+// data：置入的原件（Blob）、或 data: URL（预览器、网页交回的 PDF）；不抽的类型不读
+/** @param {string} name @param {Blob|string} data */
 async function extractDocumentText(name, data) {
   const extract = fileKind(name).extract;
   if (extract === "pdf") return trimExtractedText(await extractPdfText(data));
-  if (extract === "zip") return trimExtractedText(await extractZipDocumentText(fileExtension(name), bytesFromDataUrl(data)));
+  if (extract === "zip") return trimExtractedText(await extractZipDocumentText(fileExtension(name), await bytesOf(data)));
   return "";
 }
+/** @param {Blob|string} data */
+async function bytesOf(data) {
+  return data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : bytesFromDataUrl(data);
+}
+/** @param {Blob|string} data */
 async function extractPdfText(data) {
   if (!(await ensureLib("pdf"))) return "";
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.js";
   const loading = window.pdfjsLib.getDocument({
-      data: bytesFromDataUrl(data),
+      data: await bytesOf(data),
       cMapUrl: "./vendor/cmaps/",
       cMapPacked: true,
       standardFontDataUrl: "./vendor/standard_fonts/"

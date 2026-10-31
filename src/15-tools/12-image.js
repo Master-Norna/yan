@@ -30,9 +30,10 @@ defineTool({
           .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "")
           .trim() || `图-${step.id.slice(-6)}`,
       // 不走 putArchiveFile：那是人放进卷宗的记法，记了答末的成品条就不列它
-      saved = await bridge(
+      saved = await bridgeUpload(
         "/api/archive/put",
-        { root: workRoot(conversation), name: `${base}.${mime.split("/")[1]?.replace("jpeg", "jpg") || "png"}`, data },
+        { root: workRoot(conversation), name: `${base}.${mime.split("/")[1]?.replace("jpeg", "jpg") || "png"}` },
+        dataUrlBlob(data),
         signal
       ),
       meta = { id: uid(), kind: /** @type {const} */ ("image"), name: saved.name, mime, size: saved.size, modifiedAt: Date.now() };
