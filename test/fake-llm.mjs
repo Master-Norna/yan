@@ -1142,6 +1142,35 @@ http
       }
       // MCPTEST：接入的 MCP 服务一轮全用上——逐件给的 echo（stdio）、按需给的先查再调（stdio，工具多）、HTTP 服务上会写的 write_note（要请示）；
       // 第二轮把看到的报回去：系统提示里有没有服务自带的用法、拿到了哪几件、各结果是什么
+      // CHKPT：一轮里新建一件、用指令改一件已有的（检查点要连指令的改动一起退得回）；CHKNOTE：报回这一问开头有没有「退回过」那一句
+      if (typeof lastUser === "string" && lastUser.includes("CHKNOTE"))
+        return sse(res, [
+          delta({ content: `CHKNOTE|note:${/已把目录里的文件退回/.test(lastUser)}` }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      if (typeof lastUser === "string" && lastUser.includes("CHKPT")) {
+        const call = (index, name, args) => ({
+          index,
+          id: `call_ck${index}`,
+          type: "function",
+          function: { name, arguments: JSON.stringify(args) }
+        });
+        if (!toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                call(0, "write_file", { path: "ck/new.txt", content: "新出的" }),
+                call(1, "run_command", {
+                  command:
+                    process.platform === "win32" ? "Set-Content -Path ck/old.txt -Value 改过 -NoNewline" : "printf 改过 > ck/old.txt",
+                  description: "改旧件"
+                })
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [delta({ content: "CHKPT|done" }), delta({}, { usage: { total_tokens: 5 } })]);
+      }
       // SIDEMCP：旁注里用按需给的 MCP——只读的照调，会写的不调；第二轮报回拿到了哪几件、目录里列没列会写的、各结果
       if (typeof lastUser === "string" && lastUser.includes("SIDEMCP")) {
         const names = (payload.tools || []).map(t => t.function.name),

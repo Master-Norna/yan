@@ -124,10 +124,13 @@ function keptImageQuestion(source, current) {
 }
 // 上次压缩以来的往来装成送给接口的历史。每一答的行迹摘要不接在助手自己的话后面——那样模型会把「［行迹］…」学成自己回复的
 // 格式，答末照样写一行出来；而是冠在下一问的开头，当作系统附上的记录。末尾的一答后面没有下一问时（旁注锚在一答上）才退回接在它话后
+// 人把目录退回过（见 80-checkpoint.js）：退回之后的头一问同样冠一句
 async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
   const history = [],
-    pictured = keptImageQuestion(source, lastUserId);
-  let trail = "";
+    pictured = keptImageQuestion(source, lastUserId),
+    rewinds = rewindNotes(source);
+  let trail = "",
+    asked = "";
   for (const m of source) {
     if (m.role === "assistant") {
       history.push(...(await answerForApi(m, budget)));
@@ -135,9 +138,13 @@ async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
       continue;
     }
     const entry = await messageForApi(m, m.id === lastUserId, budget, m.id === lastUserId || m.id === pictured);
-    if (trail && m.role === "user") {
-      if (typeof entry.content === "string") entry.content = `${trail}\n\n${entry.content}`;
-      else entry.content[0].text = `${trail}\n\n${entry.content[0].text}`;
+    if (m.role === "user") {
+      const head = [trail, ...rewinds.filter(r => r.at > asked && r.at <= m.timestamp).map(r => r.text)].filter(Boolean).join("\n\n");
+      asked = m.timestamp || asked;
+      if (head) {
+        if (typeof entry.content === "string") entry.content = `${head}\n\n${entry.content}`;
+        else entry.content[0].text = `${head}\n\n${entry.content[0].text}`;
+      }
       trail = "";
     }
     history.push(entry);

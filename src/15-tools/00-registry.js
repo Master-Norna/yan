@@ -167,6 +167,8 @@ async function runTool(step, ctx) {
     // 审而后行里规则标疑的，再交专司的审查模型判（见 03-review.js）
     const stopped = (await keepHook(step, args, ctx)) || (await reviewHook(step, args, ctx));
     if (stopped) return stopped;
+    // 动文件的：这一答头一回动手前，先把目录此刻的样子记下，日后可退回（见 14-chat-engine/80-checkpoint.js）
+    if (tool.writes) await checkpointBefore(ctx);
     const outcome = await tool.run(step, args, ctx);
     return step.reviewed?.ok ? { ...outcome, display: [outcome.display, "审准"].filter(Boolean).join(" · ") } : outcome;
   } catch (error) {

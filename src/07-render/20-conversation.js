@@ -319,13 +319,15 @@ function assistantNoteHtml(message) {
 }
 /** @param {Message} message */
 function assistantActionsHtml(message) {
+  // 动过文件的一答（记了检查点）：无论答完、停了、断了、出错，都可把目录退回到它开工前
+  const rewind = message.checkpoint ? actionIcon("rewind", t("退回到这一答开工前")) : "";
   return message.status === "streaming"
     ? ""
     : message.status === "error"
-      ? actionIcon("retry", t("重试"))
+      ? `${actionIcon("retry", t("重试"))}${rewind}`
       : message.status === "interrupted"
-        ? `${message.content ? actionIcon("copy", t("复制已写的部分")) : ""}${actionIcon("resume", t("续写"))}${actionIcon("retry", t("从头重写"))}`
-        : `${actionIcon("copy", t("复制答复"))}${message.status === "stopped" && (message.content || message.steps?.length) ? actionIcon("resume", t("续写")) : ""}${actionIcon("regenerate", t("重新生成"))}${actionIcon("note", t("旁注"))}${messageCostHtml(message)}`;
+        ? `${message.content ? actionIcon("copy", t("复制已写的部分")) : ""}${actionIcon("resume", t("续写"))}${actionIcon("retry", t("从头重写"))}${rewind}`
+        : `${actionIcon("copy", t("复制答复"))}${message.status === "stopped" && (message.content || message.steps?.length) ? actionIcon("resume", t("续写")) : ""}${actionIcon("regenerate", t("重新生成"))}${rewind}${actionIcon("note", t("旁注"))}${messageCostHtml(message)}`;
 }
 // 这一答耗了多少墨：各轮请求的用量之和（含帮手），接口报了用量就用实数，没报则按字数估。
 // 只记数、不着朱：多轮的和与上下文大小无关，带工具的一答几乎都过万；上下文重不重只由右下角的计数按模型窗口判

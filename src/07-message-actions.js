@@ -73,6 +73,8 @@ const MESSAGE_ACTIONS = {
       await resumeAnswer(c, message, profile);
     }
   },
+  // 把目录里的文件退回到这一答开工前（见 14-chat-engine/80-checkpoint.js）；作答途中不放行
+  rewind: { brush: "back", run: ({ c, message }) => rewindAnswer(c, message) },
   regenerate: { brush: "reload", run: regenerateAt },
   retry: { brush: "reload", run: regenerateAt }
 };

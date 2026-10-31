@@ -65,10 +65,14 @@
 }
 .confirm-panel p {
   margin: 0 0 22px;
+  max-height: 50vh;
+  overflow-y: auto;
   color: var(--ink-2);
   font-size: var(--fs-mid);
   line-height: 1.7;
   overflow-wrap: anywhere;
+  /* 退回检查点时一件一行列出要动的文件 */
+  white-space: pre-line;
 }
 .confirm-actions {
   display: flex;

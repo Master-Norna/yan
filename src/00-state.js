@@ -150,6 +150,8 @@
  * @property {number} [compacted] 压进摘要的条数
  * @property {boolean} [compacting]
  * @property {{ key: string, files?: { id: string, size: number }[] }} [cold] 收了尾，思绪与帮手的经过另存在对话目录的 行迹/ 里（见 01-store/35-cold.js）；files 是挪走的步骤里带的附件
+ * @property {{ root: string, at: string, files: number }} [checkpoint] 这一答头一回动手改文件前记下的目录（见 14-chat-engine/80-checkpoint.js）
+ * @property {{ at: string, restored: number, removed: number }[]} [rewound] 人把目录退回到这一答开工前的几回
  */
 /** @typedef {{ at: string, why: string, auto?: boolean }} Break 途中断过的一回：何时、为何；auto 是自动接着写上了的。续写不清，查「为何总断」时翻它 */
 /** @typedef {{ id: string, parentId: string|null, messages: Message[], createdAt: string }} Fork 被换下来的一段尾巴 */
