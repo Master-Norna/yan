@@ -159,7 +159,16 @@ const SKILLS = require("./server/skills.js")({
   skillsHome: () => STORE.paths().skills,
   bundled: process.env.YAN_BUILTIN_SKILLS ?? path.join(ROOT, "skills")
 });
-const CHATS = require("./server/chats.js")({ chatsHome: () => STORE.paths().chats });
+const CHATS = require("./server/chats.js")({
+  chatsHome: () => STORE.paths().chats,
+  // 对话删了，它各答的检查点跟着删（见下）
+  onDelete: id => CHECKPOINTS.dropConversation(id)
+});
+// 检查点：一答头一回动手改文件前记下目录的样子，可退回到那一刻（见 server/checkpoints.js）。存储根在工作目录里头时不把它记进去
+const CHECKPOINTS = require("./server/checkpoints.js")({
+  home: () => path.join(STORE.paths().root, "检查点"),
+  skip: () => [STORE.paths().root]
+});
 // 候 · 等时刻：模型约好的时刻由桥接记着，到点落进 存储根/候/ 再交给页面（见 server/timers.js）
 const TIMERS = require("./server/timers.js")({ home: () => path.join(STORE.paths().root, "候"), known: CHATS.exists });
 const FILES = require("./server/files.js")({ filesHome: () => STORE.paths().files, playable: VIDEO.playable });
@@ -198,6 +207,7 @@ const OPEN_ROUTES = {
     ...SKILLS.routes,
     ...CHATS.routes,
     ...TIMERS.routes,
+    ...CHECKPOINTS.routes,
     ...STORE.routes,
     ...FILES.routes,
     ...MCP.routes,

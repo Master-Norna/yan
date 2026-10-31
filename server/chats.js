@@ -1,5 +1,5 @@
 // 言 · 桥接的对话目录：对话像卷宗一样落在本机的一个目录里，一段对话一个 JSON 文件，页面经桥接读、写、删
-// 由 server.js 装配：require("./server/chats.js")({ chatsHome })
+// 由 server.js 装配：require("./server/chats.js")({ chatsHome, onDelete })——onDelete 在一段对话删去后叫（检查点跟着清）
 // 目录在存储根里（chatsHome()，默认 ~/.yan/对话，见 server/store.js）。文件名带标题便于翻看，末尾缀上按对话 id 算的短码来认身份：
 // 「关于滚动条·3f9a2c1b0e.json」；标题改了文件跟着改名，删对话就删文件。配置不在这里，在存储根的 配置.json
 // 收了尾的一答，思绪与帮手的经过另存在 行迹/<短码>/ 里，一答一份、写下就不再改；对话文件里那一答只留 cold 记号（见 src/01-store/35-cold.js）
@@ -10,7 +10,7 @@ const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
 
-module.exports = function createChats({ chatsHome }) {
+module.exports = function createChats({ chatsHome, onDelete = (/** @type {string} */ _id) => {} }) {
   // 旧版的设置镜像：迁进来的目录里可能还躺着一份，读目录时跳过它
   const META_FILE = "设置.json",
     FILE_LIMIT = 256 * 1024 * 1024,
@@ -238,6 +238,7 @@ module.exports = function createChats({ chatsHome }) {
       }
       fs.rmSync(trailDir(home, id), { recursive: true, force: true });
       writeTombstones(home, { ...readTombstones(home), [id]: Date.now() });
+      void Promise.resolve(onDelete(id)).catch(() => {});
       return { removed };
     },
     error => `对话未能删除：${describe(error)}`
