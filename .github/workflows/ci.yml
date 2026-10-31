@@ -1,4 +1,4 @@
-# 推到 main 与每个 PR 都跑一遍。言以 Windows 为准：check 一项挡合并；端到端先试跑、macOS 只跑单测，失败都不挡
+# 推到 main 与每个 PR 都跑一遍。言以 Windows 为准：check 一项挡合并；端到端与 macOS 先试跑，失败都不挡
 name: CI
 
 on:
@@ -40,14 +40,27 @@ jobs:
           node-version: 22
       - run: node test/run.mjs
 
-  unit-macos:
-    name: macOS 单测（不挡合并）
+  macos:
+    name: macOS 测试（不挡合并）
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - run: npm run check
       - run: npm run unit
+      - run: node test/run.mjs
+        env:
+          # runner 上 Edge 和 Chrome 都有，不指定时 run.mjs 会先选 Edge。这里固定用 Chrome，是因为 macOS 上的验证（包括看台连跑）都是在 Chrome 上做的，也免得镜像变动时悄悄换了浏览器；macOS 上的 Edge 还没验证过
+          YAN_TEST_BROWSER: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+      - if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: yan-test-diagnostics-macos
+          path: test/.tmp/*.png
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

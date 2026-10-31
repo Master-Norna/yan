@@ -94,26 +94,51 @@ const stage = {
   // 人最近一回经游目开网址的时刻（地址栏、收藏、开本机文件）：随后浏览器要「下载」的本机文件是人要开的
   goAt: 0,
   /** @type {PointerEvent | null} */
-  moved: null
+  moved: null,
+  // 正在把某一页激活到前台的在途承诺：stageLocate 等它落定才查前台，免得撞上切签中途
+  /** @type {Promise<unknown> | null} */
+  activating: null,
+  // 人切签或主动激活的代数：切签即递增，stageLocate 拿回旧前台时不覆写已发生的新切签
+  frontRevision: 0
 };
 
 // ---------- 连上浏览器 ----------
 // 已连着时也问一回：模型若把别的页请到了前台（选签、新开），看台跟过去
 function stageLocate() {
   if (stage.locating) return stage.locating;
-  stage.locating = bridge("/api/stage", stageService())
+  let revision = 0;
+  stage.locating = Promise.resolve(stage.activating)
+    .then(() => {
+      revision = stage.frontRevision;
+      return bridge("/api/stage", stageService());
+    })
     .then(({ ws, front, marks, port, output }) => {
       stage.marks = !!marks;
       stage.port = port;
       stage.output = output || "";
       if (!stage.ws) return ws ? stageConnect(ws, front) : stageSync();
-      if (front && front !== stage.front && stage.tabs.has(front)) stageShow(front);
-      stage.front = front || stage.front;
+      if (revision === stage.frontRevision) {
+        if (front && front !== stage.front && stage.tabs.has(front)) stageShow(front);
+        stage.front = front || stage.front;
+      }
       stageSync();
     })
     .catch(() => {})
     .finally(() => (stage.locating = null));
   return stage.locating;
+}
+// 换到后台的那一页：先请到前台，不然它不重绘、没有画面
+/** @param {string} id */
+function stageActivate(id) {
+  const activating = stageSend("Target.activateTarget", { targetId: id })
+    .catch(() => {})
+    .finally(() => {
+      if (stage.activating === activating) stage.activating = null;
+    });
+  stage.activating = activating;
+  stage.front = id;
+  stage.frontRevision++;
+  stageShow(id);
 }
 /** @param {string} url @param {string} front */
 function stageConnect(url, front) {

@@ -8,7 +8,7 @@ Thanks for helping build Yan. Please take a few minutes to read this page — PR
 
 1. Small fixes (typos, obvious bugs) can go straight to a PR. For new features or larger changes, open an issue first describing what and why, so we can agree on direction before you write the code.
 2. Fork the repo, branch off `main`, and open a PR against `main`.
-3. The CI job "单测 · 类型 · 格式" (unit · types · format) must pass. The end-to-end and macOS unit jobs are informational for now.
+3. The CI job "单测 · 类型 · 格式" (unit · types · format) must pass. The end-to-end and macOS test jobs are informational for now.
 4. A maintainer reviews before merging. PRs are squash-merged, so each PR lands as one commit on `main`.
 
 ## Running locally

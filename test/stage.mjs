@@ -3,8 +3,15 @@
 // 模型换页跟过去、网页的提示框画在画面上、前后按历史走、旁注开着时让位且停收画面、收起后入口回来、拖宽窄有界
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { connect, check, sleep, PAGE, DEBUG, TMP } from "./lib.mjs";
+import { connect, check, sleep, PAGE, TMP, MODEL_DEBUG } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
+const bail = () => {
+  close();
+  try {
+    browser.close();
+  } catch {}
+  process.exit(1);
+};
 // 浏览器的配置目录与收藏：配置里一个停用的「浏览器」服务只为带出 --user-data-dir（真的 playwright 这里不起）
 const PROFILE = `${TMP}/stage-profile`;
 const markPage = "data:text/html;charset=utf-8," + encodeURIComponent("<title>收藏页</title>");
@@ -30,11 +37,19 @@ await evalJs(
   `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 5, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false, mcpServers: ${JSON.stringify(mcpServers)} }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, quota: "", usedTokens: 0 }], conversations: [], library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
-await sleep(1200);
+await evalJs(
+  `window.__yanExceptions = []; window.addEventListener("error", e => window.__yanExceptions.push(String(e.error || e.message))); window.addEventListener("unhandledrejection", e => window.__yanExceptions.push(String(e.reason))); true`
+);
 
-// 「模型的页」：另开一个窗口（与言的页各在前台，都会重绘）。左上一块大按钮，右边一个输入框，标题随之变
+// 「模型的页」：在另一个浏览器实例的同一个窗口里新开一个标签（言的页面留在测试浏览器，不会被切到后台）。
+// 左上一块大按钮，右边一个输入框，标题随之变
 const html = `<title>看台测试</title><body style="margin:0"><button style="position:fixed;left:0;top:0;width:50vw;height:50vh" onclick="document.title='点中了'">点我</button><input id="i" style="position:fixed;left:60vw;top:10vh;width:30vw;height:10vh" oninput="document.title='输入:'+this.value"></body>`;
-const version = await (await fetch(DEBUG + "/json/version")).json();
+let version;
+try {
+  version = await (await fetch(MODEL_DEBUG + "/json/version")).json();
+} catch {
+  throw Error(`模型浏览器（${MODEL_DEBUG}）未就绪：stage.mjs 需由 test/run.mjs 启动`);
+}
 const browser = new WebSocket(version.webSocketDebuggerUrl);
 await new Promise(r => (browser.onopen = r));
 let seq = 0;
@@ -52,18 +67,22 @@ const browserSend = (method, params = {}, sessionId) =>
     browser.send(JSON.stringify({ id, method, params, sessionId }));
   });
 const { targetId } = await browserSend("Target.createTarget", {
-  url: "data:text/html;charset=utf-8," + encodeURIComponent(html),
-  newWindow: true
+  url: "data:text/html;charset=utf-8," + encodeURIComponent(html)
 });
+// 像 playwright 交给模型的那个浏览器一样，一个窗口里只留这一张签：关掉实例自带的空白页和浏览器自己的对话框，
+// 否则它们会与模型页抢前台，无头下后台页又不重绘，画面尺寸的断言就时灵时不灵
+for (const { targetId: id, type } of (await browserSend("Target.getTargets")).targetInfos)
+  if (type === "page" && id !== targetId) await browserSend("Target.closeTarget", { targetId: id });
 await sleep(800);
 
 check("no pin before the browser is found", await evalJs(`document.querySelector("#stagePin").classList.contains("hidden")`));
-writeConfig(new URL(DEBUG).port);
+writeConfig(new URL(MODEL_DEBUG).port);
 await evalJs(`__yanStage.locate().then(() => true)`);
 await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`, 8000);
 check("pin appears once the browser is found", true);
 check("tabs mirror the browser", await evalJs(`[...__yanStage.state.tabs.values()].some(t => t.title === "看台测试")`));
 
+// 点入口开看台
 await evalJs(`document.querySelector("#stagePin").click(); true`);
 await waitFor(`!document.querySelector("#stagePanel").classList.contains("hidden")`);
 check("pin hides while the stage is open", await evalJs(`document.querySelector("#stagePin").classList.contains("hidden")`));
@@ -77,15 +96,19 @@ check("chosen tab is marked", await evalJs(`document.querySelector(".stage-tab.o
 const want = await evalJs(
   `(r => ({ w: Math.max(960, Math.round(r.width - 24)), h: Math.max(600, Math.round(r.height - 24)) }))(document.querySelector("#stageView").getBoundingClientRect())`
 );
-await waitFor(
-  `Math.abs(__yanStage.state.meta.width - ${want.w}) < 4 && Math.abs(__yanStage.state.meta.height - ${want.h}) < 4`,
-  8000
-).catch(() => {});
+const tFollow = Date.now();
+let followOk = false;
+try {
+  await waitFor(`Math.abs(__yanStage.state.meta.width - ${want.w}) < 4 && Math.abs(__yanStage.state.meta.height - ${want.h}) < 4`, 8000);
+  followOk = true;
+} catch {}
+const metaFollow = await evalJs(`__yanStage.state.meta`).catch(() => null);
 check(
   "the browser window follows the stage size",
-  await evalJs(`Math.abs(__yanStage.state.meta.width - ${want.w}) < 4`),
-  JSON.stringify({ want, meta: await evalJs(`__yanStage.state.meta`) })
+  followOk,
+  JSON.stringify({ want, meta: metaFollow, elapsed: `${Date.now() - tFollow}ms` })
 );
+if (!followOk) bail();
 // 宽够时（阔开着）画面一比一：画幅正是网页的原大、落在整像素上，静下来换成一张 PNG
 await evalJs(`document.querySelector("#stageWide").click(); true`);
 const sharp = `(() => { const img = document.querySelector("#stageFrame"), r = img.getBoundingClientRect(), m = __yanStage.state.meta; return r.width === m.width && r.height === m.height && img.naturalWidth === Math.round(m.width * devicePixelRatio) && Number.isInteger(r.left * devicePixelRatio) && Number.isInteger(r.top * devicePixelRatio); })()`;
@@ -102,11 +125,37 @@ check(
 await waitFor(`document.querySelector("#stageFrame").src.startsWith("data:image/png")`, 5000).catch(() => {});
 check("a still page settles into a lossless frame", await evalJs(`document.querySelector("#stageFrame").src.startsWith("data:image/png")`));
 await evalJs(`document.querySelector("#stageWide").click(); true`);
-await waitFor(
-  `Math.abs(__yanStage.state.meta.width - ${want.w}) < 4 && Math.abs(__yanStage.state.meta.height - ${want.h}) < 4`,
-  8000
-).catch(() => {});
-await sleep(300);
+const tRestore = Date.now();
+let restoreOk = false;
+try {
+  await waitFor(`Math.abs(__yanStage.state.meta.width - ${want.w}) < 4 && Math.abs(__yanStage.state.meta.height - ${want.h}) < 4`, 8000);
+  restoreOk = true;
+} catch {}
+const metaRestore = await evalJs(`__yanStage.state.meta`).catch(() => null);
+check(
+  "the browser window follows the stage size after wide toggled off",
+  restoreOk,
+  JSON.stringify({ want, meta: metaRestore, elapsed: `${Date.now() - tRestore}ms` })
+);
+if (!restoreOk) bail();
+const tFrame = Date.now();
+let frameOk = false;
+try {
+  await waitFor(
+    `(() => {
+      const img = document.querySelector("#stageFrame"), m = __yanStage.state.meta;
+      return img && img.naturalWidth > 0 && Math.abs(img.naturalWidth - Math.round(m.width * devicePixelRatio)) <= 2;
+    })()`,
+    8000
+  );
+  frameOk = true;
+} catch {}
+const frameSize = await evalJs(`(() => {
+  const img = document.querySelector("#stageFrame"), m = __yanStage.state.meta;
+  return { naturalWidth: img?.naturalWidth || 0, expectedWidth: Math.round(m.width * devicePixelRatio), meta: m, dpr: devicePixelRatio };
+})()`).catch(() => null);
+check("frame size matches meta after wide toggled off", frameOk, JSON.stringify({ frameSize, elapsed: `${Date.now() - tFrame}ms` }));
+if (!frameOk) bail();
 const geometry = await evalJs(
   `(r => ({ x: r.left, y: r.top, w: r.width, h: r.height, ratio: r.width / r.height }))(document.querySelector("#stageFrame").getBoundingClientRect())`
 );
@@ -423,36 +472,6 @@ await waitFor(`!document.querySelector("#stageMarks").classList.contains("on")`,
 check("removing it takes the red off the ribbon", await evalJs(`!document.querySelector("#stageMarks").classList.contains("on")`));
 await evalJs(`document.querySelector("#stageMarks").click(); true`);
 
-// ＋：新开一页，看台跟过去，地址栏等着输网址
-const before = await evalJs(`__yanStage.state.tabs.size`);
-await evalJs(`document.querySelector("#stageNewTab").click(); true`);
-await waitFor(`__yanStage.state.tabs.size === ${before + 1}`, 5000).catch(() => {});
-const fresh = await evalJs(`__yanStage.state.current`);
-check(
-  "＋ opens a new tab and the stage follows it",
-  (await evalJs(`__yanStage.state.tabs.size === ${before + 1} && __yanStage.state.current !== ${JSON.stringify(targetId)}`)) &&
-    (await evalJs(`document.activeElement === document.querySelector("#stageUrl")`))
-);
-const clickTab = id =>
-  evalJs(`[...document.querySelectorAll("[data-stage-tab]")].find(t => t.dataset.stageTab === ${JSON.stringify(id)})?.click(); true`);
-// 模型换页：自己点回原来那页后，模型的调用（这里直接去找一回）不把人拽走；模型把那一页请到前台（选签即如此），看台跟过去
-await clickTab(targetId);
-await waitFor(`__yanStage.state.current === ${JSON.stringify(targetId)}`, 5000).catch(() => {});
-await sleep(300);
-await evalJs(`__yanStage.locate().then(() => true)`);
-check("a call after the user picked a tab leaves the view alone", await evalJs(`__yanStage.state.current === ${JSON.stringify(targetId)}`));
-await browserSend("Target.activateTarget", { targetId: fresh });
-await sleep(300);
-await evalJs(`__yanStage.locate().then(() => true)`);
-check(
-  "the stage follows the page the model brings to front",
-  await evalJs(`__yanStage.state.current === ${JSON.stringify(fresh)}`),
-  await evalJs(`__yanStage.state.current`)
-);
-await browserSend("Target.closeTarget", { targetId: fresh });
-await clickTab(targetId);
-await waitFor(`__yanStage.state.current === ${JSON.stringify(targetId)}`, 5000).catch(() => {});
-
 // 页内查找：Ctrl+F 换出查找栏，数出几处、Enter 下一处并滚到眼前，Esc 收起
 const findPage =
   "data:text/html;charset=utf-8," + encodeURIComponent(`<title>找</title><p>甲言</p><p style="margin-top:1500px">乙言</p><p>丙言</p>`);
@@ -503,19 +522,34 @@ check(
   )
 );
 const pickAt = await evalJs(
-  `(r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))(document.querySelector(".chip-pop.stage-pick [data-pick='1']").getBoundingClientRect())`
+  `(() => {
+    const el = document.querySelector(".chip-pop.stage-pick [data-pick='1']");
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`
 );
-await shot("stage-pick.png");
-await send("Input.dispatchMouseEvent", { type: "mousePressed", x: pickAt.x, y: pickAt.y, button: "left", buttons: 1, clickCount: 1 });
-await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pickAt.x, y: pickAt.y, button: "left", clickCount: 1 });
-await waitFor(`__yanStage.state.tabs.get(${JSON.stringify(targetId)})?.title === "选:乙"`, 5000).catch(() => {});
-check(
-  "picking an option reaches the page",
-  await evalJs(
-    `__yanStage.state.tabs.get(${JSON.stringify(targetId)})?.title === "选:乙" && !document.querySelector(".chip-pop.stage-pick")`
-  ),
-  await title()
-);
+if (!pickAt) {
+  check("picking an option reaches the page", false, "element .chip-pop.stage-pick [data-pick='1'] not found");
+} else {
+  await shot("stage-pick.png");
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: pickAt.x, y: pickAt.y, button: "left", buttons: 1, clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pickAt.x, y: pickAt.y, button: "left", clickCount: 1 });
+  const tPick = Date.now();
+  let pickOk = false;
+  try {
+    await waitFor(`__yanStage.state.tabs.get(${JSON.stringify(targetId)})?.title === "选:乙"`, 5000);
+    pickOk = true;
+  } catch {}
+  check(
+    "picking an option reaches the page",
+    pickOk &&
+      (await evalJs(
+        `__yanStage.state.tabs.get(${JSON.stringify(targetId)})?.title === "选:乙" && !document.querySelector(".chip-pop.stage-pick")`
+      )),
+    `${await title()} (elapsed: ${Date.now() - tPick}ms)`
+  );
+}
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at(0.7, 0.2)[0], y: at(0.7, 0.2)[1] });
 await waitFor(`__yanStage.state.tabs.get(${JSON.stringify(targetId)})?.title === "进"`, 5000).catch(() => {});
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: geometry.x + geometry.w * 0.7, y: geometry.y - 30 });
@@ -636,6 +670,10 @@ await sleep(250);
 await shot("stage-downloads.png");
 await evalJs(`document.querySelector("#stageMenuBtn").click(); true`);
 
+// 点看台上的某个签
+const clickTab = id =>
+  evalJs(`[...document.querySelectorAll("[data-stage-tab]")].find(t => t.dataset.stageTab === ${JSON.stringify(id)})?.click(); true`);
+
 // 纸签里的一项：纸签没开着先开
 const menuPick = act =>
   evalJs(
@@ -658,7 +696,7 @@ for (const [act, word] of [
   const id = await evalJs(`[...__yanStage.state.tabs].find(([, t]) => /^(edge|chrome):/.test(t.url) && t.url.includes("${word}"))?.[0]`);
   if (id) await browserSend("Target.closeTarget", { targetId: id });
   await clickTab(targetId);
-  await waitFor(`__yanStage.state.current === ${JSON.stringify(targetId)}`, 5000).catch(() => {});
+  await waitFor(`__yanStage.state.current === ${JSON.stringify(targetId)} && __yanStage.state.session !== ""`, 5000).catch(() => {});
 }
 check(
   "Edge's own dialogs (sync confirmation and the like) never become tabs",
@@ -788,6 +826,74 @@ check(
   await evalJs(`__yanStage.state.session !== "" && document.querySelector("#stagePin").classList.contains("hidden")`)
 );
 
+// ＋：新开一页，看台跟过去，地址栏等着输网址。
+// 这段放在最后：它要在同一窗口里切换标签，切完不再让后续检查依赖看台的会话
+const before = await evalJs(`__yanStage.state.tabs.size`);
+await evalJs(`document.querySelector("#stageNewTab").click(); true`);
+await waitFor(`__yanStage.state.tabs.size === ${before + 1}`, 5000).catch(() => {});
+const fresh = await evalJs(`__yanStage.state.current`);
+check(
+  "＋ opens a new tab and the stage follows it",
+  (await evalJs(`__yanStage.state.tabs.size === ${before + 1} && __yanStage.state.current !== ${JSON.stringify(targetId)}`)) &&
+    (await evalJs(`document.activeElement === document.querySelector("#stageUrl")`))
+);
+// 前提：模型页与 fresh 同窗。跨窗口时浏览器对「前台」的排序在无头 macOS 上不可靠，断言也就无从谈起
+const windowOf = async id => (await browserSend("Browser.getWindowForTarget", { targetId: id })).windowId;
+const modelWindow = await windowOf(targetId),
+  freshWindow = await windowOf(fresh);
+check("the model page and the new tab share one window", modelWindow === freshWindow, JSON.stringify({ modelWindow, freshWindow }));
+const viewState = () =>
+  evalJs(
+    `JSON.stringify({ current: __yanStage.state.current, front: __yanStage.state.front, activating: !!__yanStage.state.activating })`
+  ).catch(e => String(e));
+// 激活是异步的：等浏览器自己把要请到前台的页排到 /json/list 首位，再让看台去问，别用固定等待赌它已经生效
+const pageIds = async () => (await (await fetch(MODEL_DEBUG + "/json/list")).json()).filter(t => t.type === "page").map(t => t.id);
+const waitForFront = async (id, timeout = 8000) => {
+  const started = Date.now();
+  for (;;) {
+    try {
+      if ((await pageIds())[0] === id) return true;
+    } catch {}
+    if (Date.now() - started > timeout) return false;
+    await sleep(120);
+  }
+};
+// 模型换页：自己点回原来那页后，模型的调用（这里直接去找一回）不把人拽走；模型把那一页请到前台（选签即如此），看台跟过去
+await clickTab(targetId);
+const tabActivated = await waitFor(`__yanStage.state.current === ${JSON.stringify(targetId)} && !__yanStage.state.activating`, 5000).then(
+  () => true,
+  () => false
+);
+check("stage switches to picked tab and settles activation", tabActivated, await viewState());
+const userFront = await waitForFront(targetId);
+check("browser put the picked tab first", userFront);
+await evalJs(`__yanStage.locate().then(() => true)`);
+check(
+  "a call after the user picked a tab leaves the view alone",
+  await evalJs(`__yanStage.state.current === ${JSON.stringify(targetId)}`),
+  await viewState()
+);
+const { sessionId: freshSession } = await browserSend("Target.attachToTarget", { targetId: fresh, flatten: true });
+await browserSend("Page.bringToFront", {}, freshSession);
+const freshFront = await waitForFront(fresh);
+check("browser put the new tab first", freshFront);
+await evalJs(`__yanStage.locate().then(() => true)`);
+check(
+  "the stage follows the page the model brings to front",
+  await evalJs(`__yanStage.state.current === ${JSON.stringify(fresh)}`),
+  await viewState()
+);
+await browserSend("Target.closeTarget", { targetId: fresh });
+await waitFor(`__yanStage.state.current === ${JSON.stringify(targetId)}`, 5000).catch(() => {});
+check("stage falls back to the remaining tab", await evalJs(`__yanStage.state.current === ${JSON.stringify(targetId)}`), await viewState());
+await waitFor(`__yanStage.state.session !== ""`, 5000).catch(() => {});
+check("stage session is active on the remaining tab", await evalJs(`__yanStage.state.session !== ""`), await viewState());
+check(
+  "page has no uncaught exceptions after closing tab",
+  await evalJs(`window.__yanExceptions.length === 0`),
+  await evalJs(`JSON.stringify(window.__yanExceptions)`)
+);
+
 // 收起：小屏回来；那一页关了，签跟着没了
 await evalJs(`document.querySelector("#stageClose").click(); true`);
 await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`);
@@ -801,7 +907,7 @@ const pin = await evalJs(
   `(r => ({ x: r.right - 6, y: r.top + r.height / 2 }))(document.querySelector("#stagePin").getBoundingClientRect())`
 );
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pin.x, y: pin.y });
-await sleep(400);
+await waitFor(`Number(getComputedStyle(document.querySelector(".stage-pin-text")).opacity) === 1`, 3000).catch(() => {});
 check("the name shows when the pointer comes near", (await nameShown()) === 1);
 await shot("stage-pin.png");
 // 长对话里右缘铺着滚动条的命中层：入口的最右一列仍点得到，而不是被它吃掉

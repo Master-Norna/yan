@@ -30,6 +30,19 @@ let panelLiveSeen = false,
   panelOpened = false,
   breathing = false;
 const seen = [];
+await evalJs(`(() => {
+  window.__helperThoughtLive = false;
+  const modal = document.querySelector("#helperModal");
+  if (modal) {
+    const checkLive = () => {
+      if (modal.querySelector('.sub-timeline .reasoning[data-state="live"]')) {
+        window.__helperThoughtLive = true;
+      }
+    };
+    new MutationObserver(checkLive).observe(modal, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-state"] });
+  }
+  return true;
+})()`);
 for (let i = 0; i < 200; i++) {
   // 帮手都到齐了就把面板点开（开在最后一名身上——面板一次只看一名，思绪不一定落在头一名），此后它随 350ms 的心跳自己更新
   if (!panelOpened) {
@@ -40,7 +53,7 @@ for (let i = 0; i < 200; i++) {
     }
   }
   const s = await evalJs(
-    `(d => d ? { status: d.dataset.status, trailNested: d.querySelectorAll(".tool-step").length, panelNested: document.querySelectorAll("#helperModal .tool-step").length, panelLive: document.querySelector("#helperModal .sub-trail")?.dataset.live, panelOpen: !document.querySelector("#helperModal").classList.contains("hidden"), running: document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length, bar: document.querySelector("#helperBar:not(.hidden)")?.textContent || "", endBar: !!document.querySelector(".message.assistant .change-bar"), streaming: document.querySelector(".message.assistant")?.dataset.status === "streaming", thought: !!document.querySelector('#helperModal .sub-timeline .reasoning[data-state="live"]'), meta: document.querySelector(".message.assistant .tool-stack-meta")?.textContent || "", card: d.querySelector(".tool-meta")?.textContent || "", label: document.querySelector(".message.assistant .tool-stack-label")?.textContent || "" } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
+    `(d => d ? { status: d.dataset.status, trailNested: d.querySelectorAll(".tool-step").length, panelNested: document.querySelectorAll("#helperModal .tool-step").length, panelLive: document.querySelector("#helperModal .sub-trail")?.dataset.live, panelOpen: !document.querySelector("#helperModal").classList.contains("hidden"), running: document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length, bar: document.querySelector("#helperBar:not(.hidden)")?.textContent || "", endBar: !!document.querySelector(".message.assistant .change-bar"), streaming: document.querySelector(".message.assistant")?.dataset.status === "streaming", thought: window.__helperThoughtLive || !!document.querySelector('#helperModal .sub-timeline .reasoning[data-state="live"]'), meta: document.querySelector(".message.assistant .tool-stack-meta")?.textContent || "", card: d.querySelector(".tool-meta")?.textContent || "", label: document.querySelector(".message.assistant .tool-stack-label")?.textContent || "" } : null)(document.querySelector(".message.assistant .tool-step-delegate"))`
   );
   if (s) seen.push(JSON.stringify(s));
   if (s?.status === "running" && s.panelOpen && s.panelNested >= 1 && s.panelLive === "true") panelLiveSeen = true;
@@ -226,6 +239,11 @@ check(
 // 合上那扇窗，后面几项看的是正文
 await evalJs(`document.querySelector("#helperClose").click(); true`);
 check("second helper's file exists", readFileSync(WORK + "/src/b.js", "utf8").includes("export const b = 2;"));
+// 等收尾那一答生成出来
+await waitFor(
+  `typeof __yanState === "function" && __yanState().conversations[0]?.messages.at(-1)?.content?.startsWith("DELEGATE done")`,
+  15000
+);
 const text = await evalJs(`__yanState().conversations[0].messages.at(-1).content`);
 // 先到的那份可能在第一答里就递上了（那一答还在说「等回报」），后到的另起一答；收尾那一答前冠着派活那一答的行迹
 check(

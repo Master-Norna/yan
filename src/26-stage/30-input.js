@@ -317,10 +317,7 @@ function bindStage() {
     if (close) return void stageSend("Target.closeTarget", { targetId: close.dataset.stageClose }).catch(() => {});
     const tab = /** @type {HTMLElement | null} */ (target.closest("[data-stage-tab]"));
     if (!tab || tab.dataset.stageTab === stage.current) return;
-    // 换到后台的那一页：先请到前台，不然它不重绘、没有画面
-    void stageSend("Target.activateTarget", { targetId: tab.dataset.stageTab }).catch(() => {});
-    stage.front = tab.dataset.stageTab || "";
-    stageShow(stage.front);
+    stageActivate(tab.dataset.stageTab || "");
   });
   for (const button of document.querySelectorAll("[data-stage-nav]"))
     button.addEventListener("click", () => {

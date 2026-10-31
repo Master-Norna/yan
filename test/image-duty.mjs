@@ -54,7 +54,12 @@ check(
   /存为 墨猫\.png/.test(state.reply) && /看到图 1 幅/.test(state.reply),
   state.reply.slice(0, 300)
 );
-check("答末成品条列出这幅", state.deliverables.includes("墨猫.png"), JSON.stringify(state.deliverables));
+await waitFor(
+  '((m) => (m?.deliverables || []).some(d => d.name === "墨猫.png"))(__yanState().conversations[0]?.messages.at(-1))',
+  10000
+).catch(() => {});
+const deliverables = await evalJs("(__yanState().conversations[0]?.messages.at(-1)?.deliverables || []).map(d => d.name)");
+check("答末成品条列出这幅", deliverables.includes("墨猫.png"), JSON.stringify(deliverables));
 await waitFor(`!!document.querySelector(".message.assistant .markdown .reply-shot img")`, 5000).catch(() => {});
 check("正文引文件名就地画出", await evalJs(`!!document.querySelector(".message.assistant .markdown .reply-shot img")`));
 

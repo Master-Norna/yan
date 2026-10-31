@@ -34,12 +34,16 @@ check(
   JSON.stringify(open)
 );
 await evalJs(`document.querySelector("#clepsydra .clepsydra-row").click(); true`);
-await sleep(400);
+await waitFor(`document.querySelector('#messages .tool-step[data-tool="run_command"]')?.closest('.tool-stack')?.open`, 10000);
+// 跨过详情自动收起的 700ms 窗口：主动回到后台步骤后，行迹应保持展开。
+await sleep(900);
+const revealState = await evalJs(
+  `({ listHidden: document.querySelector("#clepsydra .clepsydra-list").classList.contains("hidden"), stackOpen: document.querySelector('#messages .tool-step[data-tool="run_command"]')?.closest(".tool-stack")?.open })`
+);
 check(
   "clicking a row closes the list and opens the trail at the step that hung it",
-  await evalJs(
-    `document.querySelector("#clepsydra .clepsydra-list").classList.contains("hidden") && !!document.querySelector('#messages .tool-step[data-tool="run_command"]')?.closest(".tool-stack")?.open`
-  )
+  revealState.listHidden && revealState.stackOpen,
+  JSON.stringify(revealState)
 );
 await waitFor(`document.querySelector("#clepsydra").classList.contains("hidden")`, 20000).catch(() => {});
 check("when it ends the clepsydra goes away", await evalJs(`document.querySelector("#clepsydra").classList.contains("hidden")`));

@@ -428,7 +428,7 @@ check("sandbox: .. is refused for mutations", r.status === 400 && /沙箱拒绝/
 // 查看则不锁目录——给电脑做检查要翻系统目录、注册表与进程，这条路必须通
 r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-ChildItem C:\\Windows" : "ls /etc" });
 check("sandbox: reading outside the workdir is allowed", r.status === 200, `${r.status} ${r.data?.error || ""}`);
-r = await post("/api/work/run", { workdir, sandbox: true, command: "Get-ChildItem .." });
+r = await post("/api/work/run", { workdir, sandbox: true, command: win ? "Get-ChildItem .." : "ls .." });
 check("sandbox: .. is allowed for reads", r.status === 200, `${r.status} ${r.data?.error || ""}`);
 r = await post("/api/work/run", { workdir, sandbox: true, command: "curl https://example.com" });
 check("sandbox: direct outbound fetch is refused", r.status === 400 && /外联/.test(r.data?.error || ""), `${r.status} ${r.data?.error}`);
@@ -448,7 +448,7 @@ check(
   r.status === 400 && /\.git 内部/.test(r.data?.error || ""),
   `${r.status} ${r.data?.error}`
 );
-r = await post("/api/work/run", { workdir, sandbox: false, command: "Get-ChildItem .." });
+r = await post("/api/work/run", { workdir, sandbox: false, command: win ? "Get-ChildItem .." : "ls .." });
 check("without sandbox the same command runs", r.status === 200, `${r.status} ${r.data?.error}`);
 r = await post("/api/work/run", {
   workdir,
@@ -570,7 +570,7 @@ rmSync(`${WORK}/../loose-probe.txt`, { force: true });
 // ---- 预筛：问而后行发指令前问一声严的沙箱会不会拦，拦的写明原因
 r = await post("/api/work/screen", { workdir, command: "curl https://example.com" });
 check("screen: the strict sandbox reason is reported", r.status === 200 && /外联/.test(r.data?.why || ""), JSON.stringify(r.data));
-r = await post("/api/work/screen", { workdir, command: "Get-ChildItem" });
+r = await post("/api/work/screen", { workdir, command: win ? "Get-ChildItem" : "ls" });
 check("screen: a harmless command passes", r.status === 200 && r.data.why === null, JSON.stringify(r.data));
 // ---- 后台指令：先回头几秒的输出与编号，之后取新输出、结束它；跑着的时候别的指令不排队
 {

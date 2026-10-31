@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
 const dir = `${TMP}/intent-work`,
-  workdir = dir.split("/").join("\\");
+  workdir = process.platform === "win32" ? dir.split("/").join("\\") : dir;
 rmSync(dir, { recursive: true, force: true });
 mkdirSync(dir, { recursive: true });
 await send("Page.navigate", { url: PAGE + "preview.html" });

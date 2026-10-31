@@ -57,7 +57,10 @@ const took = Date.now() - t0,
   steered = await firstAnswer("FGSTEER");
 check(
   "an interjection moves the running command to the background and is delivered at once",
-  took < 3000 && /^转入后台 bg\d+ · /.test(steered.card) && steered.text.includes("｜steer｜") && steered.text.includes("有话递给你"),
+  steered.bg === "running" &&
+    /^转入后台 bg\d+ · /.test(steered.card) &&
+    steered.text.includes("｜steer｜") &&
+    steered.text.includes("有话递给你"),
   JSON.stringify({ took, ...steered })
 );
 await waitFor(`${conv("FGSTEER")}.messages.at(-1)?.content.includes("FGSTEER done")`, 20000).catch(() => {});

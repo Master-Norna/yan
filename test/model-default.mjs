@@ -2,7 +2,6 @@
 import { connect, check, sleep, PAGE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
-await sleep(600);
 const t = new Date().toISOString(),
   profile = (id, name) => ({
     id,
@@ -33,10 +32,10 @@ await evalJs(
   `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 5, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false }, profiles: [${JSON.stringify(profile("p1", "甲"))}, ${JSON.stringify(profile("p2", "乙"))}], conversations: [${JSON.stringify(old)}], library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
-await sleep(1200);
 const trigger = scope => evalJs(`document.querySelector("${scope} .model-trigger .model-name").textContent`),
   defaultId = () => evalJs(`__yanState().settings.activeProfileId`);
-check("a new chat starts with the default model", (await trigger("#welcome")) === "甲");
+const offered = await trigger("#welcome");
+check("a new chat starts with the default model", offered === "甲", offered);
 
 // 打开一段用乙的旧对话：眼前是乙，默认仍是甲
 await evalJs(`document.querySelector('[data-conversation="b"]').click(); true`);

@@ -170,20 +170,19 @@ await evalJs(`document.querySelector('#approvalBar .ask-q[data-q="0"] .ask-opt[d
 await evalJs(`document.querySelector('#approvalBar [data-form="next"]').click(); true`);
 await sleep(80);
 await evalJs(`document.querySelector('#approvalBar .ask-q[data-q="1"] .ask-opt[data-opt="0"]').click(); true`);
+await evalJs(
+  `(() => { const node = document.querySelector('.reasoning[data-reuse-probe="true"]'); window.__reasoningResumed = false; window.__reasoningProbeObserver = new MutationObserver(() => { if (node.isConnected && node.dataset.state === 'live') window.__reasoningResumed = true; }); window.__reasoningProbeObserver.observe(node, { attributes: true, attributeFilter: ['data-state'] }); return true; })()`
+);
 await evalJs(`document.querySelector('#approvalBar [data-form="submit"]').click(); true`);
-let reusedThought = false;
-try {
-  await waitFor(`!!document.querySelector('.reasoning[data-reuse-probe="true"][data-state="live"]')`, 4000);
-  reusedThought = true;
-} catch {}
+await waitFor(`[...document.querySelectorAll('.message.assistant')].at(-1)?.dataset.status === "complete"`, 15000);
+const reusedThought = await evalJs(`window.__reasoningProbeObserver.disconnect(); window.__reasoningResumed`);
 check(
   "the same work-trail thought marker resumes as a breathing dot after the tool",
   reusedThought,
   await evalJs(
-    `JSON.stringify([...[...document.querySelectorAll('.message.assistant')].at(-1).querySelectorAll('.reasoning')].map(d => ({ state: d.dataset.state, reused: d.dataset.reuseProbe || '', text: d.querySelector('.reasoning-body')?.textContent.slice(0, 30) })))`
+    `JSON.stringify([...[...document.querySelectorAll('.message.assistant')].at(-1).querySelectorAll('.reasoning')].map(d => ({ state: d.dataset.state, reused: d.dataset.reuseProbe || '' })))`
   )
 );
-await waitFor(`[...document.querySelectorAll('.message.assistant')].at(-1)?.dataset.status === "complete"`, 15000);
 // 覆盖写：原有的件只算真改的行，点开见红绿；这一答新建又重写的件只增不删，点开只见定稿
 await evalJs(
   `document.querySelector("#chatInput").value = "覆写"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`

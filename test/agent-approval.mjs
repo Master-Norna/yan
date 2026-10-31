@@ -1,16 +1,16 @@
 // 通过 CDP 驱动无头 Edge，跑一遍执事模式：发送 → 工具调用 → 等待确认 → 运行 → 收尾；再测跳过、停止、轮次上限
 import { mkdirSync, writeFileSync } from "node:fs";
+import { shellCommand } from "./helpers/shell-command.mjs";
 import { connect, check, sleep, PAGE, WORK, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
+const greetingCommand = shellCommand("Write-Output '你好，世界'", "printf '你好，世界\n'");
 // 先在不跑 support.js 的同源页面写入配置（主页面离开时会把内存里的旧 store 存回去，覆盖掉写入）
 await send("Page.navigate", { url: PAGE + "preview.html" });
-await sleep(800);
 // 写入模型配置与执事默认目录，再打开主页面
 await evalJs(
   `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", mode: "work", activeProfileId: "p1", pendingWorkdir: ${JSON.stringify(WORK)}, autoTitle: true }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
-await sleep(1200);
 check("boot: bridge connected", await evalJs(`__yanBridgeFetch("/api/store/config/load", "{}").then(r => r.ok, () => false)`));
 console.log(
   "  debug:",
@@ -45,7 +45,7 @@ check("meta 待你定夺", (await evalJs(`document.querySelector(".tool-stack-me
 check(
   "approval bar above composer shows the command",
   await evalJs(
-    `!document.querySelector("#approvalBar").classList.contains("hidden") && document.querySelector("#approvalBar .approval-cmd").textContent === "Write-Output '你好，世界'" && document.querySelector("#approvalBar").dataset.stepId === document.querySelector('.tool-step[data-status="pending"]').dataset.stepId`
+    `!document.querySelector("#approvalBar").classList.contains("hidden") && document.querySelector("#approvalBar .approval-cmd").textContent === ${JSON.stringify(greetingCommand)} && document.querySelector("#approvalBar").dataset.stepId === document.querySelector('.tool-step[data-status="pending"]').dataset.stepId`
   )
 );
 // 请示条入场时输入区还在长高；留白由 ResizeObserver 在下一帧跟上，等它站定再量
@@ -232,7 +232,10 @@ await evalJs(
 );
 await sleep(1500);
 await send("Page.navigate", { url: PAGE });
-await waitFor(`typeof __yanState === "function" && __yanState().conversations.some(c => c.messages.some(m => m.id === "a9"))`, 5000);
+await waitFor(
+  `typeof __yanState === "function" && __yanState().conversations.some(c => c.messages.some(m => m.id === "a9" && m.status === "interrupted"))`,
+  8000
+);
 const recovered = await evalJs(
   `(() => { const m = __yanState().conversations.flatMap(c => c.messages).find(m => m.id === "a9"); return { status: m.status, step: m.steps[0].status, result: m.steps[0].result }; })()`
 );

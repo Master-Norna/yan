@@ -19,44 +19,58 @@ async function stageAttach() {
   if (!current()) return;
   stage.attached = target;
   let streaming = false;
+  const abort = (sessionId, screencast = false) => {
+    if (stage.ws === ws) {
+      if (screencast) void stageSend("Page.stopScreencast", {}, sessionId).catch(() => {});
+      void stageSend("Target.detachFromTarget", { sessionId }).catch(() => {});
+    }
+    if (revision === stageAttachRevision) stage.attached = stage.session = "";
+  };
   try {
     const { sessionId } = await stageSend("Target.attachToTarget", { targetId: target, flatten: true });
-    if (!current()) {
-      if (stage.ws === ws) void stageSend("Target.detachFromTarget", { sessionId }).catch(() => {});
-      return;
-    }
+    if (!current()) return abort(sessionId);
     stage.session = sessionId;
     // 浏览器的窗口在屏幕外、不在焦点上：不模拟焦点，递进去的按键没人接（playwright 自己也这么做）
     void stageSend("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
     // 收 Page 域的事件：载入、跳转、提示框（开着的提示框，enable 时会补报一回）
     await stageSend("Page.enable", {}, sessionId);
-    if (!current()) return;
+    if (!current()) return abort(sessionId);
     // 网页要人选文件：不让浏览器在屏幕外开窗，报给看台
     void stageSend("Page.setInterceptFileChooserDialog", { enabled: true }, sessionId).catch(() => {});
     // 执事在网页上哪儿下手：网页里放一个只给看台听的耳目
     void stageInkAttach(sessionId, target);
     void stageReadHistory();
     await stageSend("Page.startScreencast", { format: "jpeg", quality: 90 }, sessionId);
-    if (!current()) {
-      if (stage.ws === ws) void stageSend("Page.stopScreencast", {}, sessionId).catch(() => {});
-      return;
-    }
+    if (!current()) return abort(sessionId, true);
     streaming = true;
     // 静着的页不重绘就不出帧：先截一张垫底（后台的页截不出来，等不到就算了）
-    const [shot, metrics] = await Promise.race([
-      Promise.all([
-        stageSend("Page.captureScreenshot", { format: "jpeg", quality: 90 }, sessionId),
-        stageSend("Page.getLayoutMetrics", {}, sessionId)
-      ]),
-      new Promise((_, reject) => setTimeout(() => reject(Error("timeout")), 2000))
-    ]);
-    if (current() && stage.session === sessionId && !stage.framed)
-      void stageFrame(shot.data, metrics.cssVisualViewport.clientWidth, metrics.cssVisualViewport.clientHeight);
+    if (current() && !stage.framed) await stageBaseFrame(sessionId);
   } catch {
     // 没连成（目标刚关、Page.enable 被拒）：不留「已连着」的空壳，否则同一页再也接不上；垫底那张截不出来不算
     if (!streaming && current()) void stageDetach();
   }
   void stageFit();
+}
+// 静着的页不重绘就不出帧：截一张垫底；调窗后补的要视口尺寸对上才画，免得把旧画面画上去
+/** @param {string} sessionId @param {{ width: number, height: number }} [want] */
+async function stageBaseFrame(sessionId, want) {
+  try {
+    const [shot, inner] = await Promise.race([
+      Promise.all([
+        stageSend("Page.captureScreenshot", { format: "jpeg", quality: 90 }, sessionId),
+        stageSend("Runtime.evaluate", { expression: "[innerWidth, innerHeight]", returnByValue: true }, sessionId)
+      ]),
+      new Promise((_, reject) => setTimeout(() => reject(Error("timeout")), 2000))
+    ]);
+    if (stage.session !== sessionId || !stageVisible()) return;
+    const [innerWidth, innerHeight] = inner?.result?.value || [0, 0],
+      cw = Math.round(Number(innerWidth) || 0),
+      ch = Math.round(Number(innerHeight) || 0);
+    if (!shot?.data || !cw || !ch) return;
+    if (want && (Math.abs(cw - want.width) > 2 || Math.abs(ch - want.height) > 2)) return;
+    if (!want && stage.framed) return;
+    void stageFrame(shot.data, cw, ch);
+  } catch {}
 }
 // 屏幕外那扇窗调成看台的大小：窗比网页多出的边（标签栏、地址栏、边框）照现量补上。窗口的尺寸与网页的 CSS 像素同一单位。
 // 画面要一比一才清楚：宽高都往下取整、与画幅的 CSS（见 20-view.css 的 .stage-sheet）同减 24，视口按 innerWidth 量（带滚动条，与推来的帧同宽）——
@@ -92,6 +106,8 @@ async function stageFit() {
     if (bounds.windowState !== "normal" || (width === bounds.width && height === bounds.height)) return;
     stage.fittedAt = Date.now();
     await stageSend("Browser.setWindowBounds", { windowId, bounds: { width, height } });
+    // 静着的页调窗后可能不重绘：补一张垫底
+    await stageBaseFrame(session, want);
   } catch {}
 }
 /** @param {{ width: number, height: number } | null} size */

@@ -94,7 +94,8 @@ test("检索从存储根搜起：卷宗里的命中照给，配置与备份里�
 });
 
 test("指令点名存储根的配置：径行、不开沙箱也不跑", async () => {
-  const { status, data } = await call("run", { command: "Get-Content ..\\配置.json", permission: "auto", sandbox: false });
+  const command = process.platform === "win32" ? "Get-Content ..\\配置.json" : "cat ../配置.json",
+    { status, data } = await call("run", { command, permission: "auto", sandbox: false });
   assert.notEqual(status, 200);
   assert.match(data.error, /配置与登录文件/);
 });

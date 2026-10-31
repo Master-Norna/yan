@@ -70,4 +70,4 @@
 - 查找：在网页里跑一小段，用 CSS 的高亮（`::highlight`，样式经 `adoptedStyleSheets` 挂上）标出各处，不动网页的 DOM；只找同一段文字里的。
 - 下载：对正看的那一页开着 Page 域，`downloadWillBegin` / `downloadProgress` 报来名字与进度；执事经 MCP 下的，结果里「Downloaded file … to …」写着存到哪，补上。记录存在本机（最近三十条）。显出文件走桥接（`POST /api/stage/reveal`，`explorer /select`），没记着路径的开那个服务存下载的目录（`--output-dir`，或服务工作目录下的 `.playwright-mcp`）。Edge 下载时弹的气泡（`edge://downloads-hub`）也报成一页，游目不列。
 - 网页改标题浏览器不发通知：游目开着时每一秒半问一次标签列表。
-- 代码：`src/26-stage/`、`styles/56-stage/`；测试 `test/stage.mjs` 借测试用的 Edge 充当模型的浏览器。
+- 代码：`src/26-stage/`、`styles/56-stage/`；测试 `test/stage.mjs` 另起一个无头浏览器实例充当模型的浏览器（单窗口），言的页面留在测试浏览器里。
