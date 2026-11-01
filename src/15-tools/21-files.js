@@ -325,7 +325,7 @@ async function ensureWorkReady(conversation) {
   if (!isWork(conversation)) {
     const archive = workRoot(conversation);
     // 备的是草稿目录，卷宗根随之建好
-    if (archive && activeProfile()?.tools !== false)
+    if (archive && activeProfile(conversation)?.tools !== false)
       await bridge(
         "/api/work/prepare",
         { workdir: `${archive}${archive.includes("/") && !archive.includes("\\") ? "/" : "\\"}${scratchRel(conversation)}` },
@@ -333,7 +333,7 @@ async function ensureWorkReady(conversation) {
       ).catch(error => toast(t`卷宗目录不可用：${String(error.message || error)}`));
     return true;
   }
-  if (activeProfile()?.tools === false) {
+  if (activeProfile(conversation)?.tools === false) {
     toast(t("当前模型已关闭本机工具，请在模型高级配置中开启"));
     return false;
   }

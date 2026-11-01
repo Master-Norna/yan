@@ -222,7 +222,14 @@ function delegateInBackground(step, args, ctx) {
  * @param {boolean} [resume]
  * @param {Profile|null} [profile] 续写时在认领前拿住，等待期间换了对话也不改用别处的模型
  */
-function launchHelper(step, args, ctx, past = null, resume = false, profile = requestJob(ctx.conversation.id)?.profile || activeProfile()) {
+function launchHelper(
+  step,
+  args,
+  ctx,
+  past = null,
+  resume = false,
+  profile = requestJob(ctx.conversation.id)?.profile || activeProfile(ctx.conversation)
+) {
   const { conversation, assistant } = ctx;
   // 进展：帮手只剩等后台、睡下之前交的那一份。这一步仍在做，回报照常寄
   const progress = outcome =>
@@ -313,7 +320,7 @@ async function resumeHelpers(conversation, steps = heldHelpers(conversation)) {
   steps = steps.filter(step => step.status === "interrupted" && step.sub);
   if (!steps.length) return;
   if (runningElsewhere(conversation.id)) return toast(t("此对话正在另一页面作答，稍后再续"));
-  const profile = requestJob(conversation.id)?.profile || activeProfile();
+  const profile = requestJob(conversation.id)?.profile || activeProfile(conversation);
   if (!profile) return openSettings("models");
   if (quotaBlocked(profile)) return toast(t("余墨已尽，请调高上限或更换模型"));
   // 认领一回：几处页面同开时，只有一处续得上

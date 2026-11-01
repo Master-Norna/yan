@@ -54,7 +54,7 @@ function deliverTimer({ to, timer }) {
       next: timer.next ? prompt("work.timerNext", { next: clockText(timer.next) }) : ""
     }),
     step,
-    profile: requestJob(conversation.id)?.profile || profiles().find(p => p.id === conversation.profileId) || activeProfile(),
+    profile: requestJob(conversation.id)?.profile || activeProfile(conversation),
     relay: { step: step.id, title: timer.note, ok: true, kind: "timer", ...(late ? { late } : {}) }
   });
 }

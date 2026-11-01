@@ -95,8 +95,11 @@ function sleepUntilMail(box) {
 async function wakeWithReports(conversation, items) {
   if (!items.length || !store.conversations.includes(conversation)) return;
   // 几处页面同开：照发送的规矩先认领，别处正在这段里作答就等它松手（报到每几秒一回，见 syncLeases）再来。
-  // 等过之后按 id 重找：别处写过的，这边读回来已换了一个对象
-  if (!requestJob(conversation.id) && (remoteBusy.has(conversation.id) || !(await claimConversation(conversation.id))))
+  // 等过之后按 id 重找：别处写过的，这边读回来已换了一个对象。这边正退回目录的也等它退完（认领之后再看，等的工夫里可能点了退回）
+  if (
+    !requestJob(conversation.id) &&
+    (remoteBusy.has(conversation.id) || !(await claimConversation(conversation.id)) || rewinding.has(conversation.id))
+  )
     return void setTimeout(() => {
       const fresh = store.conversations.find(c => c.id === conversation.id);
       if (fresh) void wakeWithReports(fresh, items);
@@ -105,7 +108,7 @@ async function wakeWithReports(conversation, items) {
   // 攒着的这一会儿里有人开了一答（用户发了话、上一答收尾时补言另起了一问）：交给它
   const job = requestJob(conversation.id);
   if (job) return void items.forEach(item => deliverInline(conversation, job, item));
-  const profile = profiles().find(p => p.id === items[0].profile?.id) || activeProfile(),
+  const profile = profiles().find(p => p.id === items[0].profile?.id) || activeProfile(conversation),
     ready = profile && !quotaBlocked(profile);
   // 上一答断着（断网中断、报错）：另起一答会在断处底下留一截，续上那一答时它就成了残留，主线也从此分成两头。
   // 回报先记在这段对话上，下一答开工时递上（见 takeHeldReports）；中断的那一答就此续上，还断着就原样记着，等下一回

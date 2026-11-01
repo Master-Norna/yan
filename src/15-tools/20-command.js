@@ -141,7 +141,7 @@ function watchBackground(conversation, assistant, step) {
   if (bgWatches.has(step.id) || !step.bg) return;
   // 叫醒时用这段对话自己的模型（续答与记账都归它），不是页面此刻开着的那段的
   const controller = new AbortController(),
-    profile = requestJob(conversation.id)?.profile || profiles().find(p => p.id === conversation.profileId) || activeProfile();
+    profile = requestJob(conversation.id)?.profile || activeProfile(conversation);
   bgWatches.set(step.id, controller);
   holdAwake();
   renderClepsydra();

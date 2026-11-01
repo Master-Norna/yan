@@ -96,9 +96,9 @@ function profiles() {
 }
 // 此刻在用的模型：打开的对话用它自己记的；还没发出的新对话用欢迎页上挑的，没挑就照预设带的，再照默认。
 // 默认模型（settings.activeProfileId）只是新对话的起手，不随打开哪段、换了什么而变
-function activeProfile() {
-  const c = currentConversation(),
-    byId = id => (id && profiles().find(p => p.id === id)) || null;
+/** 这段对话用的模型：不给即眼前这段，欢迎页上是待发的那一档。后台叫醒的、正作答的那段未必是眼前这段，要把它传进来 @param {Conversation|null} [c] */
+function activeProfile(c = currentConversation()) {
+  const byId = id => (id && profiles().find(p => p.id === id)) || null;
   return (
     (c ? byId(c.profileId) : byId(pendingProfileId) || byId(presetOf(null)?.profileId)) ||
     byId(store.settings.activeProfileId) ||
