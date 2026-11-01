@@ -58,7 +58,8 @@ test("执事的一步写成一句两字动词：照 playwright 的参数，认�
 test("接法由言补齐：在人写的 --config 上合并，人写了的照人的；别的服务原样起", () => {
   const root = mkdtempSync(path.join(tmpdir(), "yan-root-")),
     cwd = mkdtempSync(path.join(tmpdir(), "yan-mcp-")),
-    where = { root, bridgePort: 8787 };
+    moved = [],
+    where = { root, bridgePort: 8787, offscreen: port => moved.push(port) };
   // 不是 Playwright 的：原样递回
   const other = { command: "node", args: ["server.js"] };
   assert.equal(prepareBrowser(other, where), other);
@@ -111,6 +112,8 @@ test("接法由言补齐：在人写的 --config 上合并，人写了的照人�
       a.startsWith("--window-position")
     )
   );
+  // 只有言挪到屏幕外的那个报出调试口（桥接据此让它不占任务栏）：人自己定了位置的、接别处的、无头的都不报
+  assert.deepEqual(moved, [9288]);
 });
 
 test("游目自己的浏览器：几项选择拼成整条，家当都在存储根的「游目」里，再补接法", () => {

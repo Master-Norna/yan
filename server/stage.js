@@ -49,10 +49,11 @@ const PLAYWRIGHT = /@playwright[\\/]mcp|playwright-mcp|mcp-server-playwright/i;
 const isPlaywright = config => !!config?.command && PLAYWRIGHT.test([config.command, ...(config.args || [])].join(" "));
 /**
  * @param {Record<string, any>} config MCP 服务的配置
- * @param {{ root: string, bridgePort: number }} where 存储根、桥接的端口
+ * @param {{ root: string, bridgePort: number, offscreen?: (port: number) => void }} where 存储根、桥接的端口；offscreen：窗口由言挪到屏幕外时告知调试口（桥接据此让它不占任务栏，见 server/taskbar.js）
  * @returns {Record<string, any>} 要起的配置（不是 Playwright 的原样递回）
  */
-function prepareBrowser(config, { root, bridgePort }) {
+function prepareBrowser(config, where) {
+  const { root, bridgePort } = where;
   if (!isPlaywright(config)) return config;
   const args = (config.args || []).map(String),
     cwd = String(config.cwd || ""),
@@ -78,8 +79,10 @@ function prepareBrowser(config, { root, bridgePort }) {
     const line = `--remote-allow-origins=${[...origins].join(",")}`;
     allow < 0 ? extra.push(line) : (extra[allow] = line);
     // 无头的不必挪；人自己定了窗口位置的照人的
-    if (!args.includes("--headless") && launch.headless !== true && !extra.some(item => item.startsWith("--window-position=")))
+    if (!args.includes("--headless") && launch.headless !== true && !extra.some(item => item.startsWith("--window-position="))) {
       extra.push("--window-position=-32000,-32000");
+      where.offscreen?.(port);
+    }
   }
   // 按内容取名：同时起几个 Playwright 服务（游目自带的、人另接的），各读各的；同一份接法才共用一个文件
   const text = JSON.stringify(file, null, 2),
@@ -133,7 +136,7 @@ function builtinConfig(stage, root) {
     env: browser === "chromium" ? { PLAYWRIGHT_BROWSERS_PATH: at.engine } : {}
   };
 }
-/** 起 MCP 服务前：游目自己的那个先拼成整条，Playwright 的再补接法 @param {Record<string, any>} config @param {{ root: string, bridgePort: number }} where */
+/** 起 MCP 服务前：游目自己的那个先拼成整条，Playwright 的再补接法 @param {Record<string, any>} config @param {{ root: string, bridgePort: number, offscreen?: (port: number) => void }} where */
 function prepareMcp(config, where) {
   if (!config?.stage) return prepareBrowser(config, where);
   const { stage, ...rest } = config,
