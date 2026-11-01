@@ -63,14 +63,19 @@ await waitFor(`!!document.querySelector('[data-conversation="trail-selection"]')
 await evalJs(`document.querySelector('[data-conversation="trail-selection"] .history-open').click(); true`);
 await waitFor(`!!document.querySelector('#messages .trail-note p')`);
 await sleep(600);
+const tipShown = `!document.querySelector('#quoteTip').classList.contains('hidden')`;
 const select = async (selector, text) => {
+  // 先清掉上一处划选、等浮条收起，免得下面读到的是上一回的浮条
+  await evalJs(`getSelection().removeAllRanges(); true`);
+  await waitFor(`!(${tipShown})`, 3000);
   await evalJs(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: "center", behavior: "instant" }); true`);
   await sleep(150); // 滚动会收起浮条，先等它落稳，再像人停下来划选一样取文字。
   await evalJs(
     `(() => { const el = document.querySelector(${JSON.stringify(selector)}); const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let n; while (n = w.nextNode()) { const at = n.data.indexOf(${JSON.stringify(text)}); if (at < 0) continue; const r = document.createRange(); r.setStart(n, at); r.setEnd(n, at + ${text.length}); const s = getSelection(); s.removeAllRanges(); s.addRange(r); break; } return true; })()`
   );
-  await sleep(250);
-  return await evalJs(`!document.querySelector('#quoteTip').classList.contains('hidden')`);
+  // 浮条在 selectionchange 防抖 120 ms 后才出，页面忙时更晚（macOS runner 上刚展开思绪那次就晚过 250 ms），轮询到它出来，等满还没有才算不给
+  for (const t = Date.now(); Date.now() - t < 2000; await sleep(60)) if (await evalJs(tipShown)) return true;
+  return false;
 };
 const quoted = await select("#messages .trail-note p", "重复片段");
 check("trail selection offers quote and side note", quoted);
