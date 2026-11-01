@@ -92,12 +92,9 @@ function liftBareHtml(text) {
   let fence = null;
   for (let i = 0; i < lines.length; ) {
     const line = lines[i],
-      mark = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (mark) {
-      if (!fence) fence = { char: mark[1][0], length: mark[1].length };
-      else if (mark[1][0] === fence.char && mark[1].length >= fence.length && !mark[2].trim()) fence = null;
-    }
-    if (fence || mark || !HTML_LINE.test(line)) {
+      was = fence;
+    fence = fenceAfter(fence, line);
+    if (was || fence || !HTML_LINE.test(line)) {
       out.push(line);
       i++;
       continue;

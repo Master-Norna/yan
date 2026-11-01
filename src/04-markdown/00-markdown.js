@@ -388,13 +388,15 @@ function renderMarkdown(source = "") {
 // 只数围栏行的奇偶不行：````markdown 里嵌着 ```bash 时，内层那两行会把里外颠倒
 function inOpenFence(text) {
   let open = null;
-  for (const line of text.split("\n")) {
-    const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (!fence) continue;
-    if (!open) open = { mark: fence[1][0], length: fence[1].length };
-    else if (fence[1][0] === open.mark && fence[1].length >= open.length && !fence[2].trim()) open = null;
-  }
+  for (const line of text.split("\n")) open = fenceAfter(open, line);
   return !!open;
+}
+/** 过了这一行，围栏开着的是哪一道（null 即不在围栏里） @param {{ mark: string, length: number }|null} open @param {string} line */
+function fenceAfter(open, line) {
+  const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  if (!fence) return open;
+  if (!open) return { mark: fence[1][0], length: fence[1].length };
+  return fence[1][0] === open.mark && fence[1].length >= open.length && !fence[2].trim() ? null : open;
 }
 // 流式渲染的分段点：最后一个空行，且它前面没有未闭合的代码围栏（裸写的交互内容提进围栏后算，见 liftBareHtml）、后面不是列表 / 缩进 / 表格的延续；
 // 以标签收尾的一段要等下一段起头不是标签才分（一段裸 HTML 被分开，提进围栏的就只剩半截）
