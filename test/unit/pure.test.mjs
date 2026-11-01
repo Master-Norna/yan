@@ -68,6 +68,11 @@ test("parseToolArguments：正常 JSON、空串、围栏、尾逗号、二次编
   assert.deepEqual(f.parseToolArguments(""), { ok: true, args: {} });
   assert.deepEqual(f.parseToolArguments('```json\n{"path":"a.js"}\n```').args, { path: "a.js" });
   assert.deepEqual(f.parseToolArguments('{"path":"a.js",}').args, { path: "a.js" });
+  // 去尾逗号只动字符串外头的：正文里的「,]」「,}」原样留着
+  assert.deepEqual(f.parseToolArguments('{"path":"a.js","content":"x = [1,]; y = {a,}",}').args, {
+    path: "a.js",
+    content: "x = [1,]; y = {a,}"
+  });
   assert.deepEqual(f.parseToolArguments(JSON.stringify('{"path":"a.js"}')).args, { path: "a.js" });
   assert.deepEqual(f.parseToolArguments("[1,2]").args, { questions: [1, 2] });
 });

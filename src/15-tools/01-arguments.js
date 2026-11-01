@@ -23,7 +23,7 @@ function parseToolArguments(raw) {
   const start = fenced.search(/[{[]/),
     end = Math.max(fenced.lastIndexOf("}"), fenced.lastIndexOf("]"));
   let body = start >= 0 && end > start ? fenced.slice(start, end + 1) : fenced;
-  for (const candidate of [body, body.replace(/,\s*([}\]])/g, "$1")]) {
+  for (const candidate of [body, dropTrailingCommas(body)]) {
     const parsed = candidate && candidate !== text ? attempt(candidate) : null;
     if (parsed?.ok) return parsed;
   }
@@ -42,6 +42,27 @@ function replayArguments(raw) {
   } catch {}
   const parsed = parseToolArguments(raw);
   return parsed.ok ? JSON.stringify(parsed.args) : "{}";
+}
+// 去掉 } ] 前多余的逗号：只认字符串外头的，正文里写着的「,]」「,}」原样留着
+function dropTrailingCommas(text) {
+  let out = "",
+    inString = false,
+    escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === ",") {
+      let j = i + 1;
+      while (/\s/.test(text[j] || "")) j++;
+      if (text[j] === "}" || text[j] === "]") continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 // 被截断的 JSON：补齐未闭合的括号，能救多少是多少——先试直接补齐（截在一个值刚写完的地方），
 // 不行再退到最后一个安全的逗号处（末尾那个残缺的键值对丢掉）。给出几个候选，由调用方逐个试
