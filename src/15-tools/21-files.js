@@ -306,14 +306,15 @@ function seenPath(conversation, file) {
     root = normalizeWorkPath(workRoot(conversation));
   return fold(root && fold(value).startsWith(`${fold(root)}/`) ? value.slice(root.length + 1) : value);
 }
+/** 比路径用：斜杠归一，消掉 . 与重复、末尾的斜杠，.. 退一节（退到根——开头的 / 或盘符——即止） @param {string} file */
 function normalizeWorkPath(file) {
   const parts = [];
   for (const part of String(file || "")
     .replace(/\\/g, "/")
     .split("/")) {
-    if (!part || part === ".") continue;
-    if (part === "..") parts.pop();
-    else parts.push(part);
+    if (part === "..") {
+      if (parts.length && !(parts.length === 1 && /^([a-z]:)?$/i.test(parts[0]))) parts.pop();
+    } else if (part !== "." && (part || !parts.length)) parts.push(part);
   }
   return parts.join("/");
 }

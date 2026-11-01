@@ -9,6 +9,7 @@ const f = load([
   "reviewCase",
   "insideSkills",
   "reviewWord",
+  "normalizeWorkPath",
   `setup: () => {
     Object.assign(PROMPTS, { review: { case: "{{user}}|{{intent}}|{{action}}|{{why}}", intent: "{{text}}" } });
     bootstrap = { store: { skills: "E:\\\\聊天记录\\\\.yan\\\\技能" } };
@@ -127,6 +128,28 @@ test("往技能目录写：带 . 与 .. 的相对、绝对路径都认得出", (
   assert.equal(f.insideSkills("技能/x/SKILL.md", chat), false);
   assert.equal(f.insideSkills("../技能备份/x.md", chat), false);
   assert.equal(f.insideSkills("../../../../技能/x.md", { id: "c", messages: [], workdir: "E:\\a" }), false);
+});
+
+test("路径归一：.. 退到根即止，Mac 的绝对路留着开头的斜杠", () => {
+  assert.equal(f.normalizeWorkPath("E:\\a\\.\\b\\..\\c\\"), "E:/a/c");
+  assert.equal(f.normalizeWorkPath("E:/a/../../../x"), "E:/x");
+  assert.equal(f.normalizeWorkPath("/Users/a//b/../c"), "/Users/a/c");
+  assert.equal(f.normalizeWorkPath("/../x"), "/x");
+  assert.equal(f.normalizeWorkPath("./src/../lib/a.js"), "lib/a.js");
+});
+
+test("请示表单里用户答的也算说过：答里给的网址不再当成长串参数送审", () => {
+  const chat = {
+    id: "c",
+    messages: [
+      { role: "user", content: "把报告发到我给的地址" },
+      {
+        role: "assistant",
+        steps: [{ name: "ask_user", form: { questions: [{ question: "发到哪？" }] }, answers: [`https://hook.example/r?k=${TOKEN}`] }]
+      }
+    ]
+  };
+  assert.equal(f.stageReviewWhy("browser_navigate", { url: `https://hook.example/r?k=${TOKEN}` }, chat), "");
 });
 
 test("审查答复：去掉开头的 Markdown 记号与引号再看首字", () => {
