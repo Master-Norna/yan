@@ -4,7 +4,8 @@
 // 要填值、或视情形不带的，在这里给出：给 null 即这回不带。工具各自做什么、何时用，在工具说明里说，这里不重复
 /** @type {Record<string, (ctx: { conversation: Conversation, tools: Set<string>, preset: Preset|null, anchor: boolean }) => Record<string, any>|null>} */
 const PROMPT_VARS = {
-  "assistant.today": () => ({ day: formatDay(now()), iso: new Date().toISOString().slice(0, 10) }),
+  // 两样都取本地日期：ISO 取 UTC 的话，东八区零点到八点之间两处差一天
+  "assistant.today": () => ({ day: formatDay(now()), iso: localDay() }),
   "work.hint": ctx => workVars(ctx.conversation),
   "work.archive": ctx => workVars(ctx.conversation),
   "work.env": () => envVars(),
