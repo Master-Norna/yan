@@ -92,8 +92,16 @@ function sleepUntilMail(box) {
   });
 }
 /** @param {Conversation} conversation */
-function wakeWithReports(conversation, items) {
+async function wakeWithReports(conversation, items) {
   if (!items.length || !store.conversations.includes(conversation)) return;
+  // 几处页面同开：照发送的规矩先认领，别处正在这段里作答就等它松手（报到每几秒一回，见 syncLeases）再来。
+  // 等过之后按 id 重找：别处写过的，这边读回来已换了一个对象
+  if (!requestJob(conversation.id) && (remoteBusy.has(conversation.id) || !(await claimConversation(conversation.id))))
+    return void setTimeout(() => {
+      const fresh = store.conversations.find(c => c.id === conversation.id);
+      if (fresh) void wakeWithReports(fresh, items);
+    }, 5000);
+  if (!store.conversations.includes(conversation)) return;
   // 攒着的这一会儿里有人开了一答（用户发了话、上一答收尾时补言另起了一问）：交给它
   const job = requestJob(conversation.id);
   if (job) return void items.forEach(item => deliverInline(conversation, job, item));

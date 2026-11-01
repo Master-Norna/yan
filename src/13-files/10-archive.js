@@ -23,7 +23,7 @@ function archiveFileUrl(path, download = false, root = archiveDir()) {
   return `${apiBase}/api/archive/file?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}${download ? "&download=1" : ""}`;
 }
 // 正文链接里的本地路落在哪：相对路相对这段对话的落脚处（绑了目录是它，没绑是卷宗）；绝对路在落脚处之内的折成相对，
-// 之外的以它所在那层为根。sandbox:/、/mnt/… 这类不是本机的路，返回 null
+// 之外的以它所在那层为根。sandbox:/ 这类不是本机的路返回 null；Windows 上 /mnt/… 这样以 / 起头的也不是，Mac 上它就是绝对路
 /** @param {string} raw @returns {{ root: string, path: string } | null} */
 function localLinkTarget(raw, conversation = currentConversation()) {
   let text = String(raw || "")
@@ -32,13 +32,17 @@ function localLinkTarget(raw, conversation = currentConversation()) {
   try {
     text = decodeURIComponent(text);
   } catch {}
-  text = text.replace(/^file:\/*/i, "").replace(/\\/g, "/");
-  const root = workRoot(conversation);
-  if (/^[a-z]:\//i.test(text)) {
+  text = text
+    .replace(/^file:\/+/i, "/")
+    .replace(/\\/g, "/")
+    .replace(/^\/([a-z]:\/)/i, "$1");
+  const root = workRoot(conversation),
+    win = (bootstrap.work?.platform || "win32") === "win32";
+  if (win ? /^[a-z]:\//i.test(text) : /^\/(?!\/)/.test(text)) {
     const base = root.replace(/\\/g, "/").replace(/\/+$/, "");
     if (base && text.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return { root, path: text.slice(base.length + 1) };
     const cut = text.lastIndexOf("/");
-    return { root: text.slice(0, cut), path: text.slice(cut + 1) };
+    return { root: text.slice(0, cut) || "/", path: text.slice(cut + 1) };
   }
   if (/^[a-z][\w+.-]*:|^\//i.test(text)) return null;
   return { root, path: text.replace(/^(?:\.\/)+/, "") };
