@@ -27,6 +27,10 @@ check(
   "tip offers 引用 and 旁注",
   (await evalJs(`[...document.querySelectorAll("#quoteTip [data-tip]")].map(b => b.textContent).join("|")`)) === "引用|旁注"
 );
+const tipAt = await evalJs(
+  `(() => { const r = document.querySelector("#quoteTip").getBoundingClientRect(), s = getSelection().getRangeAt(0).getBoundingClientRect(); return { above: r.bottom <= s.top, offset: Math.round(r.left + r.width / 2 - (s.left + s.width / 2)) }; })()`
+);
+check("tip floats centered above the selection", tipAt.above && Math.abs(tipAt.offset) <= 1, JSON.stringify(tipAt));
 await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').click(); true`);
 await sleep(300);
 check(

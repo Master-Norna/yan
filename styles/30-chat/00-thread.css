@@ -175,7 +175,6 @@ html.work-mode .chat-scroll-grabber {
   font-size: var(--fs-note);
   box-shadow: 0 3px 10px rgba(61, 49, 32, 0.1);
   animation: rise var(--dur-rise) ease-out;
-  transform: translate(-50%, 0);
 }
 /* 划选浮起的「引用 | 旁注」：方角纸签，两枚只用字、短丝栏相隔，与分段钮同式（设计稿/87 甲）。
    落选的：顶上一道朱（设计稿/90 甲，像给小块扣了个盖）；字前一粒朱（两个选项各点一粒、或只点一个都怪，见 设计稿/91 丙——那粒给了提示条） */

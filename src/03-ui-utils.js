@@ -187,28 +187,51 @@ function openChipPop(anchor, host, html) {
   host.append(pop);
   return pop;
 }
+/**
+ * 浮着的一块（position: fixed、已在页上）贴着锚点摆：below / above 贴在下边或上边，这边放不下、另一边更宽就翻过去（翻上去的带 drop-up）；
+ * beside 贴在右边、上沿对齐，右边放不下翻到左边。末了整块收进界内（默认视口；浮在面板上的可给面板的框），四边留 edge——浮签、菜单、划选的纸签都走这一处
+ * @param {HTMLElement} el @param {DOMRect} rect
+ * @param {{ side?: "below"|"above"|"beside", align?: "left"|"right"|"center", gap?: number, edge?: number, within?: DOMRect }} [options]
+ */
+function placeFloating(
+  el,
+  rect,
+  { side = "below", align = "left", gap = 6, edge = 10, within = new DOMRect(0, 0, innerWidth, innerHeight) } = {}
+) {
+  const width = el.offsetWidth,
+    height = el.offsetHeight;
+  let left,
+    top,
+    up = false;
+  if (side === "beside") {
+    left =
+      rect.right + gap + width + edge <= within.right || rect.left - gap - width < within.left + edge
+        ? rect.right + gap
+        : rect.left - gap - width;
+    top = rect.top;
+  } else {
+    const below = within.bottom - rect.bottom - gap,
+      above = rect.top - gap - within.top;
+    up = side === "above" ? above >= height + edge || above > below : below < height + edge && above > below;
+    top = up ? rect.top - gap - height : rect.bottom + gap;
+    left = align === "right" ? rect.right - width : align === "center" ? rect.left + (rect.width - width) / 2 : rect.left;
+  }
+  el.classList.toggle("drop-up", up);
+  el.style.left = `${Math.max(within.left + edge, Math.min(left, within.right - width - edge))}px`;
+  el.style.top = `${Math.max(within.top + edge, Math.min(top, within.bottom - height - edge))}px`;
+}
 // 浮层菜单：挂在 body 上、按锚点定位（fixed），不受侧栏与输入区的滚动、overflow 裁剪；贴近锚点，上下空间不够就翻向另一侧。
 // 与目录签的弹层同一套 .chip-pop 外观与关闭逻辑：点别处、Esc、锚点所在容器滚动都收
+/** @param {Element} anchor @param {string} html @param {{ align?: "left"|"right", menu?: boolean }} [options] */
 function openFloatingPop(anchor, html, { align = "left", menu = true } = {}) {
   closeChipPop();
   const pop = document.createElement("div");
   pop.className = `chip-pop floating${menu ? " chip-menu" : ""}`;
   pop.innerHTML = html;
   pop.addEventListener("click", event => event.stopPropagation());
+  pop.dataset.align = align;
   document.body.append(pop);
-  const rect = anchor.getBoundingClientRect(),
-    gap = 6,
-    edge = 10;
-  const width = pop.offsetWidth,
-    height = pop.offsetHeight;
-  const below = innerHeight - rect.bottom - gap,
-    up = below < height + edge && rect.top - gap > below;
-  pop.classList.toggle("drop-up", up);
-  const top = up ? rect.top - gap - height : rect.bottom + gap;
-  let left = align === "right" ? rect.right - width : rect.left;
-  left = Math.max(edge, Math.min(left, innerWidth - width - edge));
-  pop.style.top = `${Math.max(edge, top)}px`;
-  pop.style.left = `${left}px`;
+  placeFloating(pop, anchor.getBoundingClientRect(), { align });
   const scroller = anchor.closest("#history, #chatScroll, .composer-area, #settingsContent");
   scroller?.addEventListener("scroll", closeChipPop, { once: true, passive: true });
   return pop;

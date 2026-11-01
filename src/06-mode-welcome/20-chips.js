@@ -51,15 +51,13 @@ function openAttachMenu(anchor) {
   // 刚放进技能目录的：下回点开就列得出
   void refreshSkills();
 }
-// 选件的清单换了内容、高随之变：重新贴一次锚点（向上翻的，底边贴住锚点）
+// 选件的清单换了内容、宽高随之变：重新贴一次锚点（已向上翻的仍在上边，底边贴住锚点；菜单换成更宽的清单，也收回视口里）
 /** @param {HTMLElement} pop @param {Element} anchor */
 function settlePickerPop(pop, anchor) {
-  const rect = anchor.getBoundingClientRect(),
-    height = pop.offsetHeight;
-  if (pop.classList.contains("drop-up") || innerHeight - rect.bottom - 6 < height + 10) {
-    pop.classList.add("drop-up");
-    pop.style.top = `${Math.max(10, rect.top - 6 - height)}px`;
-  }
+  placeFloating(pop, anchor.getBoundingClientRect(), {
+    side: pop.classList.contains("drop-up") ? "above" : "below",
+    align: /** @type {"left"|"right"} */ (pop.dataset.align || "left")
+  });
 }
 // 卷宗选件：与卷宗页一样逐层看——先列这一层的夹、再列件，点夹即进、顶上一行「‹」回上一层，点一件即置于案上；
 // 一旦查找，就跨各层平铺，件旁注上它所在的夹，查找也认夹名

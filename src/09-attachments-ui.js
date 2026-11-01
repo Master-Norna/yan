@@ -145,9 +145,9 @@ function setupQuoteTip() {
     const { rect, ...anchor } = picked;
     current = anchor;
     tip.querySelectorAll('[data-tip="note"], .quote-tip-sep').forEach(el => el.classList.toggle("hidden", !!anchor.quoteOnly));
-    tip.style.left = `${Math.min(innerWidth - 40, Math.max(40, rect.left + rect.width / 2))}px`;
-    tip.style.top = `${Math.max(8, rect.top - 34)}px`;
+    // 先现出来再量：藏着时没有宽高
     tip.classList.remove("hidden");
+    placeFloating(tip, rect, { side: "above", align: "center", gap: 8, edge: 8 });
   };
   document.addEventListener("selectionchange", () => {
     clearTimeout(timer);

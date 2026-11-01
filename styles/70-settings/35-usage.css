@@ -63,7 +63,7 @@
 }
 /* 浮签同全局的纸签：方角、发丝边、极淡的影，暗色里底用 paper-3 */
 .usage-tip {
-  position: absolute;
+  position: fixed;
   z-index: 2;
   padding: 7px 10px 8px;
   border: 1px solid var(--line);

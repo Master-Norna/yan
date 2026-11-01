@@ -58,6 +58,15 @@ const low = await evalJs(
   `(t => { const r = t.getBoundingClientRect(), card = document.querySelector("#usageCard").getBoundingClientRect(); return { inCard: !!t.closest("details"), rows: t.querySelectorAll("span").length, past: r.bottom > card.bottom, height: Math.round(r.height) }; })(document.querySelector("#usageTip"))`
 );
 check("指最下一行，浮签五类整张露着、伸出卡外也不截", !low.inCard && low.rows === 5 && low.past && low.height > 100, JSON.stringify(low));
+// 浮签贴在那一点旁边、整张在设置面板里（右边放不下的翻到左边），不压着那一点
+const beside = await evalJs(
+  `(() => { const cells = [...document.querySelectorAll('#usageCard [data-usage-day]')].sort((a, b) => a.getBoundingClientRect().right - b.getBoundingClientRect().right), panel = document.querySelector("#usageCard").closest(".modal-panel").getBoundingClientRect(); return [cells[0], cells.at(-1)].map(cell => { cell.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })); const r = document.querySelector("#usageTip").getBoundingClientRect(), at = cell.getBoundingClientRect(); return { inPanel: r.left >= panel.left && r.right <= panel.right && r.top >= panel.top && r.bottom <= panel.bottom, side: r.left >= at.right ? "右" : r.right <= at.left ? "左" : "压着", at: Math.round(at.right), tip: [Math.round(r.left), Math.round(r.right)], panel: Math.round(panel.right) }; }); })()`
+);
+check(
+  "浮签贴在点旁、不出设置面板：最左、最右一列都不压着那一点",
+  beside.every(b => b.inPanel && b.side !== "压着"),
+  JSON.stringify(beside)
+);
 
 await post("/api/usage/add", {
   items: [
