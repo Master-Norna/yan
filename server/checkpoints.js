@@ -241,11 +241,12 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
     read(page.tree, "");
     return { files, unknown, dirs };
   }
-  // 此刻的目录：路径 → 哈希（大小、时刻与索引对得上的不重读）
+  // 此刻的目录：路径 → 哈希（大小、时刻与索引对得上的不重读），连同此刻有哪些夹
   async function presentOf(store) {
     const index = readJsonFile(store.index, {}),
-      files = new Map();
-    await walk(store.full, async (abs, rel, name) => {
+      files = new Map(),
+      dirs = new Set();
+    const tree = await walk(store.full, async (abs, rel, name) => {
       try {
         const stat = await fs.promises.stat(abs),
           seen = index[rel];
@@ -255,21 +256,58 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       }
       return ["f", name];
     });
-    return files;
+    const collectDirs = (items, rel) => {
+      for (const item of items)
+        if (item[0] === "d") {
+          const sub = rel ? `${rel}/${item[1]}` : item[1];
+          dirs.add(sub);
+          collectDirs(item[2], sub);
+        }
+    };
+    collectDirs(tree, "");
+    return { files, dirs };
   }
-  // 要动哪几件：changed 改回、removed（此刻没有）补回、added（那一刻没有）删去
+  // 要动哪几件：changed 改回、removed（此刻没有）补回、added（那一刻没有）删去。
+  // 夹只在底下一件文件也不牵涉时才单列（路径带 /）：空夹建了或删了，文件那几行管不到它
   async function changesOf(store, key) {
     const then = snapshotOf(store, key),
       now = await presentOf(store),
       changes = [];
     for (const [rel, hash] of then.files)
-      if (!now.has(rel)) changes.push({ path: rel, kind: "removed", hash });
-      else if (now.get(rel) !== hash) changes.push({ path: rel, kind: "changed", hash });
+      if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash });
+      else if (now.files.get(rel) !== hash) changes.push({ path: rel, kind: "changed", hash });
     // 那一刻读不了的（被占着的文件、进不去的夹）连同其下的，此刻有也不删
     const unclear = rel => [...then.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
-    for (const rel of now.keys()) if (!then.files.has(rel) && !unclear(rel)) changes.push({ path: rel, kind: "added" });
+    for (const rel of now.files.keys()) if (!then.files.has(rel) && !unclear(rel)) changes.push({ path: rel, kind: "added" });
+    const holds = (paths, dir) => [...paths].some(rel => rel.startsWith(`${dir}/`));
+    for (const dir of then.dirs)
+      if (!now.dirs.has(dir) && !holds(then.files.keys(), dir) && !holds(then.dirs, dir))
+        changes.push({ path: `${dir}/`, kind: "removed" });
+    for (const dir of now.dirs)
+      if (
+        !then.dirs.has(dir) &&
+        !unclear(dir) &&
+        !holds(now.files.keys(), dir) &&
+        !holds(now.dirs, dir) &&
+        // 底下只有忽略的（node_modules、.gitignore 写了的）不算空夹，删不得
+        !fs.readdirSync(path.join(store.full, ...dir.split("/"))).length
+      )
+        changes.push({ path: `${dir}/`, kind: "added" });
     changes.sort((a, b) => (a.path < b.path ? -1 : 1));
     return { changes, dirs: then.dirs };
+  }
+  // 补回、改回之前，从根往下逐层看那条路：那一刻的夹此刻成了链接（目录联接、符号链接）的拆掉链接、建回真夹——
+  // 不然 mkdir 与写入会顺着链接落到目录之外；成了文件的、或别的说不清的，宁可这一件不动
+  function realParent(root, rel) {
+    let dir = root;
+    for (const name of rel.split("/").slice(0, -1)) {
+      dir = path.join(dir, name);
+      const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
+      if (stat?.isSymbolicLink()) fs.unlinkSync(dir);
+      else if (stat && !stat.isDirectory()) throw Error("那一刻的夹此刻是一件文件");
+      if (!stat?.isDirectory()) fs.mkdirSync(dir);
+    }
+    return dir;
   }
   async function restore(rootDir, key) {
     const store = storeOf(rootDir);
@@ -278,26 +316,39 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
         failed = [];
       let restored = 0,
         removed = 0;
-      for (const change of changes) {
-        const target = path.join(store.full, ...change.path.split("/"));
+      // 先删后补：文件被换成同名的夹（或反过来）时，占着那条路的先让开
+      for (const change of [...changes.filter(c => c.kind === "added"), ...changes.filter(c => c.kind !== "added")]) {
+        const rel = change.path.replace(/\/$/, ""),
+          target = path.join(store.full, ...rel.split("/"));
+        let temp = "";
         try {
           if (change.kind === "added") {
-            fs.rmSync(target, { force: true });
+            if (change.path.endsWith("/")) fs.rmdirSync(target);
+            else fs.rmSync(target, { force: true });
             removed += 1;
             // 删空了的夹，那一刻没有的一并删去（一层层往上，到根为止）
-            for (let rel = path.posix.dirname(change.path); rel !== "." && !dirs.has(rel); rel = path.posix.dirname(rel)) {
-              const dir = path.join(store.full, ...rel.split("/"));
+            for (let up = path.posix.dirname(rel); up !== "." && !dirs.has(up); up = path.posix.dirname(up)) {
+              const dir = path.join(store.full, ...up.split("/"));
               if (fs.readdirSync(dir).length) break;
               fs.rmdirSync(dir);
             }
+          } else if (change.path.endsWith("/")) {
+            realParent(store.full, change.path);
+            restored += 1;
           } else {
-            fs.mkdirSync(path.dirname(target), { recursive: true });
-            const temp = `${target}.yan-${process.pid}.tmp`;
+            const parent = realParent(store.full, rel),
+              stat = fs.lstatSync(target, { throwIfNoEntry: false });
+            if (stat?.isSymbolicLink()) fs.unlinkSync(target);
+            // 此刻成了夹：底下新出的已在上面删去，空了才让位；还剩东西（忽略的、读不了的）就不动它
+            else if (stat?.isDirectory()) fs.rmdirSync(target);
+            temp = path.join(parent, `.${path.basename(target)}.yan-${process.pid}.tmp`);
             fs.copyFileSync(objectPath(store, change.hash), temp);
             fs.renameSync(temp, target);
+            temp = "";
             restored += 1;
           }
         } catch (error) {
+          if (temp) fs.rmSync(temp, { force: true });
           failed.push(`${change.path}：${errorText(error, 80)}`);
         }
       }

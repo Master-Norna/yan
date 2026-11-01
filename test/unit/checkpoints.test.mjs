@@ -120,6 +120,50 @@ test("第二回只读变了的；没变的子目录与内容共用对象；对�
   }
 });
 
+test("夹换成链接、文件换成夹、空夹建删：退回不越出目录、不留临时文件", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    outside = path.join(base, "outside"),
+    { post, close } = await serve(path.join(base, "检查点"));
+  const key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, "sub/f.txt", "原件");
+    write(root, "file", "原文件");
+    fs.mkdirSync(path.join(root, "empty"));
+    write(outside, "f.txt", "外头的");
+    await post("/api/checkpoint/take", key);
+    // sub 换成指向目录之外的联接；file 换成夹；empty 删了，另建一个空夹
+    fs.rmSync(path.join(root, "sub"), { recursive: true });
+    fs.symlinkSync(outside, path.join(root, "sub"), "junction");
+    fs.rmSync(path.join(root, "file"));
+    write(root, "file/inner.txt", "夹里的");
+    fs.rmdirSync(path.join(root, "empty"));
+    fs.mkdirSync(path.join(root, "fresh"));
+    const { changes } = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      changes.map(c => `${c.kind} ${c.path}`),
+      ["removed empty/", "removed file", "added file/inner.txt", "added fresh/", "removed sub/f.txt"]
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual(done.failed, []);
+    assert.equal(fs.readFileSync(path.join(outside, "f.txt"), "utf8"), "外头的", "没顺着联接写到目录之外");
+    assert.equal(fs.lstatSync(path.join(root, "sub")).isSymbolicLink(), false);
+    const after = tree(root);
+    assert.equal(after["sub/f.txt"], "原件");
+    assert.equal(after["file"], "原文件");
+    assert.equal(after["empty/"], true);
+    assert.equal(after["fresh/"], undefined);
+    assert.deepEqual(
+      Object.keys(after).filter(name => name.includes(".tmp")),
+      []
+    );
+    assert.deepEqual((await post("/api/checkpoint/diff", key)).changes, []);
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("存储根在目录里头时不记它；目录不在、id 不对的报错", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     points = createCheckpoints({ home: () => path.join(base, ".yan", "检查点"), skip: () => [path.join(base, ".yan")] });
