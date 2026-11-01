@@ -108,7 +108,8 @@ pre.mermaid{margin:0;background:none;text-align:center;font:inherit;white-space:
     });
   // 提示框挂在一层钉满视口的层上：ECharts 收起提示框只是隐着、不挪位置，全屏时指过图再收起，
   // 它还停在宽时的坐标上，把这一页撑宽、出横向滚动条（块里的图被滚到一边）。钉住的层里的东西不算进页面的宽。
-  // 层得有实在的大小：ECharts 换算坐标要在层的四角放标记，零大小的层算不出来，提示框就落在左上角
+  // 层得有实在的大小：ECharts 换算坐标要在层的四角放标记，零大小的层算不出来，提示框就落在左上角。
+  // 提示框关在图里（confine）：块的高就是图的高，指在图的下半部，提示框往上翻、翻出块的上沿就被切掉半截
   let tipLayer = null;
   function tooltipLayer() {
     if (!tipLayer?.isConnected) {
@@ -150,7 +151,7 @@ pre.mermaid{margin:0;background:none;text-align:center;font:inherit;white-space:
       textStyle: { color: muted, fontFamily: cssVar("body") },
       title: { textStyle: { color: ink, fontFamily: cssVar("title") }, subtextStyle: { color: muted } },
       legend: { textStyle: { color: muted, fontFamily: cssVar("title") }, icon: "roundRect", itemWidth: 12, itemHeight: 3 },
-      tooltip: { backgroundColor: cssVar("paper-2"), borderColor: line, textStyle: { color: ink }, appendTo: tooltipLayer },
+      tooltip: { backgroundColor: cssVar("paper-2"), borderColor: line, textStyle: { color: ink }, appendTo: tooltipLayer, confine: true },
       categoryAxis: category,
       valueAxis: value,
       timeAxis: category,
