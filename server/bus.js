@@ -66,8 +66,8 @@ class BusResponse extends Writable {
   }
 }
 
-/** @param {{ dispatch: (req: any, res: any) => Promise<void>|void }} options */
-module.exports = function createBus({ dispatch }) {
+/** @param {{ dispatch: (req: any, res: any) => Promise<void>|void, onPages?: (count: number) => void }} options onPages：连着总线的页数变了 */
+module.exports = function createBus({ dispatch, onPages = () => {} }) {
   // page → { res: 事件流, jobs: Map<id, BusResponse>, agent: 那一页的 User-Agent }
   const pages = new Map();
 
@@ -90,6 +90,7 @@ module.exports = function createBus({ dispatch }) {
     res.write(": open\n\n");
     const entry = { res, jobs: new Map(), agent };
     pages.set(page, entry);
+    onPages(pages.size);
     // 本机连接一般不会断；隔一阵写一行注释，中途有东西把连接掐了也能尽快发现
     const beat = setInterval(() => res.write(": beat\n\n"), 30000);
     res.on("close", () => {
@@ -101,6 +102,7 @@ module.exports = function createBus({ dispatch }) {
     const entry = pages.get(page);
     if (!entry) return;
     pages.delete(page);
+    onPages(pages.size);
     for (const job of entry.jobs.values()) job.destroy();
     entry.jobs.clear();
     if (!entry.res.writableEnded) entry.res.end();

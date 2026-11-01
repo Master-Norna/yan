@@ -99,7 +99,7 @@ function buildLauncher() {
     CSC,
     [
       "/nologo",
-      "/target:exe",
+      "/target:winexe",
       "/optimize+",
       "/codepage:65001",
       `/win32icon:${path.join(ROOT, "pack", "icon.ico")}`,

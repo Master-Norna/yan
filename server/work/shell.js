@@ -288,6 +288,8 @@ module.exports = function createShell({ toolEnv }) {
     backgroundReport,
     discardBackground,
     checkBackground,
-    watchBackground
+    watchBackground,
+    // 还有后台指令在跑：言.exe 起的桥接据此不随页面退出（见 server.js 的 --exit-with-page）
+    backgroundRunning: () => [...backgroundJobs.values()].some(job => job.exitCode === null)
   };
 };

@@ -19,6 +19,7 @@ function currentBundler() {
 }
 const { sendJson, stamp } = require("./server/http.js");
 const { openUrl, systemProxy } = require("./server/platform.js");
+const { hideFromTaskbar } = require("./server/taskbar.js");
 // 出网跟代理走：环境变量里设了就用它，没设再看系统代理；只交给 Node 的 fetch 与 http 全局代理，不写进 process.env——
 // 模型跑的 pip、npm 照旧各凭各的。联网翻页（web.js）自带地址门禁、另起连接，不经这里。Node 24 起才有这个口子，旧版照旧直连
 const PROXY = (() => {
@@ -180,13 +181,28 @@ require("./server/headless.js").configure({ home: () => path.join(os.tmpdir(), `
 const MCP = require("./server/mcp/index.js")({
   version: APP_VERSION,
   toolEnv: ENV.apply,
-  // 游目自己的浏览器拼成整条；起 Playwright 的 MCP 时补齐游目要的接法（调试口、放行来源、窗口挪到屏幕外），见 server/stage.js
-  prepare: config => STAGE_LIB.prepareMcp(config, { root: STORE.paths().root, bridgePort: PORT })
+  // 游目自己的浏览器拼成整条；起 Playwright 的 MCP 时补齐游目要的接法（调试口、放行来源、窗口挪到屏幕外，并不占任务栏），见 server/stage.js
+  prepare: config => STAGE_LIB.prepareMcp(config, { root: STORE.paths().root, bridgePort: PORT, offscreen: hideFromTaskbar })
 });
 // 看台：替页面问出模型所用浏览器的调试地址，其余页面直连（见 server/stage.js）
 const STAGE = STAGE_LIB({ root: () => STORE.paths().root });
 // 总线：长请求的响应从页面的一条事件流回去，不再一个请求占一条浏览器连接（见 server/bus.js）
-const BUS = require("./server/bus.js")({ dispatch });
+// --exit-with-page（言.exe 这样起）：桥接没有窗口可关，最后一页关掉、过了刷新与重开浏览器的工夫还没人连回来，就自己退出。
+// 后台指令还在跑的等它跑完：页面关着时它照跑，页面再开便报到；约好的时刻记在磁盘上，桥接再起时补叫，不必守着
+let leaving = null;
+const BUS = require("./server/bus.js")({
+  dispatch,
+  onPages: count => {
+    if (!process.argv.includes("--exit-with-page")) return;
+    clearInterval(leaving);
+    if (!count)
+      leaving = setInterval(() => {
+        if (WORK.backgroundRunning()) return;
+        console.log(`${stamp()} 页面都已关闭，桥接退出`);
+        process.exit(0);
+      }, 30000);
+  }
+});
 // 模型转发：测试连接、列模型、对话；各家接口的差异都在 server/model/ 的登记表里（ChatGPT 订阅的登录凭证随存储根）
 const MODEL = require("./server/model/index.js")({ home: () => STORE.paths().root });
 // 用量簿：按日记各类花了多少，给设置里的用量卡看（见 server/usage.js）
@@ -330,10 +346,22 @@ async function dispatch(req, res) {
   }
 }
 const server = http.createServer(dispatch);
-server.on("error", (/** @type {NodeJS.ErrnoException} */ error) => {
-  if (error.code === "EADDRINUSE") console.error(`端口 ${PORT} 已被占用，可设置 YAN_PORT 后重试。`);
-  else console.error(error);
-  process.exitCode = 1;
+server.on("error", async (/** @type {NodeJS.ErrnoException} */ error) => {
+  if (error.code === "EADDRINUSE") {
+    // 占着端口的就是言自己（又双击了一次言.exe）：不再起一个，打开页面即可
+    const running = /** @type {any} */ (
+      await fetch(`http://${HOST}:${PORT}/api/bootstrap`)
+        .then(r => r.json())
+        .catch(() => null)
+    );
+    if (running?.work) {
+      console.log(`言已在运行：http://${HOST}:${PORT}`);
+      if (process.argv.includes("--open")) openUrl(`http://${HOST}:${PORT}`);
+      process.exit(0);
+    }
+    console.error(`端口 ${PORT} 已被占用，可设置 YAN_PORT 后重试。`);
+  } else console.error(error);
+  process.exit(1);
 });
 server.on("clientError", (/** @type {NodeJS.ErrnoException} */ error, socket) => {
   if (DEBUG) console.log(`${stamp()} 客户端连接错误：${error.code || error.message}`);

@@ -37,7 +37,8 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       backgroundReport,
       discardBackground,
       checkBackground,
-      watchBackground
+      watchBackground,
+      backgroundRunning
     } = createShell({
       toolEnv
     }),
@@ -218,6 +219,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
     workHome,
     SCRATCH_DIR,
     WORK_SHELL,
+    backgroundRunning,
     // 都碰本机磁盘或本机进程：只受理本站页面与 VS Code Webview（见 server.js 的接口表）
     routes: {
       "POST /api/work/prepare": handleWorkPrepare,
