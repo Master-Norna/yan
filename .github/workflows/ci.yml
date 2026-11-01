@@ -1,5 +1,5 @@
-# 推到 main 与每个 PR 都跑一遍。言以 Windows 为准：check 一项挡合并；端到端与 macOS 先试跑，失败都不挡
-# Node 版本：Windows 用户多跑便携包里带的那份，两项 Windows 与 pack/pack.mjs 的 NODE 同一大版本，换版本两处一起改；macOS 用系统自装的 Node，留 22，顺带守住旧一档
+# 推到 main 与每个 PR 都跑一遍。言以 Windows 为准：Windows 的 check 与端到端两项挡合并（分支保护里登记的必过项按名字认，改 name 要一起改）；macOS 失败不挡
+# Node 版本：Windows 用户多跑便携包里带的那份，两项 Windows 与 pack/pack.mjs 的 NODE 同一大版本，换版本两处一起改；macOS 用系统自装的 Node，留 22，守住 package.json engines 的下限
 name: CI
 
 on:
@@ -30,10 +30,9 @@ jobs:
       - run: npx --yes prettier@3.3.3 --check .
 
   e2e:
-    name: 端到端（试跑）
+    name: 端到端
     runs-on: windows-latest
     timeout-minutes: 30
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
