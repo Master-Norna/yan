@@ -269,7 +269,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 专司那几张卡的记号：一行最右一粒——朱点是开或已配，淡墨空圈是关或未配（设计稿/112 甲） */
+/* 专司那几张卡的记号：一行最右一粒——墨点是开或已配，淡墨空圈是关或未配（设计稿/112 甲）。
+   墨点带毛边（设计稿/136 戊）：圆经湍流扰边、边上略淡，三行各转个角度，形状不重样。
+   落选的：朱点——一页三粒读着像三条未读，朱留给要人注意的；正圆墨点像指示灯，和笔意图标不是一路；
+   只把圆角错开，边仍是光的，像捏扁的豆子；轻毛边原大看不出毛，等于没做 */
 .duty-mark {
   flex: none;
   width: 7px;
@@ -279,8 +282,21 @@
   border-radius: 50%;
 }
 .duty-mark.on {
-  border-color: transparent;
-  background: var(--accent);
+  /* 遮罩里那团只占九成见方的四分之三：放大一圈、右边距少一点，圆心与空圈对齐 */
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%23000'/%3E%3Cstop offset='.6' stop-color='%23000'/%3E%3Cstop offset='1' stop-color='%23000' stop-opacity='.4'/%3E%3C/radialGradient%3E%3Cfilter id='f' x='-20%25' y='-20%25' width='140%25' height='140%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.07' numOctaves='2' seed='3'/%3E%3CfeDisplacementMap in='SourceGraphic' scale='17' xChannelSelector='R' yChannelSelector='G'/%3E%3C/filter%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='38' fill='url(%23g)' filter='url(%23f)'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
+}
+.profile-card:nth-of-type(3n + 2) .duty-mark.on {
+  transform: rotate(130deg);
+}
+.profile-card:nth-of-type(3n) .duty-mark.on {
+  transform: rotate(250deg);
 }
 .profile-badge {
   flex: none;
