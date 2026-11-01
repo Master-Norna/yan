@@ -1,4 +1,5 @@
 # 推到 main 与每个 PR 都跑一遍。言以 Windows 为准：check 一项挡合并；端到端与 macOS 先试跑，失败都不挡
+# Node 版本：Windows 用户多跑便携包里带的那份，两项 Windows 与 pack/pack.mjs 的 NODE 同一大版本，换版本两处一起改；macOS 用系统自装的 Node，留 22，顺带守住旧一档
 name: CI
 
 on:
@@ -23,7 +24,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
       - run: npm run unit
       - run: npm run check
       - run: npx --yes prettier@3.3.3 --check .
@@ -37,7 +38,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
       - run: node test/run.mjs
 
   macos:
