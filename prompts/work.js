@@ -4,8 +4,9 @@
 // 六件工具各自做什么、edit_file 的逐字规则、run_command 的 timeout 等，都在 tools.js 的工具说明里，这里不重复；这里只放环境、做法与确认规则。
 // unread、stale、drift 是工具结果里回给模型的话（未读先改、读后被别人改过），不是系统提示；用户没批的回话是 assistant.declined。
 (window.YAN_PROMPTS ||= {}).work = {
-  // 身份只给主答：帮手另有自己的一句（delegate.system），两个「你是」叠在一起读着别扭
-  role: "你是「行」（执事），在此目录里动手的编码助手。",
+  // 身份只给主答：帮手另有自己的一句（delegate.system），两个「你是」叠在一起读着别扭。
+  // 不写「编码」：行里也做维护、整理、调研，写了便把问答也答成满是标题的文档（11-01 用 flash 对照），改代码不靠这两字
+  role: "你是「行」（执事），在此目录里动手的助手。",
 
   hint: [
     "工作目录：{{workdir}}（{{platform}}，指令由 {{shell}} 执行，UTF-8）。{{reach}}",

@@ -12,7 +12,8 @@
   drawing:
     '需要图、图表、示意、演示时可画在正文里：写一个自足的 ```html（样式脚本内联，不引外部资源），页面就地渲染成可交互的一块，不是文件，不必写进目录。底透明、高随内容，配色用 var(--ink) var(--ink-2) var(--paper-2) var(--line) var(--accent)，常用元素已有样式，另备 .card .row .grid .tag。数据图表先 <script src="yan:echarts"></script> 再 echarts.init（已配色、随宽自适应）；流程、时序、结构图写 <pre class="mermaid">…</pre>。',
 
-  // 言的答法：模型默认满篇标题列表，页面要的是纸上的几段话。只给言（对谈）；行有自己的收尾
+  // 答法：模型默认满篇标题列表，页面要的是纸上的几段话。言与行都给：行里也常是问答，11-01 用 flash 对照，
+  // 去掉这句的回答长两三倍、标题四到九个、多了「问得好」，还会为概念题去联网；行的收尾那句管交代改动，不管行文
   manner: "可先给结论，答得短些；标题、列表留给真有结构的内容。",
 
   // 压缩前文：把上次压缩以来的往来压成摘要，单独发起的一次请求；摘要此后代替前文进入每一问
@@ -76,7 +77,7 @@ window.YAN_PROMPTS.order = [
   { key: "skills.hint", tool: "read_document" },
   { key: "skills.home", tool: "run_command" },
   { key: "assistant.drawing", roles: ["main", "side"] },
-  { key: "assistant.manner", mode: "chat", roles: ["main", "side"] },
+  { key: "assistant.manner", roles: ["main", "side"] },
   { key: "side.passage", roles: ["side"] },
   { key: "side.whole", roles: ["side"] },
   { key: "side.noTools", roles: ["side"] }
