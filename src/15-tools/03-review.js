@@ -1,7 +1,9 @@
 // 言 · 审查：审而后行里，规则标疑的那一步交「专司」里另配的审查模型照用户的原话再判（学 Claude Code 的 auto 模式）。
 // 没开审查、或档位不是审而后行，一切照旧（规则拦的回绝，没拦的照做）；审查出错也退回这样，最坏不比没开差。
 // 标疑的几类：指令被宽的沙箱或审查规则拦下的；往外发、网址里带着一长串用户没给过的参数，或带着内容 POST 出去的；
-// 写长期记忆、往技能目录里写的（会进往后每段对话的上下文）；调 MCP 服务的写操作（见 60-mcp.js）——游目的浏览器另按 stageReviewWhy 收窄。
+// 往技能目录里写的（会进往后每段对话的上下文）；调 MCP 服务的写操作（见 60-mcp.js）——游目的浏览器另按 stageReviewWhy 收窄。
+// 写记忆不审：记偏好、约定、做出来的结论本是模型自己拿主意的事，照「用户授权了没有」判几乎都驳（实测 7 回驳 3，
+// 改写成「用户说明：…」就准）；而审查看不到工具输出，分不出哪条是网页里埋来的，审了也挡不住它要挡的。条目在行迹与设置页里可改可删
 // 审查只看用户的原话、意里的目标与守、将要做的那一步；准了照做（指令带 reviewed 交桥接，规则那一道不再拦），
 // 驳了原因作工具结果回给主模型、叫它换条路，不向用户请示。一答里连驳三回、或共驳二十回，叫它停手向用户说明
 const REVIEW_STREAK = 3,
@@ -33,7 +35,6 @@ async function reviewFlag(step, args, ctx) {
     return screened?.why && !screened.hard ? String(screened.why).replace(/^(审查|沙箱)拒绝：/, "") : "";
   }
   if (["fetch_page", "http_request", "download_file"].includes(step.name)) return egressWhy(step.name, args, conversation);
-  if (step.name === "remember") return "写进长期记忆，往后每段对话都会带上";
   if (["write_file", "edit_file"].includes(step.name) && insideSkills(String(args.path || ""), conversation))
     return "往技能目录里写，往后的对话都会照着做";
   return "";
