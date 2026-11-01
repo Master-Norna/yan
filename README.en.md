@@ -25,7 +25,7 @@ Yan partners with [SiliconFlow](https://siliconflow.cn). In **Settings → Model
 - **Browser panel**: the browser the model drives sits in a panel on the right. You can see where it clicks and what it types, take over at any time, and circle things on screen to point them out. [More](docs/en/stage.md)
 - **Many models**: add several APIs and switch the default: SiliconFlow, OpenAI compatible, Anthropic, and ChatGPT subscription (official sign-in). SiliconFlow works as soon as you paste a key ([setup](docs/en/siliconflow.md)). Thinking levels are probed automatically for each provider, and **Settings → Roles** can add a separate review model and image model. [More](docs/en/models.md)
 - **Paper and ink throughout**: seals, the inkstone, tokens left, ink drops and daylight; the interface and its motion share one brush.
-- **Local, zero-dependency, under your control**: data stays in a local storage folder (`~/.yan/` by default). Yan has no server of its own; chats go only to the model APIs you connect. It needs only Node.js 18+ (bundled in the Windows portable package) and installs no npm packages. Commands have three permission levels, asking before each one by default, with a sandbox on top; in Auto-review, steps the rules aren't sure about can go to a review model that judges them against what you actually said. [Storage](docs/en/storage.md) · [Permissions and sandbox](docs/en/sandbox.md)
+- **Local, zero-dependency, under your control**: data stays in a local storage folder (`~/.yan/` by default). Yan has no server of its own; chats go only to the model APIs you connect. It needs only Node.js 22+ (bundled in the Windows portable package) and installs no npm packages. Commands have three permission levels, asking before each one by default, with a sandbox on top; in Auto-review, steps the rules aren't sure about can go to a review model that judges them against what you actually said. [Storage](docs/en/storage.md) · [Permissions and sandbox](docs/en/sandbox.md)
 
 There is also Files, subagents, presets, groups, MCP, the sandbox environment, memory and the audio player; see the [docs](docs/en/README.md).
 
@@ -33,7 +33,7 @@ There is also Files, subagents, presets, groups, MCP, the sandbox environment, m
 
 **Windows, without installing Node**: download `yan-<version>-win-x64.zip` from [Releases](https://github.com/Master-Norna/yan/releases/latest), unzip it and double-click `言.exe` in the `言` folder. The package bundles the official Node; everything else is the same as below. `言.exe` is unsigned, so the first time Windows may say "Windows protected your PC"; click **More info → Run anyway**. [More](docs/en/start.md#windows-portable-package)
 
-**From source**: install Node.js 18 or later, then double-click `start.cmd`, or run in the project folder:
+**From source**: install Node.js 22 or later, then double-click `start.cmd`, or run in the project folder:
 
 ```powershell
 npm start

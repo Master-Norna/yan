@@ -32,9 +32,9 @@ function executable() {
   }
   return null;
 }
-// Node 18 没有内置 WebSocket；本机也没有 Edge / Chrome 的（Mac 上可能），这一路就不走
+// 本机没有 Edge / Chrome 的（Mac 上可能），这一路就不走
 function available() {
-  return typeof WebSocket === "function" && !!home() && !!executable();
+  return !!home() && !!executable();
 }
 
 // 一条连到浏览器的 WebSocket，各页以 flatten 的会话挂在上面

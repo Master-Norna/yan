@@ -2,7 +2,7 @@
 
 [← Docs](README.md) · [中文](../start.md)
 
-Zero dependencies: Yan needs only Node.js 18 or later. No npm packages to install; every front-end library ships with the project and nothing loads from the web.
+Zero dependencies: Yan needs only Node.js 22 or later. No npm packages to install; every front-end library ships with the project and nothing loads from the web.
 
 ## Quick start
 

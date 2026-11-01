@@ -11,7 +11,7 @@ goto done
 :system
 where node >nul 2>nul
 if errorlevel 1 (
-  echo 未找到 node：请先安装 Node.js 18 或更高版本（https://nodejs.org），装好后再双击此文件。
+  echo 未找到 node：请先安装 Node.js 22 或更高版本（https://nodejs.org），装好后再双击此文件。
   pause
   exit /b 1
 )

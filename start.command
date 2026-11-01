@@ -3,7 +3,7 @@
 cd "$(dirname "$0")" || exit 1
 printf ']0;言 · 本机桥接 - 请保持开启'
 if ! command -v node >/dev/null 2>&1; then
-  echo "未找到 node：请先安装 Node.js 18 或更高版本（https://nodejs.org），装好后再双击此文件。"
+  echo "未找到 node：请先安装 Node.js 22 或更高版本（https://nodejs.org），装好后再双击此文件。"
   read -r -p "按回车键关闭…"
   exit 1
 fi
