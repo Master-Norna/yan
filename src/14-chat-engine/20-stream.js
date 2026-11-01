@@ -32,9 +32,6 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     assistant.durationMs = Date.now() - assistant.startedAt;
     tickTrailClock(assistant);
   }, 1000);
-  // 言里做文件：记下开工前卷宗的样子，收尾时新出的、改过的成品挂在答末
-  const archiveBefore = !isWork(conversation) ? new Map((archiveEntries || []).map(e => [e.path, e.modifiedAt])) : null,
-    archiveSince = Date.now();
   // 用量在 finally 里结算：停止、断网、工具链中途出错，前面几轮已经花掉的墨也得记上，不能只在整答顺利收尾时记账
   const tally = newTally(),
     stepsBefore = (assistant.steps || []).length,
@@ -151,17 +148,10 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     assistant.status = "complete";
     conversation.updatedAt = now();
     if (watch.kept) void intentSettleKeeps(conversation);
-    // 言里动过文件的，卷宗目录多半有了新东西：重新翻一遍，新出的、改过的成品挂在答末，侧栏的件数跟着更新。
-    // 人途中收进来的、别的对话同时写出的不算（指令写出的件认不出是谁的，仍按差算）
-    if (archiveBefore && allSteps(assistant).some(step => TOOLS.get(step.name)?.writes)) {
-      await refreshArchive();
-      assistant.deliverables = (archiveEntries || [])
-        .filter(
-          entry => archiveBefore.get(entry.path) !== entry.modifiedAt && !archiveWrittenByOther(entry.path, archiveSince, conversation.id)
-        )
-        .map(entry => ({ path: entry.path, name: entry.name, size: entry.size }));
-      if (!assistant.deliverables.length) delete assistant.deliverables;
-    }
+    // 答复里链到的本机文件即成品，挂在答末（见 replyDeliverables）；言里动过文件的，卷宗多半有了新东西，侧栏的件数跟着更新
+    if (!isWork(conversation) && allSteps(assistant).some(step => TOOLS.get(step.name)?.writes)) await refreshArchive();
+    assistant.deliverables = await replyDeliverables(conversation, assistant.content);
+    if (!assistant.deliverables.length) delete assistant.deliverables;
   } catch (error) {
     // 一个字没等到就又断了：模型没读到那几份回报，原样还回去等下一答
     if (!tally.opened) returnHeldReports(conversation, assistant, held);

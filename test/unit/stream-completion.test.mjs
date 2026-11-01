@@ -18,6 +18,7 @@ function setup(replies = []) {
         setJobLabel = refreshSteps = markDirty = accountUsage = renderQuota = () => {};
       keepInWindow = mcpForTurn = maybeAutoCompact = maybeAutoTitle = async () => {};
       reserveTokens = () => () => {};
+      replyDeliverables = async () => [];
       restFor = async () => {};
       systemPrompt = () => '';
       toolDefinitions = () => [{ type: 'function', function: { name: 'probe' } }];

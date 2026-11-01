@@ -1283,6 +1283,7 @@ var YAN_EN = {
   "改动 {0} 个文件": "{0} {0|file changed|files changed}",
   已移出卷宗: "Removed from Files",
   另存到本机: "Save a copy",
+  "成品 {0} 件": "{0} {0|output|outputs}",
   "成品 {0} 件 · 已入卷宗": "{0} {0|output|outputs} · saved to Files",
   "余 {0} 件": "{0} more",
   计划: "Plan",

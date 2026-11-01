@@ -1,4 +1,4 @@
-// 言 · 改动与成品：执事这一答改过哪些文件（改动条），言这一答在卷宗里新出了哪几件（成品条）
+// 言 · 改动与成品：执事这一答改过哪些文件（改动条），这一答交给人看的是哪几件（成品条）
 // 改动摘要：这一答里执事改过哪些文件、各增减多少行。生成中附在输入框上的工作条里实时累加（见 renderHelperBar），
 // 不跟着正文尾巴跑；写完才落到回复之下，是一道线而不是一只框（见 设计稿/12-改动条与行迹）
 // 按行切开：末尾的换行不算多出一行空行（与桥接的 countLines 同一惯例），空的就是没有行
@@ -284,14 +284,45 @@ function changeSummaryInner(message, open) {
   if (!stats.files.length) return "";
   return `<button type="button" class="change-summary" aria-expanded="${open}"><span class="seal change-seal" aria-hidden="true">${t(`改`)}</span><span class="change-title">${t`改动 ${stats.files.length} 个文件`}</span><span class="change-count">${changeCountHtml(stats)}${changeSpark(stats.added, stats.removed)}</span></button>${changeFilesHtml(stats, open)}`;
 }
-// 成品：言里这一答在卷宗根目录新出或改过的文件。一件一行：件图、文件名、大小，右侧「看」（悬浮预览）与「下载」
-// 卷宗里已经删掉的成品：条目留着（这一答确实出过这件），但标成「已移出卷宗」，不再给看与下载的按钮
-function deliverableMissing(path) {
-  return archiveEntries !== null && !archiveEntries.some(entry => entry.path === path);
+// 成品：这一答的答复里链到的本机文件（模型写「[报告](报告.md)」「![图](图.png)」）。列哪几件由模型定：交给人看的核心文件才写成链接，
+// 解压出的一堆、顺手改的代码不列，别的对话与人同时放进卷宗的也混不进来。收尾时按这段对话的落脚处认路（见 localLinkTarget），
+// 在的记下路与大小；落在卷宗里的只记卷宗里的路，别处的另记所在的根。一件一行：件图、文件名、大小，右侧「预览」与「下载」
+/** @param {Conversation} conversation @param {string} content @returns {Promise<Deliverable[]>} */
+async function replyDeliverables(conversation, content) {
+  /** @type {string[]} */
+  const hrefs = [];
+  marked.walkTokens(marked.lexer(String(content || "")), token => {
+    if (token.type === "link" || token.type === "image") hrefs.push(token.href);
+  });
+  const archive = archiveDir(),
+    seen = new Set();
+  /** @type {Deliverable[]} */
+  const files = [];
+  for (const href of hrefs) {
+    const name = localFileName(href),
+      target = name ? localLinkTarget(href, conversation) : null;
+    if (!target || seen.has(`${target.root}|${target.path}`)) continue;
+    seen.add(`${target.root}|${target.path}`);
+    const head = await fetch(archiveFileUrl(target.path, true, target.root), { method: "HEAD" }).catch(() => null);
+    if (!head?.ok) continue;
+    files.push({
+      path: target.path,
+      name: target.path.split("/").pop() || name,
+      size: Number(head.headers.get("content-length")) || 0,
+      ...(target.root === archive ? {} : { root: target.root })
+    });
+  }
+  return files;
 }
+// 卷宗里已经删掉的成品：条目留着（这一答确实出过这件），但标成「已移出卷宗」，不再给看与下载的按钮。卷宗之外的认不出在不在，点了取不到再说
+/** @param {Deliverable} f */
+function deliverableMissing(f) {
+  return !f.root && archiveEntries !== null && !archiveEntries.some(entry => entry.path === f.path);
+}
+/** @param {Deliverable} f */
 function deliverableFileHtml(f, extra = false) {
-  const missing = deliverableMissing(f.path);
-  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(f.path)}">${fileFigure(f.name, f.path)}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
+  const missing = deliverableMissing(f);
+  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(f.path)}"${f.root ? ` data-root="${escapeHtml(f.root)}"` : ""}>${fileFigure(f.name, f.path)}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
     missing
       ? `<span class="deliver-gone">${t(`已移出卷宗`)}</span>`
       : `<button type="button" class="deliver-btn" data-deliver-action="view" title="${t(`预览`)}">${t(`预览`)}</button><button type="button" class="deliver-btn" data-deliver-action="download" title="${t(`另存到本机`)}">${t(`下载`)}</button>`
@@ -302,7 +333,7 @@ const DELIVER_FOLD = 5,
   DELIVER_SHOWN = 4;
 /** @type {Set<string>} */
 const deliverOpen = new Set();
-/** @param {Array<{ path: string, name: string, size: number }>} files */
+/** @param {Deliverable[]} files */
 function deliverableRowsHtml(files) {
   const fold = files.length > DELIVER_FOLD;
   return files.map((f, i) => deliverableFileHtml(f, fold && i >= DELIVER_SHOWN)).join("");
@@ -319,7 +350,7 @@ function deliverablesHtml(message) {
       files.length > DELIVER_FOLD
         ? `<button type="button" class="deliver-more" aria-expanded="${open}">${deliverMoreInner(files.length - DELIVER_SHOWN, open)}</button>`
         : "";
-  return `<div class="deliver-bar${open ? " open" : ""}"><div class="deliver-head"><span class="seal deliver-seal" aria-hidden="true">${t(`成`)}</span><span>${t`成品 ${files.length} 件 · 已入卷宗`}</span></div>${deliverableRowsHtml(files)}${more}</div>`;
+  return `<div class="deliver-bar${open ? " open" : ""}"><div class="deliver-head"><span class="seal deliver-seal" aria-hidden="true">${t(`成`)}</span><span>${files.some(f => f.root) ? t`成品 ${files.length} 件` : t`成品 ${files.length} 件 · 已入卷宗`}</span></div>${deliverableRowsHtml(files)}${more}</div>`;
 }
 /** @param {HTMLElement} button 末行那句「余 n 件 / 收起」 */
 function toggleDeliverables(button) {

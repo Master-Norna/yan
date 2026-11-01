@@ -68,7 +68,7 @@ window.YAN_PROMPTS.order = [
   { key: "work.hint", tool: "run_command", mode: "work" },
   { key: "work.ledger", tool: "write_file", mode: "work", roles: ["main"] },
   { key: "work.archive", tool: "run_command", mode: "chat" },
-  { key: "work.deliver", tool: "run_command", mode: "chat", roles: ["main"] },
+  { key: "work.deliver", tool: "run_command", roles: ["main"] },
   { key: "work.env", tool: "run_command" },
   { key: "assistant.search", tool: "search_web" },
   { key: "memory.hint", tool: "remember" },

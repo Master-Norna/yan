@@ -1638,6 +1638,33 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      if (typeof lastUser === "string" && lastUser.includes("DELIVER")) {
+        // 交成品：写一份报告与一份杂项，答复里只链报告——成品条只列模型链到的那件
+        if (!toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_dv1",
+                  type: "function",
+                  function: { name: "write_file", arguments: JSON.stringify({ path: "docs/报告.md", content: "# 报告\n\n结论在此。\n" }) }
+                },
+                {
+                  index: 1,
+                  id: "call_dv2",
+                  type: "function",
+                  function: { name: "write_file", arguments: JSON.stringify({ path: "杂项.txt", content: "中间产物\n" }) }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [
+          delta({ content: "写好了，见 [调研报告](docs/报告.md)；不存在的 [旧稿](docs/旧稿.md) 不列。" }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       if (typeof lastUser === "string" && lastUser.includes("ARCHIVE")) {
         // 言里做文件：写一份表到卷宗，再把系统提示里的线索回出来（该是卷宗那段，不是执事那段）
         const sys = String(msgs[0]?.role === "system" ? msgs[0].content : ""),
@@ -1659,7 +1686,7 @@ http
           ]);
         return sse(res, [
           delta({
-            content: `ARCHIVE done｜archive:${sys.includes("卷宗") ? "yes" : "no"}|work:${sys.includes("「行」（执事）") ? "yes" : "no"}|run:${names.includes("run_command") ? "yes" : "no"}|result:${String(toolResults.at(-1).content).slice(0, 40)}`
+            content: `ARCHIVE done｜archive:${sys.includes("卷宗") ? "yes" : "no"}|work:${sys.includes("「行」（执事）") ? "yes" : "no"}|run:${names.includes("run_command") ? "yes" : "no"}|result:${String(toolResults.at(-1).content).slice(0, 40)}\n\n表在 [报表](报表.csv)。`
           }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);

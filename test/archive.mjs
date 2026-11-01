@@ -69,6 +69,17 @@ check(
   )) === "报表.csv|a,b"
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
+// 成品是答复里链到的那件；正文里那个链接点了同样是预览，不是下载
+await evalJs(`document.querySelector('.message.assistant .assistant-block > .markdown a[data-file="报表.csv"]').click(); true`);
+await waitFor(
+  `!document.querySelector("#fileViewer").classList.contains("hidden") && !!document.querySelector("#fileViewerStage .file-viewer-table td")`,
+  8000
+);
+check(
+  "the reply's own link to the file opens the same preview",
+  (await evalJs(`document.querySelector("#fileViewerName").textContent`)) === "报表.csv"
+);
+await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
 // 成品多了只摊前四件，末行「余 n 件」点开全摊、再点收起；开着的换一段对话再回来照旧开着
 const deliverRows = () =>
   evalJs(

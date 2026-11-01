@@ -14,23 +14,6 @@ let archiveEntries = null,
   libraryDir = "",
   // 正在就地改名的那一项（文件或夹的路径）；空即没有
   libraryRenaming = "";
-// 卷宗里谁动过的件与夹：路径 → 何时、谁。谁空着是人在页面上收入、改名、挪动的，是对话 id 的是那段对话里的工具写的（生图、写文件、下载）。
-// 答末认成品照的是开工前后卷宗的差：作答途中人收进来的、别的对话同时写出的也在差里，得凭这份剔掉
-/** @type {Map<string, { at: number, by: string }>} */
-const archiveWrites = new Map();
-function noteArchiveWrite(path, by = "") {
-  if (path) archiveWrites.set(path, { at: Date.now(), by });
-}
-// 工具在这段对话的落脚处写了件：言的落脚处就是卷宗，记下是这段对话写的（行写在自己的目录里，不碰卷宗的账）
-function noteToolWrite(conversation, path) {
-  if (!isWork(conversation)) noteArchiveWrite(path, conversation.id);
-}
-/** 这件（或它所在的夹）是不是 since 之后别人放进来的：人，或 by 以外的对话 */
-function archiveWrittenByOther(path, since, by) {
-  for (const [own, write] of archiveWrites)
-    if (write.at >= since && write.by !== by && (path === own || path.startsWith(`${own}/`))) return true;
-  return false;
-}
 const ARCHIVE_DRAG = "application/x-yan-archive";
 function parentDir(path) {
   const at = String(path).lastIndexOf("/");
@@ -41,7 +24,8 @@ function archiveFileUrl(path, download = false, root = archiveDir()) {
 }
 // 正文链接里的本地路落在哪：相对路相对这段对话的落脚处（绑了目录是它，没绑是卷宗）；绝对路在落脚处之内的折成相对，
 // 之外的以它所在那层为根。sandbox:/、/mnt/… 这类不是本机的路，返回 null
-function localLinkTarget(raw) {
+/** @param {string} raw @returns {{ root: string, path: string } | null} */
+function localLinkTarget(raw, conversation = currentConversation()) {
   let text = String(raw || "")
     .trim()
     .replace(/[?#].*$/, "");
@@ -49,7 +33,7 @@ function localLinkTarget(raw) {
     text = decodeURIComponent(text);
   } catch {}
   text = text.replace(/^file:\/*/i, "").replace(/\\/g, "/");
-  const root = workRoot(currentConversation());
+  const root = workRoot(conversation);
   if (/^[a-z]:\//i.test(text)) {
     const base = root.replace(/\\/g, "/").replace(/\/+$/, "");
     if (base && text.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return { root, path: text.slice(base.length + 1) };
@@ -274,7 +258,6 @@ async function commitLibraryRename(value) {
   if (!path || !name || name === path.split("/").pop()) return renderLibrary();
   try {
     const moved = await bridge("/api/archive/move", { root: archiveDir(), path, name }, AbortSignal.timeout(20000));
-    noteArchiveWrite(moved.path);
     rebaseDeliverables(path, moved.path);
   } catch (error) {
     toast(t`改名失败：${String(error.message || error).slice(0, 80)}`);
@@ -300,17 +283,15 @@ async function newArchiveFolder() {
 }
 /** dir：落进卷宗的哪一层，缺省为根（导出、附件上的「藏」都落在根上；卷宗页上拖入的落在此刻所在的那一层） @param {string} name @param {Blob} body 原件 */
 async function putArchiveFile(name, body, dir = "", root = archiveDir()) {
-  const saved = await bridgeUpload("/api/archive/put", { root, name, dir }, body, AbortSignal.timeout(120000));
-  noteArchiveWrite(saved.path);
-  return saved;
+  return bridgeUpload("/api/archive/put", { root, name, dir }, body, AbortSignal.timeout(120000));
 }
-// 答末成品条记的是路径：件挪了、改了名，或它所在的夹挪了、改了名，条子跟着改，不然就成了「已移出卷宗」
+// 答末成品条记的是路径：卷宗里的件挪了、改了名，或它所在的夹挪了、改了名，条子跟着改，不然就成了「已移出卷宗」
 function rebaseDeliverables(from, to) {
   if (from === to) return;
   for (const c of store.conversations)
     for (const message of allMessages(c))
       for (const file of message.deliverables || [])
-        if (file.path === from || file.path.startsWith(`${from}/`)) {
+        if (!file.root && (file.path === from || file.path.startsWith(`${from}/`))) {
           file.path = to + file.path.slice(from.length);
           file.name = file.path.split("/").pop();
           markDirty(c.id);
@@ -324,7 +305,6 @@ async function moveArchiveItem(path, dir) {
   try {
     const moved = await bridge("/api/archive/move", { root: archiveDir(), path, dir }, AbortSignal.timeout(20000)),
       renamed = moved.name !== path.split("/").pop();
-    noteArchiveWrite(moved.path);
     rebaseDeliverables(path, moved.path);
     toast(t`已移入「${dir ? dir.split("/").pop() : t("卷宗")}」${renamed ? t`，同名已有，改作 ${moved.name}` : ""}`);
   } catch (error) {
@@ -660,29 +640,32 @@ function bindLibraryEvents() {
     const files = Array.from(event.dataTransfer.files).filter(file => !folders.some(entry => entry.name === file.name));
     if (files.length) void addFiles(files);
   });
-  // 正文里指向本地文件的链接（模型写的「下载《x.docx》」）：页面上没有那样的路。先按原路在这段对话的落脚处取，
-  // 取不到（sandbox:/ 之类、或路写错了层）再到卷宗里找同名的那件。答复后又动了手，那段话退进行迹成了 .trail-note，帮手的回报是 .sub-report，同样认
+  // 正文里指向本地文件的链接（模型写的「[报告](报告.md)」）：页面上没有那样的路，点了打开预览（预览里可下载），与答末成品条同一个入口。
+  // 先按原路在这段对话的落脚处取，取不到（sandbox:/ 之类、或路写错了层）再到卷宗里找同名的那件。
+  // 答复后又动了手，那段话退进行迹成了 .trail-note，帮手的回报是 .sub-report，同样认
   document.addEventListener("click", async event => {
     const link = event.target.closest(":is(.markdown, .trail-note, .sub-report) a[data-file]");
     if (!link) return;
     event.preventDefault();
     const name = link.dataset.file,
       target = localLinkTarget(link.dataset.path);
-    if (target && (await archiveFileExists(target))) return downloadArchiveFile(target.path, target.root);
+    if (target && (await archiveFileExists(target))) return void openFileViewer(target, name, link);
     if (archiveEntries === null) await refreshArchive();
     const entry = (archiveEntries || []).find(file => file.name === name || file.path === name);
     if (!entry) return toast(t`找不到「${name}」`);
-    downloadArchiveFile(entry.path);
+    void openFileViewer(entry.path, "", link);
   });
   $("#messages").addEventListener("click", event => {
     const more = event.target.closest(".deliver-more");
     if (more) return toggleDeliverables(more);
     const button = event.target.closest("[data-deliver-action]");
     if (!button) return;
-    const path = button.closest("[data-deliver]")?.dataset.deliver;
+    const row = /** @type {HTMLElement|null} */ (button.closest("[data-deliver]")),
+      path = row?.dataset.deliver,
+      root = row?.dataset.root;
     if (!path) return;
-    if (deliverableMissing(path)) return toast(t("这件已从卷宗移除"));
-    if (button.dataset.deliverAction === "download") downloadArchiveFile(path);
-    else void openFileViewer(path, "", button);
+    if (deliverableMissing({ path, root, name: "", size: 0 })) return toast(t("这件已从卷宗移除"));
+    if (button.dataset.deliverAction === "download") downloadArchiveFile(path, root || archiveDir());
+    else void openFileViewer(root ? { path, root } : path, "", button);
   });
 }

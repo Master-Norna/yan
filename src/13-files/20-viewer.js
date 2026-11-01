@@ -3,7 +3,7 @@
 // ---------- 卷宗文件的悬浮预览：图看画、文看字、表看格、网页进沙箱、PDF 交给浏览器、音视频就地放；都不必先下载 ----------
 // 预览器看两种来源：磁盘卷宗（走桥接取回）与对话里的附件（就在这个浏览器里）。同一种文件，不论从哪儿来，看法一样——
 // 自己上传的 CSV、PDF、Markdown 点开就该是看，而不是把刚发出去的东西再下载一遍。
-// viewerSource 记着当前看的是哪一件：{ path } 是卷宗，{ attachmentId } 是附件，{ skillDir, skillPath } 是技能带的一件（设置 → 技能里点开）；
+// viewerSource 记着当前看的是哪一件：{ path } 是卷宗（带 root 的是那个目录里的），{ attachmentId } 是附件，{ skillDir, skillPath } 是技能带的一件（设置 → 技能里点开）；
 // viewerPath 仍留给卷宗那一路的下载
 let viewerPath = "",
   viewerRevision = 0,
@@ -48,7 +48,7 @@ function skillFileUrl(source, download = false) {
   return `${apiBase}/api/skills/raw?dir=${encodeURIComponent(source.skillDir)}&path=${encodeURIComponent(source.skillPath)}${download ? "&download=1" : ""}`;
 }
 async function viewerReader(source) {
-  if (source.path) return urlReader(archiveFileUrl(source.path));
+  if (source.path) return urlReader(archiveFileUrl(source.path, false, source.root || archiveDir()));
   if (source.skillDir) return urlReader(skillFileUrl(source));
   const url = `${apiBase}/api/files/raw?id=${encodeURIComponent(source.attachmentId)}`,
     head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
@@ -64,7 +64,7 @@ async function viewerReader(source) {
     extracted: String(file.extractedText || "")
   };
 }
-/** @param {string|{path?:string, attachmentId?:string, skillDir?:string, skillPath?:string}} target 卷宗路径，或 { attachmentId }，或技能里的一件 */
+/** @param {string|{path?:string, root?:string, attachmentId?:string, skillDir?:string, skillPath?:string}} target 卷宗路径，或别处目录里的 { path, root }（行的工作目录里的成品），或 { attachmentId }，或技能里的一件 */
 async function openFileViewer(target, name = "", trigger = null) {
   const revision = ++viewerRevision;
   const source = typeof target === "string" ? { path: target } : target;
@@ -105,7 +105,8 @@ const VIEWER_OPEN_BUTTON = `<button type="button" class="outline-btn" data-viewe
 async function openViewerWithSystem() {
   const source = viewerSource;
   try {
-    if (source?.path) await bridge("/api/archive/open", { root: archiveDir(), path: source.path }, AbortSignal.timeout(8000));
+    if (source?.path)
+      await bridge("/api/archive/open", { root: source.root || archiveDir(), path: source.path }, AbortSignal.timeout(8000));
     else if (source?.attachmentId) await bridge("/api/files/open", { id: source.attachmentId }, AbortSignal.timeout(8000));
     else if (source?.skillDir)
       await bridge("/api/skills/open-item", { dir: source.skillDir, path: source.skillPath }, AbortSignal.timeout(8000));
@@ -123,7 +124,7 @@ function downloadViewerFile() {
     anchor.href = skillFileUrl(viewerSource, true);
     anchor.download = String(viewerSource.skillPath).split("/").pop() || "";
     anchor.click();
-  } else if (viewerPath) downloadArchiveFile(viewerPath);
+  } else if (viewerPath) downloadArchiveFile(viewerPath, viewerSource?.root || archiveDir());
 }
 async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   if (kind === "image") return `<img class="file-viewer-image" src="${escapeHtml(reader.url())}" alt="${escapeHtml(name)}">`;

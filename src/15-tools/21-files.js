@@ -28,7 +28,6 @@ defineTool({
       };
     step.sig = data.sig;
     step.root = workRoot(conversation);
-    noteToolWrite(conversation, data.path);
     step.note = `${data.lines} 行 · ${formatFileSize(data.bytes)}${data.existed ? " · 覆盖" : ""}`;
     // 覆盖时的增删由桥接按前后两版逐行比出（旧桥接只给原有行数，退回整删整增）；lines 是写后这件的行数，新建的件按它算净增
     step.change = {
@@ -81,7 +80,6 @@ defineTool({
       );
     step.title = data.path;
     step.root = workRoot(conversation);
-    noteToolWrite(conversation, data.path);
     step.diff = { old: args.old.slice(0, 1500), new: args.new.slice(0, 1500) };
     step.sig = data.sig;
     // 读后被别人改过：这一处照改了，可文件别处的现状它没看过——这一步不算「看清了」，整份覆盖前还得重读
@@ -220,7 +218,6 @@ defineTool({
     const data = await bridge("/api/work/download", { ...workScope(conversation), url, path: args.path }, signal);
     step.title = data.path;
     step.note = url;
-    noteToolWrite(conversation, data.path);
     step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要
     return {
       ok: true,

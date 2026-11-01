@@ -22,6 +22,7 @@
  */
 /** @typedef {{ text: string, messageId?: string, model?: string, url?: string, image?: string }} Quote 引用追问：划选的一段与它所在的消息（旁注锚文本作引文时没有 messageId）；游目圈点的另带给模型的一份与网址，image 是那幅画面的附件 id（附件照常随消息走，只是画在引文里） */
 /** @typedef {{ id: string, name: string, arguments: string }} ToolCall 流式拼出的一次工具调用 */
+/** @typedef {{ path: string, name: string, size: number, root?: string }} Deliverable 成品：path 是卷宗里的路；root 有值时是那个目录里的路（行的工作目录，或答复里写的绝对路所在的那层） */
 /** @typedef {{ prompt_tokens: number, completion_tokens: number, total_tokens: number, cached_tokens?: number }} Usage cached_tokens：提示里读自缓存的部分 */
 /** @typedef {"ask"|"review"|"auto"} CommandPolicy 问而后行 / 审而后行 / 径行 */
 /** @typedef {"running"|"pending"|"done"|"error"|"skipped"|"interrupted"} StepStatus interrupted 只给差遣：帮手断着，等人续（见 holdHelper） */
@@ -141,7 +142,7 @@
  * @property {{ steps: number, broken?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数）
  * @property {number} [durationMs]
  * @property {number} [startedAt] 正在作答时的起始时刻（毫秒），行迹题头据此走用时；收尾即删
- * @property {{ path: string, name: string, size: number }[]} [deliverables] 言里这一答做出的成品
+ * @property {Deliverable[]} [deliverables] 这一答交给人看的成品（答复里链到的本机文件，见 replyDeliverables）
  * @property {boolean} [toolsOpen]
  * @property {boolean} [toolsTouched]
  * @property {boolean} [reasoningOpen]
