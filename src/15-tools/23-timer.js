@@ -7,6 +7,11 @@ defineTool({
   label: t("定时"),
   offer: ctx => ctx.files,
   mainOnly: true,
+  // 编号带给下一问：正文里没写出编号，下一问也认得「刚才那个定时」，看与取消都凭它
+  digest: step =>
+    step.timer
+      ? t`定时 ${step.timer.id} · ${clockText(step.timer.due)} → ${String(step.title || "").slice(0, 80)}`
+      : `set_timer → ${step.result || step.status}`,
   async run(step, args, { conversation, signal }) {
     const note = String(args.note || "").trim(),
       every = Math.round(Number(args.every) * 1000) || 0,

@@ -9,7 +9,9 @@ window.__yanSave = () => saveStore();
 // 存储根换了位置（设置 → 通用，桥接已整份拷过去或认了那边原有的）：引导信息换成新路径，对话的指纹与时间戳作废，
 // 配置照新处的来（认了那边原有的）或把这边的推过去（拷过去的），再与新处的对话目录对一遍
 async function switchStoreRoot(data) {
-  bootstrap.store = { root: data.root, parent: data.parent, fresh: false };
+  // 新处的各条路径整份换上（技能目录审查要认，见 insideSkills），只去掉这一回迁移本身的结果
+  const { moved: _moved, adopted: _adopted, previous: _previous, busy: _busy, busyCount: _busyCount, ...where } = data;
+  bootstrap.store = { ...where, fresh: false };
   bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive, files: data.files };
   chatsBroken = false;
   chatHashes.clear();
