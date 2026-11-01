@@ -5,6 +5,8 @@
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 /** @type {Map<string, Promise<void>>} */
 const checkpointing = new Map();
+/** @type {Set<string>} 正在退回的对话：退完之前不开新的一答，不然刚写下的又被退掉（见 prepareTurn、wakeWithReports） */
+const rewinding = new Set();
 const REWIND_SHOWN = 12;
 /** 动手前：这一答还没记过就记一回，帮手与主答同时动手也只记一回。记不下（目录不在、桥接是旧的）不拦着干活 @param {ToolContext} ctx */
 function checkpointBefore({ conversation, assistant }) {
@@ -48,6 +50,7 @@ async function rewindAnswer(c, message) {
   });
   if (!ok) return;
   if (workdirLocked(c)) return toast(t("作答中，稍后再退"));
+  rewinding.add(c.id);
   try {
     const done = await bridge("/api/checkpoint/restore", key, AbortSignal.timeout(600000));
     message.rewound = [...(message.rewound || []), { at: now(), restored: done.restored, removed: done.removed }];
@@ -62,6 +65,8 @@ async function rewindAnswer(c, message) {
     );
   } catch (error) {
     toast(t`未能退回：${bridgeErrorText(String(error.message || error)).slice(0, 80)}`);
+  } finally {
+    rewinding.delete(c.id);
   }
 }
 // 退过的几回，按时刻排：退回之后的头一问冠上一句（与上一答的行迹同一个放法，见 historyForApi）。时刻定了句子就定了，前文不会因此改写

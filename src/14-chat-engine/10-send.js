@@ -22,7 +22,11 @@ async function prepareTurn(c) {
     toast(t("此对话正在另一页面作答，稍后再发"));
     return false;
   }
-  // 等的这一会儿，后台回报可能已在这段里另起了一答，这段也可能已被删掉
+  // 等的这一会儿，后台回报可能已在这段里另起了一答，这段也可能已被删掉。正退回目录的不开工：动手写下的会被退回盖掉
+  if (rewinding.has(c.id)) {
+    toast(t("正在退回目录，稍后再发"));
+    return false;
+  }
   return !conversationRunning(c.id) && store.conversations.includes(c);
 }
 async function sendOrStop() {
@@ -238,8 +242,7 @@ function watchSteer(job, assistant) {
     if (assistant.toolCalls?.length) return; // 正在拟调用：等它拟完，结果交回时递
     const said = assistant.content.slice(job.roundStart || 0);
     if (!said.trim()) return; // 还在想（或还没开口）：等
-    const fenced = (said.match(/^\s*```/gm) || []).length % 2 === 1;
-    if (fenced || !/[\n。！？!?]\s*$/.test(said)) return;
+    if (inOpenFence(said) || !/[\n。！？!?]\s*$/.test(said)) return;
     stop();
     job.round.abort();
   }, 120);

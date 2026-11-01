@@ -45,7 +45,7 @@ function parseTokenLimit(value) {
 // 余墨只属于模型，不属于对话：对话在所选模型耗尽时暂停，换模型或调高上限即刻可续，不再把整段对话锁死
 /** @param {Conversation} c */
 function conversationDry(c) {
-  return !!c && quotaExhausted(activeProfile());
+  return !!c && quotaExhausted(activeProfile(c));
 }
 // 进行中的请求先把预计用量记在预留里：几段对话同时开工时，后开的看得见先开的已经占了多少，不会都以为「还剩 20k」而合计超卖；
 // 请求收尾时预留撤销、换成实际用量。只在内存里记，刷新页面即清
@@ -489,7 +489,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
       const end = from + at,
         said = assistant.content.slice(roundStart, end);
       // 写着的是一段带标签的代码（围栏还开着）：跳过这一个接着找
-      if ((said.match(/^\s*```/gm) || []).length % 2) {
+      if (inOpenFence(said)) {
         think.scan = end + 8;
         continue;
       }

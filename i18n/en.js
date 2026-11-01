@@ -226,6 +226,7 @@ var YAN_EN = {
   "{0}月{1}日 {2}": "{0}/{1} {2}",
   定时: "Timer",
   已叫过: "Fired",
+  "定时 {0} · {1} → {2}": "Timer {0} · {1} → {2}",
   不在等: "Not pending",
   时刻无效: "Invalid time",
   "缺 note": "Missing note",
@@ -373,6 +374,7 @@ var YAN_EN = {
   // 检查点：退回到一答开工前
   退回到这一答开工前: "Rewind files to before this reply",
   "作答中，稍后再退": "Still replying, rewind later",
+  "正在退回目录，稍后再发": "Rewinding the folder. Send later",
   "检查点读不出：{0}": "Couldn't read the checkpoint: {0}",
   "目录与这一答开工前一样，无须退回": "The folder already matches how it was before this reply",
   改回: "Revert",
