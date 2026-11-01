@@ -379,7 +379,7 @@ function renderMarkdown(source = "") {
   const plain = () => `<p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>`;
   if (!window.marked || !window.DOMPurify) return plain();
   try {
-    return DOMPurify.sanitize(marked.parse(liftBareMermaid(text), { async: false }), PURIFY_OPTIONS);
+    return DOMPurify.sanitize(marked.parse(liftBareHtml(text), { async: false }), PURIFY_OPTIONS);
   } catch {
     return plain();
   }
@@ -396,7 +396,8 @@ function inOpenFence(text) {
   }
   return !!open;
 }
-// 流式渲染的分段点：最后一个空行，且它前面没有未闭合的代码围栏、后面不是列表 / 缩进 / 表格的延续
+// 流式渲染的分段点：最后一个空行，且它前面没有未闭合的代码围栏（裸写的交互内容提进围栏后算，见 liftBareHtml）、后面不是列表 / 缩进 / 表格的延续；
+// 以标签收尾的一段要等下一段起头不是标签才分（一段裸 HTML 被分开，提进围栏的就只剩半截）
 function stableCut(content) {
   const listy = line => /^\s*(?:[-*+]|\d+[.)])\s/.test(line) || /^\s+\S/.test(line);
   let cut = content.lastIndexOf("\n\n");
@@ -404,9 +405,12 @@ function stableCut(content) {
     const before = content.slice(0, cut),
       prevLine = before.slice(before.lastIndexOf("\n") + 1),
       nextLine = content.slice(cut + 2).split("\n")[0];
-    const inFence = inOpenFence(before);
+    const inFence = inOpenFence(liftBareHtml(before));
     const continues =
-      /^\s+\S/.test(nextLine) || (listy(nextLine) && listy(prevLine)) || (/^\s*\|/.test(nextLine) && prevLine.includes("|"));
+      /^\s+\S/.test(nextLine) ||
+      (listy(nextLine) && listy(prevLine)) ||
+      (/^\s*\|/.test(nextLine) && prevLine.includes("|")) ||
+      (/>\s*$/.test(prevLine) && (!nextLine || HTML_LINE.test(nextLine)));
     if (!inFence && !continues) break;
     cut = content.lastIndexOf("\n\n", cut - 1);
   }

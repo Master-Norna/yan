@@ -119,7 +119,7 @@ async function exportConversationMarkdown(c) {
 function markdownVisuals(text) {
   if (!window.marked) return [];
   const sources = [];
-  window.marked.walkTokens(window.marked.lexer(liftBareMermaid(text)), token => {
+  window.marked.walkTokens(window.marked.lexer(liftBareHtml(text)), token => {
     if (token.type !== "code") return;
     const lang = String(token.lang || "")
       .trim()

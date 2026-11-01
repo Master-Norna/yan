@@ -45,7 +45,7 @@ const f = load([
   "PROMPTS",
   "mergeConfig3",
   "looksLikeMermaid",
-  "liftBareMermaid",
+  "liftBareHtml",
   "dropStaleThoughts"
 ]);
 // 各家接口的适配在桥接里（server/model/）
@@ -122,6 +122,11 @@ test("stableCut：在最后一个空行切，不切进未闭合的代码围栏�
   // ````markdown 里嵌着 ```bash：内层的围栏行不算把外层合上
   assert.equal(f.stableCut("````md\n```bash\nx\n\ny\n```\n\nz"), 0);
   assert.equal(f.stableCut("````md\n```bash\nx\n```\n````\n\nz"), 25);
+  // 裸写的交互内容：脚本里的空行不切；以标签收尾的一段，下一段还是标签（或还没来）就不切，不把一段 HTML 分成两半
+  assert.equal(f.stableCut("a\n\n<script>\nx\n\ny"), 1);
+  assert.equal(f.stableCut('a\n\n<div id="c"></div>\n\n<script>x</script>'), 1);
+  assert.equal(f.stableCut('a\n\n<div id="c"></div>\n\n'), 1);
+  assert.equal(f.stableCut('a\n\n<div id="c"></div>\n\nb'), 21);
 });
 test("diffCounts：新建全算增、删除全算减、其余按最长公共子序列", () => {
   assert.deepEqual(f.diffCounts("", "a\nb"), { added: 2, removed: 0 });
@@ -647,17 +652,30 @@ test("mergeConfig3：两处各添预设、分组、MCP 与环境工具时都留�
   assert.equal(merged.env.pip, "sympy");
   assert.equal(merged.env.mirror, "official");
 });
-test("looksLikeMermaid / liftBareMermaid：写岔了的流程图照样认得，普通代码与别的 pre 不误伤", () => {
+test("looksLikeMermaid / liftBareHtml：写岔了的流程图、没包围栏的交互内容照样认得，普通代码与别的 HTML 不误伤", () => {
   assert.equal(f.looksLikeMermaid("flowchart TD\n  A --> B"), true);
   assert.equal(f.looksLikeMermaid("%% 注\ngraph LR;\n  A --> B"), true);
   assert.equal(f.looksLikeMermaid("sequenceDiagram\n  A->>B: hi"), true);
   assert.equal(f.looksLikeMermaid("graph = build()\nprint(graph)"), false);
   assert.equal(f.looksLikeMermaid("pie = 3.14"), false);
-  const lifted = f.liftBareMermaid('前文\n<pre class="mermaid">\nflowchart TD\n  A --> B\n</pre>\n后文 <pre>别的</pre>');
-  assert.match(lifted, /```mermaid\n+flowchart TD\n {2}A --> B\n+```/);
-  assert.match(lifted, /后文 <pre>别的<\/pre>/);
+  assert.equal(
+    f.liftBareHtml('前文\n<pre class="mermaid">\nflowchart TD\n  A --> B\n</pre>\n后文 <pre>别的</pre>'),
+    '前文\n```html\n<pre class="mermaid">\nflowchart TD\n  A --> B\n</pre>\n```\n后文 <pre>别的</pre>'
+  );
   const fenced = '```html\n<pre class="mermaid">graph TD\nA-->B</pre>\n```';
-  assert.equal(f.liftBareMermaid(fenced), fenced);
+  assert.equal(f.liftBareHtml(fenced), fenced);
+  // 卡片与脚本连成一段（中间空一行也算），脚本里的空行不断段；之后的正文留在外头
+  const card = '<div class="card">\n<div id="c"></div>\n</div>',
+    script = '<script src="yan:echarts"></script>\n<script>\nconst a = 1;\n\necharts.init(c);\n</script>';
+  assert.equal(
+    f.liftBareHtml(`看了。\n\n${card}\n\n${script}\n\n**1.** 正文`),
+    `看了。\n\n\`\`\`html\n${card}\n\n${script}\n\`\`\`\n\n**1.** 正文`
+  );
+  // 没有脚本的 HTML 照常交给 Markdown；脚本里出现 ``` 时围栏加长
+  assert.equal(f.liftBareHtml("<details>\n<summary>x</summary>\n</details>"), "<details>\n<summary>x</summary>\n</details>");
+  assert.equal(f.liftBareHtml("<script>\n```\n</script>"), "````html\n<script>\n```\n</script>\n````");
+  // 流式中脚本还没合上：围栏也开着，尾段画成占位框
+  assert.equal(f.liftBareHtml("<script>\nlet x"), "```html\n<script>\nlet x");
 });
 test("contextOverflow / learnContextWindow：vLLM 连带列出 0 个输出 token 的也算放不下，max_tokens 给大了不算", () => {
   const vllm =
