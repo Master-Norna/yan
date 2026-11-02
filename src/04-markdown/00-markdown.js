@@ -53,6 +53,13 @@ function setupMarkdown() {
   marked.use({
     gfm: true,
     breaks: true,
+    // 删除线只认 ~~两道~~：marked 的 GFM 连单个 ~ 也认，中文正文常拿 ~ 写区间（0.13~0.24x、0.1~2 秒），一行有两处便被划掉。
+    // 交回 false 由 marked 原样处理双道的；单道的交回空，不算删除线，落回正文
+    tokenizer: {
+      del(src) {
+        return src.startsWith("~~") ? false : undefined;
+      }
+    },
     renderer: {
       code({ text, lang }) {
         return codeBlockHtml(text, lang);
