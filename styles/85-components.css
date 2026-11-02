@@ -91,6 +91,19 @@
   display: flex;
   gap: 2px;
 }
+/* 平时只浮一枚「全屏」：浮在块里右上会压住图自己右上的按钮（切换、导出之类），所以主对话里挂进正文列右边的内衬（42px，见 .chat-scroll），
+   图与上下文字都不挨。比过（设计稿/137）：挪到上沿或下沿之外横排，压上一段末行或下一段首行，指针从上一段移下来时还先冒出来挡路。
+   旁注与帮手面板的内衬只 14px 挂不下，仍在块里右上，只一枚不碍事。重来、下载只在全屏与出错时的题头里露 */
+.chat-inner .html-app:not(.work-expanded, .html-app-error) .code-head {
+  top: 0;
+  right: auto;
+  left: 100%;
+  padding: 2px 0 2px 8px; /* 隔开的 8px 算在它身上：指针从图移过去一路都在块里，不会半途淡掉 */
+  background: none;
+}
+.html-app:not(.work-expanded, .html-app-error) :is([data-app-restart], [data-app-download]) {
+  display: none;
+}
 /* 交互内容工具条、代码块题头上是笔意小画：只用墨、随按钮字色，与回复下的复制、重答同一套 */
 .code-icon {
   display: grid;
@@ -151,7 +164,7 @@
 :root[data-theme="dark"] .html-app-stage iframe {
   color-scheme: dark;
 }
-/* 源码只是存着，供复制、下载与重来时读，不显示 */
+/* 源码只是存着，供下载与重来时读，不显示 */
 .html-app-source {
   display: none;
 }

@@ -424,7 +424,7 @@ function bindContentEvents() {
   document.addEventListener("click", e => {
     const copy = e.target.closest("[data-copy-code]");
     if (copy) {
-      void copyText(copy.closest(".code-block, .html-app")?.querySelector("code")?.textContent || "");
+      void copyText(copy.closest(".code-block")?.querySelector("code")?.textContent || "");
       // 小画钮不换字（换了画就没了），说一声；代码块上的字钮照旧换成「已复制」
       if (copy.classList.contains("code-icon")) return toast(t("已复制"));
       copy.textContent = t("已复制");

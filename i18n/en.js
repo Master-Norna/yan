@@ -68,7 +68,6 @@ var YAN_EN = {
   重来: "Reload",
   下载: "Download",
   全屏: "Fullscreen",
-  复制源码: "Copy source",
   正在载入交互内容: "Loading interactive content",
   "导出资源未能载入：{0}": "Could not load export resource: {0}",
   "言 · 交互作品": "Yan · Interactive",

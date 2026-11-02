@@ -14,7 +14,7 @@ defineEmbed({
   },
   html(text, language) {
     const source = legacyViz(language, text) ? legacyVizHtml(language, text) : text;
-    return `<div class="html-app" data-html-app><div class="code-head"><span class="code-lang">${t(`html · 正在载入`)}</span><span>${vizTool("data-app-restart", t("重来"), "reload")}${vizTool("data-app-download", t("下载"), "download")}${vizTool("data-work-expand", t("全屏"), "wide")}${vizTool("data-copy-code", t("复制源码"), "copy")}</span></div><div class="html-app-stage"><span>${t(`正在载入交互内容`)}</span></div><pre class="html-app-source hidden"><code>${escapeHtml(source)}</code></pre></div>\n`;
+    return `<div class="html-app" data-html-app><div class="code-head"><span class="code-lang">${t(`html · 正在载入`)}</span><span>${vizTool("data-app-restart", t("重来"), "reload")}${vizTool("data-app-download", t("下载"), "download")}${vizTool("data-work-expand", t("全屏"), "wide")}</span></div><div class="html-app-stage"><span>${t(`正在载入交互内容`)}</span></div><pre class="html-app-source hidden"><code>${escapeHtml(source)}</code></pre></div>\n`;
   },
   mount: renderHtmlApps,
   bind: bindHtmlAppEvents
@@ -276,7 +276,8 @@ function renderHtmlApps(root) {
   for (const el of root.querySelectorAll(".html-app[data-html-app]:not([data-rendered])")) mountHtmlApp(el);
 }
 // 交互内容工具条上的一枚：笔意小画，字收进 title 与 aria-label（与回复下的复制、重答同一套画法）。
-// 源码不另设一钮：复制、下载拿到的就是它，出错的说明在标签的 title 上
+// 平时只露「全屏」，重来、下载收进全屏（与出错）时常显的题头（见 85-components.css）。不设复制源码：回复下的复制已带着这段围栏；
+// 出错的说明在标签的 title 上
 function vizTool(attr, label, icon) {
   return `<button type="button" class="code-copy code-icon" ${attr} title="${label}" aria-label="${label}">${brushIcon(icon)}</button>`;
 }
