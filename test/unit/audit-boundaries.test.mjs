@@ -16,6 +16,10 @@ test("本地链接：Mac 上 / 起头的是绝对路，Windows 上不是；file:
   assert.equal(f.localLinkTarget("/mnt/data/a.txt", win), null);
   assert.deepEqual(f.localLinkTarget("file:///D:/proj/a.txt", win), { root: "D:\\proj", path: "a.txt" });
   assert.deepEqual(f.localLinkTarget("E:\\别处\\b.txt", win), { root: "E:/别处", path: "b.txt" });
+  // 答完才绑目录：相对路仍认那一答记下的成品所在
+  const answered = { deliverables: [{ path: "图.png", name: "图.png", size: 1, root: "D:\\旧处" }] };
+  assert.deepEqual(f.localLinkTarget("./图.png", win, answered), { root: "D:\\旧处", path: "图.png" });
+  assert.deepEqual(f.localLinkTarget("别的.png", win, answered), { root: "D:\\proj", path: "别的.png" });
 });
 
 test("审查等着时点了「止」：审查回来也不再动手", async () => {

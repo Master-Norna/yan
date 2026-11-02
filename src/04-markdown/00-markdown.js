@@ -201,7 +201,7 @@ function renderReplyShots(root) {
             .findLast(item => item.kind === "image" && item.name === name)
         )
         .find(Boolean),
-      target = !file && ref.tagName === "IMG" ? localLinkTarget(ref.getAttribute("data-path")) : null,
+      target = !file && ref.tagName === "IMG" ? localLinkTarget(ref.getAttribute("data-path"), c, messages[upTo] || null) : null,
       words = ref.getAttribute("alt") || name || "";
     if (!file && !target) {
       if (ref.tagName === "IMG") ref.replaceWith(words);

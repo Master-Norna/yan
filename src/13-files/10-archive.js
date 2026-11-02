@@ -23,9 +23,10 @@ function archiveFileUrl(path, download = false, root = archiveDir()) {
   return `${apiBase}/api/archive/file?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}${download ? "&download=1" : ""}`;
 }
 // 正文链接里的本地路落在哪：相对路相对这段对话的落脚处（绑了目录是它，没绑是卷宗）；绝对路在落脚处之内的折成相对，
-// 之外的以它所在那层为根。sandbox:/ 这类不是本机的路返回 null；Windows 上 /mnt/… 这样以 / 起头的也不是，Mac 上它就是绝对路
-/** @param {string} raw @returns {{ root: string, path: string } | null} */
-function localLinkTarget(raw, conversation = currentConversation()) {
+// 之外的以它所在那层为根。sandbox:/ 这类不是本机的路返回 null；Windows 上 /mnt/… 这样以 / 起头的也不是，Mac 上它就是绝对路。
+// 给了是哪一答的：相对路先认那一答记下的成品——答完才绑目录（或换了目录），落脚处已挪走，那一答写的路仍指当时的落脚处
+/** @param {string} raw @param {Message|null} [message] @returns {{ root: string, path: string } | null} */
+function localLinkTarget(raw, conversation = currentConversation(), message = null) {
   let text = String(raw || "")
     .trim()
     .replace(/[?#].*$/, "");
@@ -45,7 +46,9 @@ function localLinkTarget(raw, conversation = currentConversation()) {
     return { root: text.slice(0, cut) || "/", path: text.slice(cut + 1) };
   }
   if (/^[a-z][\w+.-]*:|^\//i.test(text)) return null;
-  return { root, path: text.replace(/^(?:\.\/)+/, "") };
+  const path = text.replace(/^(?:\.\/)+/, ""),
+    kept = message?.deliverables?.find(f => f.path === path);
+  return { root: kept ? kept.root || archiveDir() : root, path };
 }
 // 先问一声在不在：直接下一个不存在的件，浏览器只会报一行「下载失败」
 async function archiveFileExists({ root, path }) {
@@ -651,8 +654,10 @@ function bindLibraryEvents() {
     const link = event.target.closest(":is(.markdown, .trail-note, .sub-report) a[data-file]");
     if (!link) return;
     event.preventDefault();
-    const name = link.dataset.file,
-      target = localLinkTarget(link.dataset.path);
+    const c = currentConversation(),
+      id = link.closest("[data-message]")?.getAttribute("data-message"),
+      name = link.dataset.file,
+      target = localLinkTarget(link.dataset.path, c, (c && everyMessage(c).find(m => m.id === id)) || null);
     if (target && (await archiveFileExists(target))) return void openFileViewer(target, name, link);
     if (archiveEntries === null) await refreshArchive();
     const entry = (archiveEntries || []).find(file => file.name === name || file.path === name);
