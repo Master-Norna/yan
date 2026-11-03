@@ -198,10 +198,14 @@ input[type="number"]::-webkit-outer-spin-button {
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
   --wash: radial-gradient(ellipse 55% 45% at 86% 0%, rgba(232, 227, 216, 0.055), transparent);
 }
+/* 暗色右上那轮月 */
 [data-theme="dark"] .main:before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
   right: 40px;
   top: 20px;
-  bottom: auto;
   width: 320px;
   height: 320px;
   opacity: 0.09;
@@ -212,7 +216,6 @@ input[type="number"]::-webkit-outer-spin-button {
     color-mix(in srgb, var(--ink) 10%, transparent) 50%,
     transparent 70%
   );
-  transform: none;
 }
 :root {
   /* 明暗切换用的几个形状：带湍流滤镜的 SVG，开机后由 themeSheets 各画成一张上了色的位图，动效里只放大位图 */

@@ -488,22 +488,8 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   border-radius: var(--radius-l) 0 0 var(--radius-l);
   overflow: hidden;
 }
-.main:before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  right: -70px;
-  bottom: -110px;
-  width: 430px;
-  height: 430px;
-  pointer-events: none;
-  opacity: 0.045;
-  background: radial-gradient(ellipse at 50% 65%, transparent 43%, var(--ink) 44% 45%, transparent 46%),
-    radial-gradient(ellipse at 32% 55%, transparent 39%, var(--ink) 40% 41%, transparent 42%);
-  transform: rotate(-12deg);
-}
-/* 时令那一件（设计稿/84 丙，画见 src/12-season.js）：贴右下角，墨色作底、画作遮罩，浓淡同上面那两道圈；
-   亮色里替掉两道圈，暗色里右上那轮月照旧（月下一枝） */
+/* 时令那一件（设计稿/84 丙，画见 src/12-season.js）：贴右下角，墨色作底、画作遮罩；暗色里右上那轮月照旧（月下一枝，见 00-base.css）。
+   亮色原先右下角是两道淡圈，已由这一件替掉、删去——留着只会在开页画上遮罩前闪一下 */
 .main:after {
   content: "";
   position: absolute;
@@ -518,9 +504,6 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   mask: var(--season-mark) right bottom / contain no-repeat;
 }
 :root:not([data-season-mark]) .main:after {
-  display: none;
-}
-:root[data-theme="light"][data-season-mark] .main:before {
   display: none;
 }
 .topbar {
