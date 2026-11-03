@@ -778,7 +778,7 @@ await waitFor(
   8000
 ).catch(() => {});
 check(
-  "the 游目 tab sits between 技能 and 记忆, with the line it is named after",
+  "the 游目 tab sits between Skill and 记忆, with the line it is named after",
   await evalJs(
     `(t => t.nextElementSibling?.dataset.tab === "memory" && t.previousElementSibling?.dataset.tab === "skills")(document.querySelector('[data-tab="stage"]')) && document.querySelector("#settingsContent .settings-lead")?.textContent === "游目骋怀，足以极视听之娱。" && !!document.querySelector("#settingsContent .settings-mark")`
   )

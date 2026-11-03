@@ -149,9 +149,9 @@ check(
   skillText
 );
 check(
-  "the step reads 技能 · 写信 in the trail, not 翻阅文档 · 写信/SKILL.md",
+  "the step reads Skill · 写信 in the trail, not 翻阅文档 · 写信/SKILL.md",
   await evalJs(
-    `[...document.querySelectorAll(".tool-step")].some(s => s.querySelector(".tool-label")?.textContent === "技能" && s.querySelector(".tool-title")?.textContent === "写信")`
+    `[...document.querySelectorAll(".tool-step")].some(s => s.querySelector(".tool-label")?.textContent === "Skill" && s.querySelector(".tool-title")?.textContent === "写信")`
   )
 );
 // 人点名：「＋」→「技能」挑「写信」，那份说明作一件附件置于案上、随问附上

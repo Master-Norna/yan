@@ -66,7 +66,7 @@ function listenTrackFrom(source, name, reader) {
       where: source?.path
         ? [pathTail(source.root), ...source.path.split("/").slice(0, -1)].join(" › ") + ` · ${ext}`
         : skill
-          ? t`技能 · ${ext}`
+          ? t`Skill · ${ext}`
           : t`附件 · ${ext}`,
       source,
       bytes: async () => (await reader.blob()).arrayBuffer(),

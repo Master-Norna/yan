@@ -73,7 +73,7 @@ async function placeSkill(skill) {
     if (draftKey() !== key) return toast(t`${skill.name} 已置于原对话的案上`);
     setTimeout(() => (currentConversation() ? $("#chatInput") : $("#welcomeInput")).focus(), 0);
   } catch (error) {
-    toast(t`技能「${skill.name}」的说明没取到：${tr(String(error.message || error)).slice(0, 80)}`);
+    toast(t`Skill「${skill.name}」的说明没取到：${tr(String(error.message || error)).slice(0, 80)}`);
   }
 }
 // 「＋」里的技能选件：与卷宗选件同一副样子——顶上查找，一份一行，名与何时用的头一句；查找也认何时用。不列 user-invocable: false 的
@@ -81,7 +81,7 @@ async function placeSkill(skill) {
 function renderSkillPicker(pop, anchor) {
   const skills = skillList().filter(skill => !skill.hidden);
   pop.classList.add("attach-picker");
-  pop.innerHTML = `<input class="field" placeholder="${t(`按名字查找`)}" aria-label="${t(`查找技能`)}"><div class="chip-pop-list"></div>`;
+  pop.innerHTML = `<input class="field" placeholder="${t(`按名字查找`)}" aria-label="${t(`查找 Skill`)}"><div class="chip-pop-list"></div>`;
   const input = /** @type {HTMLInputElement} */ (pop.querySelector("input")),
     list = /** @type {HTMLElement} */ (pop.querySelector(".chip-pop-list"));
   const paint = () => {
@@ -94,7 +94,7 @@ function renderSkillPicker(pop, anchor) {
               `<button type="button" class="skill-pick" data-pick="${escapeHtml(skill.dir)}" title="${escapeHtml(skill.description)}">${skillMark("skill-mark", skill.manual)}<span>${escapeHtml(skill.name)}</span><small>${escapeHtml(skillGist(skill))}</small></button>`
           )
           .join("")
-      : `<div class="chip-pop-label">${t(`没有匹配的技能`)}</div>`;
+      : `<div class="chip-pop-label">${t(`没有匹配的 Skill`)}</div>`;
     list.scrollTop = 0;
     settlePickerPop(pop, anchor);
   };
@@ -141,7 +141,7 @@ function skillsSettingsHtml() {
     .join("");
   const adding = skillEditing && !skillEditing.dir;
   return (
-    `<div class="settings-head">${brushIcon("skills", "settings-mark")}<h2>${t(`技能`)}</h2><span class="settings-meta">${t`${skills.length} 份`}</span></div>` +
+    `<div class="settings-head">${brushIcon("skills", "settings-mark")}<h2>${t(`Skill`)}</h2><span class="settings-meta">${t`${skills.length} 份`}</span></div>` +
     `<div class="skill-head"><span class="skill-dir" title="${escapeHtml(home)}">${escapeHtml(home)}</span><span class="memory-spacer"></span><span class="memory-ops"><button type="button" id="addSkill" title="${t(`新建一份`)}">${brushIcon("add")}</button></span><button type="button" class="skill-open" data-skill-open>${t(`打开`)}</button></div>` +
     `<div class="skill-list">${adding ? skillEditorHtml(skillEditing) : ""}${
       rows || (adding ? "" : `<p class="skill-empty">${t(`尚无一份`)}</p>`)
@@ -258,7 +258,7 @@ async function settleSkillEditor() {
     return renderSettings();
   }
   if (!name) {
-    toast(t("技能要有名字"));
+    toast(t("Skill 要有名字"));
     return /** @type {HTMLElement|null} */ ($("[data-skill-field=name]"))?.focus();
   }
   skillSaving = true;
@@ -391,7 +391,7 @@ function bindSkillSettings() {
   }
   // 删一份：先问，连同目录里的脚本与参考一并删
   const removeSkill = async (dir, name) => {
-    const ok = await askConfirm({ title: t`删去技能「${name}」？`, body: t`连同目录里的脚本与参考一并删去：${dir}`, ok: t("删去") });
+    const ok = await askConfirm({ title: t`删去 Skill「${name}」？`, body: t`连同目录里的脚本与参考一并删去：${dir}`, ok: t("删去") });
     if (!ok) return;
     try {
       await bridge("/api/skills/remove", { dir }, AbortSignal.timeout(15000));

@@ -40,10 +40,10 @@ function openAttachMenu(anchor) {
       },
       {
         id: "skill",
-        label: t("技能"),
+        label: t("Skill"),
         note: skills ? t`${skills} 份` : t("尚空"),
         keep: true,
-        run: (button, pop) => (skills ? renderSkillPicker(pop, anchor) : toast(t("尚无技能，可在设置 → 技能里写一份")))
+        run: (button, pop) => (skills ? renderSkillPicker(pop, anchor) : toast(t("尚无 Skill，可在设置 → Skill 里写一份")))
       }
     ],
     { align: "left", kind: "attach" }
