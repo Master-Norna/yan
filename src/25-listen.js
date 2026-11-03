@@ -38,9 +38,9 @@ function listenArchiveTrack(entry) {
     list: []
   };
 }
-// 预览器交来的：卷宗那一路连同夹里的其余音频一起列出，附件只有它自己
+// 预览器交来的：卷宗那一路连同夹里的其余音频一起列出；别处目录里的（行的工作目录里的成品，带 root）、附件、技能里的只有它自己
 function listenTrackFrom(source, name, reader) {
-  if (source?.path) {
+  if (source?.path && (!source.root || source.root === archiveDir())) {
     const entry = (archiveEntries || []).find(file => file.path === source.path) || { path: source.path, name, size: 0 },
       dir = source.path.split("/").slice(0, -1).join("/"),
       siblings = (archiveEntries || []).filter(
@@ -52,13 +52,22 @@ function listenTrackFrom(source, name, reader) {
     track.list = list;
     return list.find(item => item.key === track.key) || track;
   }
-  // 附件，或技能带的一件（设置 → 技能里点开）
+  // 别处目录里的、附件，或技能带的一件（设置 → 技能里点开）
   const skill = !!source?.skillDir,
+    ext = fileExtension(name).toUpperCase(),
     track = {
-      key: skill ? `s:${source.skillDir}/${source.skillPath}` : `a:${source?.attachmentId}`,
+      key: source?.path
+        ? `r:${source.root}|${source.path}`
+        : skill
+          ? `s:${source.skillDir}/${source.skillPath}`
+          : `a:${source?.attachmentId}`,
       name,
       url: reader.url(),
-      where: skill ? t`技能 · ${fileExtension(name).toUpperCase()}` : t`附件 · ${fileExtension(name).toUpperCase()}`,
+      where: source?.path
+        ? [pathTail(source.root), ...source.path.split("/").slice(0, -1)].join(" › ") + ` · ${ext}`
+        : skill
+          ? t`技能 · ${ext}`
+          : t`附件 · ${ext}`,
       source,
       bytes: async () => (await reader.blob()).arrayBuffer(),
       list: []

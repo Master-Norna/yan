@@ -1648,7 +1648,10 @@ http
                   index: 0,
                   id: "call_dv1",
                   type: "function",
-                  function: { name: "write_file", arguments: JSON.stringify({ path: "docs/报告.md", content: "# 报告\n\n结论在此。\n" }) }
+                  function: {
+                    name: "write_file",
+                    arguments: JSON.stringify({ path: "docs/报告.md", content: "# 报告\n\n结论在此，另见[下篇](附/下篇.md)。\n" })
+                  }
                 },
                 {
                   index: 1,
@@ -1661,7 +1664,7 @@ http
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         return sse(res, [
-          delta({ content: "写好了，见 [调研报告](docs/报告.md)；不存在的 [旧稿](docs/旧稿.md) 不列。" }),
+          delta({ content: "写好了，见 [调研报告](docs/报告.md) 与 [配图](docs/图.png)；不存在的 [旧稿](docs/旧稿.md) 不列。" }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }

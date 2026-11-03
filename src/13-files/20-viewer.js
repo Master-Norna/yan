@@ -221,31 +221,39 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   }
   const text = await reader.text();
   if (kind === "markdown")
-    return `<div class="file-viewer-text markdown">${rebaseMarkdownImages(renderMarkdown(text.slice(0, 200000)), viewerSource)}</div>`;
+    return `<div class="file-viewer-text markdown">${rebaseMarkdownRefs(renderMarkdown(text.slice(0, 200000)), viewerSource)}</div>`;
   return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(text.slice(0, 200000))}</pre>${text.length > 200000 ? `<p class="file-viewer-note">${t(`仅显示前 20 万字`)}</p>` : ""}</div>`;
 }
 // CSV / TSV：引号里的换行仍属于同一个字段，显示上限按记录计。
-// Markdown 里的相对图片（![](images/a.png)）：照这份文件所在的那一层去取，与 VS Code 一样——不然渲染进言的页面，
-// 相对地址落到言自己的根上。消毒时本地的图已摘了 src、原路记在 data-path（见 04-markdown 的钩子），从那里取回；
-// 那一层在哪个根下跟着这份文件走：卷宗、行的工作目录（带 root）、技能目录。本机盘符不动，/ 开头的从根算。附件里的 Markdown 没有「所在的那一层」，不改
+// Markdown 里的相对图片（![](images/a.png)）与链接（[下一篇](b.md)）：照这份文件所在的那一层去取，与 VS Code 一样——不然图渲染进言的页面，
+// 相对地址落到言自己的根上；链接点了按这段对话的落脚处去找（见 10-archive.js 的点击）。消毒时本地的路已摘了 src / href、原路记在 data-path
+// （见 04-markdown 的钩子），从那里取回；那一层在哪个根下跟着这份文件走：卷宗、行的工作目录（带 root）、技能目录。
+// 图直接换上地址；链接把算好的路写回 data-path、根记在 data-root（技能里的记 data-skill-dir），点击时照这个开。
+// 本机盘符不动，/ 开头的从根算。附件里的 Markdown 没有「所在的那一层」，不改
 /** @param {string} html @param {{path?:string, root?:string, skillDir?:string, skillPath?:string}|null} source 这份 Markdown 从哪来（即 viewerSource） */
-function rebaseMarkdownImages(html, source) {
+function rebaseMarkdownRefs(html, source) {
   const at = source?.path || source?.skillPath || "";
   if (!at || !html.includes("data-path")) return html;
   const box = document.createElement("template");
   box.innerHTML = html;
-  for (const img of box.content.querySelectorAll("img[data-path]")) {
-    const ref = img.getAttribute("data-path") || "";
+  for (const node of box.content.querySelectorAll("img[data-path], a[data-path]")) {
+    const ref = node.getAttribute("data-path") || "";
     if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(ref)) continue;
     const path = archiveRelative(ref.startsWith("/") ? "" : parentDir(at), ref);
-    img.setAttribute(
+    if (node.tagName === "A") {
+      node.setAttribute("data-path", path);
+      if (source.skillDir) node.setAttribute("data-skill-dir", source.skillDir);
+      else node.setAttribute("data-root", source.root || archiveDir());
+      continue;
+    }
+    node.setAttribute(
       "src",
       source.skillDir
         ? skillFileUrl({ skillDir: source.skillDir, skillPath: path })
         : archiveFileUrl(path, false, source.root || archiveDir())
     );
-    img.removeAttribute("data-path");
-    img.removeAttribute("data-file");
+    node.removeAttribute("data-path");
+    node.removeAttribute("data-file");
   }
   return box.innerHTML;
 }

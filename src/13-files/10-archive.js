@@ -654,6 +654,9 @@ function bindLibraryEvents() {
     const link = event.target.closest(":is(.markdown, .trail-note, .sub-report) a[data-file]");
     if (!link) return;
     event.preventDefault();
+    // 预览器里一份 Markdown 的链接：路已照那份文件所在的那一层算好（见 rebaseMarkdownRefs）
+    if (link.dataset.skillDir) return void openFileViewer({ skillDir: link.dataset.skillDir, skillPath: link.dataset.path }, "", link);
+    if (link.dataset.root) return void openFileViewer({ root: link.dataset.root, path: link.dataset.path }, "", link);
     const c = currentConversation(),
       id = link.closest("[data-message]")?.getAttribute("data-message"),
       name = link.dataset.file,

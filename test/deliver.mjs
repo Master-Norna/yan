@@ -1,9 +1,13 @@
-// 行里的成品：答复里链到的工作目录文件挂在答末，点「预览」就地看；写了却没链的、链了却不存在的都不列
-import { mkdirSync, rmSync } from "node:fs";
+// 行里的成品：答复里链到的工作目录文件挂在答末，点「预览」就地看；写了却没链的、链了却不存在的都不列。
+// 图片的件图照它自己的根取；预览里 Markdown 的相对链接照那份文件所在的那一层开
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { connect, check, PAGE, WORK } from "./lib.mjs";
 rmSync(WORK + "/docs", { recursive: true, force: true });
-mkdirSync(WORK, { recursive: true });
+mkdirSync(WORK + "/docs/附", { recursive: true });
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+writeFileSync(WORK + "/docs/图.png", PNG);
+writeFileSync(WORK + "/docs/附/下篇.md", "# 下篇\n\n下篇正文。\n");
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await waitFor(`document.readyState === "complete"`);
@@ -18,20 +22,41 @@ await evalJs(
 await waitFor(`document.querySelector(".message.assistant")?.dataset.status === "complete"`, 20000);
 await waitFor(`!!document.querySelector(".message.assistant .deliver-bar")`, 5000);
 await shot("deliver-work.png");
-const stored = await evalJs(`JSON.stringify(__yanState().conversations[0].messages.at(-1).deliverables)`);
+const stored = await evalJs(`JSON.stringify(__yanState().conversations[0].messages.at(-1).deliverables)`),
+  root = path.resolve(WORK),
+  report = Buffer.byteLength("# 报告\n\n结论在此，另见[下篇](附/下篇.md)。\n");
 check(
-  "only the linked file that exists becomes a deliverable, kept with its folder",
-  stored === JSON.stringify([{ path: "docs/报告.md", name: "报告.md", size: 26, root: path.resolve(WORK) }]),
+  "only the linked files that exist become deliverables, kept with their folder",
+  stored ===
+    JSON.stringify([
+      { path: "docs/报告.md", name: "报告.md", size: report, root },
+      { path: "docs/图.png", name: "图.png", size: PNG.length, root }
+    ]),
   stored
 );
 check(
   "the bar outside Files does not claim the file went into Files",
-  (await evalJs(`document.querySelector(".message.assistant .deliver-head").textContent`)) === "成成品 1 件"
+  (await evalJs(`document.querySelector(".message.assistant .deliver-head").textContent`)) === "成成品 2 件"
+);
+check(
+  "an image deliverable's thumbnail is read from its own folder",
+  await waitFor(`document.querySelector(".message.assistant .deliver-bar .fi-thumb img")?.naturalWidth > 0`, 5000).then(
+    () => true,
+    () => false
+  )
 );
 await evalJs(`document.querySelector('.message.assistant .deliver-bar [data-deliver-action="view"]').click(); true`);
 await waitFor(`/结论在此/.test(document.querySelector("#fileViewerStage")?.textContent || "")`, 8000);
 check(
   "preview reads the file from the working folder",
   (await evalJs(`document.querySelector("#fileViewerName").textContent`)) === "报告.md"
+);
+await evalJs(`document.querySelector("#fileViewerStage a[data-file]").click(); true`);
+check(
+  "a relative link inside the previewed Markdown opens beside that file",
+  await waitFor(`/下篇正文/.test(document.querySelector("#fileViewerStage")?.textContent || "")`, 8000).then(
+    () => true,
+    () => false
+  )
 );
 close();
