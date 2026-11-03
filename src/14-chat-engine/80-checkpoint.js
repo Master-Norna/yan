@@ -1,6 +1,7 @@
 // 言 · 对话引擎 · 检查点：一答头一回动手改文件（写、改、跑指令、下载、作画）之前，请桥接把它的目录此刻的样子记下
 // （见 server/checkpoints.js），这一答上记 checkpoint；回复动作里多一枚「退回」，把目录退回到这一答开工前。
 // 只管目录里的文件：指令写到目录之外的、MCP 改的远端退不了——这不是后悔药，是本地文件的一道底。
+// 只记行（绑了目录）的：言落在卷宗里，卷宗是几段对话与人共用的，退回一答就把别处后来放进去的一并删了，且聊天里本没多少改动可退
 // 退过之后接着问，下一问的开头注明退过（见 rewindNotes）：不然模型以为它先前写下的还在
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 /** @type {Map<string, Promise<void>>} */
@@ -10,7 +11,7 @@ const rewinding = new Set();
 const REWIND_SHOWN = 12;
 /** 动手前：这一答还没记过就记一回，帮手与主答同时动手也只记一回。记不下（目录不在、桥接是旧的）不拦着干活 @param {ToolContext} ctx */
 function checkpointBefore({ conversation, assistant }) {
-  const root = conversation && workRoot(conversation);
+  const root = isWork(conversation) && workRoot(conversation);
   if (!root || assistant.checkpoint) return Promise.resolve();
   if (!checkpointing.has(assistant.id))
     checkpointing.set(

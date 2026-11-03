@@ -320,7 +320,8 @@ function assistantNoteHtml(message) {
 /** @param {Message} message */
 function assistantActionsHtml(message) {
   // 动过文件的一答（记了检查点）：无论答完、停了、断了、出错，都可把目录退回到它开工前
-  const rewind = message.checkpoint ? actionIcon("rewind", t("退回到这一答开工前")) : "";
+  // 先前言里记下的（根是卷宗）不给退，见 80-checkpoint.js
+  const rewind = message.checkpoint && message.checkpoint.root !== archiveDir() ? actionIcon("rewind", t("退回到这一答开工前")) : "";
   return message.status === "streaming"
     ? ""
     : message.status === "error"
