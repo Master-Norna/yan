@@ -106,11 +106,11 @@ const FIGURE_MARKS = {
   video: `<path class="f" d="M6.4 9.4L10.4 12.2L6.4 15ZM3 8h1.2v1.2H3zM3 10.9h1.2v1.2H3zM3 13.8h1.2v1.2H3zM12.1 8h1.2v1.2h-1.2zM12.1 10.9h1.2v1.2h-1.2zM12.1 13.8h1.2v1.2h-1.2z"/>`,
   zip: `<path class="m" d="M8.2 1.2V3M8.2 4.4V6.2M8.2 7.6V9.4M7 10.6H9.4V14.4H7Z"/>`
 };
-/** 一件的小图：图片就是它自己的缩略，别的按类画记号 */
-function fileFigure(name, path = "") {
+/** 一件的小图：图片就是它自己的缩略（root 是它所在的根，默认卷宗），别的按类画记号 */
+function fileFigure(name, path = "", root = archiveDir()) {
   const figure = fileKind(name).figure;
   if (figure === "image" && path)
-    return `<span class="fi fi-thumb" aria-hidden="true"><img src="${escapeHtml(archiveFileUrl(path))}" alt="" loading="lazy"></span>`;
+    return `<span class="fi fi-thumb" aria-hidden="true"><img src="${escapeHtml(archiveFileUrl(path, false, root))}" alt="" loading="lazy"></span>`;
   return `<svg class="fi" data-figure="${figure}" viewBox="0 0 16 20" aria-hidden="true"><path class="body" d="M1 .5H11L15.5 5V19.5H1Z"/><path class="fold" d="M11 .5V5H15.5Z"/>${FIGURE_MARKS[figure] || ""}</svg>`;
 }
 function caseFigure() {

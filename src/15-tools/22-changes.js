@@ -322,7 +322,7 @@ function deliverableMissing(f) {
 /** @param {Deliverable} f */
 function deliverableFileHtml(f, extra = false) {
   const missing = deliverableMissing(f);
-  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(f.path)}"${f.root ? ` data-root="${escapeHtml(f.root)}"` : ""}>${fileFigure(f.name, f.path)}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
+  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(f.path)}"${f.root ? ` data-root="${escapeHtml(f.root)}"` : ""}>${fileFigure(f.name, f.path, f.root)}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
     missing
       ? `<span class="deliver-gone">${t(`已移出卷宗`)}</span>`
       : `<button type="button" class="deliver-btn" data-deliver-action="view" title="${t(`预览`)}">${t(`预览`)}</button><button type="button" class="deliver-btn" data-deliver-action="download" title="${t(`另存到本机`)}">${t(`下载`)}</button>`
