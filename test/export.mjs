@@ -9,6 +9,7 @@ const html = `<title>中文交互🌏</title><div class="card"><button id="add">
 let n = 0; document.getElementById('add').onclick = () => document.getElementById('count').textContent = ++n;
 document.getElementById('lines').textContent = '第一行\\n\\n\\n第四行';
 try { parent.document.body; document.body.dataset.parentAccess = 'allowed'; } catch { document.body.dataset.parentAccess = 'blocked'; }
+localStorage.setItem('theme', 'dark'); document.body.dataset.stored = localStorage.getItem('theme');
 </script>`;
 const content = `工具之后的正文。\n\n\`\`\`html\n${html}\n\`\`\`\n\n\`\`\`echarts\n{"xAxis":{"data":["甲","乙"]},"yAxis":{},"series":[{"type":"bar","data":[2,5]}]}\n\`\`\`\n\n\`\`\`mermaid\ngraph LR\nA[中文起点] --> B[结束]\n\`\`\`\n\n**最后总结**`;
 await fetch(PAGE + "api/chats/save", {
@@ -158,11 +159,15 @@ for (const [index, name] of files.entries()) {
   );
   if (index === 0) {
     const result = await frameEval(
-      `(() => { document.getElementById('add').click(); return { count:document.getElementById('count').textContent, title:document.title, lines:document.getElementById('lines').textContent, isolation:document.body.dataset.parentAccess, color:getComputedStyle(document.body).color }; })()`
+      `(() => { document.getElementById('add').click(); return { count:document.getElementById('count').textContent, title:document.title, lines:document.getElementById('lines').textContent, isolation:document.body.dataset.parentAccess, stored:document.body.dataset.stored, color:getComputedStyle(document.body).color }; })()`
     );
     check(
-      "offline HTML preserves Unicode, whitespace, interaction and sandbox",
-      result.count === "1" && result.title === "中文交互🌏" && result.lines === "第一行\n\n\n第四行" && result.isolation === "blocked",
+      "offline HTML preserves Unicode, whitespace, interaction and sandbox; page storage works within the page",
+      result.count === "1" &&
+        result.title === "中文交互🌏" &&
+        result.lines === "第一行\n\n\n第四行" &&
+        result.isolation === "blocked" &&
+        result.stored === "dark",
       JSON.stringify(result)
     );
   } else

@@ -4,6 +4,26 @@
   // 正文里的 ```html 就地渲染成可交互的一块：与正文同一张纸——色板与字体取自言，底色透明，高度随内容；
   // 数据图表用 yan:echarts、流程与结构图用 <pre class="mermaid">，库随项目本地分发，按需才载
   let scriptUrls = [];
+  // 沙箱的 origin 为 null，网页一碰 localStorage / sessionStorage 就抛错：记明暗、记折叠的寻常网页因此报「运行错误」，
+  // 那段脚本后面的也不跑了。换成只活在这一页里的一份：本页里存得进、读得回，不落盘，也碰不到言自己的存储
+  for (const name of ["localStorage", "sessionStorage"]) {
+    try {
+      void window[name];
+    } catch {
+      const data = new Map();
+      const memory = {
+        get length() {
+          return data.size;
+        },
+        key: index => [...data.keys()][index] ?? null,
+        getItem: key => (data.has(String(key)) ? data.get(String(key)) : null),
+        setItem: (key, value) => void data.set(String(key), String(value)),
+        removeItem: key => void data.delete(String(key)),
+        clear: () => data.clear()
+      };
+      Object.defineProperty(window, name, { value: memory, configurable: true, enumerable: true });
+    }
+  }
   // 独立导出的 HTML 带着源码、主题与库；普通页内预览仍由父页送入。
   const exported = document.getElementById("yan-preview-export"),
     standalone = exported ? JSON.parse(exported.textContent) : null;
