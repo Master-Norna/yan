@@ -39,3 +39,24 @@
 查看放开到整机之后，工作目录之外的普通文件（浏览器数据、聊天记录之类）也在模型读得到的范围内——只有 `.env`、密钥与凭据这类按名字认得出的另有专条。请勿将工作目录指向不希望被改动的位置。
 
 「设置 → 工具」一栏专管模型能动手的边界：沙箱、新对话的三档指令权限、文件工具可及范围、卷宗对模型可读、工具轮次上限（按轮计，同一轮并发的几次调用只算一轮；留空即不限）。
+
+### macOS 指令
+
+下面这些与 Windows 的规则放在同一张清单，不按运行平台分开；只认指令位上的命令，`echo "launchctl load x"` 这样的普通参数不算。`then`、`do`、`else`、`exec`、`nohup`、`nice`（可带 `-n N`）、`time`、`timeout 时长`、`command`、`xargs`、`env` 与环境变量赋值可作前缀，单层 `sh` / `bash` / `zsh` / `dash` / `ksh -c`（含 `-lc`、`-ce`、`-o pipefail`、`--norc`）只把紧跟的那个词算指令位。`command -v launchctl` 是查名字，放行。
+
+| 命令 | 严、宽、审三档都拦的修改 | 放行的查询与操作 |
+| --- | --- | --- |
+| `launchctl` | `load`、`unload`、`bootstrap`、`bootout`、`enable`、`disable`、`kickstart`、`submit`、`remove`、`start`、`stop`、`kill`、`attach`、`setenv`、`unsetenv`、`config`、`debug`、`reboot` | `list`、`print`、`print-disabled`、`getenv`、`blame` |
+| `defaults` | `write`、`delete`、`import`、`rename`，含 `-currentHost` / `-host` | `read`、`domains`、`find` |
+| `crontab` | `-e`、`-r`、安装文件、从 `-` 读入或不带参数从管道读入，含 `-u user`；只放行 `-l` 查询 | `-l`，可在前面带 `-u user` |
+| `networksetup` | `-set*`，创建、删除、增减、重命名、复制、排序网络服务、切换位置、探测新硬件与连接或断开 PPPoE | `-get*`、`-list*`、`-show*` 等查询 |
+| `diskutil` | `erase*`、`partitionDisk`、`reformat`、`zeroDisk`、`secureErase`、`repairVolume`、`repairDisk`；`apfs deleteVolume` / `deleteContainer` / `addVolume` / `resizeContainer` | `list`、`info`、`verifyVolume`、`mount`、`unmount`、`eject` |
+| `security` | `add-*`、`delete-*`、`set-*`、`create-*`、`remove-*`、`import`、锁定或解锁钥匙串、安装 MDS、导入信任设置、显式修改钥匙串列表与默认项、用户信任开关、写或删授权策略、提权执行 | 列表、默认项查询、`show-keychain-info`、不带 `-w` / `-g` 的密码项查找 |
+
+严档拦下后转用户请示；宽档在径行或审查关闭、连不上时回绝，审而后行开着审查时仍可交审查模型批准。`security find-generic-password` / `find-internet-password` 带 `-w` 或 `-g`、`security export`，以及 `security dump-keychain -d` 导出明文内容，只在严档转请示，宽档与审档放行。`osascript` 无需提权也能执行系统操作，三档都拦 AppleScript 与 JXA；严档转用户请示。`sudo` 也按指令位认，套在单层 `bash -c` 里、带调度前缀或写成 `"/usr/bin/sudo"` 仍拦，`echo sudo x` 不拦。
+
+改写指令的几种写法不可审：指令位上的 `eval`、`source <(...)` / `. <(...)`、`sh <(...)`、`bash -c "$(...)"`，以及任意来源经管道交给 `sh` / `bash` / `zsh` / `dash` / `ksh` / `powershell` / `pwsh` 执行；审查准了也不放。普通的 `source ./env.sh`、`sh script.sh` 不属这几种写法。别名定义（`alias name=...`、`Set-Alias` 等，含赋值右侧）严宽都拦，仍可交审查模型；`echo Set-Alias` 不算定义。
+
+目录约束的写动词补有 `chmod`、`chown`、`chflags`、`ln`、`rsync`、`ditto`、`sed -i`。复制、同步与链接的第一个来源路径可在目录外，如 `cp -r /Users/a/src ./backup/`、`rsync -a /Users/a/source/ ./backup/`、`ditto /Users/a/file.zip ./file.zip`、`ln -s /opt/homebrew/bin/node ./node`；只豁免当次来源参数，目标仍受目录约束，`rsync --remove-source-files` 会删来源，不豁免。
+
+未列出的子命令不因这张表而拦（`crontab` 仅放行上述 `-l` 查询）；本次不另列 `csrutil`、`pmset`、`nvram`、`spctl` 全局开关，也未列尚待 Mac 实测的防火墙、账户等命令。显式提权仍由共用规则拦下。静态筛查不解析完整 Shell 语法，也不跟踪符号链接或脚本内部的操作；多层嵌套的 `bash -c "bash -c 'sudo rm -rf /'"` 仍可能放行。
