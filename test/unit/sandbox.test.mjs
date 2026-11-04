@@ -390,3 +390,24 @@ test("iex：站在指令位上的不论怎么收尾都算藏字，三档一致�
     assert.equal(screen(command), null, command);
   }
 });
+
+test("不带后缀的 credentials：带路径才算凭据文件，严档拦、宽档放；只是搜字或同名别的文件放行", () => {
+  for (const command of [
+    "cat ~/.aws/credentials",
+    "Get-Content ~\\.aws\\credentials",
+    "Get-Content $env:USERPROFILE\\.aws\\credentials",
+    'type "C:\\Users\\me\\.aws\\credentials"',
+    "cat ./credentials"
+  ]) {
+    assert.match(screen(command), /凭据/, command);
+    assert.equal(screenLoose(command), null, command);
+  }
+  for (const command of [
+    "rg credentials src",
+    "echo credentials",
+    "git config credential.helper",
+    "cat src/credentials.ts",
+    "ls src/credentials-form"
+  ])
+    assert.equal(screen(command), null, command);
+});
