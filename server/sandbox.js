@@ -25,8 +25,12 @@ const ITEM_WRITERS = String.raw`(?:New|Set|Remove|Clear|Rename|Copy|Move)-Item(?
 const ALIASING = /\b(?:Set|New)-Alias\b|(^|[\s;&|({])(?:sal|nal)\s/i;
 // 藏字：编码过的指令、拿 Invoke-Expression 跑拼出来的字串——筛查与审查都只看得到一串编码，判不了它要做什么。
 // iex 按指令位认，后面可贴括号、引号或就此收尾（irm x | iex、iex(irm x)）；赋值的右边也算在执行。rg iex a.txt 是搜字，不算
+// PowerShell 认参数名的任意前缀，也认 / 开头：-en、-encodedc、/enc 都是 -EncodedCommand，串再短也能跑。所以站在指令位的 powershell / pwsh（可带路径、可经 Start-Process）
+// 后面见到就算；-Command、-File 之后的属于被跑的东西（powershell -c "node -e 1"），不算。别的程序的 -e 只认一长串 base64 那一条
+const prefixesOf = (/** @type {string} */ word) => Array.from(word, (_, i) => word.slice(0, i + 1)).join("|");
+const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?)?["']?(?:[^"'\n;|&(){}]*[\\/])?(?:powershell|pwsh)(?:\.exe)?["']?(?:(?![\s"'][-/](?:${prefixesOf("command")}|${prefixesOf("file")})(?:[\s:]|$))[^\n;|&])*?[\s"'][-/](?:ec|${prefixesOf("encodedcommand")})(?=[\s:"']|$)`;
 const HIDDEN = new RegExp(
-    String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}`,
+    String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}`,
     "im"
   ),
   HIDDEN_WHY = "不代为执行隐藏或动态拼接的指令";
@@ -61,9 +65,14 @@ const FORBIDDEN = [
 ];
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
 const HOME_SYSTEM_PATH =
-  /\$env:(USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)\b|%(USERPROFILE|HOMEPATH|HOMEDRIVE|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)%|\$HOME\b|(^|[\s"'=])~([\\/]|$)/i;
-// 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）
-const NET_TOOLS = /(^|[\s;&|(])(curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(\.exe)?(\s|$)/i;
+  /\$\{?env:(USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)\b|%(USERPROFILE|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)%|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)/i;
+// 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）。
+// 带引号的只认站在指令位的（& "curl.exe" …）：rg "curl" src 是搜字。curl 的 --connect-to、-x 之类不往下追：静态筛查追不完，问而后行里这些本来就要请示
+const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
+const NET_TOOLS = new RegExp(
+  String.raw`(^|[\s;&|(])(${NET_TOOL_NAMES})(\.exe)?(\s|$)|(^|[;&|(\n]\s*)["'](${NET_TOOL_NAMES})(\.exe)?["'](\s|$)`,
+  "i"
+);
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
 // 桥接自己的端口：本机别的服务随便测，唯独桥接不行——它的执事接口不带请示与沙箱，指令借 curl、脚本调它就整个绕过去了。
 // 严宽两档都拦（径行开着沙箱时也拦：径行放开的是这段对话的指令，不是桥接的门禁）；静态筛查，脚本里拼出来的地址管不到。
@@ -131,7 +140,7 @@ const REVIEW_FORBIDDEN = [
 ];
 // 审而后行只守系统目录；POSIX 的 /usr、/etc、macOS 的 /System 等也认。用户目录、临时目录、别的项目照常可写。
 const REVIEW_SYSTEM_PATH =
-  /\$env:(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)\b|%(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)%|(?<![A-Za-z0-9_])[a-z]:[\\/](?:windows|program files(?: \(x86\))?|programdata)(?=[\\/\s"']|$)|(?:^|[\s"'=])\/(?:usr|etc|bin|sbin|boot|lib(?:32|64)?|opt|System|Library|Applications|private\/(?:etc|var)|var\/(?:db|lib|log|run))(?=[\/\s"']|$)/i;
+  /\$\{?env:(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)\b|%(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)%|(?<![A-Za-z0-9_])[a-z]:[\\/](?:windows|program files(?: \(x86\))?|programdata)(?=[\\/\s"']|$)|(?:^|[\s"'=])\/(?:usr|etc|bin|sbin|boot|lib(?:32|64)?|opt|System|Library|Applications|private\/(?:etc|var)|var\/(?:db|lib|log|run))(?=[\/\s"']|$)/i;
 const BROAD_DELETE =
   /\bRemove-Item\b(?=[^\n]*(?:-Recurse|-Force))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
 
@@ -145,15 +154,17 @@ function inside(root, target) {
   const rel = path.relative(root, target);
   return !rel || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
-// 指令文本里所有像绝对路径的片段：盘符（C:\… 与 C:/…，光秃的 C: 也算——那是盘符相对路径）、UNC（\\server\share）；
-// 非 Windows 上再加 POSIX 根（/usr/…）。URL 里的 http: 与 key:value 这类前面贴着字母的不算
+// 指令文本里所有像绝对路径的片段：盘符（C:\… 与 C:/…，光秃的 C: 也算——那是盘符相对路径）、UNC（\\server\share 与 //server/share，
+// 正斜杠的要带出第二段：//todo 多半是代码注释）；非 Windows 上再加 POSIX 根（/usr/…）。URL 里的 http: 与 key:value 这类前面贴着字母的不算
 function absolutePathsIn(command, win) {
   const found = [];
   const drive = /(?<![A-Za-z0-9_])([A-Za-z]:(?:[\\/][^\s"'`;|&<>()]*|(?=[\s"'`;|&<>()]|$)))/g,
     unc = /(?<![\w\\/])(\\\\[^\s\\"'`;|&<>()]+(?:\\[^\s"'`;|&<>()]*)?)/g,
+    slashUnc = /(?<![\w\\/:.-])(\/\/[^\s\\/"'`;|&<>()]+\/[^\s"'`;|&<>()]*)/g,
     posix = /(?<![\w./~:-])(\/(?!\/)[^\s"'`;|&<>()]+)/g;
   for (const match of command.matchAll(drive)) found.push(match[1]);
   for (const match of command.matchAll(unc)) found.push(match[1]);
+  for (const match of command.matchAll(slashUnc)) found.push(match[1]);
   if (!win) for (const match of command.matchAll(posix)) found.push(match[1]);
   return found;
 }
