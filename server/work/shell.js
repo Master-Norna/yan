@@ -79,7 +79,6 @@ module.exports = function createShell({ toolEnv }) {
   const runningShells = new Set();
   function runShell(command, cwd, timeoutMs, signal = null, { boxed = false, env = {} } = {}) {
     return new Promise(resolve => {
-      const win = process.platform === "win32";
       const child = spawnShell(command, cwd, { boxed, env });
       let stdout = "",
         stderr = "",

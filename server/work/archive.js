@@ -4,7 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const createLocks = require("./locks.js");
-const { sendJson, readJson, jsonRoute, errorText, uniqueStamp, sendFile, openWithSystem, receiveUpload } = require("../http.js");
+const { sendJson, jsonRoute, errorText, uniqueStamp, sendFile, openWithSystem, receiveUpload } = require("../http.js");
 const {
   SCRATCH_DIR,
   WORK_SKIP,

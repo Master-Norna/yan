@@ -86,7 +86,6 @@ function renderQuota() {
   $("#quotaText").textContent = !p ? "" : quotaAmount(cap === null ? used : remaining);
   $("#quotaNote").textContent = !p ? t("尚未接入模型") : cap === null ? t("不设上限") : t`上限 ${quotaAmount(cap)}`;
   status.classList.toggle("dry", !!cap && remaining === 0);
-  status.classList.toggle("empty", !p);
   status.setAttribute(
     "aria-label",
     !p
