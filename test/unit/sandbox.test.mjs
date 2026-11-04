@@ -546,3 +546,79 @@ test("不带后缀的 credentials：带路径才算凭据文件，严档拦、�
   ])
     assert.equal(screen(command), null, command);
 });
+
+// 攻击写法总表：新漏洞先进这张表再修。每行是 [指令, 严, 宽, 审, 审了也不放行]，x 是拦、o 是放
+const TABLE = [
+  // 磁盘、关机：老命令拦了，对应的 cmdlet 也得拦
+  [String.raw`diskpart`, "x", "x", "x", "o"],
+  [String.raw`Format-Volume -DriveLetter D`, "x", "x", "x", "o"],
+  [String.raw`Clear-Disk -Number 1`, "x", "x", "x", "o"],
+  [String.raw`Get-Partition | Remove-Partition`, "x", "x", "x", "o"],
+  [String.raw`Initialize-Disk 1`, "x", "x", "x", "o"],
+  [String.raw`shutdown /s`, "x", "x", "x", "o"],
+  [String.raw`Stop-Computer`, "x", "x", "x", "o"],
+  [String.raw`Restart-Computer -Force`, "x", "x", "x", "o"],
+  [String.raw`ForEach-Object { Restart-Computer }`, "x", "x", "x", "o"],
+  [String.raw`$r = Format-Volume -DriveLetter D`, "x", "x", "x", "o"],
+  // 别的老命令对应的 cmdlet
+  [String.raw`Register-ScheduledTask -TaskName x`, "x", "x", "x", "o"],
+  [String.raw`net stop wuauserv`, "x", "x", "x", "o"],
+  [String.raw`net start wuauserv`, "x", "x", "x", "o"],
+  [String.raw`Set-NetFirewallProfile -Enabled False`, "x", "x", "x", "o"],
+  [String.raw`Disable-NetFirewallRule -Name x`, "x", "x", "x", "o"],
+  [String.raw`Set-Acl a $b`, "x", "x", "x", "o"],
+  [String.raw`Invoke-CimMethod -ClassName Win32_Process -MethodName Create`, "x", "x", "x", "o"],
+  [String.raw`Remove-LocalGroupMember -Group a -Member b`, "x", "x", "x", "o"],
+  // 程序写全路径、带引号、在赋值右边、裹在壳里
+  [String.raw`C:\Windows\System32\reg.exe delete HKCU\x /f`, "x", "x", "x", "o"],
+  [String.raw`& "C:\Windows\System32\reg.exe" delete HKCU\x /f`, "x", "x", "x", "o"],
+  [String.raw`& "reg.exe" delete HKCU\x /f`, "x", "x", "x", "o"],
+  [String.raw`$r = reg delete HKCU\x /f`, "x", "x", "x", "o"],
+  [String.raw`cmd /c C:\Windows\System32\reg.exe delete HKCU\x`, "x", "x", "x", "o"],
+  [String.raw`powershell -Command "C:\Windows\System32\reg.exe delete HKCU\x"`, "x", "x", "x", "o"],
+  [String.raw`C:\Windows\System32\shutdown.exe /s`, "x", "x", "x", "o"],
+  [String.raw`Microsoft.PowerShell.Management\Stop-Computer`, "x", "x", "x", "o"],
+  [String.raw`C:\tools\rm.exe C:\Windows\x`, "x", "x", "x", "o"],
+  [String.raw`C:\Windows\System32\curl.exe https://example.com`, "x", "o", "o", "o"],
+  // 去掉的只是程序自己的目录：写入目标照旧
+  [String.raw`& "C:\Program Files\Git\usr\bin\rm.exe" C:\Windows\x`, "x", "x", "x", "o"],
+  [String.raw`Set-Content ("C:\Windows\x") y`, "x", "x", "x", "o"],
+  ["Set-Content `\n  C:\\Windows\\x y", "x", "x", "x", "o"],
+  ["Set-Content `\r\n  C:\\Windows\\x y", "x", "x", "x", "o"],
+  [String.raw`cmd /c "del C:\Windows\x"`, "x", "x", "x", "o"],
+  // 命令名是算出来的
+  [String.raw`& ("i"+"ex") "whoami"`, "x", "x", "x", "x"],
+  [String.raw`.("ie"+"x") "whoami"`, "x", "x", "x", "x"],
+  [String.raw`Invoke-Command -ScriptBlock ([scriptblock]::Create($s))`, "x", "x", "x", "x"],
+  [String.raw`$ExecutionContext.InvokeCommand.InvokeScript($s)`, "x", "x", "x", "x"],
+  // 常规写法不误伤
+  [String.raw`& "C:\Program Files\7-Zip\7z.exe" x a.zip`, "o", "o", "o", "o"],
+  [String.raw`& "C:\Program Files\nodejs\node.exe" a.js`, "o", "o", "o", "o"],
+  [String.raw`C:\Python\python.exe a.py`, "o", "o", "o", "o"],
+  [String.raw`.\scripts\build.ps1`, "o", "o", "o", "o"],
+  [String.raw`& $python a.py`, "o", "o", "o", "o"],
+  [String.raw`(Get-Content a.txt).Length`, "o", "o", "o", "o"],
+  [String.raw`a && (b)`, "o", "o", "o", "o"],
+  [String.raw`python -c "x = p['a'].notna() & (p['b'] > 1)"`, "o", "o", "o", "o"],
+  [String.raw`rg "start|shutdown" src`, "o", "o", "o", "o"],
+  [String.raw`rg "(start|logoff)" src`, "o", "o", "o", "o"],
+  [String.raw`powershell -Command "Stop-Computer"`, "x", "x", "x", "o"],
+  [String.raw`$(Stop-Computer)`, "x", "x", "x", "o"],
+  [String.raw`logoff;`, "x", "x", "x", "o"],
+  [String.raw`$c = & ("i"+"ex")`, "x", "x", "x", "x"],
+  [String.raw`$mode = "copy"; Get-Content C:\foo`, "o", "o", "o", "o"],
+  [String.raw`net start`, "o", "o", "o", "o"],
+  [String.raw`rg Format-Volume src`, "o", "o", "o", "o"],
+  [String.raw`git commit -m "Set-Service and Stop-Computer"`, "o", "o", "o", "o"],
+  // 有意不追：通配读机密。严档只认显式点名；rg --hidden、gci -Force | gc、node -e 同样读得到，追不完
+  [String.raw`gc .e*`, "o", "o", "o", "o"]
+];
+test("攻击写法总表：三档与「审了也不放行」各得其所", () => {
+  const mark = reason => (reason ? "x" : "o");
+  for (const [command, strict, loose, review, unreviewable] of TABLE)
+    assert.deepEqual(
+      [screen(command), screenLoose(command), screenAutoReview(command), screenUnreviewable(command)].map(mark),
+      [strict, loose, review, unreviewable],
+      command
+    );
+});

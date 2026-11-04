@@ -3,7 +3,7 @@
 //         查看则可及整台机器——给电脑做检查本就要翻系统目录、注册表与进程，锁住读等于把这件事堵死。
 //         机密文件（.env、密钥、凭据）与 .git 内部另有专条，读写都不放行；文件工具这一路仍是整个目录内，不认「全盘」；
 //   环境——指令看不到机密环境变量（名字里带 KEY / TOKEN / SECRET / PASSWORD 之类的一律不传；页面配置里的 API Key 本就不进桥接进程）；
-//   指令——动系统的（注册表、服务、计划任务、防火墙、账户、磁盘、关机、提权、执行策略）、藏字的（编码指令、Invoke-Expression）、
+//   指令——动系统的（注册表、服务、计划任务、防火墙、账户、磁盘、关机、提权、执行策略）、藏字的（编码指令、Invoke-Expression、拼出来的命令名）、
 //         直接外联的（curl / iwr / wget 之类，指向本机的除外）一律拒绝，装依赖走包管理器。
 // 以上是严的一档（screenCommand），给「问而后行」：拦下的由页面转给用户请示，批了这一条就出沙箱跑。
 // 「审而后行」「径行」用宽的一档（screenLoose），只守系统本身，见其说明。
@@ -17,9 +17,20 @@ const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 // 「指令位」：一行的开头，或 ; & | ( { 之后（& 调用、脚本块也算），只有站在这个位置上的词才算在执行它——
 // 「npm run format」「echo shutdown」里的 format / shutdown 不是。
 // 套一层壳的也算：cmd /c、powershell -Command、pwsh -c 后面跟的整段都在执行——指令本就由 PowerShell 跑，
-// 「powershell -Command "Set-Content C:\x y"」与直接写没有分别；这类壳之后同一行里的任何词都按指令位看，宁可多拦
-const CMD = String.raw`(?:^|[;&|({\n]|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?`;
-const cmd = (names, tail = String.raw`(?:\.exe|\.com)?(?:\s|$)`) => new RegExp(`${CMD}(?:${names})${tail}`, "im");
+// 「powershell -Command "Set-Content C:\x y"」与直接写没有分别；这类壳之后同一行里的任何词都按指令位看，宁可多拦。
+// 赋值的右边也在执行（$r = reg delete …）；右边是带引号的字串（$mode = "copy"）不算
+const CMD = String.raw`(?:^|[;&|({\n]|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?`;
+// 带引号的命令名要两头都有引号（& "reg.exe" delete）：rg "start|shutdown" src 里的 |shutdown" 是搜字。
+// args 是非跟不可的参数，不写就只认命令名到此为止；后面贴着 | 或 ) 的不算，(start|shutdown) 多半是一段正则
+const cmd = (names, args = "") => {
+  const name = String.raw`(?:${names})(?:\.exe|\.com)?`;
+  return new RegExp(
+    String.raw`${CMD}(?:(?<=["'])${name}["']|${name})${args ? String.raw`\s+(?:${args})` : String.raw`(?=[\s;}]|$)`}`,
+    "im"
+  );
+};
+// cmdlet 带连字符，不会是正则里的一个词，后面贴着什么都算：$(Stop-Computer)、Stop-Computer|x、powershell -c "Stop-Computer"
+const cmdlet = (/** @type {string} */ names) => new RegExp(String.raw`${CMD}(?:${names})(?=[\s;|&)}"']|$)`, "im");
 // 改「项」的 cmdlet 与它们在 Windows PowerShell 里的别名（ni = New-Item、sp = Set-ItemProperty……）：注册表那条与写动词表都用
 const ITEM_WRITERS = String.raw`(?:New|Set|Remove|Clear|Rename|Copy|Move)-Item(?:Property)?|ni|si|ri|cli|rni|rn|cpi|mi|sp|rp|clp|rnp|mp`;
 // 定义别名等于给写动词换个名字，静态筛查就认不出来了；与 Invoke-Expression 同属「藏字」
@@ -30,11 +41,27 @@ const ALIASING = /\b(?:Set|New)-Alias\b|(^|[\s;&|({])(?:sal|nal)\s/i;
 // 后面见到就算；-Command、-File 之后的属于被跑的东西（powershell -c "node -e 1"），不算。别的程序的 -e 只认一长串 base64 那一条
 const prefixesOf = (/** @type {string} */ word) => Array.from(word, (_, i) => word.slice(0, i + 1)).join("|");
 const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?)?["']?(?:[^"'\n;|&(){}]*[\\/])?(?:powershell|pwsh)(?:\.exe)?["']?(?:(?![\s"'][-/](?:${prefixesOf("command")}|${prefixesOf("file")})(?:[\s:]|$))[^\n;|&])*?[\s"'][-/](?:ec|${prefixesOf("encodedcommand")})(?=[\s:"']|$)`;
+// 命令名是算出来的：& ("i"+"ex")、.("ie"+"x")、& (gcm i*x)，或把字串变成脚本块再跑（[scriptblock]::Create）。规则与审查都看不到它实际跑什么。
+// & $exe 不算：把带空格的程序路径放进变量再调用是常规写法，拦了误伤多，真想藏的也还有 node -e 可走（见文件头）
+// & 要在语句开头：a & (b) 是 pandas 之类脚本里的按位与
+const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])\s*[&.]\s*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
 const HIDDEN = new RegExp(
-    String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}`,
+    String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}`,
     "im"
   ),
   HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
+// 指令位上的程序可以写全路径（C:\Windows\System32\reg.exe、& "C:\Program Files\…\reg.exe"）。规则都按命令名认，筛之前先去掉程序的目录，
+// 禁用规则、外联、写动词就不必各自认路径；程序自己的路径也不再算它碰的路径——& "C:\Program Files\7-Zip\7z.exe" x a.zip 并没有往系统目录里写。
+// 带引号的只认 & 与 . 之后的：别处的引号是字串，("C:\Windows\x") 正可能是写入目标；cmd /c、powershell -c 后面的引号裹的是整条指令，也按不带引号的认。
+// 续行（反引号、反斜杠）之后的一行不是指令位，那可能正是写入目标
+const LINE_START = String.raw`(?<![${"`"}\\][ \t]*\r?\n)^`,
+  CALL_SITE = String.raw`(?:${LINE_START}|[;|({&])[ \t]*`,
+  UNQUOTED_EXE_DIR = new RegExp(
+    String.raw`((?:${CALL_SITE}(?:\.[ \t]+)?|\$[\w:]+[ \t]*=[ \t]*|\bcmd(?:\.exe)?\b[^\n]*?\s/[ck][ \t]*["']?|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s[-/](?:${prefixesOf("command")})[ \t]+["']?))[^\s"'${"`"};|&<>(){}]*[\\/]`,
+    "gim"
+  ),
+  QUOTED_EXE_DIR = new RegExp(String.raw`((?:(?<!&)&|${CALL_SITE}\.)[ \t]*["'])[^"'\n]*[\\/]`, "gim");
+const withoutExeDir = (/** @type {string} */ text) => text.replace(UNQUOTED_EXE_DIR, "$1").replace(QUOTED_EXE_DIR, "$1");
 // 指令里禁用的写法，只此一张表：[正则, 一句原因, 适用的档]。逐条对整段指令文本查，命中即拒。
 // 严＝screenCommand（问而后行）；宽＝screenLoose（审而后行、径行开着沙箱时）；审＝screenAutoReview（审而后行的规则）。
 // 宽与审不是第二个沙箱：常规开发、安装、Git（含回退与清理）、本机进程、联网、整机查看、写到目录之外都放行，只拦明确会伤及宿主机或难以恢复的动作。
@@ -43,7 +70,7 @@ const EVERY = "严宽审",
   WIDE = "宽审";
 /** @type {[RegExp, string, string][]} */
 const RULES = [
-  [cmd("reg", String.raw`(?:\.exe)?\s+(?:add|delete|import|restore|load|unload|copy|save)\b`), "不动注册表", EVERY],
+  [cmd("reg", String.raw`(?:add|delete|import|restore|load|unload|copy|save)\b`), "不动注册表", EVERY],
   // 注册表：查看放行（启动项、已装软件、驱动版本都在里头，是电脑检查的常规去处），改则拒绝
   [
     new RegExp(String.raw`\bregedit\b|\b(?:${ITEM_WRITERS})\b[^\n]*(?:\bHK(?:LM|CU|CR|U|CC)\s*:|\bHKEY_|\bRegistry::)`, "i"),
@@ -53,19 +80,32 @@ const RULES = [
   // 计划任务：严档连查看也拦，宽档只拦改动与触发
   [cmd("schtasks"), "不动计划任务", "严"],
   [/\bschtasks(?:\.exe)?\b[^\n]*(?:\/create|\/delete|\/change|\/run|\/end)\b/i, "不动计划任务", WIDE],
-  [cmd("sc", String.raw`(?:\.exe)?\s+(?:create|delete|config|start|stop|failure)\b`), "不动系统服务", EVERY],
-  [/\b(New|Set|Remove|Start|Stop|Restart)-Service\b/i, "不动系统服务", EVERY],
+  [cmdlet("(?:Register|Unregister|Set|Enable|Disable|Start|Stop)-ScheduledTask"), "不动计划任务", EVERY],
+  [cmd("sc", String.raw`(?:create|delete|config|start|stop|failure)\b`), "不动系统服务", EVERY],
+  [cmd("net", String.raw`(?:stop\b|start\s+\S)`), "不动系统服务", EVERY],
+  [cmdlet("(?:New|Set|Remove|Start|Stop|Restart)-Service"), "不动系统服务", EVERY],
   [/\bnetsh(?:\.exe)?\b[^\n]*\b(?:set|add|delete|reset|exec|import)\b/i, "不动网络与防火墙配置", EVERY],
-  [/\b(New|Set|Remove)-NetFirewallRule\b|\bSet-DnsClient/i, "不动网络与防火墙配置", EVERY],
-  [cmd("net", String.raw`(?:\.exe)?\s+(?:user|localgroup|group|share|accounts)\b`), "不动用户、账户与共享", EVERY],
+  [
+    cmdlet(String.raw`(?:New|Set|Remove|Enable|Disable)-NetFirewallRule|Set-NetFirewallProfile|Set-DnsClient\w*`),
+    "不动网络与防火墙配置",
+    EVERY
+  ],
+  [cmd("net", String.raw`(?:user|localgroup|group|share|accounts)\b`), "不动用户、账户与共享", EVERY],
   // 映射网络盘只在严档拦：宽档本就放行写到目录之外
-  [cmd("net", String.raw`(?:\.exe)?\s+use\b`), "不动用户、账户与共享", "严"],
-  [/\b(New|Remove|Set|Enable|Disable)-LocalUser\b|\bAdd-LocalGroupMember\b/i, "不动用户与账户", EVERY],
+  [cmd("net", String.raw`use\b`), "不动用户、账户与共享", "严"],
+  [cmdlet("(?:New|Remove|Set|Enable|Disable)-LocalUser|(?:Add|Remove)-LocalGroupMember"), "不动用户与账户", EVERY],
   [/-Verb\s+RunAs\b|(^|\s)sudo\s/i, "不提权", EVERY],
   [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限", EVERY],
+  // 老命令对应的 cmdlet 与老命令同样按指令位认：rg Format-Volume src 只是搜字
+  [
+    cmdlet("Format-Volume|Clear-Disk|Initialize-Disk|Set-Disk|(?:New|Remove|Resize|Set)-Partition|Stop-Computer|Restart-Computer|Set-Acl"),
+    "不动系统、磁盘与权限",
+    EVERY
+  ],
   [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不通过 WMI 改系统", EVERY],
-  [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不动磁盘", EVERY],
-  [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不改执行策略与安全设置", EVERY],
+  [cmdlet("Invoke-(?:Cim|Wmi)Method|Remove-(?:CimInstance|WmiObject)|Set-(?:CimInstance|WmiInstance)"), "不通过 WMI 改系统", EVERY],
+  [cmd("format", String.raw`[a-z]:`), "不动磁盘", EVERY],
+  [cmdlet("Set-ExecutionPolicy|(?:Set|Add|Remove)-MpPreference"), "不改执行策略与安全设置", EVERY],
   [HIDDEN, HIDDEN_WHY, EVERY],
   [ALIASING, "不定义别名，直接写出指令", "严宽"],
   // .NET 联网只认真在用的写法（[System.Net.…]、New-Object Net.…、::new）：rg HttpClient、Select-String System.Net 这类只是搜字的不算
@@ -110,7 +150,7 @@ const BRIDGE_WHY = "指令不调言的本机桥接（它的接口不经请示与
 function screenUnreviewable(command) {
   const text = String(command || "");
   if (callsBridge(text)) return BRIDGE_WHY;
-  return HIDDEN.test(text) ? HIDDEN_WHY : null;
+  return HIDDEN.test(withoutExeDir(text)) ? HIDDEN_WHY : null;
 }
 // 文件工具会用 screenPath 拦机密文件；指令通道也得拦显式点名，否则 `Get-Content .env` 能从 shell 绕过去。
 // 这里只认完整的路径片段，避免把 `dotnet user-secrets list`、`env.d.ts` 这类正常参数误判成文件。
@@ -215,9 +255,10 @@ function screenWritePaths(text, workdir, win, prefix) {
  * @param {string} workdir 完整的绝对路径
  */
 function screenCommand(command, workdir, { platform = process.platform } = {}) {
-  const text = String(command || "");
-  if (callsBridge(text)) return `沙箱拒绝：${BRIDGE_WHY}`;
-  const win = platform === "win32";
+  const raw = String(command || "");
+  if (callsBridge(raw)) return `沙箱拒绝：${BRIDGE_WHY}`;
+  const text = withoutExeDir(raw),
+    win = platform === "win32";
   const forbidden = forbiddenWhy(text, "严");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
   if (SECRET_PATH_IN_COMMAND.test(text)) return "沙箱拒绝：指令不读写 .env、密钥或凭据文件；需要普通配置时请改用不含机密的文件";
@@ -240,9 +281,10 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
  * @param {string} command
  */
 function screenAutoReview(command) {
-  const text = String(command || "");
-  if (callsBridge(text)) return `审查拒绝：${BRIDGE_WHY}`;
-  const forbidden = forbiddenWhy(text, "审");
+  const raw = String(command || "");
+  if (callsBridge(raw)) return `审查拒绝：${BRIDGE_WHY}`;
+  const text = withoutExeDir(raw),
+    forbidden = forbiddenWhy(text, "审");
   if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
   if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
@@ -256,9 +298,10 @@ function screenAutoReview(command) {
  * @param {string} command
  */
 function screenLoose(command) {
-  const text = String(command || "");
-  if (callsBridge(text)) return `沙箱拒绝：${BRIDGE_WHY}`;
-  const forbidden = forbiddenWhy(text, "宽");
+  const raw = String(command || "");
+  if (callsBridge(raw)) return `沙箱拒绝：${BRIDGE_WHY}`;
+  const text = withoutExeDir(raw),
+    forbidden = forbiddenWhy(text, "宽");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
   if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
     return "沙箱拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
