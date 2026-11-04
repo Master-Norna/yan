@@ -518,7 +518,8 @@
   margin: -5px;
   padding: 5px;
 }
-.intent-mk-tip::after {
+.intent-mk-tip::after,
+.tab-btn::after {
   content: attr(data-tip);
   position: absolute;
   bottom: calc(100% - 2px);
@@ -537,12 +538,28 @@
   pointer-events: none;
   transition: opacity var(--dur-quick);
 }
-:root[data-theme="dark"] .intent-mk-tip::after {
+:root[data-theme="dark"] .intent-mk-tip::after,
+:root[data-theme="dark"] .tab-btn::after {
   background: var(--paper-3);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 .intent-mk-tip:hover::after {
   opacity: 1;
+}
+/* 设置的栏目钮用同一张纸签，浮在钮右、压着内容区：名字多是雅称（专司、游目），靠近时给一句白话。题下导语只管气韵，不挪它讲这个 */
+.tab-btn::after {
+  top: 50%;
+  bottom: auto;
+  left: calc(100% + 18px);
+  width: max-content;
+  max-width: 260px;
+  white-space: normal;
+  transform: translateY(-50%);
+}
+.tab-btn:hover::after,
+.tab-btn:focus-visible::after {
+  opacity: 1;
+  transition-delay: 0.12s;
 }
 .intent-row-name {
   overflow: hidden;

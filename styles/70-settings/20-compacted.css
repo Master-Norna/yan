@@ -81,6 +81,7 @@
   border-color: var(--danger);
 }
 .tab-btn {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;

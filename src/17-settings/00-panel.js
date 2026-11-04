@@ -2,7 +2,7 @@
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // 设置的各栏：画法、接事件、题下一句导语成组登记，左侧栏目钮（index.html 的 .tab-btn）照 data-tab 认。换一栏只画、只接这一栏；
 // 各栏自己的面板写在各自领域里（记忆在 11-memory，游目在 26-stage/40-settings），这里只登记。加一栏只需加一行与一枚栏目钮。
-// 导语是题记，只管气韵，不讲这一栏怎么用（用法进 设置 → 文档）
+// 导语是题记，只管气韵，不讲这一栏怎么用（用法进 设置 → 文档）；这一栏是什么，靠近栏目钮浮出一句白话（data-tip）
 /** @type {Record<string, [() => string, (() => void) | null, string]>} */
 const SETTINGS_TABS = {
   general: [generalSettingsHtml, bindGeneralSettings, t("凡事豫则立，不豫则废。")],

@@ -35,6 +35,22 @@ check(
   heads.length === 12 && heads.every(([, mark, title, lead]) => mark && title && lead),
   JSON.stringify(heads)
 );
+// 栏目名多是雅称：每个栏目钮都有一句白话，靠近才浮出，并且不被内容区盖住
+check("every tab has a plain-language tip", await evalJs(`[...document.querySelectorAll(".tab-btn")].every(b => b.dataset.tip)`));
+const tabTip = `getComputedStyle(document.querySelector('.tab-btn[data-tab="duty"]'), "::after")`;
+check("the tip is hidden at rest", await evalJs(`${tabTip}.opacity === "0"`));
+const dutyTab = await evalJs(
+  `(r => ({ x: r.left + 20, y: r.top + r.height / 2 }))(document.querySelector('.tab-btn[data-tab="duty"]').getBoundingClientRect())`
+);
+await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: dutyTab.x, y: dutyTab.y });
+await waitFor(`${tabTip}.opacity === "1"`, 3000).catch(() => {});
+check("the tip shows when the pointer comes near", await evalJs(`${tabTip}.opacity === "1"`));
+await shot("settings-tab-tip.png");
+await evalJs(`document.documentElement.dataset.theme = "dark"; true`);
+await sleep(200);
+await shot("settings-tab-tip-dark.png");
+await evalJs(`document.documentElement.dataset.theme = "light"; true`);
+await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 });
 await evalJs(`document.querySelector('.tab-btn[data-tab="guide"]').click(); true`);
 const guide = await evalJs(
   `(h => ({ version: h.querySelector(".settings-meta")?.textContent, last: [...h.querySelectorAll(".guide-row .guide-title")].pop()?.textContent }))(document.querySelector("#settingsContent"))`
