@@ -558,7 +558,8 @@ function stageAddrHtml(tab) {
   const sep = `<i aria-hidden="true">›</i>`;
   if (url.protocol === "about:") return `<b>${escapeHtml(stageTitle(tab))}</b>`;
   if (url.protocol === "file:") {
-    const path = decodeURIComponent(url.pathname).replace(/^\/([a-z]:)/i, "$1");
+    // 手输的、页面链来的网址里可能有没转义的 %（100%.html），解不了就照原样写，整栏的重画不能断在这儿
+    const path = decodeURIComponentSafe(url.pathname).replace(/^\/([a-z]:)/i, "$1");
     return `<b>${escapeHtml(path.split("/").pop() || path)}</b>${sep}${escapeHtml(path.split("/").slice(0, -1).join("/"))}`;
   }
   // data: 之类整串没法看：写协议与页题

@@ -271,6 +271,17 @@ check(
   await evalJs(`document.querySelector("#stageFrame").style.cursor === ""`),
   await evalJs(`document.querySelector("#stageFrame").style.cursor`)
 );
+// 文件名带 % 的本地页，网址里的 % 没转义（手输的、页面链过去的）：地址行照样写得出，整栏的重画不断在这儿
+const percentFile = path.resolve(TMP, "100%.html").replace(/\\/g, "/");
+writeFileSync(percentFile, "<title>百分</title>");
+await evalJs(`__yanStage.go(${JSON.stringify(`file://${percentFile.startsWith("/") ? "" : "/"}${percentFile}`)}); true`);
+await waitFor(`__yanStage.state.tabs.get(${JSON.stringify(targetId)})?.title === "百分"`, 8000).catch(() => {});
+await waitFor(`document.querySelector("#stageAddr").textContent.includes("100%.html")`, 3000).catch(() => {});
+check(
+  "a local file with a bare % in its url keeps the address line rendering",
+  await evalJs(`document.querySelector("#stageAddr").textContent.includes("100%.html")`),
+  await evalJs(`document.querySelector("#stageAddr").textContent`)
+);
 await evalJs(`__yanStage.go(${JSON.stringify(upload)}); true`);
 await waitFor(`__yanStage.state.tabs.get(${JSON.stringify(targetId)})?.title === "传"`, 8000).catch(() => {});
 await sleep(400);
