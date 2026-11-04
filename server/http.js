@@ -125,9 +125,13 @@ function replaceFile(temp, file) {
       Atomics.wait(wait, 0, 0, 15 * 2 ** attempt);
     }
 }
+// 临时文件名里那一小串：进程号、时刻加几位随机，同一刻几处同写也不撞；不作机密
+function uniqueStamp() {
+  return `${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
 // 先写临时文件再改名：写到一半断电、进程被杀，正本也不会只剩半截
 function writeAtomic(file, data) {
-  const temp = `${file}.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.tmp`;
+  const temp = `${file}.${uniqueStamp()}.tmp`;
   try {
     fs.writeFileSync(temp, data, typeof data === "string" ? "utf8" : undefined);
     replaceFile(temp, file);
@@ -277,6 +281,7 @@ module.exports = {
   requestSignal,
   stamp,
   errorText,
+  uniqueStamp,
   writeAtomic,
   replaceFile,
   receiveUpload,

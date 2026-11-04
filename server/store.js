@@ -14,7 +14,7 @@ const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText, re
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { expandHome } = require("./work/paths.js");
+const { expandHome, pathIsInside } = require("./work/paths.js");
 
 /** @param {{ working?: () => number }} [options] */
 module.exports = function createStore({ working = () => 0 } = {}) {
@@ -34,8 +34,7 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     return path.resolve(fs.realpathSync(existing), ...tail);
   }
   function inside(from, to) {
-    const relative = path.relative(physicalPath(from).toLowerCase(), physicalPath(to).toLowerCase());
-    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+    return pathIsInside(physicalPath(from).toLowerCase(), physicalPath(to).toLowerCase());
   }
   function readPointer(file) {
     const pointed = readJsonFile(file)?.root;

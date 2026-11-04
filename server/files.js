@@ -7,6 +7,7 @@ const {
   sendJson,
   jsonRoute,
   errorText,
+  uniqueStamp,
   writeAtomic,
   replaceFile,
   receiveUpload,
@@ -61,7 +62,7 @@ module.exports = function createFiles({ filesHome, playable }) {
         // 原件本身是 .json 的，与元数据同名会被元数据盖掉：另取「<id>.raw.json」（id 里没有点，不与别件相混）
         const extension = extensionOf(record.name);
         file = `${id}${extension === ".json" ? ".raw" : ""}${extension}`;
-        return path.join(dir, `${file}.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.tmp`);
+        return path.join(dir, `${file}.${uniqueStamp()}.tmp`);
       });
       // 同一 id 换了扩展名（极少见）：旧的原件不留
       const previous = rawFileOf(dir, id, readMeta(dir, id)),

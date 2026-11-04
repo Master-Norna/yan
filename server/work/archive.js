@@ -4,7 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const createLocks = require("./locks.js");
-const { sendJson, readJson, jsonRoute, errorText, sendFile, openWithSystem, receiveUpload } = require("../http.js");
+const { sendJson, readJson, jsonRoute, errorText, uniqueStamp, sendFile, openWithSystem, receiveUpload } = require("../http.js");
 const {
   SCRATCH_DIR,
   WORK_SKIP,
@@ -150,7 +150,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
         // 点开头的（.gitignore、标题是「.NET 8」的导出）列卷宗时当隐藏项跳过，收进来就再也看不见、删不掉：去掉首尾的点与空格，与改名同一个规矩
         name = path.basename(String(head?.name || "").trim()).replace(/^[. ]+|[. ]+$/g, "") || "未命名文件";
         dir = await archiveDirOf(root, head?.dir);
-        return path.join(dir, `.yan-upload-${process.pid}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}.tmp`);
+        return path.join(dir, `.yan-upload-${uniqueStamp()}.tmp`);
       }).catch(error => {
         throw error.tooLarge ? Error(`单个文件不超过 ${ARCHIVE_FILE_LIMIT / 1048576} MB`) : error;
       });
