@@ -114,6 +114,23 @@ test("接法由言补齐：在人写的 --config 上合并，人写了的照人�
   );
   // 只有言挪到屏幕外的那个报出调试口（桥接据此让它不占任务栏）：人自己定了位置的、接别处的、无头的都不报
   assert.deepEqual(moved, [9288]);
+  // 模型的浏览器开不了言：端口随桥接实际所用，接别处起好的浏览器也算，人自己列的照留
+  const blocked = config => JSON.parse(readFileSync(config.args.at(-1), "utf8")).network.blockedOrigins,
+    own = ["http://127.0.0.1:8787", "http://localhost:8787"];
+  assert.deepEqual(blocked(bare), own);
+  assert.deepEqual(blocked(prepareBrowser({ command: "npx", args: ["@playwright/mcp"] }, { root, bridgePort: 8801 })), [
+    "http://127.0.0.1:8801",
+    "http://localhost:8801"
+  ]);
+  assert.deepEqual(
+    blocked(prepareBrowser({ command: "npx", args: ["@playwright/mcp", "--cdp-endpoint", "http://127.0.0.1:9333"] }, where)),
+    own
+  );
+  writeFileSync(path.join(cwd, "blocked.json"), JSON.stringify({ network: { blockedOrigins: ["https://ads.example.com", own[0]] } }));
+  assert.deepEqual(blocked(prepareBrowser({ command: "npx", args: ["@playwright/mcp", "--config", "blocked.json"], cwd }, where)), [
+    "https://ads.example.com",
+    ...own
+  ]);
 });
 
 test("游目自己的浏览器：几项选择拼成整条，家当都在存储根的「游目」里，再补接法", () => {

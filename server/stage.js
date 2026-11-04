@@ -84,6 +84,12 @@ function prepareBrowser(config, where) {
       where.offscreen?.(port);
     }
   }
+  // 模型的浏览器开不了言自己：页面能改设置，开了就能关审查、改权限，等于自己给自己松绑。与指令不调桥接同理（sandbox.js）。
+  // 只列这两个名字：桥接只听 127.0.0.1，也只认这两个 Host（server.js 的 trustedHost）。挡的是开页与跳转，不挡 run_code 里直发的请求，那条与 node -e 一样不往下堵
+  const network = (file.network ||= {});
+  network.blockedOrigins = [
+    ...new Set([...(network.blockedOrigins || []), `http://127.0.0.1:${bridgePort}`, `http://localhost:${bridgePort}`])
+  ];
   // 按内容取名：同时起几个 Playwright 服务（游目自带的、人另接的），各读各的；同一份接法才共用一个文件
   const text = JSON.stringify(file, null, 2),
     dir = path.join(root, "游目"),
