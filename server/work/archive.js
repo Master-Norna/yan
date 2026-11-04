@@ -21,12 +21,13 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   // ---- 卷宗目录：页面上的卷宗即这一目录的视图。列出全部文件与子目录（页面逐层看、查找时平铺），收入 / 取出 / 挪动 / 移出都限定在目录内 ----
   const ARCHIVE_LIST_LIMIT = 3000,
     ARCHIVE_FILE_LIMIT = 256 * 1024 * 1024;
-  // 卷宗根：请求里带 root 就用它（须是完整限定的绝对路径，与工作目录同一套规矩），否则默认位置
-  async function archiveRoot(raw) {
+  // 卷宗根：请求里带 root 就用它（须是完整限定的绝对路径，与工作目录同一套规矩），否则默认位置。
+  // 不存在时只有真要往里放东西的（新建夹、收入）才建：读的请求建目录，随便问一个路径就在磁盘上留下空夹
+  async function archiveRoot(raw, { create = false } = {}) {
     const root = String(raw || "").trim() ? resolveWorkdir(raw) : archiveHome();
     const existing = await fs.promises.stat(root).catch(() => null);
     if (existing && !existing.isDirectory()) throw Error(`卷宗路径已被文件占用：${root}`);
-    if (!existing)
+    if (!existing && create)
       await fs.promises.mkdir(root, { recursive: true }).catch(error => {
         throw Error(describeFsError(error, root));
       });
@@ -146,7 +147,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     try {
       let root, dir, name;
       const received = await receiveUpload(req, ARCHIVE_FILE_LIMIT, async head => {
-        root = await archiveRoot(head?.root);
+        root = await archiveRoot(head?.root, { create: true });
         // 点开头的（.gitignore、标题是「.NET 8」的导出）列卷宗时当隐藏项跳过，收进来就再也看不见、删不掉：去掉首尾的点与空格，与改名同一个规矩
         name = path.basename(String(head?.name || "").trim()).replace(/^[. ]+|[. ]+$/g, "") || "未命名文件";
         dir = await archiveDirOf(root, head?.dir);
@@ -238,7 +239,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   }, failed);
   // 新建夹：落在 dir 那一层；同名已有就另取「新建夹 (2)」
   const handleArchiveMkdir = jsonRoute(async body => {
-    const root = await archiveRoot(body.root),
+    const root = await archiveRoot(body.root, { create: true }),
       target = await placeFree(await archiveDirOf(root, body.dir), cleanName(body.name || "新建夹"), to => fs.promises.mkdir(to)).catch(
         error => {
           throw Error(describeFsError(error, String(body.name || "")));
