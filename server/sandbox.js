@@ -23,6 +23,13 @@ const cmd = (names, tail = String.raw`(?:\.exe|\.com)?(?:\s|$)`) => new RegExp(`
 const ITEM_WRITERS = String.raw`(?:New|Set|Remove|Clear|Rename|Copy|Move)-Item(?:Property)?|ni|si|ri|cli|rni|rn|cpi|mi|sp|rp|clp|rnp|mp`;
 // 定义别名等于给写动词换个名字，静态筛查就认不出来了；与 Invoke-Expression 同属「藏字」
 const ALIASING = /\b(?:Set|New)-Alias\b|(^|[\s;&|({])(?:sal|nal)\s/i;
+// 藏字：编码过的指令、拿 Invoke-Expression 跑拼出来的字串——筛查与审查都只看得到一串编码，判不了它要做什么。
+// iex 按指令位认，后面可贴括号、引号或就此收尾（irm x | iex、iex(irm x)）；赋值的右边也算在执行。rg iex a.txt 是搜字，不算
+const HIDDEN = new RegExp(
+    String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}`,
+    "im"
+  ),
+  HIDDEN_WHY = "不代为执行隐藏或动态拼接的指令";
 // 指令里禁用的写法：[正则, 一句原因]。逐条对整段指令文本查，命中即拒
 /** @type {[RegExp, string][]} */
 const FORBIDDEN = [
@@ -44,7 +51,7 @@ const FORBIDDEN = [
   [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不通过 WMI 改系统"],
   [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不动磁盘"],
   [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不改执行策略与安全设置"],
-  [/\bInvoke-Expression\b|(^|[\s;&|(])iex\s|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}/i, "不用编码或拼接的指令，直接写出来"],
+  [HIDDEN, "不用编码或拼接的指令，直接写出来"],
   [ALIASING, "不定义别名，直接写出指令"],
   // .NET 联网只认真在用的写法（[System.Net.…]、New-Object Net.…、::new）：rg HttpClient、Select-String System.Net 这类只是搜字的不算
   [
@@ -67,9 +74,6 @@ function callsBridge(text) {
   return new RegExp(String.raw`(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])\s*:\s*${BRIDGE_PORT}(?!\d)`, "i").test(text);
 }
 const BRIDGE_WHY = "指令不调言的本机桥接（它的接口不经请示与沙箱）；要读写文件、跑指令直接用相应的工具";
-// 藏字：编码过的指令、拿 Invoke-Expression 跑拼出来的字串——筛查与审查都只看得到一串编码，判不了它要做什么
-const HIDDEN = /\bInvoke-Expression\b|(^|[\s;&|(])iex\s|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}/i,
-  HIDDEN_WHY = "不代为执行隐藏或动态拼接的指令";
 /**
  * 审查准了也不放行的两样（与存储根那一道一样是底线）：调言自己的桥接——它的接口不经请示与沙箱，跑指令那个口子还认「已审准」，
  * 等于自己给自己盖章；藏字——审查看不见它实际要跑什么，准与驳都只能猜。通过返回 null
