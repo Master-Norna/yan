@@ -50,14 +50,39 @@ function setupMarkdown() {
       return `<div class="math-block">${renderMath(token.text, true)}</div>\n`;
     }
   };
+  // Windows 绝对路径里的反斜杠是分隔符，不是 Markdown 的转义：\. \_ \- 被吃掉，E:\聊天记录\.yan 就成了 E:\聊天记录.yan，链接打不开、复制下来也是错的。
+  // 正文里的整段路径认作一件，原样显示（路径里的 _ 也不当强调）；相对路径、网址里的反斜杠仍按转义算（模型常写 a\_b.md）
+  const windowsPath = {
+    name: "windowsPath",
+    level: "inline",
+    start(src) {
+      const m = src.match(/(?<![A-Za-z0-9_])[a-z]:\\|\\\\[\w.-]+\\/i);
+      return m ? m.index : -1;
+    },
+    tokenizer(src) {
+      const m = src.match(/^(?:[a-z]:\\|\\\\[\w.-]+\\)[^\s"'`<>|*?()[\]（）「」《》，。；：！？、]*/i);
+      return m ? { type: "windowsPath", raw: m[0] } : undefined;
+    },
+    renderer(token) {
+      return escapeHtml(token.raw);
+    }
+  };
   marked.use({
     gfm: true,
     breaks: true,
-    // 删除线只认 ~~两道~~：marked 的 GFM 连单个 ~ 也认，中文正文常拿 ~ 写区间（0.13~0.24x、0.1~2 秒），一行有两处便被划掉。
-    // 交回 false 由 marked 原样处理双道的；单道的交回空，不算删除线，落回正文
     tokenizer: {
+      // 删除线只认 ~~两道~~：marked 的 GFM 连单个 ~ 也认，中文正文常拿 ~ 写区间（0.13~0.24x、0.1~2 秒），一行有两处便被划掉。
+      // 交回 false 由 marked 原样处理双道的；单道的交回空，不算删除线，落回正文
       del(src) {
         return src.startsWith("~~") ? false : undefined;
+      },
+      // 链接与图片的目标从原文取回：放在分词这一层，渲染和记成品（只分词，见 22-changes.js）拿到的是同一条路。\( \) 仍算转义，那是配平括号的写法
+      link(src) {
+        const token = marked.Tokenizer.prototype.link.call(this, src),
+          target = token && /^[\s\S]*\]\(\s*(?:<([^>\n]+)>|(\S+?))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)$/.exec(token.raw);
+        const path = target && (target[1] || target[2]);
+        if (path && /^(?:[a-z]:\\|\\\\[\w.-]+\\)/i.test(path)) token.href = path.replace(/\\([()])/g, "$1");
+        return token;
       }
     },
     renderer: {
@@ -65,7 +90,7 @@ function setupMarkdown() {
         return codeBlockHtml(text, lang);
       }
     },
-    extensions: [blockMath, inlineMath]
+    extensions: [blockMath, inlineMath, windowsPath]
   });
   if (window.DOMPurify) {
     // 模型写「下载《x.docx》」时常把链接指向 sandbox:/、file:/// 或一个裸文件名——页面上没有这样的路。
