@@ -357,6 +357,71 @@ test("screenUnreviewable：审查准了也不放行的只有调桥接与藏字�
     assert.equal(screenUnreviewable(command), null, command);
 });
 
+// 必须拦下的清单：规则表（server/sandbox.js 的 RULES）每条至少一例，写明哪几档拦。该拦的拦，不该拦的放行，档位标错或规则漏跟都会红
+test("规则表：每条在它标明的档里拦下，其余的档放行", () => {
+  const tiers = {
+    严: command => screenCommand(command, wd, win),
+    宽: screenLoose,
+    审: screenAutoReview
+  };
+  const every = "严宽审";
+  for (const [command, blocked] of [
+    ["reg add HKLM\\Software\\x", every],
+    ["regedit /s a.reg", every],
+    ["Set-ItemProperty HKCU:\\Software\\x -Name a -Value 1", every],
+    ["schtasks /create /tn x", every],
+    ["schtasks /query", "严"],
+    ["sc stop spooler", every],
+    ["New-Service -Name x", every],
+    ["netsh advfirewall set allprofiles state off", every],
+    ["New-NetFirewallRule -Name x", every],
+    ["net user admin pw /add", every],
+    ["net localgroup administrators x /add", every],
+    ["net use z: \\\\server\\share", "严"],
+    ["New-LocalUser x", every],
+    ["Start-Process notepad -Verb RunAs", every],
+    ["shutdown /s", every],
+    ["icacls a /grant x:F", every],
+    ["wmic process call create calc", every],
+    ["format c:", every],
+    ["Set-ExecutionPolicy Unrestricted", every],
+    ["Add-MpPreference -ExclusionPath x", every],
+    ["Invoke-Expression $script", every],
+    ["powershell -en YwBhAGwAYwA=", every],
+    ["Set-Alias zz Remove-Item", "严宽"],
+    ["sal zz Remove-Item", "严宽"],
+    ["certutil -urlcache -f http://x a", "严"],
+    ["Start-BitsTransfer http://x a", "严"],
+    ["(New-Object Net.WebClient).DownloadString('http://x')", "严"]
+  ])
+    for (const [tier, screenIt] of Object.entries(tiers)) {
+      const why = screenIt(command);
+      if (blocked.includes(tier)) assert.ok(why, `${tier}档该拦：${command}`);
+      else assert.equal(why, null, `${tier}档该放行：${command}`);
+    }
+  // 拒绝的说法照档位冠名，同一条规则只有一句原因
+  assert.equal(screenCommand("shutdown /s", wd, win), "沙箱拒绝：不动系统、磁盘与权限");
+  assert.equal(screenLoose("shutdown /s"), "沙箱拒绝：不动系统、磁盘与权限");
+  assert.equal(screenAutoReview("shutdown /s"), "审查拒绝：不动系统、磁盘与权限");
+});
+
+test("环境变量的两种写法同一份名单：用户目录只归严档，系统目录三档都守", () => {
+  for (const name of ["USERPROFILE", "APPDATA", "TEMP", "SystemDrive"])
+    for (const command of [`Set-Content $env:${name}\\x y`, `Set-Content \${env:${name}}\\x y`, `echo y > %${name}%\\x`]) {
+      assert.match(screen(command), /用户目录|系统目录/, command);
+      assert.equal(screenLoose(command), null, command);
+      assert.equal(screenAutoReview(command), null, command);
+    }
+  for (const name of ["ProgramData", "ProgramFiles", "ProgramW6432", "SystemRoot", "windir"])
+    for (const command of [`Set-Content $env:${name}\\x y`, `Set-Content \${env:${name}}\\x y`, `echo y > %${name}%\\x`]) {
+      assert.match(screen(command), /用户目录|系统目录/, command);
+      assert.match(screenLoose(command), /系统目录/, command);
+      assert.match(screenAutoReview(command), /系统目录/, command);
+    }
+  assert.match(screen("Set-Content ${env:ProgramFiles(x86)}\\x y"), /用户目录|系统目录/);
+  assert.match(screenAutoReview("Set-Content $env:ProgramFiles(x86)\\x y"), /系统目录/);
+});
+
 test("编码指令：PowerShell 认的缩写与 / 写法、短串都算藏字，三档与审查一致；别的程序的 -e、被跑的东西里的 -e 不算", () => {
   const short = "YwBhAGwAYwA=",
     long = "VwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIABlAG4AYwBvAGQAZQBkAC0AcgBhAG4A";
@@ -442,8 +507,8 @@ test("iex：站在指令位上的不论怎么收尾都算藏字，三档一致�
   ]) {
     assert.ok(screenUnreviewable(command), command);
     assert.match(screen(command), /编码/, command);
-    assert.match(screenLoose(command), /隐藏/, command);
-    assert.match(screenAutoReview(command), /隐藏/, command);
+    assert.match(screenLoose(command), /编码或拼接/, command);
+    assert.match(screenAutoReview(command), /编码或拼接/, command);
   }
   for (const command of [
     "rg iex server/",

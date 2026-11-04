@@ -89,7 +89,7 @@ check(
   "藏字的指令：不交审查，照规则回绝",
   state.steps[0]?.status === "error" &&
     !state.steps[0].reviewed &&
-    /隐藏或动态拼接/.test(state.reply) &&
+    /编码或拼接/.test(state.reply) &&
     !existsSync(`${TMP}/review-duty/hard.txt`),
   JSON.stringify({ step: state.steps[0], reply: state.reply.slice(0, 200) })
 );

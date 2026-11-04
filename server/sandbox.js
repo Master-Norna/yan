@@ -11,6 +11,7 @@
 // 纯函数，不碰文件系统；由 server/work/index.js 装配，test/unit 直接测
 "use strict";
 const path = require("node:path");
+const { pathIsInside } = require("./work/paths.js");
 
 const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 // 「指令位」：一行的开头，或 ; & | ( { 之后（& 调用、脚本块也算），只有站在这个位置上的词才算在执行它——
@@ -33,39 +34,57 @@ const HIDDEN = new RegExp(
     String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}`,
     "im"
   ),
-  HIDDEN_WHY = "不代为执行隐藏或动态拼接的指令";
-// 指令里禁用的写法：[正则, 一句原因]。逐条对整段指令文本查，命中即拒
-/** @type {[RegExp, string][]} */
-const FORBIDDEN = [
-  [cmd("reg", String.raw`(?:\.exe)?\s+(?:add|delete|import|restore|load|unload|copy|save)\b`), "不动注册表"],
+  HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
+// 指令里禁用的写法，只此一张表：[正则, 一句原因, 适用的档]。逐条对整段指令文本查，命中即拒。
+// 严＝screenCommand（问而后行）；宽＝screenLoose（审而后行、径行开着沙箱时）；审＝screenAutoReview（审而后行的规则）。
+// 宽与审不是第二个沙箱：常规开发、安装、Git（含回退与清理）、本机进程、联网、整机查看、写到目录之外都放行，只拦明确会伤及宿主机或难以恢复的动作。
+// 它们不向用户请示；拿不准而确实需要做时，模型可以换用结构化工具，或用户切到「问而后行 / 径行」。沙箱开着时沙箱先筛，审查规则再筛
+const EVERY = "严宽审",
+  WIDE = "宽审";
+/** @type {[RegExp, string, string][]} */
+const RULES = [
+  [cmd("reg", String.raw`(?:\.exe)?\s+(?:add|delete|import|restore|load|unload|copy|save)\b`), "不动注册表", EVERY],
   // 注册表：查看放行（启动项、已装软件、驱动版本都在里头，是电脑检查的常规去处），改则拒绝
   [
     new RegExp(String.raw`\bregedit\b|\b(?:${ITEM_WRITERS})\b[^\n]*(?:\bHK(?:LM|CU|CR|U|CC)\s*:|\bHKEY_|\bRegistry::)`, "i"),
-    "不动注册表——查看可以，改不行"
+    "不动注册表——查看可以，改不行",
+    EVERY
   ],
-  [cmd("schtasks"), "不动计划任务"],
-  [cmd("sc", String.raw`(?:\.exe)?\s+(?:create|delete|config|start|stop|failure)\b`), "不动系统服务"],
-  [/\b(New|Set|Remove|Start|Stop|Restart)-Service\b/i, "不动系统服务"],
-  [/\bnetsh(?:\.exe)?\b[^\n]*\b(?:set|add|delete|reset|exec|import)\b/i, "不动网络与防火墙配置"],
-  [/\b(New|Set|Remove)-NetFirewallRule\b|\bSet-DnsClient/i, "不动网络与防火墙配置"],
-  [cmd("net", String.raw`(?:\.exe)?\s+(?:user|localgroup|group|share|use|accounts)\b`), "不动用户与账户"],
-  [/\b(New|Remove|Set|Enable|Disable)-LocalUser\b|\bAdd-LocalGroupMember\b/i, "不动用户与账户"],
-  [/-Verb\s+RunAs\b|(^|\s)sudo\s/i, "不提权"],
-  [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限"],
-  [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不通过 WMI 改系统"],
-  [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不动磁盘"],
-  [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不改执行策略与安全设置"],
-  [HIDDEN, "不用编码或拼接的指令，直接写出来"],
-  [ALIASING, "不定义别名，直接写出指令"],
+  // 计划任务：严档连查看也拦，宽档只拦改动与触发
+  [cmd("schtasks"), "不动计划任务", "严"],
+  [/\bschtasks(?:\.exe)?\b[^\n]*(?:\/create|\/delete|\/change|\/run|\/end)\b/i, "不动计划任务", WIDE],
+  [cmd("sc", String.raw`(?:\.exe)?\s+(?:create|delete|config|start|stop|failure)\b`), "不动系统服务", EVERY],
+  [/\b(New|Set|Remove|Start|Stop|Restart)-Service\b/i, "不动系统服务", EVERY],
+  [/\bnetsh(?:\.exe)?\b[^\n]*\b(?:set|add|delete|reset|exec|import)\b/i, "不动网络与防火墙配置", EVERY],
+  [/\b(New|Set|Remove)-NetFirewallRule\b|\bSet-DnsClient/i, "不动网络与防火墙配置", EVERY],
+  [cmd("net", String.raw`(?:\.exe)?\s+(?:user|localgroup|group|share|accounts)\b`), "不动用户、账户与共享", EVERY],
+  // 映射网络盘只在严档拦：宽档本就放行写到目录之外
+  [cmd("net", String.raw`(?:\.exe)?\s+use\b`), "不动用户、账户与共享", "严"],
+  [/\b(New|Remove|Set|Enable|Disable)-LocalUser\b|\bAdd-LocalGroupMember\b/i, "不动用户与账户", EVERY],
+  [/-Verb\s+RunAs\b|(^|\s)sudo\s/i, "不提权", EVERY],
+  [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限", EVERY],
+  [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不通过 WMI 改系统", EVERY],
+  [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不动磁盘", EVERY],
+  [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不改执行策略与安全设置", EVERY],
+  [HIDDEN, HIDDEN_WHY, EVERY],
+  [ALIASING, "不定义别名，直接写出指令", "严宽"],
   // .NET 联网只认真在用的写法（[System.Net.…]、New-Object Net.…、::new）：rg HttpClient、Select-String System.Net 这类只是搜字的不算
   [
     /\bcertutil(\.exe)?\b[^\n]*-urlcache|\bStart-BitsTransfer\b|\[(?:System\.)?Net\.[\w.]+\]|New-Object\s+(?:-TypeName\s+)?["']?(?:System\.)?Net\.|\[(?:System\.Net\.Http\.)?HttpClient\]/i,
-    "沙箱里不直接外联"
+    "沙箱里不直接外联",
+    "严"
   ]
 ];
+/** 这一档里命中的第一条的原因，没有返回 undefined @param {string} text @param {string} tier */
+const forbiddenWhy = (text, tier) => RULES.find(([pattern, , tiers]) => tiers.includes(tier) && pattern.test(text))?.[1];
+// 环境变量的两种写法（$env:X、${env:X} 与 %X%）从同一份名单生成，补一个名字两边都有
+const envVars = (/** @type {string} */ names) => String.raw`\$\{?env:(?:${names})\b|%(?:${names})%`;
+const SYSTEM_VARS = String.raw`ProgramData|ProgramFiles(?:\(x86\))?|ProgramW6432|SystemRoot|windir`;
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
-const HOME_SYSTEM_PATH =
-  /\$\{?env:(USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)\b|%(USERPROFILE|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir|Public|ALLUSERSPROFILE)%|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)/i;
+const HOME_SYSTEM_PATH = new RegExp(
+  String.raw`${envVars(`USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|Public|ALLUSERSPROFILE|${SYSTEM_VARS}`)}|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)`,
+  "i"
+);
 // 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）。
 // 带引号的只认站在指令位的（& "curl.exe" …）：rg "curl" src 是搜字。curl 的 --connect-to、-x 之类不往下追：静态筛查追不完，问而后行里这些本来就要请示
 const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
@@ -114,33 +133,11 @@ const DIRECT_FILE_MUTATION = new RegExp(
   "im"
 );
 
-// 审而后行不是第二个沙箱：常规开发、安装、Git（含回退与清理）、本机进程、联网、整机查看、写到目录之外都放行，
-// 只拦明确会伤及宿主机或难以恢复的动作：改系统、提权、藏字的指令、整目录与磁盘级删除、往系统目录里写。
-// 它不向用户请示；拿不准而确实需要做时，模型可以换用结构化工具，或用户切到「问而后行 / 径行」。沙箱开着时沙箱先筛，这一档再筛。
-/** @type {[RegExp, string][]} */
-const REVIEW_FORBIDDEN = [
-  [cmd("reg", String.raw`(?:\.exe)?\s+(?:add|delete|import|restore|load|unload|copy|save)\b`), "不代为修改注册表"],
-  [
-    new RegExp(String.raw`\bregedit\b|\b(?:${ITEM_WRITERS})\b[^\n]*(?:\bHK(?:LM|CU|CR|U|CC)\s*:|\bHKEY_|\bRegistry::)`, "i"),
-    "不代为修改注册表"
-  ],
-  [/\bschtasks(?:\.exe)?\b[^\n]*(?:\/create|\/delete|\/change|\/run|\/end)\b/i, "不代为修改或触发计划任务"],
-  [cmd("sc", String.raw`(?:\.exe)?\s+(?:create|delete|config|start|stop|failure)\b`), "不代为修改系统服务"],
-  [/\b(New|Set|Remove|Start|Stop|Restart)-Service\b/i, "不代为修改系统服务"],
-  [/\bnetsh(?:\.exe)?\b[^\n]*\b(?:set|add|delete|reset|exec|import)\b/i, "不代为修改网络与防火墙配置"],
-  [/\b(New|Set|Remove)-NetFirewallRule\b|\bSet-DnsClient/i, "不代为修改网络与防火墙配置"],
-  [cmd("net", String.raw`(?:\.exe)?\s+(?:user|localgroup|group|share|accounts)\b`), "不代为修改用户、账户与共享"],
-  [/\b(New|Remove|Set|Enable|Disable)-LocalUser\b|\bAdd-LocalGroupMember\b/i, "不代为修改用户与账户"],
-  [/-Verb\s+RunAs\b|(^|\s)sudo\s/i, "不代为提权"],
-  [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不代为提权或修改系统、磁盘与权限"],
-  [cmd("format", String.raw`(?:\.com)?\s+[a-z]:`), "不代为格式化磁盘"],
-  [/\bSet-ExecutionPolicy\b|\b(Set|Add|Remove)-MpPreference\b/i, "不代为修改执行策略与安全设置"],
-  [HIDDEN, HIDDEN_WHY],
-  [/\bwmic(?:\.exe)?\b[^\n]*\b(?:call|delete)\b/i, "不代为通过 WMI 修改系统"]
-];
 // 审而后行只守系统目录；POSIX 的 /usr、/etc、macOS 的 /System 等也认。用户目录、临时目录、别的项目照常可写。
-const REVIEW_SYSTEM_PATH =
-  /\$\{?env:(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)\b|%(ProgramData|ProgramFiles(\(x86\))?|ProgramW6432|SystemRoot|windir)%|(?<![A-Za-z0-9_])[a-z]:[\\/](?:windows|program files(?: \(x86\))?|programdata)(?=[\\/\s"']|$)|(?:^|[\s"'=])\/(?:usr|etc|bin|sbin|boot|lib(?:32|64)?|opt|System|Library|Applications|private\/(?:etc|var)|var\/(?:db|lib|log|run))(?=[\/\s"']|$)/i;
+const REVIEW_SYSTEM_PATH = new RegExp(
+  String.raw`${envVars(SYSTEM_VARS)}|(?<![A-Za-z0-9_])[a-z]:[\\/](?:windows|program files(?: \(x86\))?|programdata)(?=[\\/\s"']|$)|(?:^|[\s"'=])\/(?:usr|etc|bin|sbin|boot|lib(?:32|64)?|opt|System|Library|Applications|private\/(?:etc|var)|var\/(?:db|lib|log|run))(?=[\/\s"']|$)`,
+  "i"
+);
 const BROAD_DELETE =
   /\bRemove-Item\b(?=[^\n]*(?:-Recurse|-Force))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
 
@@ -149,10 +146,6 @@ function normalizeLower(p) {
     .normalize(p)
     .replace(/(?<=.)[\\/]+$/, "")
     .toLowerCase();
-}
-function inside(root, target) {
-  const rel = path.relative(root, target);
-  return !rel || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 // 指令文本里所有像绝对路径的片段：盘符（C:\… 与 C:/…，光秃的 C: 也算——那是盘符相对路径）、UNC（\\server\share 与 //server/share，
 // 正斜杠的要带出第二段：//todo 多半是代码注释）；非 Windows 上再加 POSIX 根（/usr/…）。URL 里的 http: 与 key:value 这类前面贴着字母的不算
@@ -211,7 +204,7 @@ function screenWritePaths(text, workdir, win, prefix) {
   for (const raw of absolutePathsIn(writeText, win)) {
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
     const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
-    if (!inside(root, candidate))
+    if (!pathIsInside(root, candidate))
       return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
   }
   return null;
@@ -225,7 +218,8 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const text = String(command || "");
   if (callsBridge(text)) return `沙箱拒绝：${BRIDGE_WHY}`;
   const win = platform === "win32";
-  for (const [pattern, why] of FORBIDDEN) if (pattern.test(text)) return `沙箱拒绝：${why}`;
+  const forbidden = forbiddenWhy(text, "严");
+  if (forbidden) return `沙箱拒绝：${forbidden}`;
   if (SECRET_PATH_IN_COMMAND.test(text)) return "沙箱拒绝：指令不读写 .env、密钥或凭据文件；需要普通配置时请改用不含机密的文件";
   if (GIT_INTERNAL_PATH.test(text) && DIRECT_FILE_MUTATION.test(text)) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
   // 目录这一道只锁「写」：查看整台机器是电脑检查的本分，锁住读等于把这件事堵死
@@ -248,7 +242,8 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
 function screenAutoReview(command) {
   const text = String(command || "");
   if (callsBridge(text)) return `审查拒绝：${BRIDGE_WHY}`;
-  for (const [pattern, why] of REVIEW_FORBIDDEN) if (pattern.test(text)) return `审查拒绝：${why}`;
+  const forbidden = forbiddenWhy(text, "审");
+  if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
   if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
@@ -263,8 +258,8 @@ function screenAutoReview(command) {
 function screenLoose(command) {
   const text = String(command || "");
   if (callsBridge(text)) return `沙箱拒绝：${BRIDGE_WHY}`;
-  for (const [pattern, why] of REVIEW_FORBIDDEN) if (pattern.test(text)) return `沙箱拒绝：${why.replace(/^不代为/, "不")}`;
-  if (ALIASING.test(text)) return "沙箱拒绝：不定义别名，直接写出指令";
+  const forbidden = forbiddenWhy(text, "宽");
+  if (forbidden) return `沙箱拒绝：${forbidden}`;
   if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
     return "沙箱拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
@@ -305,7 +300,7 @@ function screenStorePath(full, root) {
   if (!root) return null;
   const base = normalizeLower(path.resolve(root)),
     target = normalizeLower(path.resolve(full));
-  return STORE_SECRETS.some(name => inside(normalizeLower(path.join(base, name)), target)) ? `拒绝：${STORE_WHY}` : null;
+  return STORE_SECRETS.some(name => pathIsInside(normalizeLower(path.join(base, name)), target)) ? `拒绝：${STORE_WHY}` : null;
 }
 /**
  * 指令文本里点没点到这几样：写了它们的名字，且又写了存储根（或 .yan），或就在存储根里跑（卷宗、工作都在根下，..\配置.json 即到）；
@@ -320,7 +315,8 @@ function screenStoreCommand(command, root, workdir) {
     // 对指令文本的那份换成反斜杠；比目录用原样的，不然 macOS 上两边斜杠对不上、在根下跑也认不出
     base = rootPath.replace(/\//g, "\\"),
     named = STORE_SECRETS.some(name => text.includes(name.toLowerCase())),
-    near = text.includes(base) || /\\\.yan(?:\\|["'\s]|$)/.test(text) || inside(rootPath, normalizeLower(path.resolve(workdir || "")));
+    near =
+      text.includes(base) || /\\\.yan(?:\\|["'\s]|$)/.test(text) || pathIsInside(rootPath, normalizeLower(path.resolve(workdir || "")));
   if (named && near) return `拒绝：${STORE_WHY}`;
   const wild = new RegExp(`(?:${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|\\\\\\.yan)\\\\\\*`);
   return wild.test(text) ? `拒绝：${STORE_WHY}` : null;
