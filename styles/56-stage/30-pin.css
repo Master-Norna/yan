@@ -1,71 +1,118 @@
-/* 游目的入口：自页顶垂下的一笔朱竖，起笔顿、收笔出锋（与余墨、听音同一套笔墨，见 设计稿/30 甲）。靠近时笔往下舒一点，笔尖下浮出「游目」两字；
-   模型正操作浏览器时笔尖下一粒朱一明一暗。挂在右缘内侧，离滚动条的命中层（.chat-scroll-grabber，贴右缘 14px、自顶栏下起）远远的。
-   落选的：圆角带影、左缘一道朱条的书口签（网页侧边抽屉的通用画法）；绸带（与余墨、听音不是一种画法） */
+/* 游目的入口：自页顶垂下一幅立轴（画法见 src/26-stage/20-panel.js 的 stagePinInk，与听音那一缕同是「线坠一物」），三态只差 data-state：
+   未开卷成一根轴、朱带束着；开着展开；在用时轴轻摆、朱日外一晕。卷与展用全应用的展开曲线。指针靠近浮出纸签，只写「游目」——态已在形上，不再注字。
+   挂在右缘内侧，离滚动条的命中层（.chat-scroll-grabber，贴右缘 14px、自顶栏下起）远远的。
+   落选的：一笔朱竖（开没开一个样，旁边几件都有个物，它只是一根棍）；垂目（盯人）、小轩窗（实际尺寸下方框偏硬）、垂灯（喜庆，与游目不沾边），见 设计稿/138；
+   朱日外一道硬圈（像靶心，设计稿/138 丙）；圆角带影、左缘一道朱条的书口签（网页侧边抽屉的通用画法）；绸带（与余墨、听音不是一种画法） */
 .stage-pin {
   position: absolute;
   right: 24px;
   top: 0;
   z-index: 8;
   width: 22px;
-  height: 74px;
+  height: 58px;
   padding: 0;
 }
 .stage-pin-ink {
   position: absolute;
-  left: 5px;
+  left: 0;
   top: 0;
-  width: 12px;
-  height: 64px;
+  width: 22px;
+  height: 56px;
   overflow: visible;
-  transform-origin: top center;
-  transition: transform 0.28s var(--ease-ink);
+  transition:
+    transform 0.28s var(--ease-ink),
+    opacity 0.4s var(--ease-ink);
 }
 .stage-pin:hover .stage-pin-ink,
 .stage-pin:focus-visible .stage-pin-ink {
-  transform: scaleY(1.16);
+  transform: translateY(2px);
 }
-/* 两字浮在笔尖之下（不往左浮：左边挂着听音那一缕） */
-.stage-pin-text {
-  position: absolute;
-  left: 50%;
-  top: 80px;
-  color: var(--ink-2);
-  font: var(--fs-small) var(--title);
-  letter-spacing: 0.3em;
-  writing-mode: vertical-rl;
-  white-space: nowrap;
+.stage-pin-ink .heart {
+  fill: var(--paper);
+}
+.stage-pin-ink .hill-far {
+  fill: color-mix(in srgb, var(--ink) 13%, transparent);
+}
+.stage-pin-ink .hill-near {
+  fill: color-mix(in srgb, var(--ink) 26%, transparent);
+}
+.scroll-paper {
+  clip-path: inset(0);
+  transition: clip-path 0.4s var(--ease-ink);
+}
+.scroll-foot {
+  transition: transform 0.4s var(--ease-ink);
+}
+.scroll-tie {
   opacity: 0;
-  transform: translate(-50%, -4px);
-  transition:
-    opacity var(--dur-quick),
-    transform 0.28s var(--ease-ink);
+  transition: opacity 0.4s var(--ease-ink);
 }
-.stage-pin:hover .stage-pin-text,
-.stage-pin:focus-visible .stage-pin-text {
+.scroll-glow {
+  fill-opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+/* 卷着只有短短一截：指针的范围与纸签都跟着收上来，不悬在半空 */
+.stage-pin[data-state="off"] {
+  height: 26px;
+}
+.stage-pin[data-state="off"] .stage-pin-ink {
+  opacity: 0.62;
+}
+.stage-pin[data-state="off"] .scroll-paper {
+  clip-path: inset(0 0 100% 0);
+}
+/* 地杆卷上来盖住天杆，只剩一根轴 */
+.stage-pin[data-state="off"] .scroll-foot {
+  transform: translateY(-35.4px);
+}
+.stage-pin[data-state="off"] .scroll-tie {
   opacity: 1;
-  transform: translate(-50%, 0);
 }
-.stage-pin.busy::after {
-  content: "";
-  position: absolute;
-  left: 8.5px;
-  top: 70px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
-  animation: stageLine 1.6s ease-in-out infinite;
+.stage-pin[data-state="act"] .scroll {
+  transform-origin: 11px 0;
+  animation: scrollSway 3.2s ease-in-out infinite;
 }
-@keyframes stageLine {
-  50% {
-    opacity: 0.35;
+.stage-pin[data-state="act"] .scroll-glow {
+  animation: scrollGlow 1.8s ease-in-out infinite;
+}
+@keyframes scrollSway {
+  0%,
+  100% {
+    transform: rotate(1.8deg);
   }
+  50% {
+    transform: rotate(-1.8deg);
+  }
+}
+@keyframes scrollGlow {
+  0%,
+  100% {
+    fill-opacity: 0.2;
+  }
+  50% {
+    fill-opacity: 0.42;
+    transform: scale(1.2);
+  }
+}
+/* 纸签与余墨同一张（.quota-tip，10-layout.css），挂在立轴下、右缘对齐；按钮窄（22px），宽度要自己撑 */
+.stage-pin-text {
+  width: max-content;
 }
 @media (prefers-reduced-motion: reduce) {
   .stage-pin-ink,
-  .stage-pin-text {
+  .stage-pin-text,
+  .scroll-paper,
+  .scroll-foot,
+  .scroll-tie {
     transition: none;
+  }
+  .stage-pin[data-state="act"] .scroll {
+    animation: none;
+  }
+  .stage-pin[data-state="act"] .scroll-glow {
+    animation: none;
+    fill-opacity: 0.32;
   }
   .stage-nav.loading::after {
     width: 100%;

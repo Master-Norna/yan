@@ -51,17 +51,48 @@ function stageSetWidth(px) {
   stage.width = Math.round(Math.max(320, Math.min(px, innerWidth - 420)));
   $("#stagePanel").style.width = `${stage.width}px`;
 }
-// 入口那一笔：接了浏览器类的 MCP（或浏览器已开着）、游目收着（或被旁注挤开）时自页顶垂下；模型正操作浏览器时笔尖下一粒朱一明一暗
+// 入口的立轴（22 × 56 的画幅）：朱绦分两股系在天杆上，裱与画心两层，两片染的山、一点朱日，地杆两头露轴头。
+// 卷与展靠 CSS 挪地杆、遮画面（styles/56-stage/30-pin.css），朱带只在卷着时现；几个部件都常在，态与态之间才走得出动效
+function stagePinInk() {
+  const rod = 14,
+    foot = 50,
+    sun = { x: 8.6, y: 23.5 },
+    knob = x => `<rect class="ink" x="${x}" y="${foot - 1.3}" width="1.8" height="2.6" rx=".8"/>`;
+  const cord =
+      brushStroke([11, 0, 10.7, 4, 11, 8], 1.7, { tone: "zhu", head: 1, tail: 0.85 }) +
+      brushStroke([11, 8, 8, 10.6, 5.2, rod], 0.9, { tone: "zhu", head: 1, tail: 0.8 }) +
+      brushStroke([11, 8, 14, 10.6, 16.8, rod], 0.9, { tone: "zhu", head: 1, tail: 0.8 }),
+    top = brushStroke([3.4, rod + 0.2, 11, rod - 0.3, 18.6, rod + 0.2], 1.5, { head: 1, tail: 0.8 }),
+    hills =
+      `<path class="hill-far" d="M6.2 37.4C8 34.6 9.2 34 10.4 35.2C11.8 32 13.4 30.6 15.8 34.4L15.8 44.4L6.2 44.4Z"/>` +
+      `<path class="hill-near" d="M6.2 41.4C7.6 38.4 9.4 37.2 11 40C12.2 38.8 14 39 15.8 41.8L15.8 44.4L6.2 44.4Z"/>` +
+      brushStroke([6.3, 41.3, 8.6, 37, 11, 40, 13, 38.2, 15.7, 41.7], 0.6, { tail: 0.3 }),
+    paper =
+      `<rect class="wash" x="4.6" y="${rod}" width="12.8" height="${foot - rod}"/>` +
+      `<rect class="heart" x="6.2" y="17.4" width="9.6" height="27"/>` +
+      hills +
+      `<circle class="zhu scroll-glow" cx="${sun.x}" cy="${sun.y}" r="3.8"/>` +
+      brushDot(sun.x, sun.y, 1.9, "zhu"),
+    roller = brushStroke([3, foot, 11, foot - 0.3, 19, foot], 3, { head: 1, tail: 0.9 }) + knob(1.5) + knob(18.7);
+  return `<g class="scroll">${cord}${top}<g class="scroll-paper">${paper}</g><g class="scroll-foot">${roller}</g><rect class="zhu scroll-tie" x="10.1" y="${rod - 1.6}" width="1.8" height="4.4" rx=".3"/></g>`;
+}
+// 执事在不在用浏览器：调用在途；这一答碰过浏览器而还没答完（步与步之间不灭，帮手还在做也算）；歇手不到八秒
+function stageActing() {
+  for (const id of stage.usedBy) if (!requestJobs.has(id) && !crews.has(id)) stage.usedBy.delete(id);
+  return stage.busy > 0 || stage.usedBy.size > 0 || Date.now() - stage.lastAct < 8000;
+}
+// 入口：接了浏览器类的 MCP（或浏览器已开着）、游目收着（或被旁注挤开）时自页顶垂下；未开卷着，开着展开，在用轻摆
 function stageSync() {
-  const pin = $("#stagePin");
+  const pin = $("#stagePin"),
+    acting = stageActing();
   pin.classList.toggle("hidden", (!stage.ws && !stageServer()) || stageVisible());
-  pin.classList.toggle("busy", stage.busy > 0);
-  // 地址行的「执事」：执事在动、或歇手不到八秒时挂着，指着浮出近几步
-  const acting = stage.busy > 0 || Date.now() - stage.lastAct < 8000;
+  pin.dataset.state = acting ? "act" : stage.ws ? "open" : "off";
+  // 地址行的「执事」：在用时挂着，指着浮出近几步
   $("#stageBusy").classList.toggle("hidden", !acting);
   $("#stageBusy").classList.toggle("busy", stage.busy > 0);
   clearTimeout(stage.actTimer);
-  if (acting && !stage.busy) stage.actTimer = window.setTimeout(stageSync, 8000 - (Date.now() - stage.lastAct) + 50);
+  // 这一答何时收尾这里不知道：在用而没有在途调用时隔一会儿再看一回
+  if (acting && !stage.busy) stage.actTimer = window.setTimeout(stageSync, 1500);
   // 收藏：连上了就挂（收藏此页要它）；没连上时浏览器配置目录里有收藏也挂，点一条可开
   $("#stageMarks").classList.toggle("hidden", !stage.ws && !stage.marks);
   stageRender();
@@ -594,7 +625,7 @@ function stageRender() {
   if (!stageShown()) return;
   // 标签是一行字、丝栏相隔；当前那张底下一笔朱，执事所在的那张题后一粒朱
   const under = brushStroke([1, 2.6, 9, 1.8, 17, 2.4], 2.2, { tone: "zhu", tail: 0 }),
-    acting = stage.busy > 0 || Date.now() - stage.lastAct < 8000;
+    acting = stageActing();
   $("#stageTabs").innerHTML = [...stage.tabs]
     .map(
       ([id, tab]) =>
@@ -624,13 +655,15 @@ function stageRender() {
   $("#stageView").classList.toggle("empty", !!empty);
 }
 /**
- * 浏览器类的 MCP 调用（playwright 的 browser_*）进行时点一粒朱、记一笔它在做什么；调完去找一回浏览器——它多半是这一下起的
+ * 浏览器类的 MCP 调用（playwright 的 browser_*）进行时记一笔它在做什么，入口与地址行都据此报「在用」；调完去找一回浏览器——它多半是这一下起的
  * @param {string} tool
  * @param {Record<string, any>} [args]
+ * @param {string} [conversationId] 哪段对话调的：那一答没收尾之前都算在用
  */
-function stageWatch(tool, args = {}) {
+function stageWatch(tool, args = {}, conversationId = "") {
   if (!/^browser_/.test(tool)) return () => {};
   stage.busy += 1;
+  if (conversationId) stage.usedBy.add(conversationId);
   stage.trail = [...stage.trail, { text: stageActionText(tool, args), at: Date.now() }].slice(-6);
   stage.lastAct = Date.now();
   stageSync();

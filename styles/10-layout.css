@@ -753,18 +753,18 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   align-items: center;
   gap: 4px;
 }
-/* 右缘内侧自页顶垂下的游目一笔、听音一缕：顶栏右的两件给它们让出位置 */
+/* 右缘内侧自页顶垂下的游目立轴、听音一缕：顶栏右的两件给它们让出位置 */
 .main:has(> #stagePin:not(.hidden)) .top-actions,
 .main:has(> #listenPendant:not(.hidden)) .top-actions {
-  margin-right: 30px;
+  margin-right: 44px;
 }
 .main:has(> #stagePin:not(.hidden)):has(> #listenPendant:not(.hidden)) .top-actions {
-  margin-right: 60px;
+  margin-right: 74px;
 }
 .top-sep {
   width: 1px;
   height: 14px;
-  margin: 0 6px;
+  margin: 0 10px;
   background: color-mix(in srgb, var(--line) 85%, transparent);
 }
 /* 明暗：一笔圆相，半边染墨（昼夜各半）；换明暗时这一染转过半圈，悬停先转一点示意。
@@ -846,7 +846,9 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   pointer-events: none;
 }
 .quota:hover .quota-tip,
-.quota:focus-visible .quota-tip {
+.quota:focus-visible .quota-tip,
+.stage-pin:hover .quota-tip,
+.stage-pin:focus-visible .quota-tip {
   opacity: 1;
   visibility: visible;
   transform: none;

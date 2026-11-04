@@ -267,7 +267,7 @@ async function runMcpTool(step, server, tool, args, ctx) {
     if (denied) return denied;
   }
   const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal).finally(
-    stageWatch(tool, args)
+    stageWatch(tool, args, ctx.conversation?.id)
   );
   // 服务说工具变了：下一问前重拉
   if (data.toolsChanged) mcp.key = "";

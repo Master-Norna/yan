@@ -69,6 +69,8 @@ const stage = {
   trail: [],
   // 执事最近一步的时刻：地址行那两字「执事」在它歇手后再留一会儿
   lastAct: 0,
+  /** @type {Set<string>} 调过浏览器、这一答还没收尾的对话 */
+  usedBy: new Set(),
   actTimer: 0,
   // 输入法：正在组字（组字当中不挪隐藏输入框）、量光标的计时
   composing: false,
