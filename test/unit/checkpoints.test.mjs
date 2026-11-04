@@ -209,6 +209,100 @@ test("这一答动了忽略规则：那一刻忽略的文件露出来也不算�
   }
 });
 
+// 不变量：随机改一通（增删改、改名、夹换文件、动忽略规则）再退回，
+// 那一刻记下的字节不差；这一答没碰过的（连同被忽略的）原样还在；新加的（不算那一刻起就被忽略的）删去。
+// 这一答新加、又被它新写的规则盖住的文件看不见，退回时留着（占了记下那件的路就报一笔「没能动」）：不伤数据，这里不造这种情形，
+// 所以 docs/ 下不把文件换成夹——规则可能换成 docs/
+test("不变量：随机改动后退回，记下的回原样、没碰的不动、新加的删去", async () => {
+  const random = seed => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let mixed = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    { post, close } = await serve(path.join(base, "检查点"));
+  try {
+    for (let seed = 1; seed <= 40; seed++) {
+      const roll = random(seed),
+        pick = list => list[Math.floor(roll() * list.length)],
+        chance = rate => roll() < rate,
+        root = path.join(base, `work-${seed}`),
+        key = { root, conversation: `c${seed}`, answer: "m1" },
+        tag = `种子 ${seed}`;
+      write(root, ".gitignore", "*.log\n.env\ndata/\n");
+      write(root, ".git/info/exclude", "local.db\ndrafts/\n");
+      write(root, "sub/.gitignore", "*.bin\n");
+      const kept = [".env", "local.db", "run.log", "data/train.csv", "data/deep/a.csv", "drafts/d.md", "sub/w.bin", "sub/x.log"],
+        tracked = ["a.txt", "b.txt", "src/c.js", "src/deep/d.js", "docs/e.md", "docs/f.md", "sub/g.txt"];
+      for (const rel of [...kept, ...tracked]) write(root, rel, `原 ${rel} ${seed}`);
+      const before = tree(root);
+      await post("/api/checkpoint/take", key);
+      // 被忽略的挑几件也动一动：动过的不再要求原样
+      const touched = new Set(),
+        added = [];
+      for (const rel of kept)
+        if (chance(0.2)) {
+          touched.add(rel);
+          if (chance(0.5)) write(root, rel, `改 ${rel}`);
+          else fs.rmSync(path.join(root, rel));
+        }
+      const alive = new Set(tracked);
+      const rounds = 3 + Math.floor(roll() * 12);
+      for (let i = 0; i < rounds; i++) {
+        const rel = alive.size ? pick([...alive]) : "",
+          fresh = `new-${i}${pick(["", "/x", "/y/z"])}.txt`;
+        switch (rel ? Math.floor(roll() * 5) : 0) {
+          case 0:
+            write(root, fresh, "新");
+            added.push(fresh);
+            break;
+          case 1:
+            write(root, rel, "改过");
+            break;
+          case 2:
+            fs.rmSync(path.join(root, rel));
+            alive.delete(rel);
+            break;
+          case 3:
+            fs.renameSync(path.join(root, rel), path.join(root, `moved-${i}.txt`));
+            alive.delete(rel);
+            added.push(`moved-${i}.txt`);
+            break;
+          case 4:
+            if (rel.startsWith("docs/")) break;
+            fs.rmSync(path.join(root, rel));
+            alive.delete(rel);
+            write(root, `${rel}/inner.txt`, "文件换成了夹");
+            added.push(`${rel}/inner.txt`);
+            break;
+        }
+      }
+      // 动忽略规则：放开、换掉、删去，也有把记下的文件盖住的（docs/ 退回时仍要回原样）
+      const rules = pick([
+        () => {},
+        () => fs.rmSync(path.join(root, ".gitignore")),
+        () => write(root, ".gitignore", "*.tmpx\n"),
+        () => write(root, ".gitignore", "docs/\n"),
+        () => write(root, ".git/info/exclude", ""),
+        () => fs.rmSync(path.join(root, "sub/.gitignore"), { force: true })
+      ]);
+      rules();
+      const done = await post("/api/checkpoint/restore", key);
+      assert.deepEqual(done.failed, [], tag);
+      const after = tree(root);
+      for (const rel of tracked) assert.equal(after[rel], before[rel], `${tag}：记下的 ${rel} 回原样`);
+      for (const rel of [".gitignore", "sub/.gitignore"]) assert.equal(after[rel], before[rel], `${tag}：规则 ${rel} 回原样`);
+      for (const rel of kept) if (!touched.has(rel)) assert.equal(after[rel], before[rel], `${tag}：没碰的 ${rel} 不动`);
+      for (const rel of added) assert.equal(after[rel], undefined, `${tag}：新加的 ${rel} 删去`);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("存储根在目录里头时不记它；目录不在、id 不对的报错", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     points = createCheckpoints({ home: () => path.join(base, ".yan", "检查点"), skip: () => [path.join(base, ".yan")] });
