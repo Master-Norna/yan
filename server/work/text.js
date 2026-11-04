@@ -95,7 +95,10 @@ function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
   const at = new Map();
   lines.forEach((line, i) => {
     const text = line.trim();
-    if (text) at.set(text, [...(at.get(text) || []), i]);
+    if (!text) return;
+    const seen = at.get(text);
+    if (seen) seen.push(i);
+    else at.set(text, [i]);
   });
   const votes = new Map();
   for (const { k, text } of voters) for (const i of at.get(text) || []) votes.set(i - k, (votes.get(i - k) || 0) + 1);

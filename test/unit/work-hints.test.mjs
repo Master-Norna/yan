@@ -75,3 +75,10 @@ test("nearestPassage：只对上一行短行的不算像", () => {
   assert.equal(nearestPassage("a\nelse:\nb\n", "if x:\n    y\nelse:\n    z"), "");
   assert.match(nearestPassage("one\ntwo three four\nfive\n", "two three four"), /2│two three four/);
 });
+test("nearestPassage：满文件重复行也不退化（同步运算，慢了卡住整个桥接）", () => {
+  const source = Array(200000).fill("  },").join("\n"),
+    started = Date.now();
+  assert.equal(nearestPassage(source, "nothing here to match\nanother line here\n"), "");
+  // 逐次复制数组时这一档要一分多钟；线性只要几十毫秒，这里留足余量
+  assert.ok(Date.now() - started < 5000, `${Date.now() - started} ms`);
+});
