@@ -139,21 +139,37 @@ function setupQuoteTip() {
     current = null;
     if (!tip.classList.contains("hidden")) tip.classList.add("hidden");
   };
+  const place = rect => {
+    // 先现出来再量：藏着时没有宽高
+    tip.classList.remove("hidden");
+    placeFloating(tip, rect, { side: "above", align: "center", gap: 8, edge: 8 });
+  };
   const check = () => {
     const picked = selectionAnchor();
     if (!picked) return hide();
     const { rect, ...anchor } = picked;
     current = anchor;
     tip.querySelectorAll('[data-tip="note"], .quote-tip-sep').forEach(el => el.classList.toggle("hidden", !!anchor.quoteOnly));
-    // 先现出来再量：藏着时没有宽高
-    tip.classList.remove("hidden");
-    placeFloating(tip, rect, { side: "above", align: "center", gap: 8, edge: 8 });
+    place(rect);
   };
   document.addEventListener("selectionchange", () => {
     clearTimeout(timer);
     timer = setTimeout(check, 120);
   });
-  $("#chatScroll").addEventListener("scroll", hide, { passive: true });
+  // 滚动不算放弃这处划选：选区没变就不会再有 selectionchange，这里收了便再也回不来（生成中跟随到底时浮条一闪即逝）。只跟着挪，翻出视口才藏，翻回来还在
+  const scroller = $("#chatScroll");
+  scroller.addEventListener(
+    "scroll",
+    () => {
+      const selection = getSelection();
+      if (!current || !selection?.rangeCount) return;
+      const rect = selection.getRangeAt(0).getBoundingClientRect(),
+        box = scroller.getBoundingClientRect();
+      if (rect.bottom <= box.top || rect.top >= box.bottom) tip.classList.add("hidden");
+      else place(rect);
+    },
+    { passive: true }
+  );
   tip.addEventListener("pointerdown", event => event.preventDefault()); // 别让点击把划选清掉
   tip.addEventListener("click", event => {
     const button = event.target.closest("[data-tip]");

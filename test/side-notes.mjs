@@ -379,6 +379,28 @@ await evalJs(
   `(() => { const p = [...document.querySelectorAll('#messages .message.assistant .markdown p')].at(-1); const t = p.firstChild; const r = document.createRange(); const i = t.data.indexOf("StructRAG", t.data.indexOf("StructRAG") + 1); r.setStart(t, i); r.setEnd(t, i + 9); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return true; })()`
 );
 await waitFor(`!document.querySelector("#quoteTip").classList.contains("hidden")`);
+// 划选之后内容长高、跟随滚到底（图、字体晚到）：浮条跟着选区走，不丢；翻出视口才藏，翻回来还在，点下去照样落得上
+const tipHidden = `document.querySelector("#quoteTip").classList.contains("hidden")`;
+await evalJs(
+  `(d => { d.id = "tipSpacer"; d.style.height = "1500px"; document.querySelector("#messages").prepend(d); return true; })(document.createElement("div"))`
+);
+await sleep(300);
+const grown = await evalJs(
+  `(() => { const r = document.querySelector("#quoteTip").getBoundingClientRect(), s = getSelection().getRangeAt(0).getBoundingClientRect(); return { hidden: ${tipHidden}, above: r.bottom <= s.top, offset: Math.round(r.left + r.width / 2 - (s.left + s.width / 2)), top: document.querySelector("#chatScroll").scrollTop }; })()`
+);
+check(
+  "tip follows the selection when the column grows and scrolls",
+  !grown.hidden && grown.above && Math.abs(grown.offset) <= 1 && grown.top > 1000,
+  JSON.stringify(grown)
+);
+await evalJs(`document.querySelector("#chatScroll").scrollTop = 0; true`);
+await sleep(200);
+check("tip hides while the selection is scrolled out of view", await evalJs(tipHidden));
+await evalJs(`(h => { h.scrollTop = h.scrollHeight; return true; })(document.querySelector("#chatScroll"))`);
+await sleep(200);
+check("tip comes back when the selection scrolls back", !(await evalJs(tipHidden)));
+await evalJs(`document.querySelector("#tipSpacer").remove(); true`);
+await sleep(200);
 await evalJs(`document.querySelector('#quoteTip [data-tip="note"]').click(); true`);
 await sleep(300);
 const twice = await evalJs(
