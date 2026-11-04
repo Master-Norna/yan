@@ -113,9 +113,9 @@ function findOnPath(command, env) {
 // 事件流逐条读出：每条事件交给 onEvent(event, data)
 async function readEvents(response, onEvent) {
   const decoder = new TextDecoder();
-  let buffer = "";
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true }).replace(/\r\n?/g, "\n");
+  let buffer = "",
+    carry = "";
+  const drain = () => {
     let index;
     while ((index = buffer.indexOf("\n\n")) >= 0) {
       const block = buffer.slice(0, index);
@@ -128,6 +128,17 @@ async function readEvents(response, onEvent) {
       }
       if (data.length) onEvent(event, data.join("\n"));
     }
+  };
+  for await (const chunk of response.body) {
+    // 块尾的 \r 留到下一块再认：它若与下一块开头的 \n 是同一个换行，分开换就成了两个，事件被拦腰切开
+    const text = carry + decoder.decode(chunk, { stream: true });
+    carry = text.endsWith("\r") ? "\r" : "";
+    buffer += (carry ? text.slice(0, -1) : text).replace(/\r\n?/g, "\n");
+    drain();
+  }
+  if (carry) {
+    buffer += "\n";
+    drain();
   }
 }
 async function httpError(response) {
@@ -259,4 +270,4 @@ function createTransport(config, toolEnv) {
   throw Error("配置里既没有 command 也没有 url");
 }
 
-module.exports = { createTransport, SseTransport };
+module.exports = { createTransport, SseTransport, readEvents };

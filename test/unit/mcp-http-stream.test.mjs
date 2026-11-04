@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { createTransport } = require("../../server/mcp/transports.js");
+const { createTransport, readEvents } = require("../../server/mcp/transports.js");
 
 // 一个回事件流的假服务：流先不结束，由测试决定何时出错
 function fakeStream() {
@@ -41,6 +41,26 @@ test("事件流半路断了：等这条回复的那一问收到错误", async t 
   assert.equal(got.length, 1);
   assert.equal(got[0].id, 7);
   assert.match(got[0].error.message, /事件流中断/);
+});
+
+test("事件流读取：\\r\\n 被切在两块之间，事件不被拦腰切开、不丢事件名", async () => {
+  const read = async chunks => {
+    const got = [];
+    await readEvents({ body: chunks.map(text => Buffer.from(text)) }, (event, data) => got.push([event, data]));
+    return got;
+  };
+  assert.deepEqual(await read(["event: message\r\ndata: a\r", "\ndata: b\r\n\r\n"]), [["message", "a\nb"]]);
+  assert.deepEqual(await read(["event: endpoint\r", "\ndata: /messages?s=1\r\n\r\n"]), [["endpoint", "/messages?s=1"]]);
+  assert.deepEqual(await read(["data: a\r\n\r", "\ndata: b\r\n\r\n"]), [
+    ["message", "a"],
+    ["message", "b"]
+  ]);
+  // 只用 \r 换行的：流收尾时留着的那个 \r 也要算数
+  assert.deepEqual(await read(["data: a\r\r"]), [["message", "a"]]);
+  assert.deepEqual(await read(["data: a\n\n", "data: b\n\n"]), [
+    ["message", "a"],
+    ["message", "b"]
+  ]);
 });
 
 test("自己 close() 掐的流不当作出错", async t => {
