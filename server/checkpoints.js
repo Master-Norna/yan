@@ -5,6 +5,7 @@
 //   检查点/<目录短码>/索引.json         上回见过的 路径 → [大小, 修改时刻, 哈希]：大小、时刻都没变的不重读，第二回起只读变了的
 // 不进的：列目录、检索也不钻的那几类（node_modules、.git、dist……，见 work/paths.js 的 WORK_SKIP），.gitignore 里写了的，链接，
 // 存储根本身（工作目录把它包在里面时）；.git/info/exclude 与 .gitignore 同样认。读不了的文件（被占着）记一笔「不明」，退回时不动它——不能因为没读到就当它不该在。
+// 忽略的也记一笔「不明」：这一答可能改了忽略规则，那一刻忽略的（.env、数据集）此刻露了出来，它们没进快照也恢复不了，不能当这一答新加的删掉。
 // 只管目录里的文件：指令写到目录之外的、MCP 改的远端，都退不了
 "use strict";
 const fs = require("node:fs");
@@ -163,7 +164,11 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
           sub = rel ? `${rel}/${entry.name}` : entry.name;
         if (entry.isSymbolicLink() || skipped.some(dir => same(dir, full))) continue;
         if (entry.isDirectory()) {
-          if (WORK_SKIP.has(entry.name) || ignored(own, sub, true)) continue;
+          if (WORK_SKIP.has(entry.name)) continue;
+          if (ignored(own, sub, true)) {
+            items.push(["x", entry.name]);
+            continue;
+          }
           let inner;
           try {
             inner = await down(full, sub, own);
@@ -173,8 +178,7 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
           }
           items.push(["d", entry.name, inner]);
         } else if (entry.isFile()) {
-          if (ignored(own, sub, false)) continue;
-          items.push(await visit(full, sub, entry.name));
+          items.push(ignored(own, sub, false) ? ["x", entry.name] : await visit(full, sub, entry.name));
         }
       }
       return items;
@@ -276,7 +280,7 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
     for (const [rel, hash] of then.files)
       if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash });
       else if (now.files.get(rel) !== hash) changes.push({ path: rel, kind: "changed", hash });
-    // 那一刻读不了的（被占着的文件、进不去的夹）连同其下的，此刻有也不删
+    // 那一刻读不了的（被占着的文件、进不去的夹）与忽略的，连同其下的，此刻有也不删
     const unclear = rel => [...then.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
     for (const rel of now.files.keys()) if (!then.files.has(rel) && !unclear(rel)) changes.push({ path: rel, kind: "added" });
     const holds = (paths, dir) => [...paths].some(rel => rel.startsWith(`${dir}/`));

@@ -1,4 +1,4 @@
-// 桥接的检查点（server/checkpoints.js）：记下目录此刻的样子、对照、退回；不进 .gitignore、.git/info/exclude 与 node_modules；第二回只读变了的；
+// 桥接的检查点（server/checkpoints.js）：记下目录此刻的样子、对照、退回；不进 .gitignore、.git/info/exclude 与 node_modules，改了忽略规则也不删它们；第二回只读变了的；
 // 对话删了册跟着删、没人用的对象清掉
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -161,6 +161,51 @@ test("夹换成链接、文件换成夹、空夹建删：退回不越出目录�
   } finally {
     await close();
     fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("这一答动了忽略规则：那一刻忽略的文件露出来也不算新加的，退回不删", async () => {
+  const cases = {
+    "改了 .gitignore": root => write(root, ".gitignore", "*.log\n"),
+    "删了 .gitignore": root => fs.rmSync(path.join(root, ".gitignore")),
+    "清了 .git/info/exclude": root => write(root, ".git/info/exclude", ""),
+    "删了子目录的 .gitignore": root => fs.rmSync(path.join(root, "sub/.gitignore"))
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+      root = path.join(base, "work"),
+      { post, close } = await serve(path.join(base, "检查点")),
+      key = { root, conversation: "c1", answer: "m1" };
+    try {
+      write(root, ".gitignore", ".env\ndata/\n");
+      write(root, ".git/info/exclude", "local.db\n");
+      write(root, "sub/.gitignore", "*.bin\n");
+      write(root, ".env", "KEY=1");
+      write(root, "data/deep/train.csv", "1,2");
+      write(root, "local.db", "库");
+      write(root, "sub/w.bin", "权重");
+      await post("/api/checkpoint/take", key);
+      change(root);
+      write(root, "new.txt", "真新加的");
+      const { changes } = await post("/api/checkpoint/diff", key);
+      assert.deepEqual(
+        changes.map(c => c.path).filter(rel => /\.env|train\.csv|local\.db|w\.bin/.test(rel)),
+        [],
+        `${name}：确认窗不列它们`
+      );
+      const done = await post("/api/checkpoint/restore", key);
+      assert.deepEqual(done.failed, [], name);
+      const after = tree(root);
+      assert.equal(after[".env"], "KEY=1", name);
+      assert.equal(after["data/deep/train.csv"], "1,2", name);
+      assert.equal(after["local.db"], "库", name);
+      assert.equal(after["sub/w.bin"], "权重", name);
+      assert.equal(after["new.txt"], undefined, `${name}：真新加的照删`);
+      assert.equal(after[".gitignore"], ".env\ndata/\n", `${name}：规则本身退回`);
+    } finally {
+      await close();
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   }
 });
 
