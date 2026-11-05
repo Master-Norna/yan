@@ -52,7 +52,7 @@ test("链接与图片：绝对路径的反斜杠照原样留着，渲染与只�
 
 test("落到打开文件的那一步：根还是真实的根，不多出 E:\\聊天记录.yan 这样的目录", () => {
   const [href] = hrefsOf(`[x](${win("E:", "聊天记录", ".yan", "卷宗", "x.docx")})`);
-  assert.deepEqual(f.localLinkTarget(href, { workdir: win("D:", "proj") }), { root: "E:/聊天记录/.yan/卷宗", path: "x.docx" });
+  assert.deepEqual(f.localLinkTarget(href, { workdir: win("D:", "proj") }), { file: "E:/聊天记录/.yan/卷宗/x.docx" });
 });
 
 test("网址与相对路径照 Markdown 的规矩：反斜杠仍是转义", () => {

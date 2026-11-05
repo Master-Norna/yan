@@ -286,7 +286,7 @@ function changeSummaryInner(message, open) {
 }
 // 成品：这一答的答复里链到的本机文件（模型写「[报告](报告.md)」「![图](图.png)」）。列哪几件由模型定：交给人看的核心文件才写成链接，
 // 解压出的一堆、顺手改的代码不列，别的对话与人同时放进卷宗的也混不进来。收尾时按这段对话的落脚处认路（见 refTarget），
-// 在的记下路与大小；落在卷宗里的只记卷宗里的路，别处的另记所在的根。一件一行：件图、文件名、大小，右侧「预览」与「下载」
+// 在的记下路与大小。存下的是相对的路：落在卷宗里的只记卷宗里的路，存储目录搬了家也认得；别处的另记所在的根。一件一行：件图、文件名、大小，右侧「预览」与「下载」
 /** @param {Conversation} conversation @param {string} content @returns {Promise<Deliverable[]>} */
 async function replyDeliverables(conversation, content) {
   /** @type {string[]} */
@@ -294,27 +294,34 @@ async function replyDeliverables(conversation, content) {
   marked.walkTokens(marked.lexer(String(content || "")), token => {
     if (token.type === "link" || token.type === "image") hrefs.push(token.href);
   });
-  const archive = archiveDir(),
+  const anchor = messageAnchor(conversation),
+    root = workRoot(conversation),
     seen = new Set();
   /** @type {Deliverable[]} */
   const files = [];
   for (const href of hrefs) {
     const name = localFileName(href),
-      target = name ? refTarget(href, messageAnchor(conversation)) : null;
-    if (!target || seen.has(`${target.root}|${target.path}`)) continue;
-    seen.add(`${target.root}|${target.path}`);
-    const head = await fetch(archiveFileUrl(target.path, true, target.root), { method: "HEAD" }).catch(() => null);
+      file = name ? refTarget(href, anchor)?.file : null;
+    if (!file || seen.has(file)) continue;
+    seen.add(file);
+    const head = await fetch(localFileUrl(file, true), { method: "HEAD" }).catch(() => null);
     if (!head?.ok) continue;
+    const inArchive = archiveRel(file),
+      inRoot = relInside(root, file);
     files.push({
-      path: target.path,
-      name: target.path.split("/").pop() || name,
+      path: inArchive ?? inRoot ?? file.split("/").pop(),
+      name: file.split("/").pop() || name,
       size: Number(head.headers.get("content-length")) || 0,
-      ...(target.root === archive ? {} : { root: target.root })
+      ...(inArchive !== null ? {} : { root: inRoot !== null ? root : parentDir(file) })
     });
   }
   return files;
 }
 // 卷宗里已经删掉的成品：条目留着（这一答确实出过这件），但标成「已移出卷宗」，不再给看与下载的按钮。卷宗之外的认不出在不在，点了取不到再说
+/** 存下的一件成品是哪件文件 @param {Deliverable} f */
+function deliverableFile(f) {
+  return f.root ? joinFile(f.root, f.path) : archiveFile(f.path);
+}
 /** @param {Deliverable} f */
 function deliverableMissing(f) {
   return !f.root && archiveEntries !== null && !archiveEntries.some(entry => entry.path === f.path);
@@ -322,7 +329,7 @@ function deliverableMissing(f) {
 /** @param {Deliverable} f */
 function deliverableFileHtml(f, extra = false) {
   const missing = deliverableMissing(f);
-  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(f.path)}"${f.root ? ` data-root="${escapeHtml(f.root)}"` : ""}>${fileFigure(f.name, f.path, f.root)}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
+  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(deliverableFile(f))}">${fileFigure(f.name, deliverableFile(f))}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
     missing
       ? `<span class="deliver-gone">${t(`已移出卷宗`)}</span>`
       : `<button type="button" class="deliver-btn" data-deliver-action="view" title="${t(`预览`)}">${t(`预览`)}</button><button type="button" class="deliver-btn" data-deliver-action="download" title="${t(`另存到本机`)}">${t(`下载`)}</button>`

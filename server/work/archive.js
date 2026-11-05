@@ -9,6 +9,7 @@ const {
   SCRATCH_DIR,
   WORK_SKIP,
   resolveWorkdir,
+  resolveFile,
   describeFsError,
   resolveInside,
   pathIsInside,
@@ -169,14 +170,13 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       if (!res.headersSent) sendJson(res, 400, { error: failed(error) });
     }
   }
-  // 取出：GET /api/archive/file?path=…（&root=… 指定卷宗根），页面用它做缩略图、置于案上与下载；?download=1 时让浏览器另存
+  // 取出：GET /api/archive/file?file=<绝对路径>，页面用它做缩略图、预览、置于案上与下载；?download=1 时让浏览器另存。
+  // 一件文件只认一条绝对路：页面曾传根与根下的路两样，漏了根就悄悄到卷宗里找（见 src/13-files/15-refs.js）
   async function handleArchiveFile(req, res) {
     try {
       const query = new URL(req.url, "http://127.0.0.1").searchParams;
-      const root = await archiveRoot(query.get("root")),
-        file = archivePath(root, query.get("path"));
-      await assertNoEscapingLink(root, file);
-      const name = path.basename(file),
+      const file = resolveFile(query.get("file")),
+        name = path.basename(file),
         download = !!query.get("download");
       await sendFile(req, res, download ? file : await playable(req, file, name), { name, download });
     } catch (error) {
@@ -249,10 +249,10 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   }, failed);
   // 以本机程序打开：预览认不得的、或只看得到结构的，交给系统的默认程序看原样
   const handleArchiveOpen = jsonRoute(async body => {
-    const root = await archiveRoot(body.root),
-      { target } = await archiveItem(root, body.path);
-    openWithSystem(target);
-    return { opened: relPath(root, target) };
+    const file = resolveFile(body.file);
+    if (!(await fs.promises.stat(file).catch(() => null))) throw Error(`没有这一件：${file}`);
+    openWithSystem(file);
+    return { opened: file };
   }, failed);
   return {
     "POST /api/archive/list": handleArchiveList,

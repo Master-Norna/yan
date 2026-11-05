@@ -67,25 +67,32 @@ test("Markdown 的图原路取不到：同名的认最近一件，一样近的�
   assert.equal(nearestSameName("fig1.png", doc, ["生涯/fig2.png"]), "");
 });
 
-test("写在文档里的引用：从文档那一层算，/ 从根算，退出根的跟着往上退", () => {
+test("写在文档里的引用：从文档那一层算，/ 从根算，退出根的照样算到，盘符是顶", () => {
   const f = load(["refTarget", "setup: () => { bootstrap = { work: { platform: 'win32' } }; }"]);
   f.setup();
-  const anchor = { document: true, root: "E:/卷宗", dir: "生涯/报告", scopes: [] };
-  assert.deepEqual(f.refTarget("图/a%201.png", anchor), { root: "E:/卷宗", path: "生涯/报告/图/a 1.png" });
-  assert.deepEqual(f.refTarget("../图/a.png", anchor), { root: "E:/卷宗", path: "生涯/图/a.png" });
-  assert.deepEqual(f.refTarget("/图/a.png", anchor), { root: "E:/卷宗", path: "图/a.png" });
-  assert.deepEqual(f.refTarget("../../../别处/a.png", anchor), { root: "E:/", path: "别处/a.png" });
-  assert.deepEqual(f.refTarget("../图/a.png", { document: true, root: "D:\\甲\\乙", dir: "", scopes: [] }), {
-    root: "D:/甲",
-    path: "图/a.png"
-  });
-  assert.deepEqual(f.refTarget("E:\\卷宗\\生涯\\a.png", anchor), { root: "E:/卷宗", path: "生涯/a.png" });
+  const anchor = { document: true, root: "E:/卷宗", dir: "E:/卷宗/生涯/报告", scopes: [] };
+  assert.deepEqual(f.refTarget("图/a%201.png", anchor), { file: "E:/卷宗/生涯/报告/图/a 1.png" });
+  assert.deepEqual(f.refTarget("../图/a.png", anchor), { file: "E:/卷宗/生涯/图/a.png" });
+  assert.deepEqual(f.refTarget("/图/a.png", anchor), { file: "E:/卷宗/图/a.png" });
+  assert.deepEqual(f.refTarget("../../../别处/a.png", anchor), { file: "E:/别处/a.png" });
+  assert.deepEqual(f.refTarget("../../../../../a.png", anchor), { file: "E:/a.png" });
+  assert.deepEqual(f.refTarget("E:\\别处\\.\\甲\\..\\a.png", anchor), { file: "E:/别处/a.png" });
   assert.deepEqual(f.refTarget("../a.md", { document: true, skillDir: "某技能", dir: "refs", scopes: [] }), {
     skillDir: "某技能",
     skillPath: "a.md"
   });
   assert.equal(f.refTarget("sandbox:/mnt/a.png", anchor), null);
   assert.equal(f.refTarget("//host/a.png", anchor), null);
+});
+
+test("一件文件在不在某个根下：不分大小写，夹名只是前缀的不算", () => {
+  const { relInside, joinFile } = load(["relInside", "joinFile"]);
+  assert.equal(relInside("E:\\卷宗\\", "e:/卷宗/夹/A.png"), "夹/A.png");
+  assert.equal(relInside("E:/卷宗", "E:/卷宗"), "");
+  assert.equal(relInside("E:/卷宗", "E:/卷宗二/a.png"), null);
+  assert.equal(relInside("", "E:/a.png"), null);
+  assert.equal(joinFile("E:\\卷宗\\", "a.png"), "E:/卷宗/a.png");
+  assert.equal(joinFile("E:/", "a.png"), "E:/a.png");
 });
 
 test("搬走的件：按落脚的次序认，第一个根认不出才看下一个，件表只问一回", async () => {
@@ -95,9 +102,9 @@ test("搬走的件：按落脚的次序认，第一个根认不出才看下一�
     asked.push(root);
     return { entries: root === "E:/工作" ? [{ path: "a/图.png" }] : [{ path: "图.png" }, { path: "表.png" }] };
   });
-  const anchor = { root: "E:/工作", dir: "a/b", scopes: ["E:/工作", "E:/卷宗"] };
-  assert.deepEqual(await f.relocateRef("图.png", anchor), { root: "E:/工作", path: "a/图.png" });
-  assert.deepEqual(await f.relocateRef("表.png", anchor), { root: "E:/卷宗", path: "表.png" });
+  const anchor = { root: "E:/工作", dir: "E:/工作/a/b", scopes: ["E:/工作", "E:/卷宗"] };
+  assert.deepEqual(await f.relocateRef("图.png", anchor), { file: "E:/工作/a/图.png" });
+  assert.deepEqual(await f.relocateRef("表.png", anchor), { file: "E:/卷宗/表.png" });
   assert.equal(await f.relocateRef("无.png", anchor), null);
   assert.equal(await f.relocateRef("图.png", { dir: "", scopes: [] }), null);
   assert.deepEqual(asked, ["E:/工作", "E:/卷宗"]);

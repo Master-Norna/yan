@@ -44,6 +44,13 @@ function resolveWorkdir(raw, home = () => "") {
     );
   return dir;
 }
+// 一件文件：完整限定的绝对路径（盘符 / UNC / POSIX 根）；C:foo、\foo、相对路径都不算。根下的文件也取得到，整盘不可作工作目录是另一回事
+function resolveFile(raw) {
+  const text = String(raw || "").trim(),
+    target = path.resolve(text);
+  if (!path.isAbsolute(text) || path.normalize(text).toLowerCase() !== target.toLowerCase()) throw Error(`须是完整的绝对路径：${text}`);
+  return target;
+}
 // 把 Node 的文件系统错误译成可读的说明，页面与模型都不必面对 ENOENT 之类的代号
 function describeFsError(error, target = "") {
   const code = error?.code,
@@ -118,6 +125,7 @@ module.exports = {
   WORK_SKIP,
   expandHome,
   resolveWorkdir,
+  resolveFile,
   describeFsError,
   clampNumber,
   pathIsInside,

@@ -1,5 +1,7 @@
-// 言 · 文件 · 本地引用：文字里写的一条本机的路（图、链接）指向哪一件
+// 言 · 文件 · 本地引用：页面里一件本机文件怎么认，文字里写的一条路（图、链接）指向哪一件
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
+// 一件文件就是一条绝对路（斜杠一律 /），页面里各处传的都是它，取用见 localFileUrl。原先是「根 + 根下的路」两样：漏传根不报错，
+// 悄悄到卷宗里找、落成破图，修了几回都是这一个病。只有两处还说相对的路：卷宗页（卷宗的视图，出了页就 archiveFile 拼成绝对路）、存下的成品（见 deliverableFile）。
 // 引用只问三件事，各一处答，正文、旁注、预览里的 Markdown 同走这一条：
 //   写在哪      refAnchor(el)：落脚。相对路从哪算、原路不在了到哪些根里认，都由落脚定；要多一种写字的地方，这里多认一种
 //   指向哪      refTarget(raw, anchor)：只算路，不碰磁盘
@@ -8,45 +10,86 @@
 /**
  * @typedef {object} RefAnchor
  * @property {boolean} [document] 写在一份文档里：/ 起头的从根算，图摊在字里；否则是一答的正文，图画成小样
- * @property {string} [root] 相对路落在哪个根
+ * @property {string} [root] / 起头的路从哪算
  * @property {string} [skillDir] 落在技能目录（走技能的取法，不去别处认）
- * @property {string} dir 这段字在根下的哪一层（"" 即根）
+ * @property {string} dir 这段字所在的那一层：绝对路；落在技能目录的是目录下的路
  * @property {string[]} scopes 原路不在了，依次到这些根里认
  * @property {Deliverable[]} [kept] 那一答记下的成品：答完才绑目录（或换了目录），落脚处已挪走，那一答写的路仍指当时的落脚处
  */
-/** @typedef {{ root?: string, path?: string, skillDir?: string, skillPath?: string }} RefTarget 与预览器的来源（viewerSource）同一个样子，落在技能目录的只有后两项 */
+/** @typedef {{ file?: string, skillDir?: string, skillPath?: string }} RefTarget 与预览器的来源（viewerSource）同一个样子：本机一件是 file，技能带的一件是后两项 */
+
+/** @param {string} path 去掉结尾的斜杠，反斜杠换成 / */
+function slashed(path) {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+}
+/** @param {string} root @param {string} path 根下的路 */
+function joinFile(root, path) {
+  return `${slashed(root)}/${path}`;
+}
+/** @param {string} root @param {string} file @returns {string|null} 根下的路（"" 即根本身），不在根下的是 null */
+function relInside(root, file) {
+  const base = slashed(root).toLowerCase(),
+    lower = slashed(file).toLowerCase();
+  if (!base) return null;
+  if (lower === base) return "";
+  return lower.startsWith(`${base}/`) ? slashed(file).slice(base.length + 1) : null;
+}
+/** 卷宗页说的路（相对卷宗）拼成一件文件 @param {string} path */
+function archiveFile(path) {
+  return joinFile(archiveDir(), path);
+}
+/** @param {string} file @returns {string|null} 在卷宗里的路，不在卷宗里的是 null */
+function archiveRel(file) {
+  return relInside(archiveDir(), file);
+}
+/** 取一件文件的地址 @param {string} file @param {boolean} [download] */
+function localFileUrl(file, download = false) {
+  return `${apiBase}/api/archive/file?file=${encodeURIComponent(file)}${download ? "&download=1" : ""}`;
+}
+/** @param {string} file */
+function downloadFile(file) {
+  const anchor = document.createElement("a");
+  anchor.href = localFileUrl(file, true);
+  anchor.download = file.split("/").pop() || t("卷宗");
+  anchor.click();
+}
 
 /** 一答的正文：落脚是这段对话的落脚处（绑了目录是它，没绑是卷宗）；搬走的件在它与卷宗里认
  * @param {Conversation|null|undefined} conversation @param {Message|null} [message] @returns {RefAnchor} */
 function messageAnchor(conversation, message = null) {
-  const root = workRoot(conversation);
-  return { root, dir: "", kept: message?.deliverables, scopes: [...new Set([root, archiveDir()])].filter(Boolean) };
+  const root = slashed(workRoot(conversation));
+  return { root, dir: root, kept: message?.deliverables, scopes: [...new Set([root, slashed(archiveDir())])].filter(Boolean) };
+}
+// 一件文件归哪个根：这段对话的落脚处、卷宗，都不是就是它所在的那层
+/** @param {string} file */
+function fileHome(file) {
+  return [workRoot(currentConversation()), archiveDir()].map(slashed).find(root => relInside(root, file) !== null) || parentDir(file);
 }
 /** 这段字写在哪：预览器里的一份文档落在它自己所在的那一层（与 VS Code 一样），附件里的 Markdown 没有这一层，与别的字一样算这段对话的
  * @param {Element} el @returns {RefAnchor} */
 function refAnchor(el) {
   const source = el.closest("#fileViewerStage") ? viewerSource : null;
-  if (source?.path) {
-    const root = source.root || archiveDir();
-    return { document: true, root, dir: parentDir(source.path), scopes: [root] };
+  if (source?.file) {
+    const root = fileHome(source.file);
+    return { document: true, root, dir: parentDir(source.file), scopes: [root] };
   }
   if (source?.skillDir) return { document: true, skillDir: source.skillDir, dir: parentDir(source.skillPath), scopes: [] };
   const conversation = currentConversation(),
     id = el.closest("[data-message]")?.getAttribute("data-message");
   return messageAnchor(conversation, (conversation && everyMessage(conversation).find(m => m.id === id)) || null);
 }
-// 相对的路走一遍：./ 跳过，../ 退一层，退出 base 的记在 up 里（归调用的定：卷宗之外的根照样取得到，原件包里的就到顶为止）
-/** @param {string} base @param {string} ref 已解过转义的路 @returns {{ parts: string[], up: number }} */
+// 相对的路走一遍：./ 跳过，../ 退一层，到顶为止
+/** @param {string} base @param {string} ref 已解过转义的路 @returns {string} */
 function walkRelative(base, ref) {
   const parts = base ? base.split("/") : [];
-  let up = 0;
   for (const part of ref.replace(/\\/g, "/").split("/")) {
     if (!part || part === ".") continue;
-    if (part !== "..") parts.push(part);
-    else if (parts.length) parts.pop();
-    else up += 1;
+    if (part === "..") parts.pop();
+    else parts.push(part);
   }
-  return { parts, up };
+  return parts.join("/");
 }
 /** @param {string} base 一层（"" 即根） @param {string} ref 相对的路，可带 ./ ../ 与 %20 一类转义 */
 function archiveRelative(base, ref) {
@@ -54,17 +97,16 @@ function archiveRelative(base, ref) {
   try {
     clean = decodeURIComponent(clean);
   } catch {}
-  return walkRelative(base, clean).parts.join("/");
+  return walkRelative(base, clean);
 }
-// 根往上退几层，到盘符或 / 为止
-/** @param {string} root @param {number} up */
-function climbRoot(root, up) {
-  if (!up) return root;
-  const parts = root.replace(/\\/g, "/").replace(/\/+$/, "").split("/"),
-    left = parts.slice(0, Math.max(1, parts.length - up)).join("/");
-  return /^[a-z]:$/i.test(left) ? `${left}/` : left || "/";
+// 从一条绝对路再走一段：盘符、共享名、/ 是顶，退不过去
+/** @param {string} dir @param {string} ref */
+function absJoin(dir, ref) {
+  const clean = slashed(dir),
+    top = clean.match(/^(?:[a-z]:|\/\/[^/]+\/[^/]+)/i)?.[0] || "";
+  return `${top}/${walkRelative("", `${clean.slice(top.length)}/${ref}`)}`;
 }
-// 绝对路在根之内的折成相对，之外的以它所在那层为根。sandbox:/ 这类不是本机的路返回 null；Windows 上 /mnt/… 这样以 / 起头的也不是，Mac 上它就是绝对路
+// sandbox:/ 这类不是本机的路返回 null；Windows 上 /mnt/… 这样以 / 起头的也不是，Mac 上它就是绝对路
 /** @param {string} raw @param {RefAnchor} anchor @returns {RefTarget | null} */
 function refTarget(raw, anchor) {
   let text = String(raw || "")
@@ -80,24 +122,17 @@ function refTarget(raw, anchor) {
     .replace(/^\/([a-z]:\/)/i, "$1");
   if (!fromRoot) {
     const win = (bootstrap.work?.platform || "win32") === "win32";
-    if (win ? /^[a-z]:\//i.test(text) : /^\/(?!\/)/.test(text)) {
-      const root = anchor.root || "",
-        base = root.replace(/\\/g, "/").replace(/\/+$/, "");
-      if (base && text.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return { root, path: text.slice(base.length + 1) };
-      const cut = text.lastIndexOf("/");
-      return { root: text.slice(0, cut) || "/", path: text.slice(cut + 1) };
-    }
+    if (win ? /^[a-z]:\//i.test(text) : /^\/(?!\/)/.test(text)) return { file: absJoin(text, "") };
     if (/^[a-z][\w+.-]*:|^\//i.test(text)) return null;
   }
-  const { parts, up } = walkRelative(fromRoot ? "" : anchor.dir, text),
-    path = parts.join("/");
-  if (anchor.skillDir) return { skillDir: anchor.skillDir, skillPath: path };
-  const kept = anchor.kept?.find(file => file.path === path);
-  return { root: kept ? kept.root || archiveDir() : climbRoot(anchor.root || "", up), path };
+  if (anchor.skillDir) return { skillDir: anchor.skillDir, skillPath: walkRelative(fromRoot ? "" : anchor.dir, text) };
+  const path = walkRelative("", text),
+    kept = anchor.kept?.find(file => file.path === path);
+  return { file: kept ? deliverableFile(kept) : absJoin((fromRoot ? anchor.root : anchor.dir) || "", text) };
 }
 /** @param {RefTarget} target */
 function refUrl(target) {
-  return target.skillDir ? skillFileUrl(target) : archiveFileUrl(target.path, false, target.root);
+  return target.skillDir ? skillFileUrl(target) : localFileUrl(target.file);
 }
 // 同名的取离这一层最近的（少走几层）；一样近的有几件就不猜，认不出比认错好
 /** @param {string} name @param {string} dir @param {string[]} paths @returns {string} */
@@ -141,8 +176,8 @@ function refListing(root) {
 /** @param {string} name @param {RefAnchor} anchor @returns {Promise<RefTarget | null>} */
 async function relocateRef(name, anchor) {
   for (const root of anchor.scopes) {
-    const path = nearestSameName(name, root === anchor.root ? anchor.dir : "", await refListing(root));
-    if (path) return { root, path };
+    const path = nearestSameName(name, relInside(root, anchor.dir) || "", await refListing(root));
+    if (path) return { file: joinFile(root, path) };
   }
   return null;
 }
@@ -177,10 +212,7 @@ function drawRefImage(ref, anchor, words) {
   }
   /** @param {RefTarget} found */
   const show = found => {
-    if (frame !== img) {
-      frame.dataset.openArchive = found.path;
-      frame.dataset.root = found.root;
-    }
+    if (frame !== img) frame.dataset.openFile = found.file;
     img.src = refUrl(found);
   };
   const lost = () => frame.replaceWith(words);

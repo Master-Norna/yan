@@ -51,7 +51,7 @@ for (let i = 0; i < 40; i++) {
 // 总线：外站开不了事件流；本机别的端口的页面能开，但借总线转进去的请求照旧按它自己的来源过门禁，碰不到执事接口
 {
   const root = `${TMP}/cross-site-must-not-create`;
-  const url = `${BASE}/api/archive/file?root=${encodeURIComponent(root)}&path=missing.txt`;
+  const url = `${BASE}/api/archive/file?file=${encodeURIComponent(`${root}/missing.txt`)}`;
   for (const site of ["cross-site", "same-site"]) {
     const response = await fetch(url, { headers: { "Sec-Fetch-Site": site } });
     check(
@@ -242,22 +242,24 @@ check(
 r = await upload("/api/archive/put", { name: "escaped.txt" }, "data:text/plain;base64,aGk=");
 check("archive put never overwrites: same name gets (2)", r.status === 200 && r.data.name === "escaped (2).txt", JSON.stringify(r.data));
 r = await upload("/api/archive/put", { name: "page.html" }, "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==");
-let f = await fetch(`${BASE}/api/archive/file?path=page.html`);
+let f = await fetch(`${BASE}/api/archive/file?file=${encodeURIComponent(`${ARCHIVE}/page.html`)}`);
 check(
   "archive html is served as plain text in a sandbox",
   f.status === 200 && /^text\/plain/.test(f.headers.get("content-type") || "") && f.headers.get("content-security-policy") === "sandbox",
   `${f.status} ${f.headers.get("content-type")}`
 );
 await upload("/api/archive/put", { name: "图.svg" }, "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=");
-f = await fetch(`${BASE}/api/archive/file?path=${encodeURIComponent("图.svg")}`);
+f = await fetch(`${BASE}/api/archive/file?file=${encodeURIComponent(`${ARCHIVE}/图.svg`)}`);
 check(
   "archive svg is served as an image, still in a sandbox",
   f.status === 200 && f.headers.get("content-type") === "image/svg+xml" && f.headers.get("content-security-policy") === "sandbox",
   `${f.status} ${f.headers.get("content-type")}`
 );
-f = await fetch(`${BASE}/api/archive/file?path=../link-outside/secret.txt`);
-check("archive file refuses ..", f.status === 404);
-f = await fetch(`${BASE}/api/archive/file?path=escaped.txt`, { headers: { Origin: "https://evil.example" } });
+f = await fetch(`${BASE}/api/archive/file?file=../link-outside/secret.txt`);
+check("archive file refuses a path that is not absolute", f.status === 404);
+f = await fetch(`${BASE}/api/archive/file?file=${encodeURIComponent(`${ARCHIVE}/escaped.txt`)}`, {
+  headers: { Origin: "https://evil.example" }
+});
 check("archive file refuses foreign origin", f.status === 403);
 r = await post("/api/archive/list", {});
 check(
@@ -281,13 +283,13 @@ r = await post("/api/archive/move", { path: "跑出去", name: "外层" });
 check("archive rename renames a folder", r.status === 200 && existsSync(`${ARCHIVE}/外层/里层`), `${r.status} ${r.data?.error}`);
 // 以本机程序打开：可执行的一类不开（对它们「打开」就是运行）；不存在的也不开
 await upload("/api/archive/put", { name: "run.bat" }, "data:text/plain;base64,ZWNobyBoaQ==");
-r = await post("/api/archive/open", { path: "run.bat" });
+r = await post("/api/archive/open", { file: `${ARCHIVE}/run.bat` });
 check(
   "opening with the local program refuses executables",
   r.status === 400 && /可执行/.test(r.data?.error),
   `${r.status} ${r.data?.error}`
 );
-r = await post("/api/archive/open", { path: "没有这件.docx" });
+r = await post("/api/archive/open", { file: `${ARCHIVE}/没有这件.docx` });
 check("opening with the local program needs the file to exist", r.status === 400, `${r.status} ${r.data?.error}`);
 r = await post("/api/archive/remove", { path: "外层" });
 check(

@@ -134,7 +134,7 @@ const archiveDocCache = new Map();
 async function archiveDocumentText(doc) {
   const key = `${doc.archive}|${doc.modifiedAt}`;
   if (archiveDocCache.has(key)) return archiveDocCache.get(key);
-  const response = await fetch(archiveFileUrl(doc.archive), { signal: AbortSignal.timeout(60000) });
+  const response = await fetch(localFileUrl(archiveFile(doc.archive)), { signal: AbortSignal.timeout(60000) });
   if (!response.ok) throw Error(t("取回失败"));
   const blob = await response.blob();
   const text = isTextFile({ name: doc.name, type: "" })

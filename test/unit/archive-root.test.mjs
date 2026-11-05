@@ -7,7 +7,18 @@ import path from "node:path";
 import http from "node:http";
 import { createRequire } from "node:module";
 
-const createArchive = createRequire(import.meta.url)("../../server/work/archive.js");
+const load = createRequire(import.meta.url);
+const createArchive = load("../../server/work/archive.js"),
+  { resolveFile } = load("../../server/work/paths.js");
+
+test("一件文件认完整的绝对路：紧贴盘符的也认，相对的不认", () => {
+  const top = path.parse(process.cwd()).root,
+    file = path.join(top, "图.png");
+  assert.equal(resolveFile(file), file);
+  assert.equal(resolveFile(file.replace(/\\/g, "/")), file);
+  for (const bad of ["", "图.png", "../图.png", ...(process.platform === "win32" ? ["C:图.png", "\\图.png", "/图.png"] : [])])
+    assert.throws(() => resolveFile(bad), /绝对路径/, bad);
+});
 
 test("读的请求不建卷宗根，新建夹才建", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-archive-root-")),
@@ -21,7 +32,7 @@ test("读的请求不建卷宗根，新建夹才建", async () => {
       fetch(`${at}${route}`, { method: "POST", body: JSON.stringify(body) }).then(async r => ({ status: r.status, ...(await r.json()) }));
   try {
     const root = path.join(base, "没有", "卷宗");
-    const got = await fetch(`${at}/api/archive/file?root=${encodeURIComponent(root)}&path=x.docx`);
+    const got = await fetch(`${at}/api/archive/file?file=${encodeURIComponent(path.join(root, "x.docx"))}`);
     assert.equal(got.status, 404);
     assert.equal(fs.existsSync(path.join(base, "没有")), false, "问一声在不在，不建目录");
 

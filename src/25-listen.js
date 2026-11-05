@@ -27,22 +27,24 @@ const listenClock = seconds => {
 
 // ---------- 一曲：卷宗里的一件、或对话里的一件附件 ----------
 function listenArchiveTrack(entry) {
-  const dir = entry.path.split("/").slice(0, -1);
+  const dir = entry.path.split("/").slice(0, -1),
+    file = archiveFile(entry.path);
   return {
     key: `p:${entry.path}`,
     name: entry.name,
-    url: archiveFileUrl(entry.path),
+    url: localFileUrl(file),
     where: [t("卷宗"), ...dir].join(" › ") + ` · ${fileExtension(entry.name).toUpperCase()} · ${formatFileSize(entry.size || 0)}`,
-    source: { path: entry.path },
-    bytes: async () => (await fetch(archiveFileUrl(entry.path))).arrayBuffer(),
+    source: { file },
+    bytes: async () => (await fetch(localFileUrl(file))).arrayBuffer(),
     list: []
   };
 }
-// 预览器交来的：卷宗那一路连同夹里的其余音频一起列出；别处目录里的（行的工作目录里的成品，带 root）、附件、技能里的只有它自己
+// 预览器交来的：卷宗那一路连同夹里的其余音频一起列出；别处目录里的（行的工作目录里的成品）、附件、技能里的只有它自己
 function listenTrackFrom(source, name, reader) {
-  if (source?.path && (!source.root || source.root === archiveDir())) {
-    const entry = (archiveEntries || []).find(file => file.path === source.path) || { path: source.path, name, size: 0 },
-      dir = source.path.split("/").slice(0, -1).join("/"),
+  const rel = source?.file ? archiveRel(source.file) : null;
+  if (rel !== null) {
+    const entry = (archiveEntries || []).find(file => file.path === rel) || { path: rel, name, size: 0 },
+      dir = rel.split("/").slice(0, -1).join("/"),
       siblings = (archiveEntries || []).filter(
         file => file.path.split("/").slice(0, -1).join("/") === dir && fileKind(file.name).group === "audio"
       ),
@@ -56,18 +58,10 @@ function listenTrackFrom(source, name, reader) {
   const skill = !!source?.skillDir,
     ext = fileExtension(name).toUpperCase(),
     track = {
-      key: source?.path
-        ? `r:${source.root}|${source.path}`
-        : skill
-          ? `s:${source.skillDir}/${source.skillPath}`
-          : `a:${source?.attachmentId}`,
+      key: source?.file ? `r:${source.file}` : skill ? `s:${source.skillDir}/${source.skillPath}` : `a:${source?.attachmentId}`,
       name,
       url: reader.url(),
-      where: source?.path
-        ? [pathTail(source.root), ...source.path.split("/").slice(0, -1)].join(" › ") + ` · ${ext}`
-        : skill
-          ? t`Skill · ${ext}`
-          : t`附件 · ${ext}`,
+      where: source?.file ? `${pathTail(parentDir(source.file))} · ${ext}` : skill ? t`Skill · ${ext}` : t`附件 · ${ext}`,
       source,
       bytes: async () => (await reader.blob()).arrayBuffer(),
       list: []
@@ -299,7 +293,6 @@ function listenPageHtml(track) {
 // 在预览里换摆另一曲：题名、下载都跟着这一曲
 function listenShowPage(track) {
   viewerSource = track.source;
-  viewerPath = track.source.path || "";
   $("#fileViewerName").textContent = track.name;
   $("#fileViewerStage").innerHTML = listenPageHtml(track);
 }

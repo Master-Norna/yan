@@ -10,19 +10,19 @@ test("本地链接：Mac 上 / 起头的是绝对路，Windows 上不是；file:
   ]);
   f.setPlatform("darwin");
   const mac = { workdir: "/Users/me/proj" };
-  assert.deepEqual(f.localLinkTarget("/Users/me/proj/out/报告.md", mac), { root: "/Users/me/proj", path: "out/报告.md" });
-  assert.deepEqual(f.localLinkTarget("file:///Users/me/Desktop/a.png", mac), { root: "/Users/me/Desktop", path: "a.png" });
-  assert.deepEqual(f.localLinkTarget("out/a.txt", mac), { root: "/Users/me/proj", path: "out/a.txt" });
+  assert.deepEqual(f.localLinkTarget("/Users/me/proj/out/报告.md", mac), { file: "/Users/me/proj/out/报告.md" });
+  assert.deepEqual(f.localLinkTarget("file:///Users/me/Desktop/a.png", mac), { file: "/Users/me/Desktop/a.png" });
+  assert.deepEqual(f.localLinkTarget("out/a.txt", mac), { file: "/Users/me/proj/out/a.txt" });
   assert.equal(f.localLinkTarget("sandbox:/mnt/data/a.txt", mac), null);
   f.setPlatform("win32");
   const win = { workdir: "D:\\proj" };
   assert.equal(f.localLinkTarget("/mnt/data/a.txt", win), null);
-  assert.deepEqual(f.localLinkTarget("file:///D:/proj/a.txt", win), { root: "D:\\proj", path: "a.txt" });
-  assert.deepEqual(f.localLinkTarget("E:\\别处\\b.txt", win), { root: "E:/别处", path: "b.txt" });
+  assert.deepEqual(f.localLinkTarget("file:///D:/proj/a.txt", win), { file: "D:/proj/a.txt" });
+  assert.deepEqual(f.localLinkTarget("E:\\别处\\b.txt", win), { file: "E:/别处/b.txt" });
   // 答完才绑目录：相对路仍认那一答记下的成品所在
   const answered = { deliverables: [{ path: "图.png", name: "图.png", size: 1, root: "D:\\旧处" }] };
-  assert.deepEqual(f.localLinkTarget("./图.png", win, answered), { root: "D:\\旧处", path: "图.png" });
-  assert.deepEqual(f.localLinkTarget("别的.png", win, answered), { root: "D:\\proj", path: "别的.png" });
+  assert.deepEqual(f.localLinkTarget("./图.png", win, answered), { file: "D:/旧处/图.png" });
+  assert.deepEqual(f.localLinkTarget("别的.png", win, answered), { file: "D:/proj/别的.png" });
 });
 
 test("审查等着时点了「止」：审查回来也不再动手", async () => {
