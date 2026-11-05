@@ -161,6 +161,42 @@ test("改文件那一步不另存 diff：old/new 在参数里，预览照样画�
   assert.equal((html.match(/class="i"/g) || []).length, 1);
 });
 
+test("参数写了别名（contents / old_string）：照运行时那一套归位，预览与行迹不空白", () => {
+  // 运行时本来就会把 contents 归成 content、old_string 归成 old（见 01-arguments.js 的 TOOL_ARG_ALIASES），
+  // 页面只看正名的话，这些步骤在预览与行迹里就是一片空白，清单上却照样有增删
+  const message = {
+    steps: [
+      step(
+        "a",
+        "write_file",
+        { path: "n.txt", contents: "一\n二\n三" },
+        { change: { path: "n.txt", added: 3, removed: 0, created: true, lines: 3 } }
+      ),
+      step(
+        "b",
+        "edit_file",
+        { path: "n.txt", old_string: "甲", new_string: "乙" },
+        { change: { path: "n.txt", added: 1, removed: 1, lines: 3 } }
+      )
+    ]
+  };
+  assert.equal(view.stepDiffParts(message.steps[0])?.new, "一\n二\n三");
+  assert.deepEqual(view.stepDiffParts(message.steps[1]), { old: "甲", new: "乙" });
+  const html = view.changeDiffHtml(message, "n.txt");
+  assert.match(html, /二/);
+  assert.match(html, /乙/);
+});
+
+test("删了一行、新的一侧隔着六十行新行才有像它的：仍配得上，改的字标得出来", () => {
+  // 配对不设窗口：按「删的条数 × 增的条数」封在四万以内，平方的代价本就有上限；
+  // 设五十行的窗口会把删的那行配到不相干的新行上，本该标的改字整条丢掉
+  const before = "第 1 行：原来的一行\n",
+    after = `${Array.from({ length: 60 }, (_, i) => `全新的第 ${i} 件`).join("\n")}\n第 1 行：原来的一行，改过了\n`;
+  const drawn = view.splitDiffHtml(before, after);
+  // 只标真有改动的那一侧（旧的那行整行删掉，新的一行是加的），所以恰是一个
+  assert.equal((drawn.html.match(/<mark>/g) || []).length, 1);
+});
+
 test("早先存下的步骤照旧画：diff.old/new 与 written/previous 两种旧样子都认", () => {
   const oldStyle = {
     steps: [
