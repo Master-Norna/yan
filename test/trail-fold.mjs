@@ -233,7 +233,8 @@ check(
 );
 await shot("trail-helper-panel.png");
 await evalJs(`document.querySelector("#helperFoldHead").click(); true`);
-await sleep(500);
+// 收起的动效 380ms，放完才记 folded：机器慢时固定等 500ms 不够，等它落定再查
+await waitFor(`document.querySelector("#helperPanelBody .sub-trail").classList.contains("folded")`, 5000).catch(() => {});
 check(
   "folding leaves the report in view",
   await evalJs(
