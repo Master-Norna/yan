@@ -8,7 +8,7 @@ const { jsonRoute, requestSignal } = require("../http.js");
 const { fetchPublicResponse, readLimitedBytes } = require("../web.js");
 const sandbox = require("../sandbox.js");
 const { describeFsError, clampNumber, relPath } = require("./paths.js");
-const { decodeText, encodeText, countLines, lineDiffCounts, nearestPassage } = require("./text.js");
+const { decodeText, encodeText, countLines, lineDiffCounts, changeExcerpts, nearestPassage } = require("./text.js");
 const writeTextAtomic = require("./atomic.js");
 // 读一回最多交出多少字；覆盖写时捎回原文的长度，与页面留存写入内容的长度（src/15-tools/21-files.js 的 WRITTEN_KEEP_CHARS）一致
 const WORK_FILE_LIMIT = 200000,
@@ -55,8 +55,12 @@ module.exports = function createFiles(work) {
       await writeTextAtomic(file, output, signal).catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });
-      // 覆盖时按行比出真增删，并捎回原文开头一段：页面上点开这件的改动，删去的那些才有红可看
-      const counts = existed ? lineDiffCounts(previousText, content) : { added: countLines(content), removed: 0 };
+      // 覆盖时按行比出真增删，并捎回原文一段供页面并排看，删去的那些才有红可看。
+      // 整份太长时按改动摘出两侧同一批窗口，不再只留开头：改在文件后头时两侧的开头一模一样，并排一比成了「什么都没改」，
+      // 末尾那句「其后 N 字未留存」的字数反倒成了唯一的改动（见 text.js 的 changeExcerpts）
+      const counts = existed ? lineDiffCounts(previousText, content) : { added: countLines(content), removed: 0 },
+        long = previousText.length > PREVIOUS_KEEP_CHARS || content.length > PREVIOUS_KEEP_CHARS,
+        excerpt = existed && previousText && long ? changeExcerpts(previousText, content) : null;
       return {
         path: shownPath(workdir, file),
         bytes: output.length,
@@ -67,10 +71,14 @@ module.exports = function createFiles(work) {
         previousLines,
         ...counts,
         sig: fingerprint(output),
-        previous:
-          previousText.length > PREVIOUS_KEEP_CHARS
-            ? `${previousText.slice(0, PREVIOUS_KEEP_CHARS)}\n…（其后 ${previousText.length - PREVIOUS_KEEP_CHARS} 字未留存）`
-            : previousText || ""
+        ...(excerpt?.hunks
+          ? { diff: { old: excerpt.old, new: excerpt.new } }
+          : {
+              previous:
+                previousText.length > PREVIOUS_KEEP_CHARS
+                  ? `${previousText.slice(0, PREVIOUS_KEEP_CHARS)}\n…（其后 ${previousText.length - PREVIOUS_KEEP_CHARS} 字未留存）`
+                  : previousText || ""
+            })
       };
     } finally {
       release();

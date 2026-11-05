@@ -115,4 +115,128 @@ function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
     .join("\n");
 }
 
-module.exports = { tail, encodePowerShell, decodeClixml, decodeText, encodeText, countLines, lineDiffCounts, nearestPassage };
+// 两版的逐行增删：先切掉首尾相同的行，中段求最长公共子序列（放得下就细比，放不下整块当作一删一增）。
+// 's' 未改、'd' 旧有、'i' 新有，次序照文件走
+function lineOps(a, b) {
+  let start = 0,
+    endA = a.length,
+    endB = b.length;
+  while (start < endA && start < endB && a[start] === b[start]) start++;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) endA--, endB--;
+  const ops = [];
+  for (let i = 0; i < start; i++) ops.push(["s", a[i]]);
+  const m = endA - start,
+    n = endB - start;
+  if (m && n && m * n <= 250000) {
+    // 回溯要整张表：两边各五百行以内放得下
+    const width = n + 1,
+      table = new Uint32Array((m + 1) * width);
+    for (let i = 1; i <= m; i++) {
+      const line = a[start + i - 1],
+        row = i * width,
+        up = row - width;
+      for (let j = 1; j <= n; j++)
+        table[row + j] = line === b[start + j - 1] ? table[up + j - 1] + 1 : Math.max(table[up + j], table[row + j - 1]);
+    }
+    const back = [];
+    let i = m,
+      j = n;
+    while (i && j) {
+      if (a[start + i - 1] === b[start + j - 1]) back.push(["s", a[start + --i]]), j--;
+      else if (table[(i - 1) * width + j] >= table[i * width + j - 1]) back.push(["d", a[start + --i]]);
+      else back.push(["i", b[start + --j]]);
+    }
+    while (i) back.push(["d", a[start + --i]]);
+    while (j) back.push(["i", b[start + --j]]);
+    ops.push(...back.reverse());
+  } else {
+    for (let i = start; i < endA; i++) ops.push(["d", a[i]]);
+    for (let j = start; j < endB; j++) ops.push(["i", b[j]]);
+  }
+  for (let i = endA; i < a.length; i++) ops.push(["s", a[i]]);
+  return ops;
+}
+// 覆盖写一份文件时，改动要给人看全：整份存不下就按改动取，两侧各留改动连同前后各 context 行。
+// 不这么取、只留开头 N 字的话，改在文件后头时两侧的开头一模一样，并排一比成了「什么都没改」，
+// 末尾那句「其后 N 字未留存」的字数反倒成了唯一的改动。两侧取自同一批窗口，页面照旧逐行比。
+// 每侧不超过 limit 字：窗口多得放不下就舍掉后头的，并写明还剩几处
+function changeExcerpts(oldText, newText, { context = 3, limit = 20000 } = {}) {
+  const a = String(oldText ?? "").split(/\r?\n/),
+    b = String(newText ?? "").split(/\r?\n/),
+    ops = lineOps(a, b);
+  // 改动在 ops 里的区间，前后各带 context 行未改的；挨上的并成一块
+  const ranges = [];
+  for (let k = 0; k < ops.length; k++) {
+    if (ops[k][0] === "s") continue;
+    let end = k;
+    while (end < ops.length && ops[end][0] !== "s") end++;
+    const from = Math.max(0, k - context),
+      to = Math.min(ops.length, end + context),
+      last = ranges.at(-1);
+    if (last && from <= last[1]) last[1] = to;
+    else ranges.push([from, to]);
+    k = end - 1;
+  }
+  if (!ranges.length) return { old: "", new: "", hunks: 0, omitted: 0 };
+  // 这一段里两侧各自的行（未改的两边都有）
+  const cut = (from, to) => {
+    const oldLines = [],
+      newLines = [];
+    for (let k = from; k < to; k++) {
+      if (ops[k][0] !== "i") oldLines.push(ops[k][1]);
+      if (ops[k][0] !== "d") newLines.push(ops[k][1]);
+    }
+    return { oldLines, newLines };
+  };
+  const oldOut = [],
+    newOut = [];
+  const size = lines => lines.reduce((n, line) => n + line.length + 1, 0);
+  let from = 0,
+    omitted = 0;
+  for (let index = 0; index < ranges.length; index++) {
+    const [start, end] = ranges[index],
+      part = cut(start, end),
+      // 段与段之间跳过的都是未改的行，两侧同样多，写同一句话，并排看过去对得上
+      skipped = start > from && oldOut.length ? [`…（跳过 ${start - from} 行未改）`] : [],
+      oldNext = [...skipped, ...part.oldLines],
+      newNext = [...skipped, ...part.newLines];
+    if (oldOut.length && (size(oldOut) + size(oldNext) > limit || size(newOut) + size(newNext) > limit)) {
+      omitted = ranges.length - index;
+      break;
+    }
+    oldOut.push(...oldNext);
+    newOut.push(...newNext);
+    from = end;
+  }
+  // 头一块就超了 limit：留它，截到 limit 字，说明停在哪
+  const clip = lines => {
+    if (size(lines) <= limit) return lines;
+    const out = [];
+    let used = 0;
+    for (const line of lines) {
+      if (used + line.length + 1 > limit) break;
+      out.push(line);
+      used += line.length + 1;
+    }
+    out.push(`…（这一处改动太长，只列到这里）`);
+    return out;
+  };
+  if (omitted) {
+    const note = `…（另有 ${omitted} 处改动未列）`;
+    oldOut.push(note);
+    newOut.push(note);
+  }
+  return { old: clip(oldOut).join("\n"), new: clip(newOut).join("\n"), hunks: ranges.length, omitted };
+}
+
+module.exports = {
+  tail,
+  encodePowerShell,
+  decodeClixml,
+  decodeText,
+  encodeText,
+  countLines,
+  lineDiffCounts,
+  changeExcerpts,
+  nearestPassage
+};
