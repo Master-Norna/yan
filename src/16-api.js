@@ -585,11 +585,14 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
           if (delta?.thinking_block?.signature || delta?.thinking_block?.redacted)
             (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
           if (Array.isArray(delta?.tool_calls)) {
-            for (const call of delta.tool_calls) {
-              // 不带 index 的：换了 id 就是新的一件，否则续在末一件上
+            for (const [at, call] of delta.tool_calls.entries()) {
+              // 不带 index 的：换了 id 就是新的一件；同一个数组里第二件起的也是新的一件（一件调用不会在同一个数组里续写自己），
+              // 余下的续在末一件上——名字、参数都可能被切成几块到
               const slots = (assistant.toolCalls ||= []),
                 last = slots.at(-1),
-                index = call.index ?? (last && call.id && last.id && call.id !== last.id ? slots.length : Math.max(0, slots.length - 1)),
+                index =
+                  call.index ??
+                  (at > 0 || (last && call.id && last.id && call.id !== last.id) ? slots.length : Math.max(0, slots.length - 1)),
                 slot = (slots[index] ||= { id: "", name: "", arguments: "" }),
                 name = call.function?.name;
               if (call.id) slot.id = call.id;
