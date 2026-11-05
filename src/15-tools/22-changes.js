@@ -70,7 +70,8 @@ const MAX_EDITS = 1000;
  * 两列的编辑脚本：摊成一串 s（同）/ d（删）/ i（增），次序照原样；两样都行时先删后增。
  * 首尾相同的先剥掉再比：逐个比时遇到相同的就配上，一句话中间插进一段，开头那个「不」会被配到插进来的那段里去，配歪了。
  * 中段走 Myers 的 O(ND) 比法：耗时与内存跟着改动量走，不跟有多长走——两处改动隔着一千行、改在文件后头，也只比改动那一点。
- * 桥接那头是同一套（server/work/text.js 的 lineOps），清单与红绿才对得上。超过 MAX_EDITS 步才退成整块一删一增
+ * 桥接那头是同一套（server/work/text.js 的 lineOps），清单与红绿才对得上。超过 MAX_EDITS 步、文件又不大时
+ * 照旧用表比（见 myersOps 的 dpOps）；再大才整块一删一增
  * @param {string[]} a @param {string[]} b
  */
 function lcsOps(a, b) {
@@ -91,7 +92,8 @@ function lcsOps(a, b) {
   return ops;
 }
 // Myers 的最短编辑脚本：一步一条斜线，走一步记下这一步各条斜线到了哪，走到头再照记录退回来。
-// 不把整串摊进 push 的参数里（十万行的整块改写会撑爆调用栈）；超步数上限就返回 null，由 lcsOps 整块一删一增
+// 不把整串摊进 push 的参数里（十万行的整块改写会撑爆调用栈）；超步数上限时，文件不大（两版行数之积在
+// 千六百万以内）照旧用表比（dpOps），精确到每一行，再大才返回 null，由 lcsOps 整块一删一增
 /** @param {string[]} x @param {string[]} y @returns {Array<[string, string]> | null} */
 function myersOps(x, y) {
   const n = x.length,
@@ -123,7 +125,7 @@ function myersOps(x, y) {
     }
     if (found >= 0) break;
   }
-  if (found < 0) return null;
+  if (found < 0) return n * m <= 16e6 ? dpOps(x, y) : null;
   /** @type {Array<[string, string]>} */
   const back = [];
   let px = n,
@@ -144,6 +146,33 @@ function myersOps(x, y) {
   while (px > 0) back.push(["d", x[--px]]);
   while (py > 0) back.push(["i", y[--py]]);
   return back.reverse();
+}
+// 改动多到 Myers 走不完、文件又不大时照旧用表比：一张 (n+1)×(m+1) 的最长公共子序列表，从头退回来。
+// 两版行数之积在千六百万以内才进得来（与旧法同一个上限）；再大表装不下，由 lcsOps 整块一删一增。
+// 改动少时不会走到这里——那时 Myers 快得多。
+// 表摊成一条：一行一个 Uint16Array 的话，极扁的形状（二百万行 × 三行）光两百多万个数组对象就要几百兆；
+// 摊平只有 (n+1)*(m+1)*2 字节，同一形状十几兆
+/** @param {string[]} x @param {string[]} y @returns {Array<[string, string]>} */
+function dpOps(x, y) {
+  const n = x.length,
+    m = y.length,
+    w = m + 1,
+    dp = new Uint16Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i * w + j] = x[i] === y[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+  /** @type {Array<[string, string]>} */
+  const ops = [];
+  let i = 0,
+    j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && x[i] === y[j]) {
+      ops.push(["s", x[i++]]);
+      j++;
+    } else if (i < n && (j >= m || dp[(i + 1) * w + j] >= dp[i * w + j + 1])) ops.push(["d", x[i++]]);
+    else ops.push(["i", y[j++]]);
+  }
+  return ops;
 }
 // 行内按词比：英文数字连成一词，汉字与标点逐个
 const diffTokens = (/** @type {string} */ line) => line.match(/[A-Za-z0-9_$]+|\s+|[^\sA-Za-z0-9_$]/gu) || [];
@@ -239,8 +268,8 @@ function wordMarks(oldLine, newLine) {
 }
 // 一段连着的删与增怎么排：按先后，删的那行往后找第一行像它的配成一对。
 // 两对之间落单的删与跳过的增左右并进同几行（loose，不逐字比）——各占一行会排成台阶，一边一块空洞。
-// 只在往后 PAIR_WINDOW 行里找：改动块里要认亲的本来就在近旁，翻遍整块是平方的代价（几十万行的整块改写会卡死）
-const PAIR_WINDOW = 50;
+// 往后找不设窗口：调用处已经按「删的条数 × 增的条数」封在四万以内（见 splitDiffHtml），平方的代价本就有上限；
+// 设窗口反而把隔着五十行新行的那一对配到不相干的行上，该标的改字整条丢掉
 /** @param {string[]} dels @param {string[]} ins */
 function pairLines(dels, ins) {
   /** @type {Array<{ d?: string, i?: string, loose?: boolean }>} */
@@ -256,8 +285,7 @@ function pairLines(dels, ins) {
   };
   for (const d of dels) {
     let hit = -1;
-    const until = Math.min(ins.length, j + PAIR_WINDOW);
-    for (let k = j; k < until; k++)
+    for (let k = j; k < ins.length; k++)
       if (linesAlike(d, ins[k])) {
         hit = k;
         break;
@@ -322,9 +350,10 @@ function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true, all = 
     html === null
       ? `<span class="e"></span>`
       : `<span class="${kind}${kind === "s" && raw.startsWith("…（") ? " hint" : ""}"${!wrap && raw.length > 30 ? ` title="${escapeHtml(titleOf(raw))}"` : ""}>${html || " "}</span>`;
-  // 没配上对的长行：只写开头一段；配过对的走 wordMarks 的折叠（改动那一段留着）
+  // 没配上对的长行：行迹里只写开头一段（一行放不下，末端的 title 另可看出处）；预览浮层与「展开全部」照常整行，
+  // 改在后半截的行才看得见——基线本也是整行，折成开头就是这次改出来的退步
   const shownLine = raw =>
-    raw.length > LONG_LINE
+    raw.length > LONG_LINE && !wrap
       ? `${escapeHtml(raw.slice(0, LONG_MOST))}<span class="elide">…（${raw.length - LONG_MOST} 字略）</span>`
       : escapeHtml(raw);
   for (let k = 0; k < ops.length; ) {
@@ -367,10 +396,15 @@ function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true, all = 
   };
 }
 // 写文件那一步写下的整份：就在这一步的参数里（见 src/15-tools/21-files.js），不另存第二份；取不到才是 null
+// 参数照工具的 schema 理顺再取：模型把 content 写成 contents / text / body、或把整份给成字符串数组，
+// 运行时本来就都会归位（见 01-arguments.js 的 TOOL_ARG_ALIASES），页面只看正名的话，
+// 这些步骤在预览与行迹里就是一片空白，清单上却照样有增删
 /** @param {Step} step @returns {string|null} */
 function writtenContent(step) {
   const parsed = parseToolArguments(step.arguments);
-  return parsed.ok && typeof parsed.args.content === "string" ? parsed.args.content : null;
+  if (!parsed.ok) return null;
+  const { args } = normalizeToolArguments(step.name, parsed.args);
+  return typeof args.content === "string" ? args.content : null;
 }
 // 覆盖写那一步的改动：桥接只存了旧侧的行与两侧行号（见 server/work/text.js 的 changeHunks），
 // 新的一侧整份在参数里，按行号切出同一批窗口，拼回来照旧逐行比；跳过未改的那几行两侧写同一句，并排看过去对得上
@@ -399,22 +433,46 @@ function hunksText(step) {
     cursor += hunk.oldCount;
     prevEnd = hunk.oldStart + hunk.oldCount;
   }
-  return { old: old.join("\n"), new: next.join("\n"), all: true };
+  // 摘录按行拼回，末尾补一个换行：diffLines 剥掉的是补的这个。不补的话，最后一行恰是空行时会被当成文件末尾的换行，
+  // 那一行就没了，并排时新侧多出一个「新增」空行、左侧错位
+  const asText = lines => (lines.length ? `${lines.join("\n")}\n` : "");
+  return { old: asText(old), new: asText(next), all: true };
 }
 // 这一步该画的红绿：新格式（hunks）、旧格式（diff.old/new、written/previous）、改文件那步（参数里的前后两段）。
 // 解析参数不便宜（一行到底的 JSON 也有几万字），按这一步的 diff 与参数原文记一份，重画时不必再解
-/** @type {WeakMap<Step, { diff: unknown, arguments: string, parts: { old: string, new: string, all?: boolean }|null }>} */
+/** @type {WeakMap<Step, { diff: unknown, arguments: string, change: unknown, written: unknown, previous: unknown, parts: { old: string, new: string, all?: boolean }|null }>} */
 const stepDiffCache = new WeakMap();
 /** @param {Step} step @returns {{ old: string, new: string, all?: boolean }|null} */
 function stepDiffParts(step) {
   const cached = stepDiffCache.get(step);
-  if (cached && cached.diff === step.diff && cached.arguments === step.arguments) return cached.parts;
+  // change 也要比：新建的件在跑完前（change 还没设）先画过一回，缓存若只看 diff / arguments，
+  // 跑完后参数与 diff 都没变，缓存还回那个 null——新建的件就再也画不出红绿了（跑完才有 created）
+  if (
+    cached &&
+    cached.diff === step.diff &&
+    cached.arguments === step.arguments &&
+    cached.change === step.change &&
+    cached.written === step.written &&
+    cached.previous === step.previous
+  )
+    return cached.parts;
   const parts = stepDiffPartsOf(step);
-  stepDiffCache.set(step, { diff: step.diff, arguments: step.arguments, parts });
+  stepDiffCache.set(step, {
+    diff: step.diff,
+    arguments: step.arguments,
+    change: step.change,
+    written: step.written,
+    previous: step.previous,
+    parts
+  });
   return parts;
 }
 function stepDiffPartsOf(step) {
-  if (step.diff && "hunks" in step.diff) return hunksText(step);
+  // 取不到内容时不要就此 null：往下还有 written/previous 与参数这两条路，能画多少画多少
+  if (step.diff && "hunks" in step.diff) {
+    const parts = hunksText(step);
+    if (parts) return parts;
+  }
   if (step.diff && typeof step.diff.old === "string" && typeof step.diff.new === "string")
     return { old: step.diff.old, new: step.diff.new };
   if (step.written !== undefined) return { old: step.previous ?? "", new: step.written };
@@ -425,8 +483,11 @@ function stepDiffPartsOf(step) {
   }
   if (step.name === "edit_file") {
     const parsed = parseToolArguments(step.arguments);
-    if (parsed.ok && typeof parsed.args.old === "string" && typeof parsed.args.new === "string")
-      return { old: parsed.args.old, new: parsed.args.new };
+    // 与 writtenContent 同理：old_string / new_string 这些别名运行时早就归位了，页面跟着同一套走
+    if (parsed.ok) {
+      const { args } = normalizeToolArguments(step.name, parsed.args);
+      if (typeof args.old === "string" && typeof args.new === "string") return { old: args.old, new: args.new };
+    }
   }
   return null;
 }
