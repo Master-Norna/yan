@@ -34,7 +34,7 @@ function decodeText(buffer) {
   }
   if (buffer.subarray(0, 4096).includes(0)) return null;
   const text = buffer.toString("utf8"),
-    bad = (text.match(/\uFFFD/g) || []).length;
+    bad = (text.match(/�/g) || []).length;
   if (!bad || bad < text.length / 100) return { text, encoding: "utf-8" };
   return { text: new TextDecoder("gb18030").decode(buffer), encoding: "gbk" };
 }
