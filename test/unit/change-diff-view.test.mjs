@@ -2,9 +2,12 @@
 // 这些用例接着页面那一步断言：画出的增删等于真实增删，最后一处改动也在页面上
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { load } from "./harness.mjs";
 
-const view = load(["splitDiffHtml", "changeDiffHtml"]);
+const require = createRequire(import.meta.url);
+const { changeHunks } = require("../../server/work/text.js");
+const view = load(["splitDiffHtml", "changeDiffHtml", "stepDiffParts", "workStepHtml"]);
 
 const plain = (n, tag = "行") => Array.from({ length: n }, (_, i) => `第 ${i + 1} ${tag}：一二三四五六七八九十`);
 const textOf = lines => `${lines.join("\n")}\n`;
@@ -188,4 +191,51 @@ test("早先存下的步骤照旧画：diff.old/new 与 written/previous 两种�
     ]
   };
   assert.match(view.changeDiffHtml(writtenStyle, "c.txt"), /三/);
+});
+
+test("覆盖写摘录的最后一行是空行：那一行不被当成文件末尾的换行吃掉，两侧对得上", () => {
+  const oldText = "甲\n\n丙\n\n",
+    newText = "甲\n\n丙改了\n\n\n庚";
+  const d = changeHunks(oldText, newText);
+  const message = {
+    steps: [
+      step(
+        "a",
+        "write_file",
+        { path: "blank.txt", content: newText },
+        {
+          diff: { hunks: d.hunks, old: d.old },
+          change: { path: "blank.txt", added: d.added, removed: d.removed, created: false, lines: 6 }
+        }
+      )
+    ]
+  };
+  const html = view.changeDiffHtml(message, "blank.txt");
+  // 旧版 4 行（最后两行都是空行），新版 6 行：删 1 增 3，画出来也得是 1/3
+  assert.equal((html.match(/class="d"/g) || []).length, 1);
+  assert.equal((html.match(/class="i"/g) || []).length, 3);
+});
+
+test("新建的件先跑后成：缓存也认 change，红绿画得出来", () => {
+  const st = step("a", "write_file", { path: "new.txt", content: "甲\n乙\n" }, { status: "running" });
+  assert.equal(view.stepDiffParts(st), null);
+  st.change = { path: "new.txt", added: 2, removed: 0, created: true, lines: 2 };
+  st.status = "done";
+  const parts = view.stepDiffParts(st);
+  assert.ok(parts);
+  assert.equal(parts.old, "");
+  assert.equal(parts.new, "甲\n乙\n");
+});
+
+test("报错的那一步不摊红绿：old/new 在参数里，也不当成已改", () => {
+  const bad = {
+    id: "e",
+    name: "edit_file",
+    status: "error",
+    arguments: JSON.stringify({ path: "a.txt", old: "旧", new: "新" }),
+    result: "old 对不上"
+  };
+  assert.doesNotMatch(view.workStepHtml(bad, "a.txt"), /tool-diff/);
+  const ok = { ...bad, status: "done" };
+  assert.match(view.workStepHtml(ok, "a.txt"), /tool-diff/);
 });

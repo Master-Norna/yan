@@ -43,7 +43,8 @@ async function call(route, body) {
 const plain = (n, tag = "行") => Array.from({ length: n }, (_, i) => `第 ${i + 1} ${tag}：一二三四五六七八九十`);
 const textOf = lines => `${lines.join("\n")}\n`;
 
-// 把 hunks 与这一步的参数拼回两侧：与页面上 hunksText 的算法一致（这里是照着它的规矩写的核对）
+// 把 hunks 与这一步的参数拼回两侧：与页面上 hunksText 的算法一致（这里是照着它的规矩写的核对）。
+// 末尾补一个换行：页面那边 diffLines 会剥掉它，最后一行恰是空行时才不会被当成文件末尾的换行
 function rebuild(diff, content) {
   const b = content.replace(/\r?\n$/, "").split(/\r?\n/),
     oldRows = diff.old ? diff.old.split("\n") : [],
@@ -62,7 +63,8 @@ function rebuild(diff, content) {
     cursor += hunk.oldCount;
     prevEnd = hunk.oldStart + hunk.oldCount;
   }
-  return { old: old.join("\n"), new: next.join("\n") };
+  const asText = lines => (lines.length ? `${lines.join("\n")}\n` : "");
+  return { old: asText(old), new: asText(next) };
 }
 
 test("改在文件末尾：窗口指到那一行，旧侧带着原文，新侧按行号取得到", () => {
@@ -122,6 +124,21 @@ test("中间插入一千二百行：只增不删，尾随的未改行不算删",
   const h = changeHunks(textOf(lines), textOf(inserted));
   assert.equal(h.added, 1200);
   assert.equal(h.removed, 0);
+});
+
+test("隔行改五百处、改动量过千步：计数仍精确，不退成整块一删一增", () => {
+  const lines = plain(2000),
+    changed = lines.slice();
+  for (let i = 0; i < 2000; i += 4) changed[i] = `第 ${i + 1} 行：改了`;
+  const n = changed.filter((line, i) => line !== lines[i]).length;
+  // 1000 处增删（500 删 + 500 增）超过 Myers 的步数上限，文件不大，照旧用表比
+  assert.deepEqual(lineDiffCounts(textOf(lines), textOf(changed)), { added: n, removed: n });
+  const h = changeHunks(textOf(lines), textOf(changed));
+  assert.deepEqual({ added: h.added, removed: h.removed }, { added: n, removed: n });
+  // 每处相隔四行、前后各三行上下文，全都并成一块；拼回来的新侧就是整份新版
+  assert.equal(h.hunks.length, 1);
+  const back = rebuild(h, textOf(changed));
+  assert.equal(back.new, textOf(changed));
 });
 
 test("十五万行的整份改写不抛 RangeError（回溯不摊进 push 的参数）", () => {
