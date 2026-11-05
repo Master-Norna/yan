@@ -164,7 +164,7 @@ test("小文件也给 hunks：同一个工具不按文件大小分两种样子",
 
 test("比法与朴素的最长公共子序列对得上：随机两百对，桥接与页面同一个答案", () => {
   let seed = 7;
-  const next = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const next = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   for (let round = 0; round < 200; round++) {
     const n = Math.floor(next() * 30),
       m = Math.floor(next() * 30),
