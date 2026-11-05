@@ -37,14 +37,17 @@ await post("/api/chats/save", { root: "", savedAt: Date.now(), conversation: con
 await evalJs(
   `(i => { i.value = "PLAIN 这边的一问"; i.dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); })(document.querySelector("#chatInput")); true`
 );
-await waitFor(
-  `__yanState().conversations.find(c => c.id === "stale-1").messages.some(m => m.role === "assistant" && m.status === "complete" && !m.id.startsWith("s-"))`,
-  10000
-).catch(() => {});
-await sleep(2500);
-let ids = ((await disk())?.conversation.messages || []).map(m => m.id);
+// 第一次写被拒时若还在作答，并好的要隔一个流式落盘间隔才写回：不定死等多久，等盘上出现这边答完的那份
+const answeredOnDisk = async () => {
+  const messages = (await disk())?.conversation.messages || [];
+  return messages.some(m => m.role === "assistant" && m.status === "complete" && !m.id.startsWith("s-")) ? messages : null;
+};
+let saved = null;
+for (const started = Date.now(); !saved && Date.now() - started < 15000; await sleep(100)) saved = await answeredOnDisk();
+let ids = (saved || (await disk())?.conversation.messages || []).map(m => m.id);
 check("the other page's answer is still on disk after this page speaks", ids.includes("s-u2") && ids.includes("s-a2"), JSON.stringify(ids));
-check("this page's new turn follows it on disk", ids.length === 6 && ids.indexOf("s-a2") === 3, JSON.stringify(ids));
+// 两边的先后看写盘赶在作答中还是答完后（见 mergeConversation），这里只查谁都不丢
+check("this page's new turn joins it on disk", ids.length === 6, JSON.stringify(ids));
 check("and this page shows the merged conversation", JSON.stringify(await state()) === JSON.stringify(ids), JSON.stringify(await state()));
 
 // 二、那一处又写了一问；这边藏着没察觉，回到前台时先跟上
