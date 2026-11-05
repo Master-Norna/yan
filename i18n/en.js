@@ -1668,28 +1668,28 @@ var YAN_EN = {
     "No model yet. Any OpenAI-compatible or Anthropic API works; settings stay on this machine.",
   "前往设置 →": "Open settings →",
   概念讲解: "Explain a concept",
-  "用通俗易懂的方式帮我讲讲（一个概念，比如复利、傅里叶变换、TCP 三次握手）。最好用可视化、可交互的方式辅助解释。":
-    "Explain [a concept, e.g. compound interest, the Fourier transform, the TCP handshake] in plain terms. Use an interactive visualization if it helps.",
+  "用通俗易懂的方式帮我讲讲（一个概念，比如复利、傅里叶变换、TCP 三次握手）。":
+    "Explain [a concept, e.g. compound interest, the Fourier transform, the TCP handshake] in plain terms.",
   定时监测: "Watch for changes",
   "帮我盯着（一件会变的事，比如某个商品的价格、某个开源项目的新版本、某个网页上的公告），每隔（一小时）看一眼。有动静戳我。":
     "Keep an eye on [something that changes, e.g. a product's price, a new release of an open-source project, an announcement page] and check every [hour]. Ping me when something changes.",
   材料分析: "Analyze files",
-  "（附上表格、PDF 或一批文档）帮我看看这些材料：先用几句话说说讲了什么，再把关键数字整理成一张表、画成图，有前后对不上或可疑的地方指给我。":
-    "[Attach spreadsheets, PDFs or documents] Go through these: summarize them in a few sentences, put the key numbers in a table and a chart, and point out anything inconsistent or suspicious.",
+  "（附上表格、PDF 或一批文档）帮我看看这些材料讲了什么，有前后对不上或可疑的地方指给我。":
+    "[Attach spreadsheets, PDFs or documents] Tell me what these say, and point out anything inconsistent or suspicious.",
   文件生成: "Make a file",
-  "帮我做一份（要做的东西，比如季度汇报 PPT、带图表的 Excel 预算表、一页 PDF 简历）。先问我几个问题把内容和风格定下来，做好了我直接预览、下载。":
-    "Make me [something, e.g. a quarterly report deck, an Excel budget with charts, a one-page PDF resume]. Ask me a few questions about content and style first, then I'll preview and download it.",
+  "帮我做一份（要做的东西，比如季度汇报 PPT、Excel 预算表、一页 PDF 简历）。":
+    "Make me [something, e.g. a quarterly report deck, an Excel budget, a one-page PDF resume].",
   项目梳理: "Plan a project",
-  "我想把这个项目（往哪里推进，比如加上登录、换一套存储、把某个功能做完整）。先通读一遍，用几句话讲讲它现在的样子；再问我几个问题把目标定准，立一份意，把要做成的拆成几项能验证的结论。先别改代码，等我看过再动手。":
-    "I want to take this project [somewhere, e.g. add login, switch storage, finish a feature]. Read through it first and describe where it stands in a few sentences. Then ask me a few questions to pin down the goal, set up an intent map, and break it into checkable outcomes. Don't change code until I've reviewed it.",
+  "我想把这个项目（往哪里推进，比如加上登录、换一套存储、把某个功能做完整）。先看看它现在的样子，说说打算怎么做，等我看过再动手。":
+    "I want to take this project [somewhere, e.g. add login, switch storage, finish a feature]. Look at where it stands and tell me how you'd go about it; wait for me to review before making changes.",
   深度调研: "Deep research",
-  "帮我把（一个问题，比如某个领域的主流做法、几种技术方案该选哪个）研究透：派几个帮手分头去查，各自的结论收回来交叉比对，说法打架的地方标出来。最后在这个目录里写一份报告，先给结论，再列依据和出处。":
-    "Research [a question, e.g. common practice in a field, which of several technical options to pick] thoroughly: send a few subagents to look into it in parallel, cross-check their findings and flag where they disagree. Then write a report in this folder: conclusion first, then evidence and sources.",
+  "帮我把（一个问题，比如某个领域的主流做法、几种技术方案该选哪个）研究透：先给结论，再列依据和出处，说法打架的地方标出来。":
+    "Research [a question, e.g. common practice in a field, which of several technical options to pick] thoroughly: conclusion first, then evidence and sources, and flag where sources disagree.",
   网页操作: "Use the browser",
   "用浏览器帮我（要在网页上办的事，比如在几家网站比价后整理成表、把这份清单逐条填进某个后台）。碰到要我判断的地方向我确认。":
     "Use the browser to [a task on the web, e.g. compare prices across a few sites and put them in a table, enter this list into an admin panel]. Check with me whenever a judgment call comes up.",
   原型演示: "Build a prototype",
-  "在这个目录里从零做一个（一个小作品，比如番茄钟、记账本、贪吃蛇），一个网页就行，做好映射到浏览器里，检查无误后向我汇报。":
-    "Build [a small project, e.g. a pomodoro timer, an expense tracker, snake] from scratch in this folder as a single web page. Open it in the browser, check it works, then report back."
+  "在这个目录里做一个（一个小作品，比如番茄钟、记账本、贪吃蛇），一个网页就行，做好自己试一遍再告诉我。":
+    "Build [a small project, e.g. a pomodoro timer, an expense tracker, snake] in this folder as a single web page. Try it yourself, then tell me."
 };
 if (typeof module === "object") module.exports = YAN_EN;
