@@ -22,8 +22,8 @@ const TOOLS_LIMIT = 128;
 // 上游没接下请求时回的那句话。OpenAI 系 { error: { message } }、有的中转站 { error: "…" }、旧版 vLLM { message }、
 // FastAPI 写的自建服务 { detail }（参数校验错是一串对象，整串交出去，思考档位的报错才读得出它认哪几档）；
 // ChatGPT 订阅额度那边的几种拒绝换成看得懂的话。页面只读桥接回的 { error }，各家的样子到此为止
-async function upstreamError(response) {
-  const raw = await response.text().catch(() => "");
+async function upstreamError(response, raw) {
+  raw = raw ?? (await response.text().catch(() => ""));
   try {
     const json = JSON.parse(raw),
       detail = json.detail;
@@ -146,6 +146,30 @@ module.exports = function createModel({ home }) {
           status: response.status,
           retryAfter: response.headers.get("retry-after") || ""
         });
+      // 上游回了 200，正文却是整份 JSON（中转不支持流式，或者 200 {"type":"error"} 的报错）：照旧交给 translateSse，
+      // 它一个字也认不出，页面只收到一个空的 200 事件流——报「未发送结束标志」、白跑两次续写，上游的原话整段丢掉。
+      // 判据只能看类型里有没有 json：标成 text/plain 或不标类型的事件流照样能译（见 #22），反过来按「不是 event-stream
+      // 就报错」会把它们一并弄坏。只看会重译事件流的两路（provider.stream），OpenAI 兼容那路整份 JSON 本就能收
+      const type = String(response.headers.get("content-type") || "").toLowerCase();
+      if (provider.stream && type.includes("json")) {
+        const raw = await response.text().catch(() => "");
+        let json = null;
+        try {
+          json = JSON.parse(raw);
+        } catch {}
+        // 两种 JSON 分开给状态码：报错 JSON（Anthropic 的 Overloaded 这类）按可重试的 5xx 交回，页面照现有节奏等；
+        // 正常答复的整份 JSON 是 4xx、不重试——回 5xx 页面会把 RETRY_DELAYS 排满，干等约五分钟，比原先白跑两次还糟
+        if (json && ((json.error && !json.choices) || json.type === "error"))
+          throw Object.assign(Error(await upstreamError(response, raw)), { status: 503 });
+        throw Object.assign(
+          Error(
+            json
+              ? `上游回了整份 JSON，不是事件流（${type}）：这条中转多半不支持流式，可换一条支持流式的接口`
+              : `上游回的不是事件流，也读不出 JSON（${type}，前 200 字：${raw.trim().slice(0, 200)}）`
+          ),
+          { status: 415 }
+        );
+      }
       // 记着流了多少、最后一次来字是何时：途中断了，桥接窗口里一行看得出是对面掐线还是静默太久（见下 catch）
       meter.opened = Date.now();
       meter.last = meter.opened;
