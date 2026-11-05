@@ -609,6 +609,11 @@ test("不带后缀的 credentials：带路径才算凭据文件，严档拦、�
 const TABLE = [
   // POSIX 指令位
   ...[
+    "if sudo id; then :; fi",
+    "while sudo id; do :; done",
+    "! sudo id",
+    "until sudo id",
+    "elif sudo id",
     "bash -lc 'launchctl bootout gui/501/x'",
     'bash -o pipefail -c "launchctl load x"',
     'bash --norc -c "launchctl load x"',
@@ -634,6 +639,8 @@ const TABLE = [
     "echo env defaults write x y z",
     "npm run eval x",
     "echo sudo x",
+    "echo if sudo x",
+    'rg "while sudo" src',
     "echo Set-Alias",
     "echo alias x=rm",
     "echo administratorPrivileges"
@@ -736,6 +743,7 @@ const TABLE = [
     `sh -c 'echo "cat x | sh"'`
   ].map(command => [command, "o", "o", "o", "o"]),
   // 别名只认
+  [String.raw`& "Set-Alias" wipe Remove-Item; wipe C:\Users\me\v.txt`, "x", "x", "o", "o"],
   ...["alias x=rm", "Set-Alias x y", "$null = Set-Alias x y", "New-Alias x y", "sal x y", "nal x y", "sh -c 'alias x=rm'"].map(command => [
     command,
     "x",

@@ -19,7 +19,7 @@ const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 // 套一层壳的也算：cmd /c、powershell -Command、pwsh -c 后面跟的整段都在执行——指令本就由 PowerShell 跑，
 // 「powershell -Command "Set-Content C:\x y"」与直接写没有分别；这类壳之后同一行里的任何词都按指令位看，宁可多拦。
 // 赋值的右边也在执行（$r = reg delete …）；右边是带引号的字串（$mode = "copy"）不算
-const PREFIX = String.raw`(?:(?:then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs(?:\s+-\S+)*|env(?:\s+-\S+)*|[A-Za-z_]\w*=\S*)\s+)*`;
+const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs(?:\s+-\S+)*|env(?:\s+-\S+)*|[A-Za-z_]\w*=\S*)\s+)*`;
 const SHELL = String.raw`(?:\S*/)?(?:ba|z|da|k)?sh\s+(?:--[\w-]+\s+|-o\s+\S+\s+|-(?!o\s)[^c\s-]+\s+)*-[a-z]*c[a-z]*\s+["']?`;
 const CMD =
   String.raw`(?:^|[;&|({\n]|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?` +
@@ -40,7 +40,7 @@ const cmdlet = (/** @type {string} */ names) => new RegExp(String.raw`${CMD}(?:$
 // 改「项」的 cmdlet 与它们在 Windows PowerShell 里的别名（ni = New-Item、sp = Set-ItemProperty……）：注册表那条与写动词表都用
 const ITEM_WRITERS = String.raw`(?:New|Set|Remove|Clear|Rename|Copy|Move)-Item(?:Property)?|ni|si|ri|cli|rni|rn|cpi|mi|sp|rp|clp|rnp|mp`;
 // 定义别名等于给写动词换个名字，静态筛查就认不出来了；与 Invoke-Expression 同属「藏字」
-const ALIASING = new RegExp(String.raw`${CMD}(?:(?:Set|New)-Alias|sal|nal)(?=\s|$)|${CMD}alias\s+[^\s=]+\s*=`, "im");
+const ALIASING = new RegExp(String.raw`${cmd("(?:Set|New)-Alias|sal|nal").source}|${CMD}alias\s+[^\s=]+\s*=`, "im");
 const ELEVATION = new RegExp(
   String.raw`-Verb\s+RunAs\b|${cmd(String.raw`(?:/\S*/)?sudo`).source}|${cmd("osascript", String.raw`[^\n]*(?:with\s+administrator\s+privileges\b|administratorPrivileges\s*:\s*true\b)`).source}`,
   "im"
