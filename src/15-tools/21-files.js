@@ -1,6 +1,5 @@
 // 言 · 文件：读、写、改、列、搜、下载。绑了目录落在工作目录（执事的六件），没绑落在卷宗（言只带产出所需的读、写、列与指令）。
 // 路径与沙箱在桥接那头管（server/work/）；这里只管呈现与「改之前先读过」这条规矩
-const WRITTEN_KEEP_CHARS = 4000;
 defineTool({
   name: "write_file",
   group: "work",
@@ -37,20 +36,10 @@ defineTool({
       created: !data.existed,
       lines: data.lines
     };
-    // 写下的内容与覆盖掉的原文各留一份给改动清单点开看（见 changeDiffHtml）；太长只留开头，免得对话记录跟着胖
-    const keep = text =>
-      text.length > WRITTEN_KEEP_CHARS
-        ? t`${text.slice(0, WRITTEN_KEEP_CHARS)}\n…（其后 ${text.length - WRITTEN_KEEP_CHARS} 字未留存）`
-        : text;
-    // 旧的一版整份存不下时，桥接按改动摘出两侧同一批窗口（见 server/work/text.js 的 changeExcerpts）：
-    // 照它并排比，改在文件后头也看得见。这时不再留 written，免得两侧窗口对不上、把没改的行算成增删
-    if (data.diff) {
-      step.diff = { old: data.diff.old, new: data.diff.new };
-      step.written = "";
-    } else {
-      step.written = keep(String(args.content));
-      if (data.previous) step.previous = String(data.previous);
-    }
+    // 覆盖写时桥接按改动捎回旧侧的行与两侧行号（见 server/work/text.js 的 changeHunks）：新的一侧整份就在这一步的参数里，
+    // 画的时候从那儿取（见 22-changes.js 的 hunksText），不再另存一份。旧桥接只给 previous（开头一截），照旧留着，早先的步骤也画得出来
+    if (data.diff) step.diff = data.diff;
+    else if (data.previous !== undefined) step.previous = String(data.previous);
     return {
       ok: true,
       content: t`已写入 ${data.path}（${data.bytes} 字节，${data.lines} 行${data.existed ? t`，覆盖了原${data.binary ? t("有的二进制") : ""}文件` : ""}${data.converted ? t("；原文件是 GBK，已存成 UTF-8") : ""}）`,
@@ -87,8 +76,7 @@ defineTool({
       );
     step.title = data.path;
     step.root = workRoot(conversation);
-    // old/new 本就整份记在这一步的参数里，diff 不必再截一段：截了只会让人看不到改的是什么
-    step.diff = { old: args.old, new: args.new };
+    // old/new 本就整份记在这一步的参数里：画的时候从那儿取（见 22-changes.js 的 stepDiffParts），不再存第二份
     step.sig = data.sig;
     // 读后被别人改过：这一处照改了，可文件别处的现状它没看过——这一步不算「看清了」，整份覆盖前还得重读
     if (data.drift) step.drifted = changedBy(conversation, step, data.drift);
