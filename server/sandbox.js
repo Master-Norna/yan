@@ -14,15 +14,22 @@ const path = require("node:path");
 const { pathIsInside } = require("./work/paths.js");
 
 const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
-// 「指令位」：一行的开头，或 ; & | ( { 之后（& 调用、脚本块也算），只有站在这个位置上的词才算在执行它——
+// 「指令位」：一行的开头，或 ; & | ( { 与引号外的 ) 之后（& 调用、脚本块也算），只有站在这个位置上的词才算在执行它——
 // 「npm run format」「echo shutdown」里的 format / shutdown 不是。
 // 套一层壳的也算：cmd /c、powershell -Command、pwsh -c 后面跟的整段都在执行——指令本就由 PowerShell 跑，
 // 「powershell -Command "Set-Content C:\x y"」与直接写没有分别；这类壳之后同一行里的任何词都按指令位看，宁可多拦。
 // 赋值的右边也在执行（$r = reg delete …）；右边是带引号的字串（$mode = "copy"）不算
-const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs(?:\s+-\S+)*|env(?:\s+-\S+)*|[A-Za-z_]\w*=\S*)\s+)*`;
+const SHELL_WORD = String.raw`(?:"(?:\\.|[^"\\\n])*"|'[^'\n]*'|[^\s"';&|()]+)`;
+// 带值的短选项必须消费一个完整词；另一支排除这些独立选项，不能回溯成「无值」。
+const XARGS_OPTIONS = String.raw`(?:\s+(?:-[nILPdsEa]\s+${SHELL_WORD}|-(?![nILPdsEa](?=\s|$))[^\s"';&|()]+))*`;
+const ENV_OPTIONS = String.raw`(?:\s+(?:-[uCS]\s+${SHELL_WORD}|-(?![uCS](?=\s|$))[^\s"';&|()]+))*`;
+const FIND_ACTION = String.raw`find(?:\s+(?!-(?:exec|ok)(?:dir)?(?=\s|$))(?:\\?[()]|${SHELL_WORD}))*\s+-(?:exec|ok)(?:dir)?`;
+const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs${XARGS_OPTIONS}|env${ENV_OPTIONS}|${FIND_ACTION}|[A-Za-z_]\w*=(?:${SHELL_WORD})?)\s+)*`;
 const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh\s+(?:--[\w-]+\s+|-o\s+\S+\s+|-(?!o\s)[^c\s-]+\s+)*-[a-z]*c[a-z]*\s+["']?`;
+// 从行首只扫一次，跳过成对引号；不能把 echo "a) sudo" 中的 ) 当成指令位。
+const AFTER_PAREN = String.raw`^(?:${PREFIX}${SHELL})?(?:[^"'\n]|"[^"\n]*"|'[^'\n]*')*\)`;
 const CMD =
-  String.raw`(?:^|[;&|({\n]|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?` +
+  String.raw`(?:^|[;&|({\n]|${AFTER_PAREN}|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?` +
   PREFIX +
   // 第二段前缀必须跟在 Shell 后，避免两段前缀任意切分造成回溯。
   String.raw`(?:${SHELL}${PREFIX})?`;
@@ -50,7 +57,8 @@ const ELEVATION = new RegExp(
 // PowerShell 认参数名的任意前缀，也认 / 开头：-en、-encodedc、/enc 都是 -EncodedCommand，串再短也能跑。所以站在指令位的 powershell / pwsh（可带路径、可经 Start-Process）
 // 后面见到就算；-Command、-File 之后的属于被跑的东西（powershell -c "node -e 1"），不算。别的程序的 -e 只认一长串 base64 那一条
 const prefixesOf = (/** @type {string} */ word) => Array.from(word, (_, i) => word.slice(0, i + 1)).join("|");
-const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?)?["']?(?:[^"'\n;|&(){}]*[\\/])?(?:powershell|pwsh)(?:\.exe)?["']?(?:(?![\s"'][-/](?:${prefixesOf("command")}|${prefixesOf("file")})(?:[\s:]|$))[^\n;|&])*?[\s"'][-/](?:ec|${prefixesOf("encodedcommand")})(?=[\s:"']|$)`;
+// 只有带引号的程序路径能跨空白；否则会随每个前缀切分反复扫描余下的整行。
+const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?)?["']?(?:(?:(?<=["'])[^"'\n;|&(){}]*|[^\s"'\n;|&(){}]*)[\\/])?(?:powershell|pwsh)(?:\.exe)?["']?(?:(?![\s"'][-/](?:${prefixesOf("command")}|${prefixesOf("file")})(?:[\s:]|$))[^\n;|&])*?[\s"'][-/](?:ec|${prefixesOf("encodedcommand")})(?=[\s:"']|$)`;
 // 命令名是算出来的：& ("i"+"ex")、.("ie"+"x")、& (gcm i*x)，或把字串变成脚本块再跑（[scriptblock]::Create）。规则与审查都看不到它实际跑什么。
 // & $exe 不算：把带空格的程序路径放进变量再调用是常规写法，拦了误伤多，真想藏的也还有 node -e 可走（见文件头）
 // & 要在语句开头：a & (b) 是 pandas 之类脚本里的按位与
@@ -88,7 +96,7 @@ function pipesToShell(/** @type {string} */ text, shellBody = false) {
       quote = ch;
       continue;
     }
-    if (i < text.length && !";&|\n({".includes(ch)) continue;
+    if (i < text.length && !";&|\n(){".includes(ch)) continue;
     const segment = text.slice(start, i);
     if (piped && PIPE_SHELL.test(segment)) return true;
     if (!shellBody) {

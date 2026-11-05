@@ -18,7 +18,11 @@ test("长串经 withoutExeDir 后的四种完整筛查各自 200ms 内返回", (
     "/a/b ".repeat(800),
     ":;".repeat(5000),
     "a|".repeat(5000),
-    "x && ".repeat(2000)
+    "x && ".repeat(2000),
+    "xargs -n 1 ".repeat(800),
+    "env -u X ".repeat(800),
+    'A="a b" '.repeat(1000),
+    "a) ".repeat(2000)
   ]) {
     for (const check of [mac, screenLoose, screenAutoReview, screenUnreviewable]) {
       const start = performance.now();
@@ -506,6 +510,8 @@ test("编码指令：PowerShell 认的缩写与 / 写法、短串都算藏字，
     `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -en ${short}`,
     `cmd /c powershell -en ${short}`,
     `Start-Process powershell -ArgumentList "-en ${short}"`,
+    `Start-Process -FilePath "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -ArgumentList "-en ${short}"`,
+    `Start-Process -FilePath 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' -ArgumentList '-en ${short}'`,
     `npm test; powershell -en ${short}`
   ]) {
     assert.match(screen(command), /编码/, command);
@@ -616,6 +622,18 @@ test("不带后缀的 credentials：带路径才算凭据文件，严档拦、�
 const TABLE = [
   // POSIX 指令位
   ...[
+    "case x in a) sudo id;; esac",
+    "sh -c 'case x in a) sudo id;; esac'",
+    ...["-exec", "-execdir", "-ok", "-okdir"].map(flag => `find . ${flag} sudo rm {} ;`),
+    String.raw`find . \( -type f \) -exec sudo rm {} \;`,
+    ...["-n 1", "-I {}", "-L 1", "-P 4", "-d x", "-s 4096", "-E x", "-a file", '-I "a b"', "-I 'a b'"].map(
+      flags => `echo x | xargs ${flags} sudo rm`
+    ),
+    'FOO="a b" sudo id',
+    "FOO='a b' sudo id",
+    String.raw`FOO="a \"b\"" sudo id`,
+    "FOO= sudo id",
+    ...["-u X", "-C /tmp", "-S 'env -i'", '-S "env -i"'].map(flags => `env ${flags} sudo id`),
     "if sudo id; then :; fi",
     "while sudo id; do :; done",
     "! sudo id",
@@ -648,6 +666,11 @@ const TABLE = [
     "echo sudo x",
     "echo if sudo x",
     'rg "while sudo" src',
+    'echo "a) sudo"',
+    "echo -exec sudo",
+    `rg 'FOO="a b" sudo' src`,
+    'find . -name "-exec sudo" -print',
+    `sh -c 'echo "a) sudo"'`,
     "echo Set-Alias",
     "echo alias x=rm",
     "echo administratorPrivileges"

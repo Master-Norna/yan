@@ -42,7 +42,7 @@
 
 ### macOS 指令
 
-下面这些与 Windows 的规则放在同一张清单，不按运行平台分开；只认指令位上的命令，`echo "launchctl load x"` 这样的普通参数不算。`if`、`elif`、`while`、`until`、`!`（后跟空白）、`then`、`do`、`else`、`exec`、`nohup`、`nice`（可带 `-n N`）、`time`、`timeout 时长`、`command`、`xargs`、`env` 与环境变量赋值可作前缀，单层 `sh` / `bash` / `zsh` / `dash` / `ksh -c`（含 `-lc`、`-ce`、`-o pipefail`、`--norc`）只把紧跟的那个词算指令位。`command -v launchctl` 是查名字，放行。
+下面这些与 Windows 的规则放在同一张清单，不按运行平台分开；只认指令位上的命令，`echo "launchctl load x"` 这样的普通参数不算。`if`、`elif`、`while`、`until`、`!`（后跟空白）、`then`、`do`、`else`、`exec`、`nohup`、`nice`（可带 `-n N`）、`time`、`timeout 时长`、`command`、`xargs`（支持 `-n`、`-I`、`-L`、`-P`、`-d`、`-s`、`-E`、`-a` 的独立参数）、`env`（支持 `-u`、`-C`、`-S` 的独立参数）与环境变量赋值（值可用成对引号包住并带空格）可作前缀；`case` 分支的 `)` 和指令位 `find` 的 `-exec` / `-execdir` / `-ok` / `-okdir` 后也算指令位。单层 `sh` / `bash` / `zsh` / `dash` / `ksh -c`（含 `-lc`、`-ce`、`-o pipefail`、`--norc`）只把紧跟的那个词算指令位。`command -v launchctl` 是查名字，放行。
 
 | 命令 | 严、宽、审三档都拦的修改 | 放行的查询与操作 |
 | --- | --- | --- |
