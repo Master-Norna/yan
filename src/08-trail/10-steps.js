@@ -170,6 +170,8 @@ function workStepHtml(step, title) {
     // 模型说了要做什么的：题头写那一句，指令原文退到展开后的头一段（悬停也看得到）
     gist = command && step.gist;
   const meta = status === "running" ? "" : status === "pending" ? t(AWAITING) : escapeHtml(stepText(step.result || step.note));
+  // 这一步该画的红绿（覆盖写的 hunks、改文件的 old/new、旧格式），等确认的那一步先不算
+  const parts = status === "pending" ? null : stepDiffParts(step);
   let body = "",
     more = "";
   // 等待确认时把整条指令完整摊开，不能只靠单行省略号让用户猜着点头；已摆在请示条上的不再摊第二份
@@ -177,8 +179,8 @@ function workStepHtml(step, title) {
   else if (status === "pending" && step.gate) body = keepGateHtml(step, !gist);
   else if (status === "pending")
     body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre>${sandboxWhyHtml(step)}<div class="tool-approve"><button type="button" data-approve="run">${t(`运行`)}</button><button type="button" data-approve="skip">${t(`跳过`)}</button><button type="button" data-approve="auto" title="${t(`径行：此对话中后续指令不再询问`)}">${t(`径行`)}</button></div>`;
-  else if (step.diff) {
-    const diff = splitDiffHtml(step.diff.old, step.diff.new, { limit: step.full ? Infinity : DIFF_SHOW_ROWS, wrap: !!step.full });
+  else if (parts) {
+    const diff = splitDiffHtml(parts.old, parts.new, { limit: step.full ? Infinity : DIFF_SHOW_ROWS, wrap: !!step.full, all: parts.all });
     body = `<div class="tool-diff">${diff.html}</div>`;
     if (diff.clipped) more = t`展开全部 · −${diff.removed} +${diff.added} 行`;
     else if (step.full && diff.rows > DIFF_SHOW_ROWS) more = t`只看前 ${DIFF_SHOW_ROWS} 行`;
@@ -191,7 +193,8 @@ function workStepHtml(step, title) {
   if (gist && title && status !== "pending") body = `<pre class="tool-output tool-code">${escapeHtml(title)}</pre>${body}`;
   if (more) body += `<button type="button" class="tool-more" data-step-more>${more}</button>`;
   const foldable = !!body && status !== "pending",
-    openByDefault = status !== "error" && (!!step.diff || step.name === "list_files"),
+    // 有红绿可看的（写入、修改）默认摊开，与文件大小无关；目录清单也摊开。其余折起
+    openByDefault = status !== "error" && (!!parts || step.name === "list_files"),
     folded = foldable && (step.expanded === undefined ? !openByDefault : !step.expanded);
   return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? t("展开输出") : t("收起输出")}"` : ""}><span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command && !gist ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(gist || title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || t("执行失败")) : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
