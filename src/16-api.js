@@ -528,7 +528,12 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     });
   // 流被掐断（停止、补言改道）时这一段的帧循环到此为止：接下来的一轮另起一个，两个循环不能同时画一条消息
   try {
-    await pump();
+    // 已收到结束标志之后再断线：桥接那头没接住收了尾的流、上游在 stop 之后多送一个错误事件、静默超时，答复其实已经写完，
+    // 不该当成断头再续写一遍。豁免只加在 pump 上——下面的 flushThink、结束标志与 finishFault 的判断照走，
+    // 「长度截断即使带 DONE 也报错」「被拦下的不接」照旧；用户按停（AbortError）也照旧抛出
+    await pump().catch(error => {
+      if (!ended || error.name === "AbortError") throw error;
+    });
     flushThink();
     if (!ended) throw Error("接口未发送结束标志，连接已中断");
     const fault = finishFault(finishReason);
