@@ -34,7 +34,7 @@ function decodeText(buffer) {
   }
   if (buffer.subarray(0, 4096).includes(0)) return null;
   const text = buffer.toString("utf8"),
-    bad = (text.match(/�/g) || []).length;
+    bad = (text.match(/\uFFFD/g) || []).length;
   if (!bad || bad < text.length / 100) return { text, encoding: "utf-8" };
   return { text: new TextDecoder("gb18030").decode(buffer), encoding: "gbk" };
 }
@@ -104,7 +104,8 @@ function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
 
 // 两版的逐行编辑脚本：'s' 未改、'd' 旧有、'i' 新有，次序照文件走。中段走 Myers 的 O(ND) 比法：
 // 耗时与内存跟着改动量走，不跟文件有多长走——改在文件后头、两处改动隔着一千行，也只比改动那一点。
-// 改动多到超过 maxD 行（整份重写之类）才退成整块一删一增。页面的 lcsOps 是同一套（src/15-tools/22-changes.js）
+// 改动多到超过 maxD 步、文件又不大时照旧用表比（见 myersOps 的 dpOps）；再大才整块一删一增。
+// 页面的 lcsOps 是同一套（src/15-tools/22-changes.js）
 function lineOps(a, b, maxD = 1000) {
   const ops = [];
   let head = 0;
@@ -122,7 +123,8 @@ function lineOps(a, b, maxD = 1000) {
   return ops;
 }
 // Myers 的最短编辑脚本：一步一条斜线，走一步记下这一步各条斜线到了哪，走到头再照记录退回来。
-// 超过 maxD 步（改动太多，细比不如整块看）就返回 null，由 lineOps 整块一删一增。
+// 超过 maxD 步（改动太多，细比不如整块看）时，文件不大（两版行数之积在千六百万以内，与旧法同一个上限）
+// 就照旧用表比（dpOps），精确到每一行；再大才返回 null，由 lineOps 整块一删一增
 // 回溯只按记下的那份走，不把整串摊进 push 的参数里——十万行的整块改写也不会撑爆调用栈
 function myersOps(x, y, maxD) {
   const n = x.length,
@@ -153,7 +155,7 @@ function myersOps(x, y, maxD) {
     }
     if (found >= 0) break;
   }
-  if (found < 0) return null;
+  if (found < 0) return n * m <= 16e6 ? dpOps(x, y) : null;
   /** @type {Array<[string, string]>} */
   const back = [];
   let px = n,
@@ -174,6 +176,28 @@ function myersOps(x, y, maxD) {
   while (px > 0) back.push(["d", x[--px]]);
   while (py > 0) back.push(["i", y[--py]]);
   return back.reverse();
+}
+// 改动多到 Myers 走不完、文件又不大时照旧用表比：一张 (n+1)×(m+1) 的最长公共子序列表，从头退回来。
+// 两版行数之积在千六百万以内才进得来（与旧法同一个上限），4000×4000 约三十来兆、一两百毫秒；
+// 再大表装不下，由 lineOps 整块一删一增。改动少时不会走到这里——那时 Myers 快得多
+function dpOps(x, y) {
+  const n = x.length,
+    m = y.length,
+    dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--) dp[i][j] = x[i] === y[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  /** @type {Array<[string, string]>} */
+  const ops = [];
+  let i = 0,
+    j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && x[i] === y[j]) {
+      ops.push(["s", x[i++]]);
+      j++;
+    } else if (i < n && (j >= m || dp[i + 1][j] >= dp[i][j + 1])) ops.push(["d", x[i++]]);
+    else ops.push(["i", y[j++]]);
+  }
+  return ops;
 }
 // 覆盖写一份文件时，改动要给人看全：按改动取，每处连同前后各 context 行。只存旧侧的行——
 // 新的一侧整份还在这一步的参数（step.arguments）里，页面画的时候从那儿取，不另存第二份。
