@@ -318,6 +318,67 @@ function trimReply(target) {
   if (lead) for (const step of target.steps || []) if (typeof step.at === "number") step.at = Math.max(0, step.at - lead);
   return lead;
 }
+// 事件流的行首：网关、中转把 SSE 标成 text/plain 时，真正露出的记号就这几样（开头不一定是 data:，也可能是 event: 或注释行）
+const EVENT_STREAM_HEAD = /^(?:data|event|id|retry)\s*:|^:/;
+// 块可以切得很碎（第一块也许只有 da 两个字节）：还看不清时就再读一块，别急着判成整份 JSON
+const EVENT_STREAM_MARKS = ["data", "event", "id", "retry", ":"];
+/** 开头这一截还只是某个行首记号的前半截（`da`、`even`、`data ` 之类），定不下来 */
+const eventMarkPending = head => {
+  const mark = head.replace(/\s+$/, "");
+  return EVENT_STREAM_MARKS.some(from => from.startsWith(mark) || `${from}:`.startsWith(mark));
+};
+/**
+ * 一份没标成 text/event-stream 的答复，看开头几个字节定它是事件流还是整份 JSON：
+ * 只认类型的话，标错的事件流会被 response.json() 拿 `data: {...}` 去解析、抛一句语法错，已经到的正文一个字不剩；
+ * 反过来一律当事件流读，标成 text/plain 的整份 JSON 只会报「未发送结束标志」。两头都得认，所以看内容。
+ * 判完把已读的块拼回去、重包成一个 Response：是事件流的照旧逐块流进来，不是的整份交给 response.json()
+ * @param {Response} response @returns {Promise<{ response: Response, stream: boolean }>}
+ */
+async function sniffEventStream(response) {
+  const reader = response.body.getReader(),
+    decoder = new TextDecoder(),
+    chunks = [];
+  let text = "",
+    stream = false,
+    finished = false;
+  // 读到第一个非空白的东西为止（BOM、空行都跳过）：事件流也可能先来个换行再 data:，整份 JSON 也常以空白起头
+  while (true) {
+    const { value, done } = await reader.read();
+    finished = !!done;
+    if (value) {
+      chunks.push(value);
+      // 被切在多字节字符中间的那一截由 decoder 自己留着，下一块到齐再吐
+      text += decoder.decode(value, { stream: true });
+    }
+    const head = text.replace(/^\s+/, "");
+    if (EVENT_STREAM_HEAD.test(head) || (head && !eventMarkPending(head)) || finished) {
+      stream = EVENT_STREAM_HEAD.test(head);
+      break;
+    }
+  }
+  const body = new ReadableStream({
+    start: controller => {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      if (finished) controller.close();
+    },
+    async pull(controller) {
+      const { value, done } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    // 用户按停、这一路不再读：底下的 reader 一并取消，别把连接挂着
+    cancel: reason => reader.cancel(reason)
+  });
+  return { response: new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers }), stream };
+}
+/**
+ * 这一份答复按哪一路读：类型标了事件流的照旧直接读（不嗅探，正常路径的逐字出现不受影响），没标的看开头几个字节
+ * @param {Response} response @returns {Promise<{ response: Response, stream: boolean }>}
+ */
+function replyBody(response) {
+  const stream = (response.headers.get("content-type") || "").includes("text/event-stream");
+  return stream || !response.body ? Promise.resolve({ response, stream }) : sniffEventStream(response);
+}
 // 向模型要一轮回复，写进 target（正文、思绪、工具调用、用量）：流式按 SSE 逐字进，否则整段一次到
 // onOpen：接口接下请求、开始回话时叫一声——从这一刻起这一轮就在花墨了，中途停止也得记账；onFrame 逐帧交给 readSse（旁注面板用来跟随滚动）
 /**
@@ -359,7 +420,6 @@ async function readReply(profile, history, signal, overrides, target, retried = 
     throw Error(message);
   }
   onOpen?.();
-  const type = response.headers.get("content-type") || "";
   // 帮手与消息的流式字段一致（content / reasoning / toolCalls / usage），readSse 按消息处理
   const sink = /** @type {Message} */ (target);
   // 记下这次请求实际的提示用量，下一轮据此估算会不会撑破窗口
@@ -368,8 +428,10 @@ async function readReply(profile, history, signal, overrides, target, retried = 
     note = () => {
       if (Number(target.usage?.prompt_tokens) > 0) overrides.seen = { at: sentAt, tokens: Number(target.usage.prompt_tokens) };
     };
-  if (type.includes("text/event-stream"))
-    return readSse(response, sink, { onFrame }).then(note, async error => {
+  // 类型没标成事件流的（网关、中转常见的手误）看开头几个字节定，标错的两种都要能读出来（见 sniffEventStream）
+  const { response: body, stream } = await replyBody(response);
+  if (stream)
+    return readSse(body, sink, { onFrame }).then(note, async error => {
       if (error.name === "AbortError") throw error;
       if (cutAtToolCall(error, target)) return note();
       // 流里才说放不下（开口前没拦住）：与请求被拒时一样，压了再发一回
@@ -386,7 +448,7 @@ async function readReply(profile, history, signal, overrides, target, retried = 
       if (!REFUSED_FINISH.test(error.finish || "")) error.midStream = true;
       throw error;
     });
-  const finish = takeWholeReply(await response.json(), sink);
+  const finish = takeWholeReply(await body.json(), sink);
   note();
   const fault = finishFault(finish);
   if (fault && !cutAtToolCall(fault, target)) throw Object.assign(fault, { midStream: !REFUSED_FINISH.test(fault.finish) });
@@ -422,8 +484,10 @@ async function readAside(response, profile, ask) {
 async function readWhole(response, ask) {
   /** @type {Message} */
   const reply = { id: `aside-${uid()}`, role: "assistant", content: "", timestamp: now() };
-  if ((response.headers.get("content-type") || "").includes("text/event-stream")) await readSse(response, reply);
-  else takeWholeReply(await response.json(), reply);
+  // 同一份嗅探：这一路（拟题、撮要）也会碰上标错类型的网关
+  const { response: body, stream } = await replyBody(response);
+  if (stream) await readSse(body, reply);
+  else takeWholeReply(await body.json(), reply);
   return { reply, tokens: Number(reply.usage?.total_tokens || 0) || estimateTokens([{ content: ask }, { content: reply.content }]) };
 }
 // 写到输出上限、截在工具调用中间：拟好的调用照常交下去——参数残缺的由登记表回一句「太长了，分几次写」（见 15-tools/00-registry.js），
