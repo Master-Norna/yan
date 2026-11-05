@@ -747,24 +747,24 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   color: var(--ink-3);
   font-size: var(--fs-note);
 }
-/* 顶栏右侧两件（明暗、余墨）同一套笔墨，件与件之间一道细竖 */
+/* 顶栏右侧几件（漏、明暗、余墨）同一套笔墨，件与件之间一道细竖。连同垂下的听音、游目，五件件心一律相距 50（设计稿/145）：
+   每件宽 30，竖线连两边共 20；垂下的两件占右缘的第一、第二格，件心离右缘 35、85。 */
 .top-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
 }
-/* 右缘内侧自页顶垂下的游目立轴、听音一缕：顶栏右的两件给它们让出位置 */
+/* 右缘内侧自页顶垂下的游目立轴、听音一缕：顶栏右的几件给它们让出位置（顶栏内边距 22，余墨半宽 15） */
 .main:has(> #stagePin:not(.hidden)) .top-actions,
 .main:has(> #listenPendant:not(.hidden)) .top-actions {
-  margin-right: 44px;
+  margin-right: 48px;
 }
 .main:has(> #stagePin:not(.hidden)):has(> #listenPendant:not(.hidden)) .top-actions {
-  margin-right: 74px;
+  margin-right: 98px;
 }
 .top-sep {
   width: 1px;
   height: 14px;
-  margin: 0 10px;
+  margin: 0 9.5px;
   background: color-mix(in srgb, var(--line) 85%, transparent);
 }
 /* 明暗：一笔圆相，半边染墨（昼夜各半）；换明暗时这一染转过半圈，悬停先转一点示意。
@@ -804,7 +804,7 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   position: relative;
   display: grid;
   place-items: center;
-  width: 36px;
+  width: 30px;
   height: 30px;
   border-radius: var(--radius-m);
   transition: background var(--dur-quick);

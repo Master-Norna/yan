@@ -2,7 +2,9 @@
    未开卷成一根轴、朱带束着；开着展开；在用时轴轻摆、朱日外一晕。卷与展用全应用的展开曲线。指针靠近浮出纸签，只写「游目」——态已在形上，不再注字。
    挂在右缘内侧，离滚动条的命中层（.chat-scroll-grabber，贴右缘 14px、自顶栏下起）远远的。
    落选的：一笔朱竖（开没开一个样，旁边几件都有个物，它只是一根棍）；垂目（盯人）、小轩窗（实际尺寸下方框偏硬）、垂灯（喜庆，与游目不沾边），见 设计稿/138；
-   朱日外一道硬圈（像靶心，设计稿/138 丙）；圆角带影、左缘一道朱条的书口签（网页侧边抽屉的通用画法）；绸带（与余墨、听音不是一种画法） */
+   朱日外一道硬圈（像靶心，设计稿/138 丙）；圆角带影、左缘一道朱条的书口签（网页侧边抽屉的通用画法）；绸带（与余墨、听音不是一种画法）；
+   分股绦、裱、两层山、轴头俱全（一幅九样，比旁边一两笔的几件花）、天杆在顶上（卷起后贴着页顶，比中线高一截）；收回横排（少了一道朱，在用也没线可摆，设计稿/142）；
+   画心半轮落山（实际大小糊成一团）、一方小印（小得看不见）、朱笔一峰（像帐篷，设计稿/143） */
 .stage-pin {
   position: absolute;
   right: 24px;
@@ -27,15 +29,6 @@
 .stage-pin:focus-visible .stage-pin-ink {
   transform: translateY(2px);
 }
-.stage-pin-ink .heart {
-  fill: var(--paper);
-}
-.stage-pin-ink .hill-far {
-  fill: color-mix(in srgb, var(--ink) 13%, transparent);
-}
-.stage-pin-ink .hill-near {
-  fill: color-mix(in srgb, var(--ink) 26%, transparent);
-}
 .scroll-paper {
   clip-path: inset(0);
   transition: clip-path 0.4s var(--ease-ink);
@@ -54,7 +47,7 @@
 }
 /* 卷着只有短短一截：指针的范围与纸签都跟着收上来，不悬在半空 */
 .stage-pin[data-state="off"] {
-  height: 26px;
+  height: 34px;
 }
 .stage-pin[data-state="off"] .stage-pin-ink {
   opacity: 0.62;
@@ -64,7 +57,7 @@
 }
 /* 地杆卷上来盖住天杆，只剩一根轴 */
 .stage-pin[data-state="off"] .scroll-foot {
-  transform: translateY(-35.4px);
+  transform: translateY(-26.2px);
 }
 .stage-pin[data-state="off"] .scroll-tie {
   opacity: 1;

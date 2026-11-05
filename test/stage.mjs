@@ -930,6 +930,28 @@ const nameShown = () => evalJs(`Number(getComputedStyle(document.querySelector("
 check("only the stroke shows at rest", (await nameShown()) === 0);
 // 面板刚收起时那一笔还在往右缘归位：等它站定再量，不然指针移到的是它半路上的位置
 await waitFor(`document.querySelector("#stagePin").getBoundingClientRect().right > innerWidth - 60`, 3000).catch(() => {});
+// 右上角几件件心等距：有垂下的一件、两件都一样，漏壶现身时也一样
+const cornerGaps = await evalJs(`(() => {
+  const center = s => (r => r.left + r.width / 2)(document.querySelector(s).getBoundingClientRect()),
+    gaps = list => list.slice(1).map((s, i) => Math.round(center(s) - center(list[i]))),
+    listen = document.querySelector("#listenPendant"),
+    clock = document.querySelector("#clepsydra"),
+    wasListen = listen.classList.contains("hidden"),
+    wasClock = clock.classList.contains("hidden");
+  listen.classList.add("hidden");
+  const one = gaps(["#themeToggle", "#quotaStatus", "#stagePin"]);
+  listen.classList.remove("hidden");
+  clock.classList.remove("hidden");
+  const all = gaps([".clepsydra-btn", "#themeToggle", "#quotaStatus", "#listenPendant", "#stagePin"]);
+  listen.classList.toggle("hidden", wasListen);
+  clock.classList.toggle("hidden", wasClock);
+  return { one, all };
+})()`);
+check(
+  "the corner pieces sit an even 50 apart",
+  [...cornerGaps.one, ...cornerGaps.all].every(gap => gap === 50),
+  JSON.stringify(cornerGaps)
+);
 const pin = await evalJs(
   `(r => ({ x: r.right - 6, y: r.top + r.height / 2 }))(document.querySelector("#stagePin").getBoundingClientRect())`
 );
@@ -946,7 +968,7 @@ await evalJs(`window.__pinWs = __yanStage.state.ws; __yanStage.state.ws = null; 
 check(
   "the slip stays close to the rolled scroll",
   await evalJs(
-    `document.querySelector(".stage-pin-text").getBoundingClientRect().top - document.querySelector("#stagePin").getBoundingClientRect().top < 40`
+    `document.querySelector(".stage-pin-text").getBoundingClientRect().top - document.querySelector("#stagePin").getBoundingClientRect().top < 46`
   )
 );
 await evalJs(`__yanStage.state.ws = window.__pinWs; __yanStage.sync(); true`);

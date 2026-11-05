@@ -181,7 +181,7 @@
 /* ---------- 右上角垂下的一缕：墨线坠一个小圆相（画法见 src/25-listen.js 的 listenPendantHtml）；有游目那一笔时挂在它左边 ---------- */
 .listen-pendant {
   position: absolute;
-  right: 24px;
+  right: 21px;
   top: 0;
   z-index: 8;
   width: 28px;
@@ -190,7 +190,7 @@
   user-select: none;
 }
 .main:has(> #stagePin:not(.hidden)) .listen-pendant {
-  right: 52px;
+  right: 71px;
 }
 .listen-svg {
   position: absolute;
