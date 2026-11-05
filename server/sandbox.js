@@ -20,7 +20,7 @@ const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 // 「powershell -Command "Set-Content C:\x y"」与直接写没有分别；这类壳之后同一行里的任何词都按指令位看，宁可多拦。
 // 赋值的右边也在执行（$r = reg delete …）；右边是带引号的字串（$mode = "copy"）不算
 const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs(?:\s+-\S+)*|env(?:\s+-\S+)*|[A-Za-z_]\w*=\S*)\s+)*`;
-const SHELL = String.raw`(?:\S*/)?(?:ba|z|da|k)?sh\s+(?:--[\w-]+\s+|-o\s+\S+\s+|-(?!o\s)[^c\s-]+\s+)*-[a-z]*c[a-z]*\s+["']?`;
+const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh\s+(?:--[\w-]+\s+|-o\s+\S+\s+|-(?!o\s)[^c\s-]+\s+)*-[a-z]*c[a-z]*\s+["']?`;
 const CMD =
   String.raw`(?:^|[;&|({\n]|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?` +
   PREFIX +
@@ -55,14 +55,61 @@ const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?
 // & $exe 不算：把带空格的程序路径放进变量再调用是常规写法，拦了误伤多，真想藏的也还有 node -e 可走（见文件头）
 // & 要在语句开头：a & (b) 是 pandas 之类脚本里的按位与
 const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])\s*[&.]\s*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
-const HIDDEN = new RegExp(
-    String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
-      String.raw`|${CMD}eval(?=[\s("']|$)|${CMD}(?:source|\.)\s+<\(` +
-      String.raw`|${CMD}(?:ba|z|da|k)?sh\s+(?:-[^\s]+\s+)*<\(` +
-      String.raw`|${CMD}${SHELL}\$\(` +
-      String.raw`|${CMD}(?:[^"'|\n]|"[^"\n]*"|'[^'\n]*')*\|\s*(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?(?=[\s"']|$)`,
-    "im"
-  ),
+const HIDDEN_COMMAND = new RegExp(
+  String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
+    String.raw`|${CMD}eval(?=[\s("']|$)|${CMD}(?:source|\.)\s+<\(` +
+    String.raw`|${CMD}(?:ba|z|da|k)?sh\s+(?:-[^\s]+\s+)*<\(` +
+    String.raw`|${CMD}${SHELL}\$\(`,
+  "im"
+);
+const PIPE_SHELL = /^\s*(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?(?=[\s"']|$)/i;
+const SCRIPT_START = new RegExp(
+  String.raw`^\s*${PREFIX}(?:${SHELL}|(?:cmd(?:\.exe)?\b[^\n]*?/[ck]|(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?[-/](?:${prefixesOf("command")}))\s+["'])`,
+  "i"
+);
+// 每段只检查一次，分隔符必须在引号外；不从每个 CMD 位置重新扫到行尾。
+// 执行字符串只展开一层，与 CMD 的 Shell 套壳范围一致，普通参数里的管道仍只是字串。
+function pipesToShell(/** @type {string} */ text, shellBody = false) {
+  if (!text.includes("|")) return false;
+  let quote = "",
+    start = 0,
+    piped = false;
+  for (let i = 0; i <= text.length; i++) {
+    const ch = text[i];
+    if (quote !== "'" && ch === "`") {
+      i++;
+      continue;
+    }
+    if (i < text.length && quote) {
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (i < text.length && !";&|\n({".includes(ch)) continue;
+    const segment = text.slice(start, i);
+    if (piped && PIPE_SHELL.test(segment)) return true;
+    if (!shellBody) {
+      const script = SCRIPT_START.exec(segment),
+        delimiter = script?.[0].at(-1);
+      if (delimiter === '"' || delimiter === "'") {
+        let end = script[0].length;
+        for (; end < segment.length; end++) {
+          if (delimiter === '"' && segment[end] === "`") end++;
+          else if (segment[end] === delimiter) break;
+        }
+        const body = segment.slice(script[0].length, end);
+        if (pipesToShell(body, true)) return true;
+      }
+    }
+    piped = ch === "|" && text[i - 1] !== "|" && text[i + 1] !== "|";
+    start = i + 1;
+  }
+  return false;
+}
+const HIDDEN = { test: (/** @type {string} */ text) => HIDDEN_COMMAND.test(text) || pipesToShell(text) },
   HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
 // 指令位上的程序可以写全路径（C:\Windows\System32\reg.exe、& "C:\Program Files\…\reg.exe"）。规则都按命令名认，筛之前先去掉程序的目录，
 // 禁用规则、外联、写动词就不必各自认路径；程序自己的路径也不再算它碰的路径——& "C:\Program Files\7-Zip\7z.exe" x a.zip 并没有往系统目录里写。
@@ -77,14 +124,14 @@ const LINE_START = String.raw`(?<![${"`"}\\][ \t]*\r?\n)^`,
   ),
   QUOTED_EXE_DIR = new RegExp(String.raw`((?:(?<!&)&|${CALL_SITE}\.)[ \t]*["'])[^"'\n]*[\\/]`, "gim");
 const withoutExeDir = (/** @type {string} */ text) => text.replace(UNQUOTED_EXE_DIR, "$1").replace(QUOTED_EXE_DIR, "$1");
-// 指令里禁用的写法，只此一张表：[正则, 一句原因, 适用的档]。逐条对整段指令文本查，命中即拒。
+// 指令里禁用的写法，只此一张表：[筛查器（test）, 一句原因, 适用的档]。逐条对整段指令文本查，命中即拒。
 // 严＝screenCommand（问而后行）；宽＝screenLoose（审而后行、径行开着沙箱时）；审＝screenAutoReview（审而后行的规则）。
 // 宽与审不是第二个沙箱：常规开发、安装、Git（含回退与清理）、本机进程、联网、整机查看、写到目录之外都放行，只拦明确会伤及宿主机或难以恢复的动作。
 // 它们不向用户请示；拿不准而确实需要做时，模型可以换用结构化工具，或用户切到「问而后行 / 径行」。沙箱开着时沙箱先筛，审查规则再筛
 const EVERY = "严宽审",
   WIDE = "宽审";
 const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
-/** @type {[RegExp, string, string][]} */
+/** @type {[{ test(text: string): boolean }, string, string][]} */
 const RULES = [
   [
     cmd(

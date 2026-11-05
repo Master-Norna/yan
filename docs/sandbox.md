@@ -55,7 +55,7 @@
 
 严档拦下后转用户请示；宽档在径行或审查关闭、连不上时回绝，审而后行开着审查时仍可交审查模型批准。`security find-generic-password` / `find-internet-password` 带 `-w` 或 `-g`、`security export`，以及 `security dump-keychain -d` 导出明文内容，只在严档转请示，宽档与审档放行。`osascript` 在严档整条转用户请示；宽档与审档只拒 AppleScript 的 `with administrator privileges` 与 JXA 的 `administratorPrivileges: true`。`sudo` 也按指令位认，套在单层 `bash -c` 里、带调度前缀或写成 `"/usr/bin/sudo"` 仍拦，`echo sudo x` 不拦。
 
-改写指令的几种写法不可审：指令位上的 `eval`、`source <(...)` / `. <(...)`、`sh <(...)`、`bash -c "$(...)"`，以及任意来源经管道交给 `sh` / `bash` / `zsh` / `dash` / `ksh` / `powershell` / `pwsh` 执行；审查准了也不放。普通的 `source ./env.sh`、`sh script.sh` 不属这几种写法。别名定义（`alias name=...`、`Set-Alias` 等，含赋值右侧）严宽都拦，仍可交审查模型；`echo Set-Alias` 不算定义。
+改写指令的几种写法不可审：指令位上的 `eval`、`source <(...)` / `. <(...)`、`sh <(...)`、`bash -c "$(...)"`，以及任意来源经管道交给 `sh` / `bash` / `zsh` / `dash` / `ksh` / `powershell` / `pwsh` 执行；审查准了也不放。普通的 `source ./env.sh`、`sh script.sh` 不属这几种写法；普通参数被引号包住时，里面的 `|` 不算管道。别名定义（`alias name=...`、`Set-Alias` 等，含赋值右侧）严宽都拦，仍可交审查模型；`echo Set-Alias` 不算定义。
 
 目录约束的写动词补有 `chmod`、`chown`、`chflags`、`ln`、`rsync`、`ditto`、`sed -i`。复制、同步与链接的第一个来源路径可在目录外，如 `cp -r /Users/a/src ./backup/`、`rsync -a /Users/a/source/ ./backup/`、`ditto /Users/a/file.zip ./file.zip`、`ln -s /opt/homebrew/bin/node ./node`；只豁免当次来源参数，目标仍受目录约束，`rsync --remove-source-files` 会删来源，不豁免。
 

