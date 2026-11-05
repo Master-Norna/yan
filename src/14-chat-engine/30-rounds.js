@@ -430,47 +430,40 @@ async function readReply(profile, history, signal, overrides, target, retried = 
     };
   // 类型没标成事件流的（网关、中转常见的手误）看开头几个字节定，标错的两种都要能读出来（见 sniffEventStream）
   const { response: body, stream } = await replyBody(response);
-  if (stream)
-    return readSse(body, sink, { onFrame }).then(note, async error => {
-      if (error.name === "AbortError") throw error;
-      if (cutAtToolCall(error, target)) return note();
-      // 流里才说放不下（开口前没拦住）：与请求被拒时一样，压了再发一回
-      if (
-        !error.finish &&
-        !retried &&
-        target.content.length === wrote &&
-        !target.toolCalls?.length &&
-        contextOverflow(error.message) &&
-        (await keepInWindow(profile, history, signal, overrides, { overflow: true, target }))
-      )
-        return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
-      // 开了口才断的（掉线、上游掐线、静默超时、写到输出上限）：记一笔，runRounds 据此接着写而不是整答作废；被拦下的不接
-      if (!REFUSED_FINISH.test(error.finish || "")) error.midStream = true;
-      throw error;
-    });
-  const finish = takeWholeReply(await body.json(), sink);
-  note();
-  const fault = finishFault(finish);
-  if (fault && !cutAtToolCall(fault, target)) throw Object.assign(fault, { midStream: !REFUSED_FINISH.test(fault.finish) });
+  // 整份回来的也包成只有一块的事件流交给 readSse（见 asOneBlock）：流式与非流式只剩一条路，正文、思绪、工具调用、
+  // 用量、结束原因的语义只有一份，不会再各自走样
+  return readSse(stream ? body : await asOneBlock(body), sink, { onFrame }).then(note, async error => {
+    if (error.name === "AbortError") throw error;
+    if (cutAtToolCall(error, target)) return note();
+    // 流里才说放不下（开口前没拦住）：与请求被拒时一样，压了再发一回
+    if (
+      !error.finish &&
+      !retried &&
+      target.content.length === wrote &&
+      !target.toolCalls?.length &&
+      contextOverflow(error.message) &&
+      (await keepInWindow(profile, history, signal, overrides, { overflow: true, target }))
+    )
+      return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
+    // 开了口才断的（掉线、上游掐线、静默超时、写到输出上限）：记一笔，runRounds 据此接着写而不是整答作废；被拦下的不接
+    if (!REFUSED_FINISH.test(error.finish || "")) error.midStream = true;
+    throw error;
+  });
 }
-// 整份回来的答复（没走流式）读进 target，与 readSse 落下的一样：正文、思考、用量、工具调用；回的是结束原因
-/** @param {Message} target */
-function takeWholeReply(data, target) {
-  const message = data?.choices?.[0]?.message;
-  // 回 200 却是一份报错（有的中转站这样回）：把它说的原因交出去，不报成「模型未返回正文」
+// 整份回来的答复（没走流式的中转、网关）包成只有一块的事件流：与流式走同一个读法，两边不会有第二份语义。
+// 正文、思绪、工具调用、用量、结束原因照 chat.completions 分块的样子摆好；finish_reason 缺失的按 stop 算（它把话说完了才收）；
+// 回 200 却是一份报错（有的中转站这样回）的，把上游的原话抛出去，不报成「模型未返回正文」
+/** @param {Response} response @returns {Promise<Response>} */
+async function asOneBlock(response) {
+  const data = await response.json();
   if (data?.error && !data.choices) throw Error((typeof data.error === "string" ? data.error : data.error.message) || "接口返回了错误");
-  target.content += extractContent(data);
-  // 与流式一致：有的接口把思考放在 reasoning 而不是 reasoning_content
-  target.reasoning = normalizeContent(message?.reasoning_content ?? message?.reasoning) || target.reasoning;
-  splitInlineThink(target);
-  target.usage = data.usage ? withCached(data.usage) : null;
-  if (Array.isArray(message?.tool_calls))
-    target.toolCalls = message.tool_calls.map(call => ({
-      id: call.id,
-      name: call.function?.name || "",
-      arguments: call.function?.arguments || ""
-    }));
-  return data?.choices?.[0]?.finish_reason;
+  const choice = data?.choices?.[0],
+    message = choice?.message || {},
+    delta = { ...message, content: extractContent(data) };
+  // 整份里的调用是一列、不带 index：照次序编上号，readSse 才归得回原来的位置
+  if (Array.isArray(message.tool_calls)) delta.tool_calls = message.tool_calls.map((call, index) => ({ index, ...call }));
+  const block = { choices: [{ delta, finish_reason: choice?.finish_reason || "stop" }], ...(data.usage ? { usage: data.usage } : {}) };
+  return new Response(`data: ${JSON.stringify(block)}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
 }
 // 一问一答的小请求（拟题、撮要）：答复读进一条不进对话的消息，流式、整份都认；花的墨记在模型上，接口没报用量的按字估
 /** @param {Profile} profile @param {string} ask 发出去的那一问 @returns {Promise<Message>} */
@@ -484,10 +477,10 @@ async function readAside(response, profile, ask) {
 async function readWhole(response, ask) {
   /** @type {Message} */
   const reply = { id: `aside-${uid()}`, role: "assistant", content: "", timestamp: now() };
-  // 同一份嗅探：这一路（拟题、撮要）也会碰上标错类型的网关
+  // 同一份嗅探、同一个读法（见 replyBody、asOneBlock）：这一路（拟题、撮要、审查）也走 readSse，
+  // 行内 <think> 一并拆开、结束原因不对的照流式那样报错。live: false —— 它的答复不进页面，不按帧匀速写出、也不为它存盘
   const { response: body, stream } = await replyBody(response);
-  if (stream) await readSse(body, reply);
-  else takeWholeReply(await body.json(), reply);
+  await readSse(stream ? body : await asOneBlock(body), reply, { live: false });
   return { reply, tokens: Number(reply.usage?.total_tokens || 0) || estimateTokens([{ content: ask }, { content: reply.content }]) };
 }
 // 写到输出上限、截在工具调用中间：拟好的调用照常交下去——参数残缺的由登记表回一句「太长了，分几次写」（见 15-tools/00-registry.js），
