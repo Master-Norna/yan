@@ -105,7 +105,34 @@ async function extractPdfText(data) {
   if (chars < pages.length * 10) throw Error(t("PDF 没有文字层（多半是扫描件），原件照发"));
   return pages.join("\n\n");
 }
-// 取包里选中的几份：默认解成文字，raw 给原字节（图）
+// 中央目录说的大小只是包自己说的：一条声明 100 字节、实际解出几 MB 的包不能照声明值放行。
+// 解到超过 min(声明值, 每件 8 MB, 总额 16 MB 的剩余) 就停手，并说清是哪一条
+const zipTooBig = (name, declared, budget) =>
+  Error(t`文档压缩结构不符：${name} 声明 ${declared} 字节，解出的内容已超过 ${budget} 字节，停止解包`);
+// 一条 deflate 边解边数，超出预算即刻 cancel 并停下；返回的是真实长度的那份字节（原先 response.arrayBuffer() 会先整份造进内存）
+async function inflateEntry(compressed, budget, name, declared) {
+  const reader = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader(),
+    chunks = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (length + value.length > budget) {
+      await reader.cancel().catch(() => {});
+      throw zipTooBig(name, declared, budget);
+    }
+    chunks.push(value);
+    length += value.length;
+  }
+  const output = new Uint8Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, at);
+    at += chunk.length;
+  }
+  return output;
+}
+// 取包里选中的几份：默认解成文字，raw 给原字节（图）；记账按真实解出的字节数，不按声明值
 async function unzipSelected(bytes, wanted, raw = false) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     decoder = new TextDecoder(),
@@ -136,13 +163,14 @@ async function unzipSelected(bytes, wanted, raw = false) {
       const localNameLength = view.getUint16(localOffset + 26, true),
         localExtraLength = view.getUint16(localOffset + 28, true),
         start = localOffset + 30 + localNameLength + localExtraLength,
-        compressed = bytes.slice(start, start + compressedSize);
+        compressed = bytes.slice(start, start + compressedSize),
+        budget = Math.min(uncompressedSize, 8 * 1024 * 1024, 16 * 1024 * 1024 - extractedBytes);
       let output;
-      if (method === 0) output = compressed;
-      else if (method === 8) {
-        const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-        output = new Uint8Array(await new Response(stream).arrayBuffer());
-      }
+      if (method === 0) {
+        // 存储型本就是压缩段的切片，长度是真的：也照真长核对，超了照样中止
+        if (compressed.length > budget) throw zipTooBig(name, uncompressedSize, budget);
+        output = compressed;
+      } else if (method === 8) output = await inflateEntry(compressed, budget, name, uncompressedSize);
       if (output) {
         entries.set(name, raw ? output : decoder.decode(output));
         extractedBytes += output.length;
