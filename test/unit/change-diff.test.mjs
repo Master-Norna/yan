@@ -126,12 +126,14 @@ test("中间插入一千二百行：只增不删，尾随的未改行不算删",
   assert.equal(h.removed, 0);
 });
 
-test("隔行改五百处、改动量过千步：计数仍精确，不退成整块一删一增", () => {
-  const lines = plain(2000),
+test("隔行改五百零一处、改动量过千步：计数仍精确，不退成整块一删一增", () => {
+  // 五百处正好是 1000 步，压在 Myers 的上限上、不进回落那条路；要 501 处（1002 步）才真的走表比
+  const lines = plain(2004),
     changed = lines.slice();
-  for (let i = 0; i < 2000; i += 4) changed[i] = `第 ${i + 1} 行：改了`;
+  for (let i = 0; i < lines.length; i += 4) changed[i] = `第 ${i + 1} 行：改了`;
   const n = changed.filter((line, i) => line !== lines[i]).length;
-  // 1000 处增删（500 删 + 500 增）超过 Myers 的步数上限，文件不大，照旧用表比
+  assert.equal(n, 501);
+  // 整块一删一增会把 501 处报成 1002 删 + 1002 增；照旧用表比才是一处一对，正如清单上看到的
   assert.deepEqual(lineDiffCounts(textOf(lines), textOf(changed)), { added: n, removed: n });
   const h = changeHunks(textOf(lines), textOf(changed));
   assert.deepEqual({ added: h.added, removed: h.removed }, { added: n, removed: n });
@@ -139,6 +141,13 @@ test("隔行改五百处、改动量过千步：计数仍精确，不退成整�
   assert.equal(h.hunks.length, 1);
   const back = rebuild(h, textOf(changed));
   assert.equal(back.new, textOf(changed));
+});
+
+test("极扁的形状（三千行只剩三行）：走了表比也照样准，表按一条摊平不越界", () => {
+  // 两版行数之积很小、改动量却远超 Myers 的步数上限，正好走 dpOps；宽是三，行却是三千
+  const before = plain(3000),
+    after = ["新的第一行", "新的第二行", "新的第三行"];
+  assert.deepEqual(lineDiffCounts(textOf(before), textOf(after)), { added: 3, removed: 3000 });
 });
 
 test("十五万行的整份改写不抛 RangeError（回溯不摊进 push 的参数）", () => {
