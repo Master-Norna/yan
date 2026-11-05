@@ -53,7 +53,7 @@
 | `diskutil` | `erase*`、`partitionDisk`、`reformat`、`zeroDisk`、`secureErase`、`repairVolume`、`repairDisk`；`apfs deleteVolume` / `deleteContainer` / `addVolume` / `resizeContainer` | `list`、`info`、`verifyVolume`、`mount`、`unmount`、`eject` |
 | `security` | `add-*`、`delete-*`、`set-*`、`create-*`、`remove-*`、`import`、锁定或解锁钥匙串、安装 MDS、导入信任设置、显式修改钥匙串列表与默认项、用户信任开关、写或删授权策略、提权执行 | 列表、默认项查询、`show-keychain-info`、不带 `-w` / `-g` 的密码项查找 |
 
-严档拦下后转用户请示；宽档在径行或审查关闭、连不上时回绝，审而后行开着审查时仍可交审查模型批准。`security find-generic-password` / `find-internet-password` 带 `-w` 或 `-g`、`security export`，以及 `security dump-keychain -d` 导出明文内容，只在严档转请示，宽档与审档放行。`osascript` 无需提权也能执行系统操作，三档都拦 AppleScript 与 JXA；严档转用户请示。`sudo` 也按指令位认，套在单层 `bash -c` 里、带调度前缀或写成 `"/usr/bin/sudo"` 仍拦，`echo sudo x` 不拦。
+严档拦下后转用户请示；宽档在径行或审查关闭、连不上时回绝，审而后行开着审查时仍可交审查模型批准。`security find-generic-password` / `find-internet-password` 带 `-w` 或 `-g`、`security export`，以及 `security dump-keychain -d` 导出明文内容，只在严档转请示，宽档与审档放行。`osascript` 在严档整条转用户请示；宽档与审档只拒 AppleScript 的 `with administrator privileges` 与 JXA 的 `administratorPrivileges: true`。`sudo` 也按指令位认，套在单层 `bash -c` 里、带调度前缀或写成 `"/usr/bin/sudo"` 仍拦，`echo sudo x` 不拦。
 
 改写指令的几种写法不可审：指令位上的 `eval`、`source <(...)` / `. <(...)`、`sh <(...)`、`bash -c "$(...)"`，以及任意来源经管道交给 `sh` / `bash` / `zsh` / `dash` / `ksh` / `powershell` / `pwsh` 执行；审查准了也不放。普通的 `source ./env.sh`、`sh script.sh` 不属这几种写法。别名定义（`alias name=...`、`Set-Alias` 等，含赋值右侧）严宽都拦，仍可交审查模型；`echo Set-Alias` 不算定义。
 

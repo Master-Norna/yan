@@ -156,7 +156,7 @@ const RULES = [
   [cmd("net", String.raw`use\b`), "不动用户、账户与共享", "严"],
   [cmdlet("(?:New|Remove|Set|Enable|Disable)-LocalUser|(?:Add|Remove)-LocalGroupMember"), "不动用户与账户", EVERY],
   [ELEVATION, "不提权", EVERY],
-  [cmd("osascript"), "不直接执行 AppleScript 或 JXA", EVERY],
+  [cmd("osascript"), "不直接执行 AppleScript 或 JXA", "严"],
   [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限", EVERY],
   // 老命令对应的 cmdlet 与老命令同样按指令位认：rg Format-Volume src 只是搜字
   [

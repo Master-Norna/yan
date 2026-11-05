@@ -703,7 +703,7 @@ const TABLE = [
     "osascript",
     `osascript -e 'tell application "Finder" to get name'`,
     `osascript -l JavaScript -e 'app.doShellScript("id", {administratorPrivileges: false})'`
-  ].map(command => [command, "x", "x", "x", "o"]),
+  ].map(command => [command, "x", "o", "o", "o"]),
   // 动态执行
   ...[
     'eval "$(brew shellenv)"',
