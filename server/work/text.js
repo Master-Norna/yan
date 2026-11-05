@@ -179,13 +179,16 @@ function myersOps(x, y, maxD) {
 }
 // 改动多到 Myers 走不完、文件又不大时照旧用表比：一张 (n+1)×(m+1) 的最长公共子序列表，从头退回来。
 // 两版行数之积在千六百万以内才进得来（与旧法同一个上限），4000×4000 约三十来兆、一两百毫秒；
-// 再大表装不下，由 lineOps 整块一删一增。改动少时不会走到这里——那时 Myers 快得多
+// 再大表装不下，由 lineOps 整块一删一增。改动少时不会走到这里——那时 Myers 快得多。
+// 表摊成一条：一行一个 Uint16Array 的话，极扁的形状（二百万行 × 三行）光两百多万个数组对象就要几百兆
 function dpOps(x, y) {
   const n = x.length,
     m = y.length,
-    dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    w = m + 1,
+    dp = new Uint16Array((n + 1) * w);
   for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--) dp[i][j] = x[i] === y[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    for (let j = m - 1; j >= 0; j--)
+      dp[i * w + j] = x[i] === y[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
   /** @type {Array<[string, string]>} */
   const ops = [];
   let i = 0,
@@ -194,7 +197,7 @@ function dpOps(x, y) {
     if (i < n && j < m && x[i] === y[j]) {
       ops.push(["s", x[i++]]);
       j++;
-    } else if (i < n && (j >= m || dp[i + 1][j] >= dp[i][j + 1])) ops.push(["d", x[i++]]);
+    } else if (i < n && (j >= m || dp[(i + 1) * w + j] >= dp[i * w + j + 1])) ops.push(["d", x[i++]]);
     else ops.push(["i", y[j++]]);
   }
   return ops;
