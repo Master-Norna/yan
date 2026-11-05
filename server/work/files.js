@@ -8,11 +8,10 @@ const { jsonRoute, requestSignal } = require("../http.js");
 const { fetchPublicResponse, readLimitedBytes } = require("../web.js");
 const sandbox = require("../sandbox.js");
 const { describeFsError, clampNumber, relPath } = require("./paths.js");
-const { decodeText, encodeText, countLines, lineDiffCounts, changeExcerpts, nearestPassage } = require("./text.js");
+const { decodeText, encodeText, countLines, changeHunks, nearestPassage } = require("./text.js");
 const writeTextAtomic = require("./atomic.js");
-// 读一回最多交出多少字；覆盖写时捎回原文的长度，与页面留存写入内容的长度（src/15-tools/21-files.js 的 WRITTEN_KEEP_CHARS）一致
-const WORK_FILE_LIMIT = 200000,
-  PREVIOUS_KEEP_CHARS = 4000;
+// 读一回最多交出多少字
+const WORK_FILE_LIMIT = 200000;
 // 文件指纹：读、写、改都捎回一枚，页面记在那一步上；再写、再改时带上自己最后见到的那枚（seen），在锁里与现状比——
 // 对不上就是读过之后被别人（别的帮手、主模型、编辑器、指令）改过。按内容算，改了又改回去的不算
 const fingerprint = buffer => crypto.createHash("sha1").update(buffer).digest("hex").slice(0, 16);
@@ -55,12 +54,16 @@ module.exports = function createFiles(work) {
       await writeTextAtomic(file, output, signal).catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });
-      // 覆盖时按行比出真增删，并捎回原文一段供页面并排看，删去的那些才有红可看。
-      // 整份太长时按改动摘出两侧同一批窗口，不再只留开头：改在文件后头时两侧的开头一模一样，并排一比成了「什么都没改」，
-      // 末尾那句「其后 N 字未留存」的字数反倒成了唯一的改动（见 text.js 的 changeExcerpts）
-      const counts = existed ? lineDiffCounts(previousText, content) : { added: countLines(content), removed: 0 },
-        long = previousText.length > PREVIOUS_KEEP_CHARS || content.length > PREVIOUS_KEEP_CHARS,
-        excerpt = existed && previousText && long ? changeExcerpts(previousText, content) : null;
+      // 覆盖时按行比出真增删，并把改动那一带的旧侧行捎回页面，删去的那些才有红可看。
+      // 新的一侧整份就在这一步的参数里，不必另存；也不按「开头 N 字」截——改在文件后头时两截开头一模一样，
+      // 并排一比成了「什么都没改」（见 text.js 的 changeHunks）
+      const same = existed && previousText === content,
+        diff = existed && !same ? changeHunks(previousText, content) : null,
+        counts = diff
+          ? { added: diff.added, removed: diff.removed }
+          : existed
+            ? { added: 0, removed: 0 }
+            : { added: countLines(content), removed: 0 };
       return {
         path: shownPath(workdir, file),
         bytes: output.length,
@@ -71,14 +74,7 @@ module.exports = function createFiles(work) {
         previousLines,
         ...counts,
         sig: fingerprint(output),
-        ...(excerpt?.hunks
-          ? { diff: { old: excerpt.old, new: excerpt.new } }
-          : {
-              previous:
-                previousText.length > PREVIOUS_KEEP_CHARS
-                  ? `${previousText.slice(0, PREVIOUS_KEEP_CHARS)}\n…（其后 ${previousText.length - PREVIOUS_KEEP_CHARS} 字未留存）`
-                  : previousText || ""
-            })
+        ...(diff?.hunks.length ? { diff: { hunks: diff.hunks, old: diff.old } } : {})
       };
     } finally {
       release();

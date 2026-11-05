@@ -53,33 +53,20 @@ function countLines(text) {
   return value.split(/\r?\n/).length - (/\r?\n$/.test(value) ? 1 : 0);
 }
 
-// 覆盖写一份文件时，前后两版按行比出各增删几行：先去掉首尾相同的行，中段求最长公共子序列（只留两行表，省内存）；
-// 中段太大（两边行数之积过千六百万）就不细比，中段整算一删一增
+// 按行切开：末尾的换行不算多出一行空行（与 countLines 同一惯例），空的就是没有行
+function splitLines(text) {
+  const value = String(text ?? "");
+  return value ? value.replace(/\r?\n$/, "").split(/\r?\n/) : [];
+}
+// 覆盖写一份文件时，前后两版按行比出各增删几行。与预览、与页面同一套比法（见 lineOps），清单和红绿才对得上
 function lineDiffCounts(oldText, newText) {
-  const lines = text =>
-      text
-        ? String(text)
-            .replace(/\r?\n$/, "")
-            .split(/\r?\n/)
-        : [],
-    a = lines(oldText),
-    b = lines(newText);
-  let start = 0,
-    endA = a.length,
-    endB = b.length;
-  while (start < endA && start < endB && a[start] === b[start]) start++;
-  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) endA--, endB--;
-  const m = endA - start,
-    n = endB - start;
-  if (!m || !n || m * n > 16e6) return { added: n, removed: m };
-  let prev = new Uint32Array(n + 1),
-    row = new Uint32Array(n + 1);
-  for (let i = 1; i <= m; i++) {
-    const line = a[start + i - 1];
-    for (let j = 1; j <= n; j++) row[j] = line === b[start + j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], row[j - 1]);
-    [prev, row] = [row, prev];
+  let added = 0,
+    removed = 0;
+  for (const [kind] of lineOps(splitLines(oldText), splitLines(newText))) {
+    if (kind === "i") added++;
+    else if (kind === "d") removed++;
   }
-  return { added: n - prev[n], removed: m - prev[n] };
+  return { added, removed };
 }
 
 // edit_file 的 old 对不上时：文件里最像它的那一段，照现在的样子带行号交回。
@@ -115,55 +102,97 @@ function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
     .join("\n");
 }
 
-// 两版的逐行增删：先切掉首尾相同的行，中段求最长公共子序列（放得下就细比，放不下整块当作一删一增）。
-// 's' 未改、'd' 旧有、'i' 新有，次序照文件走
-function lineOps(a, b) {
-  let start = 0,
-    endA = a.length,
-    endB = b.length;
-  while (start < endA && start < endB && a[start] === b[start]) start++;
-  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) endA--, endB--;
+// 两版的逐行编辑脚本：'s' 未改、'd' 旧有、'i' 新有，次序照文件走。中段走 Myers 的 O(ND) 比法：
+// 耗时与内存跟着改动量走，不跟文件有多长走——改在文件后头、两处改动隔着一千行，也只比改动那一点。
+// 改动多到超过 maxD 行（整份重写之类）才退成整块一删一增。页面的 lcsOps 是同一套（src/15-tools/22-changes.js）
+function lineOps(a, b, maxD = 1000) {
   const ops = [];
-  for (let i = 0; i < start; i++) ops.push(["s", a[i]]);
-  const m = endA - start,
-    n = endB - start;
-  if (m && n && m * n <= 250000) {
-    // 回溯要整张表：两边各五百行以内放得下
-    const width = n + 1,
-      table = new Uint32Array((m + 1) * width);
-    for (let i = 1; i <= m; i++) {
-      const line = a[start + i - 1],
-        row = i * width,
-        up = row - width;
-      for (let j = 1; j <= n; j++)
-        table[row + j] = line === b[start + j - 1] ? table[up + j - 1] + 1 : Math.max(table[up + j], table[row + j - 1]);
-    }
-    const back = [];
-    let i = m,
-      j = n;
-    while (i && j) {
-      if (a[start + i - 1] === b[start + j - 1]) back.push(["s", a[start + --i]]), j--;
-      else if (table[(i - 1) * width + j] >= table[i * width + j - 1]) back.push(["d", a[start + --i]]);
-      else back.push(["i", b[start + --j]]);
-    }
-    while (i) back.push(["d", a[start + --i]]);
-    while (j) back.push(["i", b[start + --j]]);
-    ops.push(...back.reverse());
-  } else {
-    for (let i = start; i < endA; i++) ops.push(["d", a[i]]);
-    for (let j = start; j < endB; j++) ops.push(["i", b[j]]);
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) ops.push(["s", a[head++]]);
+  let endA = a.length,
+    endB = b.length;
+  while (endA > head && endB > head && a[endA - 1] === b[endB - 1]) endA--, endB--;
+  const middle = myersOps(a.slice(head, endA), b.slice(head, endB), maxD);
+  if (middle) for (const op of middle) ops.push(op);
+  else {
+    for (let i = head; i < endA; i++) ops.push(["d", a[i]]);
+    for (let j = head; j < endB; j++) ops.push(["i", b[j]]);
   }
   for (let i = endA; i < a.length; i++) ops.push(["s", a[i]]);
   return ops;
 }
-// 覆盖写一份文件时，改动要给人看全：整份存不下就按改动取，两侧各留改动连同前后各 context 行。
-// 不这么取、只留开头 N 字的话，改在文件后头时两侧的开头一模一样，并排一比成了「什么都没改」，
-// 末尾那句「其后 N 字未留存」的字数反倒成了唯一的改动。两侧取自同一批窗口，页面照旧逐行比。
-// 每侧不超过 limit 字：窗口多得放不下就舍掉后头的，并写明还剩几处
-function changeExcerpts(oldText, newText, { context = 3, limit = 20000 } = {}) {
-  const a = String(oldText ?? "").split(/\r?\n/),
-    b = String(newText ?? "").split(/\r?\n/),
-    ops = lineOps(a, b);
+// Myers 的最短编辑脚本：一步一条斜线，走一步记下这一步各条斜线到了哪，走到头再照记录退回来。
+// 超过 maxD 步（改动太多，细比不如整块看）就返回 null，由 lineOps 整块一删一增。
+// 回溯只按记下的那份走，不把整串摊进 push 的参数里——十万行的整块改写也不会撑爆调用栈
+function myersOps(x, y, maxD) {
+  const n = x.length,
+    m = y.length,
+    ops = [];
+  if (!n || !m) {
+    for (const line of x) ops.push(["d", line]);
+    for (const line of y) ops.push(["i", line]);
+    return ops;
+  }
+  const max = n + m + 1,
+    at = max,
+    v = new Int32Array(2 * max + 1),
+    trace = [];
+  let found = -1;
+  for (let d = 0; d <= Math.min(maxD, n + m); d++) {
+    // 这一步开始前各斜线到哪：只留 k ∈ [-d-1, d+1] 这一段，回溯时够用
+    trace.push(v.slice(at - d - 1, at + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      let px = k === -d || (k !== d && v[at + k - 1] < v[at + k + 1]) ? v[at + k + 1] : v[at + k - 1] + 1,
+        py = px - k;
+      while (px < n && py < m && x[px] === y[py]) px++, py++;
+      v[at + k] = px;
+      if (px >= n && py >= m) {
+        found = d;
+        break;
+      }
+    }
+    if (found >= 0) break;
+  }
+  if (found < 0) return null;
+  /** @type {Array<[string, string]>} */
+  const back = [];
+  let px = n,
+    py = m;
+  for (let d = found; d > 0; d--) {
+    const row = trace[d],
+      k = px - py,
+      prevK = k === -d || (k !== d && row[k + d] < row[k + d + 2]) ? k + 1 : k - 1,
+      prevX = row[prevK + d + 1],
+      prevY = prevX - prevK;
+    while (px > prevX && py > prevY) {
+      back.push(["s", x[--px]]);
+      py--;
+    }
+    if (px === prevX) back.push(["i", y[--py]]);
+    else back.push(["d", x[--px]]);
+  }
+  while (px > 0) back.push(["d", x[--px]]);
+  while (py > 0) back.push(["i", y[--py]]);
+  return back.reverse();
+}
+// 覆盖写一份文件时，改动要给人看全：按改动取，每处连同前后各 context 行。只存旧侧的行——
+// 新的一侧整份还在这一步的参数（step.arguments）里，页面画的时候从那儿取，不另存第二份。
+// 每块记下两侧的行号：页面按号取新侧、按号写「跳过 N 行未改」。不设字数上限，改动一处不落
+function changeHunks(oldText, newText, { context = 3 } = {}) {
+  const a = splitLines(oldText),
+    b = splitLines(newText),
+    ops = lineOps(a, b),
+    oldAt = new Int32Array(ops.length + 1),
+    newAt = new Int32Array(ops.length + 1);
+  let added = 0,
+    removed = 0;
+  for (let k = 0; k < ops.length; k++) {
+    const kind = ops[k][0];
+    oldAt[k + 1] = oldAt[k] + (kind === "i" ? 0 : 1);
+    newAt[k + 1] = newAt[k] + (kind === "d" ? 0 : 1);
+    if (kind === "i") added++;
+    else if (kind === "d") removed++;
+  }
   // 改动在 ops 里的区间，前后各带 context 行未改的；挨上的并成一块
   const ranges = [];
   for (let k = 0; k < ops.length; k++) {
@@ -173,60 +202,21 @@ function changeExcerpts(oldText, newText, { context = 3, limit = 20000 } = {}) {
     const from = Math.max(0, k - context),
       to = Math.min(ops.length, end + context),
       last = ranges.at(-1);
-    if (last && from <= last[1]) last[1] = to;
-    else ranges.push([from, to]);
+    if (last && from <= last.to) last.to = to;
+    else ranges.push({ from, to });
     k = end - 1;
   }
-  if (!ranges.length) return { old: "", new: "", hunks: 0, omitted: 0 };
-  // 这一段里两侧各自的行（未改的两边都有）
-  const cut = (from, to) => {
-    const oldLines = [],
-      newLines = [];
-    for (let k = from; k < to; k++) {
-      if (ops[k][0] !== "i") oldLines.push(ops[k][1]);
-      if (ops[k][0] !== "d") newLines.push(ops[k][1]);
-    }
-    return { oldLines, newLines };
-  };
-  const oldOut = [],
-    newOut = [];
-  const size = lines => lines.reduce((n, line) => n + line.length + 1, 0);
-  let from = 0,
-    omitted = 0;
-  for (let index = 0; index < ranges.length; index++) {
-    const [start, end] = ranges[index],
-      part = cut(start, end),
-      // 段与段之间跳过的都是未改的行，两侧同样多，写同一句话，并排看过去对得上
-      skipped = start > from && oldOut.length ? [`…（跳过 ${start - from} 行未改）`] : [],
-      oldNext = [...skipped, ...part.oldLines],
-      newNext = [...skipped, ...part.newLines];
-    if (oldOut.length && (size(oldOut) + size(oldNext) > limit || size(newOut) + size(newNext) > limit)) {
-      omitted = ranges.length - index;
-      break;
-    }
-    oldOut.push(...oldNext);
-    newOut.push(...newNext);
-    from = end;
-  }
-  // 头一块就超了 limit：留它，截到 limit 字，说明停在哪
-  const clip = lines => {
-    if (size(lines) <= limit) return lines;
-    const out = [];
-    let used = 0;
-    for (const line of lines) {
-      if (used + line.length + 1 > limit) break;
-      out.push(line);
-      used += line.length + 1;
-    }
-    out.push(`…（这一处改动太长，只列到这里）`);
-    return out;
-  };
-  if (omitted) {
-    const note = `…（另有 ${omitted} 处改动未列）`;
-    oldOut.push(note);
-    newOut.push(note);
-  }
-  return { old: clip(oldOut).join("\n"), new: clip(newOut).join("\n"), hunks: ranges.length, omitted };
+  const rows = [],
+    hunks = ranges.map(({ from, to }) => {
+      for (let k = from; k < to; k++) if (ops[k][0] !== "i") rows.push(ops[k][1]);
+      return {
+        oldStart: oldAt[from],
+        newStart: newAt[from],
+        oldCount: oldAt[to] - oldAt[from],
+        newCount: newAt[to] - newAt[from]
+      };
+    });
+  return { hunks, old: rows.join("\n"), added, removed };
 }
 
 module.exports = {
@@ -236,7 +226,8 @@ module.exports = {
   decodeText,
   encodeText,
   countLines,
+  splitLines,
   lineDiffCounts,
-  changeExcerpts,
+  changeHunks,
   nearestPassage
 };
