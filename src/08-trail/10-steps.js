@@ -170,8 +170,9 @@ function workStepHtml(step, title) {
     // 模型说了要做什么的：题头写那一句，指令原文退到展开后的头一段（悬停也看得到）
     gist = command && step.gist;
   const meta = status === "running" ? "" : status === "pending" ? t(AWAITING) : escapeHtml(stepText(step.result || step.note));
-  // 这一步该画的红绿（覆盖写的 hunks、改文件的 old/new、旧格式），等确认的那一步先不算
-  const parts = status === "pending" ? null : stepDiffParts(step);
+  // 这一步该画的红绿（覆盖写的 hunks、改文件的 old/new、旧格式）。等确认的、跑着的、报错的先不算：
+  // edit_file 的 old/new 在参数里一直都有，若照参数画，失败的那一步也会摊出一份没发生的红绿
+  const parts = status === "done" ? stepDiffParts(step) : null;
   let body = "",
     more = "";
   // 等待确认时把整条指令完整摊开，不能只靠单行省略号让用户猜着点头；已摆在请示条上的不再摊第二份
