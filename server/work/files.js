@@ -88,7 +88,9 @@ module.exports = function createFiles(work) {
     });
     const decoded = decodeText(buffer);
     if (!decoded) throw Error("二进制文件，不予读取");
-    const lines = decoded.text.split(/\r?\n/),
+    // 末尾的一个换行不算多一行，与 write_file 那边的 countLines 同口径：空文件 0 行，"a\nb\n\n" 仍是 3 行（a、b、空行）
+    const source = decoded.text.replace(/\r?\n$/, ""),
+      lines = decoded.text ? source.split(/\r?\n/) : [],
       offset = Math.floor(clampNumber(body.offset, 1, 1, Math.max(1, lines.length))),
       limit = Math.floor(clampNumber(body.limit, 400, 1, 2000));
     const slice = lines.slice(offset - 1, offset - 1 + limit);
