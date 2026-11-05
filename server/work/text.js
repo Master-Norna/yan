@@ -23,7 +23,11 @@ function decodeClixml(text) {
     .trim();
 }
 // 文本文件的编码：UTF-8（可带 BOM）为常；Windows PowerShell 5.1 的 > 与 Out-File 写出的是带 BOM 的 UTF-16LE，老的中文文件多是 GBK。
-// 认得出的都解成文字，真是二进制（没有 BOM 却有 NUL）才回 null。UTF-8 里夹着零星几个坏字节的仍按 UTF-8 读，不整篇改按 GBK 读成乱码
+// 认得出的都解成文字，真是二进制（没有 BOM 却有 NUL）才回 null。UTF-8 里夹着零星几个坏字节的仍按 UTF-8 读，不整篇改按 GBK 读成乱码。
+// 判据不看坏字节占多少比例，而在解出来的非 ASCII 字里比好坏：坏字节解成的 U+FFFD 比好字少，就还是 UTF-8。
+// 按比例两头都会错：短文件末字断一个字节（二十个汉字里一个坏）就过百分之一，整篇被当成 GBK 读成乱码；
+// 反过来以 ASCII 为主、只夹几个 GBK 汉字的老文件，坏字节占比不到百分之一，汉字却全成了 U+FFFD。
+// 比好坏两边都不吃亏：一处断口只出一个 U+FFFD，好字却是成篇的；真是 GBK 的「你好」按 UTF-8 解出三个 U+FFFD、一个好字也没有，判 GBK
 function decodeText(buffer) {
   if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf)
     return { text: buffer.subarray(3).toString("utf8"), encoding: "utf-8-bom" };
@@ -33,9 +37,14 @@ function decodeText(buffer) {
     return { text: body.swap16().toString("utf16le"), encoding: "utf-16be" };
   }
   if (buffer.subarray(0, 4096).includes(0)) return null;
-  const text = buffer.toString("utf8"),
-    bad = (text.match(/�/g) || []).length;
-  if (!bad || bad < text.length / 100) return { text, encoding: "utf-8" };
+  const text = buffer.toString("utf8");
+  let bad = 0,
+    good = 0;
+  for (const char of text) {
+    if (char === "\uFFFD") bad++;
+    else if (char > "\u007f") good++;
+  }
+  if (!bad || bad < good) return { text, encoding: "utf-8" };
   return { text: new TextDecoder("gb18030").decode(buffer), encoding: "gbk" };
 }
 // 按原来的编码写回；GBK 编不回去（Node 只会编 UTF-8 / UTF-16），给 null，由调用者拒绝
