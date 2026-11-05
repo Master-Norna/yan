@@ -214,7 +214,7 @@ function renderEnhancements(root) {
 defineEmbed({ name: "math", mount: root => void renderPendingMath(root) });
 // 正文里引了工具交回的画面（模型写「![截图](page-1.png)」或「[查看截图](page-1.png)」）：就地画出那幅，点开进图片查看器。
 // 原件本就作附件挂在那一步上（见 mcpResultImages、generate_image），不另存；先认这一答的，再认前几答的（「把刚才那幅再放出来」）。
-// 都不是的：链接照旧当目录里的文件，图到落脚处按路取（模型自己存的图表、前几回收进卷宗的图），取不到留下说明文字，不画破图
+// 都不是的：图与链接都是目录里的一件（模型自己存的图表、前几回收进卷宗的图），算路与认件见 15-refs.js
 /** @param {Element} root */
 function renderReplyShots(root) {
   const remote = renderRemoteShots(root),
@@ -233,27 +233,14 @@ function renderReplyShots(root) {
             .findLast(item => item.kind === "image" && item.name === name)
         )
         .find(Boolean),
-      target = !file && ref.tagName === "IMG" ? localLinkTarget(ref.getAttribute("data-path"), c, messages[upTo] || null) : null,
       words = ref.getAttribute("alt") || name || "";
-    if (!file && !target) {
-      if (ref.tagName === "IMG") ref.replaceWith(words);
+    if (!file) {
+      if (ref.tagName === "IMG") drawRefImage(ref, refAnchor(ref), words);
       continue;
     }
-    const shot = document.createElement("span"),
-      alt = escapeHtml(words);
-    shot.className = "fi fi-thumb reply-shot";
-    shot.setAttribute("role", "button");
-    shot.tabIndex = 0;
-    shot.title = t`查看 ${file?.name || name}`;
-    if (file) {
-      shot.dataset.openImage = file.id;
-      shot.innerHTML = `<img data-thumb="${escapeHtml(file.id)}" alt="${alt}">`;
-    } else {
-      shot.dataset.openArchive = target.path;
-      shot.dataset.root = target.root;
-      shot.innerHTML = `<img src="${escapeHtml(archiveFileUrl(target.path, false, target.root))}" alt="${alt}">`;
-      shot.querySelector("img").onerror = () => shot.replaceWith(words);
-    }
+    const shot = replyShotNode(file.name);
+    shot.dataset.openImage = file.id;
+    shot.innerHTML = `<img data-thumb="${escapeHtml(file.id)}" alt="${escapeHtml(words)}">`;
     shotShape(shot);
     // 图换成那幅；链接留着字（点了也是看图），画面接在后面
     if (ref.tagName === "IMG") ref.replaceWith(shot);
@@ -265,6 +252,16 @@ function renderReplyShots(root) {
   }
   groupReplyShots(root);
   void loadThumbnails(root);
+}
+// 一幅小样的外框：点开看那一幅
+/** @param {string} name */
+function replyShotNode(name) {
+  const shot = document.createElement("span");
+  shot.className = "fi fi-thumb reply-shot";
+  shot.setAttribute("role", "button");
+  shot.tabIndex = 0;
+  shot.title = t`查看 ${name}`;
+  return shot;
 }
 // 整页长截图（高过宽的两倍）从顶上取景，点开看全幅；别的整幅见。横幅在一叠里斜开得少（见 40-markdown.css）
 /** @param {HTMLElement} shot */

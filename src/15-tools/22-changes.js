@@ -285,7 +285,7 @@ function changeSummaryInner(message, open) {
   return `<button type="button" class="change-summary" aria-expanded="${open}"><span class="seal change-seal" aria-hidden="true">${t(`改`)}</span><span class="change-title">${t`改动 ${stats.files.length} 个文件`}</span><span class="change-count">${changeCountHtml(stats)}${changeSpark(stats.added, stats.removed)}</span></button>${changeFilesHtml(stats, open)}`;
 }
 // 成品：这一答的答复里链到的本机文件（模型写「[报告](报告.md)」「![图](图.png)」）。列哪几件由模型定：交给人看的核心文件才写成链接，
-// 解压出的一堆、顺手改的代码不列，别的对话与人同时放进卷宗的也混不进来。收尾时按这段对话的落脚处认路（见 localLinkTarget），
+// 解压出的一堆、顺手改的代码不列，别的对话与人同时放进卷宗的也混不进来。收尾时按这段对话的落脚处认路（见 refTarget），
 // 在的记下路与大小；落在卷宗里的只记卷宗里的路，别处的另记所在的根。一件一行：件图、文件名、大小，右侧「预览」与「下载」
 /** @param {Conversation} conversation @param {string} content @returns {Promise<Deliverable[]>} */
 async function replyDeliverables(conversation, content) {
@@ -300,7 +300,7 @@ async function replyDeliverables(conversation, content) {
   const files = [];
   for (const href of hrefs) {
     const name = localFileName(href),
-      target = name ? localLinkTarget(href, conversation) : null;
+      target = name ? refTarget(href, messageAnchor(conversation)) : null;
     if (!target || seen.has(`${target.root}|${target.path}`)) continue;
     seen.add(`${target.root}|${target.path}`);
     const head = await fetch(archiveFileUrl(target.path, true, target.root), { method: "HEAD" }).catch(() => null);

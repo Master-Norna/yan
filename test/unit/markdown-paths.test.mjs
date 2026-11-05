@@ -11,7 +11,7 @@ instance.Tokenizer = Tokenizer;
 globalThis.marked = instance;
 const f = load([
   "setupMarkdown",
-  "localLinkTarget",
+  "localLinkTarget: (raw, c, m) => refTarget(raw, messageAnchor(c, m))",
   "setup: value => { window.marked = value; bootstrap = { work: { platform: 'win32' } }; }"
 ]);
 f.setup(instance);

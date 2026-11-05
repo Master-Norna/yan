@@ -8,7 +8,6 @@
 let viewerPath = "",
   viewerRevision = 0,
   viewerSource = null,
-  viewerListing = null,
   viewerReturnFocus = null,
   viewerObjectUrls = [];
 // 关了浮层，焦点交还给点开它的那一件；键盘移到那儿打开的才照旧露焦点框。鼠标点开的、哪怕按 Esc 关，也不露——
@@ -80,7 +79,6 @@ async function openFileViewer(target, name = "", trigger = null) {
     kind = fileKind(title).view || "none";
   viewerPath = source.path || "";
   viewerSource = source;
-  viewerListing = null;
   viewerReturnFocus = focusReturn(trigger || document.activeElement);
   revokeViewerUrls();
   showNow(viewer);
@@ -222,96 +220,10 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
     return withZipImages(`<div class="file-viewer-text markdown">${note}${renderMarkdown(text)}</div>`, data);
   }
   const text = await reader.text();
-  if (kind === "markdown")
-    return `<div class="file-viewer-text markdown">${rebaseMarkdownRefs(renderMarkdown(text.slice(0, 200000)), viewerSource)}</div>`;
+  if (kind === "markdown") return `<div class="file-viewer-text markdown">${renderMarkdown(text.slice(0, 200000))}</div>`;
   return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(text.slice(0, 200000))}</pre>${text.length > 200000 ? `<p class="file-viewer-note">${t(`仅显示前 20 万字`)}</p>` : ""}</div>`;
 }
 // CSV / TSV：引号里的换行仍属于同一个字段，显示上限按记录计。
-// Markdown 里的相对图片（![](images/a.png)）与链接（[下一篇](b.md)）：照这份文件所在的那一层去取，与 VS Code 一样——不然图渲染进言的页面，
-// 相对地址落到言自己的根上；链接点了按这段对话的落脚处去找（见 10-archive.js 的点击）。消毒时本地的路已摘了 src / href、原路记在 data-path
-// （见 04-markdown 的钩子），从那里取回；那一层在哪个根下跟着这份文件走：卷宗、行的工作目录（带 root）、技能目录。
-// 图直接换上地址；链接把算好的路写回 data-path、根记在 data-root（技能里的记 data-skill-dir），点击时照这个开。
-// 本机盘符不动，/ 开头的从根算。附件里的 Markdown 没有「所在的那一层」，不改
-/** @param {string} html @param {{path?:string, root?:string, skillDir?:string, skillPath?:string}|null} source 这份 Markdown 从哪来（即 viewerSource） */
-function rebaseMarkdownRefs(html, source) {
-  const at = source?.path || source?.skillPath || "";
-  if (!at || !html.includes("data-path")) return html;
-  const box = document.createElement("template");
-  box.innerHTML = html;
-  for (const node of box.content.querySelectorAll("img[data-path], a[data-path]")) {
-    const ref = node.getAttribute("data-path") || "";
-    if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(ref)) continue;
-    const path = archiveRelative(ref.startsWith("/") ? "" : parentDir(at), ref);
-    if (node.tagName === "A") {
-      node.setAttribute("data-path", path);
-      if (source.skillDir) node.setAttribute("data-skill-dir", source.skillDir);
-      else node.setAttribute("data-root", source.root || archiveDir());
-      continue;
-    }
-    node.setAttribute(
-      "src",
-      source.skillDir
-        ? skillFileUrl({ skillDir: source.skillDir, skillPath: path })
-        : archiveFileUrl(path, false, source.root || archiveDir())
-    );
-    if (!source.skillDir) node.setAttribute("data-seek", node.getAttribute("data-file") || "");
-    node.removeAttribute("data-path");
-    node.removeAttribute("data-file");
-  }
-  return box.innerHTML;
-}
-// 文档或图挪过，文里的相对路就对不上了：到这份文件所在的根里认同名的一件。怎么挪的都接得住（卷宗里拖、资源管理器、模型的指令），文件本身不改
-/** @param {HTMLImageElement} img */
-async function seekMovedImage(img) {
-  const name = img.getAttribute("data-seek"),
-    source = viewerSource,
-    root = source?.root || archiveDir();
-  img.removeAttribute("data-seek");
-  if (!name || !source?.path) return;
-  viewerListing ||= bridge("/api/archive/list", { root }, AbortSignal.timeout(20000)).then(
-    data => (data.entries || []).map(entry => entry.path),
-    () => []
-  );
-  const found = nearestSameName(name, source.path, await viewerListing);
-  if (found && img.isConnected) img.src = archiveFileUrl(found, false, root);
-}
-// 同名的取离这份文件最近的（少走几层）；一样近的有几件就不猜，宁可留着破图也不画错图
-/** @param {string} name @param {string} at @param {string[]} paths @returns {string} */
-function nearestSameName(name, at, paths) {
-  const from = parentDir(at).toLowerCase().split("/").filter(Boolean),
-    want = name.toLowerCase();
-  let best = "",
-    least = Infinity,
-    tied = false;
-  for (const path of paths) {
-    const parts = path.toLowerCase().split("/");
-    if (parts.pop() !== want) continue;
-    let shared = 0;
-    while (shared < from.length && from[shared] === parts[shared]) shared++;
-    const steps = from.length + parts.length - 2 * shared;
-    if (steps === least) tied = true;
-    if (steps < least) {
-      best = path;
-      least = steps;
-      tied = false;
-    }
-  }
-  return tied ? "" : best;
-}
-/** @param {string} base 卷宗里的一层（"" 即根） @param {string} ref 相对的路，可带 ./ ../ 与 %20 一类转义 */
-function archiveRelative(base, ref) {
-  let clean = ref.replace(/[?#].*$/, "").replace(/\\/g, "/");
-  try {
-    clean = decodeURIComponent(clean).replace(/\\/g, "/");
-  } catch {}
-  const parts = base ? base.split("/") : [];
-  for (const part of clean.split("/")) {
-    if (!part || part === ".") continue;
-    if (part === "..") parts.pop();
-    else parts.push(part);
-  }
-  return parts.join("/");
-}
 function parseDelimited(text, split, limit = Infinity) {
   const rows = [];
   let row = [];
@@ -509,7 +421,6 @@ function bindViewerEvents() {
   $("#fileViewerStage").addEventListener(
     "error",
     e => {
-      if (e.target.matches?.("img[data-seek]")) return void seekMovedImage(e.target);
       if (!e.target.matches?.("audio, video")) return;
       e.target.closest(".file-viewer-media").outerHTML =
         `<div class="file-viewer-empty">${t(`此视频浏览器放不了，可交本机程序打开`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;

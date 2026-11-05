@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
 
 test("本地链接：Mac 上 / 起头的是绝对路，Windows 上不是；file:// 两边都认", () => {
-  const f = load(["localLinkTarget", "setPlatform: platform => { bootstrap = { work: { platform } }; }"]);
+  const f = load([
+    "localLinkTarget: (raw, c, m) => refTarget(raw, messageAnchor(c, m))",
+    "setPlatform: platform => { bootstrap = { work: { platform } }; }"
+  ]);
   f.setPlatform("darwin");
   const mac = { workdir: "/Users/me/proj" };
   assert.deepEqual(f.localLinkTarget("/Users/me/proj/out/报告.md", mac), { root: "/Users/me/proj", path: "out/报告.md" });
