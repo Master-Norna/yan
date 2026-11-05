@@ -463,6 +463,8 @@ writeFileSync(
 writeFileSync(`${ARCHIVE}/课程/场景示例/读我.md`, "# 读我\n\n![](images/点%201.png)\n\n![](./images/../images/点%201.png)\n");
 writeFileSync(`${ARCHIVE}/课程/场景示例/images/点#2.png`, readFileSync(`${ARCHIVE}/课程/场景示例/images/点 1.png`));
 writeFileSync(`${ARCHIVE}/课程/场景示例/读我.md`, "\n![](images/点%232.png)\n", { flag: "a" });
+// 挪过的文档：文里还写着旧夹，图其实在 images 里
+writeFileSync(`${ARCHIVE}/课程/场景示例/挪过.md`, "![](旧夹/点%201.png)\n");
 await evalJs(dropFolder);
 await waitFor(`!!document.querySelector('#libraryGrid [data-library-dir="课程/场景示例 (2)"]')`, 8000).catch(() => {});
 check("dropping it again makes a second folder instead of merging", existsSync(`${ARCHIVE}/课程/场景示例 (2)/图/a.txt`));
@@ -479,6 +481,16 @@ check(
     `(imgs => imgs.length === 3 && imgs.every(img => img.naturalWidth === 1 && img.src.includes("/api/archive/file")))([...document.querySelectorAll("#fileViewerStage .markdown img")])`
   ),
   await evalJs(`[...document.querySelectorAll("#fileViewerStage .markdown img")].map(img => img.src + " " + img.naturalWidth).join(" | ")`)
+);
+await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
+await evalJs(
+  `document.querySelector('#libraryGrid [data-library-disk="课程/场景示例/挪过.md"] [data-library-action="view"]').click(); true`
+);
+await waitFor(`document.querySelector("#fileViewerStage .markdown img")?.naturalWidth === 1`, 8000).catch(() => {});
+check(
+  "an image whose relative path went stale after a move is found by name near the document",
+  await evalJs(`document.querySelector("#fileViewerStage .markdown img")?.naturalWidth === 1`),
+  await evalJs(`document.querySelector("#fileViewerStage .markdown img")?.src || "no image"`)
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
 await evalJs(`document.querySelector("#libraryGrid .strip-back").click(); true`);

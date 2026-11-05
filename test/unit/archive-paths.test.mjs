@@ -54,6 +54,19 @@ test("目录拖入期间导航和更换卷宗根：整批目录和文件仍落�
   );
 });
 
+test("Markdown 的图原路取不到：同名的认最近一件，一样近的不猜", () => {
+  const { nearestSameName } = load(["nearestSameName"]);
+  const doc = "生涯/报告.md";
+  assert.equal(nearestSameName("fig1.png", doc, ["旧/fig1.png", "生涯/fig1.png"]), "生涯/fig1.png");
+  assert.equal(nearestSameName("fig1.png", doc, ["生涯/图表/深/fig1.png", "生涯/图表/FIG1.PNG"]), "生涯/图表/FIG1.PNG");
+  assert.equal(nearestSameName("fig1.png", "报告.md", ["图表/fig1.png"]), "图表/fig1.png");
+  assert.equal(nearestSameName("fig1.png", doc, ["生涯/甲/fig1.png", "生涯/乙/fig1.png"]), "");
+  assert.equal(nearestSameName("fig1.png", doc, ["生涯/甲/fig1.png", "生涯/乙/fig1.png", "别处/深/fig1.png"]), "");
+  assert.equal(nearestSameName("fig1.png", doc, ["生涯/甲/fig1.png", "生涯/乙/fig1.png", "生涯/fig1.png"]), "生涯/fig1.png");
+  assert.equal(nearestSameName("fig1.png", doc, ["生涯/fig1.png", "生涯/甲/fig1.png", "生涯/乙/fig1.png"]), "生涯/fig1.png");
+  assert.equal(nearestSameName("fig1.png", doc, ["生涯/fig2.png"]), "");
+});
+
 test("Markdown 相对图片先去查询片段，再解码文件名中的保留字符", () => {
   const { archiveRelative } = load(["archiveRelative"]);
   assert.equal(archiveRelative("notes", "./images/a%23b%2520.png?size=2#view"), "notes/images/a#b%20.png");

@@ -8,6 +8,7 @@
 let viewerPath = "",
   viewerRevision = 0,
   viewerSource = null,
+  viewerListing = null,
   viewerReturnFocus = null,
   viewerObjectUrls = [];
 // 关了浮层，焦点交还给点开它的那一件；键盘移到那儿打开的才照旧露焦点框。鼠标点开的、哪怕按 Esc 关，也不露——
@@ -79,6 +80,7 @@ async function openFileViewer(target, name = "", trigger = null) {
     kind = fileKind(title).view || "none";
   viewerPath = source.path || "";
   viewerSource = source;
+  viewerListing = null;
   viewerReturnFocus = focusReturn(trigger || document.activeElement);
   revokeViewerUrls();
   showNow(viewer);
@@ -252,10 +254,49 @@ function rebaseMarkdownRefs(html, source) {
         ? skillFileUrl({ skillDir: source.skillDir, skillPath: path })
         : archiveFileUrl(path, false, source.root || archiveDir())
     );
+    if (!source.skillDir) node.setAttribute("data-seek", node.getAttribute("data-file") || "");
     node.removeAttribute("data-path");
     node.removeAttribute("data-file");
   }
   return box.innerHTML;
+}
+// 文档或图挪过，文里的相对路就对不上了：到这份文件所在的根里认同名的一件。怎么挪的都接得住（卷宗里拖、资源管理器、模型的指令），文件本身不改
+/** @param {HTMLImageElement} img */
+async function seekMovedImage(img) {
+  const name = img.getAttribute("data-seek"),
+    source = viewerSource,
+    root = source?.root || archiveDir();
+  img.removeAttribute("data-seek");
+  if (!name || !source?.path) return;
+  viewerListing ||= bridge("/api/archive/list", { root }, AbortSignal.timeout(20000)).then(
+    data => (data.entries || []).map(entry => entry.path),
+    () => []
+  );
+  const found = nearestSameName(name, source.path, await viewerListing);
+  if (found && img.isConnected) img.src = archiveFileUrl(found, false, root);
+}
+// 同名的取离这份文件最近的（少走几层）；一样近的有几件就不猜，宁可留着破图也不画错图
+/** @param {string} name @param {string} at @param {string[]} paths @returns {string} */
+function nearestSameName(name, at, paths) {
+  const from = parentDir(at).toLowerCase().split("/").filter(Boolean),
+    want = name.toLowerCase();
+  let best = "",
+    least = Infinity,
+    tied = false;
+  for (const path of paths) {
+    const parts = path.toLowerCase().split("/");
+    if (parts.pop() !== want) continue;
+    let shared = 0;
+    while (shared < from.length && from[shared] === parts[shared]) shared++;
+    const steps = from.length + parts.length - 2 * shared;
+    if (steps === least) tied = true;
+    if (steps < least) {
+      best = path;
+      least = steps;
+      tied = false;
+    }
+  }
+  return tied ? "" : best;
 }
 /** @param {string} base 卷宗里的一层（"" 即根） @param {string} ref 相对的路，可带 ./ ../ 与 %20 一类转义 */
 function archiveRelative(base, ref) {
@@ -468,6 +509,7 @@ function bindViewerEvents() {
   $("#fileViewerStage").addEventListener(
     "error",
     e => {
+      if (e.target.matches?.("img[data-seek]")) return void seekMovedImage(e.target);
       if (!e.target.matches?.("audio, video")) return;
       e.target.closest(".file-viewer-media").outerHTML =
         `<div class="file-viewer-empty">${t(`此视频浏览器放不了，可交本机程序打开`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;
