@@ -41,7 +41,8 @@ function mcpReady(restart = []) {
   mcp.key = key;
   mcp.retryAt = 0;
   mcp.waitWarned = false;
-  if (!Object.keys(servers).length) return Promise.resolve();
+  // 空清单也报给桥接：停用最后一个服务后，旧会话要靠这一回报才会关掉（见 server/mcp/index.js 的 drop）。
+  // 不会因此多报——清单没变的调用在上面就返回了
   const loading = bridge("/api/mcp/list", { servers, restart }, AbortSignal.timeout(90000))
     .then(
       data => {
