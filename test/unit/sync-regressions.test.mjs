@@ -96,19 +96,26 @@ test("MCP 配置变更后，旧请求的迟到响应不能覆盖新配置", asyn
   assert.match(f.mcp.key, /"B"/);
 });
 
-test("MCP 服务全停用时，旧请求的迟到响应也不能恢复工具", async () => {
+test("MCP 服务全停用时，旧请求的迟到响应也不能恢复工具；空清单要报给桥接", async () => {
   const f = load([
     "mcp",
     "mcpReady",
     "setMcpEnv: (configs, call) => { apiBase = 'http://localhost'; store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }"
   ]);
   let finish;
+  const sent = [];
   f.setMcpEnv({ A: { command: "a" } }, () => new Promise(resolve => (finish = resolve)));
   const first = f.mcpReady();
-  f.setMcpEnv({}, () => {
-    throw Error("没有启用服务时不应请求桥接");
+  f.setMcpEnv({}, (path, payload) => {
+    sent.push({ path, servers: payload.servers });
+    return Promise.resolve({ servers: {} });
   });
   await f.mcpReady();
+  assert.deepEqual(
+    sent,
+    [{ path: "/api/mcp/list", servers: {} }],
+    "停用最后一个服务也要报给桥接，旧会话才关得掉（见 server/mcp/index.js 的 drop）"
+  );
   finish({ servers: { A: { ok: true, tools: [] } } });
   await first;
   assert.deepEqual(f.mcp.servers, {});

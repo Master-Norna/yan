@@ -69,12 +69,13 @@ function uploadAttachment(record, body = null) {
 function attachmentBlob(record) {
   return record.kind === "text" ? new Blob([String(record.data ?? "")], { type: record.mime || "text/plain" }) : dataUrlBlob(record.data);
 }
-// 要整份原件交出去时（收入卷宗）：在存储目录里的照同源地址取，浏览器自己托着字节，不读成 data: URL；只暂存在浏览器里的从表里取
+// 要整份原件交出去时（收入卷宗）：在存储目录里的照同源地址取，浏览器自己托着字节，不读成 data: URL；只暂存在浏览器里的从表里取。
+// 带上 download：取的是落盘的原件，不是换了壳的预览副本（视频只留第一条视频与音轨，见 server/files.js 的 handleRaw 与 video.js）
 /** @param {string} id @returns {Promise<Blob|null>} */
 async function attachmentBody(id) {
-  const response = await fetch(`${apiBase}/api/files/raw?id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(120000) }).catch(
-    () => null
-  );
+  const response = await fetch(`${apiBase}/api/files/raw?id=${encodeURIComponent(id)}&download=1`, {
+    signal: AbortSignal.timeout(120000)
+  }).catch(() => null);
   if (response?.ok) return response.blob();
   const record = await getAttachment(id);
   return record ? attachmentBlob(record) : null;

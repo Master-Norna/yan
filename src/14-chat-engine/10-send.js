@@ -23,7 +23,7 @@ async function prepareTurn(c) {
     return false;
   }
   // 等的这一会儿，后台回报可能已在这段里另起了一答，这段也可能已被删掉。正退回目录的不开工：动手写下的会被退回盖掉
-  if (rewinding.has(c.id)) {
+  if (rewindingOver(c)) {
     toast(t("正在退回目录，稍后再发"));
     return false;
   }

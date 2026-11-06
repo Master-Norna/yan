@@ -108,7 +108,8 @@ defineTool({
     step.title = `${id}${stop ? t(" · 结束") : ""}`;
     // 模型亲手结束它：不必再叫醒一回
     if (stop && started) bgWatches.get(started.id)?.abort();
-    const data = await bridge("/api/work/check", { id, stop, wait: Number(args.wait) || 0 }, signal);
+    // 带上开它时记下的 key：编号在桥接重启后会重数，只凭编号会读到、停掉同号的另一条（见 server/work/shell.js 的 checkBackground）
+    const data = await bridge("/api/work/check", { id, stop, wait: Number(args.wait) || 0, key: started?.bg?.key || "" }, signal);
     step.output = commandOutput(data);
     if (!data.running) {
       step.exitCode = data.exitCode;
