@@ -149,6 +149,13 @@ function watchBackground(conversation, assistant, step) {
     .then(
       data => {
         if (data.superseded) return;
+        // 等的这阵子别处可能写过这段，store 里已换了对象：签要改在当前那份上，改在旧的上人看不到、也存不下
+        const message = store.conversations.find(c => c.id === conversation.id)?.messages.find(m => m.id === assistant.id),
+          current = message && allSteps(message).find(s => s.id === step.id);
+        if (current?.bg) {
+          assistant = message;
+          step = current;
+        }
         // 随桥接重启而止：只把签改了，不叫醒。重启是人自己动的手，挂着的多是预览、服务，叫醒了模型多半挨个重开；
         // 真等着结果的（训练），模型下一问从行迹摘要里看得到它止了
         if (data.lost) return settleBackground(step, "lost", undefined, assistant);
@@ -182,7 +189,8 @@ function watchBackground(conversation, assistant, step) {
         if (error.name === "AbortError") return;
         // 桥接断了一下（重启、睡眠醒来）：稍候再等；重启过的，那时会回 lost
         setTimeout(() => {
-          if (store.conversations.includes(conversation) && step.bg?.state === "running") watchBackground(conversation, assistant, step);
+          if (store.conversations.some(c => c.id === conversation.id) && step.bg?.state === "running")
+            watchBackground(conversation, assistant, step);
         }, 10000);
       }
     )

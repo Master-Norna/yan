@@ -64,6 +64,44 @@ test("回报另起一答：对象已被换掉时仍能开工，写进 store 当�
   assert.equal(stale.heldReports, undefined, "旧对象上一点没写");
 });
 
+test("后台指令结束时对象已被换掉：签改在当前那份上，旧对象不动", async () => {
+  const mailed = [];
+  const f = load([
+    "watchBackground",
+    "store",
+    `install: (mailed, wait) => {
+      bridge = wait;
+      holdAwake = () => {};
+      renderClepsydra = () => {};
+      requestJob = () => null;
+      activeProfile = () => ({ id: "p" });
+      prompt = () => "结束了";
+      markDirty = () => {};
+      saveStoreSoon = () => {};
+      refreshSteps = () => {};
+      mailReport = (conversation, item) => mailed.push([conversation, item]);
+    }`
+  ]);
+  const running = () => ({ id: "s1", title: "跑", bg: { id: "bg1", key: "k", state: "running" } });
+  const staleStep = running(),
+    stale = { id: "A", messages: [{ id: "a1", role: "assistant", content: "", steps: [staleStep] }] },
+    currentStep = running(),
+    current = { id: "A", messages: [{ id: "a1", role: "assistant", content: "", steps: [currentStep] }] };
+  f.store.conversations = [stale];
+  let finish;
+  f.install(mailed, () => new Promise(resolve => (finish = resolve)));
+  f.watchBackground(stale, stale.messages[0], staleStep);
+  // 等着的时候别处写过这段：store 里换成了新对象
+  f.store.conversations = [current];
+  finish({ id: "bg1", exitCode: 0, stdout: "", stderr: "", durationMs: 1 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(currentStep.bg.state, "done");
+  assert.equal(currentStep.exitCode, 0);
+  assert.equal(staleStep.bg.state, "running", "旧对象上没写");
+  assert.equal(mailed.length, 1, "回报照样寄出");
+  assert.equal(mailed[0][1].step, currentStep);
+});
+
 test("这一段已被删掉时，回报另起一答也不开工", async () => {
   const started = [];
   const f = load([
