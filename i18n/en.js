@@ -1629,6 +1629,8 @@ var YAN_EN = {
     "The API returned a single JSON document, not an event stream ({0}). This relay probably doesn't support streaming; switch to one that does. First 200 characters: {1}",
   "上游回的不是事件流，也读不出 JSON（{0}）。前 200 字：{1}":
     "The API returned neither an event stream nor readable JSON ({0}). First 200 characters: {1}",
+  "上游回的不是事件流（{0}），正文超过 {1} MB，不再往下读。前 200 字：{2}":
+    "The API didn't return an event stream ({0}) and the body is over {1} MB, so reading stopped. First 200 characters: {2}",
   "必应（浏览器）": "Bing (browser)",
   搜索关键词不能为空: "Search query can't be empty",
   "搜索引擎暂时不可用：{0}": "Search engine unavailable: {0}",
