@@ -20,16 +20,11 @@ const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 // 「powershell -Command "Set-Content C:\x y"」与直接写没有分别；这类壳之后同一行里的任何词都按指令位看，宁可多拦。
 // 赋值的右边也在执行（$r = reg delete …）；右边是带引号的字串（$mode = "copy"）不算
 const SHELL_WORD = String.raw`(?:"(?:\\.|[^"\\\n])*"|'[^'\n]*'|[^\s"';&|()]+)`;
-// 带值的短选项必须消费一个完整词；另一支排除这些独立选项，不能回溯成「无值」。
-const XARGS_OPTIONS = String.raw`(?:\s+(?:-[nILPdsEa]\s+${SHELL_WORD}|-(?![nILPdsEa](?=\s|$))[^\s"';&|()]+))*`;
-const ENV_OPTIONS = String.raw`(?:\s+(?:-[uCS]\s+${SHELL_WORD}|-(?![uCS](?=\s|$))[^\s"';&|()]+))*`;
-const FIND_ACTION = String.raw`find(?:\s+(?!-(?:exec|ok)(?:dir)?(?=\s|$))(?:\\?[()]|${SHELL_WORD}))*\s+-(?:exec|ok)(?:dir)?`;
-const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs${XARGS_OPTIONS}|env${ENV_OPTIONS}|${FIND_ACTION}|[A-Za-z_]\w*=(?:${SHELL_WORD})?)\s+)*`;
-const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh\s+(?:--[\w-]+\s+|-o\s+\S+\s+|-(?!o\s)[^c\s-]+\s+)*-[a-z]*c[a-z]*\s+["']?`;
-// 从行首只扫一次，跳过成对引号；不能把 echo "a) sudo" 中的 ) 当成指令位。
-const AFTER_PAREN = String.raw`^(?:${PREFIX}${SHELL})?(?:[^"'\n]|"[^"\n]*"|'[^'\n]*')*\)`;
+// xargs / env 的普通选项仍供其它命令规则使用；sudo 不靠枚举包装词的选项来识别。
+const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs(?:\s+-[^\s"';&|()]+)*|env(?:\s+-[^\s"';&|()]+)*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)\s+)*`;
+const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh(?:\.exe)?\s+(?:--(?:rcfile|init-file)\s+${SHELL_WORD}\s+|--[\w-]+\s+|-o\s+\S+\s+|-(?!o\s)[^c\s-]+\s+)*-[a-z]*c[a-z]*\s+(?:--\s+)?["']?`;
 const CMD =
-  String.raw`(?:^|[;&|({\n]|${AFTER_PAREN}|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?` +
+  String.raw`(?:^|[;&|({)\n]|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?` +
   PREFIX +
   // 第二段前缀必须跟在 Shell 后，避免两段前缀任意切分造成回溯。
   String.raw`(?:${SHELL}${PREFIX})?`;
@@ -70,11 +65,76 @@ const HIDDEN_COMMAND = new RegExp(
     String.raw`|${CMD}${SHELL}\$\(`,
   "im"
 );
-const PIPE_SHELL = /^\s*(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?(?=[\s"']|$)/i;
+const PIPE_SHELL = new RegExp(
+  String.raw`^\s*${PREFIX}["']?(?:[^\s"';&|(){}]*/)?(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?["']?(?=\s|$)`,
+  "i"
+);
 const SCRIPT_START = new RegExp(
   String.raw`^\s*${PREFIX}(?:${SHELL}|(?:cmd(?:\.exe)?\b[^\n]*?/[ck]|(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?[-/](?:${prefixesOf("command")}))\s+["'])`,
   "i"
 );
+// 引号只扫一次；单引号内原样，双引号内跳过反斜杠与 PowerShell 反引号转义。
+function quotedEnd(text, start) {
+  const quote = text[start];
+  let end = start + 1;
+  for (; end < text.length; end++) {
+    if (quote !== "'" && (text[end] === "\\" || text[end] === "`")) end++;
+    else if (text[end] === quote) break;
+  }
+  return Math.min(end, text.length);
+}
+function withoutQuoted(text) {
+  const chars = text.split("");
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\\" || text[i] === "`") {
+      i++;
+      continue;
+    }
+    if (text[i] !== '"' && text[i] !== "'") continue;
+    const end = quotedEnd(text, i);
+    for (; i < end; i++) chars[i] = " ";
+    if (i < text.length) chars[i] = " ";
+  }
+  return chars.join("");
+}
+// 只隐藏普通引号参数里的语法分隔符，保留文字与索引供既有规则检查参数。
+// 单层 Shell 的执行字符串另扫一层；引号内的括号、换行不会再制造指令位。
+function commandSyntax(text, shellBody = false) {
+  const chars = text.split("");
+  let start = 0,
+    scriptAt = -1,
+    checked = false;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '"' || text[i] === "'") {
+      if (!checked && !shellBody) {
+        const script = SCRIPT_START.exec(text.slice(start));
+        scriptAt = script ? start + script[0].length - 1 : -1;
+        checked = true;
+      }
+      const end = quotedEnd(text, i);
+      if (i === scriptAt) {
+        const body = commandSyntax(text.slice(i + 1, end), true);
+        for (let j = 0; j < body.length; j++) chars[i + 1 + j] = body[j];
+      } else {
+        let substitution = 0;
+        for (let j = i + 1; j < end; j++) {
+          // 双引号里的 $() 仍会执行，不能随普通文字隐藏。
+          if (text[i] === '"' && text[j] === "$" && text[j + 1] === "(") {
+            substitution++;
+            j++;
+          } else if (substitution && text[j] === "(") substitution++;
+          else if (substitution && text[j] === ")") substitution--;
+          else if (!substitution && ";&|(){}\r\n".includes(text[j])) chars[j] = "\x01";
+        }
+      }
+      i = end;
+    } else if (";&|(){}\n".includes(text[i])) {
+      start = i + 1;
+      checked = false;
+    }
+  }
+  return chars.join("");
+}
 // 每段只检查一次，分隔符必须在引号外；不从每个 CMD 位置重新扫到行尾。
 // 执行字符串只展开一层，与 CMD 的 Shell 套壳范围一致，普通参数里的管道仍只是字串。
 function pipesToShell(/** @type {string} */ text, shellBody = false) {
@@ -94,6 +154,10 @@ function pipesToShell(/** @type {string} */ text, shellBody = false) {
     }
     if (ch === '"' || ch === "'") {
       quote = ch;
+      continue;
+    }
+    if (piped && ch === "\n" && !text.slice(start, i).trim()) {
+      start = i + 1;
       continue;
     }
     if (i < text.length && !";&|\n(){".includes(ch)) continue;
@@ -117,7 +181,7 @@ function pipesToShell(/** @type {string} */ text, shellBody = false) {
   }
   return false;
 }
-const HIDDEN = { test: (/** @type {string} */ text) => HIDDEN_COMMAND.test(text) || pipesToShell(text) },
+const HIDDEN = { test: (/** @type {string} */ text) => HIDDEN_COMMAND.test(commandSyntax(text)) || pipesToShell(text) },
   HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
 // 指令位上的程序可以写全路径（C:\Windows\System32\reg.exe、& "C:\Program Files\…\reg.exe"）。规则都按命令名认，筛之前先去掉程序的目录，
 // 禁用规则、外联、写动词就不必各自认路径；程序自己的路径也不再算它碰的路径——& "C:\Program Files\7-Zip\7z.exe" x a.zip 并没有往系统目录里写。
@@ -150,7 +214,11 @@ const RULES = [
     EVERY
   ],
   [cmd("defaults", String.raw`(?:(?:-currentHost|-host\s+\S+)\s+)?(?:write|delete|import|rename)\b`), "不动系统设置", EVERY],
-  [new RegExp(String.raw`${cmd("crontab").source}(?!(?:\s+-u\s+[^\s"';|&]+)?\s+-l\s*(?=$|["';|&<>)\n]))`, "im"), "不动计划任务", EVERY],
+  [
+    new RegExp(String.raw`${cmd("crontab").source}(?!(?=[^;|&\n]*\s-l\b)(?:\s+(?:-l|-u\s+[^\s"';|&]+))*\s*(?=$|["';|&<>)\n]))`, "im"),
+    "不动计划任务",
+    EVERY
+  ],
   [
     cmd(
       "networksetup",
@@ -171,7 +239,7 @@ const RULES = [
     cmd(
       "security",
       SECURITY_COMMAND +
-        String.raw`(?:(?:add|delete|set|create|remove)-[\w-]+|import|lock-keychain|unlock-keychain|install-mds|trust-settings-import|execute-with-privileges|(?:list-keychains|default-keychain|login-keychain)\b[^;|&\n]*\s-s\b|user-trust-settings-enable\s+-[ed]\b|authorizationdb\s+(?:write|remove)\b)(?=\s|$)`
+        String.raw`(?:-[ip]|(?:add|delete|set|create|remove)-[\w-]+|import|lock-keychain|unlock-keychain|install-mds|trust-settings-import|execute-with-privileges|(?:list-keychains|default-keychain|login-keychain)\b[^;|&\n]*\s-s\b|user-trust-settings-enable\s+-[ed]\b|authorizationdb\s+(?:write|remove)\b)(?=\s|$)`
     ),
     "不动钥匙串与安全设置",
     EVERY
@@ -180,7 +248,7 @@ const RULES = [
     cmd(
       "security",
       SECURITY_COMMAND +
-        String.raw`(?:export\b|dump-keychain\b[^;|&\n]*\s-d(?=[\s"']|$)|find-(?:generic|internet)-password\b[^;|&\n]*\s-[wg](?=[\s"']|$))`
+        String.raw`(?:export\b|dump-keychain\b[^;|&\n]*\s-(?=[a-z]*d)[a-z]+(?=[\s"']|$)|find-(?:generic|internet)-password\b[^;|&\n]*\s-(?=[a-z]*[wg])[a-z]+(?=[\s"']|$))`
     ),
     "不直接读取或导出钥匙串密码与密钥",
     "严"
@@ -211,6 +279,7 @@ const RULES = [
   [cmd("net", String.raw`use\b`), "不动用户、账户与共享", "严"],
   [cmdlet("(?:New|Remove|Set|Enable|Disable)-LocalUser|(?:Add|Remove)-LocalGroupMember"), "不动用户与账户", EVERY],
   [ELEVATION, "不提权", EVERY],
+  [{ test: text => /(^|[\s;&|()])sudo(?=$|[\s;&|()])/i.test(withoutQuoted(text)) }, "不提权", EVERY],
   [cmd("osascript"), "不直接执行 AppleScript 或 JXA", "严"],
   [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限", EVERY],
   // 老命令对应的 cmdlet 与老命令同样按指令位认：rg Format-Volume src 只是搜字
@@ -233,7 +302,10 @@ const RULES = [
   ]
 ];
 /** 这一档里命中的第一条的原因，没有返回 undefined @param {string} text @param {string} tier */
-const forbiddenWhy = (text, tier) => RULES.find(([pattern, , tiers]) => tiers.includes(tier) && pattern.test(text))?.[1];
+const forbiddenWhy = (text, tier) => {
+  const syntax = commandSyntax(text);
+  return RULES.find(([pattern, , tiers]) => tiers.includes(tier) && pattern.test(pattern === HIDDEN ? text : syntax))?.[1];
+};
 // 环境变量的两种写法（$env:X、${env:X} 与 %X%）从同一份名单生成，补一个名字两边都有
 const envVars = (/** @type {string} */ names) => String.raw`\$\{?env:(?:${names})\b|%(?:${names})%`;
 const SYSTEM_VARS = String.raw`ProgramData|ProgramFiles(?:\(x86\))?|ProgramW6432|SystemRoot|windir`;
@@ -280,7 +352,7 @@ const GIT_INTERNAL_PATH = /(^|[\s"'=;|&(])[^\s"'`;|&<>()]*\.git[\\/][^\s"'`;|&<>
 // 漏一个动词，就等于放行一次目录外的写入。重叠的前缀按长在前排（rmdir 在 rm 前、rename 在 ren 前）。
 // 指令由 Windows PowerShell 跑，它的别名是真会执行的：sc = Set-Content、ni = New-Item、ri = Remove-Item、mi / cpi / rni 同理，
 // 一并列上；解包、克隆这类把东西放到某处的也算
-const WRITE_VERBS = String.raw`Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Rename-Item|New-Item|Set-Item|Clear-Item|Clear-Content|Set-Acl|Compress-Archive|Expand-Archive|Export-Csv|Export-Clixml|Tee-Object|Start-Transcript|(?:New|Set|Remove|Copy|Move|Clear|Rename)-ItemProperty|robocopy|xcopy|copy|rmdir|rd|rm|del|erase|move|mv|cp|rename|ren|mkdir|md|touch|tee|attrib|mklink|fsutil|dd|sc|ac|ni|ri|mi|cpi|rni|rn|si|cli|clc|sp|rp|clp|mp|rnp|epcsv|tar|7za?|unzip|zip|chmod|chown|chflags|ln|rsync|ditto|sed\s+(?:-[^\s]+\s+)*-i|git\s+(?:clone|worktree\s+add)`;
+const WRITE_VERBS = String.raw`Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Rename-Item|New-Item|Set-Item|Clear-Item|Clear-Content|Set-Acl|Compress-Archive|Expand-Archive|Export-Csv|Export-Clixml|Tee-Object|Start-Transcript|(?:New|Set|Remove|Copy|Move|Clear|Rename)-ItemProperty|robocopy|xcopy|copy|rmdir|rd|rm|del|erase|move|mv|cp|rename|ren|mkdir|md|touch|tee|attrib|mklink|fsutil|dd|sc|ac|ni|ri|mi|cpi|rni|rn|si|cli|clc|sp|rp|clp|mp|rnp|epcsv|tar|7za?|unzip|zip|chmod|chown|chflags|ln|rsync|ditto|sed\s+(?:-[^\s]+\s+)*-[A-Za-z]*i|git\s+(?:clone|worktree\s+add)`;
 // 带输出目标的参数：curl -o、wget -O、iwr -OutFile、Start-Process 的重定向——动词本身像读，却在往某处写
 const OUTPUT_PARAMS = String.raw`(?:^|\s)(?:-o|-O|-OutFile|-OutputPath|-Destination(?:Path)?|-RedirectStandard(?:Output|Error)|--output(?:-document|-dir)?|--outdir|--out-dir)(?=[\s=:]|$)|(?:^|\s)-o(?=[\\/"'A-Za-z])`;
 // .NET 直写文件：[IO.File]::WriteAllText、[IO.Directory]::Delete、New-Object IO.StreamWriter 之类
@@ -318,34 +390,103 @@ function absolutePathsIn(command, win) {
   if (!win) for (const match of command.matchAll(posix)) found.push(match[1]);
   return found;
 }
-// 只读的来源不受目录约束——从外面拿东西进工作目录是正常的活（查看不限，改动才限）。只认两种最常见的写法，不做 shell 语义解析：
-//   Copy-Item / cp / copy / xcopy / robocopy、rsync / ditto / ln 紧跟选项的第一个路径是源
-//   （Move-Item 的源会被删掉，不算；robocopy 带 /MOV、rsync 带 --remove-source-files 也不算）；
-//   Get-Content / gc / cat / type 读出来往管道或重定向里送的那个路径是源。
-// 路径里带空格的写法本就认不出来（absolutePathsIn 到空格为止），这里也一样
-// 只跨过常见的无值选项；-Destination、--log-file、rsync -T 这类后面跟写入路径的，不能把参数当只读来源。
+// 只读来源不受目录约束，只豁免这次参数出现的位置；移动与删除来源不豁免。
+// Windows 复制与管道读取沿用既有写法；POSIX 带值选项与 sed 脚本在下面按参数处理。
 const PATH_TOKEN = "[^\\s\"'`;|&<>()]+";
 const READ_SOURCES = new RegExp(
   String.raw`${CMD}(?:Copy-Item|cpi|cp|copy|xcopy|robocopy)(?:\.exe)?\s+(?:-(?:Recurse|Force|Container|[aHLPRfinprsvX]+)\s+)*(?:-(?:Path|LiteralPath)\s+)?["']?(${PATH_TOKEN})(?![^;|&\n]*/mov)` +
     "|" +
     String.raw`${CMD}(?:Get-Content|gc|cat|type)(?:\.exe)?\s+(?:-(?:Raw|Encoding\s+\S+)\s+)*(?:-(?:Path|LiteralPath)\s+)?["']?(${PATH_TOKEN})(?=[^|>\n]*[|>])` +
     "|" +
-    String.raw`${CMD}(?:rsync(?![^;|&\n]*--remove-source-files\b)\s+(?:-[arvlpgoDqcnuzhxswi]+\s+)*|ditto\s+|ln\s+(?:-[sfnivh]+\s+)*)["']?(${PATH_TOKEN})`,
+    String.raw`${CMD}ln\s+(?:-[sfnivh]+\s+)*["']?(${PATH_TOKEN})`,
   "gim"
 );
+const POSIX_ARGUMENTS = new RegExp(String.raw`${CMD}(rsync|ditto|sed)\s+`, "gim");
+// 列带值选项，而不是列无值选项；日志、临时目录等写入参数只跨过，不豁免其路径。
+const RSYNC_VALUES = new Set(
+  "exclude include filter exclude-from include-from files-from rsh remote-option address port bwlimit timeout contimeout max-size min-size block-size checksum-seed compress-level skip-compress suffix backup-dir compare-dest copy-dest link-dest log-file out-format temp-dir chmod chown usermap groupmap".split(
+    " "
+  )
+);
+const RSYNC_PATTERNS = new Set(["exclude", "include", "filter"]);
+function argumentsAt(text, start) {
+  const tokens = [];
+  for (let i = start; i < text.length; ) {
+    if (/\s/.test(text[i]) && text[i] !== "\n") {
+      i++;
+      continue;
+    }
+    if (";&|()<>{}\n".includes(text[i])) break;
+    const from = i;
+    for (; i < text.length && !/[\s;&|()<>{}]/.test(text[i]); i++) {
+      if (text[i] === '"' || text[i] === "'") i = quotedEnd(text, i);
+    }
+    const raw = text.slice(from, i),
+      value = /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
+    tokens.push({ start: from, end: i, value });
+  }
+  return tokens;
+}
 /**
  * 只记源参数这一次出现的位置，不能按字符串全局豁免：
  * `Copy-Item C:\x .; Remove-Item C:\x` 里前一个 C:\x 是只读来源，后一个仍是删除目标。
  */
-function stripReadSources(text) {
+function stripReadSources(text, sources = true) {
   // 正则索引按 UTF-16 code unit 计；split("") 保持同一套索引（指令前有 emoji 时也不会错位）
   const chars = text.split("");
-  for (const match of text.matchAll(READ_SOURCES)) {
+  const syntax = commandSyntax(text);
+  for (const match of sources ? syntax.matchAll(READ_SOURCES) : []) {
     const source = match[1] || match[2] || match[3],
       offset = match[0].lastIndexOf(source),
       start = Number(match.index) + offset;
     if (!source || offset < 0) continue;
     for (let i = start; i < start + source.length; i++) chars[i] = " ";
+  }
+  for (const match of syntax.matchAll(POSIX_ARGUMENTS)) {
+    const tool = match[1].toLowerCase(),
+      tokens = argumentsAt(text, Number(match.index) + match[0].length),
+      removeSource = tool === "rsync" && tokens.some(t => t.value === "--remove-source-files");
+    let operand = false,
+      options = true,
+      sedScript = false;
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i],
+        value = token.value;
+      let ignored = false;
+      if (options && value === "--") {
+        options = false;
+        continue;
+      }
+      if (options && value.startsWith("-")) {
+        const [name, attached] = value.replace(/^--/, "").split("=", 2);
+        if (tool === "rsync") {
+          const takesValue = RSYNC_VALUES.has(name) || /^-[efBT]$/.test(value);
+          ignored = RSYNC_PATTERNS.has(name) || value === "-f";
+          if (takesValue && attached === undefined && tokens[i + 1]) {
+            if (ignored) {
+              const arg = tokens[i + 1];
+              for (let j = arg.start; j < arg.end; j++) chars[j] = " ";
+            }
+            i++;
+          }
+        } else if (tool === "ditto") {
+          if ((name === "arch" || name === "bom") && attached === undefined) i++;
+        } else {
+          if (value === "-e" || value === "--expression" || value === "-f" || value === "--file") {
+            sedScript = true;
+            ignored = true;
+            if (tokens[i + 1]) {
+              const arg = tokens[++i];
+              for (let j = arg.start; j < arg.end; j++) chars[j] = " ";
+            }
+          } else if (/^-[A-Za-z]*i$/.test(value) && tokens[i + 1]?.value === "") i++;
+        }
+      } else if (!operand) {
+        operand = true;
+        ignored = tool === "sed" ? !sedScript : sources && !removeSource;
+      }
+      if (ignored) for (let j = token.start; j < token.end; j++) chars[j] = " ";
+    }
   }
   return chars.join("");
 }
@@ -383,9 +524,9 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const forbidden = forbiddenWhy(text, "严");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
   if (SECRET_PATH_IN_COMMAND.test(text)) return "沙箱拒绝：指令不读写 .env、密钥或凭据文件；需要普通配置时请改用不含机密的文件";
-  if (GIT_INTERNAL_PATH.test(text) && DIRECT_FILE_MUTATION.test(text)) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
   // 目录这一道只锁「写」：查看整台机器是电脑检查的本分，锁住读等于把这件事堵死
-  if (DIRECT_FILE_MUTATION.test(text)) {
+  if (DIRECT_FILE_MUTATION.test(commandSyntax(text))) {
+    if (GIT_INTERNAL_PATH.test(stripReadSources(text, false))) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
     const why = screenWritePaths(text, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
@@ -408,7 +549,7 @@ function screenAutoReview(command) {
     forbidden = forbiddenWhy(text, "审");
   if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
-  if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
+  if (DIRECT_FILE_MUTATION.test(commandSyntax(text)) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
@@ -424,7 +565,7 @@ function screenLoose(command) {
   const text = withoutExeDir(raw),
     forbidden = forbiddenWhy(text, "宽");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
-  if (DIRECT_FILE_MUTATION.test(text) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
+  if (DIRECT_FILE_MUTATION.test(commandSyntax(text)) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
     return "沙箱拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
