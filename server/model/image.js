@@ -2,6 +2,7 @@
 // 言 · 生图（设置 → 专司）：只接 OpenAI 兼容的 /images/generations。硅基流动的参数名不同（image_size、batch_size），交回 images[].url；
 // OpenAI 系交回 data[].url 或 data[].b64_json。不论网址（硅基流动的一小时就失效）还是 base64，一律在这里取成 data: 地址交给页面，页面收进卷宗
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
+const { readLimitedBytes } = require("../web.js");
 
 const SILICONFLOW = config => config.api === "siliconflow" || /siliconflow/i.test(config.baseUrl);
 const IMAGE_LIMIT = 40 * 1024 * 1024;
@@ -27,8 +28,9 @@ async function fetchImage(raw, signal) {
   if (!/^https?:$/.test(url.protocol)) throw Error("接口交回的图片地址无效");
   const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]) });
   if (!response.ok) throw Error(`取图失败：${response.status}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > IMAGE_LIMIT) throw Error("图片过大");
+  // 边读边计：超过上限就停下，不先把整份收进内存再判
+  const { buffer: bytes, truncated } = await readLimitedBytes(response, IMAGE_LIMIT);
+  if (truncated) throw Error("图片过大");
   const type = String(response.headers.get("content-type") || "").split(";")[0];
   return `data:${sniff(bytes) || (type.startsWith("image/") ? type : "image/png")};base64,${bytes.toString("base64")}`;
 }
