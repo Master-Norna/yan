@@ -1192,7 +1192,6 @@ var YAN_EN = {
   "写到输出上限 · 接着写": "Hit the output limit · continuing",
   "网络不稳 · 稍候接着写": "Network unstable · continuing shortly",
   "此模型的思考档位为 {0}，已改用「{1}」": 'This model\'s thinking levels are {0}; switched to "{1}"',
-  接口返回了错误: "The API returned an error",
   已停止: "Stopped",
   "此答写毕，余墨已尽；换个模型可续": "Reply finished and the token limit is reached; switch models to continue",
   "对话还短，不必压缩": "The chat is short; no need to compact",
