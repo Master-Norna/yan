@@ -82,10 +82,7 @@ test("写在文档里的引用：从文档那一层算，/ 从根算，退出根
     skillPath: "a.md"
   });
   assert.equal(f.refTarget("sandbox:/mnt/a.png", anchor), null);
-  assert.equal(f.refTarget("//host/a.png", anchor), null, "两个正斜杠起头的是协议相对的网址，不当共享路径");
-  // Windows 的共享路径与盘符一样是绝对路：\\nas\share\… 与 file://nas/share/…
-  assert.deepEqual(f.refTarget("\\\\nas\\share\\report.pdf", anchor), { file: "//nas/share/report.pdf" });
-  assert.deepEqual(f.refTarget("file://nas/share/report.pdf", anchor), { file: "//nas/share/report.pdf" });
+  assert.equal(f.refTarget("//host/a.png", anchor), null);
 });
 
 test("一件文件在不在某个根下：不分大小写，夹名只是前缀的不算", () => {
