@@ -379,3 +379,195 @@ function replyBody(response) {
   const stream = (response.headers.get("content-type") || "").includes("text/event-stream");
   return stream || !response.body ? Promise.resolve({ response, stream }) : sniffEventStream(response);
 }
+// 向模型要一轮回复，写进 target（正文、思绪、工具调用、用量）：流式按 SSE 逐字进，否则整段一次到
+// onOpen：接口接下请求、开始回话时叫一声——从这一刻起这一轮就在花墨了，中途停止也得记账；onFrame 逐帧交给 readSse（旁注面板用来跟随滚动）
+/**
+ * @param {Profile} profile
+ * @param {Message|SubAgent} target 主消息或帮手（拟题 / 压缩的临时对象也按 Message 的样子造）
+ */
+async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
+  target.thinkingBlocks = null;
+  // 长活：这一答的工具往来快撑满窗口了，先压掉较早的几轮再发（见 14-chat-engine/60-context.js 的 keepInWindow）
+  if (!retried) await keepInWindow(profile, history, signal, overrides, { target });
+  if (blindProfiles.has(profile.id)) stripImages(history);
+  dropStaleThoughts(history, profile);
+  const response = await requestPatiently(profile, history, signal, overrides);
+  if (!response.ok) {
+    const message = await describeResponseError(response);
+    // 接口不认这个思考档位：记下它认的几档，换成最接近的一档重发一次；再不行才算失败
+    const sent = reasoningFields(profile, overrides.reasoning).reasoning_effort;
+    if (!retried && sent && learnReasoningLevels(profile, message, sent)) {
+      const level = nearestReasoning(profile, overrides.reasoning);
+      toast(t`此模型的思考档位为 ${profileReasoningLevels(profile).map(reasoningLabel).join(" / ")}，已改用「${reasoningLabel(level)}」`);
+      renderModelTriggers();
+      return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
+    }
+    // 接口回说放不下：压掉这一答较早的往来再发一回；已无可压的，原样报错。429 是限流（「tokens per min」也带 token 与 limit），不算
+    const overflow = response.status !== 429 && contextOverflow(message);
+    if (overflow) learnContextWindow(profile, message);
+    if (overflow && (await keepInWindow(profile, history, signal, overrides, { overflow: true, target })))
+      return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
+    // 送回的思绪不收（见 thoughtEcho）、附了工具交回的图被拒（多半是看不了图的模型）：去掉再发一回
+    if (
+      !retried &&
+      !overflow &&
+      response.status >= 400 &&
+      response.status < 500 &&
+      response.status !== 429 &&
+      (dropThoughtEcho(history, profile, message) || dropToolImages(history, profile, message))
+    )
+      return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
+    throw Error(message);
+  }
+  onOpen?.();
+  // 帮手与消息的流式字段一致（content / reasoning / toolCalls / usage），readSse 按消息处理
+  const sink = /** @type {Message} */ (target);
+  // 记下这次请求实际的提示用量，下一轮据此估算会不会撑破窗口
+  const sentAt = history.length,
+    wrote = target.content.length,
+    note = () => {
+      if (Number(target.usage?.prompt_tokens) > 0) overrides.seen = { at: sentAt, tokens: Number(target.usage.prompt_tokens) };
+    };
+  // 类型没标成事件流的（网关、中转常见的手误）看开头几个字节定，标错的两种都要能读出来（见 sniffEventStream）
+  const { response: body, stream } = await replyBody(response);
+  // 整份回来的也包成只有一块的事件流交给 readSse（见 asOneBlock）：流式与非流式只剩一条路，正文、思绪、工具调用、
+  // 用量、结束原因的语义只有一份，不会再各自走样
+  return readSse(stream ? body : await asOneBlock(body), sink, { onFrame }).then(note, async error => {
+    if (error.name === "AbortError") throw error;
+    if (cutAtToolCall(error, target)) return note();
+    // 流里才说放不下（开口前没拦住）：与请求被拒时一样，压了再发一回
+    if (
+      !error.finish &&
+      !retried &&
+      target.content.length === wrote &&
+      !target.toolCalls?.length &&
+      contextOverflow(error.message) &&
+      (await keepInWindow(profile, history, signal, overrides, { overflow: true, target }))
+    )
+      return readReply(profile, history, signal, overrides, target, true, onOpen, onFrame);
+    // 开了口才断的（掉线、上游掐线、静默超时、写到输出上限）：记一笔，runRounds 据此接着写而不是整答作废；被拦下的不接
+    if (!REFUSED_FINISH.test(error.finish || "")) error.midStream = true;
+    throw error;
+  });
+}
+// 整份回来的答复（没走流式的中转、网关）包成只有一块的事件流：与流式走同一个读法，两边不会有第二份语义。
+// 正文、思绪、工具调用、用量、结束原因照 chat.completions 分块的样子摆好；finish_reason 缺失的按 stop 算（它把话说完了才收）；
+// 回 200 却是一份报错（有的中转站这样回）的，把上游的原话抛出去，不报成「模型未返回正文」
+/** @param {Response} response @returns {Promise<Response>} */
+async function asOneBlock(response) {
+  const data = await response.json();
+  if (data?.error && !data.choices) throw Error((typeof data.error === "string" ? data.error : data.error.message) || "接口返回了错误");
+  const choice = data?.choices?.[0],
+    message = choice?.message || {},
+    delta = { ...message, content: extractContent(data) };
+  // 整份里的调用是一列，位置才算数、index 本就不属于这个格式：照次序编上号，readSse 才归得回原来的位置。
+  // index 放在展开之后——上游自带的 index 不能盖掉位置（两件都写 index: 0 的会被并成一件，参数拼成 {"x":1}{"x":2}）
+  if (Array.isArray(message.tool_calls)) delta.tool_calls = message.tool_calls.map((call, index) => ({ ...call, index }));
+  const block = { choices: [{ delta, finish_reason: choice?.finish_reason || "stop" }], ...(data.usage ? { usage: data.usage } : {}) };
+  return new Response(`data: ${JSON.stringify(block)}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+}
+// 一问一答的小请求（拟题、撮要）：答复读进一条不进对话的消息，流式、整份都认；花的墨记在模型上，接口没报用量的按字估
+/** @param {Profile} profile @param {string} ask 发出去的那一问 @returns {Promise<Message>} */
+async function readAside(response, profile, ask) {
+  const { reply, tokens } = await readWhole(response, ask);
+  spendTokens(profile, tokens);
+  renderQuota();
+  return reply;
+}
+/** 一问一答的答复整段读下（流式与否都行），连同花了多少墨（接口没报就估） @param {Response} response @param {string} ask */
+async function readWhole(response, ask) {
+  /** @type {Message} */
+  const reply = { id: `aside-${uid()}`, role: "assistant", content: "", timestamp: now() };
+  // 同一份嗅探、同一个读法（见 replyBody、asOneBlock）：这一路（拟题、撮要、审查）也走 readSse，
+  // 行内 <think> 一并拆开、结束原因不对的照流式那样报错。live: false —— 它的答复不进页面，不按帧匀速写出、也不为它存盘
+  const { response: body, stream } = await replyBody(response);
+  await readSse(stream ? body : await asOneBlock(body), reply, { live: false });
+  return { reply, tokens: Number(reply.usage?.total_tokens || 0) || estimateTokens([{ content: ask }, { content: reply.content }]) };
+}
+// 写到输出上限、截在工具调用中间：拟好的调用照常交下去——参数残缺的由登记表回一句「太长了，分几次写」（见 15-tools/00-registry.js），
+// 模型才知道该改写法。当成断线重来，它每回都照样写到上限，烧满三遍落成中断
+function cutAtToolCall(error, target) {
+  return error.finish === "length" && !!target.toolCalls?.some(call => call.name);
+}
+// 途中断过一回记一笔：只留最近十回，续写不清
+function noteBreak(target, why, auto = false) {
+  target.breaks = [...(target.breaks || []), { at: now(), why: String(why || "").slice(0, 200), ...(auto ? { auto } : {}) }].slice(-10);
+}
+// 网络一晃就断太脆：接口没接下请求时（连不上、限流、5xx、过载）等一等再试，间隔渐长，接口给了 Retry-After 就照它等；
+// 断网时等网回来再试。参数错、鉴权错这类 4xx 试也白试，原样交回。overrides.onRetry 用来在页面上说一声「第几次重试」。
+// 远端撑五分钟上下（对方一阵 5xx、代理换线都扛得过去，无人值守的长活不至于就此停住；「止」随时收回）；本机的只试前四回——
+// 本机服务停了是人自己关的，干等没有用
+const RETRY_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000, 60000, 60000, 60000, 60000],
+  LOCAL_RETRIES = 4;
+const retryableStatus = status => status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+/** 等 ms 毫秒（断网就等到网回来；local：本机模型不靠外网，不等）；中途停止即抛 AbortError */
+function restFor(ms, signal, local = false) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(Object.assign(Error("已停止"), { name: "AbortError" }));
+    const done = () => {
+      clearTimeout(timer);
+      removeEventListener("online", wake);
+      signal?.removeEventListener("abort", stop);
+    };
+    const wake = () => {
+      done();
+      resolve(null);
+    };
+    const stop = () => {
+      done();
+      reject(Object.assign(Error("已停止"), { name: "AbortError" }));
+    };
+    const timer = setTimeout(() => (navigator.onLine || local ? wake() : addEventListener("online", wake, { once: true })), ms);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+// 429 里说的是额度用完了（不是限流）：等多久也不会好，当场交回真正的原因。按分钟计的配额（Gemini 也叫 quota）仍是限流，照等
+const QUOTA_GONE = /insufficient_quota|quota|billing|balance|credit|余额|欠费|额度/i,
+  RATE_ONLY = /per.?minute|\brpm\b|\btpm\b|rate.?limit|每分钟/i;
+/** @param {Profile} profile */
+async function requestPatiently(profile, history, signal, overrides) {
+  const local = /^https?:\/\/(localhost|127\.|\[::1\]|0\.0\.0\.0|192\.168\.|10\.)/i.test(String(profile.baseUrl || ""));
+  for (let attempt = 0; ; attempt++) {
+    let wait = local && attempt >= LOCAL_RETRIES ? undefined : RETRY_DELAYS[attempt];
+    try {
+      const response = await requestChat(profile, history, signal, overrides);
+      if (response.ok || !retryableStatus(response.status) || wait === undefined) return response;
+      if (response.status === 429) {
+        const said = await response
+          .clone()
+          .text()
+          .catch(() => "");
+        if (QUOTA_GONE.test(said) && !RATE_ONLY.test(said)) return response;
+      }
+      const after = Number(response.headers.get("retry-after"));
+      if (after > 0) wait = Math.min(after * 1000, 60000);
+      response.body?.cancel().catch(() => {});
+    } catch (error) {
+      if (error.name === "AbortError" || wait === undefined) throw error;
+    }
+    overrides.onRetry?.(attempt + 1);
+    await restFor(wait, signal, local);
+  }
+}
+// 一答收尾（停了、断了也算）照 tally 结算：用量记到答上，耗墨补进余墨。
+// opened：接口至少接下过一次请求（没接下的——400、连不上——不花墨）；roundOpen：最后一轮开了头却没等到它的 usage（停止、断网），
+// 那一轮按估算补上——提示全文加上这一轮写出的字；一次 usage 都没拿到的（接口不回 usage）整答按估算。
+// spent：各轮已当场扣进余墨的（见 runRounds 的 spend），这里只补其余
+/**
+ * @param {Profile} profile
+ * @param {Message} assistant
+ * @param {ReturnType<typeof newTally>} tally
+ * @param {UsageKind} [kind]
+ */
+function accountUsage(profile, assistant, requestMessages, tally, kind = "main") {
+  assistant.usage = tally.usageKnown ? tally.usage : null;
+  const exact = Number(assistant.usage?.total_tokens || 0);
+  const estimate = from => estimateTokens(requestMessages) + estimateTokens([{ content: String(assistant.content || "").slice(from) }]);
+  const consumed = exact > 0 ? exact + (tally.roundOpen ? estimate(tally.roundStart) : 0) : tally.opened ? estimate(0) : 0;
+  if (!(consumed > 0)) return;
+  const live = spendTokens(profile, Math.max(0, consumed - tally.spent), kind);
+  assistant.tokenCount = consumed;
+  assistant.tokenEstimated = !(exact > 0) || tally.roundOpen || tally.steered;
+  if (quotaExhausted(live)) toast(t("此答写毕，余墨已尽；换个模型可续"));
+  renderQuota();
+}
