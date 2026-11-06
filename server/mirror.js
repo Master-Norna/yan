@@ -35,4 +35,4 @@ async function pickSource() {
   return side;
 }
 
-module.exports = { speedOf, fasterSide, pickSource };
+module.exports = { fasterSide, pickSource };

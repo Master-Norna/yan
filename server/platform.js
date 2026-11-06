@@ -128,4 +128,4 @@ function systemProxy() {
   return { HTTPS_PROXY: proxy, HTTP_PROXY: proxy, NO_PROXY: [...new Set(["localhost", "127.0.0.1", "::1", ...bypass])].join(",") };
 }
 
-module.exports = { WIN, MAC, openUrl, openPath, reveal, OWN_GROUP, killTree, killTreeSync, browserFiles, systemProxy };
+module.exports = { openUrl, openPath, reveal, OWN_GROUP, killTree, killTreeSync, browserFiles, systemProxy };

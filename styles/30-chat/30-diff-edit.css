@@ -22,16 +22,6 @@
   max-height: 150px;
   border-left: 2px solid var(--line);
 }
-.diff-del {
-  border-left-color: var(--danger) !important;
-  background: color-mix(in srgb, var(--danger) 10%, transparent) !important;
-  color: var(--ink-2) !important;
-}
-.diff-ins {
-  border-left-color: var(--code-green) !important;
-  background: color-mix(in srgb, var(--code-green) 13%, transparent) !important;
-  color: var(--ink-2) !important;
-}
 /* 并排红绿（见 splitDiffHtml）：旧在左、新在右，一行一格、折行时两边同高，中间一道丝线；
    不铺整块的灰底（红绿叠在灰上发闷），直接落在纸上，左右两栏靠中间那道丝线分开（设计稿/43）；字用本来的墨色（红底红字、绿底绿字难读），红绿只在底色与左缘一道线上；未动的淡墨，改了的字同色加深一层（删的那侧试过再加划线，三层叠着脏），对面没有的那格留白——试过铺淡墨，红绿跟着发灰看不清；斜纹整段新增时一大片太抢眼（设计稿/39、41） */
 .tool-diff .split-diff {

@@ -103,14 +103,18 @@ module.exports = function createFiles({ filesHome, playable }) {
     },
     error => errorText(error, 200)
   );
+  /** @param {string} id */
+  function rawPathOf(id) {
+    const dir = home(),
+      raw = rawFileOf(dir, id, readMeta(dir, id));
+    if (!raw) throw Error("附件原件不在存储目录里");
+    return path.join(dir, raw);
+  }
   // 压缩包交给本机工具处理：只取位置，不把整包编成 base64 再送进模型接口。
   const handlePath = jsonRoute(
     async body => {
-      const id = checkId(body.id),
-        dir = home(),
-        raw = rawFileOf(dir, id, readMeta(dir, id));
-      if (!raw) throw Error("附件原件不在存储目录里");
-      return { id, path: path.resolve(dir, raw) };
+      const id = checkId(body.id);
+      return { id, path: path.resolve(rawPathOf(id)) };
     },
     error => errorText(error, 200)
   );
@@ -134,11 +138,8 @@ module.exports = function createFiles({ filesHome, playable }) {
   // 以本机程序打开附件原件（原件落盘时带着原扩展名，系统认得该用什么开）
   const handleOpen = jsonRoute(
     async body => {
-      const id = checkId(body.id),
-        dir = home(),
-        raw = rawFileOf(dir, id, readMeta(dir, id));
-      if (!raw) throw Error("附件原件不在存储目录里");
-      openWithSystem(path.join(dir, raw));
+      const id = checkId(body.id);
+      openWithSystem(rawPathOf(id));
       return { opened: id };
     },
     error => errorText(error, 200)

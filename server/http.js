@@ -285,7 +285,6 @@ module.exports = {
   writeAtomic,
   replaceFile,
   receiveUpload,
-  fileMime,
   sendFile,
   openWithSystem,
   parseJsonText,

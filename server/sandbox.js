@@ -373,6 +373,5 @@ module.exports = {
   sandboxEnv,
   screenPath,
   screenStorePath,
-  screenStoreCommand,
-  SECRET_ENV
+  screenStoreCommand
 };
