@@ -170,6 +170,34 @@ test("判开头只看头一块：事件流不整份读完才往下交", { timeou
   assert.match(res.text, /"finish_reason":"stop"/);
 });
 
+test("回了 200、判定途中断线：502 可重试、带原因码，不落成不再试的 400", async () => {
+  const cases = [
+    ["", "text/event-stream"],
+    ["\n\n", "text/event-stream"],
+    ['{"id":"x","cho', "application/json"]
+  ];
+  for (const [lead, type] of cases) {
+    upstream = {
+      response: () => {
+        let sent = !lead;
+        return new Response(
+          new ReadableStream({
+            pull(controller) {
+              if (sent) return controller.error(Object.assign(new TypeError("terminated"), { cause: { code: "UND_ERR_SOCKET" } }));
+              sent = true;
+              controller.enqueue(new TextEncoder().encode(lead));
+            }
+          }),
+          { headers: { "content-type": type } }
+        );
+      }
+    };
+    const res = await ask();
+    assert.equal(res.status, 502, JSON.stringify(lead));
+    assert.match(res.json.error, /上游连接中断：UND_ERR_SOCKET/);
+  }
+});
+
 test("标成 text/plain 或不标类型的事件流照旧翻译（#22 那些中转不能弄坏）", async () => {
   for (const type of ["text/plain; charset=utf-8", null]) {
     answer(anthropicSse(), type);

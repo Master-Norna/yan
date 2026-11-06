@@ -212,9 +212,17 @@ module.exports = function createModel({ home }) {
       const type = String(response.headers.get("content-type") || "").toLowerCase();
       let upstreamBody = response.body;
       if (provider.stream) {
-        const lead = await peekLead(response.body);
+        // 判定途中就断了：页面这头还没写头，补不了「连接中断」那条事件，按连不上算、可重试。不接住就落到下面 catch 的兜底 400，页面不再试，原因码也没了
+        /** @param {any} error */
+        const cut = error => {
+          throw Object.assign(Error(`上游连接中断：${error.cause?.code || error.cause?.message || error.message}`), {
+            status: 502,
+            name: error.name
+          });
+        };
+        const lead = await peekLead(response.body).catch(cut);
         if (lead.first === 0x7b) {
-          const raw = await collectText(lead.chunks, lead.reader);
+          const raw = await collectText(lead.chunks, lead.reader).catch(cut);
           let json = null;
           try {
             json = JSON.parse(raw);

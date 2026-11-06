@@ -1622,6 +1622,10 @@ var YAN_EN = {
   "工具定义过多：{0} 件，一次最多 {1} 件": "Too many tool definitions: {0}, at most {1} at a time",
   "连不上上游接口：{0}": "Can't reach the API: {0}",
   "上游连接中断：{0}": "API connection interrupted: {0}",
+  "上游回了整份 JSON，不是事件流（{0}）：这条中转多半不支持流式，可换一条支持流式的接口。前 200 字：{1}":
+    "The API returned a single JSON document, not an event stream ({0}). This relay probably doesn't support streaming; switch to one that does. First 200 characters: {1}",
+  "上游回的不是事件流，也读不出 JSON（{0}）。前 200 字：{1}":
+    "The API returned neither an event stream nor readable JSON ({0}). First 200 characters: {1}",
   "必应（浏览器）": "Bing (browser)",
   搜索关键词不能为空: "Search query can't be empty",
   "搜索引擎暂时不可用：{0}": "Search engine unavailable: {0}",
