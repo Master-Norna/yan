@@ -1,8 +1,9 @@
 // #26：Anthropic 与 ChatGPT 订阅两路把上游响应的 content-type 硬写成 text/event-stream 再交给 translateSse。
 // 上游回 200、正文却是整份 JSON 时它一个字也译不出来，页面只收到一个空的 200 事件流：报「接口未发送结束标志」、
-// 白跑两次续写，上游说的原话整段丢掉。这里照上游的三种回答看 handleChat 的出口：
-// 报错的整份 JSON（可重试、带上游原话）、正常答复的整份 JSON（4xx、不重试、说清不是事件流）、
-// 标成 text/plain 或不标类型但真是事件流的（照旧翻译，见 #22）；OpenAI 兼容那路整份 JSON 本就能收，一并钉住
+// 白跑两次续写，上游说的原话整段丢掉。判据看正文开头的字节（空白之后是不是 {），不看 content-type：
+// 报错的整份 JSON（可重试、带上游原话）、正常答复的整份 JSON（415、不重试、带前 200 字）、
+// 标成 text/plain / 不标类型 / 标成 application/json 但真是事件流的（照旧翻译，见 #22、#31）；
+// OpenAI 兼容那路整份 JSON 本就能收，一并钉住
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Readable, Writable } from "node:stream";
@@ -45,6 +46,7 @@ class Res extends Writable {
   }
   _write(chunk, encoding, done) {
     this.chunks.push(Buffer.from(chunk));
+    this.onWrite?.();
     done();
   }
   get text() {
@@ -99,6 +101,73 @@ test("中转不支持流式、回了整份答复的 JSON：4xx 且不可重试�
   assert.match(res.json.error, /整份 JSON/);
   assert.match(res.json.error, /不是事件流/);
   assert.ok(!/^上游接口返回 200$/.test(res.json.error), "不能只剩一句「上游接口返回 200」");
+});
+
+test("整份 JSON 标成 text/plain 或不标类型：也按开头字节认出来，不再白跑两次", async () => {
+  const wire = JSON.stringify({ choices: [{ index: 0, message: { role: "assistant", content: "整段答复" }, finish_reason: "stop" }] });
+  for (const type of ["text/plain; charset=utf-8", null]) {
+    answer(wire, type);
+    const res = await ask();
+    assert.equal(res.status, 415, `标成 ${type} 的整份 JSON 不该再当成空事件流`);
+    assert.match(res.json.error, /整份 JSON/);
+    assert.match(res.json.error, /整段答复/, "前 200 字里要看得到上游的原话");
+  }
+});
+
+test("上游回 {code,message} 这类拒绝：415 带上前 200 字，原话不丢", async () => {
+  const wire = JSON.stringify({ code: 40001, message: "余额不足，请充值" });
+  answer(wire, "application/json");
+  const res = await ask();
+  assert.equal(res.status, 415);
+  assert.ok(!retryable(res.status), "余额不足不是等一等就会好的事");
+  assert.match(res.json.error, /余额不足，请充值/, "上游说的话要原样看得到，不用去猜 message、code");
+});
+
+test("开头是 { 却读不出 JSON：415，带前 200 字", async () => {
+  answer('{ "choices": [ 这不是 JSON', "text/plain");
+  const res = await ask();
+  assert.equal(res.status, 415);
+  assert.match(res.json.error, /读不出 JSON/);
+  assert.match(res.json.error, /这不是 JSON/);
+});
+
+test("事件流标成 application/json：照旧翻译，不因类型误判", async () => {
+  answer(anthropicSse(), "application/json");
+  const res = await ask();
+  assert.equal(res.status, 200);
+  assert.match(res.headers["content-type"], /text\/event-stream/);
+  assert.match(res.text, /"content":"整段"/);
+  assert.match(res.text, /"content":"答复"/);
+  assert.match(res.text, /"finish_reason":"stop"/);
+  assert.ok(res.text.endsWith("data: [DONE]\n\n"));
+});
+
+test("判开头只看头一块：事件流不整份读完才往下交", { timeout: 5000 }, async () => {
+  const wire = anthropicSse(),
+    // 前半截里就有两段正文（头一块到了就该往下交），后半截的收尾等页面那头收到字之后才发
+    at = wire.indexOf("event: content_block_stop"),
+    parts = [wire.slice(0, at), wire.slice(at)],
+    encoder = new TextEncoder();
+  let open;
+  const gate = new Promise(resolve => (open = resolve));
+  let sent = 0;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(parts[sent++]));
+    },
+    async pull(controller) {
+      await gate;
+      if (sent < parts.length) controller.enqueue(encoder.encode(parts[sent++]));
+      else controller.close();
+    }
+  });
+  upstream = { response: () => new Response(body, { headers: { "content-type": "application/json" } }) };
+  const res = new Res();
+  res.onWrite = () => open();
+  await chat(Readable.from([Buffer.from(JSON.stringify({ profile: anthropic, messages: [{ role: "user", content: "你好" }] }))]), res);
+  assert.equal(res.status, 200);
+  assert.match(res.text, /"content":"整段"/);
+  assert.match(res.text, /"finish_reason":"stop"/);
 });
 
 test("标成 text/plain 或不标类型的事件流照旧翻译（#22 那些中转不能弄坏）", async () => {
