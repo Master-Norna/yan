@@ -2,7 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { lineDiffCounts, countLines } = createRequire(import.meta.url)("../../server/work/text.js");
+const { changeHunks, countLines } = createRequire(import.meta.url)("../../server/work/text.js");
+const lineDiffCounts = (before, after) => {
+  const { added, removed } = changeHunks(before, after);
+  return { added, removed };
+};
 
 test("覆盖写只算真改的行，不整删整增", () => {
   const before = "a\nb\nc\nd\ne\n",

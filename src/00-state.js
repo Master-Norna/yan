@@ -50,6 +50,7 @@
  * @property {{ steps: number, broken?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数）
  * @property {ToolCall[]|null} [toolCalls]
  */
+/** @typedef {{ oldStart: number, newStart: number, oldCount: number, newCount: number }} DiffHunk 覆盖写摘出的一块：两侧各从第几行起、各有几行（新侧按号从这一步的参数里切出） */
 /**
  * @typedef {Object} Step 行迹里的一步：一次工具调用及其结果、呈现与开合状态
  * @property {string} id
@@ -76,9 +77,9 @@
  * @property {boolean} [background] 后台指令
  * @property {{ id: string, key?: string, state: "running"|"done"|"stopped"|"lost", started?: number }} [bg] 后台指令的编号与此刻的样子：结束时叫醒模型（running 时页面在等它；started：起跑的时刻，书眉的漏据它算已跑多久）
  * @property {{ id: string, due: number, every?: number, state: "waiting"|"done"|"stopped", created?: number }} [timer] 等时刻的候（set_timer）：桥接那头的编号、几时叫（every：此后隔多久再叫）；waiting 时书眉的漏列着它
- * @property {{ old: string, new: string }} [diff]
- * @property {string} [written] write_file 写下的内容（过长只留开头），改动清单点开时看
- * @property {string} [previous] write_file 覆盖掉的原文（过长只留开头），与 written 比出红绿
+ * @property {{ old: string, new: string } | { hunks: DiffHunk[], old: string }} [diff] 覆盖写：旧格式是前后两段；新格式只存旧侧的行与各块两侧的行号，新侧按号从这一步的参数里取（见 22-changes.js 的 hunksText）
+ * @property {string} [written] write_file 写下的内容：早先的步骤记整份（过长只留开头），现在不另存——整份就在这一步的参数里
+ * @property {string} [previous] write_file 覆盖掉的原文：早先的步骤才记（过长只留开头），现在换成 diff 的旧侧摘录
  * @property {{ path: string, added: number, removed: number, created?: boolean, lines?: number }} [change] lines：这一步之后这件的行数
  * @property {number} [at] 调用发起时正文的长度（时间线分组、思绪按轮切分都靠它）
  * @property {number} [rat] 调用发起时思绪的长度

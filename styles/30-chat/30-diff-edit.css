@@ -86,6 +86,10 @@
   height: 9px;
   background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat;
 }
+/* 摘录里折掉的中间一段（见 longMarks / shownLine）：淡墨，别与真内容一样重 */
+.split-diff .elide {
+  color: var(--ink-3);
+}
 .message-actions.has-branch {
   opacity: 0.72;
 }

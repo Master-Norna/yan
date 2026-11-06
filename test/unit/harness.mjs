@@ -11,6 +11,10 @@ const body = scriptParts()
   .filter(file => path.basename(file) !== "99-start.js")
   .map(file => readFileSync(file, "utf8"))
   .join("\n");
+// 工具说明（prompts/tools.js）里带着各工具的参数表：toolSpec 从这里取 schema，不加载的话
+// 别名归位（contents → content、old_string → old）与类型理顺都不发生，断言的就不是页面真会做的事
+const required = createRequire(import.meta.url);
+const promptTools = readFileSync(required.resolve("../../prompts/tools.js"), "utf8");
 
 const noop = () => {};
 const media = () => ({ matches: false, addEventListener: noop, removeEventListener: noop });
@@ -28,7 +32,7 @@ const element = () => ({
   innerHTML: ""
 });
 const stubs = {
-  window: { YAN_PROMPTS: {} },
+  window: { YAN_PROMPTS: { tools: {} } },
   document: {
     documentElement: element(),
     body: element(),
@@ -64,6 +68,6 @@ const stubs = {
  * @returns {Record<string, any>}
  */
 export function load(names) {
-  const factory = new Function(...Object.keys(stubs), `"use strict";\n${body}\nreturn { ${names.join(", ")} };`);
+  const factory = new Function(...Object.keys(stubs), `"use strict";\n${promptTools}\n${body}\nreturn { ${names.join(", ")} };`);
   return factory(...Object.values(stubs));
 }

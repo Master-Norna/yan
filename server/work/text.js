@@ -68,33 +68,10 @@ function countLines(text) {
   return value.split(/\r?\n/).length - (/\r?\n$/.test(value) ? 1 : 0);
 }
 
-// 覆盖写一份文件时，前后两版按行比出各增删几行：先去掉首尾相同的行，中段求最长公共子序列（只留两行表，省内存）；
-// 中段太大（两边行数之积过千六百万）就不细比，中段整算一删一增
-function lineDiffCounts(oldText, newText) {
-  const lines = text =>
-      text
-        ? String(text)
-            .replace(/\r?\n$/, "")
-            .split(/\r?\n/)
-        : [],
-    a = lines(oldText),
-    b = lines(newText);
-  let start = 0,
-    endA = a.length,
-    endB = b.length;
-  while (start < endA && start < endB && a[start] === b[start]) start++;
-  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) endA--, endB--;
-  const m = endA - start,
-    n = endB - start;
-  if (!m || !n || m * n > 16e6) return { added: n, removed: m };
-  let prev = new Uint32Array(n + 1),
-    row = new Uint32Array(n + 1);
-  for (let i = 1; i <= m; i++) {
-    const line = a[start + i - 1];
-    for (let j = 1; j <= n; j++) row[j] = line === b[start + j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], row[j - 1]);
-    [prev, row] = [row, prev];
-  }
-  return { added: n - prev[n], removed: m - prev[n] };
+// 按行切开：末尾的换行不算多出一行空行（与 countLines 同一惯例），空的就是没有行
+function splitLines(text) {
+  const value = String(text ?? "");
+  return value ? value.replace(/\r?\n$/, "").split(/\r?\n/) : [];
 }
 
 // edit_file 的 old 对不上时：文件里最像它的那一段，照现在的样子带行号交回。
@@ -130,4 +107,157 @@ function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
     .join("\n");
 }
 
-module.exports = { tail, encodePowerShell, decodeClixml, decodeText, encodeText, countLines, lineDiffCounts, nearestPassage };
+// 两版的逐行编辑脚本：'s' 未改、'd' 旧有、'i' 新有，次序照文件走。中段走 Myers 的 O(ND) 比法：
+// 耗时与内存跟着改动量走，不跟文件有多长走——改在文件后头、两处改动隔着一千行，也只比改动那一点。
+// 改动多到超过 maxD 步、文件又不大时照旧用表比（见 myersOps 的 dpOps）；再大才整块一删一增。
+// 页面的 lcsOps 是同一套（src/15-tools/22-changes.js）
+function lineOps(a, b, maxD = 1000) {
+  const ops = [];
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) ops.push(["s", a[head++]]);
+  let endA = a.length,
+    endB = b.length;
+  while (endA > head && endB > head && a[endA - 1] === b[endB - 1]) endA--, endB--;
+  const middle = myersOps(a.slice(head, endA), b.slice(head, endB), maxD);
+  if (middle) for (const op of middle) ops.push(op);
+  else {
+    for (let i = head; i < endA; i++) ops.push(["d", a[i]]);
+    for (let j = head; j < endB; j++) ops.push(["i", b[j]]);
+  }
+  for (let i = endA; i < a.length; i++) ops.push(["s", a[i]]);
+  return ops;
+}
+// Myers 的最短编辑脚本：一步一条斜线，走一步记下这一步各条斜线到了哪，走到头再照记录退回来。
+// 超过 maxD 步（改动太多，细比不如整块看）时，文件不大（两版行数之积在千六百万以内，与旧法同一个上限）
+// 就照旧用表比（dpOps），精确到每一行；再大才返回 null，由 lineOps 整块一删一增
+// 回溯只按记下的那份走，不把整串摊进 push 的参数里——十万行的整块改写也不会撑爆调用栈
+function myersOps(x, y, maxD) {
+  const n = x.length,
+    m = y.length,
+    ops = [];
+  if (!n || !m) {
+    for (const line of x) ops.push(["d", line]);
+    for (const line of y) ops.push(["i", line]);
+    return ops;
+  }
+  const max = n + m + 1,
+    at = max,
+    v = new Int32Array(2 * max + 1),
+    trace = [];
+  let found = -1;
+  for (let d = 0; d <= Math.min(maxD, n + m); d++) {
+    // 这一步开始前各斜线到哪：只留 k ∈ [-d-1, d+1] 这一段，回溯时够用
+    trace.push(v.slice(at - d - 1, at + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      let px = k === -d || (k !== d && v[at + k - 1] < v[at + k + 1]) ? v[at + k + 1] : v[at + k - 1] + 1,
+        py = px - k;
+      while (px < n && py < m && x[px] === y[py]) px++, py++;
+      v[at + k] = px;
+      if (px >= n && py >= m) {
+        found = d;
+        break;
+      }
+    }
+    if (found >= 0) break;
+  }
+  if (found < 0) return n * m <= 16e6 ? dpOps(x, y) : null;
+  /** @type {Array<[string, string]>} */
+  const back = [];
+  let px = n,
+    py = m;
+  for (let d = found; d > 0; d--) {
+    const row = trace[d],
+      k = px - py,
+      prevK = k === -d || (k !== d && row[k + d] < row[k + d + 2]) ? k + 1 : k - 1,
+      prevX = row[prevK + d + 1],
+      prevY = prevX - prevK;
+    while (px > prevX && py > prevY) {
+      back.push(["s", x[--px]]);
+      py--;
+    }
+    if (px === prevX) back.push(["i", y[--py]]);
+    else back.push(["d", x[--px]]);
+  }
+  while (px > 0) back.push(["d", x[--px]]);
+  while (py > 0) back.push(["i", y[--py]]);
+  return back.reverse();
+}
+// 改动多到 Myers 走不完、文件又不大时照旧用表比：一张 (n+1)×(m+1) 的最长公共子序列表，从头退回来。
+// 两版行数之积在千六百万以内才进得来（与旧法同一个上限），4000×4000 约三十来兆、一两百毫秒；
+// 再大表装不下，由 lineOps 整块一删一增。改动少时不会走到这里——那时 Myers 快得多。
+// 表摊成一条：一行一个 Uint16Array 的话，极扁的形状（二百万行 × 三行）光两百多万个数组对象就要几百兆
+function dpOps(x, y) {
+  const n = x.length,
+    m = y.length,
+    w = m + 1,
+    dp = new Uint16Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i * w + j] = x[i] === y[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+  /** @type {Array<[string, string]>} */
+  const ops = [];
+  let i = 0,
+    j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && x[i] === y[j]) {
+      ops.push(["s", x[i++]]);
+      j++;
+    } else if (i < n && (j >= m || dp[(i + 1) * w + j] >= dp[i * w + j + 1])) ops.push(["d", x[i++]]);
+    else ops.push(["i", y[j++]]);
+  }
+  return ops;
+}
+// 覆盖写一份文件时，改动要给人看全：按改动取，每处连同前后各 context 行。只存旧侧的行——
+// 新的一侧整份还在这一步的参数（step.arguments）里，页面画的时候从那儿取，不另存第二份。
+// 每块记下两侧的行号：页面按号取新侧、按号写「跳过 N 行未改」。不设字数上限，改动一处不落
+function changeHunks(oldText, newText, { context = 3 } = {}) {
+  const a = splitLines(oldText),
+    b = splitLines(newText),
+    ops = lineOps(a, b),
+    oldAt = new Int32Array(ops.length + 1),
+    newAt = new Int32Array(ops.length + 1);
+  let added = 0,
+    removed = 0;
+  for (let k = 0; k < ops.length; k++) {
+    const kind = ops[k][0];
+    oldAt[k + 1] = oldAt[k] + (kind === "i" ? 0 : 1);
+    newAt[k + 1] = newAt[k] + (kind === "d" ? 0 : 1);
+    if (kind === "i") added++;
+    else if (kind === "d") removed++;
+  }
+  // 改动在 ops 里的区间，前后各带 context 行未改的；挨上的并成一块
+  const ranges = [];
+  for (let k = 0; k < ops.length; k++) {
+    if (ops[k][0] === "s") continue;
+    let end = k;
+    while (end < ops.length && ops[end][0] !== "s") end++;
+    const from = Math.max(0, k - context),
+      to = Math.min(ops.length, end + context),
+      last = ranges.at(-1);
+    if (last && from <= last.to) last.to = to;
+    else ranges.push({ from, to });
+    k = end - 1;
+  }
+  const rows = [],
+    hunks = ranges.map(({ from, to }) => {
+      for (let k = from; k < to; k++) if (ops[k][0] !== "i") rows.push(ops[k][1]);
+      return {
+        oldStart: oldAt[from],
+        newStart: newAt[from],
+        oldCount: oldAt[to] - oldAt[from],
+        newCount: newAt[to] - newAt[from]
+      };
+    });
+  return { hunks, old: rows.join("\n"), added, removed };
+}
+
+module.exports = {
+  tail,
+  encodePowerShell,
+  decodeClixml,
+  decodeText,
+  encodeText,
+  countLines,
+  changeHunks,
+  nearestPassage
+};
