@@ -10,8 +10,8 @@ const require = createRequire(import.meta.url);
 const { OUTBOUND_MARK } = require("../../server/web.js");
 const createModel = require("../../server/model/index.js");
 const model = createModel({ home: () => "test/.tmp/model-outbound-mark" });
-const chat = model.openRoutes["POST /api/chat"],
-  models = model.openRoutes["POST /api/models"];
+const chat = model.routes["POST /api/chat"],
+  models = model.routes["POST /api/models"];
 
 // 上游的回应由每件用例自己换掉；截下来的请求头留在 sent 里
 let answer = null,

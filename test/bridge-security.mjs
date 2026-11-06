@@ -147,6 +147,13 @@ r = await post(
 check("Origin: null cannot relay through the model endpoint either", r.status === 403, String(r.status));
 r = await post("/api/search", { query: "x" }, { Origin: "null" });
 check("Origin: null cannot use search either", r.status === 403, String(r.status));
+// 模型接口的地址由调用方给：别的本机端口不能借它往内网发请求。「本站」按此刻的端口认（这份测试跑在 YAN_PORT 换过的桥接上）
+for (const path of ["/api/chat", "/api/models", "/api/test", "/api/image"]) {
+  r = await post(path, { profile: { baseUrl: "http://192.168.1.1/v1", model: "x" } }, { Origin: "http://127.0.0.1:9999" });
+  check(`other local port cannot use ${path}`, r.status === 403, String(r.status));
+  r = await post(path, {}, { Origin: `http://127.0.0.1:${PORT}` });
+  check(`own origin reaches ${path} at the configured port`, r.status === 400, String(r.status));
+}
 r = await post("/api/work/prepare", { workdir }, { Origin: `http://127.0.0.1:${PORT}` });
 check(
   "own origin passes",

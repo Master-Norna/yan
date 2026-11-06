@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const createModel = require("../../server/model/index.js");
-const chat = createModel({ home: () => "test/.tmp/upstream-body-limit" }).openRoutes["POST /api/chat"];
+const chat = createModel({ home: () => "test/.tmp/upstream-body-limit" }).routes["POST /api/chat"];
 
 const MiB = 1024 * 1024;
 // 上限本身没导出，照修法里的数写死：改了这个数就该有一条测试跟着醒过来

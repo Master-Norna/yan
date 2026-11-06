@@ -94,7 +94,7 @@ function corsHeaders(req, res) {
   if (req.headers["access-control-request-private-network"] === "true") res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
 // 执事接口能执行本机指令，不能只依赖 CORS：不可信页面即使读不到响应，也可能用简单请求触发副作用。
-// 无 Origin 的本机脚本仍可调用；浏览器只接受本站页面（别的本机端口可对谈，但不开放执事）。
+// 无 Origin 的本机脚本仍可调用；浏览器只接受本站页面，「本站」按桥接此刻的端口（YAN_PORT）认，换了端口自然跟着换。
 function trustedWorkRequest(req) {
   const origin = req.headers.origin;
   // img / video 等浏览器 GET 通常不带 Origin，仍须按 Fetch Metadata 拒绝跨站与别的本机来源。
@@ -208,11 +208,10 @@ const MODEL = require("./server/model/index.js")({ home: () => STORE.paths().roo
 // 用量簿：按日记各类花了多少，给设置里的用量卡看（见 server/usage.js）
 const USAGE = require("./server/usage.js")({ file: () => path.join(STORE.paths().root, "用量.json") });
 
-// 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件，以及能打本机的 http_request），
-// 只受理本站页面与本机脚本；另一半（引导、转发、检索、翻网页）凡是本机桥接认得的来源都可调
+// 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件、模型转发，以及能打本机的 http_request），
+// 只受理本站页面与本机脚本；另一半（引导、检索、翻网页，都只上公网）凡是本机桥接认得的来源都可调
 const OPEN_ROUTES = {
     "GET /api/bootstrap": handleBootstrap,
-    ...MODEL.openRoutes,
     ...WEB.openRoutes,
     ...SEARCH.openRoutes,
     ...BUS.routes

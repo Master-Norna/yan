@@ -9,7 +9,7 @@ import { load } from "./harness.mjs";
 
 const require = createRequire(import.meta.url);
 const createModel = require("../../server/model/index.js");
-const chat = createModel({ home: () => "test/.tmp/upstream-json-not-stream" }).openRoutes["POST /api/chat"];
+const chat = createModel({ home: () => "test/.tmp/upstream-json-not-stream" }).routes["POST /api/chat"];
 
 // 上游的回应由每件用例自己换掉；桥接只看这一份，不真发请求
 let upstream = null;

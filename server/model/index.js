@@ -334,15 +334,15 @@ module.exports = function createModel({ home }) {
       }
     }
   }
+  // 全归受信的一半：地址由调用方给，开放给别的本机页面就等于替它往内网发请求、把回话读回去；ChatGPT 的登录与退出还碰本机凭证
   return {
-    // 引导、转发、列模型凡是本机桥接认得的来源都可调；生图要按上游交回的网址取图，那一步是桥接替页面出站，
-    // 只有本站页面能调（别的本机端口页面能借它读任意 http 地址）；ChatGPT 的登录与退出碰本机凭证，同样归受信的一半
-    openRoutes: {
+    routes: {
       "POST /api/test": handleTest,
       "POST /api/models": handleModels,
-      "POST /api/chat": handleChat
-    },
-    routes: { ...createImage({ resolveProfile, upstreamError }), ...chatgpt.routes }
+      "POST /api/chat": handleChat,
+      ...createImage({ resolveProfile, upstreamError }),
+      ...chatgpt.routes
+    }
   };
 };
 module.exports.upstreamError = upstreamError;
