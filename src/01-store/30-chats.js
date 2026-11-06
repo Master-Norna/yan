@@ -457,7 +457,10 @@ async function syncChatsWithDisk() {
     chatsBroken = false;
     chatsLoaded = true;
     chatsSkipped = Number(data.skipped) || 0;
-    for (const id of [...pendingChatDeletes]) {
+    // 这一轮要补删的：data 是补删之前取的快照，过滤它得用补删前的名单——删成功的已从 pendingChatDeletes 里拿掉了，
+    // 若照改小之后的集合过滤，刚删掉的那份会从旧快照里漏过去，又被当成「目录里多出来的」捡回来
+    const deleting = new Set(pendingChatDeletes);
+    for (const id of deleting) {
       // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
       if (deletedChatIds.has(id)) continue;
       try {
@@ -466,7 +469,7 @@ async function syncChatsWithDisk() {
       } catch {}
     }
     const disk = new Map();
-    for (const item of data.items || []) if (item?.id && !pendingChatDeletes.has(item.id)) disk.set(item.id, item);
+    for (const item of data.items || []) if (item?.id && !deleting.has(item.id)) disk.set(item.id, item);
     const push = new Set(),
       settled = new Set(),
       gone = data.deleted && typeof data.deleted === "object" ? data.deleted : {};
