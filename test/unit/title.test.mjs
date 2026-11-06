@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { load } from "./harness.mjs";
 
+const { wholeReplyEvents } = createRequire(import.meta.url)("../../server/model/sse.js");
 const prompts = {};
 new Function("window", readFileSync(new URL("../../prompts/assistant.js", import.meta.url), "utf8"))({ YAN_PROMPTS: prompts });
 const conversation = (id, content = "你来继续推荐这个项目以及训练") => ({
@@ -10,11 +12,10 @@ const conversation = (id, content = "你来继续推荐这个项目以及训练"
   title: "原题",
   messages: [{ id: `user-${id}`, role: "user", content }]
 });
-const response = title => ({
-  ok: true,
-  headers: { get: () => "application/json" },
-  json: async () => ({ choices: [{ message: { content: title } }], usage: { total_tokens: 10 } })
-});
+const response = title =>
+  new Response(wholeReplyEvents({ choices: [{ message: { content: title } }], usage: { total_tokens: 10 } }), {
+    headers: { "content-type": "text/event-stream" }
+  });
 
 function titler(current, others, request) {
   const f = load([

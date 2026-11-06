@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { load } from "./harness.mjs";
 
+const { wholeReplyEvents } = createRequire(import.meta.url)("../../server/model/sse.js");
 const event = (delta = {}, finish_reason = null, extra = {}) =>
   `data: ${JSON.stringify({ choices: [{ delta, finish_reason }], ...extra })}\n\n`;
 const sse = wire => new Response(wire, { headers: { "content-type": "text/event-stream" } });
-const json = data => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
+const json = data => sse(wholeReplyEvents(data));
 
 function setup(replies = []) {
   const f = load([

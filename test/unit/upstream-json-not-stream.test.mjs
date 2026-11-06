@@ -1,9 +1,6 @@
-// #26：Anthropic 与 ChatGPT 订阅两路把上游响应的 content-type 硬写成 text/event-stream 再交给 translateSse。
-// 上游回 200、正文却是整份 JSON 时它一个字也译不出来，页面只收到一个空的 200 事件流：报「接口未发送结束标志」、
-// 白跑两次续写，上游说的原话整段丢掉。判据看正文开头的字节（空白之后是不是 {），不看 content-type：
-// 报错的整份 JSON（可重试、带上游原话）、正常答复的整份 JSON（415、不重试、带前 200 字）、
-// 标成 text/plain / 不标类型 / 标成 application/json 但真是事件流的（照旧翻译，见 #22、#31）；
-// OpenAI 兼容那路整份 JSON 本就能收，一并钉住
+// 上游回 200 之后交给页面的只有事件流（server/model/index.js 的 eventBody）。判据看正文开头的字节，不看 content-type：
+// 事件流不管标成什么照旧往下交（#22、#31）；OpenAI 兼容那路整份答复摆成一块事件流；要重译的两路（Anthropic、ChatGPT 订阅）译不了整份，
+// 报错的整份（可重试、带上游原话）、正常答复的整份（415、不重试、带前 200 字）分开给（#26）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Readable, Writable } from "node:stream";
@@ -212,13 +209,84 @@ test("标成 text/plain 或不标类型的事件流照旧翻译（#22 那些中�
   }
 });
 
-test("OpenAI 兼容那路仍旧原样透转整份 JSON（页面自己按整段答复读）", async () => {
-  const wire = JSON.stringify({ choices: [{ index: 0, message: { role: "assistant", content: "整段答复" }, finish_reason: "stop" }] });
-  answer(wire, "application/json");
-  const res = await ask(openai);
-  assert.equal(res.status, 200);
-  assert.match(res.headers["content-type"], /application\/json/);
-  assert.equal(res.text, wire);
+const oneChunk = text => [
+  `data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: null }] })}\n\n`,
+  "data: [DONE]\n\n"
+];
+
+test("OpenAI 兼容那路的整份答复：不管标成什么，都摆成一块事件流，正文、用量、结束原因都在", async () => {
+  const wire = JSON.stringify({
+    choices: [{ index: 0, message: { role: "assistant", content: "整段答复" }, finish_reason: "length" }],
+    usage: { total_tokens: 12 }
+  });
+  for (const type of ["application/json", "text/plain; charset=utf-8", "text/event-stream", null]) {
+    answer(`\n  ${wire}`, type);
+    const res = await ask(openai);
+    assert.equal(res.status, 200, String(type));
+    assert.match(res.headers["content-type"], /text\/event-stream/);
+    assert.match(res.text, /"content":"整段答复"/);
+    assert.match(res.text, /"finish_reason":"length"/);
+    assert.match(res.text, /"total_tokens":12/);
+    assert.ok(res.text.endsWith("data: [DONE]\n\n"));
+  }
+});
+
+test("OpenAI 兼容那路的整份报错：上游原话当场交回，不重试", async () => {
+  for (const [wire, said] of [
+    [{ error: { message: "上游故障：余额不足" } }, /余额不足/],
+    [{ error: "接口限流" }, /接口限流/]
+  ]) {
+    answer(JSON.stringify(wire), "application/json");
+    const res = await ask(openai);
+    assert.ok(res.status >= 400 && !retryable(res.status), JSON.stringify(wire));
+    assert.match(res.json.error, said);
+  }
+});
+
+test("OpenAI 兼容那路回的既不是答复也不是事件流：415 带前 200 字，不报成「未返回正文」", async () => {
+  for (const [wire, said] of [
+    [JSON.stringify({ code: 40001, message: "余额不足，请充值" }), /余额不足，请充值/],
+    ["<html>网关出错</html>", /网关出错/]
+  ]) {
+    answer(wire, "text/html");
+    const res = await ask(openai);
+    assert.equal(res.status, 415);
+    assert.match(res.json.error, said);
+  }
+});
+
+test("OpenAI 兼容那路的事件流不管标成什么、开头带什么，都原样往下交", async () => {
+  const stream = oneChunk("答复").join("");
+  for (const type of ["text/event-stream", "text/plain; charset=utf-8", "application/octet-stream", null])
+    for (const lead of ["", "event: message\n\n", ": keep-alive\n\n", "\n\n", "\uFEFF"]) {
+      answer(lead + stream, type);
+      const res = await ask(openai);
+      assert.equal(res.status, 200, `${type} ${JSON.stringify(lead)}`);
+      assert.match(res.headers["content-type"], /text\/event-stream/);
+      assert.equal(res.text, lead + stream);
+    }
+});
+
+test("OpenAI 兼容那路分块到达：第一块只有几个字节也判得出，且边到边往下交", { timeout: 5000 }, async () => {
+  const [first, last] = oneChunk("边到边写"),
+    encoder = new TextEncoder();
+  let open;
+  const gate = new Promise(resolve => (open = resolve));
+  const parts = [first.slice(0, 2), first.slice(2)];
+  let sent = 0;
+  const body = new ReadableStream({
+    async pull(controller) {
+      if (sent < parts.length) return controller.enqueue(encoder.encode(parts[sent++]));
+      await gate;
+      controller.enqueue(encoder.encode(last));
+      controller.close();
+    }
+  });
+  upstream = { response: () => new Response(body, { headers: { "content-type": "text/plain" } }) };
+  const res = new Res();
+  res.onWrite = () => res.text.includes("边到边写") && open();
+  await chat(Readable.from([Buffer.from(JSON.stringify({ profile: openai, messages: [{ role: "user", content: "你好" }] }))]), res);
+  assert.equal(res.text, first + last);
 });
 
 // 上游 200 却是空事件流（开了流又一个字没发）：页面对它的处置不变——「已中断」要先有写出的内容，

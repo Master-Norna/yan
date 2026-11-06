@@ -15,6 +15,7 @@ const openai = require("./openai.js");
 const anthropic = require("./anthropic.js");
 const { hinted } = require("./chatgpt.js");
 const createImage = require("./image.js");
+const { wholeReplyEvents } = require("./sse.js");
 
 // 工具定义一次最多带多少件：超过不再静默截掉后面的，明确报错，接入更多工具时一眼能看出来
 const TOOLS_LIMIT = 128;
@@ -38,10 +39,11 @@ async function upstreamError(response, raw) {
   }
 }
 
-// 上游回的正文是事件流还是整份 JSON，只能按正文开头判，不能按 content-type：标成 text/plain 的事件流也要能译（#22）。
+// 上游回的正文是事件流还是整份，只能按正文开头判，不能按 content-type：标成 text/plain 的事件流也要能译（#22），标成事件流的也可能是一句报错。
 // 只多读判定要用的那几块（前面可能全是空白），读过的不丢，由 replayBody 先吐出来再接回原来的流——事件流仍是逐块往下交，
-// 不整份攒进内存。0x7b 是 {，0x20 0x09 0x0a 0x0d 0x0b 0x0c 是空白
-const BLANK = new Set([0x20, 0x09, 0x0a, 0x0d, 0x0b, 0x0c]);
+// 不整份攒进内存。空白含 BOM（0xef 0xbb 0xbf）；事件流的行首只有 data、event、id、retry 与注释的冒号
+const BLANK = new Set([0x20, 0x09, 0x0a, 0x0d, 0x0b, 0x0c, 0xef, 0xbb, 0xbf]),
+  EVENT_MARKS = new Set([..."deir:"].map(mark => mark.charCodeAt(0)));
 /**
  * @param {ReadableStream<Uint8Array>} body
  * @returns {Promise<{ chunks: Uint8Array[], reader: ReadableStreamDefaultReader<Uint8Array>, first: number }>}
@@ -94,6 +96,42 @@ async function collectText(chunks, reader) {
     if (value) text += decoder.decode(value, { stream: true });
     if (done) return text + decoder.decode();
   }
+}
+
+// 上游回了 200，交给页面的只有事件流：页面只有一种读法，各家、各中转的样子到此为止。
+// 判定途中就断了：页面这头还没写头，补不了「连接中断」那条事件，按连不上算、可重试（502）。
+// 整份回来的：OpenAI 兼容那路摆成一块事件流；要重译的两路译不了，说清不是事件流，带上原文前 200 字（415，等一等也不会好，不重试）。
+// 整份的报错：要重译的两路多是过载一类（Anthropic 的 Overloaded），回 503 由页面等一等再试；
+// OpenAI 兼容那路多是中转说余额不足之类，当场交回，不让页面把 RETRY_DELAYS 排满干等五分钟
+/** @param {Response} response @param {{ stream?: Function }} provider @returns {Promise<ReadableStream<Uint8Array>>} */
+async function eventBody(response, provider) {
+  /** @param {any} error */
+  const cut = error => {
+    throw Object.assign(Error(`上游连接中断：${error.cause?.code || error.cause?.message || error.message}`), {
+      status: 502,
+      name: error.name
+    });
+  };
+  const lead = await peekLead(response.body).catch(cut);
+  if (!lead.first || EVENT_MARKS.has(lead.first)) return replayBody(lead.chunks, lead.reader);
+  const raw = await collectText(lead.chunks, lead.reader).catch(cut);
+  let json = null;
+  try {
+    json = JSON.parse(raw);
+  } catch {}
+  if (json?.choices && !provider.stream) return new Response(wholeReplyEvents(json)).body;
+  if (json && ((json.error && !json.choices) || json.type === "error"))
+    throw Object.assign(Error(await upstreamError(response, raw)), { status: provider.stream ? 503 : 400 });
+  const type = String(response.headers.get("content-type") || "").toLowerCase(),
+    snippet = raw.trim().slice(0, 200);
+  throw Object.assign(
+    Error(
+      json
+        ? `上游回了整份 JSON，不是事件流（${type}）：这条中转多半不支持流式，可换一条支持流式的接口。前 200 字：${snippet}`
+        : `上游回的不是事件流，也读不出 JSON（${type}）。前 200 字：${snippet}`
+    ),
+    { status: 415 }
+  );
 }
 
 /** @param {{ home: () => string }} options 存储根（ChatGPT 订阅的登录凭证放在那里） */
@@ -204,46 +242,7 @@ module.exports = function createModel({ home }) {
           status: response.status,
           retryAfter: response.headers.get("retry-after") || ""
         });
-      // 上游回了 200，正文是事件流还是整份 JSON，看开头字节：跳过空白，第一个字节是 { 就是整份 JSON
-      // （中转不支持流式，或者 200 {"type":"error"} 的报错），否则照旧交给 translateSse 逐块翻译。
-      // 不看类型：标成 text/plain 或不标类型的事件流照样能译（见 #22），反过来按「类型带 json」判会把它们弄坏。
-      // 只看会重译事件流的两路（provider.stream）；OpenAI 兼容那路整份 JSON 本就能收。
-      // 判过的几块原样接回去往下流（sniffEventStream 也是这样），事件流不整份读进内存
-      const type = String(response.headers.get("content-type") || "").toLowerCase();
-      let upstreamBody = response.body;
-      if (provider.stream) {
-        // 判定途中就断了：页面这头还没写头，补不了「连接中断」那条事件，按连不上算、可重试。不接住就落到下面 catch 的兜底 400，页面不再试，原因码也没了
-        /** @param {any} error */
-        const cut = error => {
-          throw Object.assign(Error(`上游连接中断：${error.cause?.code || error.cause?.message || error.message}`), {
-            status: 502,
-            name: error.name
-          });
-        };
-        const lead = await peekLead(response.body).catch(cut);
-        if (lead.first === 0x7b) {
-          const raw = await collectText(lead.chunks, lead.reader).catch(cut);
-          let json = null;
-          try {
-            json = JSON.parse(raw);
-          } catch {}
-          // 两种 JSON 分开给状态码：报错 JSON（Anthropic 的 Overloaded 这类）按可重试的 5xx 交回，页面照现有节奏等；
-          // 正常答复的整份 JSON 是 4xx、不重试——回 5xx 页面会把 RETRY_DELAYS 排满，干等约五分钟，比原先白跑两次还糟。
-          // 4xx 的文案一律带上原文前 200 字：上游说了什么都看得到，不用再去猜 message、code 这些字段
-          if (json && ((json.error && !json.choices) || json.type === "error"))
-            throw Object.assign(Error(await upstreamError(response, raw)), { status: 503 });
-          const snippet = raw.trim().slice(0, 200);
-          throw Object.assign(
-            Error(
-              json
-                ? `上游回了整份 JSON，不是事件流（${type}）：这条中转多半不支持流式，可换一条支持流式的接口。前 200 字：${snippet}`
-                : `上游回的不是事件流，也读不出 JSON（${type}）。前 200 字：${snippet}`
-            ),
-            { status: 415 }
-          );
-        }
-        upstreamBody = replayBody(lead.chunks, lead.reader);
-      }
+      const upstreamBody = await eventBody(response, provider);
       // 记着流了多少、最后一次来字是何时：途中断了，桥接窗口里一行看得出是对面掐线还是静默太久（见下 catch）
       meter.opened = Date.now();
       meter.last = meter.opened;
@@ -257,7 +256,7 @@ module.exports = function createModel({ home }) {
         })
       );
       res.writeHead(200, {
-        "Content-Type": (!provider.stream && response.headers.get("content-type")) || "text/event-stream; charset=utf-8",
+        "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no"

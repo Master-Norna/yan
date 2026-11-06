@@ -1,19 +1,14 @@
-// 整份回来的答复（没走流式的中转、网关）包成只有一块的事件流交给 readSse：与流式同一个读法，
-// 三轮带工具时思绪累加、轮内行内 <think> 拆开不送回模型、tool_calls 归位、finish_reason 缺失按 stop、错误 JSON 抛出上游原话
+// 整份回来的答复（没走流式的中转、网关）由桥接摆成只有一块的事件流（server/model/sse.js 的 wholeReplyEvents），页面照流读：
+// 三轮带工具时思绪累加、轮内行内 <think> 拆开不送回模型、tool_calls 归位、finish_reason 缺失按 stop
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { load } from "./harness.mjs";
 
+const { wholeReplyEvents } = createRequire(import.meta.url)("../../server/model/sse.js");
+const bare = data => new Response(wholeReplyEvents(data), { headers: { "content-type": "text/event-stream" } });
 const whole = (message, finish_reason = "stop", extra = {}) =>
-  new Response(
-    JSON.stringify({
-      choices: [{ message, finish_reason }],
-      usage: { total_tokens: 12, prompt_tokens: 7, completion_tokens: 5 },
-      ...extra
-    }),
-    { headers: { "content-type": "application/json" } }
-  );
-const bare = data => new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
+  bare({ choices: [{ message, finish_reason }], usage: { total_tokens: 12, prompt_tokens: 7, completion_tokens: 5 }, ...extra });
 const call = (id, name, args) => ({ id, type: "function", function: { name, arguments: args } });
 
 function setup(replies = []) {
@@ -122,20 +117,6 @@ test("finish_reason 缺失：按 stop 收尾，不报错、也不算中断", asy
   assert.equal(assistant.content, "没有结束原因");
   assert.equal(assistant.error, undefined);
   assert.equal(f.requests.length, 1);
-});
-
-test("整份错误 JSON：抛出上游原话，不报成「未返回正文」、不重试", async () => {
-  for (const [data, said] of [
-    [{ error: { message: "上游故障：余额不足" } }, /余额不足/],
-    [{ error: "接口限流" }, /接口限流/]
-  ]) {
-    const f = setup([bare(data)]);
-    const assistant = await turn(f);
-    assert.equal(assistant.status, "error", JSON.stringify(data));
-    assert.match(assistant.error, said);
-    assert.doesNotMatch(assistant.error, /未返回正文/);
-    assert.equal(f.requests.length, 1);
-  }
 });
 
 test("整份答复里的 tool_calls 归位：照次序编上 index，两件各成一步", async () => {

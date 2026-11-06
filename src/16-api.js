@@ -637,9 +637,6 @@ function normalizeContent(content) {
   if (Array.isArray(content)) return content.map(part => part?.text || part?.content || "").join("");
   return "";
 }
-function extractContent(data) {
-  return normalizeContent(data?.choices?.[0]?.message?.content);
-}
 // 报错的原话（中文）：存进消息、步骤的用它，显示时再 tr；直接显示的用 friendlyError
 function bridgeErrorText(message) {
   if (/Failed to fetch|NetworkError|Load failed/i.test(message))

@@ -57,4 +57,15 @@ function translateSse(model, handle) {
     }
   });
 }
-module.exports = { translateSse };
+// 整份的 chat.completions 答复（中转不支持流式）摆成只有一块的事件流：页面只有一种读法，正文、思绪、工具调用、用量、结束原因的语义只有一份。
+// finish_reason 缺失的按 stop 算（它把话说完了才收）。整份里的调用是一列，位置才算数、index 本不属于这个格式：
+// 照次序编号，放在展开之后——上游自带的 index 不能盖掉位置（两件都写 index: 0 的会并成一件，参数拼成 {"x":1}{"x":2}）
+/** @param {any} json */
+function wholeReplyEvents(json) {
+  const choice = json.choices?.[0],
+    delta = { ...choice?.message };
+  if (Array.isArray(delta.tool_calls)) delta.tool_calls = delta.tool_calls.map((call, index) => ({ ...call, index }));
+  const block = { choices: [{ delta, finish_reason: choice?.finish_reason || "stop" }], ...(json.usage ? { usage: json.usage } : {}) };
+  return `data: ${JSON.stringify(block)}\n\ndata: [DONE]\n\n`;
+}
+module.exports = { translateSse, wholeReplyEvents };
