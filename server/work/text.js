@@ -58,16 +58,6 @@ function splitLines(text) {
   const value = String(text ?? "");
   return value ? value.replace(/\r?\n$/, "").split(/\r?\n/) : [];
 }
-// 覆盖写一份文件时，前后两版按行比出各增删几行。与预览、与页面同一套比法（见 lineOps），清单和红绿才对得上
-function lineDiffCounts(oldText, newText) {
-  let added = 0,
-    removed = 0;
-  for (const [kind] of lineOps(splitLines(oldText), splitLines(newText))) {
-    if (kind === "i") added++;
-    else if (kind === "d") removed++;
-  }
-  return { added, removed };
-}
 
 // edit_file 的 old 对不上时：文件里最像它的那一段，照现在的样子带行号交回。
 // 拿 old 的每一行（去掉首尾空白）到文件里找同样的行，各自推出「old 若从这里开始」的起点，起点得票最多的那段即是；
@@ -253,8 +243,6 @@ module.exports = {
   decodeText,
   encodeText,
   countLines,
-  splitLines,
-  lineDiffCounts,
   changeHunks,
   nearestPassage
 };

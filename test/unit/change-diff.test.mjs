@@ -8,8 +8,13 @@ import path from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const createWork = require("../../server/work/index.js");
-const { changeHunks, lineDiffCounts } = require("../../server/work/text.js");
+const { changeHunks } = require("../../server/work/text.js");
 import { load } from "./harness.mjs";
+
+const lineDiffCounts = (before, after) => {
+  const { added, removed } = changeHunks(before, after);
+  return { added, removed };
+};
 
 const view = load(["splitDiffHtml", "diffCounts"]);
 
@@ -174,7 +179,7 @@ test("覆盖写一份大文件：桥接捎回旧侧与行号，不再只给开�
   assert.ok(!data.diff.old.includes("第 150 行"));
   // 页面按行号取新侧，画出来的增删与清单一致
   const back = rebuild(data.diff, textOf(changed)),
-    drawn = view.splitDiffHtml(back.old, back.new, { all: true });
+    drawn = view.splitDiffHtml(back.old, back.new);
   assert.deepEqual({ added: drawn.added, removed: drawn.removed }, { added: 1, removed: 1 });
   assert.match(drawn.html, /这一行改了/);
 });

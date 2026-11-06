@@ -395,11 +395,11 @@ function diffRows(oldText, newText, { limit = Infinity, wrap = true, all = false
 }
 /**
  * 两版比成并排的红绿，套上外层的容器：「展开全部」按 rows 与 clipped 认。
- * @param {string} oldText @param {string} newText @param {{ limit?: number, wrap?: boolean, all?: boolean }} [options]
+ * @param {string} oldText @param {string} newText @param {{ limit?: number, wrap?: boolean }} [options]
  * @returns {{ html: string, rows: number, clipped: boolean, added: number, removed: number }}
  */
-function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true, all = false } = {}) {
-  const out = diffRows(oldText, newText, { limit, wrap, all });
+function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true } = {}) {
+  const out = diffRows(oldText, newText, { limit, wrap });
   return {
     html: `<div class="tool-output split-diff${wrap ? "" : " clip"}">${out.rows.join("")}</div>`,
     rows: out.total,
@@ -464,7 +464,7 @@ function writtenContent(step) {
 // 覆盖写那一步的改动：桥接只存了旧侧的行与两侧行号（见 server/work/text.js 的 changeHunks），
 // 新的一侧整份在参数里，按行号切出同一批窗口；摘录里跳过的未改行数一并带回去，画的时候放在两块之间。
 // 各窗口分开比（见 windowsDiffHtml），不拼成一整段再比：拼起来窗口之间会互相配对，挪到远处的代码被认成没改
-/** @param {Step} step @returns {{ windows: Array<{ old: string, new: string, skip: number }>, all: true }|null} */
+/** @param {Step} step @returns {{ windows: Array<{ old: string, new: string, skip: number }> }|null} */
 function hunksText(step) {
   const diff = step.diff;
   if (!diff || !("hunks" in diff) || !Array.isArray(diff.hunks) || !diff.hunks.length) return null;
@@ -492,13 +492,13 @@ function hunksText(step) {
     cursor += hunk.oldCount;
     prevEnd = hunk.oldStart + hunk.oldCount;
   }
-  return { windows, all: true };
+  return { windows };
 }
 // 这一步该画的红绿：新格式（hunks）、旧格式（diff.old/new、written/previous）、改文件那步（参数里的前后两段）。
 // 解析参数不便宜（一行到底的 JSON 也有几万字），按这一步的 diff 与参数原文记一份，重画时不必再解。
 // 比出来的 HTML 也按 limit、wrap 记着：行迹里每次重画都会再走一遍，表比最大到一千六百万格，几步叠起来就感觉得到
-/** @typedef {{ old: string, new: string, all?: boolean }} DiffText */
-/** @typedef {{ windows: Array<{ old: string, new: string, skip: number }>, all: true }} DiffWindows */
+/** @typedef {{ old: string, new: string }} DiffText */
+/** @typedef {{ windows: Array<{ old: string, new: string, skip: number }> }} DiffWindows */
 /** @typedef {{ html: string, rows: number, clipped: boolean, added: number, removed: number }} DiffRender */
 /** @type {WeakMap<Step, { diff: unknown, arguments: string, change: unknown, written: unknown, previous: unknown, parts: DiffText|DiffWindows|null, views: Map<string, DiffRender> }>} */
 const stepDiffCache = new WeakMap();
@@ -546,7 +546,7 @@ function stepDiffRender(step, { limit = Infinity, wrap = true } = {}) {
     out =
       "windows" in entry.parts
         ? windowsDiffHtml(entry.parts.windows, { limit, wrap })
-        : splitDiffHtml(entry.parts.old, entry.parts.new, { limit, wrap, all: entry.parts.all });
+        : splitDiffHtml(entry.parts.old, entry.parts.new, { limit, wrap });
     entry.views.set(key, out);
   }
   return out;
@@ -593,7 +593,7 @@ function changeDiffHtml(message, path) {
         head = `<p class="file-viewer-note">${escapeHtml(note)}</p>`,
         content = created && step.name === "write_file" ? writtenContent(step) : null;
       // 新建的件（或没记下原文的）也并排画：左边留空，与改动同一种画法，不一会儿整宽一会儿两栏
-      if (content !== null) return `${head}<div class="tool-diff">${splitDiffHtml("", content, { all: true }).html}</div>`;
+      if (content !== null) return `${head}<div class="tool-diff">${splitDiffHtml("", content).html}</div>`;
       const diff = stepDiffRender(step);
       if (!diff) return head;
       return `${head}<div class="tool-diff">${diff.html}</div>`;
