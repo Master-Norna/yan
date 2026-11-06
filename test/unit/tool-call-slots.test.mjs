@@ -23,7 +23,7 @@ function setup() {
   f.setup();
   return f;
 }
-/** 把这几块按顺序流进来，交回开发的那条消息 */
+/** 把这几块按顺序流进来，交回读完的那条消息 */
 async function read(f, wire) {
   const assistant = { id: "a", role: "assistant", content: "" };
   await f.readSse(new Response(wire + done, { headers: { "content-type": "text/event-stream" } }), assistant);
