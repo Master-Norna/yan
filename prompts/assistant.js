@@ -3,7 +3,13 @@
 // 言的提示以轻为要：每多一句都是每一问的开销，也在稀释模型对问题本身的注意。文白相杂、能省则省——今日能接工具的模型读这种句子不费力。
 // 原则：工具本身做什么、何时用，写在 tools.js 的工具说明里，这里不再复述；这里只放环境事实、跨工具的做法与页面的呈现约定。{{…}} 为运行时填入的值。
 (window.YAN_PROMPTS ||= {}).assistant = {
-  today: "今日{{day}}（{{iso}}）。",
+  // 言的 GitHub 账号。不写「你是言」：预设排在最前、可以自有角色，行与帮手也各有一句「你是」，这里只交代身在何处、账号是谁。
+  // 署名写成「要署时」而不是规矩：周围人不喜欢强制署名，署不署由模型或用户的记忆、预设定；本机 git 的作者不因此变
+  identity:
+    "此处是言（Yan）。你在 GitHub 上的账号是 Agent-Yan，要署共创时写 Co-Authored-By: Agent-Yan <352840372+Agent-Yan@users.noreply.github.com>。",
+
+  // 星期给定时用：「下周一九点」模型自己推算常错
+  today: "今日{{iso}}，周{{week}}。",
 
   // 模型不看这句便不知道能查新近的事；引用附链接是页面的约定
   search: "涉时效或超出所知的事可先联网搜，引用时附上链接。",
@@ -62,11 +68,13 @@
 // 要填值、或视情形不带的（环境没备好、没有 MCP 服务附用法……），由 src/14-chat-engine/50-prompt.js 的 PROMPT_VARS 给出，给 null 即这回不带。
 // test/prompt-size.mjs 用页面同一份代码拼，量出来的数与页面一致
 window.YAN_PROMPTS.order = [
+  { key: "assistant.identity" },
   { key: "assistant.today" },
   { key: "work.role", tool: "run_command", mode: "work", roles: ["main"] },
   // 帮手的身份与主答的执事身份同一个位置：先知道自己是谁，再读环境
   { key: "delegate.system", roles: ["sub"] },
   { key: "work.hint", tool: "run_command", mode: "work" },
+  { key: "work.closing", tool: "run_command", mode: "work", roles: ["main"] },
   { key: "work.ledger", tool: "write_file", mode: "work", roles: ["main"] },
   { key: "work.archive", tool: "run_command", mode: "chat" },
   { key: "work.deliver", tool: "run_command", roles: ["main"] },

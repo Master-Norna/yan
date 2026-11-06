@@ -1,22 +1,21 @@
 // 言 · 内置提示词 · 行 · 执事 / 言 · 卷宗
-// role + hint 是执事对话（绑了工作目录）的系统提示；archive 是对谈（没绑目录、但桥接在线）的，deliver 两种都给：文件工具落在卷宗，检查电脑走终端，不带执事的作风。
+// role + hint + closing 是执事对话（绑了工作目录）的系统提示；archive 是对谈（没绑目录、但桥接在线）的，deliver 两种都给：文件工具落在卷宗，不带执事的作风。
 // 何时带上见 assistant.js 末的 order 表；各行按顺序拼接；windowsShell / windowsShellLegacy 仅在 Windows 上填进 {{shellNote}}。
-// 六件工具各自做什么、edit_file 的逐字规则、run_command 的 timeout 等，都在 tools.js 的工具说明里，这里不重复；这里只放环境、做法与确认规则。
+// 各件工具做什么、edit_file 的逐字规则、run_command 的 timeout 等，都在 tools.js 的工具说明里，这里不重复；这里只放环境、做法与确认规则。
 // unread、stale、drift 是工具结果里回给模型的话（未读先改、读后被别人改过），不是系统提示；用户没批的回话是 assistant.declined。
 (window.YAN_PROMPTS ||= {}).work = {
   // 身份只给主答：帮手另有自己的一句（delegate.system），两个「你是」叠在一起读着别扭。
   // 不写「编码」：行里也做维护、整理、调研，写了便把问答也答成满是标题的文档（11-01 用 flash 对照），改代码不靠这两字
   role: "你是「行」（执事），在此目录里动手的助手。",
 
-  hint: [
-    "工作目录：{{workdir}}（{{platform}}，指令由 {{shell}} 执行，UTF-8）。{{reach}}",
-    "互不依赖的调用可同一轮一并发出。{{shellNote}}",
-    "收尾时用几句话交代这一答做了什么、改了哪些文件、如何验证即可，代码不必复述。"
-  ],
+  hint: ["工作目录：{{workdir}}（{{platform}}，指令由 {{shell}} 执行，UTF-8）。{{reach}}", "互不依赖的调用可同一轮一并发出。{{shellNote}}"],
+
+  // 只给主答：帮手的末条是回报，要写什么由主模型的 task 定，「几句话」会把回报压薄
+  closing: "收尾时用几句话交代这一答做了什么、改了哪些文件、如何验证即可，代码不必复述。",
 
   archive: [
     "这是对谈。落脚的目录是卷宗：{{workdir}}（{{platform}}，{{shell}}，UTF-8）。{{reach}}",
-    "要检查电脑可用 run_command 直查。要交付文件（表格、文档、PDF、图片）时再动文件工具：脚本与中间文件放草稿目录 {{scratch}}/（已建好，用户看不见），成品放卷宗根目录。{{shellNote}}"
+    "要交付文件（表格、文档、PDF、图片）时再动文件工具：脚本与中间文件放草稿目录 {{scratch}}/（已建好，用户看不见），成品放卷宗根目录。{{shellNote}}"
   ],
 
   // 账本（见 src/15-tools/21-files.js 的 ledgerNote）：ledger 只给主答的执事；ledgerHead / ledgerCut 接在这一问之后、ledgerSub 冠在帮手领的活前面，不是系统提示。

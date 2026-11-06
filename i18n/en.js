@@ -801,7 +801,6 @@ var YAN_EN = {
   "清空环境？": "Clear the environment?",
   "整个环境目录将被删除，已装的包需重新安装；对话、卷宗与配置不受影响。":
     "The whole environment folder will be deleted and packages must be reinstalled. Chats, Files and settings are not affected.",
-  "另装 {0}": "Extra: {0}",
 
   // ---- 设置 · MCP ----
   "＋ 新增服务": "+ Add server",

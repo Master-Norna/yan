@@ -4,15 +4,15 @@
 // 要填值、或视情形不带的，在这里给出：给 null 即这回不带。工具各自做什么、何时用，在工具说明里说，这里不重复
 /** @type {Record<string, (ctx: { conversation: Conversation, tools: Set<string>, preset: Preset|null, anchor: boolean }) => Record<string, any>|null>} */
 const PROMPT_VARS = {
-  // 两样都取本地日期：ISO 取 UTC 的话，东八区零点到八点之间两处差一天
-  "assistant.today": () => ({ day: formatDay(now()), iso: localDay() }),
+  // 都取本地日期：取 UTC 的话，东八区零点到八点之间差一天
+  "assistant.today": () => ({ iso: localDay(), week: "日一二三四五六"[new Date().getDay()] }),
   "work.hint": ctx => workVars(ctx.conversation),
   "work.archive": ctx => workVars(ctx.conversation),
   "work.env": () => envVars(),
   // 不报条数：记一条就变，系统提示一变，整段对话的缓存都作废
   "memory.hint": () => {
     const names = memoryCategories().map(cat => cat.name);
-    return { categories: names.length ? t`，分作${names.map(name => `「${name}」`).join("")}` : "" };
+    return { categories: names.length ? `，分作${names.map(name => `「${name}」`).join("")}` : "" };
   },
   "mcp.hint": ctx => mcpHintVars(ctx.tools, ctx.preset),
   "skills.hint": () => skillCatalog(),
@@ -62,7 +62,7 @@ function workVars(conversation) {
           ? "work.reachAnywhere"
           : "work.reachInside"
     ),
-    platform: win ? "Windows" : bootstrap.work?.platform === "darwin" ? "macOS" : t("类 Unix"),
+    platform: win ? "Windows" : bootstrap.work?.platform === "darwin" ? "macOS" : "类 Unix",
     shell,
     shellNote: win ? prompt(/5\.1/.test(shell) ? "work.windowsShellLegacy" : "work.windowsShell") : ""
   };

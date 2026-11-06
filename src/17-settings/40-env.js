@@ -133,5 +133,5 @@ function envVars() {
     .filter(pack => !pack.base && state.packs.includes(pack.id))
     .map(pack => `${pack.name}（${pack.hint || [...pack.pip, ...pack.npm].slice(0, 6).join("、")}）`);
   const extra = [...state.pip, ...state.npm];
-  return { kits: [state.python, ...kits, ...(extra.length ? [t`另装 ${extra.join("、")}`] : [])].join("；") };
+  return { kits: [state.python, ...kits, ...(extra.length ? [`另装 ${extra.join("、")}`] : [])].join("；") };
 }
