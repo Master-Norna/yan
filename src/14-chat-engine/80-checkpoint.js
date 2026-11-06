@@ -32,6 +32,11 @@ function rootBusyElsewhere(root, exceptId) {
 function rootRewinding(root, exceptId) {
   return store.conversations.some(c => c.id !== exceptId && dirsOverlap(workRoot(c), root) && rewinding.has(c.id));
 }
+// 这段此刻开工写下的会被退回盖掉：它自己在退，或别的对话正退回相交的目录。开一答的两处（prepareTurn、wakeWithReports）都看这一句
+/** @param {Conversation} c */
+function rewindingOver(c) {
+  return rewinding.has(c.id) || (isWork(c) && rootRewinding(workRoot(c), c.id));
+}
 /** 动手前：这一答还没记过就记一回，帮手与主答同时动手也只记一回。记不下（目录不在、桥接是旧的）不拦着干活 @param {ToolContext} ctx */
 function checkpointBefore({ conversation, assistant }) {
   const root = isWork(conversation) && workRoot(conversation);

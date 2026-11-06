@@ -87,3 +87,30 @@ test("目录正被别的对话退回时，这一段不开工", () => {
   assert.equal(f.rootBusyElsewhere("E:/工作/项目/子", "B"), true, "同目录的对话正作答");
   assert.equal(f.rootBusyElsewhere("E:/别处", "B"), false);
 });
+
+test("回报另起一答也看退回：相交的目录正退回时等它退完，不相交的照常开工", async () => {
+  const started = [];
+  const f = load([
+    "wakeWithReports",
+    "rewinding",
+    "store",
+    `install: started => {
+      claimConversation = async () => true;
+      requestJob = () => null;
+      profiles = () => [];
+      activeProfile = () => ({ id: "p" });
+      quotaBlocked = () => false;
+      startTurn = (c, user) => started.push([c.id, user.content]);
+    }`
+  ]);
+  f.install(started);
+  const report = () => [{ report: "到点", step: { id: "s1" }, relay: { step: "s1", title: "t", ok: true } }];
+  const near = { id: "near", workdir: "E:\\工作\\项目\\子", messages: [] },
+    far = { id: "far", workdir: "E:\\别处", messages: [] };
+  f.store.conversations = [{ id: "A", workdir: "e:/工作/项目", messages: [] }, near, far];
+  f.rewinding.add("A");
+  await f.wakeWithReports(near, report());
+  assert.deepEqual(started, [], "上层正退回，这一层不开工");
+  await f.wakeWithReports(far, report());
+  assert.deepEqual(started, [["far", "到点"]]);
+});
