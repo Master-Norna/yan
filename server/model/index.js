@@ -11,6 +11,7 @@
 const { Readable } = require("node:stream");
 const { finished } = require("node:stream/promises");
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
+const { OUTBOUND_MARK } = require("../web.js");
 const openai = require("./openai.js");
 const anthropic = require("./anthropic.js");
 const { hinted } = require("./chatgpt.js");
@@ -160,7 +161,8 @@ module.exports = function createModel({ home }) {
   async function listModels(provider, config, kind = "") {
     if (provider.models) return provider.models(config);
     const response = await fetch(provider.modelsUrl(config, kind), {
-      headers: await provider.headers(config),
+      // 带上「桥接自己转出」的标记：baseUrl 指向桥接自己的受信接口时，server.js 据此拒绝，不替页面当跳板
+      headers: { ...(await provider.headers(config)), [OUTBOUND_MARK]: "1" },
       signal: AbortSignal.timeout(20000)
     });
     if (!response.ok) throw Error(await upstreamError(response));
@@ -228,7 +230,8 @@ module.exports = function createModel({ home }) {
       const upstream = provider.request(payload, config);
       const response = await fetch(provider.url(config), {
         method: "POST",
-        headers: await provider.headers(config, upstream),
+        // 带上「桥接自己转出」的标记：baseUrl 指向桥接自己的受信接口时，server.js 据此拒绝，不替页面当跳板
+        headers: { ...(await provider.headers(config, upstream)), [OUTBOUND_MARK]: "1" },
         body: JSON.stringify(upstream),
         signal: requestSignal(res)
       }).catch(error => {
@@ -308,14 +311,14 @@ module.exports = function createModel({ home }) {
     }
   }
   return {
-    // 引导、转发、列模型凡是本机桥接认得的来源都可调；ChatGPT 的登录与退出碰本机凭证，归受信的一半
+    // 引导、转发、列模型凡是本机桥接认得的来源都可调；生图要按上游交回的网址取图，那一步是桥接替页面出站，
+    // 只有本站页面能调（别的本机端口页面能借它读任意 http 地址）；ChatGPT 的登录与退出碰本机凭证，同样归受信的一半
     openRoutes: {
       "POST /api/test": handleTest,
       "POST /api/models": handleModels,
-      "POST /api/chat": handleChat,
-      ...createImage({ resolveProfile, upstreamError })
+      "POST /api/chat": handleChat
     },
-    routes: chatgpt.routes
+    routes: { ...createImage({ resolveProfile, upstreamError }), ...chatgpt.routes }
   };
 };
 module.exports.upstreamError = upstreamError;
