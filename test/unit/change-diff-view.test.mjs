@@ -2,12 +2,13 @@
 // 这些用例接着页面那一步断言：画出的增删等于真实增删，最后一处改动也在页面上
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { load } from "./harness.mjs";
 
 const require = createRequire(import.meta.url);
 const { changeHunks } = require("../../server/work/text.js");
-const view = load(["splitDiffHtml", "changeDiffHtml", "stepDiffParts", "workStepHtml"]);
+const view = load(["splitDiffHtml", "changeDiffHtml", "stepDiffParts", "workStepHtml", "stepDiffRender"]);
 
 const plain = (n, tag = "行") => Array.from({ length: n }, (_, i) => `第 ${i + 1} ${tag}：一二三四五六七八九十`);
 const textOf = lines => `${lines.join("\n")}\n`;
@@ -78,14 +79,26 @@ test("摘录里的「跳过 N 行未改」画得出来，不被当成未改行�
     changed = lines.slice();
   changed[1] = "前一处";
   changed[590] = "后一处";
-  // 与页面 hunksText 拼出来的一样：两块之间一句跳过
-  const back = {
-    old: `第 1 行：一二三四五六七八九十\n第 2 行：一二三四五六七八九十\n第 3 行：一二三四五六七八九十\n…（跳过 585 行未改）\n第 589 行：一二三四五六七八九十\n第 590 行：一二三四五六七八九十\n第 591 行：一二三四五六七八九十`,
-    new: `第 1 行：一二三四五六七八九十\n前一处\n第 3 行：一二三四五六七八九十\n…（跳过 585 行未改）\n第 589 行：一二三四五六七八九十\n第 590 行：一二三四五六七八九十\n后一处`
+  const h = changeHunks(textOf(lines), textOf(changed));
+  const message = {
+    steps: [
+      step(
+        "a",
+        "write_file",
+        { path: "skip.txt", content: textOf(changed) },
+        {
+          diff: { hunks: h.hunks, old: h.old },
+          change: { path: "skip.txt", added: h.added, removed: h.removed, created: false, lines: 600 }
+        }
+      )
+    ]
   };
-  const drawn = view.splitDiffHtml(back.old, back.new, { all: true });
-  assert.match(drawn.html, /跳过 585 行未改/);
-  assert.deepEqual({ added: drawn.added, removed: drawn.removed }, { added: 2, removed: 2 });
+  const html = view.changeDiffHtml(message, "skip.txt");
+  assert.match(html, /…（跳过 \d+ 行未改）/);
+  assert.equal((html.match(/class="d"/g) || []).length, 2);
+  assert.equal((html.match(/class="i"/g) || []).length, 2);
+  // 提示两侧同文，是未改行，不能挂上红绿
+  assert.doesNotMatch(html, /<span class="[di]">…（跳过/);
 });
 
 test("新建之后再整份改写：预览只看最后一版对空的多行，与清单「只增不删」一致", () => {
@@ -274,4 +287,95 @@ test("报错的那一步不摊红绿：old/new 在参数里，也不当成已改
   assert.doesNotMatch(view.workStepHtml(bad, "a.txt"), /tool-diff/);
   const ok = { ...bad, status: "done" };
   assert.match(view.workStepHtml(ok, "a.txt"), /tool-diff/);
+});
+
+test("一千行的文件把三十行挪到远处：两块分开比，增删是 30/30，跳过提示不在红绿里", () => {
+  // 拼成一整段再比时，窗口之间会拿挪走的那段去配挪到的位置，被挪的三十行认成未改，
+  // 上下文与跳过提示反而画成红绿（最小增删会从 30/30 掉成 7/7）
+  const lines = plain(1000),
+    moved = lines.slice(100, 130),
+    rest = [...lines.slice(0, 100), ...lines.slice(130)],
+    changed = [...rest.slice(0, 769), ...moved, ...rest.slice(769)],
+    d = changeHunks(textOf(lines), textOf(changed));
+  assert.deepEqual({ added: d.added, removed: d.removed }, { added: 30, removed: 30 });
+  assert.equal(d.hunks.length, 2);
+  const message = {
+    steps: [
+      step(
+        "a",
+        "write_file",
+        { path: "move.txt", content: textOf(changed) },
+        {
+          diff: { hunks: d.hunks, old: d.old },
+          change: { path: "move.txt", added: d.added, removed: d.removed, created: false, lines: 1000 }
+        }
+      )
+    ]
+  };
+  const html = view.changeDiffHtml(message, "move.txt");
+  assert.equal((html.match(/class="d"/g) || []).length, 30);
+  assert.equal((html.match(/class="i"/g) || []).length, 30);
+  assert.match(html, /…（跳过 \d+ 行未改）/);
+  // 提示是未改行，两侧同文，不能挂上红绿
+  assert.doesNotMatch(html, /<span class="[di]">…（跳过/);
+});
+
+test("同一步骤重画：红绿按 limit 与 wrap 记着，不重跑比法；参数变了整份换新", () => {
+  const lines = plain(300),
+    changed = lines.slice();
+  changed[150] = "第 151 行：改了";
+  const d = changeHunks(textOf(lines), textOf(changed));
+  const st = step(
+    "a",
+    "write_file",
+    { path: "cache.txt", content: textOf(changed) },
+    {
+      diff: { hunks: d.hunks, old: d.old },
+      change: { path: "cache.txt", added: 1, removed: 1, created: false, lines: 300 }
+    }
+  );
+  const first = view.stepDiffRender(st, { limit: 20, wrap: false }),
+    again = view.stepDiffRender(st, { limit: 20, wrap: false }),
+    full = view.stepDiffRender(st, { limit: Infinity, wrap: true });
+  assert.equal(first, again);
+  assert.notEqual(first, full);
+  // 参数变了：缓存整份换新，不拿旧的 HTML
+  st.arguments = JSON.stringify({ path: "cache.txt", content: textOf([...changed, "又一行"]) });
+  const after = view.stepDiffRender(st, { limit: 20, wrap: false });
+  assert.notEqual(after, first);
+});
+
+test("摘录分块比出来的增删，与整份清单一致：随机改五十回", () => {
+  let seed = 11;
+  const next = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let round = 0; round < 50; round++) {
+    const before = plain(40 + Math.floor(next() * 160)),
+      after = before.slice();
+    for (let k = 0, edits = 1 + Math.floor(next() * 6); k < edits; k++) {
+      const at = Math.floor(next() * after.length),
+        kind = next();
+      if (kind < 0.45) after[at] = `第 ${round}-${k} 处改了`;
+      else if (kind < 0.75) after.splice(at, 0, ...Array.from({ length: 1 + Math.floor(next() * 4) }, (_, i) => `插 ${round}-${k}-${i}`));
+      else if (after.length > 1) after.splice(at, 1);
+    }
+    const h = changeHunks(textOf(before), textOf(after));
+    if (!h.hunks.length) continue;
+    const st = step(
+      "a",
+      "write_file",
+      { path: "rand.txt", content: textOf(after) },
+      {
+        diff: { hunks: h.hunks, old: h.old },
+        change: { path: "rand.txt", added: h.added, removed: h.removed, created: false, lines: after.length }
+      }
+    );
+    const drawn = view.stepDiffRender(st, { limit: Infinity, wrap: true });
+    assert.deepEqual({ added: drawn.added, removed: drawn.removed }, { added: h.added, removed: h.removed }, `round ${round}`);
+  }
+});
+
+test("省略提示都走 i18n：英文表里有这几句", () => {
+  const en = readFileSync(new URL("../../i18n/en.js", import.meta.url), "utf8");
+  for (const key of ["…（跳过 {0} 行未改）", "…（前 {0} 字略）", "…（后 {0} 字略）", "…（中间 {0} 字略）", "…（{0} 字略）"])
+    assert.ok(en.includes(`"${key}"`), `${key} 不在 i18n/en.js`);
 });
