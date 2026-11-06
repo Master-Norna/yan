@@ -366,7 +366,7 @@ function parseInlineThink(text) {
     end = thinkCloser(body);
   return end < 0 ? null : { reasoning: body.slice(0, end).trim(), content: body.slice(end + 8).replace(/^\s+/, "") };
 }
-async function readSse(response, assistant, { onFrame = null } = {}) {
+async function readSse(response, assistant, { onFrame = null, live = true } = {}) {
   const reader = response.body.getReader(),
     decoder = new TextDecoder();
   let buffer = "",
@@ -374,7 +374,8 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     ended = false,
     finishReason = "";
   // 落墨节奏：正文不按网络分块一坨坨出现，而是每帧按积压量的一定比例匀速写出（积压越多写得越快，最多滞后零点几秒）；新写出的字带短暂渐显，末尾跟一支笔尖光标
-  const paced = !inkMotionOff();
+  // live: false 的是不进页面的答复（拟题、撮要、审查）：一次落下，不按帧写、不为它存盘
+  const paced = live && !inkMotionOff();
   let shown = paced ? assistant.content.length : Infinity,
     freshGroups = [];
   let closed = false;
@@ -412,6 +413,7 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
     requestAnimationFrame(frame);
   };
   const refresh = () => {
+    if (!live) return;
     saveStoreSoon();
     schedule();
   };
