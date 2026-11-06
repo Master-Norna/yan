@@ -1,5 +1,5 @@
 // 编码认读：末字被写断一个字节的短 UTF-8 仍按 UTF-8 读（末尾一个 U+FFFD），整篇 ASCII 只夹几个 GBK 汉字的照旧认作 GBK，
-// 判据是在非 ASCII 字里比好坏；GBK「你好」、真 GBK 整段、纯 ASCII、空文件、带 BOM 的都不变
+// 判据是在非 ASCII 字里比好坏（两字节的字记半个）；合法 UTF-8 里的字面 U+FFFD 不算坏；GBK「你好」、真 GBK 整段、纯 ASCII、空文件、带 BOM 的都不变
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -57,6 +57,26 @@ test("整段真 GBK 中文：判 GBK，解得回原文", () => {
   assert.equal(decoded.text.length, 141);
   assert.ok(decoded.text.startsWith("会议纪要：本次讨论了工作目录的读写接口"));
   assert.ok(decoded.text.endsWith("空文件算零行。"));
+});
+
+test("文件里本来就写着 U+FFFD（合法 UTF-8）：仍按 UTF-8 读，那是真内容不是坏字节", () => {
+  const ascii = Buffer.from("x".repeat(200), "ascii"),
+    decoded = decodeText(Buffer.concat([ascii, Buffer.from("\uFFFD", "utf8")]));
+  assert.equal(decoded.encoding, "utf-8");
+  assert.equal(decoded.text, "x".repeat(200) + "\uFFFD");
+});
+
+test("合法 UTF-8 里 U+FFFD 比别的非 ASCII 字还多：仍是 UTF-8", () => {
+  const decoded = decodeText(Buffer.from("好\uFFFD\uFFFD\uFFFD", "utf8")); // 好 一个，U+FFFD 三个
+  assert.equal(decoded.encoding, "utf-8");
+  assert.equal(decoded.text, "好\uFFFD\uFFFD\uFFFD");
+});
+
+test("短 GBK 的「系统信息」：三对凑巧配上的两字节字压不过两个 U+FFFD，判 GBK", () => {
+  // cfb5cdb3d0c5cfa2 按 UTF-8 解出 ϵͳ��Ϣ：三个两字节字（各记半个）与两个 U+FFFD
+  const decoded = decodeText(Buffer.from("cfb5cdb3d0c5cfa2", "hex"));
+  assert.equal(decoded.encoding, "gbk");
+  assert.equal(decoded.text, "系统信息");
 });
 
 test("纯 ASCII、空文件、带 BOM 的照旧", () => {
