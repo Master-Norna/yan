@@ -106,22 +106,27 @@ function absJoin(dir, ref) {
     top = clean.match(/^(?:[a-z]:|\/\/[^/]+\/[^/]+)/i)?.[0] || "";
   return `${top}/${walkRelative("", `${clean.slice(top.length)}/${ref}`)}`;
 }
-// sandbox:/ 这类不是本机的路返回 null；Windows 上 /mnt/… 这样以 / 起头的也不是，Mac 上它就是绝对路
+// sandbox:/ 这类不是本机的路返回 null；Windows 上 /mnt/… 这样以 / 起头的也不是，Mac 上它就是绝对路。
+// Windows 的共享路径（\\nas\share\… 与 file://nas/share/…）与盘符一样是绝对路；两个正斜杠起头的是协议相对的网址，不认
 /** @param {string} raw @param {RefAnchor} anchor @returns {RefTarget | null} */
 function refTarget(raw, anchor) {
   let text = String(raw || "")
     .trim()
     .replace(/[?#].*$/, "");
+  // 要在换成 / 之前认出来：\\nas\share\… 与 file://nas/share/…
+  const shared = /^\\\\[^\\]/.test(text) || /^file:\/\/[^/]/i.test(text);
   try {
     text = decodeURIComponent(text);
   } catch {}
   const fromRoot = !!anchor.document && /^\/(?!\/)/.test(text);
   text = text
+    .replace(/^file:\/\/([^/])/i, "//$1")
     .replace(/^file:\/+/i, "/")
     .replace(/\\/g, "/")
     .replace(/^\/([a-z]:\/)/i, "$1");
   if (!fromRoot) {
     const win = (bootstrap.work?.platform || "win32") === "win32";
+    if (win && shared) return { file: absJoin(text, "") };
     if (win ? /^[a-z]:\//i.test(text) : /^\/(?!\/)/.test(text)) return { file: absJoin(text, "") };
     if (/^[a-z][\w+.-]*:|^\//i.test(text)) return null;
   }
