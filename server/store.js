@@ -169,9 +169,16 @@ module.exports = function createStore({ working = () => 0 } = {}) {
         ({ busy: locked } = copyInto(root, next, new Set(["位置.json", "环境"])));
       }
       const previous = root;
-      root = next;
-      ensureRoot();
-      if (!process.env.YAN_HOME) writePointer(root);
+      try {
+        root = next;
+        ensureRoot();
+        if (!process.env.YAN_HOME) writePointer(root);
+      } catch (error) {
+        // 建目录或写位置条子失败：把根退回去，这一段会话里配置、对话、卷宗才不会一个在新处一个在旧处。
+        // 新处已拷进去的那份留着（重试时判成「那里已有言的数据，直接沿用」正是想要的）
+        root = previous;
+        throw error;
+      }
       return { ...describe(), moved: true, adopted: existing, previous, busy: locked.slice(0, 20), busyCount: locked.length };
     },
     error => `存储位置未能更换：${errorText(error, 200)}`
