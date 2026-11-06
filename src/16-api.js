@@ -530,9 +530,12 @@ async function readSse(response, assistant, { onFrame = null } = {}) {
   try {
     // 已收到结束标志之后再断线：桥接那头没接住收了尾的流、上游在 stop 之后多送一个错误事件、静默超时，答复其实已经写完，
     // 不该当成断头再续写一遍。豁免只加在 pump 上——下面的 flushThink、结束标志与 finishFault 的判断照走，
-    // 「长度截断即使带 DONE 也报错」「被拦下的不接」照旧；用户按停（AbortError）也照旧抛出
+    // 「长度截断即使带 DONE 也报错」「被拦下的不接」照旧；用户按停（AbortError）也照旧抛出。
+    // 吞掉错误时把 reader 一并收掉：不取消就没人再读，桥接那头会替一个没人读的流一直转发、连接一直挂着，
+    // 走总线时也靠取消才从 busJobs 里撤下并发出 /api/bus/cancel。连接已经断了再取消也无妨
     await pump().catch(error => {
       if (!ended || error.name === "AbortError") throw error;
+      reader.cancel().catch(() => {});
     });
     flushThink();
     if (!ended) throw Error("接口未发送结束标志，连接已中断");
