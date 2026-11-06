@@ -239,16 +239,18 @@ check(
 // 合上那扇窗，后面几项看的是正文
 await evalJs(`document.querySelector("#helperClose").click(); true`);
 check("second helper's file exists", readFileSync(WORK + "/src/b.js", "utf8").includes("export const b = 2;"));
-// 等收尾那一答生成出来
+// 等收尾那一答生成出来。两份回报若在某一答说着「等回报。」时就都递上了，收尾那段落在这半句之后，
+// 不以此开头（见 #37），故与第 77 行一样按「含」判
 await waitFor(
-  `typeof __yanState === "function" && __yanState().conversations[0]?.messages.at(-1)?.content?.startsWith("DELEGATE done")`,
+  `typeof __yanState === "function" && __yanState().conversations[0]?.messages.at(-1)?.content?.includes("DELEGATE done｜")`,
   15000
 );
 const text = await evalJs(`__yanState().conversations[0].messages.at(-1).content`);
-// 先到的那份可能在第一答里就递上了（那一答还在说「等回报」），后到的另起一答；收尾那一答前冠着派活那一答的行迹
+// 先到的那份可能在第一答里就递上了（那一答还在说「等回报」），后到的另起一答；收尾那一答前冠着派活那一答的行迹。
+// 两份都赶进同一答时，正文前面还留着「等回报。」——两处都按「含」判，只认收尾那一段在不在
 check(
   "the last answer closes on the reports, behind the digest of the answer that sent the helpers",
-  text.startsWith("DELEGATE done｜trail:yes") && /帮手「(改 a\.js|建 b\.js)」已完成（\d 步，改了 1 个文件：src\/[ab]\.js/.test(text),
+  text.includes("DELEGATE done｜trail:yes") && /帮手「(改 a\.js|建 b\.js)」已完成（\d 步，改了 1 个文件：src\/[ab]\.js/.test(text),
   text.slice(0, 400)
 );
 check(
