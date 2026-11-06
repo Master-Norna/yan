@@ -2,40 +2,37 @@
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // 言离不开本机桥接（模型转发、存储、工具都在它那头）：页面与桥接说话只经这一段——接上（connectBridge）、
 // 长请求走总线（bridgeFetch，交回与 fetch 一样的 Response）、短请求要 JSON（bridge）、读桥接回的报错（describeResponseError）
-const LOCAL_BRIDGE = "http://127.0.0.1:8787";
 // 桥接的引导信息（版本、存储根、目录、平台、shell）；notice 是页面自己写的桥接状态提示，在设置 → 模型顶部显示
 let bootstrap = { notice: "" };
-/** @type {string|null} 桥接的地址：桥接自己开的页面是 ""（同源），探测别的本机端口时用 LOCAL_BRIDGE */
+/** @type {string|null} 桥接的地址：页面只由桥接自己开，接上后是 ""（同源） */
 let apiBase = null;
 // 页面是不是桥接自己开的（http://127.0.0.1:端口）：是的话桥接一定在，探测失败多半只是首次加载时被大文件挤慢了，该多等、多试
 function servedByBridge() {
   return /^https?:$/.test(location.protocol) && /^(127\.0\.0\.1|localhost)$/i.test(location.hostname);
 }
-async function connectBridge(candidates, timeout = 1400) {
+async function connectBridge() {
   // 从文件直接打开的页面不接桥接：它的浏览器存储与桥接页面分开，常是很久以前的旧记录，接上就可能把它当正本写回 配置.json
   //（VS Code 内置浏览器里曾这样整份冲掉过配置）。桥接那头也不认来源为 null 的请求，这里再守一道，不依赖浏览器发什么头
   if (location.protocol === "file:") return false;
-  for (const candidate of candidates) {
-    // 同源探测：首次打开时浏览器还在拉 vendor 里的几个大文件，引导请求排在后面，1.4 秒不够，给足时间
-    const wait = candidate === "" && servedByBridge() ? Math.max(timeout, 8000) : timeout;
-    try {
-      const response = await fetch(`${candidate}/api/bootstrap`, { signal: AbortSignal.timeout(wait) });
-      if (!response.ok || !(response.headers.get("content-type") || "").includes("application/json")) continue;
-      const next = await response.json();
-      bootstrap = next;
-      apiBase = candidate;
-      if (next.stale) toast(t("本机桥接已更新，请关闭桥接窗口后重新运行 start.cmd"), 8000);
-      return true;
-    } catch {}
+  try {
+    // 首次打开时浏览器还在拉 vendor 里的几个大文件，引导请求排在后面，要给足时间
+    const response = await fetch("/api/bootstrap", { signal: AbortSignal.timeout(servedByBridge() ? 8000 : 1400) });
+    if (!response.ok || !(response.headers.get("content-type") || "").includes("application/json")) return false;
+    const next = await response.json();
+    bootstrap = next;
+    apiBase = "";
+    if (next.stale) toast(t("本机桥接已更新，请关闭桥接窗口后重新运行 start.cmd"), 8000);
+    return true;
+  } catch {
+    return false;
   }
-  return false;
 }
-// 言离不开本机桥接（模型转发、存储、工具都在它那头）：接上了才开张。接不上就只挂一句「请先运行 start.cmd」，每隔几秒再探
+// 言离不开本机桥接（模型转发、存储、工具都在它那头）：接上了才开张。接不上就只挂一句「请先运行 start.cmd」，每隔几秒再探。
+// 桥接开的页面就在桥接自己的地址上，换了 YAN_PORT 也写得对；别处打开的不知道端口，留 index.html 里写的默认地址
 async function awaitBridge() {
-  const candidates = servedByBridge() ? ["", LOCAL_BRIDGE] : [LOCAL_BRIDGE];
-  while (!(await connectBridge(candidates))) {
+  while (!(await connectBridge())) {
     document.documentElement.dataset.bridge = "waiting";
-    $("#bridgeGateUrl").textContent = LOCAL_BRIDGE;
+    if (servedByBridge()) $("#bridgeGateUrl").textContent = location.origin;
     await new Promise(resolve => setTimeout(resolve, 3000));
   }
   delete document.documentElement.dataset.bridge;
