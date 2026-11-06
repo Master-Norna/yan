@@ -1,5 +1,6 @@
 // 流里的工具调用既没有 index 也没有 id：同一个 tool_calls 数组里第二件起的都是新的一件（一件调用不会在同一个数组里续写自己）；
-// 跨块的名字、参数续块仍旧续在末一件上——名字分块到达（read_ + file）与每块重发名字都不能被拆成两件
+// 第二件与末一件同 id 的例外——id 说了是同一件，续在它上面。跨块的名字、参数续块仍旧续在末一件上——
+// 名字分块到达（read_ + file）与每块重发名字都不能被拆成两件
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
@@ -70,6 +71,12 @@ test("带 index 的照旧按 index 归位，同块里乱序也一样", async () 
       calls({ index: 0, function: { arguments: ',"y":1}' } }, { index: 1, function: { arguments: ',"y":2}' } })
   );
   assert.deepEqual(shape(assistant), ['first({"x":1,"y":1})', 'second({"x":2,"y":2})']);
+});
+
+test("同一块里两件同 id、第二件不带 index：id 说了是同一件，仍是一件", async () => {
+  const assistant = await read(setup(), calls(call("probe", '{"x"', { id: "c1" }), { id: "c1", function: { arguments: ":1}" } }));
+  assert.deepEqual(shape(assistant), ['probe({"x":1})']);
+  assert.equal(assistant.toolCalls.length, 1);
 });
 
 test("带 id 的：换了 id 就是新的一件，同块里两件异 id 也拆开", async () => {
