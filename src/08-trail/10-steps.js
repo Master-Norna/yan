@@ -181,10 +181,12 @@ function workStepHtml(step, title) {
   else if (status === "pending")
     body = `<pre class="tool-output tool-cmd-preview">${escapeHtml(title)}</pre>${sandboxWhyHtml(step)}<div class="tool-approve"><button type="button" data-approve="run">${t(`运行`)}</button><button type="button" data-approve="skip">${t(`跳过`)}</button><button type="button" data-approve="auto" title="${t(`径行：此对话中后续指令不再询问`)}">${t(`径行`)}</button></div>`;
   else if (parts) {
-    const diff = splitDiffHtml(parts.old, parts.new, { limit: step.full ? Infinity : DIFF_SHOW_ROWS, wrap: !!step.full, all: parts.all });
-    body = `<div class="tool-diff">${diff.html}</div>`;
-    if (diff.clipped) more = t`展开全部 · −${diff.removed} +${diff.added} 行`;
-    else if (step.full && diff.rows > DIFF_SHOW_ROWS) more = t`只看前 ${DIFF_SHOW_ROWS} 行`;
+    const diff = stepDiffRender(step, { limit: step.full ? Infinity : DIFF_SHOW_ROWS, wrap: !!step.full });
+    if (diff) {
+      body = `<div class="tool-diff">${diff.html}</div>`;
+      if (diff.clipped) more = t`展开全部 · −${diff.removed} +${diff.added} 行`;
+      else if (step.full && diff.rows > DIFF_SHOW_ROWS) more = t`只看前 ${DIFF_SHOW_ROWS} 行`;
+    }
   } else if (step.output) {
     const out = clampLines(step.output, step.full);
     body = `<pre class="tool-output">${escapeHtml(out.text)}</pre>`;
