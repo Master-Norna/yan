@@ -76,8 +76,11 @@ module.exports = function createChatgpt({ home }) {
       body: new URLSearchParams({ ...form, resource: RESOURCE }),
       signal: AbortSignal.timeout(20000)
     }).catch(error => {
-      throw Error(
-        `连不上 OpenAI 授权端（${error.cause?.code || error.cause?.message || error.message}）：多半是桥接没走代理，开着代理就重启桥接再试`
+      throw Object.assign(
+        Error(
+          `连不上 OpenAI 授权端（${error.cause?.code || error.cause?.message || error.message}）：多半是桥接没走代理，开着代理就重启桥接再试`
+        ),
+        { status: 502 }
       );
     });
     const data = /** @type {any} */ (await response.json().catch(() => ({})));
@@ -86,7 +89,7 @@ module.exports = function createChatgpt({ home }) {
       const nested = data.error && typeof data.error === "object" ? data.error : null,
         code = nested ? nested.code || nested.type : data.error;
       const message = nested?.message || data.error_description || data.detail || code || `换令牌失败（${response.status}）`;
-      throw Object.assign(Error(hinted(code, String(message))), { code });
+      throw Object.assign(Error(hinted(code, String(message))), { code, status: response.status });
     }
     return data;
   }
@@ -107,7 +110,12 @@ module.exports = function createChatgpt({ home }) {
         save({ ...auth, tokens: tokensOf(fresh, auth.tokens) });
         return fresh.access_token;
       } catch (error) {
-        if (!DEAD_GRANTS.has(error.code)) throw Error(`ChatGPT 的登录凭证没能换新：${error.message}`);
+        if (!DEAD_GRANTS.has(error.code)) {
+          // 换新失败按「还能不能再试」给状态码：网络、5xx、限流是可重试的一类（502，页面等一等再发）；
+          // 其余 4xx 多是要改配置，当场交回，不让页面把 RETRY_DELAYS 排满
+          const retryable = !error.status || error.status === 429 || error.status >= 500;
+          throw Object.assign(Error(`ChatGPT 的登录凭证没能换新：${error.message}`), { status: retryable ? 502 : 400 });
+        }
         const { tokens, ...rest } = auth;
         save(rest);
         throw Error("ChatGPT 的登录已失效，请到「设置 → 模型」里重新登录");

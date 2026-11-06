@@ -44,6 +44,8 @@ async function upstreamError(response, raw) {
 // 不整份攒进内存。空白含 BOM（0xef 0xbb 0xbf）；事件流的行首只有 data、event、id、retry 与注释的冒号
 const BLANK = new Set([0x20, 0x09, 0x0a, 0x0d, 0x0b, 0x0c, 0xef, 0xbb, 0xbf]),
   EVENT_MARKS = new Set([..."deir:"].map(mark => mark.charCodeAt(0)));
+// 非事件流最多读到这么多就停：判定只看开头，整份 JSON 的答复才要整份；8 MiB 足够放进不带图的整份答复
+const SNIFF_LIMIT = 8 * 1024 * 1024;
 /**
  * @param {ReadableStream<Uint8Array>} body
  * @returns {Promise<{ chunks: Uint8Array[], reader: ReadableStreamDefaultReader<Uint8Array>, first: number }>}
@@ -86,15 +88,31 @@ function replayBody(chunks, reader) {
 /**
  * @param {Uint8Array[]} chunks
  * @param {ReadableStreamDefaultReader<Uint8Array>} reader
+ * @param {number} [limit] 读到这么多字节就停：非事件流要整份读进来才判得出是不是 JSON，给个上限，
+ * 配错的地址、失控的中转不至于让常驻桥接一直吃到内存天花板
+ * @returns {Promise<{ text: string, truncated: boolean }>}
  */
-async function collectText(chunks, reader) {
+async function collectText(chunks, reader, limit = Infinity) {
   const decoder = new TextDecoder();
-  let text = "";
-  for (const chunk of chunks) text += decoder.decode(chunk, { stream: true });
+  let text = "",
+    read = 0;
+  const stop = async () => {
+    await reader.cancel().catch(() => {});
+    return { text, truncated: true };
+  };
+  for (const chunk of chunks) {
+    text += decoder.decode(chunk, { stream: true });
+    read += chunk.byteLength;
+  }
+  if (read > limit) return stop();
   for (;;) {
     const { value, done } = await reader.read();
-    if (value) text += decoder.decode(value, { stream: true });
-    if (done) return text + decoder.decode();
+    if (value) {
+      text += decoder.decode(value, { stream: true });
+      read += value.byteLength;
+      if (read > limit) return stop();
+    }
+    if (done) return { text: text + decoder.decode(), truncated: false };
   }
 }
 
@@ -114,7 +132,15 @@ async function eventBody(response, provider) {
   };
   const lead = await peekLead(response.body).catch(cut);
   if (!lead.first || EVENT_MARKS.has(lead.first)) return replayBody(lead.chunks, lead.reader);
-  const raw = await collectText(lead.chunks, lead.reader).catch(cut);
+  const { text: raw, truncated } = await collectText(lead.chunks, lead.reader, SNIFF_LIMIT).catch(cut);
+  const type = String(response.headers.get("content-type") || "").toLowerCase(),
+    snippet = raw.trim().slice(0, 200);
+  // 判定只看开头，整份 JSON 的答复才要整份；超过上限仍不是事件流的，不再往下读，也不当整份
+  if (truncated)
+    throw Object.assign(
+      Error(`上游回的不是事件流（${type}），正文超过 ${SNIFF_LIMIT / 1024 / 1024} MB，不再往下读。前 200 字：${snippet}`),
+      { status: 415 }
+    );
   let json = null;
   try {
     json = JSON.parse(raw);
@@ -122,8 +148,6 @@ async function eventBody(response, provider) {
   if (json?.choices && !provider.stream) return new Response(wholeReplyEvents(json)).body;
   if (json && ((json.error && !json.choices) || json.type === "error"))
     throw Object.assign(Error(await upstreamError(response, raw)), { status: provider.stream ? 503 : 400 });
-  const type = String(response.headers.get("content-type") || "").toLowerCase(),
-    snippet = raw.trim().slice(0, 200);
   throw Object.assign(
     Error(
       json
