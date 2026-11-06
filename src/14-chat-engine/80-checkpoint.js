@@ -9,6 +9,29 @@ const checkpointing = new Map();
 /** @type {Set<string>} 正在退回的对话：退完之前不开新的一答，不然刚写下的又被退掉（见 prepareTurn、wakeWithReports） */
 const rewinding = new Set();
 const REWIND_SHOWN = 12;
+// 两处目录相交：同一处，或一处就在另一处里头（Windows 路径不分大小写，反斜杠与正斜杠同看）。
+// 退回按整片目录恢复（见 server/checkpoints.js），同目录、上层、下层的另一段对话在写，都会被它盖掉
+/** @param {string} a @param {string} b */
+function dirsOverlap(a, b) {
+  const norm = dir =>
+    String(dir || "")
+      .replace(/\\/g, "/")
+      .replace(/\/+$/, "")
+      .toLowerCase();
+  const x = norm(a),
+    y = norm(b);
+  return !!x && !!y && (x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`));
+}
+// 这个目录上还有别处在写：另一段对话正作答、帮手在做，或正退回。退回按整片目录恢复，一处忙就整片别动
+/** @param {string} root @param {string} exceptId */
+function rootBusyElsewhere(root, exceptId) {
+  return store.conversations.some(c => c.id !== exceptId && dirsOverlap(workRoot(c), root) && workdirLocked(c));
+}
+// 这个目录正被别的对话退回：此刻开工写下的，退回时会连同一起盖掉
+/** @param {string} root @param {string} exceptId */
+function rootRewinding(root, exceptId) {
+  return store.conversations.some(c => c.id !== exceptId && dirsOverlap(workRoot(c), root) && rewinding.has(c.id));
+}
 /** 动手前：这一答还没记过就记一回，帮手与主答同时动手也只记一回。记不下（目录不在、桥接是旧的）不拦着干活 @param {ToolContext} ctx */
 function checkpointBefore({ conversation, assistant }) {
   const root = isWork(conversation) && workRoot(conversation);
@@ -31,7 +54,7 @@ function checkpointBefore({ conversation, assistant }) {
 async function rewindAnswer(c, message) {
   const point = message.checkpoint;
   if (!point) return;
-  if (workdirLocked(c)) return toast(t("作答中，稍后再退"));
+  if (workdirLocked(c) || rootBusyElsewhere(point.root, c.id)) return toast(t("作答中，稍后再退"));
   const key = { root: point.root, conversation: c.id, answer: message.id };
   /** @type {{ path: string, kind: "changed"|"removed"|"added" }[]} */
   let changes;
@@ -50,7 +73,7 @@ async function rewindAnswer(c, message) {
     ok: t("退回")
   });
   if (!ok) return;
-  if (workdirLocked(c)) return toast(t("作答中，稍后再退"));
+  if (workdirLocked(c) || rootBusyElsewhere(point.root, c.id)) return toast(t("作答中，稍后再退"));
   rewinding.add(c.id);
   try {
     const done = await bridge("/api/checkpoint/restore", key, AbortSignal.timeout(600000));

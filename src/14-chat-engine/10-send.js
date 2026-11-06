@@ -22,8 +22,9 @@ async function prepareTurn(c) {
     toast(t("此对话正在另一页面作答，稍后再发"));
     return false;
   }
-  // 等的这一会儿，后台回报可能已在这段里另起了一答，这段也可能已被删掉。正退回目录的不开工：动手写下的会被退回盖掉
-  if (rewinding.has(c.id)) {
+  // 等的这一会儿，后台回报可能已在这段里另起了一答，这段也可能已被删掉。正退回目录的不开工：动手写下的会被退回盖掉。
+  // 退回按整片目录恢复，别的对话在同一处（或上下层）退回时也一样
+  if (rewinding.has(c.id) || (isWork(c) && rootRewinding(workRoot(c), c.id))) {
     toast(t("正在退回目录，稍后再发"));
     return false;
   }
