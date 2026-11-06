@@ -21,6 +21,19 @@ const broken = (wire, error) => {
 };
 const failure = (message, name = "Error") => Object.assign(Error(message), { name });
 const aborted = () => failure("已停止", "AbortError");
+/** 送完这几帧之后流还开着（不结束、不报错）：吞掉错误之后有没有把 reader 收掉，就看底层流的 cancel 被没被调到 */
+const held = wire => {
+  let cancelled = 0;
+  const chunk = new TextEncoder().encode(wire);
+  const response = new Response(
+    new ReadableStream({
+      start: controller => controller.enqueue(chunk),
+      cancel: () => void cancelled++
+    }),
+    { headers: { "content-type": "text/event-stream" } }
+  );
+  return { response, cancelled: () => cancelled };
+};
 
 function setup() {
   const f = load([
@@ -62,6 +75,16 @@ test("stop 结束块之后连接报错（controller.error）：照常收尾，�
   const { target, ok, error } = await read(f, broken(event({ content: "写完了" }, "stop"), failure("网络断了")));
   assert.equal(ok, true, error?.message);
   assert.equal(target.content, "写完了");
+});
+
+test("stop 结束块之后来错误事件、流还开着：照常收尾，并把底层流取消掉", async () => {
+  const f = setup();
+  const wire = held(event({ content: "写完了" }, "stop") + 'data: {"error":{"message":"上游掐线"}}\n\n');
+  const { target, ok, error } = await read(f, wire.response);
+  assert.equal(ok, true, error?.message);
+  assert.equal(target.content, "写完了");
+  // 不取消就没人再读：桥接那头会替一个没人读的流一直转发，走总线时也撤不下 busJobs
+  assert.equal(wire.cancelled(), 1);
 });
 
 test("length 即使带 DONE 仍报长度上限，被拦下的仍报被拦", async () => {
