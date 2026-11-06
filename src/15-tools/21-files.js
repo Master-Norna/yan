@@ -119,7 +119,9 @@ defineTool({
         : t`；文件是 ${data.encoding === "gbk" ? "GBK" : data.encoding.toUpperCase()} 编码${data.encoding === "gbk" ? t("，edit_file 改不了它") : ""}`;
     return {
       ok: true,
-      content: t`${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行${encoding}）\n${data.text}`,
+      content: data.totalLines
+        ? t`${data.path}（共 ${data.totalLines} 行，此处第 ${data.offset}–${data.offset + data.shown - 1} 行${encoding}）\n${data.text}`
+        : t`${data.path}（共 0 行，空文件${encoding}）\n${data.text}`,
       display: `${data.shown}/${data.totalLines} 行`
     };
   }
