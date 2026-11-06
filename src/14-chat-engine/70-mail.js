@@ -9,6 +9,9 @@
 const mailbags = new Map();
 /** @param {Conversation} conversation */
 function mailReport(conversation, item) {
+  // 对象会换：别处写过这段，catchUpConversation 把 store 里的换成了新对象，而帮手、后台指令的闭包还攥着旧的那一个。
+  // 按 id 取当前的那一份；真删了（找不到）就照手里这份往下走，写下的没人再读，也就到头了
+  conversation = store.conversations.find(c => c.id === conversation.id) || conversation;
   // 帮手开的后台指令，结束时叫醒的是帮手自己（见 mailHelper），不是主对话
   if (item.step?.scope) return void mailHelper(conversation, item.step.scope, item);
   const job = requestJob(conversation.id);
@@ -93,7 +96,7 @@ function sleepUntilMail(box) {
 }
 /** @param {Conversation} conversation */
 async function wakeWithReports(conversation, items) {
-  if (!items.length || !store.conversations.includes(conversation)) return;
+  if (!items.length || !store.conversations.some(c => c.id === conversation.id)) return;
   // 几处页面同开：照发送的规矩先认领，别处正在这段里作答就等它松手（报到每几秒一回，见 syncLeases）再来。
   // 等过之后按 id 重找：别处写过的，这边读回来已换了一个对象。这边正退回目录的也等它退完（认领之后再看，等的工夫里可能点了退回）
   if (
@@ -104,7 +107,10 @@ async function wakeWithReports(conversation, items) {
       const fresh = store.conversations.find(c => c.id === conversation.id);
       if (fresh) void wakeWithReports(fresh, items);
     }, 5000);
-  if (!store.conversations.includes(conversation)) return;
+  // 认领的工夫里对象也可能被换过：往下都写当前这一份
+  const live = store.conversations.find(c => c.id === conversation.id);
+  if (!live) return;
+  conversation = live;
   // 攒着的这一会儿里有人开了一答（用户发了话、上一答收尾时补言另起了一问）：交给它
   const job = requestJob(conversation.id);
   if (job) return void items.forEach(item => deliverInline(conversation, job, item));
