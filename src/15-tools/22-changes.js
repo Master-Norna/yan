@@ -208,11 +208,11 @@ function longMarks(oldLine, newLine) {
   const part = text => {
     if (text.length <= LONG_MOST) return escapeHtml(text);
     const half = LONG_MOST >> 1;
-    return `${escapeHtml(text.slice(0, half))}<span class="elide">…（中间 ${text.length - LONG_MOST} 字略）</span>${escapeHtml(text.slice(-half))}`;
+    return `${escapeHtml(text.slice(0, half))}<span class="elide">${escapeHtml(t`…（中间 ${text.length - LONG_MOST} 字略）`)}</span>${escapeHtml(text.slice(-half))}`;
   };
   const side = line => {
-    const pre = head > LONG_PAD ? `…（前 ${head - LONG_PAD} 字略）` : "",
-      post = tail > LONG_PAD ? `…（后 ${tail - LONG_PAD} 字略）` : "",
+    const pre = head > LONG_PAD ? t`…（前 ${head - LONG_PAD} 字略）` : "",
+      post = tail > LONG_PAD ? t`…（后 ${tail - LONG_PAD} 字略）` : "",
       before = line.slice(Math.max(0, head - LONG_PAD), head),
       after = line.slice(line.length - tail, line.length - tail + LONG_PAD);
     return `${escapeHtml(pre)}${escapeHtml(before)}<mark>${part(line.slice(head, line.length - tail))}</mark>${escapeHtml(after)}${escapeHtml(post)}`;
@@ -301,23 +301,27 @@ function pairLines(dels, ins) {
   return out;
 }
 /**
- * 前后两版比出并排的各行：成片未动的只留改动上下各两行，两处改动之间隔一道丝线、不写跳过几行（本就只列变化）；两边共有的缩进一起去掉。
+ * 前后两版比出并排的各行（不套外层容器）：摘录按窗口分开比时，各窗口各调一次，块与块之间不互相配对。
+ * 成片未动的只留改动上下各两行，两处改动之间隔一道丝线、不写跳过几行（本就只列变化）；两边共有的缩进一起去掉。
  * limit 只画前几行（行迹里先看前 20 行，「展开全部」再看全），比对总按全文来——先截后比会把截掉的行当成删了。
  * wrap 为假时一行放不下只放写得下的，末尾省略、悬停看整行（行迹里一步不该被一行长注释撑成半屏）；预览浮层与展开全部时照常折行。
- * all 为真时一行也不省：摘录里本来就只留改动上下几行，那句「跳过 N 行未改」也得画出来（见 changeDiffHtml）。
+ * all 为真时一行也不省：摘录里本来就只留改动上下几行，那句「跳过 N 行未改」也得画出来（见 windowsDiffHtml）。
  * 比法按改动量走（见 lcsOps）：两处改动隔着一千行、改在文件后头，都不会退成一整块红一整块绿；改动多到超过上限才整块一删一增，
  * 也是逐行画，limit 与「展开全部」照常
- * @param {string} oldText @param {string} newText @param {{ limit?: number, wrap?: boolean, all?: boolean }} [options]
- * @returns {{ html: string, rows: number, clipped: boolean, added: number, removed: number }}
+ * @param {string} oldText @param {string} newText @param {{ limit?: number, wrap?: boolean, all?: boolean, indent?: number }} [options]
+ * @returns {{ rows: string[], total: number, added: number, removed: number }}
  */
-function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true, all = false } = {}) {
+function diffRows(oldText, newText, { limit = Infinity, wrap = true, all = false, indent } = {}) {
   let a = diffLines(oldText),
     b = diffLines(newText);
-  // 两边共有的缩进一起去掉（一行一行找，不摊成参数：十几万行的文件会撑爆调用栈）
-  let lead = Infinity;
-  const indentOf = line => (line.trim() ? line.match(/^ */)[0].length : Infinity);
-  for (const line of a) lead = Math.min(lead, indentOf(line));
-  for (const line of b) lead = Math.min(lead, indentOf(line));
+  // 两边共有的缩进一起去掉（一行一行找，不摊成参数：十几万行的文件会撑爆调用栈）。
+  // 摘录分块比时由调用处给一个共同的缩进：各块各去各的，缩进深的那块会整体左移，几块并排看着对不齐
+  let lead = indent ?? Infinity;
+  if (indent === undefined) {
+    const indentOf = line => (line.trim() ? line.match(/^ */)[0].length : Infinity);
+    for (const line of a) lead = Math.min(lead, indentOf(line));
+    for (const line of b) lead = Math.min(lead, indentOf(line));
+  }
   if (Number.isFinite(lead) && lead > 0) [a, b] = [a, b].map(lines => lines.map(line => line.slice(Math.min(lead, line.length))));
   const ops = lcsOps(a, b),
     near = all
@@ -349,12 +353,12 @@ function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true, all = 
   const cell = (kind, html, raw = "") =>
     html === null
       ? `<span class="e"></span>`
-      : `<span class="${kind}${kind === "s" && raw.startsWith("…（") ? " hint" : ""}"${!wrap && raw.length > 30 ? ` title="${escapeHtml(titleOf(raw))}"` : ""}>${html || " "}</span>`;
+      : `<span class="${kind}"${!wrap && raw.length > 30 ? ` title="${escapeHtml(titleOf(raw))}"` : ""}>${html || " "}</span>`;
   // 没配上对的长行：行迹里只写开头一段（一行放不下，末端的 title 另可看出处）；预览浮层与「展开全部」照常整行，
   // 改在后半截的行才看得见——基线本也是整行，折成开头就是这次改出来的退步
   const shownLine = raw =>
     raw.length > LONG_LINE && !wrap
-      ? `${escapeHtml(raw.slice(0, LONG_MOST))}<span class="elide">…（${raw.length - LONG_MOST} 字略）</span>`
+      ? `${escapeHtml(raw.slice(0, LONG_MOST))}<span class="elide">${escapeHtml(t`…（${raw.length - LONG_MOST} 字略）`)}</span>`
       : escapeHtml(raw);
   for (let k = 0; k < ops.length; ) {
     if (ops[k][0] === "s") {
@@ -387,6 +391,57 @@ function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true, all = 
       pushRow(cell("d", left, d) + cell("i", right, i));
     }
   }
+  return { rows, total, added, removed };
+}
+/**
+ * 两版比成并排的红绿，套上外层的容器：「展开全部」按 rows 与 clipped 认。
+ * @param {string} oldText @param {string} newText @param {{ limit?: number, wrap?: boolean, all?: boolean }} [options]
+ * @returns {{ html: string, rows: number, clipped: boolean, added: number, removed: number }}
+ */
+function splitDiffHtml(oldText, newText, { limit = Infinity, wrap = true, all = false } = {}) {
+  const out = diffRows(oldText, newText, { limit, wrap, all });
+  return {
+    html: `<div class="tool-output split-diff${wrap ? "" : " clip"}">${out.rows.join("")}</div>`,
+    rows: out.total,
+    clipped: out.rows.length < out.total,
+    added: out.added,
+    removed: out.removed
+  };
+}
+// 摘录的几块各比各的：块与块之间只放一句「跳过 N 行未改」，两侧同文、是未改行。不拼成一整段再比——
+// 拼起来窗口之间会互相配对（把挪到远处的代码认成没改，上下文与跳过提示反而画成红绿），增删也与清单对不上。
+// limit 按所有块合计，先看前几行；每块自己的最小增删加起来，就是整份的增删
+/**
+ * @param {Array<{ old: string, new: string, skip: number }>} windows
+ * @param {{ limit?: number, wrap?: boolean }} [options]
+ * @returns {{ html: string, rows: number, clipped: boolean, added: number, removed: number }}
+ */
+function windowsDiffHtml(windows, { limit = Infinity, wrap = true } = {}) {
+  /** @type {string[]} */
+  const rows = [];
+  let total = 0,
+    added = 0,
+    removed = 0;
+  // 几块共用一个缩进量（与拼成一整段时一样）：各块各去各的，缩进深的那块会整体左移
+  const indentOf = line => (line.trim() ? line.match(/^ */)[0].length : Infinity);
+  let indent = Infinity;
+  for (const w of windows) {
+    for (const text of [w.old, w.new]) for (const line of diffLines(text)) indent = Math.min(indent, indentOf(line));
+  }
+  for (const w of windows) {
+    if (w.skip > 0) {
+      const note = t`…（跳过 ${w.skip} 行未改）`,
+        cell = `<span class="s">${escapeHtml(note)}</span>`;
+      total++;
+      if (rows.length < limit) rows.push(cell + cell);
+    }
+    // 这块只拿剩下的行数：前面的块把 limit 用完了就不拼 HTML，但仍要把行数、增删数清点完
+    const part = diffRows(w.old, w.new, { limit: Math.max(0, limit - rows.length), wrap, all: true, indent });
+    total += part.total;
+    added += part.added;
+    removed += part.removed;
+    for (const row of part.rows) if (rows.length < limit) rows.push(row);
+  }
   return {
     html: `<div class="tool-output split-diff${wrap ? "" : " clip"}">${rows.join("")}</div>`,
     rows: total,
@@ -407,8 +462,9 @@ function writtenContent(step) {
   return typeof args.content === "string" ? args.content : null;
 }
 // 覆盖写那一步的改动：桥接只存了旧侧的行与两侧行号（见 server/work/text.js 的 changeHunks），
-// 新的一侧整份在参数里，按行号切出同一批窗口，拼回来照旧逐行比；跳过未改的那几行两侧写同一句，并排看过去对得上
-/** @param {Step} step @returns {{ old: string, new: string, all: boolean }|null} */
+// 新的一侧整份在参数里，按行号切出同一批窗口；摘录里跳过的未改行数一并带回去，画的时候放在两块之间。
+// 各窗口分开比（见 windowsDiffHtml），不拼成一整段再比：拼起来窗口之间会互相配对，挪到远处的代码被认成没改
+/** @param {Step} step @returns {{ windows: Array<{ old: string, new: string, skip: number }>, all: true }|null} */
 function hunksText(step) {
   const diff = step.diff;
   if (!diff || !("hunks" in diff) || !Array.isArray(diff.hunks) || !diff.hunks.length) return null;
@@ -416,37 +472,41 @@ function hunksText(step) {
   const content = writtenContent(step);
   if (content === null) return null;
   const b = diffLines(content),
-    oldRows = step.diff.old ? step.diff.old.split("\n") : [],
-    old = [],
-    next = [];
+    oldRows = diff.old ? diff.old.split("\n") : [],
+    // 摘录按行拼回，末尾补一个换行：diffLines 剥掉的是补的这个。不补的话，最后一行恰是空行时会被当成文件末尾的换行，
+    // 那一行就没了，并排时新侧多出一个「新增」空行、左侧错位
+    asText = lines => (lines.length ? `${lines.join("\n")}\n` : ""),
+    /** @type {Array<{ old: string, new: string, skip: number }>} */
+    windows = [];
   let cursor = 0,
     prevEnd = 0;
   for (const hunk of hunks) {
-    const skip = hunk.oldStart - prevEnd;
-    if (skip > 0) {
-      const note = `…（跳过 ${skip} 行未改）`;
-      old.push(note);
-      next.push(note);
-    }
-    for (let i = 0; i < hunk.oldCount; i++) old.push(oldRows[cursor + i] ?? "");
-    for (const line of b.slice(hunk.newStart, hunk.newStart + hunk.newCount)) next.push(line);
+    /** @type {string[]} */
+    const oldLines = [];
+    for (let i = 0; i < hunk.oldCount; i++) oldLines.push(oldRows[cursor + i] ?? "");
+    windows.push({
+      old: asText(oldLines),
+      new: asText(b.slice(hunk.newStart, hunk.newStart + hunk.newCount)),
+      skip: Math.max(0, hunk.oldStart - prevEnd)
+    });
     cursor += hunk.oldCount;
     prevEnd = hunk.oldStart + hunk.oldCount;
   }
-  // 摘录按行拼回，末尾补一个换行：diffLines 剥掉的是补的这个。不补的话，最后一行恰是空行时会被当成文件末尾的换行，
-  // 那一行就没了，并排时新侧多出一个「新增」空行、左侧错位
-  const asText = lines => (lines.length ? `${lines.join("\n")}\n` : "");
-  return { old: asText(old), new: asText(next), all: true };
+  return { windows, all: true };
 }
 // 这一步该画的红绿：新格式（hunks）、旧格式（diff.old/new、written/previous）、改文件那步（参数里的前后两段）。
-// 解析参数不便宜（一行到底的 JSON 也有几万字），按这一步的 diff 与参数原文记一份，重画时不必再解
-/** @type {WeakMap<Step, { diff: unknown, arguments: string, change: unknown, written: unknown, previous: unknown, parts: { old: string, new: string, all?: boolean }|null }>} */
+// 解析参数不便宜（一行到底的 JSON 也有几万字），按这一步的 diff 与参数原文记一份，重画时不必再解。
+// 比出来的 HTML 也按 limit、wrap 记着：行迹里每次重画都会再走一遍，表比最大到一千六百万格，几步叠起来就感觉得到
+/** @typedef {{ old: string, new: string, all?: boolean }} DiffText */
+/** @typedef {{ windows: Array<{ old: string, new: string, skip: number }>, all: true }} DiffWindows */
+/** @typedef {{ html: string, rows: number, clipped: boolean, added: number, removed: number }} DiffRender */
+/** @type {WeakMap<Step, { diff: unknown, arguments: string, change: unknown, written: unknown, previous: unknown, parts: DiffText|DiffWindows|null, views: Map<string, DiffRender> }>} */
 const stepDiffCache = new WeakMap();
-/** @param {Step} step @returns {{ old: string, new: string, all?: boolean }|null} */
-function stepDiffParts(step) {
+// 缓存还新不新：change 也要比——新建的件在跑完前（change 还没设）先画过一回，缓存若只看 diff / arguments，
+// 跑完后参数与 diff 都没变，缓存还回那个 null——新建的件就再也画不出红绿了（跑完才有 created）
+/** @param {Step} step */
+function stepDiffEntry(step) {
   const cached = stepDiffCache.get(step);
-  // change 也要比：新建的件在跑完前（change 还没设）先画过一回，缓存若只看 diff / arguments，
-  // 跑完后参数与 diff 都没变，缓存还回那个 null——新建的件就再也画不出红绿了（跑完才有 created）
   if (
     cached &&
     cached.diff === step.diff &&
@@ -455,25 +515,50 @@ function stepDiffParts(step) {
     cached.written === step.written &&
     cached.previous === step.previous
   )
-    return cached.parts;
-  const parts = stepDiffPartsOf(step);
-  stepDiffCache.set(step, {
+    return cached;
+  const entry = {
     diff: step.diff,
     arguments: step.arguments,
     change: step.change,
     written: step.written,
     previous: step.previous,
-    parts
-  });
-  return parts;
+    parts: stepDiffPartsOf(step),
+    views: new Map()
+  };
+  stepDiffCache.set(step, entry);
+  return entry;
 }
+/** @param {Step} step @returns {DiffText|DiffWindows|null} */
+function stepDiffParts(step) {
+  return stepDiffEntry(step).parts;
+}
+/**
+ * 重画时不必再比：按 limit、wrap 记着；这一步的 diff / 参数 / change 一变，整份缓存换新，旧的 HTML 一并丢掉。
+ * @param {Step} step @param {{ limit?: number, wrap?: boolean }} [options]
+ * @returns {DiffRender|null}
+ */
+function stepDiffRender(step, { limit = Infinity, wrap = true } = {}) {
+  const entry = stepDiffEntry(step);
+  if (!entry.parts) return null;
+  const key = `${limit}|${wrap ? 1 : 0}`;
+  let out = entry.views.get(key);
+  if (!out) {
+    out =
+      "windows" in entry.parts
+        ? windowsDiffHtml(entry.parts.windows, { limit, wrap })
+        : splitDiffHtml(entry.parts.old, entry.parts.new, { limit, wrap, all: entry.parts.all });
+    entry.views.set(key, out);
+  }
+  return out;
+}
+/** @param {Step} step @returns {DiffText|DiffWindows|null} */
 function stepDiffPartsOf(step) {
   // 取不到内容时不要就此 null：往下还有 written/previous 与参数这两条路，能画多少画多少
   if (step.diff && "hunks" in step.diff) {
     const parts = hunksText(step);
     if (parts) return parts;
   }
-  if (step.diff && typeof step.diff.old === "string" && typeof step.diff.new === "string")
+  if (step.diff && "new" in step.diff && typeof step.diff.old === "string" && typeof step.diff.new === "string")
     return { old: step.diff.old, new: step.diff.new };
   if (step.written !== undefined) return { old: step.previous ?? "", new: step.written };
   // 新建的件：没有旧的一版，写下的整份就是这一处改动（左边留空），与覆盖写同一种画法
@@ -509,9 +594,9 @@ function changeDiffHtml(message, path) {
         content = created && step.name === "write_file" ? writtenContent(step) : null;
       // 新建的件（或没记下原文的）也并排画：左边留空，与改动同一种画法，不一会儿整宽一会儿两栏
       if (content !== null) return `${head}<div class="tool-diff">${splitDiffHtml("", content, { all: true }).html}</div>`;
-      const parts = stepDiffParts(step);
-      if (!parts) return head;
-      return `${head}<div class="tool-diff">${splitDiffHtml(parts.old, parts.new, { all: parts.all }).html}</div>`;
+      const diff = stepDiffRender(step);
+      if (!diff) return head;
+      return `${head}<div class="tool-diff">${diff.html}</div>`;
     })
     .join("")}</div>`;
 }

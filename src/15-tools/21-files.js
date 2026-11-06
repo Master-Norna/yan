@@ -37,9 +37,8 @@ defineTool({
       lines: data.lines
     };
     // 覆盖写时桥接按改动捎回旧侧的行与两侧行号（见 server/work/text.js 的 changeHunks）：新的一侧整份就在这一步的参数里，
-    // 画的时候从那儿取（见 22-changes.js 的 hunksText），不再另存一份。旧桥接只给 previous（开头一截），照旧留着，早先的步骤也画得出来
+    // 画的时候从那儿取（见 22-changes.js 的 hunksText），不再另存一份。早先的步骤另有 previous，画的时候照旧认
     if (data.diff) step.diff = data.diff;
-    else if (data.previous !== undefined) step.previous = String(data.previous);
     return {
       ok: true,
       content: t`已写入 ${data.path}（${data.bytes} 字节，${data.lines} 行${data.existed ? t`，覆盖了原${data.binary ? t("有的二进制") : ""}文件` : ""}${data.converted ? t("；原文件是 GBK，已存成 UTF-8") : ""}）`,
