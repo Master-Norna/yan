@@ -264,10 +264,13 @@ test("screenPath：机密文件不读不写，.git 内部不写、可读；别�
     assert.match(screenPath(p, { write: true }), /机密文件/, p);
   }
   // Windows 的数据流写法（x::$DATA、x:stream）碰的是同一件文件本身：判之前剥掉，别让它绕过这一道
-  for (const p of [".env::$DATA", "src/.env:stream", "a/id_rsa::$DATA", "key.pem:$DATA", "config\\secrets.json::$DATA"]) {
-    assert.match(screenPath(p), /机密文件/, p);
-    assert.match(screenPath(p, { write: true }), /机密文件/, p);
-  }
+  if (process.platform === "win32")
+    for (const p of [".env::$DATA", "src/.env:stream", "a/id_rsa::$DATA", "key.pem:$DATA", "config\\secrets.json::$DATA"]) {
+      assert.match(screenPath(p), /机密文件/, p);
+      assert.match(screenPath(p, { write: true }), /机密文件/, p);
+    }
+  // 别的平台上冒号是文件名的一部分：不能剥，keys/service:prod.pem 仍是私钥
+  else assert.match(screenPath("keys/service:prod.pem"), /机密文件/);
   assert.equal(screenPath(".git/config"), null);
   assert.match(screenPath(".git/config", { write: true }), /\.git 内部/);
   assert.match(screenPath(".git\\hooks\\pre-commit", { write: true }), /\.git 内部/);

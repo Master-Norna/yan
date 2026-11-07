@@ -160,9 +160,11 @@ const SECRET_PATH_IN_COMMAND =
   /(^|[\s"'=;|&(])(?:[^\s"'`;|&<>()]*[\\/]credentials|(?:[^\s"'`;|&<>()]*[\\/])?(?:\.env(?:\.[^\s"'`;|&<>()\\/]*)?|[^\s"'`;|&<>()\\/]*\.(?:pem|key|pfx|p12|jks|keystore)|id_(?:rsa|ed25519|ecdsa|dsa)(?:\.pub)?|[^\s"'`;|&<>()\\/]*\.(?:credentials|secret|secrets)|credentials\.json|secrets\.(?:json|ya?ml|toml)))(?=$|:|[\s"'`;|&)])/i;
 // Windows 的 NTFS 数据流：「x::$DATA」「x:stream」写的是同一件文件 x 的另一个流（未命名流即 x 本身），fs 照常打开 x——
 // 「.env::$DATA」若原样去比，就绕过了机密文件这一道。比之前把每段里冒号起往后截掉；盘符段「C:」的冒号后是
-// 分隔符或到头，不会被截。只用于单条路径：混着别的话的文本（指令）不能这么截
+// 分隔符，开头的单个字母是盘符，都不截。只用于单条路径：混着别的话的文本（指令）不能这么截。
+// 别的平台上冒号就是文件名的一部分（keys/service:prod.pem、/tmp/user:data/.yan），不动
 function withoutDataStream(value) {
-  return String(value || "").replace(/(^|[\\/])([^\\/]*?):(?![\\/])[^\\/]*/g, "$1$2");
+  const text = String(value || "");
+  return process.platform === "win32" ? text.replace(/(^|[\\/])([^\\/]*?)(?<!^[A-Za-z]):(?![\\/])[^\\/]*/g, "$1$2") : text;
 }
 // `.git` 要由 git 自己维护；显式读可以，直接用 shell 写、删、搬则拒绝。脚本内部仍不在静态筛查能力之内。
 const GIT_INTERNAL_PATH = /(^|[\s"'=;|&(])[^\s"'`;|&<>()]*\.git[\\/][^\s"'`;|&<>()]*/i;

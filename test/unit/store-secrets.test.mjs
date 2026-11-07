@@ -42,6 +42,15 @@ test("screenStorePath：根下这几样（含备份目录里的）拦下，卷�
     assert.equal(screenStorePath(p, R), null, p);
 });
 
+test(
+  "screenStorePath：别的平台上存储根带冒号也认得出（冒号是路径的一部分，不当数据流剥）",
+  { skip: process.platform === "win32" && "只在非 Windows 上成立" },
+  () => {
+    const colon = "/tmp/user:data/.yan";
+    assert.ok(screenStorePath(`${colon}/配置.json`, colon));
+  }
+);
+
 const root = path.resolve("test/.tmp/store-secrets"),
   archive = path.join(root, "卷宗");
 rmSync(root, { recursive: true, force: true });
@@ -81,8 +90,8 @@ test("宽档、没开沙箱也拦：读、写配置，读备份", async () => {
     ["read", { path: path.join(root, "配置.json"), roam: true, permission: "auto" }],
     ["read", { path: path.join(root, "配置备份", "a.json"), roam: true, permission: "review" }],
     ["write", { path: path.join(root, "配置.json"), content: "{}", roam: true, permission: "auto" }],
-    // 数据流写法（配置.json::$DATA）碰的是同一件文件本身，不能借它把 Key 读出来
-    ["read", { path: `${path.join(root, "配置.json")}::$DATA`, roam: true, permission: "auto" }]
+    // 数据流写法（配置.json::$DATA）碰的是同一件文件本身，不能借它把 Key 读出来（只有 Windows 上才是）
+    ...(process.platform === "win32" ? [["read", { path: `${path.join(root, "配置.json")}::$DATA`, roam: true, permission: "auto" }]] : [])
   ]) {
     const { status, data } = await call(route, body);
     assert.notEqual(status, 200, `${route} ${body.path}`);
