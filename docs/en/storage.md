@@ -21,4 +21,4 @@ If an attachment original can't be written to disk, it waits in the browser's In
 
 ## Backup
 
-- Backup export and import: on export you can tick **Include attachments**. Import merges (chats / models / Files items that already exist are skipped by id, and non-conflicting drafts are merged). Backups never include API keys.
+- Backup export and import: on export you can tick **Include attachments**. Import merges (chats and models that already exist are skipped by id, and non-conflicting drafts are merged); Files is a folder in the storage location and isn't part of backups. Backups never include API keys.
