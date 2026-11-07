@@ -463,7 +463,13 @@ test("anthropicRequest：system 单列、工具结果并进 user、思考块回�
     messages: [{ role: "user", content: "x" }],
     reasoning_effort: "max"
   });
-  assert.ok(sonnet35.max_tokens <= 8192 && sonnet35.thinking.budget_tokens < sonnet35.max_tokens);
+  assert.ok(sonnet35.max_tokens <= 8192 && !sonnet35.thinking, "3.5 没有思考，也不超 8192");
+  const opus3 = f.anthropicRequest({
+    model: "claude-3-opus-20240229",
+    messages: [{ role: "user", content: "x" }],
+    reasoning_effort: "max"
+  });
+  assert.ok(opus3.max_tokens <= 4096 && !opus3.thinking, "Opus 3 是 4096，不按 Opus 4 的 32k 算");
   assert.equal(f.anthropicEndpoint("https://api.anthropic.com/v1/"), "https://api.anthropic.com/v1/messages");
   assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com" }), true);
   assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com", api: "openai" }), false);

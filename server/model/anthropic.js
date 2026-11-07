@@ -22,9 +22,11 @@ function anthropicGeneration(model) {
     noSampling: version >= 4.7,
     thinksByDefault: version >= 5,
     xhigh: version >= 4.7,
-    // 老模型的输出上限：Opus 4 / 4.1 是 32k，4.x 其余与 3.7 是 64k，3.5 是 8192、3.0 是 4096（预算连同正文不过它）
+    // 思考从 3.7 起才有：更老的带上 thinking 就是 400
+    noThinking: !!family && version < 3.7,
+    // 老模型的输出上限：3.0 是 4096、3.5 是 8192（Opus 3 也是 4096，要先判代际），Opus 4 / 4.1 是 32k，4.x 其余与 3.7 是 64k
     output:
-      !family || version >= 4.6 ? 0 : family === "opus" && version < 4.5 ? 32000 : version >= 3.7 ? 64000 : version >= 3.5 ? 8192 : 4096,
+      !family || version >= 4.6 ? 0 : version < 3.5 ? 4096 : version < 3.7 ? 8192 : family === "opus" && version < 4.5 ? 32000 : 64000,
     version
   };
 }
@@ -139,7 +141,9 @@ function anthropicRequest(payload) {
   } else {
     // 预算得给正文留出 4096，连同正文不过这一代的输出上限（「最高」档的 65536 放在 64k 的模型上就是 400）
     const ceiling = generation.output || Infinity,
-      budget = level ? Math.min(ANTHROPIC_BUDGETS[level] || 8192, ceiling - 4096) : 0;
+      budget = level && !generation.noThinking ? Math.min(ANTHROPIC_BUDGETS[level] || 8192, ceiling - 4096) : 0;
+    // 不开思考也不能超这一代的上限：默认的 32000 放在 3.5 上同样是 400
+    body.max_tokens = Math.min(maxTokens, ceiling);
     // 开了思考 temperature 只能是 1：不传
     if (budget) {
       body.thinking = { type: "enabled", budget_tokens: budget };
