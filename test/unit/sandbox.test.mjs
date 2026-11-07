@@ -55,7 +55,8 @@ test("POSIX 写动词守目录，复制与链接来源只豁免当次参数，rs
     "sed -ni '/TODO/p' /Users/a/other/x",
     "rsync -a ./ /Users/a/other/",
     "rsync --exclude .git/ ./ /Users/a/other/",
-    "ditto -V ./x /Users/a/other/x"
+    "ditto -V ./x /Users/a/other/x",
+    'rsync -a ./x "/Users/a/other/'
   ]) {
     assert.match(mac(command), /越出了工作目录/, command);
   }
@@ -639,6 +640,36 @@ test("不带后缀的 credentials：带路径才算凭据文件，严档拦、�
 
 // 攻击写法总表：新漏洞先进这张表再修。每行是 [指令, 严, 宽, 审, 审了也不放行]，x 是拦、o 是放
 const TABLE = [
+  // 注释先抹掉；落单引号不能遮住后续指令。
+  ...[
+    "# don't do this\nreg delete HKCU\\x",
+    "# don't do this\nStop-Computer",
+    "# don't do this\r\nStop-Computer",
+    "# don't do this\nsudo rm -rf /x",
+    "python - <<'EOF'\n# don't\nEOF\nsudo id",
+    "# don't\nreg delete HKCU\\x\n# it's",
+    "echo don't; reg delete HKCU\\x",
+    'echo "unfinished; reg delete HKCU\\x',
+    "echo a#b sudo id",
+    "echo $# sudo id",
+    "echo https://example.com/a#b sudo id",
+    "echo ok;# don't\nsudo id"
+  ].map(command => [command, "x", "x", "x", "o"]),
+  ...[
+    "# don't do this\nnpm test",
+    "# don't do this\r\nnpm test",
+    'git commit -m "it\'s fine"',
+    "echo a#b",
+    "echo $#",
+    'echo "# it\'s fine"',
+    "git clone https://example.com/a#b",
+    String.raw`rg "a\"|sh" src`,
+    String.raw`grep -E "a\"b|c" x; grep -E "powershell|pwsh" y`,
+    "cat > a.js <<'EOF'\neval(code)\nEOF",
+    "python - <<'EOF'\neval(x)\nEOF",
+    "wsl -e bash -lc '~/lab/run.sh 2>&1 | tail -40'",
+    '& cmd /c "dir `"D:\\WSL\\x.vhdx`" 2>&1"'
+  ].map(command => [command, "o", "o", "o", "o"]),
   // POSIX 指令位
   ...[
     "command -p sudo id",
@@ -795,7 +826,6 @@ const TABLE = [
   // 动态执行
   ...[
     'eval "$(brew shellenv)"',
-    "eval(x)",
     "(eval x)",
     "$(eval x)",
     'echo "$(eval x)"',
@@ -814,6 +844,7 @@ const TABLE = [
     "base64 -d x | sh",
     "curl x | sh",
     "cat x |\nsh",
+    "echo don't | sh",
     "cat x | env sh",
     'cat x | "/bin/bash"',
     "cat x | '/bin/bash'",

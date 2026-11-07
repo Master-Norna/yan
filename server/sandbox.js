@@ -60,7 +60,7 @@ const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?
 const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])\s*[&.]\s*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
 const HIDDEN_COMMAND = new RegExp(
   String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
-    String.raw`|${CMD}eval(?=[\s("']|$)|${CMD}(?:source|\.)\s+<\(` +
+    String.raw`|${CMD}eval(?=[\s"']|$)|${CMD}(?:source|\.)\s+<\(` +
     String.raw`|${CMD}(?:ba|z|da|k)?sh\s+(?:-[^\s]+\s+)*<\(` +
     String.raw`|${CMD}${SHELL}\$\(`,
   "im"
@@ -81,37 +81,52 @@ function quotedEnd(text, start) {
     if (quote !== "'" && (text[end] === "\\" || text[end] === "`")) end++;
     else if (text[end] === quote) break;
   }
-  return Math.min(end, text.length);
+  return end < text.length ? end : -1;
 }
-function withoutQuoted(text) {
+// 注释先于引号处理，保留换行与 UTF-16 索引。落单引号是普通字符；所有扫描共用同一份引号范围。
+function shellText(text) {
   const chars = text.split("");
+  const quotes = new Map();
   for (let i = 0; i < text.length; i++) {
-    if (text[i] === "\\" || text[i] === "`") {
+    if (text[i] === "`" || (text[i] === "\\" && /[\\"']/.test(text[i + 1] || ""))) {
       i++;
+      continue;
+    }
+    if (text[i] === "#" && (i === 0 || /[\s;&|()]/.test(text[i - 1]))) {
+      for (; i < text.length && text[i] !== "\n" && text[i] !== "\r"; i++) chars[i] = " ";
       continue;
     }
     if (text[i] !== '"' && text[i] !== "'") continue;
     const end = quotedEnd(text, i);
-    for (; i < end; i++) chars[i] = " ";
-    if (i < text.length) chars[i] = " ";
+    if (end < 0) continue;
+    quotes.set(i, end);
+    i = end;
   }
+  return { text: chars.join(""), quotes };
+}
+function withoutQuoted(text) {
+  const scanned = shellText(text),
+    chars = scanned.text.split("");
+  for (const [start, end] of scanned.quotes) for (let i = start; i <= end; i++) chars[i] = " ";
   return chars.join("");
 }
 // 只隐藏普通引号参数里的语法分隔符，保留文字与索引供既有规则检查参数。
 // 单层 Shell 的执行字符串另扫一层；引号内的括号、换行不会再制造指令位。
 function commandSyntax(text, shellBody = false) {
+  const scanned = shellText(text);
+  text = scanned.text;
   const chars = text.split("");
   let start = 0,
     scriptAt = -1,
     checked = false;
   for (let i = 0; i < text.length; i++) {
-    if (text[i] === '"' || text[i] === "'") {
+    if (scanned.quotes.has(i)) {
       if (!checked && !shellBody) {
         const script = SCRIPT_START.exec(text.slice(start));
         scriptAt = script ? start + script[0].length - 1 : -1;
         checked = true;
       }
-      const end = quotedEnd(text, i);
+      const end = scanned.quotes.get(i);
       if (i === scriptAt) {
         const body = commandSyntax(text.slice(i + 1, end), true);
         for (let j = 0; j < body.length; j++) chars[i + 1 + j] = body[j];
@@ -138,22 +153,19 @@ function commandSyntax(text, shellBody = false) {
 // 每段只检查一次，分隔符必须在引号外；不从每个 CMD 位置重新扫到行尾。
 // 执行字符串只展开一层，与 CMD 的 Shell 套壳范围一致，普通参数里的管道仍只是字串。
 function pipesToShell(/** @type {string} */ text, shellBody = false) {
+  const scanned = shellText(text);
+  text = scanned.text;
   if (!text.includes("|")) return false;
-  let quote = "",
-    start = 0,
+  let start = 0,
     piped = false;
   for (let i = 0; i <= text.length; i++) {
     const ch = text[i];
-    if (quote !== "'" && ch === "`") {
+    if (ch === "`") {
       i++;
       continue;
     }
-    if (i < text.length && quote) {
-      if (ch === quote) quote = "";
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
+    if (scanned.quotes.has(i)) {
+      i = scanned.quotes.get(i);
       continue;
     }
     if (piped && ch === "\n" && !text.slice(start, i).trim()) {
@@ -165,14 +177,10 @@ function pipesToShell(/** @type {string} */ text, shellBody = false) {
     if (piped && PIPE_SHELL.test(segment)) return true;
     if (!shellBody) {
       const script = SCRIPT_START.exec(segment),
-        delimiter = script?.[0].at(-1);
-      if (delimiter === '"' || delimiter === "'") {
-        let end = script[0].length;
-        for (; end < segment.length; end++) {
-          if (delimiter === '"' && segment[end] === "`") end++;
-          else if (segment[end] === delimiter) break;
-        }
-        const body = segment.slice(script[0].length, end);
+        open = script ? start + script[0].length - 1 : -1,
+        end = scanned.quotes.get(open);
+      if (end !== undefined) {
+        const body = text.slice(open + 1, end);
         if (pipesToShell(body, true)) return true;
       }
     }
@@ -358,7 +366,7 @@ const OUTPUT_PARAMS = String.raw`(?:^|\s)(?:-o|-O|-OutFile|-OutputPath|-Destinat
 // .NET 直写文件：[IO.File]::WriteAllText、[IO.Directory]::Delete、New-Object IO.StreamWriter 之类
 const DOTNET_WRITE = String.raw`\[(?:System\.)?IO\.(?:File|Directory|FileInfo|DirectoryInfo)\]::(?:Write|Append|Create|Delete|Move|Copy|Replace|Set)\w*|\b(?:System\.)?IO\.(?:StreamWriter|FileStream|BinaryWriter)\b`;
 const DIRECT_FILE_MUTATION = new RegExp(
-  String.raw`${CMD}(?:${WRITE_VERBS})(?:\.exe)?\b|(?:^|[^<])>{1,2}\s*[^&]|${OUTPUT_PARAMS}|${DOTNET_WRITE}`,
+  String.raw`${CMD}(?:${WRITE_VERBS})(?:\.exe)?\b|(?:^|[^<])>{1,2}\s*[^&\x01]|${OUTPUT_PARAMS}|${DOTNET_WRITE}`,
   "im"
 );
 
@@ -410,6 +418,8 @@ const RSYNC_VALUES = new Set(
 );
 const RSYNC_PATTERNS = new Set(["exclude", "include", "filter"]);
 function argumentsAt(text, start) {
+  const scanned = shellText(text);
+  text = scanned.text;
   const tokens = [];
   for (let i = start; i < text.length; ) {
     if (/\s/.test(text[i]) && text[i] !== "\n") {
@@ -419,7 +429,7 @@ function argumentsAt(text, start) {
     if (";&|()<>{}\n".includes(text[i])) break;
     const from = i;
     for (; i < text.length && !/[\s;&|()<>{}]/.test(text[i]); i++) {
-      if (text[i] === '"' || text[i] === "'") i = quotedEnd(text, i);
+      if (scanned.quotes.has(i)) i = scanned.quotes.get(i);
     }
     const raw = text.slice(from, i),
       value = /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
