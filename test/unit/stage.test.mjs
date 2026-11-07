@@ -37,6 +37,23 @@ test("调试口与配置目录：参数里直写的、--config 文件里的，�
   assert.deepEqual(browserOf(undefined), { port: 9288, dir: "", output: "" });
 });
 
+test("--config 写相对路径时按服务的工作目录解析，与起服务时同一个基准", () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "yan-stage-"));
+  writeFileSync(
+    path.join(cwd, "playwright-1a2b3c4d.json"),
+    JSON.stringify({
+      browser: { userDataDir: "下载/配置", outputDir: "下载", launchOptions: { args: ["--remote-debugging-port=9333"] } }
+    })
+  );
+  // 页面问调试口时递的是原配置：工作目录设成 cwd、--config 写相对路径（很自然的写法）
+  // 改动前读不到那份文件，端口回落 9288、下载目录回落 .playwright-mcp——游目整个连不上
+  assert.deepEqual(browserOf(["cli.js", "--config", "playwright-1a2b3c4d.json"], cwd), {
+    port: 9333,
+    dir: "下载/配置",
+    output: path.join(cwd, "下载")
+  });
+});
+
 test("存下载的目录：参数里的 --output-dir，没写的是服务工作目录下的 .playwright-mcp", () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "yan-stage-"));
   assert.equal(browserOf(["cli.js"], cwd).output, path.join(cwd, ".playwright-mcp"));
