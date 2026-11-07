@@ -185,7 +185,11 @@ function toolCacheKey(step) {
   const cache = TOOLS.get(step.name)?.cache,
     parsed = cache ? parseToolArguments(step.arguments) : null;
   if (!parsed?.ok) return null;
-  const args = cache === true ? parsed.args : cache(parsed.args);
+  // 与 runTool 同一个口径：别名归位、定型之后才交给 cache 算键——拿原始参数算，query 写成别名、
+  // 给了数字或干脆没给，都会在 .trim() 上抛，把整答打断（search_web / fetch_page 就如此）
+  const { args: normalized, problems } = normalizeToolArguments(step.name, parsed.args);
+  if (problems.length) return null;
+  const args = cache === true ? normalized : cache(normalized);
   return args ? `${step.name}:${JSON.stringify(stableToolJson(args))}` : null;
 }
 function stableToolJson(value) {
@@ -206,7 +210,9 @@ function toolPresentation(step) {
     title: step.title || "",
     url: step.url || "",
     note: step.note || "",
-    results: step.results ? structuredClone(step.results) : null
+    results: step.results ? structuredClone(step.results) : null,
+    // 请示的答案跟着复用走：不搬的话，命中缓存的那一步在摘要里写成「用户未作答」、行迹里也看不到答案
+    ...(step.answers ? { answers: structuredClone(step.answers) } : {})
   };
 }
 // 把一批工具调用跑完，返回各步回给模型的结果，连同各步交回的图。相邻的可并发的一起跑（读、搜、翻网页、翻记忆彼此无关）；会改状态或要请示的按原顺序逐个来。
