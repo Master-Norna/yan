@@ -1119,7 +1119,9 @@ http
         return sse(res, [delta({ content: "测试标题" }), delta({}, { usage: { total_tokens: 10 } })]);
       }
       if (typeof lastUser === "string" && lastUser.includes("SLOWHTML")) {
-        // 一块 html 一行一行慢慢流：闭合之前页面上是占位框，框里报着写到第几行
+        // 一块 html 一行一行慢慢流：闭合之前页面上是占位框，框里报着写到第几行。
+        // 用例要在流没闭合的这段里寄补言、按停，每一块隔 150ms（整条约一秒六），留得出几次往返的工夫——
+        // 隔得再密，慢一些的 CI 机器上等占位框、读行数、寄补言这几步跑完，流已经到头，用例会假红
         const lines = [
           "先说一句。\n\n```html\n",
           "<!doctype html>\n",
@@ -1133,7 +1135,7 @@ http
           "<p>8</p>\n",
           "```\n"
         ];
-        return sse(res, [...lines.map(content => delta({ content })), delta({}, { usage: { total_tokens: 11 } })]);
+        return sse(res, [...lines.map(content => delta({ content })), delta({}, { usage: { total_tokens: 11 } })], 150);
       }
       if (typeof lastUser === "string" && lastUser.includes("SLOWTEXT")) {
         // 一段一段慢慢说的纯文本（每段两句，段尾空行），给补言找落点用：约 8 秒说完

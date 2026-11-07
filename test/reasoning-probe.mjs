@@ -165,7 +165,12 @@ await evalJs(`document.querySelector('.tab-btn[data-tab="models"]').click(); tru
 await sleep(300);
 // 设置里：测试连接顺带重探，状态行报档位；高级配置里的「思考档位」跟着填
 await evalJs(`document.querySelector('[data-profile-card="p2"] [data-profile-action="test"]').click(); true`);
-await waitFor(`/思考档位/.test(document.querySelector('[data-profile-card="p2"] .profile-status')?.textContent || "")`, 8000);
+// 等的条件不能只是「思考档位」：探着的时候状态行写的是「可用 · 4 ms · 探测思考档位…」，也含这三个字，
+// 慢机器上一轮往返就够读到那句，随即便把「探测中」当成结果核对
+await waitFor(
+  `(s => /思考档位/.test(s) && !/探测思考档位/.test(s))(document.querySelector('[data-profile-card="p2"] .profile-status')?.textContent || "")`,
+  8000
+);
 const status = await evalJs(`document.querySelector('[data-profile-card="p2"] .profile-status').textContent`);
 check("test connection reports the levels", /可用 · \d+ ms · 思考档位 低 \/ 中 \/ 高/.test(status), status);
 check(
