@@ -11,6 +11,26 @@ const wd = "E:\\项目\\言",
 
 const mac = command => screenCommand(command, "/Users/a/proj", { platform: "darwin" });
 
+test("未收尾的引号与 $()：两种平台的四档筛查各自 200ms 内返回", () => {
+  for (const command of ['"$('.repeat(2000), 'echo "$('.repeat(2000), "\"$('".repeat(2000), '"$(x"'.repeat(2000)]) {
+    for (const platform of ["win32", "darwin"]) {
+      const options = { platform };
+      for (const [tier, check] of [
+        ["严", c => screenCommand(c, platform === "win32" ? wd : "/Users/a/proj", options)],
+        ["宽", screenLoose],
+        ["审", screenAutoReview],
+        ["不可审", screenUnreviewable]
+      ]) {
+        const start = performance.now();
+        const result = check(command, options);
+        const elapsed = performance.now() - start;
+        assert.equal(result, null, `${platform} ${tier}: ${command.slice(0, 10)}…`);
+        assert.ok(elapsed < 200, `${platform} ${tier}: ${command.slice(0, 10)}… 耗时 ${elapsed.toFixed(1)}ms`);
+      }
+    }
+  }
+});
+
 test("长串经 withoutExeDir 后的四种完整筛查各自 200ms 内返回", () => {
   for (const command of [
     "a=1 ".repeat(1000) + "x",

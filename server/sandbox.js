@@ -85,97 +85,112 @@ function escapes(text, at, shell, quote = "") {
 function commentAt(text, at, shell) {
   return shell !== "cmd" && text[at] === "#" && (at === 0 || /[\s;&|()]/.test(text[at - 1]));
 }
-// $() 有自己的引号上下文，里面的引号不能结束外层双引号。
-function substitutionEnd(text, start, shell) {
-  let depth = 1;
-  for (let i = start + 2; i < text.length; i++) {
-    if (escapes(text, i, shell)) i++;
-    else if (commentAt(text, i, shell)) {
-      while (i < text.length && text[i] !== "\n" && text[i] !== "\r") i++;
-    } else if (text[i] === '"' || (shell !== "cmd" && text[i] === "'")) {
-      const end = quotedEnd(text, i, shell);
-      if (end >= 0) i = end;
-    } else if (text[i] === "(") depth++;
-    else if (text[i] === ")" && --depth === 0) return i;
+// 每个位置只计算一次单引号、双引号和 $() 的收尾；依赖都在右边，倒序填表即可。
+// -1 也缓存：未收尾时按普通字符前进，不为下一个起点重扫同一后缀。
+function quoteContext(text, shell, offset = 0) {
+  const single = new Int32Array(text.length + 2).fill(-1),
+    double = new Int32Array(text.length + 2).fill(-1),
+    substitution = new Int32Array(text.length + 2).fill(-1);
+  let newline = text.length;
+  for (let i = text.length - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === "\n" || ch === "\r") newline = i;
+    single[i] = ch === "'" ? i : single[i + 1];
+    if (escapes(text, i, shell, '"')) double[i] = double[i + 2];
+    else if (ch === '"') double[i] = i;
+    else if (shell !== "cmd" && ch === "$" && text[i + 1] === "(" && substitution[i + 2] >= 0) double[i] = double[substitution[i + 2] + 1];
+    else double[i] = double[i + 1];
+
+    if (escapes(text, i, shell)) substitution[i] = substitution[i + 2];
+    else if (commentAt(text, i, shell)) substitution[i] = substitution[newline + 1];
+    else if (ch === '"' || (shell !== "cmd" && ch === "'")) {
+      const end = ch === '"' ? double[i + 1] : single[i + 1];
+      substitution[i] = substitution[end < 0 ? i + 1 : end + 1];
+    } else if (ch === "(") {
+      const end = substitution[i + 1];
+      substitution[i] = end < 0 ? -1 : substitution[end + 1];
+    } else substitution[i] = ch === ")" ? i : substitution[i + 1];
   }
-  return -1;
-}
-function quotedEnd(text, start, shell, substitutions = []) {
-  const quote = text[start];
-  for (let i = start + 1; i < text.length; i++) {
-    if (escapes(text, i, shell, quote)) i++;
-    else if (text[i] === quote) return i;
-    else if (quote === '"' && shell !== "cmd" && text[i] === "$" && text[i + 1] === "(") {
-      const end = substitutionEnd(text, i, shell);
-      if (end >= 0) {
-        substitutions.push([i, end]);
-        i = end;
-      }
-    }
-  }
-  return -1;
+  return { text, shell, offset, single, double, substitution };
 }
 // 一份扫描同时提供注释已抹掉的文本、语法视图与 sudo 整词视图，索引始终不变。
 // 普通参数隐藏分隔符与整段引号内容；执行字符串展开一层，$() 则进入自己的上下文。
-function shellText(text, shell, shellBody = false) {
+function shellText(text, shell) {
   const chars = text.split(""),
     syntax = text.split(""),
     unquoted = text.split("");
   const quotes = new Map();
-  let start = 0,
-    scriptAt = -1,
-    checked = false;
-  const copyBody = (from, to, bodyShell, body) => {
-    const scanned = shellText(text.slice(from, to), bodyShell, body);
-    for (let j = from; j < to; j++) {
-      chars[j] = scanned.text[j - from];
-      syntax[j] = scanned.syntax[j - from];
-      unquoted[j] = scanned.unquoted[j - from];
-    }
-    for (const [open, close] of scanned.quotes) quotes.set(from + open, from + close);
+  const frames = [];
+  const push = (context, from, to, shellBody, quote = "") => {
+    frames.push({ context, at: from, to, shellBody, quote, start: from, checked: false, scriptAt: -1 });
   };
-  for (let i = 0; i < text.length; i++) {
+  push(quoteContext(text, shell), 0, text.length, false);
+  // 引号与 $() 共用所在文本的收尾表；执行字符串另建一层，彼此不重叠。
+  // 每个字符只生成一次视图，深层 $() 不再递归复制整段正文。
+  while (frames.length) {
+    const frame = frames[frames.length - 1],
+      { context, at: i, to } = frame,
+      { text, shell, offset } = context,
+      at = offset + i;
+    if (i >= to) {
+      frames.pop();
+      continue;
+    }
+    if (frame.quote) {
+      const escaped = escapes(text, i, shell, frame.quote),
+        end = context.substitution[i + 2];
+      if (!escaped && frame.quote === '"' && shell !== "cmd" && text[i] === "$" && text[i + 1] === "(" && end >= 0 && end < to) {
+        unquoted[at] = " ";
+        unquoted[at + 1] = "(";
+        unquoted[offset + end] = ")";
+        frame.at = end + 1;
+        push(context, i + 2, end, frame.shellBody);
+      } else {
+        const next = Math.min(i + (escaped ? 2 : 1), to);
+        for (let j = i; j < next; j++) {
+          unquoted[offset + j] = " ";
+          if (";&|(){}\r\n".includes(text[j])) syntax[offset + j] = "\x01";
+        }
+        frame.at = next;
+      }
+      continue;
+    }
     if (escapes(text, i, shell)) {
-      if (i + 1 < text.length) syntax[i + 1] = "\x01";
-      i++;
+      if (i + 1 < to) syntax[at + 1] = "\x01";
+      frame.at += 2;
       continue;
     }
     if (commentAt(text, i, shell)) {
-      for (; i < text.length && text[i] !== "\n" && text[i] !== "\r"; i++) chars[i] = syntax[i] = unquoted[i] = " ";
-      i--;
+      while (frame.at < to && text[frame.at] !== "\n" && text[frame.at] !== "\r") {
+        const at = offset + frame.at++;
+        chars[at] = syntax[at] = unquoted[at] = " ";
+      }
       continue;
     }
     if (text[i] === '"' || (shell !== "cmd" && text[i] === "'")) {
-      const substitutions = [],
-        end = quotedEnd(text, i, shell, substitutions);
-      if (end < 0) continue;
-      quotes.set(i, end);
-      if (!checked && !shellBody) {
-        const script = SCRIPT_START.exec(text.slice(start));
-        scriptAt = script ? start + script[0].length - 1 : -1;
-        checked = true;
+      const end = text[i] === '"' ? context.double[i + 1] : context.single[i + 1];
+      if (end < 0 || end >= to) {
+        frame.at++;
+        continue;
       }
-      for (let j = i; j <= end; j++) {
-        unquoted[j] = " ";
-        if (j > i && j < end && ";&|(){}\r\n".includes(text[j])) syntax[j] = "\x01";
+      quotes.set(at, offset + end);
+      if (!frame.checked && !frame.shellBody) {
+        const script = SCRIPT_START.exec(text.slice(frame.start, to));
+        frame.scriptAt = script ? frame.start + script[0].length - 1 : -1;
+        frame.checked = true;
       }
-      if (i === scriptAt) {
-        const command = text.slice(start, i),
+      unquoted[at] = unquoted[offset + end] = " ";
+      frame.at = end + 1;
+      if (i === frame.scriptAt) {
+        const command = text.slice(frame.start, i),
           bodyShell = CMD_SCRIPT.test(command) ? "cmd" : POSIX_SCRIPT.test(command) ? "posix" : "powershell";
-        copyBody(i + 1, end, bodyShell, true);
-      } else {
-        for (const [open, close] of substitutions) {
-          syntax[open] = "$";
-          syntax[open + 1] = unquoted[open + 1] = "(";
-          syntax[close] = unquoted[close] = ")";
-          copyBody(open + 2, close, shell, shellBody);
-        }
-      }
-      i = end;
+        push(quoteContext(text.slice(i + 1, end), bodyShell, at + 1), 0, end - i - 1, true);
+      } else push(context, i + 1, end, frame.shellBody, text[i]);
     } else if (";&|(){}\n".includes(text[i])) {
-      start = i + 1;
-      checked = false;
-    }
+      frame.start = i + 1;
+      frame.checked = false;
+      frame.at++;
+    } else frame.at++;
   }
   return { text: chars.join(""), quotes, syntax: syntax.join(""), unquoted: unquoted.join("") };
 }
