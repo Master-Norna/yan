@@ -24,7 +24,7 @@ The **strict level**, for Ask first, has the three gates below. Commands the str
 
 - **Folder**: *changes* stay inside the working folder or Files (writing, deleting, moving and redirection never use `..` to climb up, `~`, `$env:USERPROFILE` or absolute paths outside the folder), while *viewing* can reach the whole machine — checking a computer means looking through system folders, the registry, processes and logs, and locking reads would block that entirely. File tools still stay inside the folder and ignore **Anywhere**. Reading and writing `.env`, keys and credential files is refused, `.git` internals aren't written, and search skips secret files.
 - **Commands**: anything that touches the system (registry, services, scheduled tasks, firewall, accounts, disks, shutdown, privilege escalation, execution policy), hides what it does (encoded commands, `Invoke-Expression`, command names assembled at runtime) or connects out directly (`curl` / `iwr` / `wget`; pointing at local 127.0.0.1 is allowed) is refused. Install dependencies through a package manager and look things up with the search tools.
-- **Environment**: commands can't see environment variables whose names look secret (KEY / TOKEN / SECRET / PASSWORD…).
+- **Environment**: commands can't see environment variables whose names look secret (KEY / TOKEN / SECRET / PASSWORD…) — this gate applies at either level whenever the sandbox is on.
 
 A command refused at the loose level comes back to the model with a reason; rewriting it accordingly is enough. Connecting out only counts forms that really go online (`[System.Net.…]`, `New-Object Net.…`); something like `rg HttpClient`, which only searches text, doesn't.
 

@@ -110,7 +110,7 @@ function stagePickWorld(method, params) {
 }
 
 /**
- * 浮那张纸签：贴着网页里那一框，宽不窄于它；当前选着的着朱。项多（十二项以上）的顶上一栏筛选
+ * 浮那张纸签：贴着网页里那一框，宽不窄于它；当前选着的着朱。项多（十三项起）的顶上一栏筛选
  * @param {{ token: string, x: number, y: number, w: number, h: number, at: number, items: { i: number, t: string, g: string, d: boolean }[] }} box
  */
 function stagePickOpen(box) {
