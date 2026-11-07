@@ -451,6 +451,19 @@ test("anthropicRequest：system 单列、工具结果并进 user、思考块回�
   assert.ok(sonnet45.max_tokens <= 64000 && sonnet45.thinking.budget_tokens < sonnet45.max_tokens);
   const opus41 = f.anthropicRequest({ model: "claude-opus-4-1", messages: [{ role: "user", content: "x" }], reasoning_effort: "xhigh" });
   assert.ok(opus41.max_tokens <= 32000 && opus41.thinking.budget_tokens < opus41.max_tokens);
+  // 3.x 把代际放在中间（claude-3-7-sonnet-…）：也要认出——不认就按 0 算，最高档的 65536 原样发出去，3.7 / 3.5 都回 400
+  const sonnet37 = f.anthropicRequest({
+    model: "claude-3-7-sonnet-20250219",
+    messages: [{ role: "user", content: "x" }],
+    reasoning_effort: "max"
+  });
+  assert.ok(sonnet37.max_tokens <= 64000 && sonnet37.thinking.budget_tokens < sonnet37.max_tokens);
+  const sonnet35 = f.anthropicRequest({
+    model: "claude-3-5-sonnet-20241022",
+    messages: [{ role: "user", content: "x" }],
+    reasoning_effort: "max"
+  });
+  assert.ok(sonnet35.max_tokens <= 8192 && sonnet35.thinking.budget_tokens < sonnet35.max_tokens);
   assert.equal(f.anthropicEndpoint("https://api.anthropic.com/v1/"), "https://api.anthropic.com/v1/messages");
   assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com" }), true);
   assert.equal(f.anthropicLike({ baseUrl: "https://api.anthropic.com", api: "openai" }), false);
