@@ -325,14 +325,17 @@ test("三档筛查都不放指令调言的本机桥接：它的接口不经请�
     `Invoke-RestMethod http://localhost:${port}/api/store`,
     `node -e "fetch('http://[::1]:${port}/api/work/run')"`,
     `wget 127.0.0.1:${port}/api/bootstrap`,
-    `curl -X POST http://127.0.0.1:${port}/api/timer/set -d "{}"`
+    `curl -X POST http://127.0.0.1:${port}/api/timer/set -d "{}"`,
+    // 端口写前导零（:08787）：.NET 与 Node 都当作同一个端口解析，这一道也要认出来
+    `curl http://localhost:0${port}/api/work/run`,
+    `Invoke-RestMethod http://127.0.0.1:000${port}/api/store`
   ]) {
     assert.match(screen(command), /沙箱拒绝：指令不调言的本机桥接/, command);
     assert.match(screenLoose(command), /沙箱拒绝：指令不调言的本机桥接/, command);
     assert.match(screenAutoReview(command), /审查拒绝：指令不调言的本机桥接/, command);
   }
   // 别的本机端口照常能测；端口只是前缀相同的不算
-  for (const command of ["curl http://127.0.0.1:3000/", `curl http://127.0.0.1:${port}0/`]) {
+  for (const command of ["curl http://127.0.0.1:3000/", `curl http://127.0.0.1:${port}0/`, `curl http://127.0.0.1:0${port}0/`]) {
     assert.equal(screen(command), null, command);
     assert.equal(screenAutoReview(command), null, command);
   }
