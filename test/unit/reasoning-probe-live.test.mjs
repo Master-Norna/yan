@@ -31,3 +31,43 @@ test("探档位写在此刻表里的那一份上（配置同步换掉 store.prof
   assert.deepEqual(learned, f.REASONING_DEFAULT_LEVELS);
   assert.equal(f.current().profiles[0].reasoningLevels, f.REASONING_DEFAULT_LEVELS.join(", "), "写进了此刻表里的那一份");
 });
+
+function setupSwap(swap) {
+  return load([
+    "probeReasoningLevels",
+    "learnReasoningLevels",
+    "nearestReasoning",
+    "reasoningProbeKey",
+    "current: () => store",
+    `setup: (initial, swap) => {
+      store = initial;
+      requestChat = async () => {
+        store = swap(store);
+        return { ok: true };
+      };
+      saveStoreSoon = () => {};
+    }`
+  ]);
+}
+const stale = () => ({ id: "p1", name: "假", model: "m", baseUrl: "http://127.0.0.1:1/v1", apiKey: "k", usedTokens: 0 });
+
+test("学到的档位两份都记：表里那份落盘，手里这份给这一答的重发用", () => {
+  const f = setupSwap();
+  const profile = stale();
+  f.setup({ settings: {}, profiles: [stale()], conversations: [], drafts: {} }, s => s);
+  assert.equal(f.learnReasoningLevels(profile, "Supported values are: 'low', 'medium', and 'xhigh'", "high"), true);
+  assert.equal(f.current().profiles[0].reasoningLevels, "low, medium, xhigh", "表里那份落盘");
+  assert.notEqual(f.nearestReasoning(profile, "high"), "high", "重发不再送被拒的那档");
+});
+
+test("探着的时候配置同步带来了手填的档位：探的结果作废，手填的不被盖", async () => {
+  const f = setupSwap();
+  const profile = stale();
+  f.setup({ settings: {}, profiles: [stale()], conversations: [], drafts: {} }, s => ({
+    ...s,
+    profiles: s.profiles.map(item => ({ ...item, reasoningLevels: "low", reasoningProbed: `manual|${f.reasoningProbeKey(item)}` }))
+  }));
+  assert.equal(await f.probeReasoningLevels(profile), null);
+  assert.equal(f.current().profiles[0].reasoningLevels, "low");
+  assert.match(f.current().profiles[0].reasoningProbed, /^manual\|/);
+});
