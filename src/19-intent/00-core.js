@@ -21,6 +21,9 @@
 // 一项不成图：新立意时只有一项要立的，退回——一答之内做得完的活用不着意。
 // 标成立要前提先立住（同一批一起标也算，模块即里面收口的几项）：自己做完而前提未立的仍是进行中。凭据变了转待复核是事后的，不在此拦。
 // 根可补标：当初没标、后来看清它就是整件事要立的，补标时记下那一问的原话；已是别项前提的不能标根。
+// 了结：一个目录可以先后做几件事，一棵根一件；上面这张图是专项的，要一直成立的归下面的守。根立住，那一件就了结（见 intentClosed）：
+// 不再附着、不比凭据、不计进度与上限，只给人看（题下与卡片），模型要时读文件。
+// 不存、也不用另设「任务」：图的连通本就分得出几件事，立没立住本就算得出。接着做时根改回 doing，或写进新一项的前提，它自然又开了
 // 本文件只放纯函数：理顺模型交来的改动、判状态、写成给模型读的字。读写与附着见 10-store.js，工具登记见 15-tools/32-intent.js
 /**
  * @typedef {"open"|"doing"|"waiting"|"done"|"assumed"|"dropped"} IntentMark 模型标的；waiting：待定，卡在人手里、等人拍板
@@ -173,7 +176,8 @@ function intentAncestors(intent, id) {
 /** 不算数了：自己弃了，或所属的模块弃了 @param {Intent} intent @param {string} id */
 const intentGone = (intent, id) => !intent.nodes[id] || [id, ...intentAncestors(intent, id)].some(k => intent.nodes[k].state === "dropped");
 /** 模块直属的几项 @param {Intent} intent @param {string} id */
-const intentChildren = (intent, id) => Object.keys(intent.nodes).filter(k => intent.nodes[k].in === id && !intentGone(intent, k));
+const intentChildren = (intent, id) =>
+  Object.keys(intent.nodes).filter(k => intent.nodes[k].in === id && !intent.nodes[k].keep && !intentGone(intent, k));
 /** 模块收口的几项：直属里同层没人以它为前提的——模块以它们为前提 @param {Intent} intent @param {string} id */
 function intentTops(intent, id) {
   const kids = intentChildren(intent, id);
@@ -195,8 +199,36 @@ function intentDependents(intent, id) {
 function intentRoots(intent) {
   return Object.keys(intent.nodes).filter(id => !intent.nodes[id].keep && !intentGone(intent, id) && !intentDependents(intent, id).length);
 }
-/** 守：没弃的几条 @param {Intent} intent */
-const intentKeeps = intent => Object.keys(intent.nodes).filter(id => intent.nodes[id].keep && !intentGone(intent, id));
+/**
+ * 了结的各项：立住了的根走得到、没立住的根走不到的。属模块的守随模块了结，全局的守不了结。
+ * 只看模型标的与说法、前提的版本，不看指纹：了结的不再取指纹，后来的活改了同一个文件、清了旧目录，它不会翻回来；往后要一直成立的归守。
+ * 开着的根走得到它（接着做，写进了新一项的前提），它就又开了，这时才再比凭据
+ * @param {Intent} intent @param {Set<string>} [before] 这一答开工时已了结的：作答途中才立住的先不收，收尾对照还要拿原问比
+ * @returns {Set<string>}
+ */
+function intentClosed(intent, before) {
+  const walk = (start, into) => {
+    if (into.has(start) || !Object.hasOwn(intent.nodes, start)) return into;
+    into.add(start);
+    for (const need of liveNeeds(intent, start)) walk(need, into);
+    return into;
+  };
+  const opened = new Set(),
+    settled = new Set();
+  for (const id of intentRoots(intent)) walk(id, intentEstablished(intent, id) ? settled : opened);
+  const closed = new Set([...settled].filter(id => !opened.has(id)));
+  for (const id of Object.keys(intent.nodes)) if (intent.nodes[id].keep && closed.has(intent.nodes[id].in)) closed.add(id);
+  return before ? new Set([...closed].filter(id => before.has(id))) : closed;
+}
+/** 了结的几件（根），新的在前：题下与卡片上给人看 @param {Intent} intent @param {Set<string>} [closed] */
+const intentPast = (intent, closed = intentClosed(intent)) =>
+  intentRoots(intent)
+    .filter(id => closed.has(id))
+    .reverse()
+    .sort((a, b) => String(intent.nodes[b].root?.at || "").localeCompare(String(intent.nodes[a].root?.at || "")));
+/** 守：没弃、也没随所属模块了结的几条 @param {Intent} intent @param {Set<string>} [closed] */
+const intentKeeps = (intent, closed = intentClosed(intent)) =>
+  Object.keys(intent.nodes).filter(id => intent.nodes[id].keep && !intentGone(intent, id) && !closed.has(id));
 /** 守的触发条件；没写、写坏了即无 @param {{ keep?: boolean, on?: string }} node @returns {RegExp|null} */
 function keepTrigger(node) {
   try {
@@ -212,11 +244,11 @@ const keepHookText = node =>
 const keepHookAnchor = (node, key) => !!keepTrigger(node) && anchorParts(key)[0] === "test";
 /**
  * 孤悬的：没声明为根、也没有谁以它为前提，而图里另有根——多半是手上的一步忘了连到它所撑的那一项，悄悄成了又一个根。
- * 只有它一个根、或声明过的根不算
- * @param {Intent} intent
+ * 只有它一个根、或声明过的根不算；了结的那几件不算「另有」
+ * @param {Intent} intent @param {Set<string>} [closed]
  */
-function intentStrays(intent) {
-  const roots = intentRoots(intent);
+function intentStrays(intent, closed = intentClosed(intent)) {
+  const roots = intentRoots(intent).filter(id => !closed.has(id));
   if (roots.length < 2) return [];
   return roots.filter(id => !intent.nodes[id].root);
 }
@@ -226,7 +258,8 @@ function intentStrays(intent) {
  */
 function intentNestProblems(intent) {
   const problems = [],
-    counts = new Map();
+    counts = new Map(),
+    closed = intentClosed(intent);
   for (const [id, node] of Object.entries(intent.nodes)) {
     if (node.in !== undefined && !intent.nodes[node.in]) problems.push(t`${id} 的 in「${node.in}」不存在（模块与细项同一批写上即可）`);
     const up = intentAncestors(intent, id),
@@ -234,11 +267,11 @@ function intentNestProblems(intent) {
     if (top && intent.nodes[top].in !== undefined && intent.nodes[intent.nodes[top].in])
       problems.push(t`${id} 的所属成了环：${[id, ...up, intent.nodes[top].in].join(" → ")}`);
     else if (up.length > INTENT_DEPTH) problems.push(t`${id} 嵌得太深：至多两层（全局 › 模块 › 子模块）`);
-    if (node.root && node.in) problems.push(t`${id} 是根，根在全局，不归模块`);
-    if (node.keep && node.in) problems.push(t`${id} 是守，守在全局，不归模块`);
+    // 守也记原问（同一个字段），它不算根
+    if (node.root && node.in && !node.keep) problems.push(t`${id} 是根，根在全局，不归模块`);
     if (node.keep && node.needs.length) problems.push(t`${id} 是守，不挂前提`);
     for (const need of node.needs) if (intent.nodes[need]?.keep) problems.push(t`${id} 的前提 ${need} 是守：守不作前提`);
-    if (!intentGone(intent, id)) counts.set(node.in || "", (counts.get(node.in || "") || 0) + 1);
+    if (!intentGone(intent, id) && !closed.has(id)) counts.set(node.in || "", (counts.get(node.in || "") || 0) + 1);
   }
   for (const [level, n] of counts)
     if (n > INTENT_LEVEL_LIMIT)
@@ -347,13 +380,13 @@ function intentBorrowed(intent, id) {
   }
   return [...out];
 }
-/** 已成立、已假定各项记过指纹的凭据：读意时据此取一回此刻的 @param {Intent} intent */
-function intentSealedAnchors(intent) {
+/** 已成立、已假定各项记过指纹的凭据：读意时据此取一回此刻的；了结的不取 @param {Intent} intent @param {Set<string>} [closed] */
+function intentSealedAnchors(intent, closed = intentClosed(intent)) {
   return [
     ...new Set(
-      Object.values(intent.nodes)
-        .filter(node => SEALED.has(node.state) && node.seal)
-        .flatMap(node => Object.keys(node.seal.prints).filter(key => !keepHookAnchor(node, key)))
+      Object.entries(intent.nodes)
+        .filter(([id, node]) => SEALED.has(node.state) && node.seal && !closed.has(id))
+        .flatMap(([, node]) => Object.keys(node.seal.prints).filter(key => !keepHookAnchor(node, key)))
     )
   ];
 }
@@ -487,6 +520,14 @@ function normalizeIntentOps(intent, raw, workdir = "") {
       if (op.needs) op.needs = [...new Set(op.needs.map(renamed))];
       if (op.in) op.in = renamed(op.in);
     }
+  // 了结的不再附着，模型看不见就可能撞名：照新立的写法（claim、check 都给）写到了结的一项上，多半不知道它在，改了就把旧事盖了。
+  // 只给 id 与要改的字段的是明知而改，不拦
+  const past = intentClosed(intent);
+  for (const op of ops)
+    if (op.claim && op.check && past.has(op.id) && op.claim !== intent.nodes[op.id].claim)
+      problems.push(
+        t`${op.id} 已有，是了结的一件（${intent.nodes[op.id].claim.slice(0, 60)}）：接着它做的给 state: doing；另一件事换个名字`
+      );
   // 折上去试一遍：前提都在、没有环、假定写了出处、不超上限。比「这一批新添的毛病」时，原来那份也先照新名改过，改名本身不算新毛病
   const trial = applyIntentOps(intent, ops),
     base = renames.size
@@ -519,8 +560,15 @@ function normalizeIntentOps(intent, raw, workdir = "") {
       problems.push(
         t`${id} 孤悬：没有谁以它为前提，也没标根。它撑的是哪一项，就写进那一项的 needs（可跨模块），或归进它所服务的模块（in）；一直要守住的条件标 keep；本就是整件事要立的另一条结论，标 root`
       );
-  const goals = /** @param {Intent} at */ at => Object.keys(at.nodes).filter(id => !at.nodes[id].keep && !intentGone(at, id)).length;
-  if (!goals(intent) && goals(trial) === 1)
+  // 数的是开着的：旧事都了结时再立一项，与新立意是一回事（否则「发吧」这样一句话也成一棵根）。接着做了结的不算新立：写进 needs 的连着它一起开，根改回 doing 的不是新项
+  /** @param {Intent} at */
+  const alive = at => {
+      const closed = intentClosed(at);
+      return Object.keys(at.nodes).filter(id => !intentGone(at, id) && !closed.has(id));
+    },
+    goals = /** @param {Intent} at */ at => alive(at).filter(id => !at.nodes[id].keep),
+    lone = goals(trial);
+  if (!goals(intent).length && lone.length === 1 && !intent.nodes[lone[0]] && !ops.some(op => op.rename === lone[0]))
     problems.push(
       t`意是几项结论连成的图，只有一项不必立：一答之内做得完的活用不着意。真是跨多答的长活，把它要先立住的几项一并写上（needs 或 in）`
     );
@@ -551,8 +599,8 @@ function normalizeIntentOps(intent, raw, workdir = "") {
     if (trial.nodes[id]?.state === "assumed" && !trial.nodes[id].note) problems.push(t`${id} 标了假定，note 里写明借的是什么、出处在哪`);
     if (trial.nodes[id]?.state === "waiting" && !trial.nodes[id].note) problems.push(t`${id} 标了待定，note 里写明等谁、定什么`);
   }
-  const live = Object.keys(trial.nodes).filter(id => !intentGone(trial, id)).length;
-  if (live > INTENT_LIMIT && live > Object.keys(intent.nodes).filter(id => !intentGone(intent, id)).length)
+  const live = alive(trial).length;
+  if (live > INTENT_LIMIT && live > alive(intent).length)
     problems.push(t`意里的项不宜多于 ${INTENT_LIMIT} 项（此刻 ${live}）：一项是值得单独判的结论，不是每一步动作；细的并进上一级`);
   return { ops, problems, tidied: [...tidied] };
 }
@@ -678,26 +726,29 @@ const INTENT_STATE_TEXT = {
   dropped: t("已弃"),
   stale: t("待复核")
 };
-/** 进度只数目标，守不算 @param {Intent} intent @param {IntentPrints} [now] */
-function intentTally(intent, now = {}) {
-  const live = Object.keys(intent.nodes).filter(id => !intent.nodes[id].keep && !intentGone(intent, id));
+/** 进度只数开着的目标，守、了结的不算 @param {Intent} intent @param {IntentPrints} [now] @param {Set<string>} [closed] */
+function intentTally(intent, now = {}, closed = intentClosed(intent)) {
+  const live = Object.keys(intent.nodes).filter(id => !intent.nodes[id].keep && !intentGone(intent, id) && !closed.has(id));
   return { live: live.length, standing: live.filter(id => intentEstablished(intent, id, now)).length };
 }
 /**
  * 根在前、前提在后；立住了的只留一行，没立住的写验收与缘由，没立住的根附上用户的原话。
  * 模块的细项缩进写在它底下；里面都立住了的模块只留一行，没立住的才展开——长活里看到的是整副骨架加手头那一块
- * @param {Intent} intent @param {IntentPrints} [now] @param {{ path?: string, asks?: boolean }} [options] asks：立住了的根也附原话（收尾前对照用）
+ * @param {Intent} intent @param {IntentPrints} [now]
+ * @param {{ path?: string, asks?: boolean, closed?: Set<string> }} [options] asks：立住了的根也附原话（收尾前对照用）；closed：作答途中传这一答眼里了结的
  */
-function intentText(intent, now = {}, { path = t(".yan/意.json"), asks = false } = {}) {
+function intentText(intent, now = {}, { path = t(".yan/意.json"), asks = false, closed = intentClosed(intent) } = {}) {
   const order = intentOrder(intent)
       .reverse()
-      .filter(id => !intent.nodes[id].keep && !intentGone(intent, id)),
-    keeps = intentKeeps(intent),
+      .filter(id => !intent.nodes[id].keep && !intentGone(intent, id) && !closed.has(id)),
+    keeps = intentKeeps(intent, closed),
     roots = new Set(intentRoots(intent)),
-    strays = new Set(intentStrays(intent));
+    strays = new Set(intentStrays(intent, closed));
   if (!order.length && !keeps.length) return "";
-  const { live, standing } = intentTally(intent, now),
-    dropped = Object.keys(intent.nodes).filter(id => intent.nodes[id].state === "dropped");
+  const { live, standing } = intentTally(intent, now, closed),
+    dropped = Object.keys(intent.nodes).filter(id => intent.nodes[id].state === "dropped" && !closed.has(intent.nodes[id].in)),
+    // 开着的一项可以落在了结的模块里（新事依了它里面的一步）：模块不写了，它提到全局写，不能漏
+    shelf = id => (order.includes(intent.nodes[id].in) ? intent.nodes[id].in : "");
   /** @param {string} id @param {string} pad @returns {string[]} */
   const item = (id, pad) => {
     const node = intent.nodes[id],
@@ -724,7 +775,7 @@ function intentText(intent, now = {}, { path = t(".yan/意.json"), asks = false 
     return [head, ...more, ...ask, ...inner];
   };
   /** @param {string} parent @param {string} pad */
-  const level = (parent, pad) => order.filter(id => (intent.nodes[id].in || "") === parent).flatMap(id => item(id, pad));
+  const level = (parent, pad) => order.filter(id => shelf(id) === parent).flatMap(id => item(id, pad));
   // 守：常驻的约束，没有态——平常只一行，测试不过、凭据变了的写验收与缘由；原问只在收尾前对照时附
   const kept = keeps.flatMap(id => {
     const node = intent.nodes[id],
@@ -735,7 +786,7 @@ function intentText(intent, now = {}, { path = t(".yan/意.json"), asks = false 
     return [head, t`  验收：${node.check}`, ...(state === "stale" ? [t`  缘由：${intentStaleWhy(intent, id, now)}`] : []), ...ask];
   });
   return [
-    t`［意 ${path}］已立 ${standing} / ${live}${dropped.length ? t`，已弃（走过不通的）：${dropped.join("、")}` : ""}`,
+    `${live ? t`［意 ${path}］已立 ${standing} / ${live}` : `［意 ${path}］`}${dropped.length ? t`，已弃（走过不通的）：${dropped.join("、")}` : ""}`,
     ...level("", ""),
     ...(kept.length ? [t("守（常驻的约束）："), ...kept] : [])
   ].join("\n");
@@ -743,9 +794,9 @@ function intentText(intent, now = {}, { path = t(".yan/意.json"), asks = false 
 // ---------- 一答之内的回归：每轮工具做完重取指纹，新转待复核的当场告诉它；同一项来回被打回即相持，只提醒 ----------
 // 相持：修甲坏乙、修乙坏甲，每一步单看都对，合起来原地打转——程序不拦（兼顾两头的修法可能就在下一步），只把次数与牵连摆出来
 const INTENT_STALEMATE = 3;
-/** 此刻待复核的各项 @param {Intent} intent @param {IntentPrints} now */
-function intentStaleIds(intent, now) {
-  return Object.keys(intent.nodes).filter(id => intentState(intent, id, now) === "stale");
+/** 此刻待复核的各项；了结的不算 @param {Intent} intent @param {IntentPrints} now @param {Set<string>} [closed] */
+function intentStaleIds(intent, now, closed = intentClosed(intent)) {
+  return Object.keys(intent.nodes).filter(id => !closed.has(id) && intentState(intent, id, now) === "stale");
 }
 /**
  * 这一轮之后新转待复核的几项，写成接在工具结果后的一段；没有即空

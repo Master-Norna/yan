@@ -212,9 +212,16 @@ function reviewCase(step, args, conversation, why) {
   // 这一步过了哪条守的关口，那条守在这一步上已由人照过：写明了，审查不再拿它看不见的「给人看过没有」去对
   const held = intents.get(conversation.id)?.intent,
     gated = Array.isArray(step.granted) ? step.granted : [],
-    goals = held ? intentRoots(held).map(id => held.nodes[id].claim) : [],
+    closed = held ? answerClosed(conversation, held) : undefined,
+    goals = held
+      ? intentRoots(held)
+          .filter(id => !closed.has(id))
+          .map(id => held.nodes[id].claim)
+      : [],
     keeps = held
-      ? intentKeeps(held).map(id => `${held.nodes[id].claim}${gated.includes(id) ? "（这一步已过此守的关口：用户看过、准许了）" : ""}`)
+      ? intentKeeps(held, closed).map(
+          id => `${held.nodes[id].claim}${gated.includes(id) ? "（这一步已过此守的关口：用户看过、准许了）" : ""}`
+        )
       : [],
     intentText = [goals.length ? `目标：${goals.join("；")}` : "", keeps.length ? `守：${keeps.join("；")}` : ""]
       .filter(Boolean)

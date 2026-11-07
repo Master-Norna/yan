@@ -42,12 +42,12 @@ function parseAnchor(raw, workdir = "") {
   return value ? { key: `${kind}:${value}` } : { problem: t`凭据「${text.slice(0, 80)}」写不对：${ANCHOR_KINDS.get(kind).problem}` };
 }
 /**
- * 无主改动：改过的文件里，没有哪一项（没弃的）的凭据罩着的——回归罩不到的盲区，也是副作用常藏的地方。.yan/ 下是言自己的簿记，不算
- * @param {Intent} intent @param {string[]} paths 改过的文件（目录内相对，或目录外的完整路径）
+ * 无主改动：改过的文件里，没有哪一项（没弃、没了结的）的凭据罩着的——回归罩不到的盲区，也是副作用常藏的地方。.yan/ 下是言自己的簿记，不算
+ * @param {Intent} intent @param {string[]} paths 改过的文件（目录内相对，或目录外的完整路径）@param {Set<string>} [closed]
  */
-function intentUnowned(intent, paths) {
+function intentUnowned(intent, paths, closed = intentClosed(intent)) {
   const anchors = Object.keys(intent.nodes)
-    .filter(id => !intentGone(intent, id))
+    .filter(id => !intentGone(intent, id) && !closed.has(id))
     .flatMap(id => intent.nodes[id].anchors)
     .map(anchorParts);
   return [...new Set(paths.map(path => intentPath(path)))].filter(

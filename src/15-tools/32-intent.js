@@ -55,12 +55,13 @@ defineTool({
     intentRejects.delete(conversation.id);
     // 此刻的指纹：便宜的几种现取；探针不再跑一遍——刚标的用刚取的，其余用这一答开工时取的
     const next = outcome.next,
+      closed = answerClosed(conversation, next),
       now = {
         ...(intents.get(conversation.id)?.now || {}),
-        ...(await intentPrints(conversation, intentSealedAnchors(next), signal, "round")),
+        ...(await intentPrints(conversation, intentSealedAnchors(next, closed), signal, "round")),
         ...outcome.prints
       },
-      { live, standing } = intentTally(next, now),
+      { live, standing } = intentTally(next, now, closed),
       unread = outcome.unread.length
         ? t`\n\n这几条凭据此刻取不到指纹，未记下，日后也不据它判：${outcome.unread.map(anchorLabel).join("、")}（问而后行里探针只自动跑明确只读的指令）`
         : "",
@@ -68,7 +69,11 @@ defineTool({
     keepIntent(conversation, next, now);
     // 存中文原文，画出来时照语言换（见 intentStepHtml）
     step.title = `已立 ${standing} / ${live} · ${outcome.ops.map(intentOpId).join("、")}`.slice(0, 80);
-    return { ok: true, content: `${intentText(next, now, { path: INTENT_FILE })}${unread}${tidied}`, display: `${standing}/${live}` };
+    return {
+      ok: true,
+      content: `${intentText(next, now, { path: INTENT_FILE, closed })}${unread}${tidied}`,
+      display: `${standing}/${live}`
+    };
   }
 });
 // 收尾前对照意递的那句话（见 19-intent/10-store.js 的 intentGate）：不是工具，记作行迹里它递上的那一步；往后重装这一答照原处插回。

@@ -25,7 +25,10 @@ const f = load([
   "intentDependents",
   "intentTops",
   "intentStrays",
-  "intentLevelEdges"
+  "intentLevelEdges",
+  "intentClosed",
+  "intentPast",
+  "intentKeeps"
 ]);
 
 // 照工具里的次序：理顺、取指纹、折上去。「一项不成图」另有专测，各测从一项立起只为验自己那一条
@@ -42,6 +45,8 @@ function change(intent, nodes, { prints = {}, ask = "", workdir = "" } = {}) {
 }
 const problems = (intent, nodes, workdir = "") => f.normalizeIntentOps(intent, nodes, workdir).problems;
 const empty = () => f.asIntent(null);
+// 作答途中的眼光：这一答才立住的还不算了结（见 answerClosed）。验传播、回归的各测都从这里看
+const OPEN = new Set();
 
 test("when 从工具参数进入结论，修改条件使旧封印待复核，空串可撤去", () => {
   let intent = change(empty(), [{ id: "条件", claim: "可用", check: "验证", when: "仅生产环境" }]);
@@ -128,7 +133,7 @@ test("传播：标成立要前提先立住（同一批也算），事后前提�
     { id: "乙", state: "done" }
   ]);
   assert.ok(f.intentEstablished(intent, "上线"));
-  assert.deepEqual(f.intentTally(intent), { live: 3, standing: 3 });
+  assert.deepEqual(f.intentTally(intent, {}, OPEN), { live: 3, standing: 3 });
   intent = change(intent, [{ id: "乙", state: "doing" }]);
   assert.ok(!f.intentEstablished(intent, "上线"));
   assert.match(f.intentText(intent), /\[成立·前提未立\] 上线（根）/);
@@ -143,12 +148,12 @@ test("回归：标成立后凭据变了，转待复核；没变的、不知道�
   });
   assert.deepEqual(intent.nodes["解析"].anchors, ["file:src/a.js"]);
   intent = change(intent, [{ id: "解析", state: "done" }], { prints: { "file:src/a.js": "v1" } });
-  assert.deepEqual(f.intentSealedAnchors(intent), ["file:src/a.js"]);
+  assert.deepEqual(f.intentSealedAnchors(intent, OPEN), ["file:src/a.js"]);
   assert.equal(f.intentState(intent, "解析", { "file:src/a.js": "v1" }), "done");
   assert.equal(f.intentState(intent, "解析", {}), "done", "没取到此刻的指纹：不据它判");
   assert.equal(f.intentState(intent, "解析", { "file:src/a.js": "v2" }), "stale");
   assert.equal(f.intentState(intent, "解析", { "file:src/a.js": null }), "stale", "文件没了也算改了");
-  assert.match(f.intentText(intent, { "file:src/a.js": "v2" }), /\[待复核\] 解析[\s\S]*缘由：凭据已变：src\/a\.js/);
+  assert.match(f.intentText(intent, { "file:src/a.js": "v2" }, { closed: OPEN }), /\[待复核\] 解析[\s\S]*缘由：凭据已变：src\/a\.js/);
   intent = change(intent, [{ id: "解析", state: "done" }], { prints: { "file:src/a.js": "v2" } });
   assert.equal(f.intentState(intent, "解析", { "file:src/a.js": "v2" }), "done");
 });
@@ -207,7 +212,7 @@ test("根：立时记下用户的原话；改说法时记下那一问、留痕�
   ]);
   assert.ok(f.intentEstablished(intent, "费马"));
   assert.deepEqual(f.intentBorrowed(intent, "费马"), ["模性"]);
-  const text = f.intentText(intent);
+  const text = f.intentText(intent, {}, { closed: OPEN });
   assert.match(text, /\[成立\] 费马（根）：证出费马大定理（前提：模性）（借假定：模性）/);
   assert.match(text, /\[假定\] 模性：M\n {2}出处：借 Wiles 1995 的模性定理/);
   assert.match(intent.log.at(-1).text, /^假定 模性：借 Wiles/);
@@ -299,7 +304,7 @@ test("一答之内：新转待复核的接在这一轮后；同一项第 3 回�
     { prints: { "file:api/user.js": "v1", "file:api/mask.js": "m1" } }
   );
   const now = { "file:api/user.js": "v2", "file:api/mask.js": "m1" };
-  assert.deepEqual(f.intentStaleIds(intent, now), ["登录", "隐私"]);
+  assert.deepEqual(f.intentStaleIds(intent, now, OPEN), ["登录", "隐私"]);
   const bounces = new Map([
     ["登录", 1],
     ["隐私", 1]
@@ -371,8 +376,135 @@ test("无主改动：改过而没有哪一项的凭据罩着的；文件、目�
 test("收尾前对照用的写法：立住了的根也附原话", () => {
   let intent = change(empty(), [{ id: "根", claim: "R", check: "r", root: true }], { ask: "做完这件事" });
   intent = change(intent, [{ id: "根", state: "done" }]);
-  assert.ok(!f.intentText(intent).includes("原问"));
-  assert.ok(f.intentText(intent, {}, { asks: true }).endsWith("- [成立] 根（根）：R\n  原问：做完这件事"));
+  assert.ok(!f.intentText(intent, {}, { closed: OPEN }).includes("原问"));
+  assert.ok(f.intentText(intent, {}, { asks: true, closed: OPEN }).endsWith("- [成立] 根（根）：R\n  原问：做完这件事"));
+});
+
+// 一个目录先后做几件事：实例见 GitHub维护，模型改写旧根、整批撤、一句「发吧」单立一根，都是因为做完的事没处放
+const finished = (id, extra = {}) => [
+  { id, claim: `${id}的结论`, check: "c", root: true, needs: [`${id}细项`], state: "done", ...extra },
+  { id: `${id}细项`, claim: "细", check: "c", state: "done", anchors: [`${id}.txt`] }
+];
+
+test("了结：根立住那件收起——不附着，不计进度，不取指纹，改了文件也不翻回来", () => {
+  const intent = change(empty(), finished("甲"), { prints: { "file:甲.txt": "v1" } });
+  assert.deepEqual([...f.intentClosed(intent)].sort(), ["甲", "甲细项"]);
+  assert.deepEqual(f.intentTally(intent), { live: 0, standing: 0 });
+  assert.deepEqual(f.intentSealedAnchors(intent), []);
+  assert.deepEqual(f.intentStaleIds(intent, { "file:甲.txt": "v2" }), []);
+  assert.equal(f.intentText(intent, { "file:甲.txt": null }), "", "没有开着的事、也没有守：什么都不附");
+  const guarded = change(intent, [{ id: "界限", claim: "只用本机", check: "c", keep: true }]);
+  assert.equal(f.intentText(guarded), "［意 .yan/意.json］\n守（常驻的约束）：\n- 界限：只用本机", "只有守：不写 0 / 0，也不提了结的");
+  assert.ok(f.intentClosed(intent).has("甲"), "了结不看指纹：与此刻的文件无关");
+});
+
+test("了结：新立的撞了了结的名字退回，免得看不见就盖了旧事；只给要改的字段的是明知而改", () => {
+  const intent = change(empty(), finished("甲"));
+  assert.match(problems(intent, [{ id: "甲", claim: "另一件", check: "c", root: true }]).join(), /甲 已有，是了结的一件（甲的结论）/);
+  assert.deepEqual(
+    problems(intent, [{ id: "甲", claim: "甲的结论", check: "c" }]).filter(p => p.includes("已有")),
+    [],
+    "照原样再报一遍不算撞名"
+  );
+  assert.deepEqual(problems(intent, [{ id: "甲", claim: "甲的结论（改）" }]), []);
+});
+
+test("了结：只数开着的——旧事不撑上限、不算「另有根」，新的在前", () => {
+  let intent = empty();
+  for (let i = 0; i < 20; i++)
+    intent = f.applyIntentOps(intent, f.normalizeIntentOps(intent, finished(`旧${i}`)).ops, {
+      at: `2026-11-${String(i + 1).padStart(2, "0")}`,
+      ask: "问"
+    });
+  assert.equal(Object.keys(intent.nodes).length, 40);
+  assert.deepEqual(
+    problems(intent, [
+      { id: "新事", claim: "N", check: "c", needs: ["新细项"] },
+      { id: "新细项", claim: "n", check: "c" }
+    ]),
+    [],
+    "不标根也不算孤悬；全局早过了 15 项也不拦"
+  );
+  assert.equal(f.intentText(intent), "");
+  assert.deepEqual(f.intentPast(intent).slice(0, 2), ["旧19", "旧18"], "新的在前");
+});
+
+test("了结：旧事都了结时再单立一项退回；接着做的把它写进 needs 或根改回 doing，旧的跟着开、又比凭据", () => {
+  const intent = change(empty(), finished("甲"), { prints: { "file:甲.txt": "v1" } });
+  assert.match(problems(intent, [{ id: "发布", claim: "发吧", check: "c", root: true }]).join(), /只有一项不必立/);
+  const next = change(intent, [{ id: "发布", claim: "发吧", check: "c", root: true, needs: ["甲"] }]);
+  assert.deepEqual([...f.intentClosed(next)], [], "连着新事，整条又开了");
+  assert.deepEqual(f.intentTally(next, {}), { live: 3, standing: 2 });
+  assert.deepEqual(f.intentStaleIds(next, { "file:甲.txt": "v2" }), ["甲细项"], "用到才复核：文件已变的这时才报");
+  assert.deepEqual(problems(intent, [{ id: "甲", state: "doing" }]), [], "根改回 doing 不算新立");
+  const reopened = change(intent, [{ id: "甲", state: "doing" }]);
+  assert.deepEqual([...f.intentClosed(reopened)], []);
+  const single = change(empty(), [{ id: "乙", claim: "B", check: "c", state: "done", root: true }]);
+  assert.deepEqual(problems(single, [{ id: "乙", state: "doing" }]), [], "只一项的旧事也改得回来");
+});
+
+test("了结：作答途中才立住的留到这一答收尾，收尾对照还要拿原问比；此刻重开的立即算开", () => {
+  const before = change(empty(), [
+    { id: "甲", claim: "A", check: "c", root: true, needs: ["甲细项"] },
+    { id: "甲细项", claim: "a", check: "c" }
+  ]);
+  const marked = change(
+    before,
+    [
+      { id: "甲细项", state: "done" },
+      { id: "甲", state: "done" }
+    ],
+    { ask: "做甲" }
+  );
+  const start = f.intentClosed(before);
+  assert.deepEqual([...f.intentClosed(marked, start)], [], "开工时没了结的，这一答里不收");
+  assert.deepEqual(f.intentTally(marked, {}, f.intentClosed(marked, start)), { live: 2, standing: 2 });
+  assert.equal(f.intentClosed(marked).size, 2, "答完再看即了结");
+  const closedAtStart = f.intentClosed(marked);
+  const reopened = change(marked, [{ id: "甲", state: "doing" }]);
+  assert.deepEqual([...f.intentClosed(reopened, closedAtStart)], []);
+});
+
+test("了结：开着的一项落在了结的模块里，提到全局写，不漏；手编出的环不算了结", () => {
+  let intent = change(empty(), [
+    { id: "旧事", claim: "O", check: "c", root: true, needs: ["旧模块"] },
+    { id: "旧模块", claim: "M", check: "c" },
+    { id: "旧细项", claim: "k", check: "c", in: "旧模块" }
+  ]);
+  intent = change(intent, [
+    { id: "旧细项", state: "done" },
+    { id: "旧模块", state: "done" },
+    { id: "旧事", state: "done" }
+  ]);
+  const next = change(intent, [
+    { id: "新事", claim: "N", check: "c", root: true, needs: ["新一步", "旧细项"] },
+    { id: "新一步", claim: "s", check: "c" }
+  ]);
+  const closed = f.intentClosed(next);
+  assert.ok(closed.has("旧事") && closed.has("旧模块") && !closed.has("旧细项"));
+  assert.match(f.intentText(next), /^- \[成立\] 旧细项：k$/m);
+  const hand = f.asIntent({
+    nodes: { 甲: { claim: "a", check: "c", needs: ["乙"], state: "done" }, 乙: { claim: "b", check: "c", needs: ["甲"], state: "done" } }
+  });
+  assert.deepEqual([...f.intentClosed(hand)], []);
+});
+
+test("了结：守写 in 就随那一件了结，不算它的细项；全局的守不了结", () => {
+  let intent = change(empty(), [
+    { id: "甲", claim: "A", check: "c", root: true, needs: ["甲细项"] },
+    { id: "甲细项", claim: "a", check: "c" },
+    { id: "这回门禁", claim: "发前先过测试", check: "c", keep: true, in: "甲" },
+    { id: "总界限", claim: "只用本机", check: "c", keep: true }
+  ]);
+  assert.deepEqual(f.intentTops(intent, "甲"), [], "守不是甲的细项");
+  assert.deepEqual(f.intentKeeps(intent), ["这回门禁", "总界限"]);
+  intent = change(intent, [
+    { id: "甲细项", state: "done" },
+    { id: "甲", state: "done" }
+  ]);
+  assert.deepEqual(f.intentKeeps(intent), ["总界限"]);
+  assert.ok(!f.intentText(intent).includes("发前先过测试"));
+  assert.match(f.intentText(intent), /守（常驻的约束）：\n- 总界限：只用本机$/);
 });
 
 test("写入记下更新时刻；读回来照样在", () => {
@@ -668,7 +800,7 @@ test("待定：等人拍板的一项，note 写等谁、定什么；不算立住
   assert.equal(f.asIntent(JSON.parse(JSON.stringify(intent))).nodes["提交规范"].state, "waiting", "存盘读回仍是待定");
 });
 
-test("守：一直要守的条件——不算根、不孤悬、不计进度；不挂前提、不作前提、不归模块；立时记下原话，读给模型时另列一节", () => {
+test("守：一直要守的条件——不算根、不孤悬、不计进度；不挂前提、不作前提；立时记下原话，读给模型时另列一节", () => {
   let intent = change(
     empty(),
     [
@@ -693,7 +825,6 @@ test("守：一直要守的条件——不算根、不孤悬、不计进度；�
     problems(intent, [{ id: "部署", claim: "推上去", check: "跑起来", needs: ["测过"] }]).some(p => p.includes("是守：守不作前提"))
   );
   assert.ok(problems(intent, [{ id: "测过", needs: ["上线"] }]).some(p => p.includes("是守，不挂前提")));
-  assert.ok(problems(intent, [{ id: "测过", in: "上线" }]).some(p => p.includes("是守，守在全局")));
   // 守没有进度可标：不给 state 也即作数、记下凭据；顺手带的别的态照作数，只有弃说清该撤
   const kept = change(empty(), [{ id: "界限", claim: "只用本机", check: "无外部算力", keep: true, state: "open" }]);
   assert.equal(kept.nodes["界限"].state, "done");
