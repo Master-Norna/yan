@@ -11,6 +11,26 @@ const wd = "E:\\项目\\言",
 
 const mac = command => screenCommand(command, "/Users/a/proj", { platform: "darwin" });
 
+test("注释与空行：两种平台的四档筛查各自 200ms 内返回", () => {
+  for (const command of ["# c\n".repeat(2000), "\n".repeat(4000), "# comment line here\n".repeat(2000)]) {
+    for (const platform of ["win32", "darwin"]) {
+      const options = { platform };
+      for (const [tier, check] of [
+        ["严", c => screenCommand(c, platform === "win32" ? wd : "/Users/a/proj", options)],
+        ["宽", screenLoose],
+        ["审", screenAutoReview],
+        ["不可审", screenUnreviewable]
+      ]) {
+        const start = performance.now();
+        const result = check(command, options);
+        const elapsed = performance.now() - start;
+        assert.equal(result, null, `${platform} ${tier}`);
+        assert.ok(elapsed < 200, `${platform} ${tier}: ${command.length} 字符耗时 ${elapsed.toFixed(1)}ms`);
+      }
+    }
+  }
+});
+
 test("未收尾的引号与 $()：两种平台的四档筛查各自 200ms 内返回", () => {
   for (const command of ['"$('.repeat(2000), 'echo "$('.repeat(2000), "\"$('".repeat(2000), '"$(x"'.repeat(2000)]) {
     for (const platform of ["win32", "darwin"]) {
@@ -661,6 +681,45 @@ test("不带后缀的 credentials：带路径才算凭据文件，严档拦、�
 
 // 攻击写法总表：新漏洞先进这张表再修。每行是 [指令, 严, 宽, 审, 审了也不放行, 可选平台期望]，x 是拦、o 是放
 const TABLE = [
+  // 来源与只读选项值都可在目录外；写入选项和 sed 的真实目标仍守目录。
+  ...[
+    "ditto -arch arm64 /Users/a/f.zip ./f.zip",
+    "ditto --bom /Users/a/bom.txt ./out",
+    "rsync -ave ssh /Users/a/x ./y",
+    "rsync -a -e /usr/bin/ssh /Users/a/x ./y",
+    "rsync --rsync-path=/usr/local/bin/rsync /Users/a/x ./y",
+    "rsync -a --exclude-from=/Users/a/ignore /Users/a/x ./y",
+    "rsync -a --files-from=/Users/a/l / ./y",
+    "rsync -a --link-dest=/Users/a/old /Users/a/x ./y",
+    "rsync --include-from /Users/a/ignore /Users/a/x ./y",
+    "rsync --compare-dest /Users/a/old /Users/a/x ./y",
+    "rsync --copy-dest /Users/a/old /Users/a/x ./y",
+    "rsync --rsh=/usr/bin/ssh /Users/a/x ./y",
+    "rsync --address 127.0.0.1 /Users/a/x ./y",
+    "rsync -avB 4096 /Users/a/x ./y",
+    "rsync -avB4096 /Users/a/x ./y",
+    "rsync -ave/usr/bin/ssh /Users/a/x ./y",
+    "rsync -avT ./tmp /Users/a/x ./y",
+    "sed -i '' -e's/a/b/' ./x",
+    "sed -i --expression='s/a/b/' ./x",
+    "sed --in-place '' 's/a/b/' ./x"
+  ].map(command => [command, "o", "o", "o", "o"]),
+  ...[
+    "rsync --log-file=/Users/a/x ./src ./out",
+    "rsync -avT /Users/a/tmp ./src ./out",
+    "sed -i '' -e's/a/b/' /Users/a/x",
+    "sed -i --expression='s/a/b/' /Users/a/x",
+    "sed --in-place '' 's/a/b/' /Users/a/x",
+    "sed -i '' -e 's/a/b/' /Users/a/x"
+  ].map(command => [command, "x", "o", "o", "o", { win32: "oooo" }]),
+  ["rsync --backup-dir=/etc/x ./src ./out", "x", "x", "x", "o", { win32: "oxxo" }],
+  ...[
+    String.raw`rsync --log-file=C:\Windows\a ./src ./out`,
+    String.raw`rsync --backup-dir=C:\Windows\a ./src ./out`,
+    String.raw`sed -i '' -e's/a/b/' C:\Windows\a`,
+    String.raw`sed -i --expression='s/a/b/' C:\Windows\a`,
+    String.raw`sed --in-place '' 's/a/b/' C:\Windows\a`
+  ].map(command => [command, "x", "x", "x", "o"]),
   // 转义按实际 Shell 分档；$() 内部与外层双引号各有自己的引号上下文。
   [String.raw`Write-Output "C:\"; Stop-Computer; Write-Output "done"`, "o", "o", "o", "o", { win32: "xxxo" }],
   ...[

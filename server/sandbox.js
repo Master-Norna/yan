@@ -19,12 +19,14 @@ const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 // 套一层壳的也算：cmd /c、powershell -Command、pwsh -c 后面跟的整段都在执行——指令本就由 PowerShell 跑，
 // 「powershell -Command "Set-Content C:\x y"」与直接写没有分别；这类壳之后同一行里的任何词都按指令位看，宁可多拦。
 // 赋值的右边也在执行（$r = reg delete …）；右边是带引号的字串（$mode = "copy"）不算
+// 指令位与包装前缀只吃行内空白，不能从每个行首重扫后续空行。
+const INLINE_SPACE = String.raw`[^\S\r\n]`;
 const SHELL_WORD = String.raw`(?:"(?:\\.|[^"\\\n])*"|'[^'\n]*'|[^\s"';&|()]+)`;
 // xargs / env 的普通选项仍供其它命令规则使用；sudo 不靠枚举包装词的选项来识别。
-const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:\s+-n\s+-?\d+)?|time|timeout\s+\d+(?:\.\d+)?[smhd]?|command(?=\s+[^-\s])|xargs(?:\s+-[^\s"';&|()]+)*|env(?:\s+-[^\s"';&|()]+)*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)\s+)*`;
-const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh(?:\.exe)?\s+(?:--(?:rcfile|init-file)\s+${SHELL_WORD}\s+|--[\w-]+\s+|-o\s+\S+\s+|-(?!o\s)[^c\s-]+\s+)*-[a-z]*c[a-z]*\s+(?:--\s+)?["']?`;
+const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:${INLINE_SPACE}+-n${INLINE_SPACE}+-?\d+)?|time|timeout${INLINE_SPACE}+\d+(?:\.\d+)?[smhd]?|command(?=${INLINE_SPACE}+[^-\s])|xargs(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|env(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)${INLINE_SPACE}+)*`;
+const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh(?:\.exe)?${INLINE_SPACE}+(?:--(?:rcfile|init-file)${INLINE_SPACE}+${SHELL_WORD}${INLINE_SPACE}+|--[\w-]+${INLINE_SPACE}+|-o${INLINE_SPACE}+\S+${INLINE_SPACE}+|-(?!o\s)[^c\s-]+${INLINE_SPACE}+)*-[a-z]*c[a-z]*${INLINE_SPACE}+(?:--${INLINE_SPACE}+)?["']?`;
 const CMD =
-  String.raw`(?:^|[;&|({)\n]|\$[\w:]+\s*=(?=\s*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))\s*["']?(?:&\s*["']?)?` +
+  String.raw`(?:^|[;&|({)\n]|\$[\w:]+${INLINE_SPACE}*=(?=${INLINE_SPACE}*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))${INLINE_SPACE}*["']?(?:&${INLINE_SPACE}*["']?)?` +
   PREFIX +
   // 第二段前缀必须跟在 Shell 后，避免两段前缀任意切分造成回溯。
   String.raw`(?:${SHELL}${PREFIX})?`;
@@ -57,7 +59,7 @@ const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?
 // 命令名是算出来的：& ("i"+"ex")、.("ie"+"x")、& (gcm i*x)，或把字串变成脚本块再跑（[scriptblock]::Create）。规则与审查都看不到它实际跑什么。
 // & $exe 不算：把带空格的程序路径放进变量再调用是常规写法，拦了误伤多，真想藏的也还有 node -e 可走（见文件头）
 // & 要在语句开头：a & (b) 是 pandas 之类脚本里的按位与
-const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])\s*[&.]\s*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
+const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])${INLINE_SPACE}*[&.]${INLINE_SPACE}*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
 const HIDDEN_COMMAND = new RegExp(
   String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
     String.raw`|${CMD}eval(?=[\s"']|$)|${CMD}(?:source|\.)\s+<\(` +
@@ -66,15 +68,15 @@ const HIDDEN_COMMAND = new RegExp(
   "im"
 );
 const PIPE_SHELL = new RegExp(
-  String.raw`^\s*${PREFIX}["']?(?:[^\s"';&|(){}]*/)?(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?["']?(?=\s|$)`,
+  String.raw`^${INLINE_SPACE}*${PREFIX}["']?(?:[^\s"';&|(){}]*/)?(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?["']?(?=\s|$)`,
   "i"
 );
 const SCRIPT_START = new RegExp(
-  String.raw`^\s*${PREFIX}(?:${SHELL}|(?:cmd(?:\.exe)?\b[^\n]*?/[ck]|(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?[-/](?:${prefixesOf("command")}))\s+["'])`,
+  String.raw`^${INLINE_SPACE}*${PREFIX}(?:${SHELL}|(?:cmd(?:\.exe)?\b[^\n]*?/[ck]|(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?[-/](?:${prefixesOf("command")}))${INLINE_SPACE}+["'])`,
   "i"
 );
-const CMD_SCRIPT = new RegExp(String.raw`^\s*${PREFIX}cmd(?:\.exe)?\b[^\n]*?/[ck]\s*$`, "i");
-const POSIX_SCRIPT = new RegExp(String.raw`^\s*${PREFIX}${SHELL}$`, "i");
+const CMD_SCRIPT = new RegExp(String.raw`^${INLINE_SPACE}*${PREFIX}cmd(?:\.exe)?\b[^\n]*?/[ck]${INLINE_SPACE}*$`, "i");
+const POSIX_SCRIPT = new RegExp(String.raw`^${INLINE_SPACE}*${PREFIX}${SHELL}$`, "i");
 // 转义跟随执行这段文本的 Shell；cmd 的 ^ 只在引号外转义。
 function escapes(text, at, shell, quote = "") {
   if (quote === "'") return false;
@@ -354,7 +356,7 @@ const HOME_SYSTEM_PATH = new RegExp(
 // 带引号的只认站在指令位的（& "curl.exe" …）：rg "curl" src 是搜字。curl 的 --connect-to、-x 之类不往下追：静态筛查追不完，问而后行里这些本来就要请示
 const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
 const NET_TOOLS = new RegExp(
-  String.raw`(^|[\s;&|(])(${NET_TOOL_NAMES})(\.exe)?(\s|$)|(^|[;&|(\n]\s*)["'](${NET_TOOL_NAMES})(\.exe)?["'](\s|$)`,
+  String.raw`(^|[\s;&|(])(${NET_TOOL_NAMES})(\.exe)?(\s|$)|(^|[;&|(\n]${INLINE_SPACE}*)["'](${NET_TOOL_NAMES})(\.exe)?["'](\s|$)`,
   "i"
 );
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
@@ -389,7 +391,7 @@ const GIT_INTERNAL_PATH = /(^|[\s"'=;|&(])[^\s"'`;|&<>()]*\.git[\\/][^\s"'`;|&<>
 // 漏一个动词，就等于放行一次目录外的写入。重叠的前缀按长在前排（rmdir 在 rm 前、rename 在 ren 前）。
 // 指令由 Windows PowerShell 跑，它的别名是真会执行的：sc = Set-Content、ni = New-Item、ri = Remove-Item、mi / cpi / rni 同理，
 // 一并列上；解包、克隆这类把东西放到某处的也算
-const WRITE_VERBS = String.raw`Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Rename-Item|New-Item|Set-Item|Clear-Item|Clear-Content|Set-Acl|Compress-Archive|Expand-Archive|Export-Csv|Export-Clixml|Tee-Object|Start-Transcript|(?:New|Set|Remove|Copy|Move|Clear|Rename)-ItemProperty|robocopy|xcopy|copy|rmdir|rd|rm|del|erase|move|mv|cp|rename|ren|mkdir|md|touch|tee|attrib|mklink|fsutil|dd|sc|ac|ni|ri|mi|cpi|rni|rn|si|cli|clc|sp|rp|clp|mp|rnp|epcsv|tar|7za?|unzip|zip|chmod|chown|chflags|ln|rsync|ditto|sed\s+(?:-[^\s]+\s+)*-[A-Za-z]*i|git\s+(?:clone|worktree\s+add)`;
+const WRITE_VERBS = String.raw`Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Rename-Item|New-Item|Set-Item|Clear-Item|Clear-Content|Set-Acl|Compress-Archive|Expand-Archive|Export-Csv|Export-Clixml|Tee-Object|Start-Transcript|(?:New|Set|Remove|Copy|Move|Clear|Rename)-ItemProperty|robocopy|xcopy|copy|rmdir|rd|rm|del|erase|move|mv|cp|rename|ren|mkdir|md|touch|tee|attrib|mklink|fsutil|dd|sc|ac|ni|ri|mi|cpi|rni|rn|si|cli|clc|sp|rp|clp|mp|rnp|epcsv|tar|7za?|unzip|zip|chmod|chown|chflags|ln|rsync|ditto|sed\s+(?:-[^\s]+\s+)*(?:-[A-Za-z]*i|--in-place)|git\s+(?:clone|worktree\s+add)`;
 // 带输出目标的参数：curl -o、wget -O、iwr -OutFile、Start-Process 的重定向——动词本身像读，却在往某处写
 const OUTPUT_PARAMS = String.raw`(?:^|\s)(?:-o|-O|-OutFile|-OutputPath|-Destination(?:Path)?|-RedirectStandard(?:Output|Error)|--output(?:-document|-dir)?|--outdir|--out-dir)(?=[\s=:]|$)|(?:^|\s)-o(?=[\\/"'A-Za-z])`;
 // .NET 直写文件：[IO.File]::WriteAllText、[IO.Directory]::Delete、New-Object IO.StreamWriter 之类
@@ -441,11 +443,13 @@ const READ_SOURCES = new RegExp(
 const POSIX_ARGUMENTS = new RegExp(String.raw`${CMD}(rsync|ditto|sed)\s+`, "gim");
 // 列带值选项，而不是列无值选项；日志、临时目录等写入参数只跨过，不豁免其路径。
 const RSYNC_VALUES = new Set(
-  "exclude include filter exclude-from include-from files-from rsh remote-option address port bwlimit timeout contimeout max-size min-size block-size checksum-seed compress-level skip-compress suffix backup-dir compare-dest copy-dest link-dest log-file out-format temp-dir chmod chown usermap groupmap".split(
+  "exclude include filter exclude-from include-from files-from rsh rsync-path remote-option address port bwlimit timeout contimeout max-size min-size block-size checksum-seed compress-level skip-compress suffix backup-dir compare-dest copy-dest link-dest log-file out-format temp-dir chmod chown usermap groupmap".split(
     " "
   )
 );
-const RSYNC_PATTERNS = new Set(["exclude", "include", "filter"]);
+const RSYNC_READ_VALUES = new Set(
+  "exclude include filter exclude-from include-from files-from link-dest compare-dest copy-dest rsh rsync-path address".split(" ")
+);
 function argumentsAt(scanned, start) {
   const text = scanned.text;
   const tokens = [];
@@ -498,9 +502,11 @@ function stripReadSources(scanned, sources = true) {
       if (options && value.startsWith("-")) {
         const [name, attached] = value.replace(/^--/, "").split("=", 2);
         if (tool === "rsync") {
-          const takesValue = RSYNC_VALUES.has(name) || /^-[efBT]$/.test(value);
-          ignored = RSYNC_PATTERNS.has(name) || value === "-f";
-          if (takesValue && attached === undefined && tokens[i + 1]) {
+          const short = /^-[A-Za-z]*?([efBT])(.*)$/.exec(value),
+            takesValue = RSYNC_VALUES.has(name) || !!short,
+            hasAttached = short ? short[2] !== "" : attached !== undefined;
+          ignored = RSYNC_READ_VALUES.has(name) || !!(short && "ef".includes(short[1]));
+          if (takesValue && !hasAttached && tokens[i + 1]) {
             if (ignored) {
               const arg = tokens[i + 1];
               for (let j = arg.start; j < arg.end; j++) chars[j] = " ";
@@ -508,16 +514,21 @@ function stripReadSources(scanned, sources = true) {
             i++;
           }
         } else if (tool === "ditto") {
-          if ((name === "arch" || name === "bom") && attached === undefined) i++;
+          ignored = name === "bom";
+          if ((value === "-arch" || name === "arch" || name === "bom") && attached === undefined && tokens[i + 1]) {
+            const arg = tokens[++i];
+            if (ignored) for (let j = arg.start; j < arg.end; j++) chars[j] = " ";
+          }
         } else {
-          if (value === "-e" || value === "--expression" || value === "-f" || value === "--file") {
+          const script = /^(?:-[ef]|--(?:expression|file)(?:=|$))/.exec(value);
+          if (script) {
             sedScript = true;
             ignored = true;
-            if (tokens[i + 1]) {
+            if (value.length === script[0].length && !value.endsWith("=") && tokens[i + 1]) {
               const arg = tokens[++i];
               for (let j = arg.start; j < arg.end; j++) chars[j] = " ";
             }
-          } else if (/^-[A-Za-z]*i$/.test(value) && tokens[i + 1]?.value === "") i++;
+          } else if ((/^-[A-Za-z]*i$/.test(value) || value === "--in-place") && tokens[i + 1]?.value === "") i++;
         }
       } else if (!operand) {
         operand = true;
