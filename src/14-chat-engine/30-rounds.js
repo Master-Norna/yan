@@ -204,6 +204,8 @@ async function runRounds(target, history, run) {
     });
     const offered = new Set(overrides.tools.map(tool => tool.function?.name)),
       { outcomes, images } = await runSteps(steps, conversation, host, signal, toolCache, offered, run.kind === "side");
+    // 这一批跑着时按了「止」：工具结果不再装进历史、排着的补言也不在这里递（留给 settleSupplements 放回案上），就此停住
+    signal.throwIfAborted();
     for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
     // 它这一轮自己撮了要：此前的往来换成它写的笔记（见 60-context.js 的 foldByModel）
     foldByModel(history, overrides, steps);
