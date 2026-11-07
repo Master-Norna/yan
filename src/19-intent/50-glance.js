@@ -46,17 +46,20 @@ function intentGlanceHtml(conversation, short = false) {
   const held = intentGlances.get(key);
   if (!held) return void glanceIntent(conversation), "";
   const { intent, now } = held,
+    closed = intentClosed(intent),
+    past = intentPast(intent, closed).length,
     views = Object.keys(intent.nodes)
-      .filter(id => !intent.nodes[id].keep && !intentGone(intent, id))
+      .filter(id => !intent.nodes[id].keep && !intentGone(intent, id) && !closed.has(id))
       .map(id => intentView(intent, id, now))
       .sort((a, b) => INTENT_GLANCE_ORDER.indexOf(a) - INTENT_GLANCE_ORDER.indexOf(b)),
-    keeps = intentKeeps(intent),
-    // 只立了守、没有目标的：守都列出来，不然这一枚就不见了，卡片也点不开
-    broken = views.length ? keeps.filter(id => intentView(intent, id, now) === "stale") : keeps;
-  if (!views.length && !broken.length) return "";
-  const { standing } = intentTally(intent, now),
+    keeps = intentKeeps(intent, closed),
+    // 只立了守、别的什么也没有：守都列出来，不然这一枚就不见了，卡片也点不开
+    broken = views.length || past ? keeps.filter(id => intentView(intent, id, now) === "stale") : keeps;
+  if (!views.length && !broken.length && !past) return "";
+  const { standing } = intentTally(intent, now, closed),
     rest = views.length - INTENT_GLANCE_MARKS;
-  return `<button type="button" class="intent-glance" data-intent-open title="${t`意：进度 ${standing} / ${views.length}，点开看图`}"><span class="seal intent-seal" aria-hidden="true">${t(`意`)}</span>${views.length ? `<span>${short ? `<b>${standing}</b>/${views.length}` : `${t(`进度`)} <b>${standing}</b> / ${views.length}`}</span>` : ""}<span class="intent-glance-run" aria-hidden="true">${views
+  // 眼下没有开着的事：只留印与一句已了结几件，不排记号
+  return `<button type="button" class="intent-glance" data-intent-open title="${views.length || !past ? t`意：进度 ${standing} / ${views.length}，点开看图` : t`意：已了结 ${past} 件，点开看`}"><span class="seal intent-seal" aria-hidden="true">${t(`意`)}</span>${views.length ? `<span>${short ? `<b>${standing}</b>/${views.length}` : `${t(`进度`)} <b>${standing}</b> / ${views.length}`}</span>` : past ? `<span>${t`已了结 ${past}`}</span>` : ""}<span class="intent-glance-run" aria-hidden="true">${views
     .slice(0, INTENT_GLANCE_MARKS)
     .map(view => intentMark(view))
     .join("")}${rest > 0 ? `<i>+${rest}</i>` : ""}</span>${

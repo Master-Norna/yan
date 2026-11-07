@@ -209,6 +209,10 @@
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
 }
+/* 了结的那一页不画图，簿录直接接在页头下 */
+.intent-graph:empty {
+  margin: 0 0 30px;
+}
 .intent-svg {
   display: block;
   margin: 0 auto;

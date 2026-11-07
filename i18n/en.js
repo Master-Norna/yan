@@ -1505,6 +1505,8 @@ var YAN_EN = {
   "墨痕 {0}": "History {0}",
   "意 · {0}": "Intent · {0}",
   "意：进度 {0} / {1}，点开看图": "Intent: {0} / {1} settled, click to view",
+  "已了结 {0}": "Closed {0}",
+  "意：已了结 {0} 件，点开看": "Intent: {0} closed, click to view",
 
   // ---- 桥接回的话（页面在提示条、报错与状态行上照这几句换；桥接那头照旧写中文） ----
   缺少页面标识: "Missing page ID",

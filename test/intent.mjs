@@ -444,6 +444,85 @@ try {
   await sleep(250);
   check("an older card's late response does not replace the newly opened card", await evalJs(rootSays("第二张卡片的根")));
 
+  // 了结（一个目录先后几件事）：一件了结的带前提链，一件了结的是模块，一件开着。图只画开着的；「已了结」换成一件一行、新的在上，点 › 进它那张图
+  const doneItem = (claim, extra = {}) => ({ claim, check: "c", needs: [], anchors: [], state: "done", rev: 1, ...extra });
+  const closedSet = {
+    nodes: {
+      旧链: doneItem("旧链的结论", { needs: ["旧链一步"], root: { ask: "问一", at: "2026-11-01T00:00:00Z" } }),
+      旧链一步: doneItem("一步"),
+      // 与还作数的守共用一个已不在的文件：守照报，了结的不比
+      旧模块: doneItem("旧模块的结论", {
+        root: { ask: "问二", at: "2026-11-02T00:00:00Z" },
+        anchors: ["file:共用.txt"],
+        seal: { rev: 1, premises: { 旧细项: 1 }, prints: { "file:共用.txt": "旧" }, anchors: ["file:共用.txt"] }
+      }),
+      旧细项: doneItem("细项", { in: "旧模块" }),
+      旧门禁: doneItem("这回的门禁", { keep: true, in: "旧链", root: { ask: "问一", at: "2026-11-01T00:00:00Z" } }),
+      总界限: doneItem("只用本机", {
+        keep: true,
+        root: { ask: "问三", at: "2026-11-01T00:00:00Z" },
+        anchors: ["file:共用.txt"],
+        seal: { rev: 1, premises: {}, prints: { "file:共用.txt": "旧" }, anchors: ["file:共用.txt"] }
+      }),
+      新事: {
+        claim: "新事的结论",
+        check: "c",
+        needs: ["新一步"],
+        anchors: [],
+        state: "doing",
+        rev: 1,
+        root: { ask: "问四", at: "2026-11-03T00:00:00Z" }
+      },
+      新一步: { claim: "一步", check: "c", needs: [], anchors: [], state: "open", rev: 1 }
+    },
+    log: []
+  };
+  const stage = selector => `document.querySelector('#fileViewerStage ${selector}')`,
+    names = `[...document.querySelectorAll('#fileViewerStage .intent-roll .intent-row-name')].map(n => n.textContent).join(",")`,
+    drawn = `[...document.querySelectorAll('#fileViewerStage g[data-intent-node]')].map(n => n.dataset.intentNode).sort().join(",")`;
+  await evalJs(`document.querySelector('#fileViewerClose').click(); true`);
+  writeFileSync(`${dir}/.yan/意.json`, JSON.stringify(closedSet));
+  await openCard();
+  await waitFor(`${stage('g[data-intent-node="新事"]')}`);
+  check("the graph draws only the open job", (await evalJs(drawn)) === "新一步,新事");
+  check(
+    "the header counts open items and offers the closed ones; a closed job's keep is gone",
+    /^进度 0 \/ 2/.test(await evalJs(`${stage(".page-facts")}.textContent`)) &&
+      (await evalJs(`${stage("[data-intent-past]")}.textContent`)) === "已了结 2" &&
+      (await evalJs(names)) === "新事,新一步,总界限"
+  );
+  await evalJs(`${stage("[data-intent-past]")}.click(); true`);
+  await waitFor(`!${stage(".intent-svg")} && ${names} === "旧模块,旧链,总界限"`);
+  check("closed jobs list one row each, newest first, without a graph", true);
+  check(
+    "a closed job is not compared against evidence it shares with a live keep",
+    (await evalJs(`${stage('.intent-row[data-intent-node="旧模块"]')}.dataset.state`)) === "holds" &&
+      (await evalJs(`${stage('.intent-row[data-intent-node="总界限"]')}.dataset.state`)) === "stale"
+  );
+  await evalJs(`${stage('.intent-row[data-intent-node="旧链"] [data-intent-level]')}.click(); true`);
+  await waitFor(`${drawn} === "旧链,旧链一步"`);
+  check("entering a closed job draws its own premise chain", (await evalJs(names)).includes("旧门禁"));
+  await evalJs(`${stage('.intent-crumb [data-intent-level=""]')}.click(); true`);
+  await waitFor(`${names} === "旧模块,旧链,总界限"`);
+  await evalJs(`${stage('.intent-row[data-intent-node="旧模块"] [data-intent-level]')}.click(); true`);
+  await waitFor(`${drawn} === "旧模块,旧细项"`);
+  check("entering a closed module draws what is inside it", true);
+  await evalJs(`document.querySelector('#fileViewerClose').click(); true`);
+  // 都了结：题下只写已了结几件，不排记号；打开就是那一页，无可切换
+  closedSet.nodes.新事.state = "done";
+  closedSet.nodes.新一步.state = "done";
+  closedSet.nodes.总界限.anchors = [];
+  delete closedSet.nodes.总界限.seal;
+  writeFileSync(`${dir}/.yan/意.json`, JSON.stringify(closedSet));
+  await openCard();
+  await waitFor(`${names} === "新事,旧模块,旧链,总界限"`);
+  check("with nothing open the card opens on the closed jobs, with no switch", !(await evalJs(`!!${stage("[data-intent-past]")}`)));
+  await waitFor(`document.querySelector('#chatMeta .intent-glance')?.textContent === "意已了结 3"`);
+  check(
+    "the glance says how many are closed and draws no marks",
+    !(await evalJs(`!!document.querySelector('#chatMeta .intent-glance .intent-mk')`))
+  );
+
   await evalJs(`document.querySelector('#fileViewerClose').click(); true`);
   writeFileSync(`${dir}/.yan/意.json`, '{"nodes":null,"log":[null]}');
   await openCard();

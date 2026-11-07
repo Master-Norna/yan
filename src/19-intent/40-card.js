@@ -7,6 +7,8 @@
 // 卡片只给看、不给改：要改的往往不是一两个字，直接告诉模型。
 // 嵌套：图只画一层。模块在图上与簿录里带「里面已立几项 ›」，点它即进模块：整张图换成模块里的，以模块自己收尾（最右那一项，淡些），
 // 页头下一行写所在（可点回上层）；模块的前提与撑起什么点开它那一项即见，不在这行另列。
+// 了结的几件（见 00-core.js 的 intentClosed）不上这张图：页头右端「已了结 n」与墨痕同一个样子，点开图下换成一件一行、新的在上，点「›」进它自己那张图，与进模块同一种走法；
+// 眼下没有开着的事，打开即这一页。
 // 由程序照 .yan/意.json 画，与文件一字不差，不请模型另画；展开的因果（支撑、缘由、哪条凭据变了）也是程序从图与指纹推出的，不经模型。
 /** @typedef {"holds"|"premised"|"stale"|"assumed"|"doing"|"waiting"|"open"|"dropped"|"kept"} IntentView 画出来的状态：成立的再按前提分已立与前提未立；kept：守，没出事 */
 const INTENT_VIEW_TEXT = {
@@ -78,21 +80,61 @@ function intentView(intent, id, now) {
   if (intent.nodes[id].keep) return state === "stale" ? "stale" : "kept";
   return state === "done" ? (intentEstablished(intent, id, now) ? "holds" : "premised") : state;
 }
-/** 模块里已立几项 @param {Intent} intent @param {IntentPrints} now @param {string} id @returns {string} 不是模块即空 */
+/**
+ * 了结的一件，全局那一层它一路依着的（进它那张图时一并画）。不是了结的根即空。前提落在模块里的算那个模块，落在自己里面的不算
+ * @param {Intent} intent @param {string} root @returns {Set<string>}
+ */
+function intentChain(intent, root) {
+  const out = new Set(),
+    walk = id => {
+      for (const need of writtenNeeds(intent, id)) {
+        const top = intentAncestors(intent, need).at(-1) || need;
+        if (top === root || out.has(top)) continue;
+        out.add(top);
+        walk(top);
+      }
+    };
+  if (intentRoots(intent).includes(root) && intentClosed(intent).has(root)) walk(root);
+  return out;
+}
+/** 模块（或了结的一件）里已立几项 @param {Intent} intent @param {IntentPrints} now @param {string} id @returns {string} 里面没有东西即空 */
 function intentInside(intent, now, id) {
-  const kids = intentChildren(intent, id);
+  const kids = [...intentChildren(intent, id), ...intentChain(intent, id)];
   return kids.length ? `${kids.filter(k => intentEstablished(intent, k, now)).length}/${kids.length}` : "";
+}
+/**
+ * 图上这一层有哪几项。全局分开着的与了结的；进了一层即它里面的，了结的一件连同它依着的
+ * @param {Intent} intent @param {string} level @param {boolean} [past] @returns {(id: string) => boolean}
+ */
+function intentLayer(intent, level, past = false) {
+  if (level) {
+    const chain = intentChain(intent, level);
+    return id => intent.nodes[id].in === level || chain.has(id);
+  }
+  const closed = intentClosed(intent);
+  return id => !intent.nodes[id].in && closed.has(id) === past;
+}
+/** 点中一项时该落到哪一层 @param {Intent} intent @param {string} id @param {string} level 眼下那一层 */
+function intentHome(intent, id, level) {
+  const node = intent.nodes[id];
+  if (node.keep) return node.in === level ? level : "";
+  if (node.in) return node.in;
+  const closed = intentClosed(intent);
+  if (!closed.has(id) || intentRoots(intent).includes(id)) return "";
+  if (intentChain(intent, level).has(id)) return level;
+  return intentPast(intent, closed).find(root => intentChain(intent, root).has(id)) || "";
 }
 /** 所在：「全局」或一层层的模块名 @param {Intent} intent @param {string} id */
 const intentWhere = (intent, id) => intentAncestors(intent, id).reverse().join(" › ") || t("全局");
 /**
  * 一层图上的线：前提可跨模块，画一层时把这一层以下各项的前提都提到这一层——两头各取它在这一层的那一项（自己，或它所在的模块）。
  * 两头落在同一项的是那一项里面的事，这一层不画；提上来的（不是这两项直连的）画淡些；前提在这一层之外的，画成左侧一个淡影
- * @param {Intent} intent @param {string} level
+ * @param {Intent} intent @param {string} level @param {boolean} [past] 全局那一层画了结的（默认画开着的）
  * @returns {{ needs: Record<string, string[]>, soft: Record<string, string[]>, ghosts: string[] }}
  */
-function intentLevelEdges(intent, level) {
-  const at = id => [id, ...intentAncestors(intent, id)].find(k => (intent.nodes[k].in || "") === level && !intent.nodes[k].keep),
+function intentLevelEdges(intent, level, past = false) {
+  const member = intentLayer(intent, level, past),
+    at = id => [id, ...intentAncestors(intent, id)].find(k => member(k) && !intent.nodes[k].keep),
     /** @type {Record<string, Set<string>>} */ direct = {},
     /** @type {Record<string, Set<string>>} */ lifted = {},
     ghosts = new Set();
@@ -117,15 +159,16 @@ function intentLevelEdges(intent, level) {
 /**
  * 图：前提在左、根在右。只画一层：全局，或某个模块里的（模块自己作收尾那一项）
  * @param {Intent} intent @param {IntentPrints} now @param {string} selected @param {string} [level] 模块的 id；空即全局
+ * @param {boolean} [past] 全局那一层看了结的：一件一行不画图，几件互不相干，叠成一张图只是一摞
  * @returns {{ svg: string, order: string[] }} order：簿录的次序——根在先，余者随图自右而左、自上而下
  */
-function intentGraphSvg(intent, now, selected, level = "") {
+function intentGraphSvg(intent, now, selected, level = "", past = false) {
+  if (!level && past) return { svg: "", order: intentPast(intent) };
   // 弃了的不上图（列在图下「已弃」）；孤悬的不当根画
   const strays = new Set(intentStrays(intent)),
     roots = new Set(intentRoots(intent).filter(id => !strays.has(id))),
-    ids = Object.keys(intent.nodes).filter(
-      id => !intent.nodes[id].keep && (intent.nodes[id].in || "") === level && !intentGone(intent, id)
-    ),
+    member = intentLayer(intent, level),
+    ids = Object.keys(intent.nodes).filter(id => !intent.nodes[id].keep && member(id) && !intentGone(intent, id)),
     { needs, soft, ghosts } = intentLevelEdges(intent, level),
     drawing = drawGraphLayout([
       ...ids.map(id => {
@@ -143,7 +186,15 @@ function intentGraphSvg(intent, now, selected, level = "") {
         };
       }),
       ...(level && intent.nodes[level]
-        ? [{ id: level, label: level, needs: intentTops(intent, level), state: intentView(intent, level, now), root: true }]
+        ? [
+            {
+              id: level,
+              label: level,
+              needs: [...new Set([...intentTops(intent, level), ...writtenNeeds(intent, level).filter(k => member(k))])],
+              state: intentView(intent, level, now),
+              root: true
+            }
+          ]
         : []),
       // 这一层之外的前提：淡影，名后小字写它在哪；点它跳到它那一层
       ...ghosts.map(id => ({ id, label: id, needs: [], state: intentView(intent, id, now), ghost: intentWhere(intent, id) }))
@@ -281,13 +332,15 @@ function intentRollHtml(intent, now, order, selected, level) {
     })
     .join("")}</div>`;
 }
-// 守：簿录之后另起一节（设计稿/80 卡片乙），行同目标那几行，出了事的说法换成事由；只在全局那一层。
+// 守：簿录之后另起一节（设计稿/80 卡片乙），行同目标那几行，出了事的说法换成事由。全局那一层列还作数的全部，进了一层只列属它的（了结的也列）。
 // 哪条有程序把关、在哪一步把关，看各行的记号（keepGate）；题旁只写条数
-/** @param {Intent} intent @param {IntentPrints} now @param {string} selected */
-function intentKeepHtml(intent, now, selected) {
-  const keeps = intentKeeps(intent);
+/** @param {Intent} intent @param {IntentPrints} now @param {string} selected @param {string} level */
+function intentKeepHtml(intent, now, selected, level) {
+  const keeps = level
+    ? Object.keys(intent.nodes).filter(id => intent.nodes[id].keep && intent.nodes[id].in === level && !intentGone(intent, id))
+    : intentKeeps(intent);
   if (!keeps.length) return "";
-  return `<div class="intent-keep-head">${t(`守`)}<small>${t`${keeps.length} 条`}</small></div>${intentRollHtml(intent, now, keeps, selected, "")}`;
+  return `<div class="intent-keep-head">${t(`守`)}<small>${t`${keeps.length} 条`}</small></div>${intentRollHtml(intent, now, keeps, selected, level)}`;
 }
 /** 墨痕：新的在上，同一时刻的几笔并作一组；每笔写是哪一种（弃、撤、改意、归入……）。弃的带灰叉、写弃时的缘由，假定的带泥金勾；还在图上的名可点 @param {Intent} intent */
 function intentInkHtml(intent) {
@@ -339,29 +392,39 @@ function intentCrumbHtml(intent, level) {
 /**
  * 整张卡片
  * @param {Intent} intent @param {IntentPrints} now
- * @param {{ selected?: string, level?: string, name?: string, ink?: boolean }} [options] level：眼前是哪个模块里的一层；name：目录名；ink：图下换成墨痕
+ * @param {{ selected?: string, level?: string, name?: string, ink?: boolean, past?: boolean }} [options] level：眼前是哪个模块里的一层；name：目录名；ink：图下换成墨痕；past：全局那一层看了结的
  */
-function intentCardHtml(intent, now, { selected = "", level = "", name = "", ink = false } = {}) {
+function intentCardHtml(intent, now, { selected = "", level = "", name = "", ink = false, past = false } = {}) {
   if (!Object.keys(intent.nodes).some(id => !intentGone(intent, id)))
     return `<div class="intent-card"><div class="file-viewer-empty">${t(`此目录尚未立意`)}</div></div>`;
-  const { standing, live } = intentTally(intent, now),
-    borrowed = [...new Set(intentRoots(intent).flatMap(id => intentBorrowed(intent, id)))].length,
-    { svg, order } = intentGraphSvg(intent, now, selected, level),
-    inked = ink && intent.log.length > 0;
+  const closed = intentClosed(intent),
+    { standing, live } = intentTally(intent, now, closed),
+    settled = intentPast(intent, closed).length,
+    borrowed = [...new Set(intentRoots(intent).flatMap(id => (closed.has(id) ? [] : intentBorrowed(intent, id))))].length,
+    // 了结的不比凭据：与开着的项、守共用一个文件时手上有此刻的指纹，也不拿来画
+    seen = (!level && past) || closed.has(level) ? {} : now,
+    { svg, order } = intentGraphSvg(intent, seen, selected, level, past),
+    inked = ink && intent.log.length > 0,
+    /** @param {string} attr @param {boolean} on @param {string} text */
+    act = (attr, on, text) => `<button type="button" ${attr} aria-pressed="${on}"${on ? ` class="on"` : ""}>${text}</button>`,
+    // 没有开着的事时这一页就是了结的那几件，无可切换
+    acts = [
+      live && settled ? act("data-intent-past", past && !inked, t`已了结 ${settled}`) : "",
+      intent.log.length ? act("data-intent-ink", inked, t`墨痕 ${intent.log.length}`) : ""
+    ].join("");
   // 页头：目录名、一行事实，右端墨痕。原问不上卡片，它是给模型对照用的
   const facts = [
     live ? `<span class="intent-meta">${t(`进度`)} <b>${standing}</b> / ${live}</span>` : "",
+    !live && settled ? `<span class="intent-meta">${t`已了结 ${settled}`}</span>` : "",
     borrowed ? `<span class="intent-borrow">${t`假定 ${borrowed}`}</span>` : "",
     intent.updated ? `<span class="intent-updated">${t`更新于 ${escapeHtml(intentTime(intent.updated))}`}</span>` : ""
   ].join("");
   return `<div class="intent-card"><div class="page-head intent-page-head">${name ? `<h1>${escapeHtml(name)}</h1>` : ""}<span class="page-facts">${facts}</span>${
-    intent.log.length
-      ? `<div class="page-acts"><button type="button" data-intent-ink aria-pressed="${inked}"${inked ? ` class="on"` : ""}>${t`墨痕 ${intent.log.length}`}</button></div>`
-      : ""
+    acts ? `<div class="page-acts">${acts}</div>` : ""
   }</div>${intentCrumbHtml(intent, level)}<div class="intent-graph">${svg}</div>${
     inked
       ? intentInkHtml(intent)
-      : `${intentRollHtml(intent, now, order, selected, level)}${level ? "" : intentKeepHtml(intent, now, selected)}`
+      : `${intentRollHtml(intent, seen, order, selected, level)}${intentKeepHtml(intent, level ? seen : now, selected, level)}`
   }</div>`;
 }
 /** 本地时刻「10-11 16:41」；不是今年的带上年份 @param {string|undefined} at ISO */
@@ -373,16 +436,16 @@ function intentTime(at) {
   return date.getFullYear() === new Date().getFullYear() ? day : `${date.getFullYear()}-${day}`;
 }
 // ---------- 打开与交互：读文件、取指纹（文件与目录现取；探针用这一答开工时取的，不为看一眼去跑指令）----------
-/** @type {{ conversation: Conversation, intent: Intent, now: IntentPrints, selected: string, level: string, ink: boolean, painted?: string, revision: number }|null} */
+/** @type {{ conversation: Conversation, intent: Intent, now: IntentPrints, selected: string, level: string, ink: boolean, past: boolean, painted?: string, revision: number }|null} */
 let intentCard = null;
 function paintIntentCard() {
   const stage = $("#fileViewerStage");
   if (!intentCard || intentCard.revision !== viewerRevision || !stage?.querySelector(".intent-card")) return;
-  const { conversation, intent, now, selected, level, ink } = intentCard,
+  const { conversation, intent, now, selected, level, ink, past } = intentCard,
     // 图比卡片宽时横滚：同一层重画（点了一项）留在原处；头一回画、换了一层，滚到正做着的、待复核的那一项，没有就靠右见根
     before = intentCard.painted === level ? stage.querySelector(".intent-graph:not(:empty)")?.scrollLeft : undefined;
   intentCard.painted = level;
-  stage.innerHTML = intentCardHtml(intent, now, { selected, level, ink, name: workdirName(conversation) });
+  stage.innerHTML = intentCardHtml(intent, now, { selected, level, ink, past, name: workdirName(conversation) });
   const graph = stage.querySelector(".intent-graph");
   if (!graph || graph.scrollWidth <= graph.clientWidth) return;
   if (before !== undefined) return void (graph.scrollLeft = before);
@@ -416,7 +479,7 @@ async function openIntentCard(conversation, trigger = null) {
       };
     if (revision !== viewerRevision) return;
     noteIntentGlance(conversation, intent, now);
-    intentCard = { conversation, intent, now, selected: "", level: "", ink: false, revision };
+    intentCard = { conversation, intent, now, selected: "", level: "", ink: false, past: !intentTally(intent, now).live, revision };
     paintIntentCard();
   } catch (error) {
     if (revision !== viewerRevision) return;
@@ -428,16 +491,18 @@ async function openIntentCard(conversation, trigger = null) {
 /** 点中一项：图上、簿录里再点一下（或点笺的题）收起；别层的（前提、支撑、内含、墨痕里点的）跳到它那一层，墨痕收起 @param {string} id @param {boolean} toggle */
 function pickIntentNode(id, toggle) {
   if (!intentCard?.intent.nodes[id]) return;
-  const { level, ink } = intentCard;
+  const { level, ink, past, intent } = intentCard;
   intentCard.ink = false;
   if (toggle && intentCard.selected === id) intentCard.selected = "";
   else {
-    if (id !== intentCard.level) intentCard.level = intentCard.intent.nodes[id].in || "";
+    if (id !== intentCard.level) intentCard.level = intentHome(intent, id, level);
+    // 守两边都列着，点它不换页
+    if (!intent.nodes[id].keep) intentCard.past = intentClosed(intent).has(id);
     intentCard.selected = id;
   }
   // 同一层里摊开、收起一张笺：簿录从旧高动到新高，与别处的展开同一种；换了层、从墨痕回来是整张换过，不动
   const stage = $("#fileViewerStage");
-  if (ink || level !== intentCard.level) return paintIntentCard();
+  if (ink || level !== intentCard.level || past !== intentCard.past) return paintIntentCard();
   morphHeight(stage.querySelector(".intent-roll"), paintIntentCard, 320, () => stage.querySelector(".intent-roll"));
 }
 /** 点了就开合（再点收起）的：图上一项、簿录一行、摊开的笺的题；别处的名（前提、支撑、墨痕）是跳过去 */
@@ -462,6 +527,14 @@ function bindIntentEvents() {
       pick = event.target.closest("[data-intent-node]");
     if (event.target.closest("[data-intent-ink]")) {
       intentCard.ink = !intentCard.ink;
+      intentCard.selected = "";
+      return paintIntentCard();
+    }
+    if (event.target.closest("[data-intent-past]")) {
+      // 从墨痕点过来是看了结的；已在看了结的，点一下回开着的那张图
+      intentCard.past = intentCard.ink || !intentCard.past;
+      intentCard.ink = false;
+      intentCard.level = "";
       intentCard.selected = "";
       return paintIntentCard();
     }
