@@ -234,7 +234,11 @@ test("screenCommand：指令通道也不许显式碰机密文件或直接改 .gi
     "type src\\.env.local",
     'cat "keys/id_rsa"',
     "Get-Content config/secrets.yaml",
-    "Remove-Item certs/site.pfx"
+    "Remove-Item certs/site.pfx",
+    // 数据流写法碰的是同一件文件本身
+    "Get-Content .env::$DATA",
+    "type config\\secrets.json::$DATA",
+    "node -e \"fs.readFileSync('keys/id_rsa::$DATA')\""
   ])
     assert.match(screen(command), /机密|凭据/, command);
   for (const command of ["Set-Content .git/config x", "Remove-Item .git/hooks/pre-commit", "echo x > .git/config"])
@@ -259,10 +263,15 @@ test("screenPath：机密文件不读不写，.git 内部不写、可读；别�
     assert.match(screenPath(p), /机密文件/, p);
     assert.match(screenPath(p, { write: true }), /机密文件/, p);
   }
+  // Windows 的数据流写法（x::$DATA、x:stream）碰的是同一件文件本身：判之前剥掉，别让它绕过这一道
+  for (const p of [".env::$DATA", "src/.env:stream", "a/id_rsa::$DATA", "key.pem:$DATA", "config\\secrets.json::$DATA"]) {
+    assert.match(screenPath(p), /机密文件/, p);
+    assert.match(screenPath(p, { write: true }), /机密文件/, p);
+  }
   assert.equal(screenPath(".git/config"), null);
   assert.match(screenPath(".git/config", { write: true }), /\.git 内部/);
   assert.match(screenPath(".git\\hooks\\pre-commit", { write: true }), /\.git 内部/);
-  for (const p of ["src/index.js", ".github/workflows/ci.yml", "monkey.txt", "keys/readme.md", "env.d.ts"]) {
+  for (const p of ["src/index.js", ".github/workflows/ci.yml", "monkey.txt", "keys/readme.md", "env.d.ts", "src/a:b.js"]) {
     assert.equal(screenPath(p), null, p);
     assert.equal(screenPath(p, { write: true }), null, p);
   }

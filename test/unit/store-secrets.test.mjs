@@ -35,7 +35,11 @@ test("screenStoreCommand：点名配置、备份、登录文件且靠近存储�
 test("screenStorePath：根下这几样（含备份目录里的）拦下，卷宗里同名的放行，大小写不论", onlyWindows, () => {
   for (const p of [J("配置.json"), J("配置备份", "2026.json"), J("ChatGPT 登录.json"), "e:\\聊天记录\\.YAN\\配置.JSON"])
     assert.ok(screenStorePath(p, R), p);
-  for (const p of [J("卷宗", "a.md"), J("卷宗", "配置.json"), J("对话")]) assert.equal(screenStorePath(p, R), null, p);
+  // Windows 的数据流写法碰的是同一件文件本身：剥掉再比，别让它绕过这一道
+  for (const p of [J("配置.json::$DATA"), J("ChatGPT 登录.json::$DATA"), "e:\\聊天记录\\.YAN\\配置.JSON:stream"])
+    assert.ok(screenStorePath(p, R), p);
+  for (const p of [J("卷宗", "a.md"), J("卷宗", "配置.json"), J("对话"), J("卷宗", "配置.json::$DATA")])
+    assert.equal(screenStorePath(p, R), null, p);
 });
 
 const root = path.resolve("test/.tmp/store-secrets"),
@@ -76,7 +80,9 @@ test("宽档、没开沙箱也拦：读、写配置，读备份", async () => {
   for (const [route, body] of [
     ["read", { path: path.join(root, "配置.json"), roam: true, permission: "auto" }],
     ["read", { path: path.join(root, "配置备份", "a.json"), roam: true, permission: "review" }],
-    ["write", { path: path.join(root, "配置.json"), content: "{}", roam: true, permission: "auto" }]
+    ["write", { path: path.join(root, "配置.json"), content: "{}", roam: true, permission: "auto" }],
+    // 数据流写法（配置.json::$DATA）碰的是同一件文件本身，不能借它把 Key 读出来
+    ["read", { path: `${path.join(root, "配置.json")}::$DATA`, roam: true, permission: "auto" }]
   ]) {
     const { status, data } = await call(route, body);
     assert.notEqual(status, 200, `${route} ${body.path}`);
