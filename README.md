@@ -1,5 +1,9 @@
 # 言
 
+<p align="center">
+  <img src="icon.svg" alt="言" width="96" height="96">
+</p>
+
 **中文** · [English](README.en.md)
 
 一个本地运行、零依赖的聊天前端，接 OpenAI 兼容接口，也接 Anthropic 的 Messages API，界面取清简纸墨之意。同一段对话，绑上工作目录即是「行 · 执事」——一个只做代码工作的轻量 Agent，在那个目录里检索、读写、修改文件并执行指令；不绑目录即是「言 · 对谈」——照常聊，需要产出表格、文档、PDF 之类的文件时，同一套工具落在本机的「卷宗」目录里。

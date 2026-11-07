@@ -1,5 +1,9 @@
 # Yan (言)
 
+<p align="center">
+  <img src="icon.svg" alt="Yan" width="96" height="96">
+</p>
+
 [中文](README.md) · **English**
 
 A local, zero-dependency chat front end for OpenAI-compatible APIs and Anthropic's Messages API, styled after plain paper and ink. A chat bound to a working folder becomes **Agent** mode (行 · 执事): a lightweight coding agent that searches, reads, edits files and runs commands in that folder. Unbound, it is **Chat** mode (言 · 对谈): talk as usual, and when you need a spreadsheet, document or PDF, the same tools write into a local folder called **Files** (卷宗).
