@@ -2,7 +2,7 @@
 // 言 · 生图（设置 → 专司）：只接 OpenAI 兼容的 /images/generations。硅基流动的参数名不同（image_size、batch_size），交回 images[].url；
 // OpenAI 系交回 data[].url 或 data[].b64_json。不论网址（硅基流动的一小时就失效）还是 base64，一律在这里取成 data: 地址交给页面，页面收进卷宗
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
-const { readLimitedBytes } = require("../web.js");
+const { readLimitedBytes, fetchPublicResponse } = require("../web.js");
 
 const SILICONFLOW = config => config.api === "siliconflow" || /siliconflow/i.test(config.baseUrl);
 const IMAGE_LIMIT = 40 * 1024 * 1024;
@@ -26,13 +26,20 @@ async function fetchImage(raw, signal) {
   if (raw.startsWith("data:")) return raw;
   const url = new URL(raw);
   if (!/^https?:$/.test(url.protocol)) throw Error("接口交回的图片地址无效");
-  const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]) });
+  // 与其它公网请求同一条路：地址门禁、逐跳复检、带上出站标记。中转交回的网址可以是本机或内网，
+  // 裸 fetch 就等于让桥接替它去取（桥接的受信接口对无标记的本机请求是放行的）
+  const { response } = await fetchPublicResponse(url.href, { timeout: 60000, signal });
   if (!response.ok) throw Error(`取图失败：${response.status}`);
   // 边读边计：超过上限就停下，不先把整份收进内存再判
   const { buffer: bytes, truncated } = await readLimitedBytes(response, IMAGE_LIMIT);
   if (truncated) throw Error("图片过大");
-  const type = String(response.headers.get("content-type") || "").split(";")[0];
-  return `data:${sniff(bytes) || (type.startsWith("image/") ? type : "image/png")};base64,${bytes.toString("base64")}`;
+  const type = String(response.headers.get("content-type") || "")
+      .split(";")[0]
+      .trim(),
+    guessed = sniff(bytes);
+  // 只收图：认得出格式头、或接口明说是 image/*；别的（被投毒的网址回一段 JSON、一段文本）不当图
+  if (!guessed && !type.startsWith("image/")) throw Error("接口交回的地址不是图片");
+  return `data:${guessed || type};base64,${bytes.toString("base64")}`;
 }
 
 /** @param {{ resolveProfile: Function, upstreamError: (response: Response) => Promise<string> }} options */

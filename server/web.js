@@ -201,9 +201,14 @@ function pinnedFetch(url, options, addresses) {
 // 不设这一道，模型就能借它们调桥接自己的执事接口，绕过请示与沙箱在沙箱外跑指令（无 Origin、Host 也对得上）
 const OUTBOUND_MARK = "x-yan-outbound";
 // 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读
-async function fetchPublicResponse(url, { method = "GET", headers = {}, body = null, timeout = 30000, allowLoopback = false } = {}) {
+async function fetchPublicResponse(
+  url,
+  { method = "GET", headers = {}, body = null, timeout = 30000, allowLoopback = false, signal = null } = {}
+) {
   let current = new URL(url);
-  const signal = AbortSignal.timeout(timeout);
+  // 调用方的中止（页面走了、这一问停了）与超时一并算数；没传即照旧只有超时
+  const deadline = AbortSignal.timeout(timeout),
+    stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const addresses = await assertPublicUrl(current, { allowLoopback });
     const response = await pinnedFetch(
@@ -212,7 +217,7 @@ async function fetchPublicResponse(url, { method = "GET", headers = {}, body = n
         method,
         headers: { "User-Agent": BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7", ...headers, [OUTBOUND_MARK]: "1" },
         body: body && !["GET", "HEAD"].includes(method) ? body : undefined,
-        signal
+        signal: stop
       },
       addresses
     );
