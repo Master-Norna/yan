@@ -71,7 +71,7 @@ defineTool({
   }
 });
 
-// 调接口能发 POST，不算纯查阅，旁注不给。GET 也不复用：多是打本机的开发服务，改了代码再 GET 就该是新的
+// 调接口能发 POST，不算纯查阅，不登记 cache。GET 也不复用：多是打本机的开发服务，改了代码再 GET 就该是新的
 defineTool({
   name: "http_request",
   group: "web",
