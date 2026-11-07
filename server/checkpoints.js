@@ -154,6 +154,9 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
   async function walk(root, visit) {
     const skipped = skip().map(dir => path.resolve(dir));
     const down = async (abs, rel, rules) => {
+      // 浏览的起点自己就是跳过的一处（工作目录选成了存储根本身）：整棵都不记——不这么判，
+      // 「检查点/」「对话/」会被自己照进快照，退回时把它们当作新增删掉
+      if (skipped.some(dir => same(dir, path.resolve(abs)))) return [];
       const own = rulesFor(abs, rel, rules),
         entries = (await fs.promises.readdir(abs, { withFileTypes: true })).sort((a, b) =>
           a.name < b.name ? -1 : a.name > b.name ? 1 : 0

@@ -327,6 +327,30 @@ test("存储根在目录里头时不记它；目录不在、id 不对的报错",
   }
 });
 
+test("工作目录就是存储根时：整棵都不记，不把检查点自己照进快照", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-self-")),
+    root = path.join(base, "root"),
+    points = createCheckpoints({ home: () => path.join(root, "检查点"), skip: () => [root] });
+  const server = http.createServer((req, res) => points.routes[`POST ${req.url}`](req, res)).listen(0, "127.0.0.1");
+  await new Promise(resolve => server.once("listening", resolve));
+  const post = (route, body) =>
+    fetch(`http://127.0.0.1:${server.address().port}${route}`, { method: "POST", body: JSON.stringify(body) }).then(async r => ({
+      status: r.status,
+      ...(await r.json())
+    }));
+  try {
+    write(root, "配置.json", '{"apiKey":"sk"}');
+    write(root, "对话/a.json", "{}");
+    const took = await post("/api/checkpoint/take", { root, conversation: "c1", answer: "m1" });
+    assert.equal(took.status, 200, JSON.stringify(took));
+    assert.equal(took.files, 0, "存储根本身在跳过之列：浏览的起点就是它，整棵都不记");
+    assert.deepEqual((await post("/api/checkpoint/diff", { root, conversation: "c1", answer: "m1" })).changes, []);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test(".gitignore：取反、只管目录、带 / 的从所在层算起、**", () => {
   const rules = ["*.log", "!keep.log", "build/", "/top.txt", "docs/**/*.tmp", "a?c"].map(line => ignoreRule(line, ""));
   assert.equal(ignored(rules, "x/y.log", false), true);
