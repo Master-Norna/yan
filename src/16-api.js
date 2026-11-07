@@ -596,17 +596,14 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
             (assistant.thinkingBlocks ||= []).push(delta.thinking_block);
           if (Array.isArray(delta?.tool_calls)) {
             for (const [at, call] of delta.tool_calls.entries()) {
-              // 不带 index 的：id 与末一件相同就续在它上面（id 明明白白说了是同一件）；换了 id、或同一个数组里第二件起的，另起一件
-              // （一件调用不会在同一个数组里续写自己）；余下没有 id 的续在末一件上——名字、参数都可能被切成几块到
+              // 不带 index 的：id 说过是同一件的，就在已拟的几件里找它——多件并行、参数的续块交错送到时，末一件不一定是它；
+              // 找不到、又是同一个数组里第二件起（或换了 id 的），另起一件（一件调用不会在同一个数组里续写自己）；
+              // 余下没有 id 的续在末一件上——名字、参数都可能被切成几块到
               const slots = (assistant.toolCalls ||= []),
                 last = slots.at(-1),
+                byId = call.id ? slots.findIndex(slot => slot.id === call.id) : -1,
                 index =
-                  call.index ??
-                  (call.id && call.id === last?.id
-                    ? slots.length - 1
-                    : at > 0 || (last && call.id && last.id)
-                      ? slots.length
-                      : Math.max(0, slots.length - 1)),
+                  call.index ?? (byId >= 0 ? byId : at > 0 || (last && call.id && last.id) ? slots.length : Math.max(0, slots.length - 1)),
                 slot = (slots[index] ||= { id: "", name: "", arguments: "" }),
                 name = call.function?.name;
               if (call.id) slot.id = call.id;
