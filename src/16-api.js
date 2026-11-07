@@ -208,9 +208,11 @@ function learnReasoningLevels(profile, message, sent) {
   if (!found.length) return false;
   const current = profileReasoningLevels(profile);
   if (found.length === current.length && found.every(level => current.includes(level))) return false;
-  profile.reasoningLevels = found.join(", ");
-  // 从报错里学到的就是这个身份的定论，不必再探
-  profile.reasoningProbed = reasoningProbeKey(profile);
+  // 写在此刻表里的那一份上（与 spendTokens 同一个道理：请求途中配置同步可能已把 store.profiles 整份换掉，写旧的就不落盘）
+  const live = profiles().find(item => item.id === profile.id) || profile;
+  live.reasoningLevels = found.join(", ");
+  // 记的是探出这个定论的那个身份（profile）：此刻表里那份若已换了模型，留着旧身份的键，下次会再探
+  live.reasoningProbed = reasoningProbeKey(profile);
   saveStoreSoon();
   return true;
 }
@@ -271,8 +273,10 @@ async function probeReasoningLevels(profile, force = false) {
       else if (/unknown|unrecognized|unsupported|not support|不支持|不认识/i.test(message)) learned = [];
       else learned = REASONING_DEFAULT_LEVELS;
     }
-    profile.reasoningLevels = learned.length ? learned.join(", ") : "none";
-    profile.reasoningProbed = key;
+    // 写在此刻表里的那一份上：探的这 20 秒里配置同步可能已把 store.profiles 整份换掉，写旧的就不落盘
+    const live = profiles().find(item => item.id === profile.id) || profile;
+    live.reasoningLevels = learned.length ? learned.join(", ") : "none";
+    live.reasoningProbed = key;
     saveStoreSoon();
     return learned;
   } catch {
