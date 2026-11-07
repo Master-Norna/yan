@@ -198,6 +198,18 @@ function parseReasoningLevels(message, sent) {
   );
   return found.length < 2 ? [] : found.sort((a, b) => REASONING_ORDER.indexOf(a) - REASONING_ORDER.indexOf(b));
 }
+// 档位记到模型上：手里这份（这一答的重发读的是它）与此刻表里那份（请求途中配置同步可能已把 store.profiles 整份换掉，
+// 只写旧的就不落盘，与 spendTokens 同一个道理）。表里那份若已换了模型或被亲手填过，这份结果管不到它
+/** @param {Profile} profile @param {string} key @param {string} levels */
+function recordReasoningLevels(profile, key, levels) {
+  const live = profiles().find(item => item.id === profile.id),
+    targets = live && reasoningProbeKey(live) === key && !reasoningManual(live) ? [profile, live] : [profile];
+  for (const item of targets) {
+    item.reasoningLevels = levels;
+    item.reasoningProbed = key;
+  }
+  saveStoreSoon();
+}
 // 接口拒绝了思考档位：认出它支持的几档记到模型上；认不出来就不动
 /**
  * @param {Profile} profile
@@ -208,10 +220,7 @@ function learnReasoningLevels(profile, message, sent) {
   if (!found.length) return false;
   const current = profileReasoningLevels(profile);
   if (found.length === current.length && found.every(level => current.includes(level))) return false;
-  profile.reasoningLevels = found.join(", ");
-  // 从报错里学到的就是这个身份的定论，不必再探
-  profile.reasoningProbed = reasoningProbeKey(profile);
-  saveStoreSoon();
+  recordReasoningLevels(profile, reasoningProbeKey(profile), found.join(", "));
   return true;
 }
 // 选定模型时探一下它认哪几档：故意送一个不存在的档位（probe），接口若按 OpenAI 的样子报错，就把报错里列的几档记下；
@@ -257,8 +266,10 @@ async function probeReasoningLevels(profile, force = false) {
       maxTokens: 16,
       reasoning: "probe"
     });
-    // 探着探着模型被换了：这份结果是旧模型的，作废；探着的时候用户亲手填了档位：手填的是定论，也作废
-    if (reasoningProbeKey(profile) !== key || reasoningManual(profile)) return null;
+    // 探着探着模型被换了：这份结果是旧模型的，作废；探着的时候用户亲手填了档位：手填的是定论，也作废。
+    // 此刻表里那份也要看：配置同步可能刚把别处的改动带进来
+    const live = profiles().find(item => item.id === profile.id);
+    if ([profile, live].some(item => item && (reasoningProbeKey(item) !== key || reasoningManual(item)))) return null;
     let learned;
     if (response.ok) learned = REASONING_DEFAULT_LEVELS;
     else {
@@ -271,9 +282,7 @@ async function probeReasoningLevels(profile, force = false) {
       else if (/unknown|unrecognized|unsupported|not support|不支持|不认识/i.test(message)) learned = [];
       else learned = REASONING_DEFAULT_LEVELS;
     }
-    profile.reasoningLevels = learned.length ? learned.join(", ") : "none";
-    profile.reasoningProbed = key;
-    saveStoreSoon();
+    recordReasoningLevels(profile, key, learned.length ? learned.join(", ") : "none");
     return learned;
   } catch {
     return null;
