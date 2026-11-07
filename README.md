@@ -1,7 +1,7 @@
 # 言
 
 <p align="center">
-  <img src="assets/yan-logo.png" alt="言" width="96" height="96">
+  <img src="icon.svg" alt="言" width="96" height="96">
 </p>
 
 **中文** · [English](README.en.md)
