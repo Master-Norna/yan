@@ -139,7 +139,8 @@ const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
 // 加口令也藏不住——页面只能把它存进浏览器的 localStorage，那在磁盘上是明文。真要管住脚本得靠进程隔离
 const BRIDGE_PORT = Number(process.env.YAN_PORT || 8787);
 function callsBridge(text) {
-  return new RegExp(String.raw`(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])\s*:\s*${BRIDGE_PORT}(?!\d)`, "i").test(text);
+  // 端口可写前导零（:08787）：.NET 与 Node 都当作同一个端口解析，这一道也要认出来
+  return new RegExp(String.raw`(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])\s*:\s*0*${BRIDGE_PORT}(?!\d)`, "i").test(text);
 }
 const BRIDGE_WHY = "指令不调言的本机桥接（它的接口不经请示与沙箱）；要读写文件、跑指令直接用相应的工具";
 /**
