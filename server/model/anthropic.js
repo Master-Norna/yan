@@ -10,16 +10,23 @@ const ANTHROPIC_BUDGETS = { minimal: 1024, low: 2048, medium: 8192, high: 16384,
 // 思绪默认不回、要明说 summarized；5 起不带 thinking 也照样在想；xhigh 一档 4.7 起才有。Haiku 也一样（4.5 还是预算，5.5 只收 adaptive）。
 // 认不出型号的按老模型走。output：走预算的老模型输出上限（Opus 4 / 4.1 是 32k，其余 4.x、3.7 是 64k），预算连同输出不能越过它
 function anthropicGeneration(model) {
-  const m = String(model || "")
-    .toLowerCase()
-    .match(/claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d)(?!\d))?/);
-  const version = m ? Number(m[2]) + Number(m[3] || 0) / 10 : 0;
+  const text = String(model || "").toLowerCase(),
+    // 新式 claude-<族>-<代>[-<次>]（sonnet-4-5）；老式把代际放在中间 claude-<代>[-<次>]-<族>（3.x 是这种写法）——也要认，
+    // 不认就成了「认不出型号」，输出上限按 0 算，「最高」档的 65536 原样发出去，3.7（64k）、3.5（8k）都被回 400
+    modern = text.match(/claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d)(?!\d))?/),
+    legacy = modern ? null : text.match(/claude-(\d+)(?:-(\d)(?!\d))?-(opus|sonnet|haiku|fable|mythos)/),
+    family = modern ? modern[1] : legacy?.[3],
+    version = modern ? Number(modern[2]) + Number(modern[3] || 0) / 10 : legacy ? Number(legacy[1]) + Number(legacy[2] || 0) / 10 : 0;
   return {
     adaptive: version >= 4.6,
     noSampling: version >= 4.7,
     thinksByDefault: version >= 5,
     xhigh: version >= 4.7,
-    output: !m || version >= 4.6 ? 0 : m[1] === "opus" && version < 4.5 ? 32000 : 64000,
+    // 思考从 3.7 起才有：更老的带上 thinking 就是 400
+    noThinking: !!family && version < 3.7,
+    // 老模型的输出上限：3.0 是 4096、3.5 是 8192（Opus 3 也是 4096，要先判代际），Opus 4 / 4.1 是 32k，4.x 其余与 3.7 是 64k
+    output:
+      !family || version >= 4.6 ? 0 : version < 3.5 ? 4096 : version < 3.7 ? 8192 : family === "opus" && version < 4.5 ? 32000 : 64000,
     version
   };
 }
@@ -134,7 +141,9 @@ function anthropicRequest(payload) {
   } else {
     // 预算得给正文留出 4096，连同正文不过这一代的输出上限（「最高」档的 65536 放在 64k 的模型上就是 400）
     const ceiling = generation.output || Infinity,
-      budget = level ? Math.min(ANTHROPIC_BUDGETS[level] || 8192, ceiling - 4096) : 0;
+      budget = level && !generation.noThinking ? Math.min(ANTHROPIC_BUDGETS[level] || 8192, ceiling - 4096) : 0;
+    // 不开思考也不能超这一代的上限：默认的 32000 放在 3.5 上同样是 400
+    body.max_tokens = Math.min(maxTokens, ceiling);
     // 开了思考 temperature 只能是 1：不传
     if (budget) {
       body.thinking = { type: "enabled", budget_tokens: budget };
