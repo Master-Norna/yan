@@ -241,6 +241,10 @@ async function runSteps(steps, conversation, assistant, signal, toolCache, offer
       // 只缓存成功的：临时的 502、超时若也缓存，模型想重试只会一直拿到同一个旧失败
       else if (key && outcome.ok) toolCache.set(key, { outcome: structuredClone(outcome), presentation: toolPresentation(step) });
     }
+    // 不可中止的工具（http_request、长指令）在按了「止」之后才回来：结果不再记、状态不再改回——
+    // 停那一头的收束（10-send.js 的 haltJob、90-delegate.js 收工那段）会把没跑完的收成「已止」；
+    // 这一批由 runRounds 在 runSteps 返回后一并停住
+    if (signal.aborted) return;
     const remaining = MIN_TOOL_STATUS_MS - (performance.now() - started);
     if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
     // 在后台接着做的（差遣）：这一步仍是进行中，做完由它自己收尾；先记一句「后台进行中」，下一问的行迹摘要里模型才知道它还没回来
