@@ -26,14 +26,14 @@ function selectPreset(id) {
   renderHeader();
   renderSendButtons();
 }
-// 模型菜单里的一段：本色与各个预设；一个预设都没有时不占地方
+// 模型菜单里浮出的那一列：本色与各个预设；一个预设都没有时这一栏不占地方
 function presetMenuHtml() {
   const presets = store.settings.presets;
   if (!presets.length) return "";
   const current = presetOf(currentConversation())?.id || "";
   const option = (id, name, note) =>
     `<button class="model-option preset-option${id === current ? " active" : ""}" data-preset="${escapeHtml(id)}"${id === current ? ' aria-current="true"' : ""} title="${escapeHtml(note)}"><strong><span class="model-dot"></span><span class="model-option-name">${escapeHtml(name)}</span></strong></button>`;
-  return `<div class="menu-section"><div class="menu-section-title"><span>${t(`预设`)}</span></div></div>${option("", t("本色"), t("言之本色，不加预设"))}${presets.map(preset => option(preset.id, preset.name, preset.prompt.split("\n")[0].slice(0, 80))).join("")}`;
+  return `${option("", t("本色"), t("言之本色，不加预设"))}${presets.map(preset => option(preset.id, preset.name, preset.prompt.split("\n")[0].slice(0, 80))).join("")}`;
 }
 
 function presetsSettingsHtml() {

@@ -23,12 +23,10 @@
   top: calc(100% + 9px);
   bottom: auto;
   right: 0;
-  width: min(310px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  width: min(280px, calc(100vw - 28px));
   padding: 7px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
   border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
   border-radius: var(--radius-s) var(--radius-l) var(--radius-l) var(--radius-l);
   background: var(--grain), linear-gradient(145deg, color-mix(in srgb, var(--accent) 3.5%, transparent), transparent 42%), var(--paper);
@@ -76,30 +74,92 @@
   transition: opacity var(--dur-quick);
 }
 .model-option.active {
-  padding-right: 50px;
   background: color-mix(in srgb, var(--accent) 7%, var(--paper));
   color: var(--ink);
 }
 .model-option.active .model-dot {
   opacity: 1;
 }
-.model-option.active:after {
-  content: "当前";
-  position: absolute;
-  top: 10px;
-  right: 11px;
-  color: var(--accent);
-  font: 9px var(--title);
-  letter-spacing: 0.12em;
+/* 只有模型这一列滚：菜单本身不能裁，浮列要伸到外面 */
+.model-menu-list {
+  flex: 1 1 auto;
+  min-height: 38px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
-.menu-section {
+.model-flies {
+  flex: none;
   margin-top: 6px;
-  padding: 10px 9px 7px;
-  border-top-color: color-mix(in srgb, var(--accent) 16%, var(--line));
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line));
 }
-.menu-section-title {
-  margin-bottom: 8px;
+.model-fly {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: var(--radius-m) var(--radius-l) var(--radius-l) var(--radius-l);
+  color: var(--ink-2);
+  font: 500 var(--fs-mid) var(--title);
+  letter-spacing: 0.025em;
+  text-align: left;
+  transition:
+    background-color var(--dur-quick),
+    color var(--dur-quick);
+}
+.model-fly:hover,
+.model-fly.open {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.model-fly-value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
   color: var(--ink-3);
+  font-size: var(--fs-small);
+  font-weight: 400;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.model-fly-arrow {
+  color: var(--ink-3);
+}
+.model-fly.to-left .model-fly-arrow {
+  transform: scaleX(-1);
+}
+/* 浮列（设计稿/148）：与主栏同一张纸，贴在旁边；窄屏两边都放不下就地摊开 */
+.model-sub {
+  position: absolute;
+  left: calc(100% + 6px);
+  width: max-content;
+  min-width: 120px;
+  max-width: 220px;
+  padding: 7px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: var(--radius-l);
+  background: var(--grain), var(--paper);
+  box-shadow: 0 18px 46px rgba(35, 30, 24, 0.16);
+}
+.model-sub.on-left {
+  left: auto;
+  right: calc(100% + 6px);
+}
+.model-sub.inline {
+  position: static;
+  width: auto;
+  max-width: none;
+  padding: 0 0 0 10px;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 .model-manage {
   border-radius: 0 0 var(--radius-m) var(--radius-m);

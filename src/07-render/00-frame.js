@@ -112,6 +112,8 @@ function renderModelTriggers() {
 }
 function closeModelMenu() {
   const menu = $("#modelMenu");
+  clearTimeout(modelFlyTimer);
+  modelFly = "";
   hideWithFade(menu);
   document.querySelectorAll(".model-trigger").forEach(button => button.setAttribute("aria-expanded", "false"));
 }
@@ -125,32 +127,96 @@ function positionModelMenu(button) {
     edge = 12;
   const below = Math.max(0, innerHeight - rect.bottom - gap - edge),
     above = Math.max(0, rect.top - gap - edge);
-  const dropUp = below < Math.min(menu.scrollHeight, 220) && above > below;
+  // 下面放不下整张、上面更宽就往上开：不为省地方让模型那一列滚起来
+  const dropUp = below < menu.scrollHeight && above > below;
   menu.classList.toggle("drop-up", dropUp);
-  menu.style.maxHeight = `${Math.max(96, Math.min(dropUp ? above : below, 420))}px`;
+  // 栏与浮列不随主栏滚动，要占的高度得留足；只有模型那一列在里面滚
+  menu.style.maxHeight = `${Math.max(176, Math.min(dropUp ? above : below, 420))}px`;
 }
+// 模型菜单（设计稿/148 乙）：主栏只列模型；预设、思考深度各一栏，指上即在旁边浮出竖列，点也开（触屏只有点）。
+// 浮列是菜单的孩子，从栏斜着移过去时路过别的栏、跨过两板之间的缝都有一小段宽限，到了浮列上就算数
+const MODEL_FLY_SWITCH = 120,
+  MODEL_FLY_CLOSE = 240;
+let modelFly = "",
+  /** @type {any} */ modelFlyTimer = 0;
+/** 一栏的浮列靠哪边、多高：右边放得下放右边，再左边，两边都放不下（窄屏）就地摊开在栏下 @param {HTMLElement} row @param {HTMLElement} sub */
+function placeModelSub(row, sub) {
+  const menu = $("#modelMenu"),
+    gap = 6,
+    edge = 12;
+  sub.classList.remove("inline", "on-left");
+  sub.style.removeProperty("top");
+  const box = menu.getBoundingClientRect(),
+    room = sub.offsetWidth + gap + edge;
+  if (innerWidth - box.right < room && box.left < room) return sub.classList.add("inline");
+  sub.classList.toggle("on-left", innerWidth - box.right < room);
+  sub.style.maxHeight = `${innerHeight - edge * 2}px`;
+  // 与栏齐平；碰到窗沿往回收
+  const top = Math.max(edge, Math.min(row.getBoundingClientRect().top - 8, innerHeight - edge - sub.offsetHeight));
+  sub.style.top = `${top - box.top - menu.clientTop}px`;
+}
+/** 照 modelFly 开合各栏的浮列 */
+function paintModelFly() {
+  document.querySelectorAll("#modelMenu [data-fly]").forEach(node => {
+    const row = /** @type {HTMLElement} */ (node),
+      sub = /** @type {HTMLElement} */ (row.nextElementSibling),
+      open = row.dataset.fly === modelFly;
+    row.classList.toggle("open", open);
+    row.setAttribute("aria-expanded", String(open));
+    sub.classList.toggle("hidden", !open);
+    if (open) placeModelSub(row, sub);
+    row.classList.toggle("to-left", open && sub.classList.contains("on-left"));
+  });
+}
+/** @param {string} name 要开的栏；空即都收起 @param {number} [delay] */
+function flyModelMenu(name, delay = 0) {
+  clearTimeout(modelFlyTimer);
+  if (name === modelFly) return;
+  if (!delay) {
+    modelFly = name;
+    return paintModelFly();
+  }
+  modelFlyTimer = setTimeout(() => flyModelMenu(name), delay);
+}
+/** @param {string} name @param {string} label @param {string} value 栏右端写此刻选的 @param {string} list 浮列里的各项 */
+const modelFlyHtml = (name, label, value, list) =>
+  `<button type="button" class="model-fly" data-fly="${name}" aria-haspopup="menu" aria-expanded="false"><span>${label}</span><span class="model-fly-value">${value}</span><span class="model-fly-arrow" aria-hidden="true">›</span></button><div class="model-sub hidden" role="menu">${list}</div>`;
 function renderModelMenu() {
   const all = profiles();
   $("#modelMenu").innerHTML = all.length
-    ? all
+    ? `<div class="model-menu-list">${all
         .map(p => {
           const active = p.id === activeProfile()?.id;
           // 只列显示名：模型原名与接口地址长短不一，行高参差；要看去模型设置
           return `<button class="model-option${active ? " active" : ""}" data-profile="${escapeHtml(p.id)}"${active ? ' aria-current="true"' : ""} title="${escapeHtml(p.model)}"><strong><span class="model-dot"></span><span class="model-option-name">${escapeHtml(p.name)}</span></strong></button>`;
         })
-        .join("")
+        .join("")}</div>`
     : `<button class="model-option" id="configureFirst"><strong>${t(`接入模型`)}</strong></button>`;
   const c = currentConversation(),
     profile = activeProfile(),
     level = (c ? c.reasoning : profile?.reasoning) || "",
     choices = reasoningChoices(profile),
     // 选过的档位这个模型不认（换了模型、或刚学到它的档位）：菜单上点亮它实际会落到的那一档
-    shown = choices.includes(level) ? level : nearestReasoning(profile, level) || "";
+    shown = choices.includes(level) ? level : nearestReasoning(profile, level) || "",
+    presets = presetMenuHtml(),
+    // 默认不占一行（设计稿/148 乙；落选的甲是一行只一粒朱点，用起来像字丢了）：一档都不点亮，栏上一粒朱点；再点选中的那档退回默认
+    levels = choices
+      .filter(Boolean)
+      .map(value => {
+        const on = value === shown;
+        return `<button type="button" class="model-option${on ? " active" : ""}" data-reasoning="${value}"${on ? ` aria-current="true" title="${t`再点一下退回默认`}"` : ""}><strong><span class="model-dot"></span><span class="model-option-name">${reasoningLabel(value)}</span></strong></button>`;
+      })
+      .join("");
   if (all.length)
     $("#modelMenu").insertAdjacentHTML(
       "beforeend",
-      `${presetMenuHtml()}<div class="menu-section"><div class="menu-section-title"><span>${t(`思考深度`)}</span><span>${t(`当前模型`)}</span></div>${choices.length > 1 ? `<div class="segmented">${choices.map(value => `<button type="button" data-reasoning="${value}" class="${value === shown ? "active" : ""}">${reasoningLabel(value)}</button>`).join("")}</div>` : `<div class="menu-section-note">${t(`此模型不认思考档位`)}</div>`}</div><button class="model-option model-manage" data-manage>${t(`模型设置`)}</button>`
+      `<div class="model-flies">${presets ? modelFlyHtml("preset", t(`预设`), escapeHtml(presetOf(c)?.name || t("本色")), presets) : ""}${
+        choices.length > 1
+          ? modelFlyHtml("reasoning", t(`思考深度`), shown ? reasoningLabel(shown) : `<span class="model-dot"></span>`, levels)
+          : `<div class="menu-section-note">${t(`此模型不认思考档位`)}</div>`
+      }</div><button class="model-option model-manage" data-manage>${t(`模型设置`)}</button>`
     );
+  paintModelFly();
   $("#configureFirst")?.addEventListener("click", () => openSettings("models"));
   $("#modelMenu [data-manage]")?.addEventListener("click", e => {
     e.stopPropagation();
@@ -188,20 +254,49 @@ function bindModelMenuEvents() {
     const trigger = document.querySelector('.model-trigger[aria-expanded="true"]');
     if (trigger) positionModelMenu(trigger);
   });
+  $("#modelMenu").addEventListener("mouseover", e => {
+    const row = e.target.closest("[data-fly]");
+    if (row) return flyModelMenu(row.dataset.fly, modelFly ? MODEL_FLY_SWITCH : 0);
+    if (e.target.closest(".model-sub")) return clearTimeout(modelFlyTimer);
+    if (e.target.closest(".model-option")) flyModelMenu("", MODEL_FLY_SWITCH);
+  });
+  $("#modelMenu").addEventListener("mouseleave", () => flyModelMenu("", MODEL_FLY_CLOSE));
+  // 键盘：→ 开，← 收回到栏上；Tab 顺着往下走到浮列
+  $("#modelMenu").addEventListener("keydown", e => {
+    const row = e.target.closest("[data-fly]"),
+      inside = e.target.closest(".model-sub");
+    if (row && e.key === "ArrowRight") {
+      flyModelMenu(row.dataset.fly);
+      row.nextElementSibling.querySelector(".active, button")?.focus();
+    } else if (inside && e.key === "ArrowLeft") {
+      flyModelMenu("");
+      inside.previousElementSibling.focus();
+    }
+  });
   $("#modelMenu").addEventListener("click", e => {
+    const fly = e.target.closest("[data-fly]");
+    if (fly) {
+      e.stopPropagation();
+      const same = modelFly === fly.dataset.fly;
+      // 鼠标指上已开，点一下不该收；触屏才是点开点合
+      if (!(same && e.pointerType === "touch")) flyModelMenu(fly.dataset.fly);
+      else flyModelMenu("");
+      return;
+    }
     const level = e.target.closest("[data-reasoning]");
     if (level) {
       e.stopPropagation();
       const c = currentConversation();
       const profile = activeProfile();
       if (!profile) return;
-      profile.reasoning = normalizeReasoning(level.dataset.reasoning);
+      profile.reasoning = level.classList.contains("active") ? "" : normalizeReasoning(level.dataset.reasoning);
       if (c) c.reasoning = profile.reasoning;
       saveStore();
       renderModelMenu();
       renderModelTriggers();
       const trigger = document.querySelector('.model-trigger[aria-expanded="true"]');
       if (trigger) positionModelMenu(trigger);
+      paintModelFly();
       return;
     }
     const preset = e.target.closest("[data-preset]");

@@ -366,9 +366,6 @@ body {
 :root[lang="en"] body * {
   letter-spacing: normal !important;
 }
-:root[lang="en"] .model-option.active:after {
-  content: "Current";
-}
 :root[lang="en"] .helper-panel-body .sub-report:before {
   content: "Report";
 }

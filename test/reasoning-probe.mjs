@@ -33,7 +33,7 @@ check(
 );
 await evalJs(`document.querySelector("#welcome .model-trigger").click(); true`);
 await sleep(200);
-check("a different model starts at its own default", (await menu()) === "默认*,低,中,高", await menu());
+check("a different model starts at its own default", (await menu()) === "低,中,高", await menu());
 check(
   "trigger label shows the level actually used",
   (await evalJs(`document.querySelector("#welcome .model-trigger .model-extra")?.textContent`)) === "",

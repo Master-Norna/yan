@@ -674,31 +674,12 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   font-size: 9px;
   color: var(--ink-3);
 }
-.menu-section {
-  margin: 4px 0 2px;
-  padding: 8px 10px 6px;
-  border-top: 1px solid var(--line);
-}
-.menu-section-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-  color: var(--ink-3);
-  font: var(--fs-mark) var(--title);
-  letter-spacing: 0.12em;
-}
-/* 探到模型不认思考档位：这一节只留一句话 */
+/* 探到模型不认思考档位：这一栏只留一句话 */
 .menu-section-note {
-  padding: 4px 2px 3px;
+  padding: 7px 10px;
   color: var(--ink-3);
   font: var(--fs-note) var(--title);
   letter-spacing: 0.06em;
-}
-/* 菜单里思考深度各档均分一行 */
-.menu-section .segmented button {
-  flex: 1;
-  padding: 4px;
 }
 .welcome-chips:not(:has(.chip:not(.hidden))) {
   display: none;

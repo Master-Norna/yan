@@ -176,8 +176,8 @@ var YAN_EN = {
   "思考 {0}": "Thinking {0}",
   接入模型: "Add model",
   思考深度: "Thinking depth",
-  当前模型: "Current model",
   此模型不认思考档位: "This model has no thinking levels",
+  再点一下退回默认: "Click again for default",
   模型设置: "Model settings",
 
   // ---- 侧栏对话列表 ----
