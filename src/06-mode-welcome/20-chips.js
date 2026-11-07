@@ -179,6 +179,7 @@ async function bindWorkdir(c, dir) {
   if (!dir) {
     if (!isWork(c)) return;
     c.workdir = "";
+    markDirty(c.id);
     saveStore();
     render();
     toast(t("已解开目录，回到言"));
@@ -191,6 +192,7 @@ async function bindWorkdir(c, dir) {
     if (workdirLocked(c)) return toast(t("作答中，稍后再改"));
     c.workdir = prepared.workdir;
     c.commandPolicy = commandPolicyOf(c);
+    markDirty(c.id);
     saveStore();
     render();
     toast(t`已绑定 ${pathTail(prepared.workdir)}${prepared.created ? t("（新建）") : ""}，此后为行`);
