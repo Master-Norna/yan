@@ -175,7 +175,7 @@ module.exports = function createFiles(work) {
       release();
     }
   }, failed);
-  // ---- download_file：把网上的文件存进工作目录。地址门禁与 fetch_page 同一套（不许本机与内网）；path 给目录或省略时按网址里的文件名存，
+  // ---- download_file：把网上的文件存进工作目录。地址门禁与 http_request 同一套（本机回环放行，内网拒）；path 给目录或省略时按网址里的文件名存，
   // 已有同名文件就加 (2)；最多 64 MB
   const DOWNLOAD_LIMIT = 64 * 1024 * 1024;
   const handleWorkDownload = jsonRoute(async (body, req, res) => {
