@@ -601,7 +601,8 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
               // 余下没有 id 的续在末一件上——名字、参数都可能被切成几块到
               const slots = (assistant.toolCalls ||= []),
                 last = slots.at(-1),
-                byId = call.id ? slots.findIndex(slot => slot.id === call.id) : -1,
+                // 数组可能有洞：index 乱序送到时（0、2、1），先建的那几件之间留着空位——回调拿到的 slot 可能是 undefined
+                byId = call.id ? slots.findIndex(slot => slot?.id === call.id) : -1,
                 index =
                   call.index ?? (byId >= 0 ? byId : at > 0 || (last && call.id && last.id) ? slots.length : Math.max(0, slots.length - 1)),
                 slot = (slots[index] ||= { id: "", name: "", arguments: "" }),

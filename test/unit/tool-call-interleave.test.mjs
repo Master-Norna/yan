@@ -70,6 +70,33 @@ test("交错也照 index 归位（带 index 的照旧）", async () => {
   );
 });
 
+test("同一块里 index 乱序（0、2、1）时三件都在，各归各的位置", async () => {
+  const f = setup();
+  const target = { content: "", toolCalls: null };
+  await f.readSse(
+    wireOf([
+      chunk({
+        tool_calls: [
+          { index: 0, id: "call_a", function: { name: "probe_a", arguments: '{"x":1}' } },
+          { index: 2, id: "call_c", function: { name: "probe_c", arguments: '{"z":3}' } },
+          { index: 1, id: "call_b", function: { name: "probe_b", arguments: '{"y":2}' } }
+        ]
+      }),
+      chunk({}, "tool_calls")
+    ]),
+    target
+  );
+  // 先建 [0]、再建 [2] 时 [1] 是空位：按 id 找续块要容得下它（intent 端到端正是这种乱序）
+  assert.deepEqual(
+    target.toolCalls.map(call => [call.id, call.name, call.arguments]),
+    [
+      ["call_a", "probe_a", '{"x":1}'],
+      ["call_b", "probe_b", '{"y":2}'],
+      ["call_c", "probe_c", '{"z":3}']
+    ]
+  );
+});
+
 test("没有 id 的照旧：单独数组的续块续末件", async () => {
   const f = setup();
   const target = { content: "", toolCalls: null };
