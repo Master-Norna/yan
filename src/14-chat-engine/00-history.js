@@ -26,7 +26,11 @@ function quotedText(message) {
 // 帮手、后台指令后来被停、中断了也重写：不会再有回报送到，不改的话此后每问都告诉模型「后台进行中」
 function settledDigest(message) {
   const steps = (message.steps || []).length,
-    broken = (message.steps || []).filter(step => step.status === "error" || step.status === "skipped").length;
+    // 「断」也算：holdHelper 收成 interrupted 的那一步，此后不会再有回报送到，
+    // 不重写就永远写着「后台进行中」（见上面那两句注释）
+    broken = (message.steps || []).filter(
+      step => step.status === "error" || step.status === "skipped" || step.status === "interrupted"
+    ).length;
   if (message.trailDigest?.steps !== steps || (message.trailDigest.broken || 0) !== broken)
     message.trailDigest = { steps, broken, text: stepsDigest(message, t("上一答的行迹")) };
   return message.trailDigest.text;
