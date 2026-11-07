@@ -82,17 +82,22 @@ defineAnchor("file", {
   cadence: "round",
   read: async (conversation, values, signal) =>
     (await bridge("/api/work/prints", { ...workScope(conversation), paths: values }, signal)).prints || {},
-  covers: (value, path) => value === path
+  // 路不分大小写（intentPath 剥目录前缀时就是这么比的）：Windows 上模型写 README.md、盘上是 readme.md，不能算白报
+  covers: (value, path) => value.toLowerCase() === path.toLowerCase()
 });
 defineAnchor("dir", {
   hint: t("dir:目录（底下整片，新增删除也算）"),
-  normalize: (value, workdir) => intentPath(value, workdir).replace(/\/+$/, "") || ".",
+  // 空值别收成「.」：那等于罩住整个工作目录，收尾前对照的「改了而无凭据罩着」就从此静默失效；显式的「.」「./」照旧
+  normalize: (value, workdir) => {
+    const raw = String(value ?? "").trim();
+    return raw ? intentPath(raw, workdir).replace(/\/+$/, "") || "." : "";
+  },
   problem: t("要一个目录"),
   label: value => `${value}/`,
   cadence: "round",
   read: async (conversation, values, signal) =>
     (await bridge("/api/work/prints", { ...workScope(conversation), dirs: values }, signal)).dirs || {},
-  covers: (value, path) => value === "." || path.startsWith(`${value}/`)
+  covers: (value, path) => value === "." || path.toLowerCase().startsWith(`${value.toLowerCase()}/`)
 });
 // 探针：比的是一条指令的输出（连同退出码）。跟着这段对话的档位走：问而后行里只自动跑明确只读的，别的这回不跑、不据它判；
 // 审而后行、径行照跑。超时给得短——每答开工都要跑，一条卡住的探针不该拖住整答
