@@ -156,8 +156,17 @@ function screenUnreviewable(command) {
 // 文件工具会用 screenPath 拦机密文件；指令通道也得拦显式点名，否则 `Get-Content .env` 能从 shell 绕过去。
 // 这里只认完整的路径片段，避免把 `dotnet user-secrets list`、`env.d.ts` 这类正常参数误判成文件。
 // 不带后缀的 credentials（~/.aws/credentials）要带路径才算：`rg credentials src` 只是搜字。
+// 尾部把「:」也算终点：`.env::$DATA` 是 Windows 上碰同一件文件本身（见 withoutDataStream）。
 const SECRET_PATH_IN_COMMAND =
-  /(^|[\s"'=;|&(])(?:[^\s"'`;|&<>()]*[\\/]credentials|(?:[^\s"'`;|&<>()]*[\\/])?(?:\.env(?:\.[^\s"'`;|&<>()\\/]*)?|[^\s"'`;|&<>()\\/]*\.(?:pem|key|pfx|p12|jks|keystore)|id_(?:rsa|ed25519|ecdsa|dsa)(?:\.pub)?|[^\s"'`;|&<>()\\/]*\.(?:credentials|secret|secrets)|credentials\.json|secrets\.(?:json|ya?ml|toml)))(?=$|[\s"'`;|&)])/i;
+  /(^|[\s"'=;|&(])(?:[^\s"'`;|&<>()]*[\\/]credentials|(?:[^\s"'`;|&<>()]*[\\/])?(?:\.env(?:\.[^\s"'`;|&<>()\\/]*)?|[^\s"'`;|&<>()\\/]*\.(?:pem|key|pfx|p12|jks|keystore)|id_(?:rsa|ed25519|ecdsa|dsa)(?:\.pub)?|[^\s"'`;|&<>()\\/]*\.(?:credentials|secret|secrets)|credentials\.json|secrets\.(?:json|ya?ml|toml)))(?=$|:|[\s"'`;|&)])/i;
+// Windows 的 NTFS 数据流：「x::$DATA」「x:stream」写的是同一件文件 x 的另一个流（未命名流即 x 本身），fs 照常打开 x——
+// 「.env::$DATA」若原样去比，就绕过了机密文件这一道。比之前把每段里冒号起往后截掉；盘符段「C:」的冒号后是
+// 分隔符，开头的单个字母是盘符，都不截。只用于单条路径：混着别的话的文本（指令）不能这么截。
+// 别的平台上冒号就是文件名的一部分（keys/service:prod.pem、/tmp/user:data/.yan），不动
+function withoutDataStream(value) {
+  const text = String(value || "");
+  return process.platform === "win32" ? text.replace(/(^|[\\/])([^\\/]*?)(?<!^[A-Za-z]):(?![\\/])[^\\/]*/g, "$1$2") : text;
+}
 // `.git` 要由 git 自己维护；显式读可以，直接用 shell 写、删、搬则拒绝。脚本内部仍不在静态筛查能力之内。
 const GIT_INTERNAL_PATH = /(^|[\s"'=;|&(])[^\s"'`;|&<>()]*\.git[\\/][^\s"'`;|&<>()]*/i;
 // 「这条指令会不会改东西」——目录那一道全压在它身上（判定为改，路径才受约束），所以宁可多列：
@@ -326,9 +335,7 @@ const SECRET_FILE =
  * @param {{ write?: boolean }} [options]
  */
 function screenPath(rel, { write = false } = {}) {
-  const text = String(rel || "")
-    .split("\\")
-    .join("/");
+  const text = withoutDataStream(rel).split("\\").join("/");
   if (SECRET_FILE.test(text)) return `沙箱拒绝：不读写机密文件（${text}）`;
   if (write && /(^|\/)\.git(\/|$)/.test(text)) return `沙箱拒绝：不改 .git 内部（${text}），用 git 指令`;
   return null;
@@ -343,7 +350,7 @@ const STORE_WHY = "不碰言的配置与登录文件（内有 API Key 与令牌�
 function screenStorePath(full, root) {
   if (!root) return null;
   const base = normalizeLower(path.resolve(root)),
-    target = normalizeLower(path.resolve(full));
+    target = normalizeLower(path.resolve(withoutDataStream(full)));
   return STORE_SECRETS.some(name => pathIsInside(normalizeLower(path.join(base, name)), target)) ? `拒绝：${STORE_WHY}` : null;
 }
 /**
