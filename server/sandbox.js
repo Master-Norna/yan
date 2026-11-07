@@ -73,6 +73,7 @@ const SCRIPT_START = new RegExp(
   String.raw`^\s*${PREFIX}(?:${SHELL}|(?:cmd(?:\.exe)?\b[^\n]*?/[ck]|(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?[-/](?:${prefixesOf("command")}))\s+["'])`,
   "i"
 );
+const CMD_SCRIPT = new RegExp(String.raw`^\s*${PREFIX}cmd(?:\.exe)?\b[^\n]*?/[ck]\s*$`, "i");
 // 引号只扫一次；单引号内原样，双引号内跳过反斜杠与 PowerShell 反引号转义。
 function quotedEnd(text, start) {
   const quote = text[start];
@@ -84,15 +85,17 @@ function quotedEnd(text, start) {
   return end < text.length ? end : -1;
 }
 // 注释先于引号处理，保留换行与 UTF-16 索引。落单引号是普通字符；所有扫描共用同一份引号范围。
-function shellText(text) {
+function shellText(text, shellCommand = "") {
   const chars = text.split("");
   const quotes = new Map();
+  // cmd 的执行字符串不认 # 注释；外层文本、POSIX Shell 与 PowerShell 仍认。
+  const comments = !CMD_SCRIPT.test(shellCommand);
   for (let i = 0; i < text.length; i++) {
     if (text[i] === "`" || (text[i] === "\\" && /[\\"']/.test(text[i + 1] || ""))) {
       i++;
       continue;
     }
-    if (text[i] === "#" && (i === 0 || /[\s;&|()]/.test(text[i - 1]))) {
+    if (comments && text[i] === "#" && (i === 0 || /[\s;&|()]/.test(text[i - 1]))) {
       for (; i < text.length && text[i] !== "\n" && text[i] !== "\r"; i++) chars[i] = " ";
       continue;
     }
@@ -112,8 +115,8 @@ function withoutQuoted(text) {
 }
 // 只隐藏普通引号参数里的语法分隔符，保留文字与索引供既有规则检查参数。
 // 单层 Shell 的执行字符串另扫一层；引号内的括号、换行不会再制造指令位。
-function commandSyntax(text, shellBody = false) {
-  const scanned = shellText(text);
+function commandSyntax(text, shellBody = false, shellCommand = "") {
+  const scanned = shellText(text, shellCommand);
   text = scanned.text;
   const chars = text.split("");
   let start = 0,
@@ -128,7 +131,7 @@ function commandSyntax(text, shellBody = false) {
       }
       const end = scanned.quotes.get(i);
       if (i === scriptAt) {
-        const body = commandSyntax(text.slice(i + 1, end), true);
+        const body = commandSyntax(text.slice(i + 1, end), true, text.slice(start, i));
         for (let j = 0; j < body.length; j++) chars[i + 1 + j] = body[j];
       } else {
         let substitution = 0;
@@ -152,8 +155,8 @@ function commandSyntax(text, shellBody = false) {
 }
 // 每段只检查一次，分隔符必须在引号外；不从每个 CMD 位置重新扫到行尾。
 // 执行字符串只展开一层，与 CMD 的 Shell 套壳范围一致，普通参数里的管道仍只是字串。
-function pipesToShell(/** @type {string} */ text, shellBody = false) {
-  const scanned = shellText(text);
+function pipesToShell(/** @type {string} */ text, shellBody = false, shellCommand = "") {
+  const scanned = shellText(text, shellCommand);
   text = scanned.text;
   if (!text.includes("|")) return false;
   let start = 0,
@@ -181,7 +184,7 @@ function pipesToShell(/** @type {string} */ text, shellBody = false) {
         end = scanned.quotes.get(open);
       if (end !== undefined) {
         const body = text.slice(open + 1, end);
-        if (pipesToShell(body, true)) return true;
+        if (pipesToShell(body, true, text.slice(start, open))) return true;
       }
     }
     piped = ch === "|" && text[i - 1] !== "|" && text[i + 1] !== "|";

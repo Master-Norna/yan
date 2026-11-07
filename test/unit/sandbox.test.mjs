@@ -640,6 +640,16 @@ test("不带后缀的 credentials：带路径才算凭据文件，严档拦、�
 
 // 攻击写法总表：新漏洞先进这张表再修。每行是 [指令, 严, 宽, 审, 审了也不放行]，x 是拦、o 是放
 const TABLE = [
+  // cmd 执行字符串不认 # 注释，分隔符后的指令仍执行。
+  ...[
+    String.raw`cmd /c "echo x #& del /q C:\Windows\a"`,
+    String.raw`cmd /k "dir #& shutdown /s"`,
+    String.raw`cmd /c "echo #& Stop-Computer"`
+  ].map(command => [command, "x", "x", "x", "o"]),
+  [String.raw`cmd.exe /c "x #| powershell -enc AAAA"`, "x", "x", "x", "x"],
+  ...["echo a #; sudo id", 'bash -c "echo #; sudo id"', 'powershell -Command "echo #; sudo id"', 'bash -c "echo #; Stop-Computer"'].map(
+    command => [command, "o", "o", "o", "o"]
+  ),
   // 注释先抹掉；落单引号不能遮住后续指令。
   ...[
     "# don't do this\nreg delete HKCU\\x",
