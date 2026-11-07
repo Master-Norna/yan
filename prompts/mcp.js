@@ -1,5 +1,5 @@
 // 言 · 内置提示词 · MCP
-// hint：已接入的 MCP 服务自带的用法（握手时给的 instructions），有它的工具交给模型时接在系统提示末尾，一服务一行（{{servers}}）。
+// hint：已接入的 MCP 服务自带的用法（握手时给的 instructions），有它的工具交给模型时接在系统提示里、排在技能与画图行文几句之前，一服务一行（{{servers}}）。
 // 其余是工具结果里回给模型的话，不是系统提示。mcp_describe / mcp_call 两件的说明在 tools.js。
 (window.YAN_PROMPTS ||= {}).mcp = {
   // 服务的说明常以自家名字起头（「景语：让模型……」）；曾因没有身份句，模型问起是谁就自称景语，现由 assistant.identity 交代。
