@@ -7,7 +7,7 @@
 // 卡片只给看、不给改：要改的往往不是一两个字，直接告诉模型。
 // 嵌套：图只画一层。模块在图上与簿录里带「里面已立几项 ›」，点它即进模块：整张图换成模块里的，以模块自己收尾（最右那一项，淡些），
 // 页头下一行写所在（可点回上层）；模块的前提与撑起什么点开它那一项即见，不在这行另列。
-// 了结的几件（见 00-core.js 的 intentClosed）不上这张图：页头右端「已了结 n」与墨痕同一个样子，点开图下换成一件一行、新的在上，点「›」进它自己那张图，与进模块同一种走法；
+// 了结的几件（见 00-core.js 的 intentClosed）不上这张图：页头右端「往事 n」与墨痕同一个样子，点开图下换成一件一行、新的在上，点「›」进它自己那张图，与进模块同一种走法；
 // 眼下没有开着的事，打开即这一页。
 // 由程序照 .yan/意.json 画，与文件一字不差，不请模型另画；展开的因果（支撑、缘由、哪条凭据变了）也是程序从图与指纹推出的，不经模型。
 /** @typedef {"holds"|"premised"|"stale"|"assumed"|"doing"|"waiting"|"open"|"dropped"|"kept"} IntentView 画出来的状态：成立的再按前提分已立与前提未立；kept：守，没出事 */
@@ -409,13 +409,13 @@ function intentCardHtml(intent, now, { selected = "", level = "", name = "", ink
     act = (attr, on, text) => `<button type="button" ${attr} aria-pressed="${on}"${on ? ` class="on"` : ""}>${text}</button>`,
     // 没有开着的事时这一页就是了结的那几件，无可切换
     acts = [
-      live && settled ? act("data-intent-past", past && !inked, t`已了结 ${settled}`) : "",
+      live && settled ? act("data-intent-past", past && !inked, t`往事 ${settled}`) : "",
       intent.log.length ? act("data-intent-ink", inked, t`墨痕 ${intent.log.length}`) : ""
     ].join("");
   // 页头：目录名、一行事实，右端墨痕。原问不上卡片，它是给模型对照用的
   const facts = [
     live ? `<span class="intent-meta">${t(`进度`)} <b>${standing}</b> / ${live}</span>` : "",
-    !live && settled ? `<span class="intent-meta">${t`已了结 ${settled}`}</span>` : "",
+    !live && settled ? `<span class="intent-meta">${t`往事 ${settled}`}</span>` : "",
     borrowed ? `<span class="intent-borrow">${t`假定 ${borrowed}`}</span>` : "",
     intent.updated ? `<span class="intent-updated">${t`更新于 ${escapeHtml(intentTime(intent.updated))}`}</span>` : ""
   ].join("");

@@ -488,7 +488,7 @@ try {
   check(
     "the header counts open items and offers the closed ones; a closed job's keep is gone",
     /^进度 0 \/ 2/.test(await evalJs(`${stage(".page-facts")}.textContent`)) &&
-      (await evalJs(`${stage("[data-intent-past]")}.textContent`)) === "已了结 2" &&
+      (await evalJs(`${stage("[data-intent-past]")}.textContent`)) === "往事 2" &&
       (await evalJs(names)) === "新事,新一步,总界限"
   );
   await evalJs(`${stage("[data-intent-past]")}.click(); true`);
@@ -517,7 +517,7 @@ try {
   await openCard();
   await waitFor(`${names} === "新事,旧模块,旧链,总界限"`);
   check("with nothing open the card opens on the closed jobs, with no switch", !(await evalJs(`!!${stage("[data-intent-past]")}`)));
-  await waitFor(`document.querySelector('#chatMeta .intent-glance')?.textContent === "意已了结 3"`);
+  await waitFor(`document.querySelector('#chatMeta .intent-glance')?.textContent === "意往事 3"`);
   check(
     "the glance says how many are closed and draws no marks",
     !(await evalJs(`!!document.querySelector('#chatMeta .intent-glance .intent-mk')`))

@@ -58,8 +58,8 @@ function intentGlanceHtml(conversation, short = false) {
   if (!views.length && !broken.length && !past) return "";
   const { standing } = intentTally(intent, now, closed),
     rest = views.length - INTENT_GLANCE_MARKS;
-  // 眼下没有开着的事：只留印与一句已了结几件，不排记号
-  return `<button type="button" class="intent-glance" data-intent-open title="${views.length || !past ? t`意：进度 ${standing} / ${views.length}，点开看图` : t`意：已了结 ${past} 件，点开看`}"><span class="seal intent-seal" aria-hidden="true">${t(`意`)}</span>${views.length ? `<span>${short ? `<b>${standing}</b>/${views.length}` : `${t(`进度`)} <b>${standing}</b> / ${views.length}`}</span>` : past ? `<span>${t`已了结 ${past}`}</span>` : ""}<span class="intent-glance-run" aria-hidden="true">${views
+  // 眼下没有开着的事：只留印与一句往事几件，不排记号
+  return `<button type="button" class="intent-glance" data-intent-open title="${views.length || !past ? t`意：进度 ${standing} / ${views.length}，点开看图` : t`意：往事 ${past} 件，点开看`}"><span class="seal intent-seal" aria-hidden="true">${t(`意`)}</span>${views.length ? `<span>${short ? `<b>${standing}</b>/${views.length}` : `${t(`进度`)} <b>${standing}</b> / ${views.length}`}</span>` : past ? `<span>${t`往事 ${past}`}</span>` : ""}<span class="intent-glance-run" aria-hidden="true">${views
     .slice(0, INTENT_GLANCE_MARKS)
     .map(view => intentMark(view))
     .join("")}${rest > 0 ? `<i>+${rest}</i>` : ""}</span>${
