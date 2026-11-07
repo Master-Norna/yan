@@ -47,10 +47,8 @@ try {
   );
   check("nothing is open at first", !(await evalJs(shown("preset"))) && !(await evalJs(shown("reasoning"))));
   check(
-    "the depth row shows a dot, not a word, at default",
-    await evalJs(
-      `!!document.querySelector(${JSON.stringify(`${FLY("reasoning")} .model-fly-value .model-dot`)}) && !document.querySelector(${JSON.stringify(`${FLY("reasoning")} .model-fly-value`)}).textContent`
-    )
+    "the depth row says 默认 at default",
+    (await evalJs(`document.querySelector(${JSON.stringify(`${FLY("reasoning")} .model-fly-value`)}).textContent`)) === "默认"
   );
 
   await moveTo(FLY("reasoning"));
@@ -98,7 +96,7 @@ try {
   );
   await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-  await waitFor(`!!document.querySelector(${JSON.stringify(`${FLY("reasoning")} .model-fly-value .model-dot`)})`);
+  await waitFor(`document.querySelector(${JSON.stringify(`${FLY("reasoning")} .model-fly-value`)}).textContent === "默认"`);
   check(
     "clicking the picked level again goes back to default, and the trigger drops the level",
     (await evalJs(`!${subOf("reasoning")}.querySelector(".active")`)) &&

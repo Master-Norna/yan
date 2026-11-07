@@ -199,7 +199,7 @@ function renderModelMenu() {
     // 选过的档位这个模型不认（换了模型、或刚学到它的档位）：菜单上点亮它实际会落到的那一档
     shown = choices.includes(level) ? level : nearestReasoning(profile, level) || "",
     presets = presetMenuHtml(),
-    // 默认不占一行（设计稿/148 乙；落选的甲是一行只一粒朱点，用起来像字丢了）：一档都不点亮，栏上一粒朱点；再点选中的那档退回默认
+    // 默认不占一行（设计稿/148 乙；落选的甲是一行只一粒朱点，用起来像字丢了）：一档都不点亮，栏上写「默认」（只放朱点难认）；再点选中的那档退回默认
     levels = choices
       .filter(Boolean)
       .map(value => {
@@ -212,7 +212,7 @@ function renderModelMenu() {
       "beforeend",
       `<div class="model-flies">${presets ? modelFlyHtml("preset", t(`预设`), escapeHtml(presetOf(c)?.name || t("本色")), presets) : ""}${
         choices.length > 1
-          ? modelFlyHtml("reasoning", t(`思考深度`), shown ? reasoningLabel(shown) : `<span class="model-dot"></span>`, levels)
+          ? modelFlyHtml("reasoning", t(`思考深度`), reasoningLabel(shown), levels)
           : `<div class="menu-section-note">${t(`此模型不认思考档位`)}</div>`
       }</div><button class="model-option model-manage" data-manage>${t(`模型设置`)}</button>`
     );
