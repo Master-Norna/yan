@@ -29,7 +29,10 @@ function browserOf(raw, cwd = "") {
   };
   let file = /** @type {any} */ ({});
   try {
-    file = JSON.parse(fs.readFileSync(arg("--config"), "utf8")).browser || {};
+    // --config 是相对路径时按服务的工作目录解析——起服务时（prepareBrowser）就是这么找的，
+    // 两边基准得一致，不然页面问调试口时读不到那份配置，端口、配置目录、下载目录全回落
+    const config = arg("--config");
+    if (config) file = JSON.parse(fs.readFileSync(path.resolve(cwd || ".", config), "utf8")).browser || {};
   } catch {}
   const launch = (file.launchOptions?.args || []).map(String),
     endpoint = arg("--cdp-endpoint") || String(file.cdpEndpoint || ""),
