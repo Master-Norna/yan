@@ -260,7 +260,7 @@ function openWithSystem(file) {
 function parseJsonText(text) {
   return JSON.parse(String(text).replace(/^\uFEFF/, ""));
 }
-// \u8BFB\u6865\u63A5\u81EA\u5DF1\u8BB0\u7684\u4E00\u4EFD JSON\uFF08\u767B\u5F55\u3001\u7C3F\u8BB0\u3001\u7D22\u5F15\u2026\u2026\uFF09\uFF1A\u6CA1\u6709\u3001\u8BFB\u4E0D\u4E86\u3001\u574F\u4E86\u90FD\u5F53\u6CA1\u6709\uFF0C\u56DE fallback
+// 读桥接自己记的一份 JSON（登录、簿记、索引……）：没有、读不了、坏了都当没有，回 fallback
 function readJsonFile(file, fallback = null) {
   try {
     return parseJsonText(fs.readFileSync(file, "utf8"));
@@ -268,7 +268,7 @@ function readJsonFile(file, fallback = null) {
     return fallback;
   }
 }
-// \u4E00\u4EF6\u6587\u4EF6\u5185\u5BB9\u7684 SHA-1\uFF1A\u8FB9\u8BFB\u8FB9\u7B97\uFF0C\u4E0D\u628A\u6574\u4EFD\u8BFB\u8FDB\u5185\u5B58
+// 一件文件内容的 SHA-1：边读边算，不把整份读进内存
 async function fileHash(file) {
   const hash = crypto.createHash("sha1");
   for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
