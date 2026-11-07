@@ -74,75 +74,101 @@ const SCRIPT_START = new RegExp(
   "i"
 );
 const CMD_SCRIPT = new RegExp(String.raw`^\s*${PREFIX}cmd(?:\.exe)?\b[^\n]*?/[ck]\s*$`, "i");
-// 引号只扫一次；单引号内原样，双引号内跳过反斜杠与 PowerShell 反引号转义。
-function quotedEnd(text, start) {
+const POSIX_SCRIPT = new RegExp(String.raw`^\s*${PREFIX}${SHELL}$`, "i");
+// 转义跟随执行这段文本的 Shell；cmd 的 ^ 只在引号外转义。
+function escapes(text, at, shell, quote = "") {
+  if (quote === "'") return false;
+  if (shell === "powershell") return text[at] === "`";
+  if (shell === "cmd") return !quote && text[at] === "^";
+  return text[at] === "\\" && (!quote || /[$`"\\\r\n]/.test(text[at + 1] || ""));
+}
+function commentAt(text, at, shell) {
+  return shell !== "cmd" && text[at] === "#" && (at === 0 || /[\s;&|()]/.test(text[at - 1]));
+}
+// $() 有自己的引号上下文，里面的引号不能结束外层双引号。
+function substitutionEnd(text, start, shell) {
+  let depth = 1;
+  for (let i = start + 2; i < text.length; i++) {
+    if (escapes(text, i, shell)) i++;
+    else if (commentAt(text, i, shell)) {
+      while (i < text.length && text[i] !== "\n" && text[i] !== "\r") i++;
+    } else if (text[i] === '"' || (shell !== "cmd" && text[i] === "'")) {
+      const end = quotedEnd(text, i, shell);
+      if (end >= 0) i = end;
+    } else if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+function quotedEnd(text, start, shell, substitutions = []) {
   const quote = text[start];
-  let end = start + 1;
-  for (; end < text.length; end++) {
-    if (quote !== "'" && (text[end] === "\\" || text[end] === "`")) end++;
-    else if (text[end] === quote) break;
+  for (let i = start + 1; i < text.length; i++) {
+    if (escapes(text, i, shell, quote)) i++;
+    else if (text[i] === quote) return i;
+    else if (quote === '"' && shell !== "cmd" && text[i] === "$" && text[i + 1] === "(") {
+      const end = substitutionEnd(text, i, shell);
+      if (end >= 0) {
+        substitutions.push([i, end]);
+        i = end;
+      }
+    }
   }
-  return end < text.length ? end : -1;
+  return -1;
 }
-// 注释先于引号处理，保留换行与 UTF-16 索引。落单引号是普通字符；所有扫描共用同一份引号范围。
-function shellText(text, shellCommand = "") {
-  const chars = text.split("");
+// 一份扫描同时提供注释已抹掉的文本、语法视图与 sudo 整词视图，索引始终不变。
+// 普通参数隐藏分隔符与整段引号内容；执行字符串展开一层，$() 则进入自己的上下文。
+function shellText(text, shell, shellBody = false) {
+  const chars = text.split(""),
+    syntax = text.split(""),
+    unquoted = text.split("");
   const quotes = new Map();
-  // cmd 的执行字符串不认 # 注释；外层文本、POSIX Shell 与 PowerShell 仍认。
-  const comments = !CMD_SCRIPT.test(shellCommand);
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "`" || (text[i] === "\\" && /[\\"']/.test(text[i + 1] || ""))) {
-      i++;
-      continue;
-    }
-    if (comments && text[i] === "#" && (i === 0 || /[\s;&|()]/.test(text[i - 1]))) {
-      for (; i < text.length && text[i] !== "\n" && text[i] !== "\r"; i++) chars[i] = " ";
-      continue;
-    }
-    if (text[i] !== '"' && text[i] !== "'") continue;
-    const end = quotedEnd(text, i);
-    if (end < 0) continue;
-    quotes.set(i, end);
-    i = end;
-  }
-  return { text: chars.join(""), quotes };
-}
-function withoutQuoted(text) {
-  const scanned = shellText(text),
-    chars = scanned.text.split("");
-  for (const [start, end] of scanned.quotes) for (let i = start; i <= end; i++) chars[i] = " ";
-  return chars.join("");
-}
-// 只隐藏普通引号参数里的语法分隔符，保留文字与索引供既有规则检查参数。
-// 单层 Shell 的执行字符串另扫一层；引号内的括号、换行不会再制造指令位。
-function commandSyntax(text, shellBody = false, shellCommand = "") {
-  const scanned = shellText(text, shellCommand);
-  text = scanned.text;
-  const chars = text.split("");
   let start = 0,
     scriptAt = -1,
     checked = false;
+  const copyBody = (from, to, bodyShell, body) => {
+    const scanned = shellText(text.slice(from, to), bodyShell, body);
+    for (let j = from; j < to; j++) {
+      chars[j] = scanned.text[j - from];
+      syntax[j] = scanned.syntax[j - from];
+      unquoted[j] = scanned.unquoted[j - from];
+    }
+    for (const [open, close] of scanned.quotes) quotes.set(from + open, from + close);
+  };
   for (let i = 0; i < text.length; i++) {
-    if (scanned.quotes.has(i)) {
+    if (escapes(text, i, shell)) {
+      if (i + 1 < text.length) syntax[i + 1] = "\x01";
+      i++;
+      continue;
+    }
+    if (commentAt(text, i, shell)) {
+      for (; i < text.length && text[i] !== "\n" && text[i] !== "\r"; i++) chars[i] = syntax[i] = unquoted[i] = " ";
+      i--;
+      continue;
+    }
+    if (text[i] === '"' || (shell !== "cmd" && text[i] === "'")) {
+      const substitutions = [],
+        end = quotedEnd(text, i, shell, substitutions);
+      if (end < 0) continue;
+      quotes.set(i, end);
       if (!checked && !shellBody) {
         const script = SCRIPT_START.exec(text.slice(start));
         scriptAt = script ? start + script[0].length - 1 : -1;
         checked = true;
       }
-      const end = scanned.quotes.get(i);
+      for (let j = i; j <= end; j++) {
+        unquoted[j] = " ";
+        if (j > i && j < end && ";&|(){}\r\n".includes(text[j])) syntax[j] = "\x01";
+      }
       if (i === scriptAt) {
-        const body = commandSyntax(text.slice(i + 1, end), true, text.slice(start, i));
-        for (let j = 0; j < body.length; j++) chars[i + 1 + j] = body[j];
+        const command = text.slice(start, i),
+          bodyShell = CMD_SCRIPT.test(command) ? "cmd" : POSIX_SCRIPT.test(command) ? "posix" : "powershell";
+        copyBody(i + 1, end, bodyShell, true);
       } else {
-        let substitution = 0;
-        for (let j = i + 1; j < end; j++) {
-          // 双引号里的 $() 仍会执行，不能随普通文字隐藏。
-          if (text[i] === '"' && text[j] === "$" && text[j + 1] === "(") {
-            substitution++;
-            j++;
-          } else if (substitution && text[j] === "(") substitution++;
-          else if (substitution && text[j] === ")") substitution--;
-          else if (!substitution && ";&|(){}\r\n".includes(text[j])) chars[j] = "\x01";
+        for (const [open, close] of substitutions) {
+          syntax[open] = "$";
+          syntax[open + 1] = unquoted[open + 1] = "(";
+          syntax[close] = unquoted[close] = ")";
+          copyBody(open + 2, close, shell, shellBody);
         }
       }
       i = end;
@@ -151,26 +177,15 @@ function commandSyntax(text, shellBody = false, shellCommand = "") {
       checked = false;
     }
   }
-  return chars.join("");
+  return { text: chars.join(""), quotes, syntax: syntax.join(""), unquoted: unquoted.join("") };
 }
-// 每段只检查一次，分隔符必须在引号外；不从每个 CMD 位置重新扫到行尾。
-// 执行字符串只展开一层，与 CMD 的 Shell 套壳范围一致，普通参数里的管道仍只是字串。
-function pipesToShell(/** @type {string} */ text, shellBody = false, shellCommand = "") {
-  const scanned = shellText(text, shellCommand);
-  text = scanned.text;
+// 引号内的分隔符已由共用扫描遮掉，每段只检查一次。
+function pipesToShell(/** @type {string} */ text) {
   if (!text.includes("|")) return false;
   let start = 0,
     piped = false;
   for (let i = 0; i <= text.length; i++) {
     const ch = text[i];
-    if (ch === "`") {
-      i++;
-      continue;
-    }
-    if (scanned.quotes.has(i)) {
-      i = scanned.quotes.get(i);
-      continue;
-    }
     if (piped && ch === "\n" && !text.slice(start, i).trim()) {
       start = i + 1;
       continue;
@@ -178,21 +193,13 @@ function pipesToShell(/** @type {string} */ text, shellBody = false, shellComman
     if (i < text.length && !";&|\n(){".includes(ch)) continue;
     const segment = text.slice(start, i);
     if (piped && PIPE_SHELL.test(segment)) return true;
-    if (!shellBody) {
-      const script = SCRIPT_START.exec(segment),
-        open = script ? start + script[0].length - 1 : -1,
-        end = scanned.quotes.get(open);
-      if (end !== undefined) {
-        const body = text.slice(open + 1, end);
-        if (pipesToShell(body, true, text.slice(start, open))) return true;
-      }
-    }
     piped = ch === "|" && text[i - 1] !== "|" && text[i + 1] !== "|";
     start = i + 1;
   }
   return false;
 }
-const HIDDEN = { test: (/** @type {string} */ text) => HIDDEN_COMMAND.test(commandSyntax(text)) || pipesToShell(text) },
+const HIDDEN = HIDDEN_COMMAND,
+  SUDO_WORD = /(^|[\s;&|()])sudo(?=$|[\s;&|()])/i,
   HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
 // 指令位上的程序可以写全路径（C:\Windows\System32\reg.exe、& "C:\Program Files\…\reg.exe"）。规则都按命令名认，筛之前先去掉程序的目录，
 // 禁用规则、外联、写动词就不必各自认路径；程序自己的路径也不再算它碰的路径——& "C:\Program Files\7-Zip\7z.exe" x a.zip 并没有往系统目录里写。
@@ -290,7 +297,7 @@ const RULES = [
   [cmd("net", String.raw`use\b`), "不动用户、账户与共享", "严"],
   [cmdlet("(?:New|Remove|Set|Enable|Disable)-LocalUser|(?:Add|Remove)-LocalGroupMember"), "不动用户与账户", EVERY],
   [ELEVATION, "不提权", EVERY],
-  [{ test: text => /(^|[\s;&|()])sudo(?=$|[\s;&|()])/i.test(withoutQuoted(text)) }, "不提权", EVERY],
+  [SUDO_WORD, "不提权", EVERY],
   [cmd("osascript"), "不直接执行 AppleScript 或 JXA", "严"],
   [cmd("runas|shutdown|bcdedit|diskpart|reagentc|sfc|dism|takeown|icacls|cacls|logoff"), "不动系统、磁盘与权限", EVERY],
   // 老命令对应的 cmdlet 与老命令同样按指令位认：rg Format-Volume src 只是搜字
@@ -312,10 +319,13 @@ const RULES = [
     "严"
   ]
 ];
-/** 这一档里命中的第一条的原因，没有返回 undefined @param {string} text @param {string} tier */
-const forbiddenWhy = (text, tier) => {
-  const syntax = commandSyntax(text);
-  return RULES.find(([pattern, , tiers]) => tiers.includes(tier) && pattern.test(pattern === HIDDEN ? text : syntax))?.[1];
+/** 这一档里命中的第一条的原因，没有返回 undefined */
+const forbiddenWhy = (scanned, tier) => {
+  return RULES.find(
+    ([pattern, , tiers]) =>
+      tiers.includes(tier) &&
+      (pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax) || (pattern === HIDDEN && pipesToShell(scanned.syntax)))
+  )?.[1];
 };
 // 环境变量的两种写法（$env:X、${env:X} 与 %X%）从同一份名单生成，补一个名字两边都有
 const envVars = (/** @type {string} */ names) => String.raw`\$\{?env:(?:${names})\b|%(?:${names})%`;
@@ -347,10 +357,11 @@ const BRIDGE_WHY = "指令不调言的本机桥接（它的接口不经请示与
  * 等于自己给自己盖章；藏字——审查看不见它实际要跑什么，准与驳都只能猜。通过返回 null
  * @param {string} command
  */
-function screenUnreviewable(command) {
+function screenUnreviewable(command, { platform = process.platform } = {}) {
   const text = String(command || "");
   if (callsBridge(text)) return BRIDGE_WHY;
-  return HIDDEN.test(withoutExeDir(text)) ? HIDDEN_WHY : null;
+  const scanned = shellText(withoutExeDir(text), platform === "win32" ? "powershell" : "posix");
+  return HIDDEN.test(scanned.syntax) || pipesToShell(scanned.syntax) ? HIDDEN_WHY : null;
 }
 // 文件工具会用 screenPath 拦机密文件；指令通道也得拦显式点名，否则 `Get-Content .env` 能从 shell 绕过去。
 // 这里只认完整的路径片段，避免把 `dotnet user-secrets list`、`env.d.ts` 这类正常参数误判成文件。
@@ -420,9 +431,8 @@ const RSYNC_VALUES = new Set(
   )
 );
 const RSYNC_PATTERNS = new Set(["exclude", "include", "filter"]);
-function argumentsAt(text, start) {
-  const scanned = shellText(text);
-  text = scanned.text;
+function argumentsAt(scanned, start) {
+  const text = scanned.text;
   const tokens = [];
   for (let i = start; i < text.length; ) {
     if (/\s/.test(text[i]) && text[i] !== "\n") {
@@ -444,10 +454,10 @@ function argumentsAt(text, start) {
  * 只记源参数这一次出现的位置，不能按字符串全局豁免：
  * `Copy-Item C:\x .; Remove-Item C:\x` 里前一个 C:\x 是只读来源，后一个仍是删除目标。
  */
-function stripReadSources(text, sources = true) {
+function stripReadSources(scanned, sources = true) {
   // 正则索引按 UTF-16 code unit 计；split("") 保持同一套索引（指令前有 emoji 时也不会错位）
-  const chars = text.split("");
-  const syntax = commandSyntax(text);
+  const chars = scanned.text.split("");
+  const syntax = scanned.syntax;
   for (const match of sources ? syntax.matchAll(READ_SOURCES) : []) {
     const source = match[1] || match[2] || match[3],
       offset = match[0].lastIndexOf(source),
@@ -457,7 +467,7 @@ function stripReadSources(text, sources = true) {
   }
   for (const match of syntax.matchAll(POSIX_ARGUMENTS)) {
     const tool = match[1].toLowerCase(),
-      tokens = argumentsAt(text, Number(match.index) + match[0].length),
+      tokens = argumentsAt(scanned, Number(match.index) + match[0].length),
       removeSource = tool === "rsync" && tokens.some(t => t.value === "--remove-source-files");
     let operand = false,
       options = true,
@@ -507,10 +517,10 @@ function stripReadSources(text, sources = true) {
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，
  * 整条都按「写」处理，它顺带读的那些路径也一并受约束——静态看不出哪个参数是源、哪个是目标，
  * 只有 READ_SOURCES 认得出的那几种来源例外。沙箱与审而后行共用，只差开头的称呼。通过返回 null。
- * @param {string} text @param {string} workdir @param {boolean} win @param {string} prefix
+ * @param {ReturnType<typeof shellText>} scanned @param {string} workdir @param {boolean} win @param {string} prefix
  */
-function screenWritePaths(text, workdir, win, prefix) {
-  const writeText = stripReadSources(text);
+function screenWritePaths(scanned, workdir, win, prefix) {
+  const writeText = stripReadSources(scanned);
   // 用户目录与系统目录：只是读的来源可以（把 ~/x.txt 拷进来），写进去不行
   if (HOME_SYSTEM_PATH.test(writeText)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
@@ -533,14 +543,15 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const raw = String(command || "");
   if (callsBridge(raw)) return `沙箱拒绝：${BRIDGE_WHY}`;
   const text = withoutExeDir(raw),
-    win = platform === "win32";
-  const forbidden = forbiddenWhy(text, "严");
+    win = platform === "win32",
+    scanned = shellText(text, win ? "powershell" : "posix");
+  const forbidden = forbiddenWhy(scanned, "严");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
   if (SECRET_PATH_IN_COMMAND.test(text)) return "沙箱拒绝：指令不读写 .env、密钥或凭据文件；需要普通配置时请改用不含机密的文件";
   // 目录这一道只锁「写」：查看整台机器是电脑检查的本分，锁住读等于把这件事堵死
-  if (DIRECT_FILE_MUTATION.test(commandSyntax(text))) {
-    if (GIT_INTERNAL_PATH.test(stripReadSources(text, false))) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
-    const why = screenWritePaths(text, workdir, win, "沙箱拒绝");
+  if (DIRECT_FILE_MUTATION.test(scanned.syntax)) {
+    if (GIT_INTERNAL_PATH.test(stripReadSources(scanned, false))) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
+    const why = screenWritePaths(scanned, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
   if (NET_TOOLS.test(text)) {
@@ -555,14 +566,15 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
  * 规则刻意比沙箱宽得多：目录、机密文件、.git 内部、Git 回退都不管，只看会不会伤到系统本身。
  * @param {string} command
  */
-function screenAutoReview(command) {
+function screenAutoReview(command, { platform = process.platform } = {}) {
   const raw = String(command || "");
   if (callsBridge(raw)) return `审查拒绝：${BRIDGE_WHY}`;
   const text = withoutExeDir(raw),
-    forbidden = forbiddenWhy(text, "审");
+    scanned = shellText(text, platform === "win32" ? "powershell" : "posix"),
+    forbidden = forbiddenWhy(scanned, "审");
   if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
-  if (DIRECT_FILE_MUTATION.test(commandSyntax(text)) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
+  if (DIRECT_FILE_MUTATION.test(scanned.syntax) && REVIEW_SYSTEM_PATH.test(stripReadSources(scanned)))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
@@ -572,13 +584,14 @@ function screenAutoReview(command) {
  * 藏字与别名、往系统目录里写。联网、写目录之外、机密文件、.git 内部都放行。通过返回 null
  * @param {string} command
  */
-function screenLoose(command) {
+function screenLoose(command, { platform = process.platform } = {}) {
   const raw = String(command || "");
   if (callsBridge(raw)) return `沙箱拒绝：${BRIDGE_WHY}`;
   const text = withoutExeDir(raw),
-    forbidden = forbiddenWhy(text, "宽");
+    scanned = shellText(text, platform === "win32" ? "powershell" : "posix"),
+    forbidden = forbiddenWhy(scanned, "宽");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
-  if (DIRECT_FILE_MUTATION.test(commandSyntax(text)) && REVIEW_SYSTEM_PATH.test(stripReadSources(text)))
+  if (DIRECT_FILE_MUTATION.test(scanned.syntax) && REVIEW_SYSTEM_PATH.test(stripReadSources(scanned)))
     return "沙箱拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
