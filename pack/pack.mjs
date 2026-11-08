@@ -2,7 +2,8 @@
 // 包里是：仓库里跟踪着的运行所需文件（不带测试、文档、设计稿）+ 官方 Node 原样一份（node\，带 npm）+ 启动器 言.exe。
 // 言自己的代码一字不改：Node 仍是真的 Node、npm 就在旁边，桥接照旧从磁盘现拼页面——只是不用用户先装 Node。
 // 启动器由系统自带的 .NET Framework csc 编出（pack/launcher.cs），图标 pack/icon.ico 由 icon.svg 画成。
-// Node 的压缩包按 nodejs.org 的 SHASUMS256.txt 验过才用，下过的留在 dist/.cache 里，再打不必重下
+// Node 的压缩包按 nodejs.org 的 SHASUMS256.txt 验过才用，下过的留在 dist/.cache 里，再打不必重下。
+// dist 里只留这一版的包与这一版 Node 的缓存：发过的版本在 GitHub Release 上，旧包留在本机只占地方
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -200,3 +201,6 @@ buildLauncher();
 const zipFile = path.join(DIST, `yan-${version}-win-x64.zip`);
 const { count, bytes } = writeZip(OUT, zipFile, "言");
 say(`${path.relative(ROOT, zipFile)}：${count} 件，${(bytes / 1048576).toFixed(1)} MB`);
+for (const name of fs.readdirSync(DIST))
+  if (/^yan-.+-win-x64\.zip$/.test(name) && name !== path.basename(zipFile)) fs.rmSync(path.join(DIST, name), { force: true });
+for (const name of fs.readdirSync(CACHE)) if (!name.includes(NODE)) fs.rmSync(path.join(CACHE, name), { force: true });

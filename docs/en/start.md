@@ -26,7 +26,7 @@ If you'd rather not install Node first, use the portable package: it unzips to a
 
 `言.exe` is not code-signed. The first time you double-click it, Windows may say "Windows protected your PC"; click **More info → Run anyway**.
 
-Packaging: run `npm run pack` in the repository to get `dist/yan-<version>-win-x64.zip`. It uses the system's `curl.exe`, `tar.exe` and the .NET Framework 4 `csc.exe` (all present on Windows 10 / 11). The Node version is set at the top of `pack/pack.mjs`; the archive is used only after it matches the nodejs.org checksum. After changing the version, run the whole test suite with the bundled Node (`dist\言\node\node.exe test/run.mjs`). The launcher's source is `pack/launcher.cs`; the icon `pack/icon.ico` is drawn from `icon.svg`.
+Packaging: run `npm run pack` in the repository to get `dist/yan-<version>-win-x64.zip` (older packages are removed; released ones are on GitHub Releases). It uses the system's `curl.exe`, `tar.exe` and the .NET Framework 4 `csc.exe` (all present on Windows 10 / 11). The Node version is set at the top of `pack/pack.mjs`; the archive is used only after it matches the nodejs.org checksum. After changing the version, run the whole test suite with the bundled Node (`dist\言\node\node.exe test/run.mjs`). The launcher's source is `pack/launcher.cs`; the icon `pack/icon.ico` is drawn from `icon.svg`.
 
 ## Use inside VS Code
 
