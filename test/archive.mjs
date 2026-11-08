@@ -104,6 +104,18 @@ check("an opened fold stays open after leaving and coming back", (await deliverR
 await evalJs(`document.querySelector(".message.assistant .deliver-more").click(); true`);
 check("收起 folds back to four", (await deliverRows()) === "4|余 3 件▾");
 await evalJs(`(m => { m.deliverables = m._kept; delete m._kept; })(__yanState().conversations[0].messages[1]); true`);
+// 链到草稿里的一件：卷宗不列隐藏的，对不上目录也不算移出，题头也不说「已入卷宗」
+await evalJs(
+  `(m => { m._kept = m.deliverables; m.deliverables = [{ path: ".草稿/x/笔记.md", name: "笔记.md", size: 3 }]; })(__yanState().conversations[0].messages[1]); true`
+);
+await reopenDeliver();
+check(
+  "a deliverable in the hidden drafts folder is not marked as moved out, nor claimed to be in Files",
+  (await evalJs(
+    `(b => b.querySelectorAll(".deliver-gone").length + "|" + b.querySelectorAll(".deliver-btn").length + "|" + b.querySelector(".deliver-head").textContent)(document.querySelector(".message.assistant .deliver-bar"))`
+  )) === "0|2|成成品 1 件"
+);
+await evalJs(`(m => { m.deliverables = m._kept; delete m._kept; })(__yanState().conversations[0].messages[1]); true`);
 await reopenDeliver();
 // 纸先沉下去、底淡掉，淡完才藏起、清台面
 await sleep(260);

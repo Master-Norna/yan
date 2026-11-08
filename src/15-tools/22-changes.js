@@ -539,9 +539,13 @@ async function replyDeliverables(conversation, content) {
 function deliverableFile(f) {
   return f.root ? joinFile(f.root, f.path) : archiveFile(f.path);
 }
+/** 卷宗页列得出的一件：卷宗目录里、路上没有点打头的一层——卷宗不列隐藏的（模型的草稿 .草稿/ 就在其中），在不在也就无从对 @param {Deliverable} f */
+function deliverableListed(f) {
+  return !f.root && !f.path.split("/").some(part => part.startsWith("."));
+}
 /** @param {Deliverable} f */
 function deliverableMissing(f) {
-  return !f.root && archiveEntries !== null && !archiveEntries.some(entry => entry.path === f.path);
+  return deliverableListed(f) && archiveEntries !== null && !archiveEntries.some(entry => entry.path === f.path);
 }
 /** @param {Deliverable} f */
 function deliverableFileHtml(f, extra = false) {
@@ -574,7 +578,7 @@ function deliverablesHtml(message) {
       files.length > DELIVER_FOLD
         ? `<button type="button" class="deliver-more" aria-expanded="${open}">${deliverMoreInner(files.length - DELIVER_SHOWN, open)}</button>`
         : "";
-  return `<div class="deliver-bar${open ? " open" : ""}"><div class="deliver-head"><span class="seal deliver-seal" aria-hidden="true">${t(`成`)}</span><span>${files.some(f => f.root) ? t`成品 ${files.length} 件` : t`成品 ${files.length} 件 · 已入卷宗`}</span></div>${deliverableRowsHtml(files)}${more}</div>`;
+  return `<div class="deliver-bar${open ? " open" : ""}"><div class="deliver-head"><span class="seal deliver-seal" aria-hidden="true">${t(`成`)}</span><span>${files.every(deliverableListed) ? t`成品 ${files.length} 件 · 已入卷宗` : t`成品 ${files.length} 件`}</span></div>${deliverableRowsHtml(files)}${more}</div>`;
 }
 /** @param {HTMLElement} button 末行那句「余 n 件 / 收起」 */
 function toggleDeliverables(button) {
