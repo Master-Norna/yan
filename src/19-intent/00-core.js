@@ -657,7 +657,7 @@ function applyIntentOps(intent, ops, { at = "", conversation = "", ask = "", pri
       node.root = { ask: String(ask).slice(0, 2000), at };
       log(`立根 ${id}：${node.claim}`);
     }
-    const before = `${node.claim}\u0001${node.check}\u0001${node.when || ""}`;
+    const was = { claim: node.claim, check: node.check, when: node.when || "" };
     for (const key of /** @type {const} */ (["claim", "check", "when", "note"])) if (op[key] !== undefined) node[key] = op[key];
     if (op.any !== undefined) node.any = op.any;
     if (op.keep !== undefined) {
@@ -682,10 +682,12 @@ function applyIntentOps(intent, ops, { at = "", conversation = "", ask = "", pri
       if (node.seal && !node.seal.anchors) node.seal.anchors = [...node.anchors];
       node.anchors = op.anchors;
     }
-    if (`${node.claim}\u0001${node.check}\u0001${node.when || ""}` !== before) {
-      // 根：立时标过、此刻也没有谁以它为前提的（降成别项前提的不再算根，原问留着，哪天又成了根再用）
-      const rooted = !!node.root && !intentDependents(next, id).length;
-      if (node.rev) log(`${rooted ? "改根" : "改意"} ${id}：${node.claim}`);
+    if (node.claim !== was.claim || node.check !== was.check || (node.when || "") !== was.when) {
+      // 根：立时标过、此刻也没有谁以它为前提的（降成别项前提的不再算根，原问留着，哪天又成了根再用）。守也记着原问，但守不是根
+      const rooted = !!node.root && !node.keep && !intentDependents(next, id).length,
+        // 记改了的那一样：说法没动、只改了验收或情形的，照旧写说法，墨痕里看着像改了一回什么也没变
+        said = node.claim !== was.claim ? node.claim : node.check !== was.check ? `验收 ${node.check}` : `情形 ${node.when || "（撤去）"}`;
+      if (node.rev) log(`${rooted ? "改根" : "改意"} ${id}：${said}`);
       // 根改了说法：记下这一问，与原问一起附着，收尾时照着比
       if (node.rev && rooted && ask) node.root.later = String(ask).slice(0, 2000);
       node.rev += 1;

@@ -205,6 +205,15 @@ test("根：立时记下用户的原话；改说法时记下那一问、留痕�
     undefined,
     "照原样再报一遍不算改"
   );
+  assert.equal(
+    change(intent, [{ id: "费马", check: "Lean 4 编过" }], { ask: "用 Lean 4" }).log.at(-1).text,
+    "改根 费马：验收 Lean 4 编过",
+    "只改验收的，墨痕记验收，不重抄没动的说法"
+  );
+  const kept = change(intent, [{ id: "只用Lean", claim: "只用Lean", check: "无别的证明器", keep: true }], { ask: "只用Lean" }),
+    keepRevised = change(kept, [{ id: "只用Lean", check: "不装 Coq" }], { ask: "别的事" });
+  assert.equal(keepRevised.log.at(-1).text, "改意 只用Lean：验收 不装 Coq", "守也记着原问，但改它不是改根");
+  assert.equal(keepRevised.nodes["只用Lean"].root.later, undefined, "别的事的那一问不记到守上");
   assert.match(problems(intent, [{ id: "模性", state: "assumed" }])[0], /note 里写明/);
   intent = change(intent, [
     { id: "模性", state: "assumed", note: "借 Wiles 1995 的模性定理" },
