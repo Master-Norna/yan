@@ -197,8 +197,10 @@
   border-top-color: var(--accent);
   animation: toolSpin 0.72s linear infinite;
 }
+/* 勾用石绿，同意里「已立」那一勾：√ 绿是一套符号（设计稿/152 乙）。原先借 --code-green（#536d62），浅色下与淡墨的字同一个灰度，
+   勾了看不出是绿的；落选：丙石绿掺四成淡墨（安静些，但与意里那一勾不同色） */
 .tool-state.done {
-  color: var(--code-green);
+  color: var(--stone-green);
 }
 /* 补言待寄时转圈左边的折箭头：点了不等落点，即刻递上 */
 .note-now {
