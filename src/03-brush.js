@@ -240,6 +240,60 @@ const BRUSH_ICONS = {
 function brushIcon(name, className = "") {
   return `<svg class="brush${className ? ` ${className}` : ""}" viewBox="0 0 20 20" aria-hidden="true">${BRUSH_ICONS[name]?.() || ""}</svg>`;
 }
+// ---------- 标识：一笔言（对谈）、一笔行（执事） ----------
+// 侧栏顶上的标识随态换字（设计稿/156 丙）；画幅 16.5 12.5 68 68，一笔墨加一点朱。根目录的 icon.svg 是一笔言的定稿副本（设计稿/149），
+// 一笔行是 155 辛（亍的下横收了一点，免得兜回时出画幅）
+/** 把每段二次曲线再细分几段：笔走得长、转得急时，brushStroke 按段铺的笔形才不见棱角 @param {number[]} points */
+function brushFine(points, parts = 6) {
+  const out = [points[0], points[1]],
+    blossom = (a, b, p0, c, p1) => (1 - a) * (1 - b) * p0 + (a * (1 - b) + b * (1 - a)) * c + a * b * p1;
+  for (let i = 0; i + 4 < points.length; i += 4) {
+    const [x0, y0, cx, cy, x1, y1] = points.slice(i, i + 6);
+    for (let k = 0; k < parts; k++) {
+      const a = k / parts,
+        b = (k + 1) / parts;
+      out.push(blossom(a, b, x0, cx, x1), blossom(a, b, y0, cy, y1), blossom(b, b, x0, cx, x1), blossom(b, b, y0, cy, y1));
+    }
+  }
+  return out;
+}
+const BRUSH_DROP = "M-6 -8.5Q-2.5 -8.5 3.5 -2.5Q8.5 2.5 6 6.5Q3.5 9.8 -.4 6.6Q-3 4 -4.4 -1.5Q-5.2 -5 -6 -8.5Z";
+/** @type {Record<string, () => string>} */
+const BRUSH_MARKS = {
+  // 草书连写，三横一路折回、收笔出锋，口化在笔势里；上面一点朱。急弯处笔形自交留个破口，补一点墨
+  言: () =>
+    `<path class="zhu" transform="translate(50 23) scale(.9)" d="${BRUSH_DROP}"/>` +
+    brushStroke(
+      brushFine([22, 42, 48, 36, 74, 40, 83, 42, 72, 47, 58, 52, 36, 55, 27, 57, 37, 59, 50, 60, 64, 62, 72, 65, 62, 69, 53, 73, 43, 78]),
+      6.8,
+      {
+        tail: 0.04,
+        head: 0.9
+      }
+    ) +
+    `<circle class="ink" cx="34.1" cy="54.7" r=".6"/>`,
+  // 彳：朱一撇在上，墨一撇折下接竖；亍：上横收处斜牵到下横，走到头兜回接竖钩、出锋
+  行: () =>
+    `<path class="zhu" transform="translate(30 22) rotate(-35) scale(.9)" d="${BRUSH_DROP}"/>` +
+    brushStroke(brushFine([34, 34, 29, 41, 23, 47, 27, 45, 30, 48, 32, 62, 29, 77]), 6.6, { tail: 0.3, head: 0.9 }) +
+    brushStroke(
+      brushFine([47, 32, 59, 29, 71, 30, 62, 38, 45, 46, 61, 41, 77, 42, 82, 43, 75, 46, 67, 49, 67, 62, 67, 74, 61, 78, 57, 79, 53, 73]),
+      6.4,
+      {
+        tail: 0.04,
+        head: 0.9
+      }
+    )
+};
+/** @param {string} name @param {string} [className] */
+function brushMark(name, className = "") {
+  return `<svg class="brush${className ? ` ${className}` : ""}" viewBox="16.5 12.5 68 68" aria-hidden="true">${BRUSH_MARKS[name]?.() || ""}</svg>`;
+}
+// 标签页与通知的图标：一笔言衬一方圆角纸，字照亮色画，颜色写死（设计稿/157 乙）。标签栏的明暗网页读不到，
+// icon.svg 按系统明暗换色，系统报暗、标签栏却是浅色时浅灰的笔就淡了；README 仍用透明底的 icon.svg
+const BRAND_ICON = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="16.5 12.5 68 68"><style>.ink{fill:#3f3d3a}.zhu{fill:#9b5540}</style><rect x="17.5" y="13.5" width="66" height="66" rx="12" fill="#f1ece2"/>${BRUSH_MARKS.言()}</svg>`
+)}`;
 // 页面里写好位置的（侧栏的卷宗、设置入口，设置各栏的名字前）：开页时画上
 function paintBrushIcons(root = document) {
   for (const svg of root.querySelectorAll("svg[data-brush]"))

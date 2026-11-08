@@ -15,7 +15,7 @@ check("boot: bridge connected", await evalJs(`__yanBridgeFetch("/api/store/confi
 console.log(
   "  debug:",
   await evalJs(
-    `JSON.stringify({ mode: __yanState().settings.mode, welcomeMode: document.querySelector("#welcomeMode").textContent, chipHidden: document.querySelector("#workdirChip").className, chipText: document.querySelector("#workdirChip .chip-text").textContent, seal: document.querySelector("#modeSeal")?.dataset.mode })`
+    `JSON.stringify({ mode: __yanState().settings.mode, welcomeMode: document.querySelector("#welcomeMode").textContent, chipHidden: document.querySelector("#workdirChip").className, chipText: document.querySelector("#workdirChip .chip-text").textContent, seal: document.querySelector("#brandMark")?.dataset.mode })`
   )
 );
 check(

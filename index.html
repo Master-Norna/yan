@@ -14,8 +14,7 @@
   <div id="bridgeGate" class="bridge-gate" role="status" aria-live="polite"><span class="seal">言</span><h1>等候本机桥接</h1><p>运行 start.cmd，言会在 <code id="bridgeGateUrl">http://127.0.0.1:8787</code> 打开</p></div>
   <div class="app">
     <aside id="sidebar" class="sidebar"><div class="sidebar-inner">
-      <div class="brand-row"><div class="brand-mark wide">言</div><button id="collapseSidebar" class="icon-btn collapse-btn" title="收起侧栏">‹</button></div>
-      <div id="modeSeal" class="mode-seal" data-mode="chat" role="status" aria-label="当前为言 · 对谈"><span class="rail-icon">言</span><span class="wide">对谈</span></div>
+      <div class="brand-row"><span id="brandMark" class="brand-mark" data-mode="chat" role="img" aria-label="言 · 对谈"></span><button id="collapseSidebar" class="icon-btn collapse-btn" title="收起侧栏">‹</button></div>
       <button id="newChat" class="rail-btn new-chat" title="另起一段对话"><span class="rail-icon"><svg class="brush" data-brush="newpage" viewBox="0 0 20 20" aria-hidden="true"></svg></span><span class="wide">翻页</span></button>
       <button id="openLibrary" class="rail-btn library-open" title="卷宗"><span class="rail-icon"><svg class="brush archive-icon" data-brush="scroll" viewBox="0 0 20 20" aria-hidden="true"></svg></span><span class="wide">卷宗</span><span id="libraryCount" class="wide count"></span></button>
       <button id="openGroups" class="rail-btn" title="分组"><span class="rail-icon"><svg class="brush" data-brush="groups" viewBox="0 0 20 20" aria-hidden="true"></svg></span><span class="wide">分组</span><span id="groupsCount" class="wide count"></span></button>

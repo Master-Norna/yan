@@ -37,21 +37,25 @@ html[data-sidebar="collapsed"] .sidebar .wide {
     opacity var(--dur-quick) ease,
     transform 0.3s var(--ease-lay);
 }
+/* 侧栏顶上一行：标识即当前的态——对谈一笔言、执事一笔行（设计稿/156 丙），与下面翻页、卷宗、分组同一路笔意，停在它们那一列的中线上，
+   展开收起都不挪。收起时不另留一枚 ›：指上标识，它换成 ›，点即展开。
+   落选：甲收起时 › 占顶行、标识落到下一行（展开收起之间下面各入口要上下挪一行）；原先大字「言」下一行「对谈 /［行］执事」（言既是名又是一态，两态不对账） */
 .brand-row {
   position: relative;
   height: 34px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding-left: 9px;
+  margin-bottom: 18px;
 }
 .brand-mark {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-  font: 500 22px/1 var(--title);
+  width: 26px;
+  height: 26px;
+  margin-left: 7px; /* 中线对着下面各入口图标那一列（40px 宽的中线） */
+  transition: opacity var(--dur-quick);
+}
+.brand-mark .brush {
+  width: 100%;
+  height: 100%;
 }
 .icon-btn {
   width: 30px;
@@ -77,10 +81,21 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   left: 216px;
   transition:
     left 0.38s var(--ease-lay),
-    background var(--dur-quick);
+    background var(--dur-quick),
+    opacity var(--dur-quick);
 }
+/* 收起时 › 叠在标识上、平时不露；指上这一行，标识淡去、› 浮出，点它即展开。left 5px 时它 30px 宽的中线正对标识 */
 .sidebar.collapsed .collapse-btn {
   left: 5px;
+  opacity: 0;
+}
+.sidebar.collapsed .brand-row:hover .collapse-btn,
+.sidebar.collapsed .collapse-btn:focus-visible {
+  opacity: 1;
+}
+.sidebar.collapsed .brand-row:hover .brand-mark,
+.sidebar.collapsed .brand-row:has(.collapse-btn:focus-visible) .brand-mark {
+  opacity: 0;
 }
 .rail-btn {
   display: flex;

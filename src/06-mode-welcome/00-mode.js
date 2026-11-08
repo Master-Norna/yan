@@ -30,15 +30,15 @@ function scratchRel(c) {
 function workRoot(c) {
   return c?.workdir || archiveDir();
 }
-// 侧栏的一枚印：只显示当前的态（言 / 行），改态的入口是目录签
+// 侧栏顶上的标识即当前的态：对谈是一笔言、执事是一笔行（设计稿/156 丙），不再另写「对谈 / 执事」；改态的入口是目录签
 function renderModeSwitch() {
-  const work = workMode(),
-    seal = $("#modeSeal");
-  if (!seal) return;
-  seal.dataset.mode = work ? "work" : "chat";
-  seal.querySelector(".rail-icon").textContent = work ? "行" : "言";
-  seal.querySelector(".wide").textContent = work ? t("执事") : t("对谈");
-  seal.title = work ? t("行 · 执事：指令与改动落在工作目录") : t("言 · 对谈：产出收入卷宗");
+  const mode = workMode() ? "work" : "chat",
+    mark = $("#brandMark");
+  if (!mark || (mark.dataset.mode === mode && mark.childElementCount)) return;
+  mark.dataset.mode = mode;
+  mark.innerHTML = brushMark(mode === "work" ? "行" : "言");
+  mark.title = mode === "work" ? t("行 · 执事：指令与改动落在工作目录") : t("言 · 对谈：产出收入卷宗");
+  mark.setAttribute("aria-label", mode === "work" ? t("行 · 执事") : t("言 · 对谈"));
 }
 const COMMAND_POLICY_META = {
   ask: [t("问而后行"), t("只读指令径行，其余逐条请示")],

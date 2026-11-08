@@ -22,13 +22,32 @@ for (const c of [
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ savedAt: Date.now(), conversation: c })
   });
-const { send, evalJs, waitFor, close } = await connect();
+const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE });
 await waitFor(`!!document.querySelector('[data-conversation="loose"]')`, 10000);
 const order = () =>
   evalJs(
     `[...document.querySelectorAll("#history .history-repo-group, #history > * > .history-item, #history .history-item:not(.history-repo-group .history-item)")].map(n => n.dataset.repo ? "组" : n.dataset.conversation).join(",")`
   );
+// 侧栏顶上的标识即当前的态（设计稿/156 丙）；标签页图标是衬纸的一笔言（157 乙）
+check(
+  "the sidebar's mark is the brush 言 and the tab icon a papered one",
+  await evalJs(
+    `(m => m.dataset.mode === "chat" && !!m.querySelector("svg.brush path.zhu") && document.querySelector('link[rel="icon"]').href.startsWith("data:image/svg+xml"))(document.querySelector("#brandMark"))`
+  )
+);
+await evalJs(`document.querySelector("#collapseSidebar").click(); true`);
+await sleep(500);
+check(
+  "collapsed, the mark stays on the icon column and the › hides under it",
+  await evalJs(
+    `(() => { const m = document.querySelector("#brandMark").getBoundingClientRect(), i = document.querySelector("#newChat .rail-icon").getBoundingClientRect(); return Math.abs(m.left + m.width / 2 - (i.left + i.width / 2)) < 1.5 && getComputedStyle(document.querySelector("#collapseSidebar")).opacity === "0"; })()`
+  )
+);
+await shot("history-feel-collapsed.png");
+await evalJs(`document.querySelector("#collapseSidebar").click(); true`);
+await sleep(500);
+await shot("history-feel-sidebar.png");
 check("the directory group sits above the older loose chat", (await order()) === "组,loose", await order());
 
 // 目录的「＋」：欢迎页绑着这个目录；再点翻页，不再绑

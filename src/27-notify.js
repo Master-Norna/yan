@@ -13,7 +13,7 @@ function notifyDesktop(conversation, body) {
   const note = new Notification(conversation.title || t("新对话"), {
     body: body.replace(/\s+/g, " ").trim().slice(0, 120),
     tag: conversation.id,
-    icon: "./icon.svg"
+    icon: BRAND_ICON
   });
   note.onclick = () => {
     window.focus();

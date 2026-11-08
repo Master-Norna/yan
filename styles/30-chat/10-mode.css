@@ -1,42 +1,3 @@
-/* 侧栏顶上：牌匾「言」下面一行小字题签，注明当下的态——对谈，或执事。不是开关，只是题签；改态去目录签。
-   对谈时只有两个字，不再把「言」重复一遍；执事时前头多一枚小小的「行」印，字转印色 */
-.mode-seal {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 18px;
-  margin: -3px 0 18px;
-  padding-left: 10px;
-  color: var(--ink-3);
-  font: var(--fs-note) var(--title);
-  letter-spacing: 0.24em;
-  cursor: default;
-  transition:
-    width 0.25s ease,
-    color var(--dur-quick);
-}
-.mode-seal .rail-icon {
-  display: none;
-  width: 15px;
-  height: 15px;
-  flex: none;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line));
-  border-radius: var(--radius-s);
-  color: var(--accent);
-  font: 500 9px/1 var(--title);
-  letter-spacing: 0;
-  transform: rotate(-2deg);
-}
-.mode-seal .wide {
-  line-height: 1;
-}
-.mode-seal[data-mode="work"] {
-  color: var(--accent);
-}
-.mode-seal[data-mode="work"] .rail-icon {
-  display: grid;
-}
 .history-item.is-work .history-open:before {
   content: "行";
   display: inline-block;
@@ -92,26 +53,6 @@
 }
 .text-btn.on {
   color: var(--accent);
-}
-/* 收起时牌匾隐去，这一行只剩一个字（言 / 行）落在原处 */
-.sidebar.collapsed .mode-seal {
-  width: 40px;
-  height: 24px;
-  margin: 2px 0 16px;
-  padding: 0;
-  justify-content: center;
-  color: var(--accent);
-}
-.sidebar.collapsed .mode-seal .rail-icon {
-  display: grid;
-  width: 40px;
-  height: 24px;
-  border: 0;
-  font-size: 14px;
-  transform: none;
-}
-.sidebar.collapsed .mode-seal .wide {
-  display: none;
 }
 .welcome-chips {
   position: relative;
