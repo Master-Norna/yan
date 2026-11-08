@@ -88,9 +88,13 @@ function busReady() {
     setTimeout(() => resolve(busOpen), 3000);
   });
 }
+// 读回存着的东西（整个对话目录、几答的行迹、附件原件）：一问即答、回话却可能几十 MB。走总线时回话被切成一段段再包一层 JSON 从事件流回来，
+// 页面要拆一回、编成字节、再解一回——开页读对话目录那一下多花三百毫秒。这几样不占连接多久，直接 fetch
+const DIRECT_PATHS = new Set(["/api/chats/load", "/api/chats/trail/get", "/api/files/get"]);
 /** @returns {Promise<Response>} */
 async function bridgeFetch(path, body, signal) {
   const direct = () => fetch(`${apiBase}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body, signal });
+  if (DIRECT_PATHS.has(path)) return direct();
   // 大文件与长对话直接送原请求，避免总线再包一层 JSON、服务端拆开后再复制一整份。
   // 4 Mi 个字符即使全是转义字符，外层 JSON 也小于总线的 32 MiB 上限。
   if (typeof body === "string" && body.length > 4 * 1024 * 1024) return direct();
