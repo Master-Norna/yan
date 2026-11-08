@@ -5,7 +5,6 @@
   right: 0;
   bottom: 0;
   padding: 28px 42px 19px;
-  background: linear-gradient(transparent, var(--paper) 28%);
 }
 .approval-bar {
   width: min(100%, var(--read));
