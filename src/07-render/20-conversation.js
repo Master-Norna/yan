@@ -220,6 +220,8 @@ function syncNodes(host, items, converged) {
     }
     if (next === cursor) cursor = cursor.nextElementSibling;
     else host.insertBefore(next, cursor);
+    // 问句气泡挂上了才量得出截没截（见 25-bubble.js）
+    if (!reply && next !== node) watchBubbles(next);
     // 先挂上再画：交互内容、开合动效都要在页上才量得准
     if (reply && (next !== node || item.message.status === "streaming" || nodeSig.get(next) !== sig))
       paintAssistant(next, item.message, { side: !!item.side, branch: item.branch });
@@ -290,7 +292,7 @@ function renderMessage(message, branch = null, side = false) {
     const quote = message.quote?.text
       ? `<div class="user-quote${shot ? " has-shot" : ""}" data-quote-source="${escapeHtml(message.quote.messageId || "")}"${message.quote.url ? ` data-quote-url="${escapeHtml(message.quote.url)}"` : ""} title="${t(`回到出处`)}">${shot ? `<span class="user-quote-text">${escapeHtml(message.quote.text)}</span>${quoteShotHtml(message.quote.image, message.quote.text)}` : escapeHtml(message.quote.text)}</div>`
       : "";
-    return `<article class="message user" data-message="${escapeHtml(message.id)}">${side ? "" : noteMarkHtml(message)}${files}${quote}${message.content ? `<div class="user-bubble">${escapeHtml(message.content)}</div>` : ""}<div class="message-actions${branch ? " has-branch" : ""}">${branchNavHtml(branch)}${actionIcon("copy", t("复制消息"))}${actionIcon("edit", t("编辑消息"))}</div></article>`;
+    return `<article class="message user" data-message="${escapeHtml(message.id)}">${side ? "" : noteMarkHtml(message)}${files}${quote}${message.content ? bubbleHtml(message.content) : ""}<div class="message-actions${branch ? " has-branch" : ""}">${branchNavHtml(branch)}${actionIcon("copy", t("复制消息"))}${actionIcon("edit", t("编辑消息"))}</div></article>`;
   }
   return assistantShellHtml(message);
 }

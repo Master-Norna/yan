@@ -259,7 +259,7 @@ function syncHelperFoldHead() {
   button.dataset.run = trail?.parentElement.dataset.run || "";
   button.classList.toggle("shown", !!trail);
 }
-// 一趟一来一回，同正文：命是右侧淡底里一段（同人说的话，不另题），长了只露两行、点开看全；
+// 一趟一来一回，同正文：命是右侧淡底里一段（同人说的话，不另题），长了同问句只露四行、点开看全（见 25-bubble.js）；
 // 帮手那一答顶上一行「遣 帮手 · 时刻」（同主答的「言 模型 · 时刻」），做着时那枚印呼吸
 /** @param {Element} ask @param {Element} meta @param {Step} step */
 function paintHelperAsk(ask, meta, step) {
@@ -273,11 +273,9 @@ function paintHelperAsk(ask, meta, step) {
   }
   if (text.dataset.task === task) return;
   text.dataset.task = task;
-  text.textContent = task;
   ask.classList.toggle("hidden", !task);
-  requestAnimationFrame(() => {
-    if (!text.classList.contains("open")) text.classList.toggle("more", text.scrollHeight > text.clientHeight + 1);
-  });
+  setBubbleText(text, task);
+  watchBubbles(text);
 }
 /** @param {boolean} fresh 首次打开或换了一名帮手：从空白画起；否则就地更新 */
 function renderHelperPanel(fresh = false) {
@@ -323,7 +321,7 @@ function renderHelperPanel(fresh = false) {
     if (blank) {
       host.insertAdjacentHTML(
         "beforeend",
-        `<section class="helper-run" data-run="${escapeHtml(step.id)}"><div class="helper-ask" title="${t(`主模型交的命`)}"><div class="user-bubble helper-ask-text"></div></div><div class="message-meta helper-meta"><span class="meta-seal" aria-hidden="true">${t(`遣`)}</span><span class="helper-meta-text"></span></div><div class="sub-trail"></div></section>`
+        `<section class="helper-run" data-run="${escapeHtml(step.id)}"><div class="helper-ask" title="${t(`主模型交的命`)}">${bubbleHtml("", "helper-ask-text")}</div><div class="message-meta helper-meta"><span class="meta-seal" aria-hidden="true">${t(`遣`)}</span><span class="helper-meta-text"></span></div><div class="sub-trail"></div></section>`
       );
       run = host.lastElementChild;
     }
@@ -356,7 +354,7 @@ function revealStep(id) {
 }
 // 差遣面板：帮手条与行迹里的签打开它，遮罩与合起关上它，‹ › 与列表翻帮手
 function bindHelperEvents() {
-  // 帮手行迹的收起：各趟时间线上方的题头，与翻过题头后顶栏右侧浮出的那一枚；命截了两行的，点开看全
+  // 帮手行迹的收起：各趟时间线上方的题头，与翻过题头后顶栏右侧浮出的那一枚
   $("#helperPanelBody").addEventListener("click", event => {
     const fold = event.target.closest(".sub-fold");
     if (fold) return toggleSubFold(fold.closest(".helper-run")?.dataset.run || "");
@@ -365,12 +363,6 @@ function bindHelperEvents() {
     if (copy) {
       const report = String(helperStepById(copy.closest(".helper-run")?.dataset.run || "")?.sub?.report || "");
       return void copyText(report).then(() => toast(t("已复制")));
-    }
-    // 命长了截两行，点开看全、再点收起；在里面选字不算
-    const ask = event.target.closest(".helper-ask-text");
-    if (ask && (ask.classList.contains("more") || ask.classList.contains("open")) && !getSelection()?.toString()) {
-      ask.classList.toggle("open");
-      ask.classList.toggle("more");
     }
   });
   $("#helperFoldHead").addEventListener("click", event => toggleSubFold(event.currentTarget.dataset.run || "", true));

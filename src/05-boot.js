@@ -126,6 +126,7 @@ function bindEvents() {
   bindIntentEvents();
   bindApprovalEvents();
   bindHelperEvents();
+  bindBubbleEvents();
   bindClepsydraEvents();
   setupChips();
   setupQuoteTip();

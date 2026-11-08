@@ -124,7 +124,7 @@ function textNodesIn(root) {
   const nodes = [],
     walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: node =>
-        node.parentElement?.closest(".viz-pending, .html-app, .math-pending, sup.note-ref")
+        node.parentElement?.closest(".viz-pending, .html-app, .math-pending, sup.note-ref, .ub-fold")
           ? NodeFilter.FILTER_REJECT
           : NodeFilter.FILTER_ACCEPT
     });
@@ -365,6 +365,9 @@ function setupSidePanel() {
     if (!thread) return;
     const source = document.querySelector(`#messages [data-message="${CSS.escape(thread.anchor.messageId)}"]`);
     if (!source) return toast(t("所注段落不在当前版本中"));
+    // 所注的话落在收着的问句截掉的那段里：先摊开
+    const bubble = source.querySelector(`mark.note-anchor[data-thread="${CSS.escape(thread.id)}"]`)?.closest(".user-bubble.more");
+    if (bubble) toggleBubble(bubble, true);
     scrollChatTo(source, "center");
     source.classList.remove("flash");
     void source.offsetWidth;

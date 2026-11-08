@@ -57,6 +57,8 @@ interface Element {
   _foldTo?: boolean;
   _foldTimer?: any;
   _foldAnim?: Animation | null;
+  // 问句气泡正走着的开合动画（25-bubble.js）
+  _bubbleFold?: Animation | null;
   _follow?: boolean;
   // 画法（07-paint.js）记在节点上的：部件的键与签名、画过没有、行迹上回的状态、正文已缓存的段落与上回画的原文
   _part?: string;
