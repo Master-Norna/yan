@@ -1,7 +1,7 @@
 // 端到端测试运行器（零依赖）：起一个假模型接口、一个测试桥接、一个无头 Edge / Chrome（stage 用例另起一个模型浏览器），逐个跑 test/ 下的用例，按 PASS / FAIL 行统计
 // 用法：node test/run.mjs [用例名…]      例：node test/run.mjs memory side-notes
 import { spawn, spawnSync } from "node:child_process";
-import { connect, STAGE_DEBUG_PORT } from "./lib.mjs";
+import { connect, STAGE_DEBUG_PORT, PAGE } from "./lib.mjs";
 import { existsSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -238,6 +238,9 @@ try {
         // 离页时补写的配置（防抖一秒、再加一次往返）要在清目录前落完：否则它落进下一个用例的空根，
         // 下一个用例灌的浏览器记录又不再压过磁盘，就会带着上一个用例的模型开跑
         await sleep(1500);
+        // 浏览器这一侧的记录（localStorage、IndexedDB）也清掉：不然上一个用例的对话会被下一个页面读回来、写回磁盘，
+        // 用例单跑能过、连着跑却多出一段
+        await send("Storage.clearDataForOrigin", { origin: new URL(PAGE).origin, storageTypes: "all" });
         close();
       } catch {}
       tryRm(path.join(TMP, "work"));
