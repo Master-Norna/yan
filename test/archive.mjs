@@ -464,7 +464,10 @@ writeFileSync(`${ARCHIVE}/课程/场景示例/读我.md`, "# 读我\n\n![](image
 writeFileSync(`${ARCHIVE}/课程/场景示例/images/点#2.png`, readFileSync(`${ARCHIVE}/课程/场景示例/images/点 1.png`));
 writeFileSync(`${ARCHIVE}/课程/场景示例/读我.md`, "\n![](images/点%232.png)\n", { flag: "a" });
 // 挪过的文档：文里还写着旧夹，图其实在 images 里
-writeFileSync(`${ARCHIVE}/课程/场景示例/挪过.md`, "![](旧夹/点%201.png)\n\n![没有这幅](旧夹/无此图.png)\n\n[读我](旧夹/读我.md)\n");
+writeFileSync(
+  `${ARCHIVE}/课程/场景示例/挪过.md`,
+  "![](旧夹/点%201.png)\n\n![没有这幅](旧夹/无此图.png)\n\n![不带扩展名](chart)\n\n[读我](旧夹/读我.md)\n"
+);
 await evalJs(dropFolder);
 await waitFor(`!!document.querySelector('#libraryGrid [data-library-dir="课程/场景示例 (2)"]')`, 8000).catch(() => {});
 check("dropping it again makes a second folder instead of merging", existsSync(`${ARCHIVE}/课程/场景示例 (2)/图/a.txt`));
@@ -496,7 +499,7 @@ await waitFor(`document.querySelectorAll("#fileViewerStage .markdown img").lengt
 check(
   "an image nothing can be found for leaves its caption, not a broken picture",
   await evalJs(
-    `document.querySelectorAll("#fileViewerStage .markdown img").length === 1 && document.querySelector("#fileViewerStage .markdown").textContent.includes("没有这幅")`
+    `document.querySelectorAll("#fileViewerStage .markdown img").length === 1 && document.querySelector("#fileViewerStage .markdown").textContent.includes("没有这幅") && document.querySelector("#fileViewerStage .markdown").textContent.includes("不带扩展名")`
   )
 );
 await evalJs(`document.querySelector('#fileViewerStage a[data-file="读我.md"]').click(); true`);

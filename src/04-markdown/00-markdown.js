@@ -104,7 +104,8 @@ function setupMarkdown() {
         data.keepAttr = false;
         return;
       }
-      const name = localFileName(data.attrValue);
+      // 图不要求扩展名：模型把要画的图写成「![图](chart)」时，照原样留着页面就去取本页的 /chart，落成破图
+      const name = localFileName(data.attrValue, node.tagName === "IMG");
       if (!name) return;
       node.setAttribute("data-file", name);
       node.setAttribute("data-path", data.attrValue);
@@ -119,8 +120,9 @@ function setupMarkdown() {
     });
   }
 }
-// 不是网址、末段像个文件名的链接：取出文件名。网址、邮件、页内锚点都不算
-function localFileName(href) {
+// 不是网址、末段像个文件名的链接：取出文件名。网址、邮件、页内锚点都不算；bare 时末段不必带扩展名
+/** @param {string} href @param {boolean} [bare] */
+function localFileName(href, bare = false) {
   const raw = String(href || "").trim();
   if (!raw || /^(?:https?|mailto|tel|data|blob):/i.test(raw) || raw.startsWith("#")) return "";
   let name = raw
@@ -130,7 +132,7 @@ function localFileName(href) {
   try {
     name = decodeURIComponent(name);
   } catch {}
-  return /^[^<>:"|?*\u0000-\u001f]+\.[a-z0-9]{1,8}$/i.test(name) ? name : "";
+  return (bare ? /^[^<>:"|?*\u0000-\u001f]+$/ : /^[^<>:"|?*\u0000-\u001f]+\.[a-z0-9]{1,8}$/i).test(name) ? name : "";
 }
 function renderMath(tex, display) {
   // KaTeX 未加载时先放一个占位，库到位后由 renderPendingMath 就地替换；流式尾段每帧重绘，加载完成后自然变成正式渲染
