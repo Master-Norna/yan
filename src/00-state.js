@@ -233,6 +233,7 @@
  * @property {Duty} dutyImage 生图（设置 → 专司）：配了才把生图交给模型
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
+ * @property {Record<string, string>} [groupAt] 侧栏各组删过的对话里最近动过的时刻（键同 collapsedRepos：目录，或 group:组 id）：删了组里最新的一段，组不往下掉（见 historyKey）
  * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
  * @property {"anywhere"|"inside"} toolReach

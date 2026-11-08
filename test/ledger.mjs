@@ -40,7 +40,7 @@ try {
     ["# 目标 TOPMARK", ...Array.from({ length: 400 }, (_, i) => `- 第${i}条：实验记录良好，继续推进下一步`), "- 末条 TAILMARK"].join("\n")
   );
   await evalJs(
-    `__yanState().profiles[0].contextWindow = 20000; document.querySelector("#newChat").click(); setTimeout(() => { document.querySelector("#welcomeInput").value = "LEDGERBIG 开工"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
+    `__yanState().profiles[0].contextWindow = 20000; (w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); setTimeout(() => { document.querySelector("#welcomeInput").value = "LEDGERBIG 开工"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
   );
   const big = `__yanState().conversations.find(c => c.messages[0]?.content === "LEDGERBIG 开工")?.messages.at(-1)`;
   await waitFor(`${big}?.status === "complete"`, 30000);

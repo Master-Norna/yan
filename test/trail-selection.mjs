@@ -157,7 +157,9 @@ check(
     `!!document.querySelector('#messages .trail-note mark.note-anchor') && !!document.querySelector('#messages .reasoning-body mark.note-anchor') && !!document.querySelector('#messages .assistant-block > .markdown mark.note-anchor')`
   )
 );
-await evalJs(`document.querySelector('#newChat').click(); true`);
+await evalJs(
+  `(w => { document.querySelector('#newChat').click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+);
 await waitFor(`!!document.querySelector('#welcome:not(.hidden)')`);
 await evalJs(
   `document.querySelector('#welcomeInput').value = 'DUPTAIL QUOTE'; document.querySelector('#welcomeInput').dispatchEvent(new Event('input')); document.querySelector('#welcome .send-trigger').click(); true`
@@ -175,7 +177,9 @@ check(
   await evalJs(`!document.querySelector('#quoteTip [data-tip="note"]').classList.contains('hidden')`)
 );
 // 没调工具、字直接写在正文里的也一样：生成中只引用
-await evalJs(`document.querySelector('#newChat').click(); true`);
+await evalJs(
+  `(w => { document.querySelector('#newChat').click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+);
 await waitFor(`!!document.querySelector('#welcome:not(.hidden)')`);
 await evalJs(
   `document.querySelector('#welcomeInput').value = 'SLOWTEXT 划选'; document.querySelector('#welcomeInput').dispatchEvent(new Event('input')); document.querySelector('#welcome .send-trigger').click(); true`

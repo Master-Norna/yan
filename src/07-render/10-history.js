@@ -38,6 +38,12 @@ function renderHistory() {
     node.items.push(c);
   }
   for (const set of sets.values()) if (!query || set.items.length) nodes.push(set);
+  // 删过组里最新的一段，组仍按删前的时刻排，不往下掉（见 deleteConversation）
+  const held = store.settings.groupAt || {};
+  for (const node of nodes) {
+    const at = held[node.kind === "repo" ? node.dir : node.kind === "set" ? `group:${node.group.id}` : ""];
+    if (at > node.at) node.at = at;
+  }
   nodes.sort((a, b) => b.at.localeCompare(a.at));
   /** @type {Map<string, any[]>} */
   const buckets = new Map();

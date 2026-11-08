@@ -12,7 +12,7 @@ await send("Page.navigate", { url: PAGE });
 await sleep(1200);
 const ask = text =>
   evalJs(
-    `document.querySelector("#newChat").click(); setTimeout(() => { document.querySelector("#welcomeInput").value = ${JSON.stringify(text)}; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
+    `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); setTimeout(() => { document.querySelector("#welcomeInput").value = ${JSON.stringify(text)}; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
   );
 const conv = text => `__yanState().conversations.find(c => c.messages[0]?.content === ${JSON.stringify(text)})`;
 
@@ -61,7 +61,9 @@ const id = await evalJs(`(c => {
   c.messages.find(m => m.relay).relay = [lost("重启预览"), lost("为子目录中文稿开独立预览"), lost("很长".repeat(200))];
   return c.id;
 })(${conv("TIMERWAKE")})`);
-await evalJs(`document.querySelector("#newChat").click(); true`);
+await evalJs(
+  `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+);
 await sleep(300);
 await evalJs(`document.querySelector('[data-conversation="${id}"] .history-open').click(); true`);
 await waitFor(`document.querySelectorAll("#messages .message.relay .relay-line").length === 3`, 5000).catch(() => {});

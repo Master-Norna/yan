@@ -90,9 +90,11 @@ async function boot() {
 function bindEvents() {
   $("#collapseSidebar").onclick = () => toggleSidebar();
   $("#mobileMenu").onclick = () => toggleSidebar(false);
-  // 侧栏的翻页是散列的一段；要归进某组从组首「＋」起
+  // 侧栏的翻页是散列的一段、不绑目录；要归进某组、某目录，从组首「＋」起（原先目录的「＋」点过一回，此后翻页都粘着那个目录）
   $("#newChat").onclick = () => {
     delete store.settings.pendingGroupId;
+    delete store.settings.pendingWorkdir;
+    saveStoreSoon();
     newChat();
   };
   $("#openLibrary").onclick = () => (view === "library" ? closeLibrary() : openLibrary());

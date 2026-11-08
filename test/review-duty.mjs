@@ -32,7 +32,9 @@ const ask = async (text = "REVIEW-DUTY") => {
   );
 };
 const fresh = async () => {
-  await evalJs(`document.querySelector("#newChat").click(); true`);
+  await evalJs(
+    `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+  );
   await sleep(400);
 };
 

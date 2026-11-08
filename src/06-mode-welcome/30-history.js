@@ -83,7 +83,12 @@ async function deleteConversation(id) {
   clearDraft(id);
   void cleanScratch(removed);
   void deleteAttachments([...attachmentIds(everyMessage(removed)), ...draftFiles]);
+  // 它所在的组记下它的时刻：删了组里最新的一段，组仍停在原处，不随余下几段的时刻往下挪；组删空了一并忘掉
+  const key = historyKey(removed),
+    held = (store.settings.groupAt ||= {});
   store.conversations = store.conversations.filter(c => c.id !== id);
+  if (key && !store.conversations.some(c => historyKey(c) === key)) delete held[key];
+  else if (key && !(held[key] >= removed.updatedAt)) held[key] = removed.updatedAt;
   void deleteConversationStorage(id);
   if (currentId === id) {
     currentId = null;
@@ -92,6 +97,12 @@ async function deleteConversation(id) {
   saveStore();
   render();
   toast(t("对话已删除"));
+}
+// 一段对话在侧栏落在哪一组：分组是 group:组 id，目录组是目录（置顶的不进目录组），散着的没有；与 renderHistory 的归法、collapsedRepos 的键一致
+/** @param {Conversation} c */
+function historyKey(c) {
+  if (groupOf(c)) return `group:${c.groupId}`;
+  return !c.pinned && isWork(c) ? c.workdir : "";
 }
 function togglePin(id) {
   const c = store.conversations.find(item => item.id === id);

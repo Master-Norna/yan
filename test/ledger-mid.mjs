@@ -22,7 +22,9 @@ try {
 
   // 帮手领命时现读的新版不替主答认：主答拿开工时那份整份写回，别处的改动不能被盖掉
   writeFileSync(WORK + "/.yan/账本.md", "# 约束\n- 甲\n");
-  await evalJs(`document.querySelector("#newChat").click(); true`);
+  await evalJs(
+    `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+  );
   await sleep(300);
   await evalJs(
     `document.querySelector("#welcomeInput").value = "BOOKSTALE 开工"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`

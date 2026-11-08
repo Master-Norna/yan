@@ -21,7 +21,9 @@ for (;;) {
   // 第二轮思绪流到一半时翻去欢迎页再翻回来：生成期间页面上没有「当前对话」，时间线也不该乱
   if (!hopped && (await evalJs(`!!document.querySelector('.message.assistant .tool-stack .reasoning[data-state="live"]')`))) {
     hopped = true;
-    await evalJs(`document.querySelector("#newChat").click(); true`);
+    await evalJs(
+      `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+    );
     await sleep(300);
     await evalJs(
       `[...document.querySelectorAll("#history .history-item")].find(n => n.textContent.includes("DUP")).querySelector(".history-open").click(); true`
@@ -48,7 +50,9 @@ check("round-1 text sits in the group note once", final.notes.length === 1 && fi
 
 // 最后一步之后正写着的话（此时在行迹「进行中」那组里）：切去另一段对话再回来，整页重画不能在正文区另画一份大字的。
 // 第一步之前没说话（步骤记在 0 处）也一样
-await evalJs(`document.querySelector("#newChat").click(); true`);
+await evalJs(
+  `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+);
 await sleep(300);
 await evalJs(
   `document.querySelector("#welcomeInput").value = "DUPTAIL"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`

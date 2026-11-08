@@ -15,7 +15,7 @@ check("nothing hung, no clepsydra", await evalJs(`document.querySelector("#cleps
 
 // 假模型挂一条先睡六秒的后台指令就收尾
 await evalJs(
-  `document.querySelector("#newChat").click(); setTimeout(() => { document.querySelector("#welcomeInput").value = "BGRELOAD"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
+  `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); setTimeout(() => { document.querySelector("#welcomeInput").value = "BGRELOAD"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
 );
 await waitFor(`!document.querySelector("#clepsydra").classList.contains("hidden")`, 10000).catch(() => {});
 check("a hung command shows the clepsydra", await evalJs(`!document.querySelector("#clepsydra").classList.contains("hidden")`));

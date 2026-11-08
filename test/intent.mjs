@@ -174,7 +174,7 @@ try {
 
   // 另起一段对话、同一个目录：两项同依托 api/user.js，改一回两项都转待复核，接在那一轮的工具结果后；来回三回即相持，只提醒、不拦
   await evalJs(
-    `document.querySelector("#newChat").click(); setTimeout(() => { document.querySelector("#welcomeInput").value = "INTENTC 相持"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
+    `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); setTimeout(() => { document.querySelector("#welcomeInput").value = "INTENTC 相持"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
   );
   const third = `((__yanState().conversations.find(c => c.messages[0]?.content === "INTENTC 相持")?.messages || []).filter(m => m.role === "assistant" && m.status === "complete")[0]?.content || "")`;
   await waitFor(`${third}.startsWith("INTENTC|")`, 30000);

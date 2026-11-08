@@ -49,7 +49,9 @@ const meta = await evalJs(`document.querySelector(".message.assistant .tool-step
 check("the errand marker says how many times it folded", /12 步 · 撮要 \d+ 回/.test(meta), meta);
 
 // 主答：填了窗口（20k）。按接口报的提示用量估，到七成半就先压，一次「放不下」都不该撞上
-await evalJs(`__yanState().profiles[0].contextWindow = 20000; document.querySelector("#newChat").click(); true`);
+await evalJs(
+  `__yanState().profiles[0].contextWindow = 20000; (w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+);
 await sleep(400);
 const main = await run("LONGMAIN 依次读 big0.txt 到 big11.txt");
 s = await stats();
@@ -79,7 +81,9 @@ check(
 );
 
 // 自己撮要：执事做完一段调 fold，此前的往来换成它写的笔记；同一批里的另一步连同结果留在笔记之后，fold 那一下不留在历史里
-await evalJs(`__yanState().profiles[0].contextWindow = 0; document.querySelector("#newChat").click(); true`);
+await evalJs(
+  `__yanState().profiles[0].contextWindow = 0; (w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+);
 await sleep(400);
 const self = await run("LONGSELF 读几个文件，读完一段自己撮要", "LONGSELF done");
 check(
@@ -116,7 +120,9 @@ const stuff = (pairs, n, tag) =>
     `(() => { const c = __yanState().conversations.find(c => c.messages[0]?.content === "LH-SEED 起个头"); for (let i = 0; i < ${pairs}; i++) c.messages.push({ id: "${tag}u" + i, role: "user", content: "旧问${tag}" + i + "：" + "字".repeat(${n}), timestamp: new Date().toISOString(), status: "complete" }, { id: "${tag}a" + i, role: "assistant", content: "旧答${tag}" + i + "：" + "字".repeat(${n}), timestamp: new Date().toISOString(), status: "complete", steps: [] }); return true; })()`
   );
 // 没填窗口：请求撞上「放不下」，当场压前文再发
-await evalJs(`__yanState().profiles[0].contextWindow = 0; document.querySelector("#newChat").click(); true`);
+await evalJs(
+  `__yanState().profiles[0].contextWindow = 0; (w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
+);
 await sleep(400);
 await run("LH-SEED 起个头");
 await stuff(2, 9000, "h");

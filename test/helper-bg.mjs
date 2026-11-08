@@ -66,7 +66,7 @@ check(
 const readText = "HELPERREAD 派个帮手再翻它的经过",
   readConv = `__yanState().conversations.find(c => c.messages[0]?.content === ${JSON.stringify(readText)})`;
 await evalJs(
-  `document.querySelector("#newChat").click(); setTimeout(() => { document.querySelector("#welcomeInput").value = ${JSON.stringify(readText)}; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
+  `(w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); setTimeout(() => { document.querySelector("#welcomeInput").value = ${JSON.stringify(readText)}; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); }, 300); true`
 );
 await waitFor(
   `${readConv}?.messages.at(-1)?.content.includes("HELPERREAD done") && ${readConv}.messages.at(-1).status === "complete"`,
