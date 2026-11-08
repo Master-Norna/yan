@@ -154,7 +154,15 @@ http
     if (req.url.startsWith("/chatgpt")) return chatgpt(req, res);
     if (req.url.endsWith("/v1/models") && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ data: [{ id: "claude-test", type: "model" }] }));
+      // 测试连接要在清单里找得到当前模型（见 src/17-settings/10-models.js）：各用例用到的假模型都列上
+      return res.end(
+        JSON.stringify({
+          data: ["claude-test", "fake", "fake-slow", "fake-plain", "fake-mute", "fake-three", "fake-vague"].map(id => ({
+            id,
+            type: "model"
+          }))
+        })
+      );
     }
     // 长活用例读一下：各自压过几回、撞过几回「放不下」
     if (req.url.endsWith("/long-stats") && req.method === "GET") {
