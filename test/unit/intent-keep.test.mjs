@@ -122,7 +122,7 @@ for (const change of ["同一对话换新意", "同目录另一对话换新意",
   });
 
 // 守的钩子：写了 on 的守，对得上的那一步动手前先跑它挂的测试；平时不取它的指纹，收尾时也不重查
-function hookRuntime({ policy = "auto", exitCode = 1, keep = {}, grant = true } = {}) {
+function hookRuntime({ policy = "auto", exitCode = 1, keep = {}, grant = true, before = [] } = {}) {
   const f = load([
     "asIntent",
     "applyIntentOps",
@@ -143,6 +143,7 @@ function hookRuntime({ policy = "auto", exitCode = 1, keep = {}, grant = true } 
     { ops, problems } = f.normalizeIntentOps(f.asIntent(null), [
       { id: "上线", claim: "能部署", check: "可访问", root: true, needs: ["部署"] },
       { id: "部署", claim: "推上去", check: "看得到" },
+      ...before,
       {
         id: "算力",
         claim: "只用获准的机器",
@@ -251,6 +252,22 @@ test("标了 ask 的钩子是关口：测试过了再请用户批，准了放行
   assert.equal(out.display, "守未准 · 算力");
   assert.equal(skipped.skipped, true);
   assert.equal(declined.runs.length, 0);
+});
+
+test("同一步对上关口与测试两条守：测试不过就不请批，过了才批一回", async () => {
+  const gate = { id: "发布", claim: "放行前不外发", check: "用户批过", keep: true, on: "ssh", ask: true, anchors: [] },
+    failing = hookRuntime({ before: [gate] });
+  assert.deepEqual(failing.problems, []);
+  assert.equal((await failing.keepHook({ name: "run_command" }, { command: "ssh gpu-9" }, failing.ctx)).display, "守拦下 · 算力");
+  assert.equal(failing.asked.length, 0, "批了又被测试拦下，那回准许白费");
+  const passing = hookRuntime({ exitCode: 0, before: [gate] }),
+    step = { name: "run_command" };
+  assert.equal(await passing.keepHook(step, { command: "ssh gpu-9" }, passing.ctx), null);
+  assert.deepEqual(
+    passing.asked.map(gate => gate.id),
+    ["发布"]
+  );
+  assert.deepEqual(step.granted, ["发布"]);
 });
 
 test("on 的写法：只给守、须是合法的正则；ask 要有 on，撤了 on 关口随之撤", () => {

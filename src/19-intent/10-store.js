@@ -178,20 +178,25 @@ function keepAnchors(intent, closed) {
 // 守的钩子：写了 on 的守，有副作用的一步（指令、写文件、调接口……帮手做的也算）对得上它，动手前（请示之前）先跑它挂的测试，
 // 将要做的经环境变量交给测试：YAN_TOOL 是工具名，YAN_TARGET 是指令原文、路径或网址（别的工具即整份参数）。不过即不做这一步，测试的输出作这一步的结果回给模型。
 // 跟探针一样随档位：问而后行里只自动跑明确只读的，别的不跑——那一步本就要人批。跑不成的这回不拦。改意不过钩子：写宽了的 on 不能连撤它的那一步也拦下。
-// 没挂测试的即禁令，对上就不做；标了 ask 的是关口：测试过了（或没挂）还要请用户批，不论档位——径行也问，批了这一步不再另问
+// 没挂测试的即禁令，对上就不做；标了 ask 的是关口：测试过了（或没挂）还要请用户批，不论档位——径行也问，批了这一步不再另问。
+// 对上的几条先过禁令、再跑测试，都过了才请人批：批完又被另一条的测试拦下，那回准许就白费了，改好重来还得再批一回
 /** @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx @returns {Promise<ToolOutcome|null>} 拦下即交回这一步的结果 */
 async function keepHook(step, args, ctx) {
   const held = intents.get(ctx.conversation.id);
   if (!held || step.name === "update_intent" || !TOOLS.get(step.name)?.sideEffect) return null;
   const target = String(args.command ?? args.path ?? args.url ?? JSON.stringify(args)),
-    policy = commandPolicyOf(ctx.conversation);
-  for (const id of intentKeeps(held.intent, answerClosed(ctx.conversation, held.intent))) {
-    const node = held.intent.nodes[id],
-      on = keepTrigger(node);
-    if (!on || !(on.test(target) || on.test(step.name))) continue;
-    const tests = node.anchors.filter(key => keepHookAnchor(node, key));
+    policy = commandPolicyOf(ctx.conversation),
+    hit = intentKeeps(held.intent, answerClosed(ctx.conversation, held.intent))
+      .map(id => ({ id, node: held.intent.nodes[id] }))
+      .filter(({ node }) => {
+        const on = keepTrigger(node);
+        return on && (on.test(target) || on.test(step.name));
+      })
+      .map(keep => ({ ...keep, tests: keep.node.anchors.filter(key => keepHookAnchor(keep.node, key)) }));
+  for (const { id, node, tests } of hit)
     if (!tests.length && !node.ask)
       return { ok: false, content: prompt("work.keepBan", { id, claim: node.claim }).trim(), display: `守拦下 · ${id}` };
+  for (const { id, tests } of hit)
     for (const key of tests) {
       const command = anchorParts(key)[1];
       if (policy === "ask" && !isReadOnlyCommand(command)) continue;
@@ -219,6 +224,7 @@ async function keepHook(step, args, ctx) {
         display: `守拦下 · ${id}`
       };
     }
+  for (const { id, node } of hit) {
     if (!node.ask) continue;
     step.gate = { id, claim: node.claim, target };
     const granted = await askApproval(step, ctx).finally(() => delete step.gate);
