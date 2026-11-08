@@ -38,33 +38,50 @@ const THEME_SHEETS = [
   SHEET_PX = 1024;
 /** @type {Promise<Record<string, string>|null>|null} */
 let themeSheetCache = null;
+// 画一张要在主线程上把带湍流的 SVG 栅格成 1024²，一张一百多毫秒；四张挤在开页后的同一个任务里，头一下点击要等半秒。
+// 画出来的只随 SVG 与颜色变：存进浏览器的 Cache Storage，此后开页只取回位图（解码不在主线程）；SVG 或颜色变了按记下的来源重画、盖掉旧的。
+// 头一回画时一张一个任务，中间让出主线程
+/** @param {string} key @param {string} name @param {string} color */
+async function themeSheet(key, name, color) {
+  const url = cssVar(name).match(/^url\((["']?)(.*)\1\)$/s)?.[2];
+  if (!url) throw Error(name);
+  const source = `${SHEET_PX}|${color}|${hashText(url)}`,
+    address = `${location.origin}/__yan/theme-sheet/${key}.png`;
+  /** @type {Cache|null} */
+  let cache = null;
+  try {
+    cache = await caches.open("yan-theme-sheets");
+    const hit = await cache.match(address);
+    if (hit?.headers.get("x-yan-source") === source) return `url("${URL.createObjectURL(await hit.blob())}")`;
+  } catch {}
+  await new Promise(resolve => setTimeout(resolve));
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = SHEET_PX;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0, SHEET_PX, SHEET_PX);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, SHEET_PX, SHEET_PX);
+  // toBlob 在后台编码；toDataURL 在主线程上同步编四张 1024² 的 PNG，开页后那一下约 330 ms 一动不动
+  const blob = /** @type {Blob|null} */ (await new Promise(resolve => canvas.toBlob(resolve, "image/png")));
+  if (!blob) throw Error(name);
+  void cache?.put(address, new Response(blob, { headers: { "Content-Type": "image/png", "x-yan-source": source } })).catch(() => {});
+  return `url("${URL.createObjectURL(blob)}")`;
+}
 function themeSheets() {
   if (themeSheetCache) return themeSheetCache;
-  themeSheetCache = Promise.all(
-    THEME_SHEETS.map(async ([, name, color]) => {
-      const url = cssVar(name).match(/^url\((["']?)(.*)\1\)$/s)?.[2];
-      if (!url) throw Error(name);
-      const image = new Image();
-      image.src = url;
-      await image.decode();
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = SHEET_PX;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(image, 0, 0, SHEET_PX, SHEET_PX);
-      ctx.globalCompositeOperation = "source-in";
-      ctx.fillStyle = color;
-      ctx.fillRect(0, 0, SHEET_PX, SHEET_PX);
-      // toBlob 在后台编码；toDataURL 在主线程上同步编四张 1024² 的 PNG，开页后那一下约 330 ms 一动不动
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
-      if (!blob) throw Error(name);
-      return `url("${URL.createObjectURL(blob)}")`;
-    })
-  )
-    .then(urls => Object.fromEntries(THEME_SHEETS.map(([key], i) => [key, urls[i]])))
-    .catch(() => {
-      themeSheetCache = null;
-      return null;
-    });
+  themeSheetCache = (async () => {
+    /** @type {Record<string, string>} */
+    const sheets = {};
+    for (const [key, name, color] of THEME_SHEETS) sheets[key] = await themeSheet(key, name, color);
+    return sheets;
+  })().catch(() => {
+    themeSheetCache = null;
+    return null;
+  });
   return themeSheetCache;
 }
 // 一张铺开的图：定在 (x, y)，从 from 放大到 to；返回节点与放大完成的 promise
