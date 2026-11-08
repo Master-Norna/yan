@@ -60,6 +60,8 @@
   background: var(--grain), var(--desk);
   animation: fadeIn var(--dur-rise) ease;
 }
+/* 顶栏不画线：纸滚上去在顶栏下淡出（见 .helper-stage），同文件预览、同正文（设计稿/153 乙）。原先一道横贯整宽的线，纸被它一刀切齐、纸顶的金线滚上去直接撞在线上。
+   落选：甲题落到纸上作页头、滚过才浮书眉（像正文那一页，但要另写一套书眉的随滚显隐，顶栏也与文件预览从此两样） */
 .helper-viewer-head {
   height: 54px;
   flex: none;
@@ -67,7 +69,6 @@
   align-items: center;
   gap: 12px;
   padding: 0 18px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
 }
 .helper-head-seal {
   width: 26px;
@@ -127,20 +128,38 @@
   color: var(--gold);
   background: color-mix(in srgb, var(--gold) 10%, transparent);
 }
-/* 计数点开的那张列表：帮手多了，一个个翻就难受 */
-.helper-list {
+/* 计数点开的那张列表：浮在计数下的一张纸签（方角、发丝边、极淡的影，同划选浮签），开时同模型签向下舒展，按在外面即收（设计稿/154 一）。
+   原先是顶栏下一整条横带，一开就把纸往下推。落选：二右缘导航条（同正文问题导航，看不到各名的步数与用时）、三纸左边常显一列目录（窄窗放不下，得两套并存） */
+.helper-nav-wrap {
+  position: relative;
   flex: none;
-  max-height: 40vh;
+  display: flex;
+}
+.helper-list {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 8px);
+  right: -6px;
+  width: min(340px, calc(100vw - 32px));
+  max-height: 50vh;
   overflow-y: auto;
-  padding: 8px 18px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--grain), var(--paper);
+  box-shadow: 0 10px 28px rgba(35, 30, 24, 0.1);
+  transform-origin: top right;
+  animation: menuDrop var(--dur-rise) var(--ease-ink);
+}
+:root[data-theme="dark"] .helper-list {
+  background: var(--grain), var(--paper-3);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 .helper-list-item {
-  width: min(100%, var(--read));
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 auto;
   padding: 7px 12px;
   border-radius: var(--radius-m);
   color: var(--ink-2);
@@ -175,6 +194,7 @@
   color: var(--ink-3);
   font-size: var(--fs-mark);
 }
+/* 顶端渐隐的那截与上边的留白一样高：停在纸顶时金线不淡，滚上去才在顶栏下淡出 */
 .helper-stage {
   min-height: 0;
   flex: 1;
@@ -182,6 +202,7 @@
   justify-content: center;
   overflow: auto;
   padding: 24px;
+  mask-image: linear-gradient(transparent, #000 24px);
 }
 /* 案上一条纸（同文件预览，设计稿/86 丙），上下各留一截案；「代人行事」的金落在纸顶一道线上，不铺两侧——
    原先两侧铺 7% 的金，暗色里混进深底成了一片棕（色只上笔画，不上面）。落选的：只留印与纸边（认不出是差遣的窗） */

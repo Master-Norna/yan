@@ -110,7 +110,7 @@ function openHelperPanel(stepId, noteId = "") {
   helperRunFocus = step.id;
   // 传话要翻到那句话，那一趟总得摊开；是程序替人开的，不记在步骤上（同正文 revealStep）
   helperPeek = noteId ? step.id : "";
-  $("#helperList").classList.add("hidden");
+  toggleHelperList(false);
   const modal = $("#helperModal");
   showNow(modal);
   // 焦点进窗：敲回车开的，Tab 不再落到窗底下的正文里；合上时交还
@@ -154,7 +154,19 @@ function stepHelperPanel(delta) {
     next = all[at + delta];
   if (next) openHelperPanel(next.id);
 }
-// 计数点开的那张列表：帮手多了，一个个翻就难受
+// 计数点开的那张列表：帮手多了，一个个翻就难受。浮在计数下的一张纸签，开合同模型签（向下舒展、淡去）；
+// 原先是顶栏下一整条横带，一开就把纸往下推（设计稿/154 一）
+/** @param {boolean} [open] */
+function toggleHelperList(open) {
+  const list = $("#helperList"),
+    shown = isShown("#helperList");
+  open ??= !shown;
+  $("#helperNav .helper-nav-count")?.setAttribute("aria-expanded", String(open));
+  if (open === shown) return;
+  if (!open) return hideWithFade(list);
+  renderHelperList();
+  showNow(list);
+}
 function renderHelperList() {
   const host = $("#helperList");
   if (!host) return;
@@ -302,10 +314,10 @@ function renderHelperPanel(fresh = false) {
     nav.dataset.key = navKey;
     nav.innerHTML =
       all.length > 1
-        ? `<button class="message-action" data-helper-step="-1" title="${t(`上一名帮手`)}" aria-label="${t(`上一名帮手`)}"${at <= 0 ? " disabled" : ""}>‹</button><button type="button" class="helper-nav-count" data-helper-list title="${t(`所有帮手`)}">${navKey}</button><button class="message-action" data-helper-step="1" title="${t(`下一名帮手`)}" aria-label="${t(`下一名帮手`)}"${at >= all.length - 1 ? " disabled" : ""}>›</button>`
+        ? `<button class="message-action" data-helper-step="-1" title="${t(`上一名帮手`)}" aria-label="${t(`上一名帮手`)}"${at <= 0 ? " disabled" : ""}>‹</button><button type="button" class="helper-nav-count" data-helper-list title="${t(`所有帮手`)}" aria-haspopup="true" aria-expanded="${isShown("#helperList")}">${navKey}</button><button class="message-action" data-helper-step="1" title="${t(`下一名帮手`)}" aria-label="${t(`下一名帮手`)}"${at >= all.length - 1 ? " disabled" : ""}>›</button>`
         : "";
   }
-  if (!$("#helperList").classList.contains("hidden")) renderHelperList();
+  if (isShown("#helperList")) renderHelperList();
   const host = $("#helperPanelBody");
   if (!host) return;
   // 各趟按先后：已画的就地更新，续派新起的一趟接在末尾；对不上了（切了分支）就从空白画起。
@@ -424,6 +436,8 @@ function bindHelperEvents() {
   let helperPressedBackdrop = false;
   $("#helperModal").addEventListener("pointerdown", event => {
     helperPressedBackdrop = helperBackdrop(event.target);
+    // 帮手清单开着，按在它与计数之外即收（同模型签）
+    if (isShown("#helperList") && !event.target.closest("#helperList, [data-helper-list]")) toggleHelperList(false);
   });
   $("#helperModal").addEventListener("click", event => {
     if (helperPressedBackdrop && helperBackdrop(event.target)) closeHelperPanel();
@@ -436,11 +450,7 @@ function bindHelperEvents() {
   $("#helperNav").addEventListener("click", event => {
     const move = event.target.closest("[data-helper-step]")?.dataset.helperStep;
     if (move) return stepHelperPanel(Number(move));
-    if (event.target.closest("[data-helper-list]")) {
-      const list = $("#helperList");
-      list.classList.toggle("hidden");
-      if (!list.classList.contains("hidden")) renderHelperList();
-    }
+    if (event.target.closest("[data-helper-list]")) toggleHelperList();
   });
   $("#helperList").addEventListener("click", event => {
     const id = event.target.closest("[data-helper-pick]")?.dataset.helperPick;
@@ -452,6 +462,6 @@ defineLayer({
   name: "helper-list",
   rank: 105,
   open: () => helperPanelOpen() && isShown("#helperList"),
-  close: () => $("#helperList").classList.add("hidden")
+  close: () => toggleHelperList(false)
 });
 defineLayer({ name: "helper", rank: 100, open: helperPanelOpen, close: closeHelperPanel });

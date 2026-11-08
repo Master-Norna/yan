@@ -438,6 +438,7 @@ button.source-local {
   background: var(--grain), var(--desk);
   animation: fadeIn var(--dur-rise) ease;
 }
+/* 顶栏不画线，纸滚上去在顶栏下淡出：同差遣的窗（设计稿/153 乙） */
 .file-viewer-head {
   height: 54px;
   flex: none;
@@ -445,7 +446,6 @@ button.source-local {
   align-items: center;
   gap: 12px;
   padding: 0 18px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
 }
 .file-viewer-name {
   min-width: 0;
@@ -486,6 +486,7 @@ button.source-local {
   justify-content: center;
   overflow: auto;
   padding: 24px;
+  mask-image: linear-gradient(transparent, #000 24px);
 }
 .file-viewer-image {
   margin: auto;

@@ -734,6 +734,10 @@ body {
   overflow: hidden;
   mask-image: none; /* 带着 mask，全屏的那块只能铺在滚动区里、随滚动偏走，「收起」也出了视野 */
 }
+/* 浮层里（文件预览、差遣的窗）的交互内容展开全屏时同理：滚动区顶端的渐隐先撤掉 */
+.work-mode :is(.file-viewer-stage, .helper-stage) {
+  mask-image: none;
+}
 .history-state {
   position: absolute;
   right: 12px;

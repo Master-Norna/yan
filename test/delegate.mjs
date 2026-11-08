@@ -207,9 +207,25 @@ const list = await evalJs(
   `JSON.stringify([...document.querySelectorAll("#helperList .helper-list-item")].map(n => n.querySelector(".helper-list-title").textContent))`
 );
 check("the count opens a list of every errand", JSON.parse(list).join("|") === "改 a.js|建 b.js", list);
+// 清单是浮在计数下的一张纸签，不推下面的纸（设计稿/154 一）；按在它之外即收
+check(
+  "the list floats under the count instead of pushing the page down",
+  await evalJs(
+    `getComputedStyle(document.querySelector("#helperList")).position === "absolute" && document.querySelector("#helperScroll").getBoundingClientRect().top - document.querySelector(".helper-viewer-head").getBoundingClientRect().bottom < 1`
+  )
+);
+await evalJs(`document.querySelector("#helperScroll").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); true`);
+await sleep(300);
+check("pressing elsewhere folds the list away", await evalJs(`document.querySelector("#helperList").classList.contains("hidden")`));
+await evalJs(`document.querySelector("#helperNav [data-helper-list]").click(); true`);
+await sleep(150);
 await evalJs(`document.querySelectorAll("#helperList .helper-list-item")[0].click(); true`);
 await sleep(200);
-check("picking from the list switches to it", (await evalJs(`document.querySelector("#helperTitle").textContent`)) === "改 a.js");
+check(
+  "picking from the list switches to it and the list goes",
+  (await evalJs(`document.querySelector("#helperTitle").textContent`)) === "改 a.js" &&
+    (await evalJs(`document.querySelector("#helperList").classList.contains("hidden")`))
+);
 const report = await evalJs(`document.querySelector("#helperModal .sub-report")?.textContent.trim() || ""`);
 check("helper had its own system prompt and no delegate / ask_user", report.includes("sys:yes|delegate:no|ask:no"), report);
 check("helper can read memory but not write it", report.includes("|memw:0|memr:2|"), report);
