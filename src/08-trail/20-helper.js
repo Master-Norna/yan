@@ -101,15 +101,15 @@ function helperPanelOpen() {
   const panel = $("#helperModal");
   return !!panel && !panel.classList.contains("hidden") && !panel.classList.contains("leaving");
 }
-// 点哪一趟的签就开这名帮手、滚到那一趟（它的行迹摊开）；noteId：传话的签点开时，直接翻到递去的那句话
+// 点哪一趟的签就开这名帮手、滚到那一趟；行迹开合照正文（见 helperRunFolded）。noteId：传话的签点开时，直接翻到递去的那句话
 function openHelperPanel(stepId, noteId = "") {
   const step = helperStepById(stepId);
   if (!step) return;
   const fresh = helperKey(step) !== helperKeyOpen || !helperPanelOpen();
   helperKeyOpen = helperKey(step);
   helperRunFocus = step.id;
-  // 点开的是先前收着的一趟：摊开它（人自己收起的仍收着）；传话要翻到那句话，总得摊开
-  if (noteId || (!helperFolds.has(step.id) && helperRunFolded(step))) helperFolds.set(step.id, false);
+  // 传话要翻到那句话，那一趟总得摊开；是程序替人开的，不记在步骤上（同正文 revealStep）
+  helperPeek = noteId ? step.id : "";
   $("#helperList").classList.add("hidden");
   const modal = $("#helperModal");
   showNow(modal);
@@ -140,6 +140,7 @@ function openHelperPanel(stepId, noteId = "") {
 function closeHelperPanel() {
   helperKeyOpen = "";
   helperRunFocus = "";
+  helperPeek = "";
   helperSeen.clear();
   const panel = $("#helperModal");
   if (panel && !panel.classList.contains("hidden")) hideWithFade(panel);
@@ -167,12 +168,13 @@ function renderHelperList() {
     .join("");
 }
 // 帮手行迹的收起：每趟一行题头（折角 · 行迹 · 几轮 · 几步，与主行迹题头同一枚折角，点它开合）。
-// 同主行迹：做着摊开、交了差就收，只露回报；最近一趟断了、没做成的摊着，好看清停在哪。点过的记在这里，翻到别的帮手再翻回来仍是那样。
+// 同主行迹：做着摊开、交了差就收，只露回报；最近一趟断了、没做成的摊着，好看清停在哪。点签开窗不另摊开——原先点哪趟就摊哪趟，
+// 交了差的每回点进去都是一整条行迹，与正文对不上。人亲手开合过的记在步骤上（folded，同正文的 toolsOpen），翻走、刷新都还是那样。
 // 题头滚出面板顶上时，面板顶栏右侧浮出同一枚「收起行迹」，收的是此刻顶在上面的那一趟，与主对话的书眉一个意思
-const helperFolds = new Map(); // 趟 id → 收着与否
+let helperPeek = ""; // 传话的签点开时替人摊开的那一趟，合窗即忘
 /** @param {Step} step */
 function helperRunFolded(step) {
-  return helperFolds.get(step.id) ?? !(step === openHelperRuns().at(-1) && step.status !== "done");
+  return step.folded ?? (step.id !== helperPeek && !(step === openHelperRuns().at(-1) && step.status !== "done"));
 }
 /** @param {Step} step */
 function syncSubFold(trail, step) {
@@ -184,7 +186,7 @@ function syncSubFold(trail, step) {
   trail._status = step.status;
   // 没有题头（只说了话就交差）：时间线里那段话就是回报，收着不重出
   if (!head) return foldSubTrail(trail, true, -1);
-  if (was === "running" && step.status === "done") helperFolds.delete(step.id);
+  if (was === "running" && step.status === "done") delete step.folded;
   const folded = helperRunFolded(step),
     rounds = trailGroups(sub).length,
     meta = live ? (steps.length ? t`${steps.length} 步 · 进行中` : t("进行中")) : t`${rounds} 轮 · ${steps.length} 步`;
@@ -233,7 +235,8 @@ function toggleSubFold(id, fold) {
   const step = helperStepById(id),
     trail = $("#helperPanelBody").querySelector(`.helper-run[data-run="${CSS.escape(id)}"] > .sub-trail`);
   if (!step || !trail) return;
-  helperFolds.set(id, fold ?? !helperRunFolded(step));
+  step.folded = fold ?? !helperRunFolded(step);
+  saveStoreSoon();
   syncSubFold(trail, step);
   // 从顶栏收起时，停回题头处
   const head = trail.querySelector(":scope > .sub-fold"),

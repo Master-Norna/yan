@@ -93,7 +93,7 @@
  * @property {boolean} [skipped]
  * @property {boolean} [expanded] 输出摊开 / 折起；未记则按状态定（报错折起）
  * @property {boolean} [full] 输出看全 / 只看前 10 行
- * @property {boolean} [folded] 差遣卡片整张折起
+ * @property {boolean} [folded] 差遣：面板里这一趟的行迹人亲手收起 / 摊开过；未记则按状态定（见 helperRunFolded）
  * @property {SubAgent} [sub]
  * @property {"tell"|"resume"|"stop"|"read"} [mode] 传话一步做的是哪样：递话、续派、叫停、翻看
  * @property {string} [ref] 传话、叫停说到的那一趟（步骤 id）

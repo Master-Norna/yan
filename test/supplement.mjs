@@ -251,7 +251,7 @@ check(
     againPanel.nav === "",
   JSON.stringify(againPanel)
 );
-// 点头一趟的签：同一页，停在纸顶，头一趟的行迹摊开（只说了话就交差的没有行迹可摊，收着露回报）
+// 点头一趟的签：同一页，停在纸顶；交了差的同正文收着、只露回报
 await evalJs(`document.querySelector("#helperClose").click(); true`);
 await sleep(300);
 await evalJs(`document.querySelector('#messages .tool-step-delegate[data-kind="差遣"] > .tool-step-head')?.click(); true`);
@@ -260,8 +260,8 @@ const firstRun = await evalJs(
   `(runs => ({ runs: runs.length, folded: runs.map(r => r.querySelector(".sub-trail").classList.contains("folded")), heads: runs.map(r => !!r.querySelector(".sub-fold")), top: document.querySelector("#helperScroll").scrollTop }))([...document.querySelectorAll("#helperPanelBody > .helper-run")])`
 );
 check(
-  "the first run's card opens the same page at the top with that run unfolded",
-  firstRun.runs === 2 && (firstRun.heads[0] ? firstRun.folded[0] === false : firstRun.folded[0] === true) && firstRun.top === 0,
+  "the first run's card opens the same page at the top, that finished run folded",
+  firstRun.runs === 2 && firstRun.folded[0] === true && firstRun.top === 0,
   JSON.stringify(firstRun)
 );
 await evalJs(`document.querySelector("#helperClose").click(); true`);

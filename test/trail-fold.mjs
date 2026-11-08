@@ -217,6 +217,20 @@ check(
   "the helper panel heads its trail with rounds and steps",
   (await evalJs(`document.querySelector("#helperPanelBody .sub-fold").textContent`)) === "行迹2 轮 · 3 步"
 );
+// 同正文：交了差的一趟点开就收着，只露回报
+check(
+  "a finished helper opens with its trail folded to the report",
+  await evalJs(`document.querySelector("#helperPanelBody .sub-trail").classList.contains("folded")`)
+);
+await evalJs(`document.querySelector("#helperPanelBody .sub-fold").click(); true`);
+// 摊开的动效放完再往下（放着时时间线高度还没长足，滚不到题头之下）
+await waitFor(`(t => !t.classList.contains("folded") && !t._foldAnim)(document.querySelector("#helperPanelBody .sub-trail"))`, 5000).catch(
+  () => {}
+);
+check(
+  "unfolding it by hand is kept on the step",
+  await evalJs(`__yanState().conversations.find(c => c.id === "trail-fold").messages[1].steps.find(s => s.id === "d1").folded === false`)
+);
 await evalJs(`document.querySelectorAll("#helperPanelBody .reasoning").forEach(d => (d.open = true)); true`);
 await sleep(300);
 check(
@@ -244,8 +258,8 @@ check(
 await evalJs(`document.querySelector('#helperNav [data-helper-step="1"]').click(); true`);
 await sleep(300);
 check(
-  "another helper opens unfolded",
-  !(await evalJs(`document.querySelector("#helperPanelBody .sub-trail").classList.contains("folded")`))
+  "another finished helper opens folded too",
+  await evalJs(`document.querySelector("#helperPanelBody .sub-trail").classList.contains("folded")`)
 );
 await evalJs(`document.querySelector('#helperNav [data-helper-step="-1"]').click(); true`);
 await sleep(300);
