@@ -726,6 +726,7 @@ var YAN_EN = {
   "已取回 {0} 个模型": "Fetched {0} {0|model|models}",
   "接通中…": "Connecting…",
   "可用 · {0} ms": "Working · {0} ms",
+  "已接通，但接口的模型列表里没有 {0}": "Connected, but {0} isn't in the API's model list",
   "请先填写 Base URL": "Enter a Base URL first",
   新模型: "New model",
 

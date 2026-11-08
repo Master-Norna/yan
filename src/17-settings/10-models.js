@@ -215,7 +215,12 @@ async function handleProfileAction(profile, action, card) {
       status = card.querySelector(".profile-status");
       status.textContent = t("接通中…");
       const started = performance.now();
-      await bridge("/api/test", { profile: profileForRequest(profile) });
+      const result = await bridge("/api/test", { profile: profileForRequest(profile) });
+      // 清单里没有它：接口通着，这个模型却不在（填错了名字，或服务端只列此刻答得上来的、它正挂着）
+      if (result.modelFound === false) {
+        status.textContent = t`已接通，但接口的模型列表里没有 ${profile.model}`;
+        return;
+      }
       status.textContent = t`可用 · ${Math.round(performance.now() - started)} ms`;
       // 测试连接是亲手要的一次核对：档位也重探一遍
       void reportReasoningProbe(profile, card, true);
