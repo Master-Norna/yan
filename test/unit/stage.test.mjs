@@ -1,14 +1,16 @@
 // 游目：地址栏的话怎么换成网址、执事的一步怎么写成人话；桥接怎么从 MCP 服务的参数里读出调试口、配置目录与存下载的目录
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { load } from "./harness.mjs";
 
 const { stageUrlOf } = load(["stageUrlOf"]);
-const { browserOf, prepareBrowser, prepareMcp, builtinConfig } = createRequire(import.meta.url)("../../server/stage.js");
+const { browserOf, prepareBrowser, prepareMcp, builtinConfig, sweepOutputs, savedName } = createRequire(import.meta.url)(
+  "../../server/stage.js"
+);
 
 test("地址栏：网址补 https，本机的照走，不像网址的交给搜索", () => {
   assert.equal(stageUrlOf("  example.com "), "https://example.com");
@@ -92,6 +94,8 @@ test("接法由言补齐：在人写的 --config 上合并，人写了的照人�
     "--remote-allow-origins=http://127.0.0.1:8787,http://127.0.0.1:9288",
     "--window-position=-32000,-32000"
   ]);
+  // 结果里的文件写全路径
+  assert.equal(JSON.parse(readFileSync(bare.args.at(-1), "utf8")).filePaths, "absolute");
   // 人写的 stage.json 只放行了言：补上调试口自己，端口与别的设定照人的，--config 换成合并好的那份
   writeFileSync(
     path.join(cwd, "stage.json"),
@@ -165,7 +169,8 @@ test("游目自己的浏览器：几项选择拼成整条，家当都在存储�
     path.join(home, "下载"),
     "--allow-unrestricted-file-access"
   ]);
-  assert.equal(edge.cwd, home);
+  // 工作目录另开一层：模型给了名字的截图不与依赖、浏览器配置混着
+  assert.equal(edge.cwd, path.join(home, "工作"));
   // 自带内核：指到「内核」目录
   const own = builtinConfig({ browser: "chromium" }, root);
   assert.equal(own.env.PLAYWRIGHT_BROWSERS_PATH, path.join(home, "内核"));
@@ -177,4 +182,33 @@ test("游目自己的浏览器：几项选择拼成整条，家当都在存储�
   assert.equal(path.dirname(ready.args.at(-1)), home);
   // 页面问调试口、收藏时递几项选择，认得出配置目录
   assert.equal(browserOf(builtinConfig({}, root).args, home).dir, path.join(home, "浏览器"));
+});
+
+test("下载目录里 Playwright 自己起名的过程文件放过一天就清，下载来的不动", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "yan-out-")),
+    old = new Date(Date.now() - 2 * 86400000),
+    names = {
+      "console-2026-11-04T08-04-31-979Z.log": false,
+      "page-2026-11-05T13-04-31-207Z.yml": false,
+      "network-request-2026-11-05T13-04-31-207Z.log": false,
+      "download-2026-11-05T13-04-31-207Z.bin": true,
+      "github-recovery-codes.txt": true,
+      "报告 console-2026-11-04T08-04-31-979Z.log": true
+    };
+  for (const name of Object.keys(names)) {
+    writeFileSync(path.join(dir, name), "x");
+    utimesSync(path.join(dir, name), old, old);
+  }
+  writeFileSync(path.join(dir, "page-2026-11-07T13-04-31-207Z.yml"), "新的");
+  mkdirSync(path.join(dir, "page-2026-11-04T08-04-31-979Z.d"));
+  sweepOutputs(dir);
+  for (const [name, kept] of Object.entries(names)) assert.equal(existsSync(path.join(dir, name)), kept, name);
+  assert.ok(existsSync(path.join(dir, "page-2026-11-07T13-04-31-207Z.yml")));
+  sweepOutputs(path.join(dir, "无此目录"));
+});
+
+test("下载存成的名字照 Playwright 的规矩：ASCII 符号与空格换成 -，中文与扩展名的点留着", () => {
+  assert.equal(savedName("下载测.txt"), "下载测.txt");
+  assert.equal(savedName("my report (1).tar.gz"), "my-report-1-tar.gz");
+  assert.equal(savedName("README"), "README");
 });

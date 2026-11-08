@@ -10,7 +10,8 @@
 
 - `依赖/`：驱动 `@playwright/mcp` 装在这里（npm，下载源随「环境」那一栏，国内默认走镜像）；「更新」即重装最新的。
 - `浏览器/`：登录状态与收藏（`--user-data-dir`）。
-- `下载/`：网页里下载的落在这里（`--output-dir`）。
+- `下载/`：网页里下载的落在这里（`--output-dir`）。Playwright 自己起名的过程文件（页面快照、控制台记录、没给名的截图）也只能落这里，放过一天的由言清掉。
+- `工作/`：服务的工作目录。执事给了名字的截图、存下的页面落在这里。结果里的文件路径一律写全（`filePaths: absolute`），执事拿自己的工具找得着。
 - `内核/`：选「自带内核」时 Playwright 的那个浏览器装在这里，「浏览器」那行多一个「装内核」。下载源自己挑（`server/mirror.js`）：开装前拿内核本身各取 2 MB 比一比镜像与官方哪个快——镜像对新出的内核常要现去源站拉，几十 KB/s，看着像卡死；下着 90 秒没有一点进展，结束它、换另一个源重来。按钮上报下到几成。驱动随常用包比的结果走。装着时刷新页面或再点，跟着同一趟等，不另起。选了本机没装的 Edge / Chrome，同一行出「去下载」，开官网（装系统浏览器要管理员权限，言不代装）。
 - `playwright-*.json`：接法（按内容取名，一份接法一个文件），见下。
 
@@ -69,6 +70,6 @@
 - 适应页面：Playwright 记着定死的视口，换页会再钉回去，游目这头另起连接也清不掉（实测）——所以放开是经那个 MCP 服务的 `browser_tabs` 先 `new` 一张空页（成了执事的当前页，标签账对得上），游目随即按 targetId 关掉旧页（Playwright 照关页事件销账），再 `browser_navigate` 回那个网址。不按执事报的序号关：同址新开要等载完，其间人若先关了旧页，序号就落到新页上，关掉最后一页浏览器随之退出。执事调 `browser_resize`、或在 `browser_run_code_unsafe` 里 `setViewportSize` 时，工具结果后补一句（`prompts/mcp.js` 的 `stagePinned`），叫它测完新开一页而不是再设个桌面尺寸「还原」。
 - 缩放：浏览器自己的缩放经调试口调不动（借收藏页里的 `chrome.tabs.setZoom` 一调就卡住），所以是调窗：窗宽按倍数收窄，画面的最大宽按同一倍数放开。
 - 查找：在网页里跑一小段，用 CSS 的高亮（`::highlight`，样式经 `adoptedStyleSheets` 挂上）标出各处，不动网页的 DOM；只找同一段文字里的。
-- 下载：对正看的那一页开着 Page 域，`downloadWillBegin` / `downloadProgress` 报来名字与进度；执事经 MCP 下的，结果里「Downloaded file … to …」写着存到哪，补上。记录存在本机（最近三十条）。显出文件走桥接（`POST /api/stage/reveal`，`explorer /select`），没记着路径的开那个服务存下载的目录（`--output-dir`，或服务工作目录下的 `.playwright-mcp`）。Edge 下载时弹的气泡（`edge://downloads-hub`）也报成一页，游目不列。
+- 下载：对正看的那一页开着 Page 域，`downloadWillBegin` / `downloadProgress` 报来名字与进度；执事经 MCP 下的，结果里「Downloaded file … to …」写着存到哪，补上。记录存在本机（最近三十条）。显出文件走桥接（`POST /api/stage/reveal`，`explorer /select`），没记着路径的（你点的下载、之后执事没再动手）按名字在存下载的目录里找，找不着才开整个目录（`--output-dir`，或服务工作目录下的 `.playwright-mcp`）。Edge 下载时弹的气泡（`edge://downloads-hub`）也报成一页，游目不列。
 - 网页改标题浏览器不发通知：游目开着时每一秒半问一次标签列表。
 - 代码：`src/26-stage/`、`styles/56-stage/`；测试 `test/stage.mjs` 另起一个无头浏览器实例充当模型的浏览器（单窗口），言的页面留在测试浏览器里。

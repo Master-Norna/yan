@@ -4,7 +4,7 @@
 // 标签页、画面、输入都在页面里（src/26-stage/），不过桥接，这里也不记任何东西。
 // 另读一份收藏：看台只转网页，浏览器自己的收藏栏看不到；收藏存在浏览器配置目录的 Default/Bookmarks 里。
 // 纸签的「用系统浏览器打开」：交给系统默认的浏览器（经 url.dll，不经 cmd——网址里的 & 会被当成命令分隔）；游目显示不了的本机文件交给本机程序
-// 下载签的「打开所在文件夹」：在资源管理器里显出那个文件；没记着路径的，开那个服务存下载的目录（Playwright 默认是工作目录下的 .playwright-mcp）
+// 下载签的「打开所在文件夹」：在资源管理器里显出那个文件；没记着路径的按名字找，再找不着开那个服务存下载的目录（Playwright 默认是工作目录下的 .playwright-mcp）
 "use strict";
 const fs = require("node:fs");
 const crypto = require("node:crypto");
@@ -89,6 +89,8 @@ function prepareBrowser(config, where) {
   }
   // 模型的浏览器开不了言自己：页面能改设置，开了就能关审查、改权限，等于自己给自己松绑。与指令不调桥接同理（sandbox.js）。
   // 只列这两个名字：桥接只听 127.0.0.1，也只认这两个 Host（server.js 的 trustedHost）。挡的是开页与跳转，不挡 run_code 里直发的请求，那条与 node -e 一样不往下堵
+  // 结果里的文件（下载、快照、截图）写全路径：相对的是相对服务的工作目录，模型拿自己的工具找不着，下载签也显不出那个文件。人写了的照人的
+  file.filePaths ??= "absolute";
   const network = (file.network ||= {});
   network.blockedOrigins = [
     ...new Set([...(network.blockedOrigins || []), `http://127.0.0.1:${bridgePort}`, `http://localhost:${bridgePort}`])
@@ -114,7 +116,8 @@ const bookmarksFile = dir => path.join(dir, "Default", "Bookmarks");
 // 浏览器不再要人去 MCP 里接：设置 → 游目里开着，言自己起一个 Playwright 的 MCP 服务（名叫「游目」）。家当都在存储根的「游目」目录：
 //   依赖/  @playwright/mcp 装在这里（npm install，一键）
 //   浏览器/  登录状态、收藏（--user-data-dir）
-//   下载/  下载落在这里（--output-dir）
+//   下载/  下载落在这里（--output-dir）。Playwright 自己起名的过程文件（页面快照、控制台记录、没给名的截图）也只能落这里，放过一天就清（见 sweepOutputs）
+//   工作/  服务的工作目录：模型给了名字的截图、存下的页面落在这里，不与言自己的家当混着
 //   内核/  本机没有 Edge / Chrome 时，Playwright 自带的那个浏览器装在这里（PLAYWRIGHT_BROWSERS_PATH）
 //   playwright-*.json  接法（prepareBrowser 写的，按内容取名）
 const BROWSERS = ["msedge", "chrome", "chromium"];
@@ -126,9 +129,33 @@ function stageHome(root) {
     deps: path.join(home, "依赖"),
     profile: path.join(home, "浏览器"),
     output: path.join(home, "下载"),
+    work: path.join(home, "工作"),
     engine: path.join(home, "内核"),
     cli: path.join(home, "依赖", "node_modules", "@playwright", "mcp", "cli.js")
   };
+}
+// Playwright 自己起名的过程文件：「前缀-ISO 时刻.扩展名」（时刻里的 : 与 . 换成 -）。只给模型这一答翻看，放过一天就没用了。
+// download- 打头的不算：那是没带文件名的下载
+const AUTO_OUTPUT = /^(?!download-)[a-z]+(?:-[a-z]+)*-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.[a-z0-9]+$/,
+  OUTPUT_GRACE_MS = 24 * 60 * 60 * 1000;
+/** @param {string} dir 存下载的目录 */
+function sweepOutputs(dir) {
+  const cutoff = Date.now() - OUTPUT_GRACE_MS;
+  try {
+    for (const name of fs.readdirSync(dir))
+      if (AUTO_OUTPUT.test(name))
+        try {
+          const file = path.join(dir, name);
+          if (fs.statSync(file).mtimeMs < cutoff) fs.rmSync(file, { force: true });
+        } catch {}
+  } catch {}
+}
+// 下载存成的名字：Playwright 按浏览器给的名存，名里的 ASCII 符号与空格换成 -（照它的 sanitizeForFilePath）
+/** @param {string} name */
+function savedName(name) {
+  const clean = (/** @type {string} */ text) => text.replace(/[\x00-\x2C\x2E-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F]+/g, "-"),
+    dot = name.lastIndexOf(".");
+  return dot < 0 ? clean(name) : `${clean(name.slice(0, dot))}.${clean(name.slice(dot + 1))}`;
 }
 /**
  * 页面递来的是几项选择（{ browser }），这里拼成起服务的那一整条；家当一律落在「游目」目录，本机文件一律许开（执事做的网页要自己开来看）
@@ -141,7 +168,7 @@ function builtinConfig(stage, root) {
   return {
     command: process.execPath,
     args: [at.cli, "--browser", browser, "--user-data-dir", at.profile, "--output-dir", at.output, "--allow-unrestricted-file-access"],
-    cwd: at.home,
+    cwd: at.work,
     env: browser === "chromium" ? { PLAYWRIGHT_BROWSERS_PATH: at.engine } : {}
   };
 }
@@ -150,10 +177,11 @@ function prepareMcp(config, where) {
   if (!config?.stage) return prepareBrowser(config, where);
   const { stage, ...rest } = config,
     built = { ...rest, ...builtinConfig(stage, where.root) };
+  const at = stageHome(where.root);
   try {
-    const at = stageHome(where.root);
-    for (const dir of [at.profile, at.output]) fs.mkdirSync(dir, { recursive: true });
+    for (const dir of [at.profile, at.output, at.work]) fs.mkdirSync(dir, { recursive: true });
   } catch {}
+  sweepOutputs(at.output);
   return prepareBrowser(built, where);
 }
 // 页面问调试口、收藏、下载目录时递来的那个服务：游目自己的递选择，别的递参数
@@ -399,18 +427,22 @@ module.exports = function createStage({ root = () => "" } = {}) {
     if (!process.env.YAN_NO_EXTERNAL) platform.openUrl(url);
     sendJson(res, 200, { ok: true });
   }
-  // 只显出、不打开：下载来的可能是程序，开它要人自己在资源管理器里点
+  // 只显出、不打开：下载来的可能是程序，开它要人自己在资源管理器里点。
+  // 没记着路径的（人点的下载，之后执事没再动手，结果里没报存到哪）按名字在存下载的目录里找；找不着才开整个目录
   async function reveal(req, res) {
     const body = await readJson(req),
-      { path: file } = body,
-      target = String(file || "");
-    if (target && fs.existsSync(target)) {
+      service = serviceOf(body, root()),
+      { output } = browserOf(service.args, service.cwd),
+      name = path.basename(String(body.name || "")),
+      target = [String(body.path || ""), ...(output && name ? [path.join(output, name), path.join(output, savedName(name))] : [])].find(
+        file => file && fs.existsSync(file)
+      );
+    if (target) {
       platform.reveal(target);
       return sendJson(res, 200, { ok: true });
     }
-    const service = serviceOf(body, root()),
-      { output } = browserOf(service.args, service.cwd);
     if (!output || !fs.existsSync(output)) return sendJson(res, 404, { error: "还没有下载过，或找不到存下载的目录" });
+    if (body.stage) sweepOutputs(output);
     platform.openPath(output);
     sendJson(res, 200, { ok: true });
   }
@@ -432,3 +464,5 @@ module.exports.builtinConfig = builtinConfig;
 module.exports.installStage = installStage;
 module.exports.stageState = stageState;
 module.exports.isPlaywright = isPlaywright;
+module.exports.sweepOutputs = sweepOutputs;
+module.exports.savedName = savedName;

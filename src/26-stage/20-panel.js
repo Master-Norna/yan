@@ -514,7 +514,7 @@ function stageOpenDownloads(anchor) {
               : "✓",
         size = item.total ? formatFileSize(item.total) : "",
         meta = [size, item.by || "", stageHost(item.url), stageAgo(item.at)].filter(Boolean).join(" · ");
-      return `<button type="button" class="stage-dl" data-stage-reveal="${escapeHtml(item.path || "")}" title="${escapeHtml(item.path || item.url)}"><i class="stage-dl-file" style="--fc:${tone(item.name)}"></i><span class="stage-dl-name">${escapeHtml(item.name)}</span><span class="stage-dl-state${item.state === "canceled" ? " off" : ""}">${state}</span><span class="stage-dl-meta">${escapeHtml(meta)}</span></button>`;
+      return `<button type="button" class="stage-dl" data-stage-reveal="${escapeHtml(item.path || "")}" data-stage-name="${escapeHtml(item.name)}" title="${escapeHtml(item.path || item.url)}"><i class="stage-dl-file" style="--fc:${tone(item.name)}"></i><span class="stage-dl-name">${escapeHtml(item.name)}</span><span class="stage-dl-state${item.state === "canceled" ? " off" : ""}">${state}</span><span class="stage-dl-meta">${escapeHtml(meta)}</span></button>`;
     })
     .join("");
   const pop = openFloatingPop(
@@ -531,9 +531,11 @@ function stageOpenDownloads(anchor) {
       return stageOpenInside("downloads");
     }
     if (!reveal) return;
-    void bridge("/api/stage/reveal", { ...stageService(), path: reveal.dataset.stageReveal || "" }).catch(error =>
-      toast(String(error.message || error).slice(0, 80))
-    );
+    void bridge("/api/stage/reveal", {
+      ...stageService(),
+      path: reveal.dataset.stageReveal || "",
+      name: reveal.dataset.stageName || ""
+    }).catch(error => toast(String(error.message || error).slice(0, 80)));
   });
 }
 /** @param {number} at */
