@@ -219,6 +219,11 @@ defineEmbed({ name: "math", mount: root => void renderPendingMath(root) });
 // 都不是的：图与链接都是目录里的一件（模型自己存的图表、前几回收进卷宗的图），算路与认件见 15-refs.js
 /** @param {Element} root */
 function renderReplyShots(root) {
+  // 模型自己写的 data: 图，坏了（编的、截断的）留下说明文字，与认不出的本机图一样不画破图
+  // （decode 在画好之前、之后问都答得上；不看 naturalWidth：不带尺寸的 SVG 也是 0）
+  /** @type {NodeListOf<HTMLImageElement> | []} */
+  const inline = root.querySelectorAll?.(":is(.markdown, .trail-note, .sub-report) img[src^='data:']") || [];
+  for (const img of inline) img.decode().catch(() => img.isConnected && img.replaceWith(img.getAttribute("alt") || ""));
   const remote = renderRemoteShots(root),
     refs = root.querySelectorAll?.(":is(.markdown, .trail-note, .sub-report) [data-file]") || [];
   if (!refs.length && !remote) return;
