@@ -411,6 +411,8 @@ function setProcessDetails(details, open, animate = true) {
   details._motionAnimation?.cancel();
   details._motionAnimation = null;
   details._motionTarget = open;
+  // 收着时没画身子的行迹（见 paintStack）：开之前先画上，动画才量得出高度
+  if (open) details._paintBody?.();
   // 只认自己直接的那层正文：帮手卡片的「帮手 · n 步」里还套着各轮的思绪，不能抓到里头那个去动
   const body = details.querySelector(":scope > .reasoning-body, :scope > .tool-stack-body, :scope > .sub-timeline, :scope > .source-grid");
   details.classList.remove("is-closing");

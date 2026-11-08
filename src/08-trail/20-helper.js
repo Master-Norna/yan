@@ -331,9 +331,18 @@ function renderHelperPanel(fresh = false) {
   });
   if (follow) stage.scrollTop = stage.scrollHeight;
 }
+// 正文里那一步的签；所在的行迹收着、身子还没画（见 paintStack）就先画上
+/** @param {string} stepId */
+function paintedStep(stepId) {
+  const message = currentConversation()?.messages.find(m => (m.steps || []).some(step => step.id === stepId));
+  if (!message) return null;
+  const stack = document.querySelector(`#messages [data-message="${CSS.escape(message.id)}"] details.tool-stack`);
+  /** @type {any} */ (stack)?._paintBody?.();
+  return stack?.querySelector(`.tool-step[data-step-id="${CSS.escape(stepId)}"]`) || null;
+}
 // 回到当前对话行迹里的那一步（摊开并取消尚未到期的自动收起）；帮手手上的一步不在正文行迹里，就回到派它的那枚签
 function revealStep(id) {
-  const cardOf = stepId => document.querySelector(`#messages .tool-step[data-step-id="${CSS.escape(stepId)}"]`),
+  const cardOf = stepId => paintedStep(stepId) || document.querySelector(`#messages .tool-step[data-step-id="${CSS.escape(stepId)}"]`),
     owner = currentConversation()
       ?.messages.flatMap(message => message.steps || [])
       .find(step => step.sub?.steps?.some(sub => sub.id === id)),
@@ -408,7 +417,7 @@ function bindHelperEvents() {
   $("#helperClose").onclick = () => {
     const id = helperRunFocus;
     closeHelperPanel();
-    const card = document.querySelector(`#messages .tool-step-delegate[data-step-id="${CSS.escape(id || "")}"]`);
+    const card = paintedStep(id || "");
     if (!card) return;
     const stack = card.closest(".tool-stack");
     if (stack) settleDetails(stack, true);

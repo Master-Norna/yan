@@ -61,6 +61,8 @@ const conversations = [
 ];
 const seed = `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 5, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", lastView: "chat", lastConversationId: "reload", autoTitle: false }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", maxTokens: 8192, quota: "100k", usedTokens: 0 }], conversations: ${JSON.stringify(conversations)}, library: [], drafts: {} })); true`;
 const chat = id => `__yanState().conversations.find(c => c.id === "${id}")`;
+// 收着的行迹开页时不画身子（见 src/07-paint.js 的 paintStack），像人一样先点开行迹再找里面的签
+const openTrails = `!!document.querySelector("#messages details.tool-stack") && ([...document.querySelectorAll("#messages .assistant-block > details.tool-stack:not([open]) > summary")].forEach(s => s.click()), true)`;
 const card = id => `document.querySelector('#messages .tool-step-delegate[data-step-id="${id}"]')`;
 
 // 一：页面刷新时还在做的帮手，开页即挂着——签上一笔续写，不再是 ×
@@ -68,6 +70,7 @@ await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(500);
 await evalJs(seed);
 await send("Page.navigate", { url: PAGE });
+await waitFor(openTrails);
 await waitFor(`!!${card("r1")}`);
 const reload = JSON.parse(
   await evalJs(

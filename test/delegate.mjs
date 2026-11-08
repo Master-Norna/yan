@@ -270,6 +270,11 @@ await waitFor(`[...document.querySelectorAll("#history .history-item")].some(n =
 await evalJs(
   `[...document.querySelectorAll("#history .history-item")].find(n => n.textContent.includes("DELEGATE"))?.querySelector(".history-open").click(); true`
 );
+// 收着的行迹开页时不画身子（见 src/07-paint.js 的 paintStack），像人一样先点开行迹
+await waitFor(
+  `!!document.querySelector("#messages details.tool-stack") && ([...document.querySelectorAll("#messages .assistant-block > details.tool-stack:not([open]) > summary")].forEach(s => s.click()), true)`,
+  5000
+).catch(() => {});
 const markerRestored = await waitFor(`!!document.querySelector(".message.assistant .tool-step-delegate")`, 5000).catch(() => false);
 check(
   "the delegate marker is restored before opening its panel",

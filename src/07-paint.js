@@ -319,6 +319,20 @@ function paintStack(stack, message, source, view, created) {
   if (label.textContent !== text) label.textContent = text;
   rollText(stack.querySelector(":scope > summary > .tool-stack-meta"), trailMeta(message));
   stack.dataset.state = message.status || "complete";
+  // 收着的行迹先不画身子，头一回打开时再画（setProcessDetails 叫 _paintBody）：开一段长对话，几十答收着的行迹占了排版的大半
+  // （实测 8 MB、121 条的一段，切过去 1 秒里六成画在这上头）。画过一回的此后照常就地更新
+  if (!stack._painted && !stack.open && !view.streaming) {
+    stack._status = message.status;
+    stack._paintBody = () => {
+      stack._painted = true;
+      paintStack(stack, message, source, { ...view, animate: false }, true);
+      // 旁注可能划在行迹里说的话上：画上了才落得了锚
+      decorateNoteAnchors(stack.closest("[data-message]"));
+    };
+    return;
+  }
+  stack._painted = true;
+  stack._paintBody = null;
   const body = stack.querySelector(":scope > .tool-stack-body"),
     seen = stepSeen(message.id),
     steps = view.steps || created;
