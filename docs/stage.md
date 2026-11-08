@@ -66,7 +66,7 @@
 - 圈点：与划选正文「引用」同一条路，不另起标注。圈点按网页里的位置记（视口坐标加上画面帧里报来的滚动），网页滚动后朱笔跟着走；落笔时问网页那一块看得见的字（点是那一处那一件的字）。引文分两份：界面上一句，给模型的那份另带网址与各处的位置（CSS 像素，与附图同一取景）。附图是此刻的画面叠上朱笔，存成一件寻常附件；再圈一处，引文与图一并换新。点那一问上方的引文回到游目那一页。
 - 只在看得见时收画面：游目收起、被旁注挤开、言的页面到了后台，都停掉 screencast；回来再接上。
 - 收藏：游目只转网页，浏览器自己的收藏栏在画面之外。收藏存在浏览器配置目录的 `Default/Bookmarks`，目录取自那个服务参数里的 `--user-data-dir`，由桥接读出（`POST /api/stage/bookmarks`，与找调试口一样只递那个服务的参数），每回现读。改收藏借浏览器自己的收藏页：那一页里调得到 `chrome.bookmarks`，增删改浏览器即刻生效，不碰配置文件。那一页开在另起的一个浏览器上下文里（`Target.createBrowserContext`）——执事（Playwright）不认得它、游目也不列它，收藏是整个配置共用的，照样进主收藏夹；调完即关。刚改完的十秒内信浏览器递回的那棵树（文件过一两秒才落盘）。
-- 适应页面：Playwright 记着定死的视口，换页会再钉回去，游目这头另起连接也清不掉（实测）——所以放开是经那个 MCP 服务的 `browser_tabs`：先 `list` 认出这一页是执事的第几页，再 `new` 同一网址、`close` 旧的，执事那边的标签账对得上。执事调 `browser_resize`、或在 `browser_run_code_unsafe` 里 `setViewportSize` 时，工具结果后补一句（`prompts/mcp.js` 的 `stagePinned`），叫它测完新开一页而不是再设个桌面尺寸「还原」。
+- 适应页面：Playwright 记着定死的视口，换页会再钉回去，游目这头另起连接也清不掉（实测）——所以放开是经那个 MCP 服务的 `browser_tabs` 先 `new` 一张空页（成了执事的当前页，标签账对得上），游目随即按 targetId 关掉旧页（Playwright 照关页事件销账），再 `browser_navigate` 回那个网址。不按执事报的序号关：同址新开要等载完，其间人若先关了旧页，序号就落到新页上，关掉最后一页浏览器随之退出。执事调 `browser_resize`、或在 `browser_run_code_unsafe` 里 `setViewportSize` 时，工具结果后补一句（`prompts/mcp.js` 的 `stagePinned`），叫它测完新开一页而不是再设个桌面尺寸「还原」。
 - 缩放：浏览器自己的缩放经调试口调不动（借收藏页里的 `chrome.tabs.setZoom` 一调就卡住），所以是调窗：窗宽按倍数收窄，画面的最大宽按同一倍数放开。
 - 查找：在网页里跑一小段，用 CSS 的高亮（`::highlight`，样式经 `adoptedStyleSheets` 挂上）标出各处，不动网页的 DOM；只找同一段文字里的。
 - 下载：对正看的那一页开着 Page 域，`downloadWillBegin` / `downloadProgress` 报来名字与进度；执事经 MCP 下的，结果里「Downloaded file … to …」写着存到哪，补上。记录存在本机（最近三十条）。显出文件走桥接（`POST /api/stage/reveal`，`explorer /select`），没记着路径的开那个服务存下载的目录（`--output-dir`，或服务工作目录下的 `.playwright-mcp`）。Edge 下载时弹的气泡（`edge://downloads-hub`）也报成一页，游目不列。

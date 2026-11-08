@@ -133,32 +133,31 @@ function stageMarkExecutorPinned() {
   stageRenderLetter();
 }
 // 放开定死的视口：执事那头（Playwright）记着那个尺寸，换页也会再钉回去，游目这头清不掉——只有新开一页最干净。
-// 经那个 MCP 服务的 browser_tabs 办：同一网址新开一页、关掉旧的，执事那边的标签账也对得上（它下回调用时看得到）。
+// 经那个 MCP 服务的 browser_tabs 开新页，执事那边的标签账才对得上（新页即它的当前页）；旧页由游目按 targetId 关，它那头照关页事件销账。
+// 先开空页、随即关旧页、再去那个网址：同址新开要等载完（重的站十几秒，过了 30 秒还算失败），其间两页并排，人顺手关了旧页，
+// 按序号关就落到新页上——那是最后一页，浏览器随之退出。按 targetId 关，人先关了也只是扑空
 // 「适应页面」开着且确是执事定的：它歇手（没有在途的浏览器调用、也没有在答的对话）才放；其余只在人点「放开」时放
 /** @param {boolean} [now] 人点了「放开」 */
 async function stageRelease(now = false) {
   const server = stageServer(),
-    tab = stage.tabs.get(stage.current),
-    url = tab?.url || "";
+    old = stage.current,
+    url = stage.tabs.get(old)?.url || "";
   if (!server || !stage.pinned || !url || /^(about|data|devtools|edge|chrome):/.test(url)) return;
   if (!now && stage.released.url === url && Date.now() - stage.released.at < 60000) return;
   stage.released = { url, at: Date.now() };
   const config = mcpConfigs()[server],
-    call = (/** @type {Record<string, any>} */ args) =>
-      bridge("/api/mcp/call", { server, config, tool: "browser_tabs", arguments: args, timeout: 30 });
+    call = (/** @type {string} */ tool, /** @type {Record<string, any>} */ args, timeout = 30) =>
+      bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout });
   try {
-    // 执事那边的第几页：照它报的「- 2: (current) [题](网址)」认
-    const listed = await call({ action: "list" }),
-      lines = String((listed.result?.content || []).map((/** @type {any} */ item) => item.text || "").join("\n")).split("\n"),
-      rows = lines.map(line => line.match(/^- (\d+): (\(current\) )?\[.*\]\((.*)\)\s*$/)).filter(Boolean),
-      old = rows.find(row => row?.[3] === url && row[2]) || rows.find(row => row?.[3] === url);
-    if (!old) return;
-    await call({ action: "new", url });
-    await call({ action: "close", index: Number(old[1]) });
+    await call("browser_tabs", { action: "new" });
+    await stageSend("Target.closeTarget", { targetId: old }).catch(() => {});
     stage.executorPinned = false;
   } catch (error) {
     if (now) toast(t`未能放开：${String(/** @type {any} */ (error).message || error).slice(0, 80)}`);
+    return;
   }
+  // 载得慢、载不出都是那个网站的事，页已经换了
+  void call("browser_navigate", { url }, 600).catch(() => {});
 }
 // 执事歇手了吗：没有在途的浏览器调用、没有在答的对话与差遣
 function stageIdle() {
