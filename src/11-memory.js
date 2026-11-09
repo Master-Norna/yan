@@ -6,7 +6,8 @@
 // 照各家的朴素做法（ChatGPT 的存下的记忆、Claude 的 userMemories、Claude Code 的 MEMORY.md）：记忆整份放进系统提示，
 // 每段对话头一问时定格；不再要模型自己去翻——原先只报分类、内容要 recall 才看得到，模型不知道里头有什么，多半就不翻。
 // 记多少不设上限（同账本：硬数字只会逼它删有用的），由专司「记忆」在每一答落定后整理——从这段的问答里补记、合并、改掉推翻的。
-// 遗忘不按时长、不按字数：被新说法推翻的、用户要忘的才删；人也可在设置里删。主模型仍可当场 remember，只是不靠它：答题中途停下来记是分心，记不记全看它那一刻想没想起来
+// 遗忘不按时长、不按字数：被新说法推翻的、用户要忘的才删；人也可在设置里删。主模型没有记与忘：答题中途停下来记是分心，
+// 用户说要记要忘的，每一答之后的整理已涵盖（系统提示里交代了这一层，它便不另想办法）
 const MEMORY_UNSORTED = "未分类",
   // 整理一回交多少字的问答；用户的话、助手的答复各截到多长（助手的只作上下文）
   TIDY_CHUNK = 16000,
@@ -18,7 +19,7 @@ let memoryCategoryOpen = null;
 let memoryItemOpen = "",
   memoryItemEditing = "";
 /**
- * 专司「记忆」配好了：每段对话开头带上记忆、给记与忘，一答落定后整理。预设没挑「记忆与旧谈」这一组的对话不带也不整理
+ * 专司「记忆」配好了：每段对话开头带上记忆，一答落定后整理。预设没挑「记忆与旧谈」这一组的对话不带也不整理
  * @param {Conversation} [conversation]
  */
 function memoryOn(conversation) {
@@ -67,8 +68,11 @@ function memoryCategories() {
   for (const entry of map.values()) entry.items.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   return [...map.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
-function memoryLine(item, withCategory = false) {
-  return `[${item.id}] ${String(item.updatedAt || item.createdAt).slice(0, 10)}｜${withCategory ? `${memoryCategoryOf(item)}｜` : ""}${item.text}`;
+/** 一条的日子：让模型看得出新旧 */
+const memoryDay = item => String(item.updatedAt || item.createdAt).slice(0, 10);
+/** 交给整理的一条：带 id（增删改认它）与分类 */
+function memoryLine(item) {
+  return `[${item.id}] ${memoryDay(item)}｜${memoryCategoryOf(item)}｜${item.text}`;
 }
 function keywordTerms(query) {
   return String(query || "")
@@ -89,12 +93,12 @@ function addMemory(text, source = null, category = "") {
   return item;
 }
 // ── 带进对话 ──
-/** @type {Map<string, string>} 各段对话头一问时定格的那份记忆：此后别处整理、记入都不改它，系统提示不变，前面的缓存接得上；本段自己记的本就在上下文里 */
+/** @type {Map<string, string>} 各段对话头一问时定格的那份记忆：此后整理都不改它，系统提示不变，前面的缓存接得上；本段说过的本就在上下文里 */
 const memorySnapshots = new Map();
-/** 整份记忆，按类分段（最近动过的类在前），条目带 id 与日子：记与忘认 id，日子让模型看得出新旧 */
+/** 带进对话的整份记忆，按类分段（最近动过的类在前），条目带日子；主模型不增删，不带 id */
 function memoryText() {
   return memoryCategories()
-    .map(cat => `「${cat.name}」\n${cat.items.map(item => memoryLine(item)).join("\n")}`)
+    .map(cat => `「${cat.name}」\n${cat.items.map(item => `${memoryDay(item)}｜${item.text}`).join("\n")}`)
     .join("\n\n");
 }
 /** @param {Conversation} conversation */
@@ -202,7 +206,7 @@ async function askTidier(c, turns, day) {
     reply = await askDuty(
       "memory",
       prompt("memory.case", {
-        items: items.length ? items.map(item => memoryLine(item, true)).join("\n") : prompt("memory.empty"),
+        items: items.length ? items.map(memoryLine).join("\n") : prompt("memory.empty"),
         title: c.title || t("未命名"),
         day,
         turns
@@ -242,7 +246,7 @@ function applyMemoryOps(ops, c, counts) {
     }
   }
 }
-// 设置页开着「记忆」时，模型记入或删去要立刻反映在列表里；正在改的那条不打断（重画会把输入框连同光标冲掉）
+// 设置页开着「记忆」时，整理改了的要立刻反映在列表里；正在改的那条不打断（重画会把输入框连同光标冲掉）
 function refreshMemorySettings() {
   if (document.activeElement?.matches?.("#settingsContent .memory-text")) return;
   if (settingsTab === "memory" && !$("#settingsModal").classList.contains("hidden")) renderSettings();
