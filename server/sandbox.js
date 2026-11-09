@@ -442,9 +442,11 @@ function gitReadOnly(sub, args) {
   if (!allowed) return false;
   // `git stash` 不带参数是存起来，不是列出
   if (!args.length && name === "stash") return false;
+  // branch / tag 带了 -l / --list，位置参数是筛名字的模式（git tag --list "v1.3*"），不是要建的名
+  const listing = (name === "branch" || name === "tag") && args.some(arg => arg === "-l" || arg === "--list");
   let takesValue = false;
   for (const arg of args) {
-    if (takesValue) {
+    if (takesValue || (listing && !arg.startsWith("-"))) {
       takesValue = false;
       continue;
     }
@@ -459,36 +461,13 @@ function gitReadOnly(sub, args) {
 function dynamicPath(value) {
   return /[$`~]|%[^%\\/]+%/.test(value);
 }
-/** 指令里有没有会改东西的 git 调用（查看类与没有子命令的不算） @param {string} text */
-function gitWrites(text) {
-  for (const tokens of commandSegments(text)) {
-    const invocation = gitInvocation(tokens);
-    if (invocation && !gitReadOnly(invocation.sub, invocation.args)) return true;
-  }
-  return false;
-}
-// 先换目录、再动仓库：`cd ..; git checkout -- f` 里那个 `..` 不是「改动路径」，写路径规则不会拿它去判
+// 换目录的几种写法：`cd ..; git checkout -- f` 里那个 `..` 不是「改动路径」，写路径规则不会拿它去判
 const CD_COMMAND = /^(?:cd|chdir|sl|set-location|pushd|push-location)$/i;
-/** 指令里有没有先 cd 到工作目录之外（只在这条指令还带 git 写子命令时问） @param {string} text @param {string} workdir @param {boolean} win */
-function directoryChangeEscapes(text, workdir, win) {
-  const api = win ? path.win32 : path,
-    root = win ? api.normalize(workdir).toLowerCase() : api.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-  let cwd = workdir;
-  for (const tokens of commandSegments(text)) {
-    if (!CD_COMMAND.test(tokens[0] || "")) continue;
-    const target = tokens[1];
-    // 不带参数是回到家目录；带 shell 展开的静态看不出落到哪——都按出去了算
-    if (!target || dynamicPath(target)) return true;
-    cwd = api.resolve(cwd, target);
-    const relative = api.relative(root, cwd);
-    if (relative && (relative === ".." || relative.startsWith(`..${api.sep}`) || api.isAbsolute(relative))) return true;
-  }
-  return false;
-}
 /**
- * git 的 -C / --git-dir / --work-tree 有没有把仓库指到工作目录之外：是则返回拒绝语，否则 null。
- * 目录选项按出现次序生效（-C sub -C .. 又绕回工作目录；后一个 --work-tree 覆盖前一个）；
- * 指到外面时只放行查看类子命令。子命令自己的 pathspec 不在这里管：git 自身拒绝工作树外的路径
+ * git 动的仓库落没落在工作目录之外：是则返回拒绝语，否则 null。
+ * 按段依次走，cd 换过的目录接着算（`git commit; cd 别处` 里 git 在 cd 之前，不受它牵连）；
+ * 每个 git 调用从当时的目录出发，再叠 -C（按出现次序生效，-C sub -C .. 又绕回来）与 --git-dir / --work-tree（取最后一个）。
+ * 落到外面时只放行查看类子命令。子命令自己的 pathspec 不在这里管：git 自身拒绝工作树外的路径
  * （`git checkout -- ../x` 报 is outside repository）
  * @param {string} text @param {string} workdir @param {boolean} win @returns {string | null}
  */
@@ -500,12 +479,22 @@ function gitEscapeWhy(text, workdir, win) {
       const relative = api.relative(root, target);
       return !relative || (relative !== ".." && !relative.startsWith(`..${api.sep}`) && !api.isAbsolute(relative));
     };
+  /** 当前目录；cd 到静态看不出的地方（不带参数回家目录、带 shell 展开）后记那个写法，按出去了算 */
+  let here = workdir,
+    unknown = "";
   for (const tokens of commandSegments(text)) {
+    if (CD_COMMAND.test(tokens[0] || "")) {
+      // Set-Location -Path x：跳过开关取头一个目录参数
+      const target = tokens.slice(1).find(token => !token.startsWith("-"));
+      if (!target || dynamicPath(target)) unknown = target || tokens[0];
+      else if (!unknown) here = api.resolve(here, target);
+      continue;
+    }
     const invocation = gitInvocation(tokens);
     if (!invocation) continue;
-    let cwd = workdir,
-      outside = null;
-    for (const dir of invocation.dirs) {
+    let cwd = here,
+      outside = unknown || null;
+    for (const dir of outside ? [] : invocation.dirs) {
       if (dynamicPath(dir)) {
         outside = dir;
         break;
@@ -521,7 +510,7 @@ function gitEscapeWhy(text, workdir, win) {
     }
     if (!outside) continue;
     if (!invocation.opts.some(opt => GIT_RUNS_COMMANDS.has(opt)) && gitReadOnly(invocation.sub, invocation.args)) continue;
-    return `沙箱拒绝：git 的 -C / --git-dir / --work-tree 指到了工作目录之外（${outside}）；只有 log、status、diff、show 这类查看子命令能跨出去，要改动那一处请把工作目录设在那一处`;
+    return `沙箱拒绝：git 动的仓库在工作目录之外（${outside}，经 cd 或 -C / --git-dir / --work-tree）；只有 log、status、diff、show 这类查看子命令能跨出去，要改动那一处请把工作目录设在那一处`;
   }
   return null;
 }
@@ -544,15 +533,11 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
     const why = screenWritePaths(text, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
-  // git 的 -C / --git-dir / --work-tree 把仓库指到别处：`git -C .. checkout -- f` 里没有一个「改动路径」，
-  // 上面的写路径规则看不出它动的是上层的工作树，于是整个漏过。这三个选项在这里按工作目录判一遍；
-  // 指到外面时只放行查看类子命令（git -C .. log 仍放行），目录内的 -C sub 照旧
+  // git 把仓库指到别处：`git -C .. checkout -- f`、`cd ..; git reset --hard` 里都没有一个「改动路径」，
+  // 上面的写路径规则看不出它动的是上层的工作树，于是整个漏过。这里跟着 cd 与 -C / --git-dir / --work-tree 判一遍；
+  // 落到外面时只放行查看类子命令（git -C .. log 仍放行），目录内的 -C sub 照旧
   const gitWhy = gitEscapeWhy(text, workdir, win);
   if (gitWhy) return gitWhy;
-  // 另一种绕法：先 cd 出去再动仓库。`cd ..; git checkout -- f` 里的 `..` 不是「改动路径」，
-  // 写路径规则不拿它去判；上面那三个选项也一个都没有。指令里带 git 写子命令时，cd 的目标也得留在工作目录内
-  if (gitWrites(text) && directoryChangeEscapes(text, workdir, win))
-    return "沙箱拒绝：先 cd 到工作目录之外、再执行会改动仓库的 git 子命令。要改动那一处，请把工作目录设在那一处";
   if (NET_TOOLS.test(text)) {
     const hosts = [...text.matchAll(/https?:\/\/([^\s/"'`:]+)(?::\d+)?/gi)].map(m => m[1]);
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))

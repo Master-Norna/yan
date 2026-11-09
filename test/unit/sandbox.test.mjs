@@ -644,7 +644,11 @@ test("screenCommand：先 cd 到工作目录之外、再动仓库，一样拒绝
     "cd C:\\other; git checkout -- src/a.js",
     "pushd ..; git clean -fdx",
     "Set-Location ..; git restore .",
-    "cd ..; git add f.txt"
+    "cd ..; git add f.txt",
+    "Set-Location -Path ..; git restore .",
+    // 去向静态看不出的 cd 之后，再动仓库按出去了算
+    "cd $env:TEMP\\repo; git commit -m x",
+    "cd; git reset --hard"
   ])
     assert.match(screen(command), /工作目录之外/, command);
   for (const command of [
@@ -653,7 +657,15 @@ test("screenCommand：先 cd 到工作目录之外、再动仓库，一样拒绝
     "cd ..; git log --oneline",
     "cd ..; git status",
     "cd ..; rg TODO src",
-    "git checkout -- f.txt"
+    "git checkout -- f.txt",
+    // 先后要对上：git 在 cd 之前，动的是工作目录
+    "git commit -m x; cd C:\\other; python a.py",
+    // cd 过的目录接着算：sub 再 -C .. 落回工作目录；出去又回来也算回来
+    "cd sub; git -C .. checkout -- f.txt",
+    "cd ..\\言; git commit -m x",
+    // branch / tag 的 --list 后面是模式，不是要建的名
+    'cd ..; git tag --list "v1.3*"',
+    "cd ..; git branch --list feat*"
   ])
     assert.equal(screen(command), null, command);
 });
