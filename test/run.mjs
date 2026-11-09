@@ -34,9 +34,8 @@ if (!browser) {
 // 语法先过一遍
 const jsFiles = [
   "server.js",
-  "theme-boot.js",
-  "preview-runtime.js",
-  "build.js",
+  "web/theme-boot.js",
+  "web/preview-runtime.js",
   ...readdirSync(path.join(ROOT, "prompts"))
     .filter(f => f.endsWith(".js"))
     .map(f => `prompts/${f}`),

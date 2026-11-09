@@ -1,4 +1,4 @@
-// 言 · 类型声明：只给 tsc --checkJs 与编辑器用，运行时不加载（build.js 只拼 .js）。
+// 言 · 类型声明：只给 tsc --checkJs 与编辑器用，运行时不加载（server/build.js 只拼 .js）。
 // 源码仍是无模块的普通脚本，20 段拼进一个闭包；tsc 把无 import/export 的文件当作共享同一全局作用域的脚本，
 // 所以这里的声明是全局的，各段之间的函数引用也能跨文件解析。数据模型的 JSDoc typedef 在 00-state.js 顶部。
 

@@ -1,7 +1,7 @@
 // 言 · 打 Windows 便携包：node pack/pack.mjs → dist/yan-<版本>-win-x64.zip，解开是一个「言」文件夹，双击里面的 言.exe 即用。
 // 包里是：仓库里跟踪着的运行所需文件（不带测试、文档、设计稿）+ 官方 Node 原样一份（node\，带 npm）+ 启动器 言.exe。
 // 言自己的代码一字不改：Node 仍是真的 Node、npm 就在旁边，桥接照旧从磁盘现拼页面——只是不用用户先装 Node。
-// 启动器由系统自带的 .NET Framework csc 编出（pack/launcher.cs），图标 pack/icon.ico 由 icon.svg 画成。
+// 启动器由系统自带的 .NET Framework csc 编出（pack/launcher.cs），图标 pack/icon.ico 由 web/icon.svg 画成。
 // Node 的压缩包按 nodejs.org 的 SHASUMS256.txt 验过才用，下过的留在 dist/.cache 里，再打不必重下。
 // dist 里只留这一版的包与这一版 Node 的缓存：发过的版本在 GitHub Release 上，旧包留在本机只占地方
 import { execFileSync, spawnSync } from "node:child_process";
@@ -23,18 +23,13 @@ const DIST = path.join(ROOT, "dist"),
 // 运行要用的：桥接、页面、提示词、译文、前端库；README 与 LICENSE 随包
 const KEEP = [
   "server.js",
-  "build.js",
   "package.json",
-  "index.html",
-  "theme-boot.js",
-  "icon.svg",
-  "preview.html",
-  "preview-runtime.js",
   "start.cmd",
   "README.md",
   "README.en.md",
   "LICENSE",
   "server/",
+  "web/",
   "src/",
   "styles/",
   "prompts/",

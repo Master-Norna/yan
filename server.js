@@ -4,8 +4,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
-// 拼接规则（build.js）改了就重新载入：页面脚本本是即时拼的，不该因为拼法变了就得重启桥接
-const BUILD_FILE = require.resolve("./build.js");
+// 拼接规则（server/build.js）改了就重新载入：页面脚本本是即时拼的，不该因为拼法变了就得重启桥接
+const BUILD_FILE = require.resolve("./server/build.js");
 let bundler = require(BUILD_FILE),
   bundlerStamp = fs.statSync(BUILD_FILE).mtimeMs;
 function currentBundler() {
@@ -241,16 +241,18 @@ const BUNDLES = {
   "/app.css": { build: () => currentBundler().bundleStyles(), type: "text/css; charset=utf-8" }
 };
 // 静态服务只开放页面运行真正需要的文件。仓库根目录里还有桥接源码、测试、.git 与用户可能临时放入的配置，
-// 不能因为它们恰好位于 ROOT 下就一并交给浏览器；vendor/ 是随页面分发的纯前端资源，i18n/ 是界面的译文表；提示词随页面脚本拼进 /support.js。
-const PUBLIC_STATIC_FILES = new Set(["index.html", "theme-boot.js", "icon.svg", "preview.html", "preview-runtime.js"]);
+// 不能因为它们恰好位于 ROOT 下就一并交给浏览器。页面外壳（index.html、theme-boot.js、预览沙箱、图标）都在 web/，挂在站点根上：
+// web/ 本身即白名单，加一件只需放进去；vendor/ 是随页面分发的纯前端资源，i18n/ 是界面的译文表；提示词随页面脚本拼进 /support.js。
+const PAGE_DIR = path.join(ROOT, "web");
 const REAL_ROOT = fs.realpathSync(ROOT);
 function publicStaticTarget(requested) {
   // URL 路径里的反斜杠在 Windows 上也是目录分隔符；先统一再规范化，vendor/../server.js 不能借前缀混进来。
   const webPath = requested.replace(/\\/g, "/"),
     normalized = path.posix.normalize(webPath);
   if (normalized !== webPath || normalized.startsWith("../") || path.posix.isAbsolute(normalized)) return null;
-  if (!PUBLIC_STATIC_FILES.has(normalized) && !normalized.startsWith("vendor/") && !normalized.startsWith("i18n/")) return null;
-  const candidate = path.resolve(ROOT, ...normalized.split("/"));
+  const shared = normalized.startsWith("vendor/") || normalized.startsWith("i18n/");
+  if (!shared && normalized.includes("/")) return null;
+  const candidate = path.resolve(shared ? ROOT : PAGE_DIR, ...normalized.split("/"));
   if (!fs.existsSync(candidate)) return null;
   // 白名单目录中若出现指向仓库外的符号链接，也不能跟出去。
   const file = fs.realpathSync(candidate),

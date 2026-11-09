@@ -246,7 +246,7 @@ function brushIcon(name, className = "") {
   return `<svg class="brush${className ? ` ${className}` : ""}" viewBox="0 0 20 20" aria-hidden="true">${BRUSH_ICONS[name]?.() || ""}</svg>`;
 }
 // ---------- 标识：一笔言（对谈）、一笔行（执事） ----------
-// 侧栏顶上的标识随态换字（设计稿/156 丙）；画幅 16.5 12.5 68 68，一笔墨加一点朱。根目录的 icon.svg 是一笔言的定稿副本（设计稿/149），
+// 侧栏顶上的标识随态换字（设计稿/156 丙）；画幅 16.5 12.5 68 68，一笔墨加一点朱。web/icon.svg 是一笔言的定稿副本（设计稿/149），
 // 一笔行是 155 辛（亍的下横收了一点，免得兜回时出画幅）
 /** 把每段二次曲线再细分几段：笔走得长、转得急时，brushStroke 按段铺的笔形才不见棱角 @param {number[]} points */
 function brushFine(points, parts = 6) {

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { load } from "./harness.mjs";
 
 // 图表 option 的修补跑在交互预览的 iframe 里（preview-runtime.js），那一段是纯函数：单独取出来测
-const runtime = readFileSync(new URL("../../preview-runtime.js", import.meta.url), "utf8");
+const runtime = readFileSync(new URL("../../web/preview-runtime.js", import.meta.url), "utf8");
 const repairEchartsOption = new Function(
   `${runtime.match(/ {2}function repairEchartsOption[\s\S]*?\r?\n {2}\}\r?\n/)[0]}; return repairEchartsOption;`
 )();

@@ -1,7 +1,7 @@
 # Yan (言)
 
 <p align="center">
-  <img src="icon.svg" alt="Yan" width="96" height="96">
+  <img src="web/icon.svg" alt="Yan" width="96" height="96">
 </p>
 
 [中文](README.md) · **English**

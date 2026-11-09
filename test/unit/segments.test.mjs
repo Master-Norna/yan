@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 
-const { scriptParts } = createRequire(import.meta.url)("../../build.js");
+const { scriptParts } = createRequire(import.meta.url)("../../server/build.js");
 
 test("拼接各段的顶层函数不重名", () => {
   const seen = new Map(),

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // 拼接规则：prompts/ 与 src/ 下的 .js 拼成页面请求的 /support.js、styles/ 下的 .css 拼成 /app.css（零依赖，没有转译；子目录就地展开）。
 // 内置提示词排在最前、闭包之外：各自往 window.YAN_PROMPTS 上挂一份，src/ 开头取用；加一份提示词只需放进目录。
-// 桥接按请求即时拼（server.js），改完刷新即生效；不落成文件——言离不开桥接，没有谁读一份落盘的产物，留着只会与源码对不上。
+// 桥接按请求即时拼（../server.js），改完刷新即生效；不落成文件——言离不开桥接，没有谁读一份落盘的产物，留着只会与源码对不上。
 // 单元测试（test/unit/harness.mjs）照同一份清单拼
 "use strict";
 const fs = require("fs");
 const path = require("path");
 
-const ROOT = __dirname;
+const ROOT = path.join(__dirname, "..");
 const SRC = path.join(ROOT, "src"),
   PROMPTS = path.join(ROOT, "prompts"),
   STYLES = path.join(ROOT, "styles");

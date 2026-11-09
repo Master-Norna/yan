@@ -1,5 +1,5 @@
 // 在样式解析前把主题、印色与字体写到 <html> 上，避免暗色用户开页先看到一屏米白；正式逻辑仍在 support.js 的 applyAppearance
-// 直接双击 index.html（file://）打开的：页面脚本与样式都由桥接现拼，这里拿不到，也接不上桥接（它不认来源为 null 的页面）。
+// 直接双击 web/index.html（file://）打开的：页面脚本与样式都由桥接现拼，这里拿不到，也接不上桥接（它不认来源为 null 的页面）。
 // 只挂「等候本机桥接」一页，自带几行样式，指明去哪儿打开
 if (location.protocol === "file:") {
   document.documentElement.dataset.bridge = "waiting";

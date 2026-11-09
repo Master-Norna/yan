@@ -2,7 +2,7 @@
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { connect, check, usageOf, sleep, PAGE, WORK } from "./lib.mjs";
-const { bundleStyles } = createRequire(import.meta.url)("../build.js");
+const { bundleStyles } = createRequire(import.meta.url)("../server/build.js");
 const { send, evalJs, waitFor, shot, close } = await connect();
 mkdirSync(WORK + "/src", { recursive: true });
 writeFileSync(WORK + "/src/a.js", "function f() {\n  return 1;\n}\n");

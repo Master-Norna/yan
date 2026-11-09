@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 
-// 与页面同一份清单（build.js 的 scriptParts，含子目录），只去掉启动那段
-const { scriptParts } = createRequire(import.meta.url)("../../build.js");
+// 与页面同一份清单（server/build.js 的 scriptParts，含子目录），只去掉启动那段
+const { scriptParts } = createRequire(import.meta.url)("../../server/build.js");
 const body = scriptParts()
   .filter(file => path.basename(file) !== "99-start.js")
   .map(file => readFileSync(file, "utf8"))
