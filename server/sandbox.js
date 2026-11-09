@@ -259,6 +259,32 @@ function screenWritePaths(text, workdir, win, prefix) {
   }
   return null;
 }
+// git 的全局目录选项：-C <dir> 也可以连写成 -C<dir>；--git-dir / --work-tree 用 = 或空格；--bare 无参数
+const GIT_OPTION_ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`,
+  GIT_REPO_OPTION = new RegExp(
+    String.raw`\b[gG][iI][tT](?:\.exe)?\b(?:[^\n;|&]*?)\s(?:-C\s*|--git-dir(?:=|\s+)|--work-tree(?:=|\s+))(${GIT_OPTION_ARG})`,
+    "g"
+  ),
+  // git 的写子命令（连同 -C / --git-dir / --work-tree 这些全局选项一起认）；查看类的（log、status、diff、show、不带 -d 的 branch）不在其中
+  GIT_WRITE_SUB = new RegExp(
+    String.raw`\b[gG][iI][tT](?:\.exe)?\b(?:\s+(?:-C\s*${GIT_OPTION_ARG}|--git-dir(?:=|\s+)${GIT_OPTION_ARG}|--work-tree(?:=|\s+)${GIT_OPTION_ARG}|--bare))*\s+(?:clone|worktree\s+add|checkout|restore|reset|clean|stash|switch|merge|rebase|apply|am|revert|cherry-pick|pull|submodule|update-ref|gc|prune|config|init|branch\s+-[dD])\b`
+  );
+/** git 的 -C / --git-dir / --work-tree 有没有指到工作目录之外 @param {string} text @param {string} workdir @param {boolean} win */
+function gitRepoEscapes(text, workdir, win) {
+  // 按 win 选 path 的那一套：测试会在 macOS 上跑 Windows 路径，不能拿 POSIX 的 resolve 去解析盘符
+  const api = win ? path.win32 : path,
+    root = win ? api.normalize(workdir).toLowerCase() : api.normalize(workdir).replace(/(?<=.)[\\/]+$/, ""),
+    inside = target => {
+      const relative = api.relative(root, target);
+      return !relative || (relative !== ".." && !relative.startsWith(`..${api.sep}`) && !api.isAbsolute(relative));
+    };
+  for (const match of String(text).matchAll(GIT_REPO_OPTION)) {
+    const raw = match[1].replace(/^["']|["']$/g, ""),
+      target = win ? api.resolve(workdir, raw).toLowerCase() : api.resolve(workdir, raw);
+    if (!inside(target)) return true;
+  }
+  return false;
+}
 /**
  * 筛一条指令。通过返回 null；拒绝返回一句原因（给模型看的，说清怎么改）
  * @param {string} command
@@ -278,6 +304,11 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
     const why = screenWritePaths(text, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
+  // git 的 -C / --git-dir / --work-tree 把仓库指到别处：`git -C .. checkout -- f` 里没有一个「改动路径」，
+  // 上面的写路径规则看不出它动的是上层的工作树，于是整个漏过。这三个选项的参数在这里单独按工作目录判一次；
+  // 只有写子命令才查（git -C .. log 是查看，仍放行），目录内的 -C sub 照旧
+  if (GIT_WRITE_SUB.test(text) && gitRepoEscapes(text, workdir, win))
+    return "沙箱拒绝：git 的 -C / --git-dir / --work-tree 指到了工作目录之外；要操作别的目录，请把工作目录设在那一处";
   if (NET_TOOLS.test(text)) {
     const hosts = [...text.matchAll(/https?:\/\/([^\s/"'`:]+)(?::\d+)?/gi)].map(m => m[1]);
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))

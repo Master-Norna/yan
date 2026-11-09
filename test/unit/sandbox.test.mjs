@@ -637,3 +637,29 @@ test("攻击写法总表：三档与「审了也不放行」各得其所", () =>
       command
     );
 });
+test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之外时，写子命令拒绝；目录内与查看类放行", () => {
+  for (const command of [
+    "git -C .. checkout -- src/a.js",
+    "git -C.. reset --hard",
+    "git -C ../other clean -fdx",
+    "git -C E:\\other checkout -- src/a.js",
+    "git --git-dir=..\\.git checkout -- src/a.js",
+    "git --git-dir ..\\.git reset --hard",
+    "git --work-tree .. restore .",
+    'git -C "E:\\other dir" checkout -- src/a.js'
+  ])
+    assert.match(screen(command), /工作目录之外/, command);
+  for (const command of [
+    "git -C sub checkout -- src/a.js",
+    "git -C . reset --hard",
+    "git checkout -- src/a.js",
+    "git reset --hard",
+    "git -C .. log --oneline",
+    "git -C .. status",
+    "git -C .. diff",
+    "git -C .. show HEAD",
+    "git -C .. branch",
+    "git status"
+  ])
+    assert.equal(screen(command), null, command);
+});
