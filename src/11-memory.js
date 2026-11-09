@@ -133,10 +133,10 @@ function tidyMemory(conversation) {
   const id = conversation.id;
   if (tidyingIds.has(id) || !memoryOn(conversation) || !hasUntidied(conversation)) return tidyQueue;
   tidyingIds.add(id);
-  // 没成（接口不通、答得认不出清单）：说一声，这段的进度不动，下回离开时再来
+  // 没成（接口不通、答得认不出清单）：这段的进度不动，下回离开时再来。不提示：没成不丢东西，配错了接口去设置里试连
   tidyQueue = tidyQueue
     .then(() => tidyOne(id))
-    .catch(error => toast(t`记忆整理没成：${friendlyError(error.message)}`))
+    .catch(error => console.warn("记忆整理没成，下回离开这段时再来", error))
     .finally(() => tidyingIds.delete(id));
   return tidyQueue;
 }
