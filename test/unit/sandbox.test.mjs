@@ -665,9 +665,14 @@ test("screenCommand：先 cd 到工作目录之外、再动仓库，一样拒绝
     "cd ..\\言; git commit -m x",
     // branch / tag 的 --list 后面是模式，不是要建的名
     'cd ..; git tag --list "v1.3*"',
-    "cd ..; git branch --list feat*"
+    "cd ..; git branch --list feat*",
+    // 写明了 --get 一类的 config，多出的操作数是模式或 URL
+    "git -C .. config --get-urlmatch http https://example.com/",
+    "git -C .. config --get-all remote.origin.fetch main"
   ])
     assert.equal(screen(command), null, command);
+  // 工作目录本身带 $ 或短文件名里的 ~：那是已解析好的目录，不是 shell 展开
+  for (const dir of ["C:\\tmp\\cost$repo", "C:\\Users\\RUNNER~1\\work"]) assert.equal(screenCommand("git add f.txt", dir, win), null, dir);
 });
 
 test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之外时，只看不改才放行；目录内与查看类照旧", () => {

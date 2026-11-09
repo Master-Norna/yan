@@ -432,11 +432,13 @@ function gitReadOnly(sub, args) {
   // 没有子命令：只打印用法
   if (!name) return true;
   if (GIT_READ_SUB.has(name)) return true;
-  // config：`git config 键` 是读、`git config 键 值` 是写；--unset / --add 这些一律算写
+  // config：`git config 键` 是读、`git config 键 值` 是写；--unset / --add 这些一律算写；
+  // 写明了 --get 一类的，后面多出的是值的模式或 URL（--get-urlmatch http https://x），仍是读
   if (name === "config")
     return (
-      args.filter(arg => !arg.startsWith("-")).length <= 1 &&
-      !args.some(arg => /^(?:--(?:unset|unset-all|add|replace-all|rename-section|remove-section|edit|append)|-e)$/.test(arg))
+      !args.some(arg => /^(?:--(?:unset|unset-all|add|replace-all|rename-section|remove-section|edit|append)|-e)$/.test(arg)) &&
+      (args.some(arg => /^(?:--get(?:-all|-regexp|-urlmatch|-color|-colorbool)?|--list|-l)$/.test(arg)) ||
+        args.filter(arg => !arg.startsWith("-")).length <= 1)
     );
   const allowed = GIT_READ_ARGS[name];
   if (!allowed) return false;
@@ -457,9 +459,10 @@ function gitReadOnly(sub, args) {
   }
   return true;
 }
-/** 参数里有 shell 展开（$HOME、%USERPROFILE%、~/x）时静态看不出落到哪，一律按出去了算 */
+/** 参数里有 shell 展开（$HOME、%USERPROFILE%、~/x）时静态看不出落到哪，一律按出去了算。
+ * ~ 只在开头才展开：短文件名 C:\PROGRA~1 里的不算 */
 function dynamicPath(value) {
-  return /[$`~]|%[^%\\/]+%/.test(value);
+  return /[$`]|^~|%[^%\\/]+%/.test(value);
 }
 // 换目录的几种写法：`cd ..; git checkout -- f` 里那个 `..` 不是「改动路径」，写路径规则不会拿它去判
 const CD_COMMAND = /^(?:cd|chdir|sl|set-location|pushd|push-location)$/i;
@@ -503,7 +506,8 @@ function gitEscapeWhy(text, workdir, win) {
     }
     for (const target of outside ? [] : [cwd, invocation.gitDir, invocation.workTree]) {
       if (target === null) continue;
-      if (dynamicPath(target) || !inside(api.resolve(cwd, target))) {
+      // cwd 是已解析好的目录（工作目录里本就可能有 $），只对指令里原样写的 --git-dir / --work-tree 查 shell 展开
+      if ((target !== cwd && dynamicPath(target)) || !inside(api.resolve(cwd, target))) {
         outside = target;
         break;
       }
