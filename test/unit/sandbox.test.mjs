@@ -637,3 +637,95 @@ test("攻击写法总表：三档与「审了也不放行」各得其所", () =>
       command
     );
 });
+test("screenCommand：先 cd 到工作目录之外、再动仓库，一样拒绝；目录内的 cd 与查看类照旧", () => {
+  for (const command of [
+    "cd ..; git checkout -- f.txt",
+    "cd ..; git reset --hard",
+    "cd C:\\other; git checkout -- src/a.js",
+    "pushd ..; git clean -fdx",
+    "Set-Location ..; git restore .",
+    "cd ..; git add f.txt",
+    "Set-Location -Path ..; git restore .",
+    // 去向静态看不出的 cd 之后，再动仓库按出去了算
+    "cd $env:TEMP\\repo; git commit -m x",
+    "cd; git reset --hard"
+  ])
+    assert.match(screen(command), /工作目录之外/, command);
+  for (const command of [
+    "cd sub; git checkout -- f.txt",
+    "cd sub; git commit -m x",
+    "cd ..; git log --oneline",
+    "cd ..; git status",
+    "cd ..; rg TODO src",
+    "git checkout -- f.txt",
+    // 先后要对上：git 在 cd 之前，动的是工作目录
+    "git commit -m x; cd C:\\other; python a.py",
+    // cd 过的目录接着算：sub 再 -C .. 落回工作目录；出去又回来也算回来
+    "cd sub; git -C .. checkout -- f.txt",
+    "cd ..\\言; git commit -m x",
+    // branch / tag 的 --list 后面是模式，不是要建的名
+    'cd ..; git tag --list "v1.3*"',
+    "cd ..; git branch --list feat*",
+    // 写明了 --get 一类的 config，多出的操作数是模式或 URL
+    "git -C .. config --get-urlmatch http https://example.com/",
+    "git -C .. config --get-all remote.origin.fetch main"
+  ])
+    assert.equal(screen(command), null, command);
+  // 工作目录本身带 $ 或短文件名里的 ~：那是已解析好的目录，不是 shell 展开
+  for (const dir of ["C:\\tmp\\cost$repo", "C:\\Users\\RUNNER~1\\work"]) assert.equal(screenCommand("git add f.txt", dir, win), null, dir);
+});
+
+test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之外时，只看不改才放行；目录内与查看类照旧", () => {
+  for (const command of [
+    "git -C .. checkout -- src/a.js",
+    "git -C.. reset --hard",
+    "git -C ../other clean -fdx",
+    "git -C E:\\other checkout -- src/a.js",
+    "git --git-dir=..\\.git checkout -- src/a.js",
+    "git --git-dir ..\\.git reset --hard",
+    "git --work-tree .. restore .",
+    'git -C "E:\\other dir" checkout -- src/a.js',
+    // 全局开关夹在中间不能把子命令藏起来（--no-pager、-c 都试）
+    "git -C .. --no-pager checkout -- f.txt",
+    "git -C .. -c core.autocrlf=false reset --hard",
+    // 写子命令不能只列几个常见的：add、commit、rm、tag 一样动的是别处的仓库
+    "git -C .. add f.txt",
+    "git -C .. commit -am msg",
+    "git -C .. rm f.txt",
+    "git -C .. tag v9",
+    "git -C .. push origin main",
+    "git -C .. branch -d x",
+    "git -C .. config user.name x",
+    // 同一个 git 里的目录选项得全看：前一个在工作目录里，后一个指出去
+    "git --git-dir=.git --work-tree .. checkout -- f.txt",
+    "git -C sub -C ../.. checkout -- src/a.js",
+    // 静态看不出落到哪的（shell 展开）一律按出去了算；-c 能塞进 alias / pager，不算查看
+    "git -C $env:USERPROFILE checkout -- f.txt",
+    "git -C ~/other reset --hard",
+    "git -C .. -c core.pager=cat log"
+  ])
+    assert.match(screen(command), /工作目录之外/, command);
+  for (const command of [
+    "git -C sub checkout -- src/a.js",
+    "git -C . reset --hard",
+    "git checkout -- src/a.js",
+    "git reset --hard",
+    "git -C .. log --oneline",
+    "git -C .. status",
+    "git -C .. diff",
+    "git -C .. show HEAD",
+    "git -C .. branch",
+    "git -C .. branch -a",
+    "git -C .. branch --contains main",
+    "git -C .. config --get user.name",
+    "git -C .. config user.name",
+    "git -C .. remote -v",
+    "git -C .. stash list",
+    "git -C .. log --no-pager -n 5",
+    "git -C $env:USERPROFILE log --oneline",
+    // -C 按出现次序生效：sub 再 .. 又回到工作目录
+    "git -C sub -C .. checkout -- src/a.js",
+    "git status"
+  ])
+    assert.equal(screen(command), null, command);
+});
