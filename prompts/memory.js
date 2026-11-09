@@ -1,6 +1,6 @@
 // 言 · 内置提示词 · 录（记忆）
 // body：专司「记忆」配好时接在通用段落之后，条目整份带上（每段对话头一问时定格，见 src/11-memory.js 的 memorySnapshot）。
-// system / case：离开一段对话后交给专司「记忆」整理的那一问（见 src/11-memory.js 的 tidyMemory）
+// system / case：一答落定后交给专司「记忆」整理的那一问（见 src/11-memory.js 的 tidyMemory）
 (window.YAN_PROMPTS ||= {}).memory = {
   body: "你跨对话的记忆，整理自此前的对话：\n{{items}}",
   system: [
