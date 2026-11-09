@@ -463,8 +463,9 @@ button:focus:not(:focus-visible) {
 .outline.dense .outline-label {
   font-size: var(--fs-mark);
 }
-/* 「回到最新」：一枚圆钮，只一枚 ↓（四字收进 title），顶上一弧朱。
-   落选的：方角纸签（与「引用 | 旁注」同式，用户嫌不如圆的好看，2026-10-01）；白底胶囊（99px 圆角，被嫌脱节）。见 设计稿/26 二 */
+/* 「回到最新」：一枚圆钮，只一枚笔意的向下（四字收进 title），整圈一道淡线，朱只在悬停时上（设计稿/158 一乙）。
+   落选的：方角纸签（与「引用 | 旁注」同式，用户嫌不如圆的好看，2026-10-01）；白底胶囊（99px 圆角，被嫌脱节）。见 设计稿/26 二。
+   原先字体的 ↓ 配顶上常挂的一弧朱：旁边的「止」正转着一圈，这一弧看着也像在转；挪到右边贴着工作条（158 一丙）又压在步骤的用时与勾上 */
 .jump-bottom {
   position: absolute;
   left: 50%;
@@ -477,14 +478,19 @@ button:focus:not(:focus-visible) {
   place-items: center;
   padding: 0;
   border: 1px solid var(--line);
-  border-top-color: var(--accent);
   border-radius: 50%;
   background: var(--paper);
   color: var(--ink-2);
-  font-size: 14px;
-  line-height: 1;
-  box-shadow: 0 3px 10px rgba(61, 49, 32, 0.1);
+  box-shadow: 0 2px 8px rgba(61, 49, 32, 0.08);
   animation: rise var(--dur-rise) ease-out;
+}
+.jump-bottom .brush {
+  width: 16px;
+  height: 16px;
+}
+.jump-bottom .brush .ink {
+  fill: currentColor;
+  transition: fill var(--dur-quick);
 }
 .jump-bottom:hover {
   border-color: var(--accent);
