@@ -459,6 +459,32 @@ function gitReadOnly(sub, args) {
 function dynamicPath(value) {
   return /[$`~]|%[^%\\/]+%/.test(value);
 }
+/** 指令里有没有会改东西的 git 调用（查看类与没有子命令的不算） @param {string} text */
+function gitWrites(text) {
+  for (const tokens of commandSegments(text)) {
+    const invocation = gitInvocation(tokens);
+    if (invocation && !gitReadOnly(invocation.sub, invocation.args)) return true;
+  }
+  return false;
+}
+// 先换目录、再动仓库：`cd ..; git checkout -- f` 里那个 `..` 不是「改动路径」，写路径规则不会拿它去判
+const CD_COMMAND = /^(?:cd|chdir|sl|set-location|pushd|push-location)$/i;
+/** 指令里有没有先 cd 到工作目录之外（只在这条指令还带 git 写子命令时问） @param {string} text @param {string} workdir @param {boolean} win */
+function directoryChangeEscapes(text, workdir, win) {
+  const api = win ? path.win32 : path,
+    root = win ? api.normalize(workdir).toLowerCase() : api.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  let cwd = workdir;
+  for (const tokens of commandSegments(text)) {
+    if (!CD_COMMAND.test(tokens[0] || "")) continue;
+    const target = tokens[1];
+    // 不带参数是回到家目录；带 shell 展开的静态看不出落到哪——都按出去了算
+    if (!target || dynamicPath(target)) return true;
+    cwd = api.resolve(cwd, target);
+    const relative = api.relative(root, cwd);
+    if (relative && (relative === ".." || relative.startsWith(`..${api.sep}`) || api.isAbsolute(relative))) return true;
+  }
+  return false;
+}
 /**
  * git 的 -C / --git-dir / --work-tree 有没有把仓库指到工作目录之外：是则返回拒绝语，否则 null。
  * 目录选项按出现次序生效（-C sub -C .. 又绕回工作目录；后一个 --work-tree 覆盖前一个）；
@@ -523,6 +549,10 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   // 指到外面时只放行查看类子命令（git -C .. log 仍放行），目录内的 -C sub 照旧
   const gitWhy = gitEscapeWhy(text, workdir, win);
   if (gitWhy) return gitWhy;
+  // 另一种绕法：先 cd 出去再动仓库。`cd ..; git checkout -- f` 里的 `..` 不是「改动路径」，
+  // 写路径规则不拿它去判；上面那三个选项也一个都没有。指令里带 git 写子命令时，cd 的目标也得留在工作目录内
+  if (gitWrites(text) && directoryChangeEscapes(text, workdir, win))
+    return "沙箱拒绝：先 cd 到工作目录之外、再执行会改动仓库的 git 子命令。要改动那一处，请把工作目录设在那一处";
   if (NET_TOOLS.test(text)) {
     const hosts = [...text.matchAll(/https?:\/\/([^\s/"'`:]+)(?::\d+)?/gi)].map(m => m[1]);
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))

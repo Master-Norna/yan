@@ -637,6 +637,27 @@ test("攻击写法总表：三档与「审了也不放行」各得其所", () =>
       command
     );
 });
+test("screenCommand：先 cd 到工作目录之外、再动仓库，一样拒绝；目录内的 cd 与查看类照旧", () => {
+  for (const command of [
+    "cd ..; git checkout -- f.txt",
+    "cd ..; git reset --hard",
+    "cd C:\\other; git checkout -- src/a.js",
+    "pushd ..; git clean -fdx",
+    "Set-Location ..; git restore .",
+    "cd ..; git add f.txt"
+  ])
+    assert.match(screen(command), /工作目录之外/, command);
+  for (const command of [
+    "cd sub; git checkout -- f.txt",
+    "cd sub; git commit -m x",
+    "cd ..; git log --oneline",
+    "cd ..; git status",
+    "cd ..; rg TODO src",
+    "git checkout -- f.txt"
+  ])
+    assert.equal(screen(command), null, command);
+});
+
 test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之外时，只看不改才放行；目录内与查看类照旧", () => {
   for (const command of [
     "git -C .. checkout -- src/a.js",
