@@ -36,7 +36,7 @@ Packaging: run `npm run pack` in the repository to get `dist/yan-<version>-win-x
 2. Open `http://127.0.0.1:8787` in your system browser. Simple Browser embeds the page in an iframe, which Yan's `frame-ancestors 'none'` policy blocks; the bridge also doesn't open the agent API to extension webview origins.
 3. Fill in your settings in **Settings → Model**; you can click **Fetch list** and then **Test connection**. Web search is tested in **Settings → Tools**.
 
-## Opening index.html directly
+## Opening web/index.html directly
 
 Yan must be opened through the local bridge: run `start.cmd` (or `npm start`) and visit `http://127.0.0.1:8787` in your system browser. Double-clicking `web/index.html` (`file://`) can't reach the bridge: the bridge refuses pages whose origin is `null` (a `file://` page is one, and so is a sandboxed iframe embedded by another site; they can't be told apart). After editing `src/` or `styles/`, just reload (the bridge concatenates on each request and writes no build output).
 
