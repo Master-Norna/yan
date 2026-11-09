@@ -292,7 +292,7 @@ var YAN_EN = {
   "{0} 步": "{0} {0|step|steps}",
   领命中: "Starting",
   等后台: "Waiting on background",
-  正在: "Running",
+  "正在 {0}": "{0}",
   "等后台 {0}": "Waiting on background {0}",
   已跳过: "Skipped",
   完成: "Done",

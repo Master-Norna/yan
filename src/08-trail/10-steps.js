@@ -126,8 +126,11 @@ function delegateDoing(step) {
   const sub = step.sub,
     steps = sub?.steps || [],
     current = [...steps].reverse().find(s => s.status === "running" || s.status === "pending") || steps.at(-1);
-  if (current && (current.status === "running" || current.status === "pending"))
-    return `${current.status === "pending" ? t(AWAITING) : t("正在")} ${toolLabel(current.name)} ${String(current.gist || current.title || "").slice(0, 60)}`.trim();
+  if (current && (current.status === "running" || current.status === "pending")) {
+    // 英文的工具名本就是动词（Run、Read），前面再加 Running 成了「Running Run」：「正在 X」整句进表，英文只留工具名
+    const label = toolLabel(current.name);
+    return `${current.status === "pending" ? `${t(AWAITING)} ${label}` : t`正在 ${label}`} ${String(current.gist || current.title || "").slice(0, 60)}`.trim();
+  }
   // 睡着等自己挂的后台指令
   if (sub?.waiting) return t`等后台 ${helperWaits(sub).map(bgName).join("、").slice(0, 60)}`;
   const base = Math.max(0, ...steps.map(s => Number(s.at) || 0)),
