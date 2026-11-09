@@ -8,6 +8,7 @@
 "use strict";
 const fs = require("node:fs");
 const crypto = require("node:crypto");
+const os = require("node:os");
 const { spawn, execFile } = require("node:child_process");
 const { fasterSide, pickSource } = require("./mirror.js");
 const path = require("node:path");
@@ -234,16 +235,27 @@ async function engineHost(cli) {
   // 官方源不设变量：Playwright 自带几个备用地址，一个不通换下一个
   return side === "official" ? {} : { PLAYWRIGHT_DOWNLOAD_HOST: MIRROR_HOST };
 }
-// 装内核时多久没有一点进展算卡住：Playwright 每下完一成吐一行进度，正常的网一成十来秒；
-// 测速那几秒两边都没测准（刚连上时常卡一下）就会挑错源，挑错了靠这个换另一个源重来
+// 装内核时多久没有一点进展算卡住：测速那几秒两边都没测准（刚连上时常卡一下）就会挑错源，挑错了靠这个换另一个源重来。
+// 进展看下载的那个文件长没长，不只看输出：Playwright 每下完一成才吐一行，慢的线（一百来 KB/s）一成要两三分钟，
+// 只看输出会把下着的当卡住，两个源都掐掉（11-08 实测）
 const STALL_MS = 90000;
+/** @param {string} dir @returns {number} 目录里（连子目录）文件的总字节 */
+function bytesIn(dir) {
+  let total = 0;
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true }))
+      if (entry.isFile()) total += fs.statSync(path.join(entry.parentPath, entry.name)).size;
+  } catch {}
+  return total;
+}
 /**
  * 跑一趟安装，跑完才回；吐出的「n% of」报给 onProgress
  * @param {string} file @param {string[]} args @param {Record<string, string>} env @param {string} cwd
- * @param {{ stall?: number, onProgress?: (percent: number) => void }} [options] stall：多久没有输出即结束它、以 stalled 退回
+ * @param {{ stall?: number, grows?: string, onProgress?: (percent: number) => void }} [options]
+ *   stall：多久没有进展即结束它、以 stalled 退回；grows：下载落在这个目录里，里头的文件在长也算进展
  * @returns {Promise<string>}
  */
-function runInstall(file, args, env, cwd, { stall = 0, onProgress = () => {} } = {}) {
+function runInstall(file, args, env, cwd, { stall = 0, grows = "", onProgress = () => {} } = {}) {
   return new Promise((resolve, reject) => {
     // npm 在 Windows 上是 .cmd，得经 shell 起；参数都是言自己写的，没有外来的字
     // 路径里有空格（D:\Program Files\npm.cmd）：经 shell 起时整条加引号
@@ -261,6 +273,7 @@ function runInstall(file, args, env, cwd, { stall = 0, onProgress = () => {} } =
       if (!stall) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
+        clearInterval(meter);
         // 下载在它另起的子进程里，连根结束
         platform.killTree(child);
         reject(Object.assign(Error("下载卡住了"), { stalled: true }));
@@ -273,14 +286,27 @@ function runInstall(file, args, env, cwd, { stall = 0, onProgress = () => {} } =
       watch();
     };
     watch();
+    let size = 0;
+    const meter =
+      stall && grows
+        ? setInterval(() => {
+            const now = bytesIn(grows);
+            if (now !== size) watch();
+            size = now;
+          }, 3000)
+        : undefined;
+    const done = () => {
+      clearTimeout(timer);
+      clearInterval(meter);
+    };
     child.stdout.on("data", keep);
     child.stderr.on("data", keep);
     child.on("error", error => {
-      clearTimeout(timer);
+      done();
       reject(error);
     });
     child.on("close", code => {
-      clearTimeout(timer);
+      done();
       code === 0 ? resolve(tail) : reject(Error(tail.trim().split("\n").slice(-3).join(" ") || `退出码 ${code}`));
     });
   });
@@ -318,14 +344,26 @@ async function installStage(what, root, onProgress) {
   if (!fs.existsSync(args[0])) throw Error("先装依赖，再装内核");
   const first = await engineHost(args[0]),
     other = first.PLAYWRIGHT_DOWNLOAD_HOST ? {} : { PLAYWRIGHT_DOWNLOAD_HOST: MIRROR_HOST };
+  // Playwright 把压缩包下到系统临时目录下另起的一格里：给它一个言自己的临时目录，好看下着的文件长没长；装完连同半截的包一起清掉
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "yan-engine-")),
+    run = (/** @type {Record<string, string>} */ host) =>
+      runInstall(file, args, { ...env, ...host, TEMP: tmp, TMP: tmp, TMPDIR: tmp }, at.deps, {
+        stall: STALL_MS,
+        grows: tmp,
+        onProgress
+      }).catch(error => {
+        // 被结束的那一趟留着 Playwright 的目录锁，不清掉下一趟（换源重来、或人再点一次）要干等它过期
+        if (error.stalled) fs.rmSync(path.join(at.engine, "__dirlock"), { recursive: true, force: true });
+        throw error;
+      });
   try {
-    return await runInstall(file, args, { ...env, ...first }, at.deps, { stall: STALL_MS, onProgress });
+    return await run(first);
   } catch (error) {
     if (!(/** @type {any} */ (error).stalled)) throw error;
-    // 被结束的那一趟留着 Playwright 的目录锁，不清掉下一趟要干等它过期
-    fs.rmSync(path.join(at.engine, "__dirlock"), { recursive: true, force: true });
     onProgress?.(0);
-    return runInstall(file, args, { ...env, ...other }, at.deps, { stall: STALL_MS, onProgress });
+    return await run(other);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 /** @param {string} root */
