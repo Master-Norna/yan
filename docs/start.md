@@ -29,7 +29,7 @@ macOS 上双击 `start.command`（头一回若被拦，在访达里右键选「�
 
 `言.exe` 没有代码签名，头一回双击 Windows 可能提示「已保护你的电脑」，点「更多信息 → 仍要运行」即可。
 
-打包：在仓库里运行 `npm run pack`，得 `dist/yan-<版本>-win-x64.zip`（旧版本的包随之删去，发过的在 GitHub Release 上）。要用到系统自带的 `curl.exe`、`tar.exe` 与 .NET Framework 4 的 `csc.exe`（Windows 10 / 11 都有）；Node 的版本写在 `pack/pack.mjs` 开头，压缩包按 nodejs.org 的校验和验过才用，换版本后整套测试用包里的 Node 跑一遍（`dist\言\node\node.exe test/run.mjs`）。启动器的源码是 `pack/launcher.cs`，图标 `pack/icon.ico` 由 `icon.svg` 画成。
+打包：在仓库里运行 `npm run pack`，得 `dist/yan-<版本>-win-x64.zip`（旧版本的包随之删去，发过的在 GitHub Release 上）。要用到系统自带的 `curl.exe`、`tar.exe` 与 .NET Framework 4 的 `csc.exe`（Windows 10 / 11 都有）；Node 的版本写在 `pack/pack.mjs` 开头，压缩包按 nodejs.org 的校验和验过才用，换版本后整套测试用包里的 Node 跑一遍（`dist\言\node\node.exe test/run.mjs`）。启动器的源码是 `pack/launcher.cs`，图标 `pack/icon.ico` 由 `web/icon.svg` 画成。
 
 ## 在 VS Code 内使用
 
@@ -39,7 +39,7 @@ macOS 上双击 `start.command`（头一回若被拦，在访达里右键选「�
 
 ## 直接打开 index.html
 
-言须经本机桥接打开：运行 start.cmd（或 `npm start`），用系统浏览器访问 `http://127.0.0.1:8787`。直接双击 `index.html`（`file://`）接不上桥接——桥接不认来源为 `null` 的页面（`file://` 页面是它，别处网页嵌进来的沙箱 iframe 也是它，分不出来）。改过 `src/` 或 `styles/` 后刷新即生效（桥接按请求即时拼接，不落成文件）。
+言须经本机桥接打开：运行 start.cmd（或 `npm start`），用系统浏览器访问 `http://127.0.0.1:8787`。直接双击 `web/index.html`（`file://`）接不上桥接——桥接不认来源为 `null` 的页面（`file://` 页面是它，别处网页嵌进来的沙箱 iframe 也是它，分不出来）。改过 `src/` 或 `styles/` 后刷新即生效（桥接按请求即时拼接，不落成文件）。
 
 ## 环境变量
 
