@@ -1,4 +1,4 @@
-// 言 · 设置 · 专司：主答之外各司一事的几位——拟题随对话的模型、只有开关；记忆、审查与生图各自另配一份，
+// 言 · 设置 · 专司：主答之外各司一事的几位——拟题随对话的模型、只有开关；记忆优化、审查与生图各自另配一份，
 // 不借模型栏里的那几份：同一份发，会挤掉主答的提示缓存，本机的模型还得多扛一路并发。
 // 审查可走 ChatGPT 订阅：借的是登录的账号、不是哪一份模型，另挑的小模型缓存各归各，免得只为审查另养一个 Key。
 // 一职一张卡，样子同模型栏：收起一行只写职名与模型名（拟题、没配的不写），最右一粒记号——墨点是开或已配，空圈是关或未配；
@@ -7,10 +7,10 @@
 /** @typedef {"memory"|"review"|"image"} DutyId */
 /** @type {Record<DutyId, { key: "dutyMemory"|"dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string }>} */
 const DUTIES = {
-  // 记忆：配好了每段对话开头带上记忆，每一答落定后由它整理（见 11-memory.js）；关着即不带不记
+  // 记忆优化：配好了每段对话开头带上记忆、主模型可记，记忆改过后由它理一遍（见 11-memory.js）；关着即不带不记
   memory: {
     key: "dutyMemory",
-    name: () => t("记忆"),
+    name: () => t("记忆优化"),
     apis: ["siliconflow", "openai", "anthropic", "chatgpt"],
     off: () => t("关，不带记忆")
   },
@@ -39,7 +39,7 @@ function dutyOf(id) {
   return store.settings[DUTIES[id].key];
 }
 /**
- * 问一回专司里另配的那一位（审查、记忆整理）：拼成一份临时的模型配置——不扣余墨、不认思考档位，花的墨只记进用量簿的这一类
+ * 问一回专司里另配的那一位（审查、记忆优化）：拼成一份临时的模型配置——不扣余墨、不认思考档位，花的墨只记进用量簿的这一类
  * @param {"review"|"memory"} id @param {string} text @param {{ systemPrompt: string, maxTokens: number, signal: AbortSignal }} options
  */
 async function askDuty(id, text, { systemPrompt, maxTokens, signal }) {
@@ -106,8 +106,6 @@ function bindDutySettings() {
           d.on = button.dataset.value === "true";
           // 头一回开：硅基流动的地址替它填上
           if (d.on && d.api === "siliconflow" && !d.baseUrl) d.baseUrl = SILICONFLOW_BASE;
-          // 记忆从开起这一刻算起：此前的旧对话不拿去整理（关着那阵的也不补）
-          if (d.on && id === "memory") store.memory.since = now();
           saveStore();
           renderSettings();
         })

@@ -395,41 +395,43 @@ var YAN_EN = {
   已止: "Stopped",
 
   // ---- 记忆 ----
-  打开来源对话: "Open source chat",
-  来源对话: "Source chat",
   手记: "Manual",
+  尚无记忆: "No memory yet",
+  "每段对话开头带上；记忆改过后，由专司「记忆优化」理一遍":
+    "Included at the start of every chat; after it changes, the Memory optimization duty goes over it",
+  "在专司里配好「记忆优化」后，才带上、才记": "Set up Memory optimization under Duties to include and record it",
+  "这一类的记忆将被移除，无法撤销；对话不受影响。": "This category will be removed. This can't be undone; chats are not affected.",
+  "记忆：理过 {0} 类": "Memory: {0} {0|category|categories} tidied",
+  "{0} 类 · {1} 字": "{0} {0|category|categories} · {1} characters",
+  "{0} 类记忆将被移除，无法撤销；对话不受影响。":
+    "{0} {0|category|categories} of memory will be removed. This can't be undone; chats are not affected.",
+  记忆优化: "Memory optimization",
+  "、{0} 类记忆": ", {0} memory {0|category|categories}",
+  "已删去「{0}」": "Deleted “{0}”",
+  "「{0}」没有变": "“{0}” unchanged",
+  "已写入「{0}」": "Wrote “{0}”",
+  未变: "Unchanged",
+  新起: "New",
   记忆内容: "Memory content",
   修改: "Edit",
-  归入别类: "Move to category",
   另起一类: "New category",
   分类名: "Category name",
   "分类名；与已有分类同名即并为一类": "Category name; using an existing name merges them",
   手记一条: "Add a memory",
   删去此类: "Delete category",
-  "{0} 条 · {1} 字": "{0} {0|entry|entries} · {1} characters",
   " · {0} 类": " · {0} {0|category|categories}",
   带进对话: "Brought into chats",
   未带进对话: "Not brought into chats",
-  "每段对话开头带上，离开一段后由专司「记忆」在后台整理":
-    "Included at the start of every chat; tidied in the background by the Memory duty after you leave a chat",
-  "在专司里配好「记忆」后，才带上、才整理": "Set up Memory under Duties to include and tidy it",
   "记下 {0} 条": "{0} added",
   "改 {0} 条": "{0} updated",
-  "删 {0} 条": "{0} removed",
   "记忆：{0}": "Memory: {0}",
   清空记忆: "Clear memory",
   开: "On",
   关: "Off",
-  尚无一条: "Nothing yet",
-  "已归入「{0}」": 'Moved to "{0}"',
-  "另起一类…": "New category…",
   新类名: "New category name",
   "删去「{0}」这一类？": 'Delete the "{0}" category?',
-  "其中 {0} 条记忆将被移除，无法撤销；对话不受影响。":
-    "{0} {0|memory in it|memories in it} will be removed. This can't be undone; chats are not affected.",
   删去: "Delete",
   "清空记忆？": "Clear memory?",
-  "{0} 条记忆将被移除，无法撤销；对话不受影响。": "{0} {0|memory|memories} will be removed. This can't be undone; chats are not affected.",
   清空: "Clear",
   记忆已清空: "Memory cleared",
 
@@ -748,7 +750,6 @@ var YAN_EN = {
   "、{0} 个预设": ", {0} {0|preset|presets}",
   "、{0} 个 MCP 服务（密钥需重填）": ", {0} {0|MCP server|MCP servers} (secrets need re-entering)",
   "、{0} 份草稿": ", {0} {0|draft|drafts}",
-  "、{0} 条记忆": ", {0} {0|memory|memories}",
   "，恢复 {0} 件附件原件": ", restored {0} {0|attachment|attachments}",
   "；备份不含附件原件，旧附件将显示为不可用": "; the backup has no attachments, so old ones will show as unavailable",
   "已导入 {0} 段对话、{1} 个模型{2}{3}{4}{5}{6}{7}{8}": "Imported {0} {0|chat|chats}, {1} {1|model|models}{2}{3}{4}{5}{6}{7}{8}",
@@ -1942,13 +1943,13 @@ var YAN_EN = {
   "录是一份跨对话的记忆：你的偏好、身份与约定，此后不必重述。只存于本机。":
     "Memory carries across conversations: your preferences, who you are and what's been agreed, so you needn't repeat them. It's stored only on this machine.",
   带与记: "Bringing and remembering",
-  "专司里配好「记忆」，每段对话开头便带上整份记忆，模型不必去翻。每一答落定，专司「记忆」就在后台读这段新近的问答，补记、合并、删去推翻了的；改了几条，提示一句。模型也可当场记一条，行迹里写作「记入」。":
-    "Once Memory is set up under Duties, every chat starts with the whole memory included, so the model doesn't have to look anything up. Whenever an answer settles, the Memory duty reads the chat's recent exchanges in the background, adds what's new, merges and removes what's been overturned; a short notice says what changed. The model can also save an item on the spot, shown as “Remember” under Steps.",
+  "专司里配好「记忆优化」，每段对话开头便带上整份记忆，模型不必去翻。记忆一类一份，模型要记便把那一类整份改过，行迹里写作「记入」。记忆改过后，一答落定时专司「记忆优化」理一遍：合并重复、改掉矛盾、删去废话；理过几类，提示一句。":
+    "Once Memory optimization is set up under Duties, every chat starts with the whole memory included, so the model doesn't have to look anything up. Memory is kept as one text per category; to remember something the model rewrites that whole category, shown as “Remember” under Steps. After the memory changes, the Memory optimization duty goes over it when an answer settles: merging repeats, fixing contradictions and cutting filler; a short notice says how many categories it touched.",
   改与忘: "Editing and forgetting",
-  "设置 → 记忆先列各类，点开一类方见其中条目：每条皆可修改、删除、改归别类，长条目平时收起、点开即全文；分类名亦可改，改作已有之名即并为一类。专司里关掉「记忆」，便不带也不记，条目仍在。":
-    "Settings → Memory lists the categories first; open one to see its items. Each item can be edited, deleted or moved to another category; long items are collapsed until clicked. Categories can be renamed too, and renaming one to an existing name merges them. Turning Memory off under Duties stops including and recording it; the items stay.",
-  "整理只读你说的话与模型的答复，不读网页、文件这些工具结果。查旧对话、读旧对话两件常给，与记忆开不开无关。":
-    "Tidying reads only what you said and the model's replies, not tool results such as web pages or files. Searching and reading past chats are always available, whether memory is on or not.",
+  "设置 → 记忆左列各类，右边是选中那一类的全文，点一下即改，改空即删去这一类；分类名亦可改，改作已有之名即并为一类。专司里关掉「记忆优化」，便不带也不记，记忆仍在。":
+    "Settings → Memory lists the categories on the left and the selected one's full text on the right; click it to edit, and emptying it deletes the category. Categories can be renamed too, and renaming one to an existing name merges them. Turning Memory optimization off under Duties stops including and recording it; the memory stays.",
+  "记忆优化只读记忆本身，不读对话。查旧对话、读旧对话两件常给，与记忆开不开无关。":
+    "Memory optimization reads only the memory itself, not your chats. Searching and reading past chats are always available, whether memory is on or not.",
   存储边界: "Storage and boundaries",
   "数据所在，及其边界": "Where your data lives, and its boundaries",
   所在: "Location",

@@ -1,6 +1,5 @@
-/* 记忆分栏（设计稿/49 甲）：左一列类目，右边选着那一类的条目。条目平时只读、一条一行摘要，点开就地摊开全文，
-   「改」才换输入框。落选：先列分类、点进去再列条目（一层套一层，回来只靠一枚小「‹ 记忆」）；条目常开输入框、
-   长的半截淡出（像没画完），条下重写类名（碎字） */
+/* 记忆分栏（设计稿/49 甲）：左一列类目，右边选着那一类的全文（记忆一类一份），平时只读，点一下或「改」才换输入框。
+   落选：先列分类、点进去再列条目（一层套一层，回来只靠一枚小「‹ 记忆」）；常开输入框（像没画完） */
 .memory-split {
   display: grid;
   grid-template-columns: 148px minmax(0, 1fr);
@@ -30,11 +29,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.memory-cat em {
-  margin-left: auto;
-  color: var(--ink-3);
-  font: normal var(--fs-note) var(--title);
 }
 .memory-cat:hover {
   color: var(--ink);
@@ -69,12 +63,6 @@ input.memory-cat-new {
   padding: 10px 0 6px;
   border-bottom: 1px solid var(--line);
 }
-.memory-cat-count {
-  color: var(--ink-3);
-  font: var(--fs-note) var(--title);
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
 /* 分类名就地可改：改成已有的名字即并入那一类 */
 .memory-cat-name {
   field-sizing: content;
@@ -93,40 +81,32 @@ input.memory-cat-new {
 .memory-cat-name:focus {
   border-bottom-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
-.memory-item {
-  border-bottom: 1px solid var(--line);
-}
-.memory-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 14px;
-  width: 100%;
-  padding: 10px 0;
-  text-align: left;
-}
-.memory-gist {
-  overflow: hidden;
-  color: var(--ink-2);
-  font-size: var(--fs-mid);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color var(--dur-quick);
-}
-.memory-row:hover .memory-gist {
-  color: var(--ink);
-}
 .memory-day {
   color: var(--ink-3);
   font: var(--fs-note) var(--title);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
-/* 摊开的一条：左侧一道淡墨竖痕 */
+.memory-sheet {
+  padding: 12px 0;
+}
+/* 以下三样如今只有技能页在借（摊开的一份、底下一行注记与小画） */
+.memory-item {
+  border-bottom: 1px solid var(--line);
+}
 .memory-item.open {
   margin: 4px 0;
   padding: 12px 0 8px 12px;
   border-left: 1.5px solid color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.memory-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--ink-3);
+  font: var(--fs-note) var(--title);
+  letter-spacing: 0.04em;
 }
 .memory-body,
 .memory-text {
@@ -138,7 +118,7 @@ input.memory-cat-new {
 }
 .memory-body {
   white-space: pre-wrap;
-  cursor: default;
+  cursor: text;
 }
 .memory-body b {
   font-weight: 600;
@@ -157,29 +137,10 @@ input.memory-cat-new {
 .memory-text:focus {
   outline: none;
 }
-.memory-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 6px;
-  color: var(--ink-3);
-  font: var(--fs-note) var(--title);
-  letter-spacing: 0.04em;
-}
-.memory-source {
-  border-bottom: 1px dashed color-mix(in srgb, var(--ink) 25%, transparent);
-  color: var(--ink-3);
-  font: inherit;
-  letter-spacing: inherit;
-  transition: color var(--dur-quick);
-}
-.memory-source:hover {
-  color: var(--accent);
-}
 .memory-spacer {
   flex: 1;
 }
-/* 改 · 归入别类 · 删去：三枚小画，删的那一笔透一点朱 */
+/* 改 · 删去此类：两枚小画，删的那一笔透一点朱 */
 .memory-ops {
   display: flex;
   align-items: center;
@@ -203,30 +164,11 @@ input.memory-cat-new {
 .memory-ops .memory-del svg .ink {
   fill: color-mix(in srgb, var(--accent) 85%, var(--ink));
 }
-/* 另起一类时就地换成的输入框 */
-.memory-move {
-  field-sizing: content;
-  min-width: 4em;
-  max-width: 12em;
-  padding: 0 2px;
-  border: 0;
-  border-bottom: 1px dashed var(--line);
-  outline: 0;
-  background: none;
-  color: var(--ink);
-  font: var(--fs-note) var(--title);
-  letter-spacing: 0.04em;
-}
 .memory-empty {
   margin: 0;
   padding: 18px 0;
   color: var(--ink-3);
   font-size: var(--fs-mid);
-}
-.memory-foot {
-  display: flex;
-  gap: 10px;
-  margin-top: 14px;
 }
 .welcome-notice {
   width: min(100%, var(--read));

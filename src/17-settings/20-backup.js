@@ -150,22 +150,16 @@ async function importData(file) {
         uncacheAttachment(record.id);
         files += 1;
       }
-    const memoryIds = new Set(store.memory.items.map(item => item.id)),
-      memoryTexts = new Set(store.memory.items.map(item => item.text));
-    let memories = 0;
-    for (const item of incoming.memory.items)
-      if (!memoryIds.has(item.id) && !memoryTexts.has(item.text)) {
-        store.memory.items.push(item);
-        memoryIds.add(item.id);
-        memoryTexts.add(item.text);
-        memories += 1;
-      }
+    // 记忆一类一项：同名一类的全文接上去（一字不差的行不重接，见 normalizeMemory），没有的类添上
+    const memoryWas = new Map(store.memory.items.map(item => [item.category, item.text]));
+    store.memory = normalizeMemory({ ...store.memory, items: [...store.memory.items, ...incoming.memory.items] });
+    const memories = store.memory.items.filter(item => memoryWas.get(item.category) !== item.text).length;
     if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
     saveStore();
     render();
     renderSettings();
     toast(
-      t`已导入 ${conversations} 段对话、${added} 个模型${groups ? t`、${groups} 个分组` : ""}${presets ? t`、${presets} 个预设` : ""}${servers ? t`、${servers} 个 MCP 服务（密钥需重填）` : ""}${drafts ? t`、${drafts} 份草稿` : ""}${memories ? t`、${memories} 条记忆` : ""}${files ? t`，恢复 ${files} 件附件原件` : ""}${data.attachments ? "" : t("；备份不含附件原件，旧附件将显示为不可用")}`
+      t`已导入 ${conversations} 段对话、${added} 个模型${groups ? t`、${groups} 个分组` : ""}${presets ? t`、${presets} 个预设` : ""}${servers ? t`、${servers} 个 MCP 服务（密钥需重填）` : ""}${drafts ? t`、${drafts} 份草稿` : ""}${memories ? t`、${memories} 类记忆` : ""}${files ? t`，恢复 ${files} 件附件原件` : ""}${data.attachments ? "" : t("；备份不含附件原件，旧附件将显示为不可用")}`
     );
   } catch (error) {
     toast(t`导入失败：${String(error.message || error).slice(0, 80)}`);

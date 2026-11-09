@@ -29,7 +29,7 @@ let calls = 0,
   reviewAsks = [],
   // 生图接口收到的每一问（GET /image-asks 取走并清空）
   imageAsks = [],
-  // 记忆整理收到的每一问：系统提示与那一段话（GET /tidy-asks 取走并清空）
+  // 记忆优化收到的每一问：系统提示与那一段话（GET /tidy-asks 取走并清空）
   tidyAsks = [],
   flaky503 = 0,
   titleFailed = false,
@@ -229,22 +229,18 @@ http
         const answer = text.includes("Set-Alias") ? "准" : quick ? "疑" : "驳，用户没让把这串参数发出去";
         return sse(res, [delta({ content: answer }), delta({}, { usage: { total_tokens: 3 } })]);
       }
-      // 记忆整理（专司「记忆」，见 src/11-memory.js 的 tidyMemory）：记一条新的、改 PowerShell 那条、删「中文交流」那条；裹一层围栏、前头多一句，页面得认得出清单
-      if (String(msgs[0]?.role === "system" ? msgs[0].content : "").includes("你替一位助手整理")) {
+      // 记忆优化（专司「记忆优化」，见 src/11-memory.js 的 tuneMemory）：「偏好」两行并成一行、另起「工作」一类；裹一层围栏、前头多一句，页面得认得出清单
+      if (String(msgs[0]?.role === "system" ? msgs[0].content : "").includes("你替一位助手精简")) {
         const text = String(lastUser);
         tidyAsks.push({ system: msgs[0].content, user: text });
-        const ps = text.match(/\[(m[a-z0-9]+)\][^\n]*PowerShell/)?.[1],
-          zh = text.match(/\[(m[a-z0-9]+)\][^\n]*中文交流/)?.[1],
-          ops = text.includes("MEMORY go")
-            ? [
-                { op: "add", category: "工作", text: "用户在做言的记忆模块" },
-                ...(ps ? [{ op: "update", id: ps, text: "用户偏好 PowerShell 而非 bash" }] : []),
-                ...(zh ? [{ op: "delete", id: zh }] : []),
-                { op: "update", id: "mgone", text: "认不得的 id 跳过" }
-              ]
-            : [];
+        const ops = text.includes("用户偏好 PowerShell")
+          ? [
+              { category: "偏好", text: "用户偏好中文交流；命令用 PowerShell 而非 bash" },
+              { category: "工作", text: "用户在做言的记忆模块" }
+            ]
+          : [];
         return sse(res, [
-          delta({ content: `整理如下：\n\`\`\`json\n${JSON.stringify(ops)}\n\`\`\`` }),
+          delta({ content: `理过如下：\n\`\`\`json\n${JSON.stringify(ops)}\n\`\`\`` }),
           delta({}, { usage: { total_tokens: 11 } })
         ]);
       }
@@ -2027,7 +2023,8 @@ http
         ]);
       }
       if (typeof lastUser === "string" && lastUser.includes("MEMORY")) {
-        // 记忆：系统提示里带着整份记忆；记入 → 再记（合并）→ 查旧谈 → 翻旧谈 → 列最近的旧谈 → 收尾（各步对不对由这边判好写进正文，不把工具结果抄进答复）
+        // 记忆：系统提示里带着整份记忆（一类一段）；改写「偏好」→ 起「杂记」→ 写空删去 → 查旧谈 → 翻旧谈 → 列最近的旧谈 → 收尾
+        // （各步对不对由这边判好写进正文，不把工具结果抄进答复）
         const n = toolResults.length,
           sys = String(msgs[0]?.role === "system" ? msgs[0].content : ""),
           names = (payload.tools || []).map(t => t.function.name),
@@ -2038,38 +2035,37 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ];
         const say = content => sse(res, [delta({ content }), delta({}, { usage: { total_tokens: 5 } })]);
-        // 这段对话头一问时定格的记忆：后来记的、整理出的有没有进来
+        // 这段对话头一问时定格的记忆：后来记的、理过的有没有进来
         if (lastUser.includes("MEMORY-SNAP"))
           return say(
-            `SNAP|ps:${sys.includes("命令写成 PS 语法") ? "yes" : "no"}|bash:${sys.includes("而非 bash") ? "yes" : "no"}|work:${sys.includes("用户在做言的记忆模块") ? "yes" : "no"}|zh:${sys.includes("用户偏好中文交流") ? "yes" : "no"}`
+            `SNAP|bash:${sys.includes("而非 bash") ? "yes" : "no"}|work:${sys.includes("用户在做言的记忆模块") ? "yes" : "no"}|zh:${sys.includes("用户偏好中文交流") ? "yes" : "no"}`
           );
         if (lastUser.includes("MEMORY-OFF"))
           return say(
             `OFF|body:${sys.includes("你跨对话的记忆") ? "yes" : "no"}|memtools:${names.filter(x => ["remember", "recall", "forget"].includes(x)).length}|talks:${names.filter(x => ["search_conversations", "read_conversation"].includes(x)).length}`
           );
-        if (n === 0) return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell" }));
-        if (n === 1) {
-          const id = result(0).match(/\[(m[a-z0-9]+)\]/)?.[1];
-          return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell，命令写成 PS 语法", replaces: id }));
-        }
-        if (n === 2) return sse(res, call("search_conversations", { query: "术语" }));
-        if (n === 3) {
-          const id = result(2).match(/\[([0-9a-f-]{20,})\]/)?.[1];
+        if (n === 0) return sse(res, call("remember", { category: "偏好", text: "用户偏好中文交流\n用户偏好 PowerShell" }));
+        if (n === 1) return sse(res, call("remember", { category: "杂记", text: "临时一条" }));
+        if (n === 2) return sse(res, call("remember", { category: "杂记", text: "" }));
+        if (n === 3) return sse(res, call("search_conversations", { query: "术语" }));
+        if (n === 4) {
+          const id = result(3).match(/\[([0-9a-f-]{20,})\]/)?.[1];
           return sse(res, call("read_conversation", { id: id || "none" }));
         }
-        if (n === 4) return sse(res, call("search_conversations", {}));
+        if (n === 5) return sse(res, call("search_conversations", {}));
         const flag = ok => (ok ? "yes" : "no");
         return say(
           [
             "MEM",
-            `body:${flag(sys.includes("你跨对话的记忆") && sys.includes("[m0001]") && sys.includes("用户偏好中文交流"))}`,
-            `recall:${flag(names.includes("recall"))}`,
-            `saved:${flag(result(0).startsWith("已记入 [m"))}`,
-            `merged:${flag(result(1).startsWith("已更新 [m"))}`,
-            `search:${flag(result(2).includes("「旧谈一则」共 2 条"))}`,
-            `read:${flag(result(3).includes("OLDSECRET"))}`,
-            `recent:${flag(result(4).includes("「旧谈一则」") && result(4).includes("请解释术语 X"))}`,
-            `self:${flag(result(4).includes("MEMORY go"))}`
+            `body:${flag(sys.includes("你跨对话的记忆") && sys.includes("「偏好」\n用户偏好中文交流") && !sys.includes("[m"))}`,
+            `forget:${flag(names.includes("forget") || names.includes("recall"))}`,
+            `rewrote:${flag(result(0) === "已写入「偏好」")}`,
+            `added:${flag(result(1) === "已写入「杂记」")}`,
+            `dropped:${flag(result(2) === "已删去「杂记」")}`,
+            `search:${flag(result(3).includes("「旧谈一则」共 2 条"))}`,
+            `read:${flag(result(4).includes("OLDSECRET"))}`,
+            `recent:${flag(result(5).includes("「旧谈一则」") && result(5).includes("请解释术语 X"))}`,
+            `self:${flag(result(5).includes("MEMORY go"))}`
           ].join("|")
         );
       }

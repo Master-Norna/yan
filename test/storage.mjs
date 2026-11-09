@@ -321,12 +321,13 @@ await sleep(1500);
 t = Date.now();
 while (Date.now() - t < 6000 && (readConfig()?.profiles || []).length < 2) await sleep(150);
 const joined = await evalJs(
-  `(s => ({ profiles: s.profiles.map(p => p.id).sort().join(), memory: s.memory.items.map(m => m.id).sort().join() }))(__yanState())`
+  `(s => ({ profiles: s.profiles.map(p => p.id).sort().join(), memory: s.memory.items.map(m => m.category + ":" + m.text).join("|") }))(__yanState())`
 );
 check(
   "a second browser meeting this storage merges its own models and memory with the shared config",
   joined.profiles === "p1,p2" &&
-    joined.memory === "m1,m2" &&
+    // 记忆一类一项：两处都是「未分类」，并成一项、两句依次接起
+    joined.memory === "未分类:用户爱喝茶\n另一处记下的" &&
     (readConfig()?.profiles || [])
       .map(p => p.id)
       .sort()

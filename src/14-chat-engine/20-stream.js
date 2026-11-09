@@ -213,7 +213,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       setTimeout(() => maybeAutoCompact(conversation, profile), 0);
       void maybeAutoTitle(conversation, profile);
     }
-    // 一答落定（不再接着答）：交给专司「记忆」在后台整理这段新近的问答，人在不在这段都一样
-    if (!goesOn) void tidyMemory(conversation);
+    // 一答落定（不再接着答）：记忆改过的话，交专司「记忆优化」理一遍
+    if (!goesOn) void tuneMemory();
   }
 }

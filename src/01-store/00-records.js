@@ -47,7 +47,7 @@ const defaultStore = {
   },
   profiles: [],
   conversations: [],
-  memory: { since: "", items: [] },
+  memory: { tunedAt: "", items: [] },
   drafts: {}
 };
 // 结构迁移：缺的字段由下面的规整补上，这里只管「同一个字段换了意思」的那几回。
@@ -200,21 +200,26 @@ function normalizeDrafts(drafts) {
     for (const [key, value] of Object.entries(drafts)) out[key] = normalizeDraft(value);
   return out;
 }
+// 记忆一类一项（见 11-memory.js）：旧版一条一事的同类几条、两处各起的同名一类，读入时并成一项——全文依次接起（旧的在前），
+// 已有的行不重接，日子取最近的
 function normalizeMemory(memory) {
-  return {
-    since: String(memory?.since || ""),
-    items: (Array.isArray(memory?.items) ? memory.items : [])
-      .filter(item => item?.id && typeof item.text === "string" && item.text.trim())
-      .map(item => ({
-        id: String(item.id),
-        text: item.text,
-        category: String(item.category || ""),
-        createdAt: item.createdAt || now(),
-        updatedAt: item.updatedAt || item.createdAt || now(),
-        source:
-          item.source && typeof item.source === "object"
-            ? { conversationId: item.source.conversationId || "", title: String(item.source.title || "") }
-            : null
-      }))
-  };
+  /** @type {Map<string, MemoryItem>} */
+  const byName = new Map();
+  const items = (Array.isArray(memory?.items) ? memory.items : [])
+    .filter(item => item?.id && typeof item.text === "string" && item.text.trim())
+    .sort((a, b) => String(a.updatedAt || a.createdAt || "").localeCompare(String(b.updatedAt || b.createdAt || "")));
+  for (const item of items) {
+    const category = String(item.category || "").trim() || "未分类",
+      updatedAt = String(item.updatedAt || item.createdAt || now()),
+      text = item.text.trim(),
+      same = byName.get(category);
+    if (!same) byName.set(category, { id: String(item.id), category, text, updatedAt });
+    else {
+      const had = new Set(same.text.split("\n").map(line => line.trim())),
+        more = text.split("\n").filter(line => !had.has(line.trim()));
+      if (more.length) same.text = `${same.text}\n${more.join("\n")}`;
+      if (updatedAt > same.updatedAt) same.updatedAt = updatedAt;
+    }
+  }
+  return { tunedAt: String(memory?.tunedAt || ""), items: [...byName.values()] };
 }

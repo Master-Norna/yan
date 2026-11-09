@@ -1,5 +1,5 @@
-// 言 · 录（记忆）与旧谈：都在浏览器里完成，不经桥接，也不需确认——每一步都在行迹里显示，条目在设置页可改可删。
-// 记与忘在专司「记忆」配好时才有、只给主模型；记忆本身整份带在系统提示里（见 11-memory.js），不必另翻。
+// 言 · 录（记忆）与旧谈：都在浏览器里完成，不经桥接，也不需确认——每一步都在行迹里显示，记忆在设置页可改可删。
+// remember 在专司「记忆优化」配好时才有、只给主模型：记忆一类一份，写的是那一类改后的全文（见 11-memory.js）。
 // 查旧谈、读旧谈常给：翻的是自己的对话，与记忆开不开无关
 const CONVERSATION_MESSAGE_CHARS = 1500; // read_conversation 每条消息最多给这么多字
 defineTool({
@@ -9,47 +9,21 @@ defineTool({
   offer: () => memoryOn(),
   mainOnly: true,
   sideEffect: true,
-  run(step, args, { conversation }) {
-    const items = store.memory.items,
-      text = cleanMemoryText(args.text),
-      category = cleanMemoryCategory(args.category);
-    step.title = `${category}｜${text.length > 120 ? `${text.slice(0, 120)}…` : text}`;
-    if (!text) return { ok: false, content: t("text 不能为空"), display: "内容为空" };
-    const source = { conversationId: conversation.id, title: conversation.title };
-    const existing = (args.replaces && items.find(item => item.id === args.replaces)) || items.find(item => item.text === text);
-    if (existing) {
-      Object.assign(existing, { text, category, updatedAt: now(), source });
-      saveStore();
-      refreshMemorySettings();
-      return { ok: true, content: t`已更新 ${memoryLine(existing, true)}`, display: "合并" };
-    }
-    const item = addMemory(text, source, category);
-    refreshMemorySettings();
-    return { ok: true, content: t`已记入 ${memoryLine(item, true)}`, display: "" };
-  }
-});
-
-defineTool({
-  name: "forget",
-  group: "memory",
-  label: t("忘却"),
-  offer: () => memoryOn(),
-  mainOnly: true,
-  sideEffect: true,
   run(step, args) {
-    const items = store.memory.items,
-      index = items.findIndex(item => item.id === args.id);
-    step.title = index >= 0 ? items[index].text : args.id;
-    if (index < 0) return { ok: false, content: t("没有这条记忆，id 以记忆里条目前的为准"), display: "未找到" };
-    items.splice(index, 1);
-    saveStore();
+    const category = cleanMemoryCategory(args.category),
+      did = writeMemory(category, args.text);
+    step.title = category;
+    if (did) saveStore();
     refreshMemorySettings();
-    return { ok: true, content: t("已删除"), display: "" };
+    if (did === "delete") return { ok: true, content: t`已删去「${category}」`, display: "删去" };
+    if (!did) return { ok: true, content: t`「${category}」没有变`, display: "未变" };
+    return { ok: true, content: t`已写入「${category}」`, display: did === "add" ? "新起" : "" };
   }
 });
 
-// 翻记忆已撤（记忆整份带在系统提示里）：只留画法，旧对话的行迹里那几步照样有名字
+// 翻记忆、忘却已撤（记忆整份带在系统提示里；删一类即 remember 写空）：只留画法，旧对话的行迹里那几步照样有名字
 defineTool({ name: "recall", group: "memory", label: t("翻记忆"), offer: false });
+defineTool({ name: "forget", group: "memory", label: t("忘却"), offer: false });
 
 // 查旧谈：同一工作目录的执事对话排在前面，其余按新近
 defineTool({
