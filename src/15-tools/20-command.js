@@ -78,19 +78,25 @@ defineTool({
         watchBackground(conversation, ctx.assistant, step);
       }
       return {
-        ok: data.running || data.exitCode === 0,
+        ok: data.running || commandRan(data),
         content: `${data.running ? prompt("work.bgStarted", { id: data.id, seconds }) : t`后台指令 ${data.id} 已结束，退出码：${data.exitCode}`}\n--- stdout ---\n${data.stdout || t("(空)")}\n--- stderr ---\n${data.stderr || t("(空)")}`,
         display: `后台 ${data.id} · ${data.running ? "进行中" : `已结束 · 退出码 ${data.exitCode}`}${marks}`
       };
     }
     step.exitCode = data.exitCode;
     return {
-      ok: data.exitCode === 0,
+      ok: commandRan(data),
       content: t`退出码：${data.exitCode}，用时 ${took}\n--- stdout ---\n${data.stdout || t("(空)")}\n--- stderr ---\n${data.stderr || t("(空)")}`,
       display: `${data.exitCode === 0 ? took : `退出码 ${data.exitCode} · ${took}`}${marks}`
     };
   }
 });
+
+// 指令跑完了没有，不论答的是什么：打叉只留给没跑成的（shell 起不来、等满作罢、被止）。
+// 退出码是指令自己的回答——gh pr checks 还有没跑完的回 8、grep 没匹配回 1、测试不过回 1——照实写在签上、交给模型，不算这一步失败；
+// 算了的话轮询一回就记一回「失败」，行迹题头跟着误报。check_command、后台结束的签一向如此
+/** @param {{ exitCode: number, timedOut?: boolean, aborted?: boolean }} data */
+const commandRan = data => data.exitCode !== -1 && !data.timedOut && !data.aborted;
 
 // 看一条候：后台指令取上次之后的新输出，可顺带等一会儿，或结束它；等时刻的（t 开头）看几时到，或取消它（见 23-timer.js）。
 // 跟着 run_command 走——言里也能开后台指令，开了就得看得了
