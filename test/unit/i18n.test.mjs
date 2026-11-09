@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { load } from "./harness.mjs";
 const EN = createRequire(import.meta.url)("../../i18n/en.js");
 
@@ -32,6 +34,78 @@ test("英文表：译文里的变量都出自原文，原文的变量译文都�
     for (const i of to) assert.ok(from.has(i), `译文多出 {${i}}：${key}`);
     for (const i of from) assert.ok(to.has(i), `译文漏了 {${i}}：${key}`);
   }
+});
+
+// 源码里 t("…")、t`…${x}…` 的键（变量记作 {0}、{1}……，同 t 的拼法）；嵌着的模板与字符串跳过，注释行不算
+function sourceKeys(src) {
+  src = src.replace(/^\s*(?:\/\/|\/?\*).*$/gm, "");
+  const keys = [],
+    cook = text => text.replace(/\\(.)/g, (_, c) => ({ n: "\n", t: "\t" })[c] ?? c);
+  for (const m of src.matchAll(/\bt\(\s*(["'`])((?:(?!\1)[^\\$]|\\.)*)\1\s*\)/g)) keys.push(cook(m[2]));
+  for (let at = src.indexOf("t`"); at >= 0; at = src.indexOf("t`", at + 2))
+    if (!/[\w$.]/.test(src[at - 1] || "")) keys.push(cook(readTemplate(src, at + 2)[0]));
+  return keys;
+}
+function readTemplate(src, i) {
+  let key = "",
+    n = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "\\") {
+      key += src.slice(i, i + 2);
+      i += 2;
+    } else if (c === "`") return [key, i + 1];
+    else if (c === "$" && src[i + 1] === "{") {
+      i = skipExpr(src, i + 2);
+      key += `{${n++}}`;
+    } else {
+      key += c;
+      i++;
+    }
+  }
+  return [key, i];
+}
+function skipExpr(src, i) {
+  let depth = 1;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "`") i = readTemplate(src, i + 1)[1];
+    else if (c === '"' || c === "'") {
+      for (i++; i < src.length && src[i] !== c; i += src[i] === "\\" ? 2 : 1);
+      i++;
+    } else {
+      if (c === "{") depth++;
+      else if (c === "}" && !--depth) return i + 1;
+      i++;
+    }
+  }
+  return i;
+}
+// 给模型看的话（工具结果、对话引擎拼的上下文、意的校验）不进表，这几处整片不查；界面上的零星几句另记
+const MODEL_FACING = ["14-chat-engine/", "15-tools/", "19-intent/00-core.js", "13-files/30-extract.js"];
+const MODEL_KEYS = new Set([
+  "我说「打开浏览器」即指这个",
+  "点：网页左 {0}、上 {1}{2}",
+  "圈：网页左 {0}、上 {1}，宽 {2}、高 {3}{4}",
+  "划：自网页左 {0}、上 {1} 至左 {2}、上 {3}{4}",
+  "游目 · {0}{1}",
+  "附图「{0}」上的朱笔是用户画上去的；位置是网页视口里的 CSS 像素，与附图同一取景",
+  "网页里选中的一段：{0}",
+  "音{0}" // 音量那一排点前的字，同印章
+]);
+
+test("英文表：界面上用到的话都有译文（印章即单个汉字，不译）", () => {
+  const root = fileURLToPath(new URL("../../src/", import.meta.url)),
+    missing = [];
+  for (const rel of readdirSync(root, { recursive: true })) {
+    const file = String(rel).replace(/\\/g, "/");
+    if (!file.endsWith(".js") || MODEL_FACING.some(prefix => file.startsWith(prefix))) continue;
+    for (const key of sourceKeys(readFileSync(root + file, "utf8"))) {
+      const han = key.replace(/\{\d+\}/g, "").match(/[一-鿿]/g) || [];
+      if (han.length > 1 && !EN[key] && !MODEL_KEYS.has(key)) missing.push(`${file}：${key}`);
+    }
+  }
+  assert.deepEqual([...new Set(missing)], []);
 });
 
 test("英文界面：整句、带变量的句子、单复数、桥接的报错", () => {
