@@ -229,7 +229,9 @@ async function sendFile(req, res, file, { name, download = false }) {
 }
 
 // 交给 Windows 的默认程序打开一件文件（预览认不得、或只抽得出结构时，看原样）。
-// 可执行的一类不开：对它们「打开」就是运行，而文件常是模型写的或随手拖进来的
+// 可执行的一类不开：对它们「打开」就是运行，而文件常是模型写的或随手拖进来的。
+// 解释器脚本也算：Windows 上 .py / .pyw / .pyc / .pyo / .pyz / .pyzw 的默认打开就是 py.exe / pyw.exe，
+// 装了 Node 并登记了关联的机器上 .mjs / .cjs 同样点开即运行；.msc 走 mmc，.application 是 ClickOnce 安装清单
 const RUNNABLE = new Set([
   "exe",
   "com",
@@ -249,7 +251,17 @@ const RUNNABLE = new Set([
   "lnk",
   "cpl",
   "reg",
-  "jar"
+  "jar",
+  "py",
+  "pyw",
+  "pyc",
+  "pyo",
+  "pyz",
+  "pyzw",
+  "mjs",
+  "cjs",
+  "msc",
+  "application"
 ]);
 function openWithSystem(file) {
   if (RUNNABLE.has(path.extname(file).slice(1).toLowerCase())) throw Error("可执行的文件不在此打开，请到资源管理器里自行处理");
