@@ -22,8 +22,13 @@ test("tuneOnce：清单项缺 text 或 text 不是字符串时不动那一类", 
   for (const reply of [
     '[{"category":"工作"}]',
     '[{"category":"工作","text":null}]',
+    '[{"category":"工作","text":false}]',
+    '[{"category":"工作","text":0}]',
+    '[{"category":"工作","text":true}]',
     '[{"category":"工作","text":123}]',
-    '[{"category":"工作","text":["a","b"]}]'
+    '[{"category":"工作","text":["a","b"]}]',
+    '[{"category":"工作","text":[]}]',
+    '[{"category":"工作","text":{}}]'
   ]) {
     const f = setup(reply);
     await f.tuneOnce();
