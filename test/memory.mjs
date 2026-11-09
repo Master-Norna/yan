@@ -1,5 +1,5 @@
 // 录（记忆）：专司「记忆」配好时整份记忆进系统提示、每段头一问时定格；remember / replaces；查旧谈（关键词与最近）、翻旧谈；
-// 离开一段对话即交专司「记忆」整理（只给用户的话与答复、照增删改清单改、没新内容不整理）；设置页可改可删；专司里关掉即不带不记
+// 一答落定即交专司「记忆」整理、不等离开（只给用户的话与答复、照增删改清单改、只交新近的）；设置页可改可删；专司里关掉即不带不记
 import { connect, check, sleep, PAGE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 const FAKE = "http://127.0.0.1:8798";
@@ -69,45 +69,34 @@ check(
   (await lastText()) === "MEM|body:yes|recall:no|saved:yes|merged:yes|search:yes|read:yes|recent:yes|self:no",
   await lastText()
 );
-const mem = await memory();
-check(
-  "remember with replaces leaves one new item beside the seed, with its source",
-  mem.items.length === 2 &&
-    mem.items.some(i => i.text === "用户偏好 PowerShell，命令写成 PS 语法" && i.category === "偏好" && !!i.source?.conversationId),
-  JSON.stringify(mem.items)
-);
 const labels = await evalJs(`[...document.querySelectorAll('#messages .tool-step .tool-label')].map(n => n.textContent).join("|")`);
 check("step cards labeled in the house style", labels === "记入|记入|查旧谈|翻旧谈|查旧谈", labels);
 const sources = await evalJs(
   `(d => d ? [...d.querySelectorAll(".source-card")].map(c => c.querySelector("strong").textContent + "|" + (c.querySelector(".source-read") ? "read" : "")) : null)([...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector(".source-stack"))`
 );
 check("sources list the old talk, read", JSON.stringify(sources) === JSON.stringify(["旧谈一则|read"]), JSON.stringify(sources));
-check("nothing is tidied while still in the chat", (await tidyAsks()).length === 0);
 
-// 同一段里再问：系统提示仍是头一问时那份，这段里记的不进去（缓存接得上）
-await sendMain("MEMORY-SNAP", 2);
-check("the memory is frozen for the chat at its first ask", (await lastText()) === "SNAP|ps:no|bash:no|work:no|zh:yes", await lastText());
-
-// 离开这段：交专司「记忆」整理，照清单改
-await openTalk("旧谈一则");
+// 一答落定：人还在这段，也即交专司「记忆」整理，照清单改
 await waitFor(`__yanState().memory.items.some(i => i.text === "用户在做言的记忆模块")`, 20000);
 const asks = await tidyAsks();
-check("leaving the chat tidies it once", asks.length === 1, JSON.stringify(asks.length));
+check("an answer settling tidies the chat without leaving it", asks.length === 1, JSON.stringify(asks.length));
 check(
   "the tidier sees the memory and the user's and model's words, not tool output",
-  asks[0].system.includes("3000") &&
-    asks[0].user.includes("[m0001]") &&
-    asks[0].user.includes("【用户】MEMORY go") &&
-    asks[0].user.includes("【用户】MEMORY-SNAP") &&
-    asks[0].user.includes("MEM|body:yes") &&
-    !asks[0].user.includes("OLDSECRET"),
+  asks[0].user.includes("【用户】MEMORY go") && asks[0].user.includes("MEM|body:yes") && !asks[0].user.includes("OLDSECRET"),
   asks[0]?.user
+);
+// 交给整理的那份现有记忆：种下的一条，加上 remember 带 replaces 只留下的一条新的
+const listed = asks[0].user.split("\n").filter(line => /^\[m/.test(line));
+check(
+  "remember with replaces leaves one new item beside the seed",
+  listed.length === 2 && listed[0].includes("[m0001]") && listed[1].includes("用户偏好 PowerShell，命令写成 PS 语法"),
+  JSON.stringify(listed)
 );
 const tidied = await memory();
 check(
   "add, update and delete land; an unknown id is skipped",
   tidied.items.length === 2 &&
-    tidied.items.some(i => i.text === "用户偏好 PowerShell 而非 bash") &&
+    tidied.items.some(i => i.text === "用户偏好 PowerShell 而非 bash" && i.category === "偏好" && !!i.source?.conversationId) &&
     tidied.items.some(i => i.text === "用户在做言的记忆模块" && i.category === "工作") &&
     !tidied.items.some(i => i.id === "m0001" || i.text.includes("认不得")),
   JSON.stringify(tidied.items)
@@ -120,22 +109,34 @@ check(
 );
 check("a notice says what changed", await evalJs(`document.querySelector("#toast").textContent === "记忆：记下 1 条、改 1 条、删 1 条"`));
 
+// 同一段里再问：系统提示仍是头一问时那份，此后整理的、这段里记的都不进去（缓存接得上）；答完只整理这一问
+await sendMain("MEMORY-SNAP", 2);
+check("the memory is frozen for the chat at its first ask", (await lastText()) === "SNAP|ps:no|bash:no|work:no|zh:yes", await lastText());
+await waitFor(
+  `(c => c.memoryAt === c.messages.at(-1).timestamp)(__yanState().conversations.find(c => c.messages.some(m => m.content === "MEMORY go")))`
+);
+const again = await tidyAsks();
+check(
+  "the next answer tidies only what is new",
+  again.length === 1 && again[0].user.includes("【用户】MEMORY-SNAP") && !again[0].user.includes("【用户】MEMORY go"),
+  JSON.stringify(again.map(a => a.user.slice(-80)))
+);
+
 // 新起一段：带的是整理过的记忆
 await newChat();
 await sendMain("MEMORY-SNAP", 1, "#welcomeInput", "#welcome .send-trigger");
 await waitFor(`[...document.querySelectorAll('#messages .message.assistant')].at(-1)?.textContent.includes("SNAP|")`);
 check("a new chat carries the tidied memory", (await lastText()) === "SNAP|ps:no|bash:yes|work:yes|zh:no", await lastText());
-// 回到已整理过的那段再离开：没有新的问答，不再整理
+await waitFor(
+  `__yanState().conversations.every(c => !c.messages.some(m => m.content === "MEMORY-SNAP") || c.memoryAt === c.messages.at(-1).timestamp)`
+);
+await tidyAsks();
+// 来回换段：离开不再整理
 await openTalk("MEMORY go");
 await sleep(300);
 await openTalk("旧谈一则");
 await sleep(800);
-const later = await tidyAsks();
-check(
-  "leaving a chat with nothing new does not tidy it again",
-  later.length === 1 && later[0].user.includes("【用户】MEMORY-SNAP") && !later[0].user.includes("MEMORY go"),
-  JSON.stringify(later.map(a => a.user.slice(-80)))
-);
+check("leaving a chat does not tidy it", (await tidyAsks()).length === 0);
 
 // 设置页：记忆栏、改、删
 await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
@@ -143,9 +144,9 @@ await sleep(200);
 await evalJs(`document.querySelector('.tab-btn[data-tab="memory"]').click(); true`);
 await sleep(200);
 check(
-  "memory tab renders with seal, count, budget and the duty state",
+  "memory tab renders with seal, count, length and the duty state",
   await evalJs(
-    `(h => h.querySelector(".settings-mark path") && h.querySelector("h2")?.textContent === "记忆" && /^2 条 · \\d+ \\/ 3000 字 · 2 类$/.test(h.querySelector(".settings-meta")?.textContent) && h.querySelector(".setting-copy strong")?.textContent === "带进对话" && h.querySelectorAll(".memory-cat[data-memory-cat]").length === 2 && !h.querySelector(".memory-item textarea"))(document.querySelector("#settingsContent"))`
+    `(h => h.querySelector(".settings-mark path") && h.querySelector("h2")?.textContent === "记忆" && /^2 条 · \\d+ 字 · 2 类$/.test(h.querySelector(".settings-meta")?.textContent) && h.querySelector(".setting-copy strong")?.textContent === "带进对话" && h.querySelectorAll(".memory-cat[data-memory-cat]").length === 2 && !h.querySelector(".memory-item textarea"))(document.querySelector("#settingsContent"))`
   )
 );
 await evalJs(`document.querySelector('#settingsContent [data-memory-cat="偏好"]').click(); true`);

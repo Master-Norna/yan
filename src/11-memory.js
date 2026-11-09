@@ -1,14 +1,13 @@
-// 言 · 录（记忆）：条目的增删、带进对话、离开一段后的整理与设置页；模型用的工具在 15-tools/40-memory.js
+// 言 · 录（记忆）：条目的增删、带进对话、一答落定后的整理与设置页；模型用的工具在 15-tools/40-memory.js
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // ── 录（记忆）──
 // 一条条关于用户的话，跨对话都带着。每条归在一个分类下（言的开发、偏好……），分类不另存，就是各条上的名字：
 // 同名即同类，没有条目的分类自然消失。
 // 照各家的朴素做法（ChatGPT 的存下的记忆、Claude 的 userMemories、Claude Code 的 MEMORY.md）：记忆整份放进系统提示，
 // 每段对话头一问时定格；不再要模型自己去翻——原先只报分类、内容要 recall 才看得到，模型不知道里头有什么，多半就不翻。
-// 能整份带上是因为短：总长有个预算（MEMORY_BUDGET），由专司「记忆」在离开一段对话后整理——从这段的问答里补记、合并、删去推翻的，
-// 压回预算之内。主模型仍可当场 remember，只是不靠它：答题中途停下来记是分心，记不记全看它那一刻想没想起来
-const MEMORY_BUDGET = 3000,
-  MEMORY_UNSORTED = "未分类",
+// 记多少不设上限（同账本：硬数字只会逼它删有用的），由专司「记忆」在每一答落定后整理——从这段的问答里补记、合并、改掉推翻的。
+// 遗忘不按时长、不按字数：被新说法推翻的、用户要忘的才删；人也可在设置里删。主模型仍可当场 remember，只是不靠它：答题中途停下来记是分心，记不记全看它那一刻想没想起来
+const MEMORY_UNSORTED = "未分类",
   // 整理一回交多少字的问答；用户的话、助手的答复各截到多长（助手的只作上下文）
   TIDY_CHUNK = 16000,
   TIDY_USER_CHARS = 4000,
@@ -19,7 +18,7 @@ let memoryCategoryOpen = null;
 let memoryItemOpen = "",
   memoryItemEditing = "";
 /**
- * 专司「记忆」配好了：每段对话开头带上记忆、给记与忘，离开一段后整理。预设没挑「记忆与旧谈」这一组的对话不带也不整理
+ * 专司「记忆」配好了：每段对话开头带上记忆、给记与忘，一答落定后整理。预设没挑「记忆与旧谈」这一组的对话不带也不整理
  * @param {Conversation} [conversation]
  */
 function memoryOn(conversation) {
@@ -203,13 +202,12 @@ async function askTidier(c, turns, day) {
     reply = await askDuty(
       "memory",
       prompt("memory.case", {
-        used: memoryChars(),
         items: items.length ? items.map(item => memoryLine(item, true)).join("\n") : prompt("memory.empty"),
         title: c.title || t("未命名"),
         day,
         turns
       }),
-      { systemPrompt: prompt("memory.system", { budget: MEMORY_BUDGET }), maxTokens: 8000, signal: AbortSignal.timeout(180000) }
+      { systemPrompt: prompt("memory.system"), maxTokens: 8000, signal: AbortSignal.timeout(180000) }
     );
   return parseMemoryOps(reply);
 }
@@ -297,7 +295,7 @@ function memorySettingsHtml() {
     open = categories.find(cat => cat.name === memoryCategoryOpen) || categories[0];
   memoryCategoryOpen = open?.name ?? null;
   return (
-    `<div class="settings-head">${brushIcon("memory", "settings-mark")}<h2>${t(`记忆`)}</h2><span class="settings-meta">${t`${store.memory.items.length} 条 · ${memoryChars()} / ${MEMORY_BUDGET} 字`}${categories.length ? t` · ${categories.length} 类` : ""}</span></div>` +
+    `<div class="settings-head">${brushIcon("memory", "settings-mark")}<h2>${t(`记忆`)}</h2><span class="settings-meta">${t`${store.memory.items.length} 条 · ${memoryChars()} 字`}${categories.length ? t` · ${categories.length} 类` : ""}</span></div>` +
     // 开关在专司里（带不带、谁来整理是一回事）；这一行只说眼下如何，「清空记忆」管的是全部，也放这一行，不挤在哪一类底下
     `<div class="setting-row"><div class="setting-copy"><strong>${on ? t("带进对话") : t("未带进对话")}</strong><small>${
       on ? t("每段对话开头带上，离开一段后由专司「记忆」在后台整理") : t("在专司里配好「记忆」后，才带上、才整理")
