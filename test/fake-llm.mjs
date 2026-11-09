@@ -2027,7 +2027,7 @@ http
         ]);
       }
       if (typeof lastUser === "string" && lastUser.includes("MEMORY")) {
-        // 记忆：系统提示里带着整份记忆、没有记与忘；查旧谈 → 翻旧谈 → 列最近的旧谈 → 收尾（各步对不对由这边判好写进正文，不把工具结果抄进答复）
+        // 记忆：系统提示里带着整份记忆；记入 → 再记（合并）→ 查旧谈 → 翻旧谈 → 列最近的旧谈 → 收尾（各步对不对由这边判好写进正文，不把工具结果抄进答复）
         const n = toolResults.length,
           sys = String(msgs[0]?.role === "system" ? msgs[0].content : ""),
           names = (payload.tools || []).map(t => t.function.name),
@@ -2041,28 +2041,35 @@ http
         // 这段对话头一问时定格的记忆：后来记的、整理出的有没有进来
         if (lastUser.includes("MEMORY-SNAP"))
           return say(
-            `SNAP|bash:${sys.includes("而非 bash") ? "yes" : "no"}|work:${sys.includes("用户在做言的记忆模块") ? "yes" : "no"}|zh:${sys.includes("用户偏好中文交流") ? "yes" : "no"}`
+            `SNAP|ps:${sys.includes("命令写成 PS 语法") ? "yes" : "no"}|bash:${sys.includes("而非 bash") ? "yes" : "no"}|work:${sys.includes("用户在做言的记忆模块") ? "yes" : "no"}|zh:${sys.includes("用户偏好中文交流") ? "yes" : "no"}`
           );
         if (lastUser.includes("MEMORY-OFF"))
           return say(
             `OFF|body:${sys.includes("你跨对话的记忆") ? "yes" : "no"}|memtools:${names.filter(x => ["remember", "recall", "forget"].includes(x)).length}|talks:${names.filter(x => ["search_conversations", "read_conversation"].includes(x)).length}`
           );
-        if (n === 0) return sse(res, call("search_conversations", { query: "术语" }));
+        if (n === 0) return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell" }));
         if (n === 1) {
-          const id = result(0).match(/\[([0-9a-f-]{20,})\]/)?.[1];
+          const id = result(0).match(/\[(m[a-z0-9]+)\]/)?.[1];
+          return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell，命令写成 PS 语法", replaces: id }));
+        }
+        if (n === 2) return sse(res, call("search_conversations", { query: "术语" }));
+        if (n === 3) {
+          const id = result(2).match(/\[([0-9a-f-]{20,})\]/)?.[1];
           return sse(res, call("read_conversation", { id: id || "none" }));
         }
-        if (n === 2) return sse(res, call("search_conversations", {}));
+        if (n === 4) return sse(res, call("search_conversations", {}));
         const flag = ok => (ok ? "yes" : "no");
         return say(
           [
             "MEM",
-            `body:${flag(sys.includes("你跨对话的记忆") && sys.includes("用户偏好中文交流") && !sys.includes("[m0001]"))}`,
-            `memtools:${names.filter(x => ["remember", "recall", "forget"].includes(x)).length}`,
-            `search:${flag(result(0).includes("「旧谈一则」共 2 条"))}`,
-            `read:${flag(result(1).includes("OLDSECRET"))}`,
-            `recent:${flag(result(2).includes("「旧谈一则」") && result(2).includes("请解释术语 X"))}`,
-            `self:${flag(result(2).includes("MEMORY go"))}`
+            `body:${flag(sys.includes("你跨对话的记忆") && sys.includes("[m0001]") && sys.includes("用户偏好中文交流"))}`,
+            `recall:${flag(names.includes("recall"))}`,
+            `saved:${flag(result(0).startsWith("已记入 [m"))}`,
+            `merged:${flag(result(1).startsWith("已更新 [m"))}`,
+            `search:${flag(result(2).includes("「旧谈一则」共 2 条"))}`,
+            `read:${flag(result(3).includes("OLDSECRET"))}`,
+            `recent:${flag(result(4).includes("「旧谈一则」") && result(4).includes("请解释术语 X"))}`,
+            `self:${flag(result(4).includes("MEMORY go"))}`
           ].join("|")
         );
       }

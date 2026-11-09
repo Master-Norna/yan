@@ -1,4 +1,4 @@
-// 录（记忆）：专司「记忆」配好时整份记忆进系统提示、每段头一问时定格；主模型没有记与忘；查旧谈（关键词与最近）、翻旧谈；
+// 录（记忆）：专司「记忆」配好时整份记忆进系统提示、每段头一问时定格；remember / replaces；查旧谈（关键词与最近）、翻旧谈；
 // 一答落定即交专司「记忆」整理、不等离开（只给用户的话与答复、照增删改清单改、只交新近的）；设置页可改可删；专司里关掉即不带不记
 import { connect, check, sleep, PAGE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
@@ -34,19 +34,16 @@ const old = {
   ]
 };
 const duty = { on: true, api: "openai", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", model: "tidy", modelList: [] },
-  seed = [
-    ["m0001", "用户偏好中文交流"],
-    ["m0002", "用户偏好 PowerShell"]
-  ].map(([id, text]) => ({
-    id,
-    text,
+  seed = {
+    id: "m0001",
+    text: "用户偏好中文交流",
     category: "偏好",
     createdAt: "2026-10-02T00:00:00.000Z",
     updatedAt: "2026-10-02T00:00:00.000Z",
     source: null
-  }));
+  };
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 6, settings: { name: "测", theme: "light", inkMotion: "off", mode: "chat", activeProfileId: "p1", autoTitle: false, dutyMemory: ${JSON.stringify(duty)} }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [${JSON.stringify(old)}], memory: { since: "2026-10-01T00:00:00.000Z", items: ${JSON.stringify(seed)} }, library: [], drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 6, settings: { name: "测", theme: "light", inkMotion: "off", mode: "chat", activeProfileId: "p1", autoTitle: false, dutyMemory: ${JSON.stringify(duty)} }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [${JSON.stringify(old)}], memory: { since: "2026-10-01T00:00:00.000Z", items: [${JSON.stringify(seed)}] }, library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
@@ -68,12 +65,12 @@ const newChat = async () => {
 
 await sendMain("MEMORY go", 1, "#welcomeInput", "#welcome .send-trigger");
 check(
-  "memory rides in the system prompt; no memory tools; search, read and recent all work",
-  (await lastText()) === "MEM|body:yes|memtools:0|search:yes|read:yes|recent:yes|self:no",
+  "memory rides in the system prompt; recall is gone; remember, merge, search, read and recent all work",
+  (await lastText()) === "MEM|body:yes|recall:no|saved:yes|merged:yes|search:yes|read:yes|recent:yes|self:no",
   await lastText()
 );
 const labels = await evalJs(`[...document.querySelectorAll('#messages .tool-step .tool-label')].map(n => n.textContent).join("|")`);
-check("step cards labeled in the house style", labels === "查旧谈|翻旧谈|查旧谈", labels);
+check("step cards labeled in the house style", labels === "记入|记入|查旧谈|翻旧谈|查旧谈", labels);
 const sources = await evalJs(
   `(d => d ? [...d.querySelectorAll(".source-card")].map(c => c.querySelector("strong").textContent + "|" + (c.querySelector(".source-read") ? "read" : "")) : null)([...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector(".source-stack"))`
 );
@@ -88,11 +85,11 @@ check(
   asks[0].user.includes("【用户】MEMORY go") && asks[0].user.includes("MEM|body:yes") && !asks[0].user.includes("OLDSECRET"),
   asks[0]?.user
 );
-// 交给整理的是整份现有记忆
+// 交给整理的那份现有记忆：种下的一条，加上 remember 带 replaces 只留下的一条新的
 const listed = asks[0].user.split("\n").filter(line => /^\[m/.test(line));
 check(
-  "the tidier sees every item, with its id",
-  listed.length === 2 && listed.some(l => l.includes("[m0001]")) && listed.some(l => l.includes("[m0002]")),
+  "remember with replaces leaves one new item beside the seed",
+  listed.length === 2 && listed[0].includes("[m0001]") && listed[1].includes("用户偏好 PowerShell，命令写成 PS 语法"),
   JSON.stringify(listed)
 );
 const tidied = await memory();
@@ -112,9 +109,9 @@ check(
 );
 check("a notice says what changed", await evalJs(`document.querySelector("#toast").textContent === "记忆：记下 1 条、改 1 条、删 1 条"`));
 
-// 同一段里再问：系统提示仍是头一问时那份，此后整理的都不进去（缓存接得上）；答完只整理这一问
+// 同一段里再问：系统提示仍是头一问时那份，此后整理的、这段里记的都不进去（缓存接得上）；答完只整理这一问
 await sendMain("MEMORY-SNAP", 2);
-check("the memory is frozen for the chat at its first ask", (await lastText()) === "SNAP|bash:no|work:no|zh:yes", await lastText());
+check("the memory is frozen for the chat at its first ask", (await lastText()) === "SNAP|ps:no|bash:no|work:no|zh:yes", await lastText());
 await waitFor(
   `(c => c.memoryAt === c.messages.at(-1).timestamp)(__yanState().conversations.find(c => c.messages.some(m => m.content === "MEMORY go")))`
 );
@@ -129,7 +126,7 @@ check(
 await newChat();
 await sendMain("MEMORY-SNAP", 1, "#welcomeInput", "#welcome .send-trigger");
 await waitFor(`[...document.querySelectorAll('#messages .message.assistant')].at(-1)?.textContent.includes("SNAP|")`);
-check("a new chat carries the tidied memory", (await lastText()) === "SNAP|bash:yes|work:yes|zh:no", await lastText());
+check("a new chat carries the tidied memory", (await lastText()) === "SNAP|ps:no|bash:yes|work:yes|zh:no", await lastText());
 await waitFor(
   `__yanState().conversations.every(c => !c.messages.some(m => m.content === "MEMORY-SNAP") || c.memoryAt === c.messages.at(-1).timestamp)`
 );

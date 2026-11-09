@@ -10,15 +10,18 @@ const PROMPT_VARS = {
   "work.archive": ctx => workVars(ctx.conversation),
   "work.env": () => envVars(),
   // 整份记忆，这段对话头一问时定格（见 memorySnapshot）：别处整理、这段里记一条都不改它，系统提示一变整段的缓存就作废
-  "memory.body": ctx => (memoryOn(ctx.conversation) ? { items: memorySnapshot(ctx.conversation) || prompt("memory.empty") } : null),
+  "memory.body": ctx => {
+    const items = memoryOn(ctx.conversation) ? memorySnapshot(ctx.conversation) : "";
+    return items ? { items } : null;
+  },
   "mcp.hint": ctx => mcpHintVars(ctx.tools, ctx.preset),
   "skills.hint": () => skillCatalog(),
   "skills.home": () => (skillSet?.home ? { dir: skillSet.home } : null),
   "side.passage": ctx => (ctx.anchor ? {} : null),
   "side.whole": ctx => (ctx.anchor ? null : {}),
   "side.noTools": ctx => (ctx.tools.size ? null : {}),
-  // 账本那句的补充：记忆开着才带
-  "work.ledgerMemory": ctx => (memoryOn(ctx.conversation) ? {} : null)
+  // 账本那句的补充，跟着账本走：写不了文件就没有账本
+  "work.ledgerMemory": ctx => (ctx.tools.has("write_file") ? {} : null)
 };
 /**
  * @param {Conversation} conversation
