@@ -175,9 +175,13 @@ async function tidyOne(id) {
       }
       const chunk = turns.slice(0, lines.length),
         day = [chunk[0], chunk.at(-1)].map(m => localDay(new Date(m.timestamp)));
-      applyMemoryOps(await askTidier(c, lines.join("\n\n"), day[0] === day[1] ? day[0] : `${day[0]} 至 ${day[1]}`), c, counts);
-      // 整理的这一阵里这段可能从磁盘换过一回（别处写过）：记在眼下那一份上
-      c = store.conversations.find(item => item.id === id) || c;
+      const ops = await askTidier(c, lines.join("\n\n"), day[0] === day[1] ? day[0] : `${day[0]} 至 ${day[1]}`),
+        latest = store.conversations.find(item => item.id === id);
+      // 整理的这一阵里这段删了：删一段就是不要它了，这一批的改动作废、不再往下整理（此前几回记下的仍在，设置里可删）
+      if (!latest) break;
+      // 这段也可能从磁盘换过一回（别处写过）：记在眼下那一份上
+      c = latest;
+      applyMemoryOps(ops, c, counts);
       c.memoryAt = chunk.at(-1).timestamp;
       markDirty(id);
       saveStore();
