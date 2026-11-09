@@ -168,22 +168,15 @@ async function reviewGate(step, args, ctx, why) {
 }
 /** 两步判：先只要一个字；疑了再同一段话换个末句要理由（前头一字不差，走缓存） @returns {Promise<{ ok: boolean, why: string }>} */
 async function askReviewer(step, args, ctx, why) {
-  // 另配的那份拼成一份临时的模型配置：不扣余墨、不认思考档位；花的墨只记进用量簿的「审查」
-  /** @type {Profile} */
-  const duty = { id: "duty-review", name: "", quota: "", usedTokens: 0, ...store.settings.dutyReview },
-    base = reviewCase(step, args, ctx.conversation, why),
-    ask = async (tail, maxTokens) => {
-      const text = `${base}\n\n${tail}`,
-        signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(60000)]),
-        response = await requestChat(duty, [{ role: "user", content: text }], signal, {
+  const base = reviewCase(step, args, ctx.conversation, why),
+    ask = async (tail, maxTokens) =>
+      (
+        await askDuty("review", `${base}\n\n${tail}`, {
           systemPrompt: prompt("review.system"),
-          maxTokens
-        });
-      if (!response.ok) throw Error(await describeResponseError(response));
-      const { reply, tokens } = await readWhole(response, text);
-      noteUsage("review", tokens);
-      return String(reply.content || "").trim();
-    };
+          maxTokens,
+          signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(60000)])
+        })
+      ).trim();
   if (reviewWord(await ask(prompt("review.quick"), 1500)).startsWith("准")) return { ok: true, why: "" };
   const said = reviewWord(await ask(prompt("review.reason"), 3000));
   // 首字既不是准也不是驳（写空了、答非所问）：当审查出错，退回照规则，不拿它当驳

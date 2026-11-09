@@ -417,6 +417,7 @@ var YAN_EN = {
   "改 {0} 条": "{0} updated",
   "删 {0} 条": "{0} removed",
   "记忆：{0}": "Memory: {0}",
+  "记忆整理没成：{0}": "Memory tidying failed: {0}",
   清空记忆: "Clear memory",
   开: "On",
   关: "Off",

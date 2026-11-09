@@ -38,6 +38,19 @@ function dutyReady(d) {
 function dutyOf(id) {
   return store.settings[DUTIES[id].key];
 }
+/**
+ * 问一回专司里另配的那一位（审查、记忆整理）：拼成一份临时的模型配置——不扣余墨、不认思考档位，花的墨只记进用量簿的这一类
+ * @param {"review"|"memory"} id @param {string} text @param {{ systemPrompt: string, maxTokens: number, signal: AbortSignal }} options
+ */
+async function askDuty(id, text, { systemPrompt, maxTokens, signal }) {
+  /** @type {Profile} */
+  const duty = { id: `duty-${id}`, name: "", quota: "", usedTokens: 0, ...dutyOf(id) },
+    response = await requestChat(duty, [{ role: "user", content: text }], signal, { systemPrompt, maxTokens });
+  if (!response.ok) throw Error(await describeResponseError(response));
+  const { reply, tokens } = await readWhole(response, text);
+  noteUsage(id, tokens);
+  return String(reply.content || "");
+}
 function dutyMarkHtml(on, tip) {
   return `<span class="duty-mark${on ? " on" : ""}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"></span>`;
 }
@@ -72,7 +85,7 @@ function dutySettingsHtml() {
       `<strong class="profile-name">${t(`拟题`)}</strong><span class="profile-gist"></span>${dutyMarkHtml(title, title ? t("开") : t("关"))}`,
       `<div class="profile-grid"><label class="profile-full">${t(`自动拟题`)}<div class="segmented"><button data-setting="autoTitle" data-value="true" class="${title ? "active" : ""}">${t(`开`)}</button><button data-setting="autoTitle" data-value="false" class="${title ? "" : "active"}">${t(`关`)}</button></div></label></div>`
     );
-  return `<h2>${t(`专司`)}</h2>${titleCard}${/** @type {DutyId[]} */ (["memory", "review", "image"]).map(id => dutyCardHtml(id, dutyHeadHtml(id), dutyFormHtml(id))).join("")}`;
+  return `<h2>${t(`专司`)}</h2>${titleCard}${/** @type {DutyId[]} */ (Object.keys(DUTIES)).map(id => dutyCardHtml(id, dutyHeadHtml(id), dutyFormHtml(id))).join("")}`;
 }
 function bindDutySettings() {
   document.querySelectorAll("[data-duty]").forEach(card => {

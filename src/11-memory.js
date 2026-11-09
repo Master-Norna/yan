@@ -126,14 +126,17 @@ function untidied(c) {
       String(m.timestamp || "") > after
   );
 }
+/** 有用户新说的话才值得整理（只有答复续写了几句的不算） @param {Conversation} c */
+const hasUntidied = c => untidied(c).some(m => m.role === "user");
 /** @param {Conversation} conversation */
 function tidyMemory(conversation) {
   const id = conversation.id;
-  if (tidyingIds.has(id) || !memoryOn(conversation) || !untidied(conversation).some(m => m.role === "user")) return tidyQueue;
+  if (tidyingIds.has(id) || !memoryOn(conversation) || !hasUntidied(conversation)) return tidyQueue;
   tidyingIds.add(id);
+  // 没成（接口不通、答得认不出清单）：说一声，这段的进度不动，下回离开时再来
   tidyQueue = tidyQueue
     .then(() => tidyOne(id))
-    .catch(error => console.warn("记忆整理没成，下回离开这段时再来", error))
+    .catch(error => toast(t`记忆整理没成：${friendlyError(error.message)}`))
     .finally(() => tidyingIds.delete(id));
   return tidyQueue;
 }
@@ -151,40 +154,38 @@ async function tidyOne(id) {
     store.memory.since = now();
     return saveStore();
   }
-  if (!untidied(c).some(m => m.role === "user") || !(await claimConversation(id))) return;
+  if (!hasUntidied(c) || !(await claimConversation(id))) return;
   tidyingNow = id;
+  const counts = { add: 0, update: 0, delete: 0 };
   try {
-    await tidyTurns(c, id);
+    let turns = untidied(c);
+    while (turns.length) {
+      // 一回装多少：问答依次装，装满一回的量为止（至少一条）。答复的结论多在末尾，截时留头留尾
+      const lines = [];
+      let room = TIDY_CHUNK;
+      for (const m of turns) {
+        const line =
+          m.role === "user"
+            ? `【用户】${clipForModel(m.content.trim(), TIDY_USER_CHARS)}`
+            : `【助手】${clipForModel(m.content.trim(), TIDY_REPLY_CHARS, { tail: true })}`;
+        if (lines.length && line.length > room) break;
+        lines.push(line);
+        room -= line.length;
+      }
+      const chunk = turns.slice(0, lines.length),
+        day = [chunk[0], chunk.at(-1)].map(m => localDay(new Date(m.timestamp)));
+      applyMemoryOps(await askTidier(c, lines.join("\n\n"), day[0] === day[1] ? day[0] : `${day[0]} 至 ${day[1]}`), c, counts);
+      // 整理的这一阵里这段可能从磁盘换过一回（别处写过）：记在眼下那一份上
+      c = store.conversations.find(item => item.id === id) || c;
+      c.memoryAt = chunk.at(-1).timestamp;
+      markDirty(id);
+      saveStore();
+      turns = turns.slice(chunk.length);
+    }
   } finally {
     tidyingNow = "";
+    refreshMemorySettings();
   }
-}
-/** @param {Conversation} c @param {string} id */
-async function tidyTurns(c, id) {
-  let turns = untidied(c);
-  const counts = { add: 0, update: 0, delete: 0 };
-  while (turns.length) {
-    // 一回装多少：问答依次装，装满一回的量为止（至少一条）
-    const lines = [];
-    let room = TIDY_CHUNK;
-    for (const m of turns) {
-      const line = m.role === "user" ? `【用户】${clip(m.content, TIDY_USER_CHARS)}` : `【助手】${clip(m.content, TIDY_REPLY_CHARS)}`;
-      if (lines.length && line.length > room) break;
-      lines.push(line);
-      room -= line.length;
-    }
-    const chunk = turns.slice(0, lines.length),
-      day = [chunk[0], chunk.at(-1)].map(m => localDay(new Date(m.timestamp))),
-      ops = await askTidier(c, lines.join("\n\n"), day[0] === day[1] ? day[0] : `${day[0]} 至 ${day[1]}`);
-    applyMemoryOps(ops, c, counts);
-    // 整理的这一阵里这段可能从磁盘换过一回（别处写过）：记在眼下那一份上
-    c = store.conversations.find(item => item.id === id) || c;
-    c.memoryAt = chunk.at(-1).timestamp;
-    markDirty(id);
-    saveStore();
-    turns = turns.slice(chunk.length);
-  }
-  refreshMemorySettings();
   const said = [
     counts.add ? t`记下 ${counts.add} 条` : "",
     counts.update ? t`改 ${counts.update} 条` : "",
@@ -192,31 +193,21 @@ async function tidyTurns(c, id) {
   ].filter(Boolean);
   if (said.length) toast(t`记忆：${said.join(t("、"))}`);
 }
-/** @param {string} text @param {number} max */
-function clip(text, max) {
-  const clean = String(text || "").trim();
-  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
-}
 /** 问一回专司「记忆」：现有记忆整份、这段新近的问答；答回一份增删改 @param {Conversation} c @param {string} turns @param {string} day */
 async function askTidier(c, turns, day) {
-  /** @type {Profile} */
-  const duty = { id: "duty-memory", name: "", quota: "", usedTokens: 0, ...store.settings.dutyMemory },
-    items = store.memory.items,
-    text = prompt("memory.case", {
-      used: memoryChars(),
-      items: items.length ? items.map(item => memoryLine(item, true)).join("\n") : prompt("memory.empty"),
-      title: c.title || t("未命名"),
-      day,
-      turns
-    }),
-    response = await requestChat(duty, [{ role: "user", content: text }], AbortSignal.timeout(180000), {
-      systemPrompt: prompt("memory.system", { budget: MEMORY_BUDGET }),
-      maxTokens: 8000
-    });
-  if (!response.ok) throw Error(await describeResponseError(response));
-  const { reply, tokens } = await readWhole(response, text);
-  noteUsage("memory", tokens);
-  return parseMemoryOps(reply.content);
+  const items = store.memory.items,
+    reply = await askDuty(
+      "memory",
+      prompt("memory.case", {
+        used: memoryChars(),
+        items: items.length ? items.map(item => memoryLine(item, true)).join("\n") : prompt("memory.empty"),
+        title: c.title || t("未命名"),
+        day,
+        turns
+      }),
+      { systemPrompt: prompt("memory.system", { budget: MEMORY_BUDGET }), maxTokens: 8000, signal: AbortSignal.timeout(180000) }
+    );
+  return parseMemoryOps(reply);
 }
 /** 答复里的那个 JSON 数组：裹了围栏、前后多说了几句都认；找不到就当这回没整理成 @param {string} text */
 function parseMemoryOps(text) {
@@ -244,14 +235,7 @@ function applyMemoryOps(ops, c, counts) {
       Object.assign(item, { updatedAt: now(), source });
       counts.update += 1;
     } else if (op.op === "add" && text && !store.memory.items.some(entry => entry.text === text)) {
-      store.memory.items.push({
-        id: memoryId(),
-        text,
-        category: cleanMemoryCategory(op.category),
-        createdAt: now(),
-        updatedAt: now(),
-        source
-      });
+      addMemory(text, source, op.category);
       counts.add += 1;
     }
   }
