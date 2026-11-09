@@ -14,11 +14,13 @@ npm start
 
 Your browser opens `http://127.0.0.1:8787`. The first time, fill in a display name, model ID, Base URL and API key in **Settings → Model** to start; the project never reads or bundles any configuration from the developer's machine. You can add several APIs and switch the default model. Each model chooses its **API**: OpenAI compatible (chat/completions) or Anthropic (Messages API); a Base URL containing anthropic.com is recognized even if you don't choose.
 
-Switch the interface language in **Settings → General → Language** (中文 / English); the page reloads after switching. If you never chose, it follows the browser language: Chinese for Chinese locales, English otherwise. The English interface only changes the words on screen; the prompts sent to the model stay the same. **Settings → Docs** is Chinese only for now.
+Switch the interface language in **Settings → General → Language** (中文 / English); the page reloads after switching. If you never chose, it follows the browser language: Chinese for Chinese locales, English otherwise. The English interface only changes the words on screen; the prompts sent to the model stay the same.
 
 **Settings → General → Desktop notifications** is off by default. When on and the page isn't in front of you (another window or app), a system notification pops up when an answer finishes, something awaits your decision (the approval bar, a form), or a subagent breaks off; a newer one for the same chat replaces the older, and clicking it takes you back to that chat. If a follow-up started another turn or subagents are still working, the chat isn't idle yet, so nothing pops up; nor when you pressed stop. Permission is kept per browser and asked the first time you click On; settings sync through the storage folder, so a browser that hasn't allowed it stays quiet until you click On there again.
 
 The CMD window opened by `start.cmd` is the local bridge process and must stay open. If you close it, pages already loaded stay for a while, but reloading, model forwarding, web access and the agent all stop. If the browser is open but the page says the local bridge has stopped, look at that window first: when the bridge exits it stays open and prints the reason (port in use, node missing and so on) instead of flashing away.
+
+On macOS, double-click `start.command` (if it's blocked the first time, right-click it in Finder and choose **Open**). The **Environment** toolkit is Windows-only, and the sandbox rules are written for PowerShell, so they are looser on macOS.
 
 ## Windows portable package
 

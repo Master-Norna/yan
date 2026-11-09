@@ -6,9 +6,9 @@
 
 [中文](README.md) · **English**
 
-A local, zero-dependency chat front end for OpenAI-compatible APIs and Anthropic's Messages API, styled after plain paper and ink. A chat bound to a working folder becomes **Agent** mode (行 · 执事): a lightweight coding agent that searches, reads, edits files and runs commands in that folder. Unbound, it is **Chat** mode (言 · 对谈): talk as usual, and when you need a spreadsheet, document or PDF, the same tools write into a local folder called **Files** (卷宗).
-
 > Plainness for bones, paper and ink for spirit. Ask at length, answer at leisure; when the words are done, act.
+
+Yan treats working with a model as writing on paper: questions and answers are set down in ink, every action the model takes is recorded as a step, and side questions go in the margin. On the same sheet, a conversation with no folder is a chat; bind it to a folder and the model reads and writes files and runs commands there until the job is done. It runs on your machine, with models you connect yourself.
 
 <p align="center">
   <img src="assets/yan-home.png" alt="Yan: a local chat and lightweight agent interface" width="100%">
@@ -22,30 +22,53 @@ Yan partners with [SiliconFlow](https://siliconflow.cn). In **Settings → Model
 
 ## Highlights
 
-- **Chat and Agent, divided by a folder**: not two entry points, just whether a chat is bound to a working folder. Talk an idea through first, then bind a folder midway and act with the whole context. [More](docs/en/work.md)
-- **Side threads**: select a passage in a reply and a small conversation opens on the right, attached to that spot. It can read the main thread; the main thread never reads it. Ask about what's unclear without disturbing the main line. [More](docs/en/chat.md#sessions-and-input)
-- **In-page visuals**: the model writes a self-contained HTML page that renders in place inside an isolated sandbox, on the same sheet of paper as the text. ECharts and Mermaid ship with the project and load on demand. [More](docs/en/chat.md#rendering)
-- **Long jobs keep themselves going**: the folder holds a ledger (constraints and trade-offs) and an **Intent** (a graph of conclusions to establish, with premises, checks and evidence; when evidence changes, the item goes back to "needs recheck"), carried across chats. A finished background command wakes the model; a subagent can start a training run, sleep, wake up to evaluate and report back. When the context is nearly full, the model compacts its work into notes and carries on. [More](docs/en/work.md#intent)
-- **Browser panel**: the browser the model drives sits in a panel on the right. You can see where it clicks and what it types, take over at any time, and circle things on screen to point them out. [More](docs/en/stage.md)
-- **Many models**: add several APIs and switch the default: SiliconFlow, OpenAI compatible, Anthropic, and ChatGPT subscription (official sign-in). SiliconFlow works as soon as you paste a key ([setup](docs/en/siliconflow.md)). Thinking levels are probed automatically for each provider, and **Settings → Roles** can add a separate review model and image model. [More](docs/en/models.md)
-- **Paper and ink throughout**: seals, the inkstone, tokens left, ink drops and daylight; the interface and its motion share one brush.
-- **Local, zero-dependency, under your control**: data stays in a local storage folder (`~/.yan/` by default). Yan has no server of its own; chats go only to the model APIs you connect. It needs only Node.js 22+ (bundled in the Windows portable package) and installs no npm packages. Commands have three permission levels, asking before each one by default, with a sandbox on top; in Auto-review, steps the rules aren't sure about can go to a review model that judges them against what you actually said. [Storage](docs/en/storage.md) · [Permissions and sandbox](docs/en/sandbox.md)
+### Chat and Agent, divided by a folder
 
-There is also Files, subagents, presets, groups, MCP, the sandbox environment, memory and the audio player; see the [docs](docs/en/README.md).
+Most tools split chatting and agents into separate programs; Yan only asks whether this conversation is bound to a folder. Talk an idea through, bind a folder midway, and the model acts with the whole story behind it; the trade-offs you settled along the way don't need repeating. [More](docs/en/work.md)
 
-## Quick start
+### Side threads: questions in the margin
 
-**Windows, without installing Node**: download `yan-<version>-win-x64.zip` from [Releases](https://github.com/Master-Norna/yan/releases/latest), unzip it and double-click `言.exe` in the `言` folder. The package bundles the official Node; everything else is the same as below. `言.exe` is unsigned, so the first time Windows may say "Windows protected your PC"; click **More info → Run anyway**. [More](docs/en/start.md#windows-portable-package)
+When something in a reply isn't clear, select it and a small conversation attached to that spot opens on the right. A side thread can read the main conversation, but the main conversation never sees it, so a detour never leaks into the main context. Switch to another version of the reply and its side threads hide, then reappear when you switch back. [More](docs/en/chat.md#sessions-and-input)
 
-**From source**: install Node.js 22 or later, then double-click `start.cmd`, or run in the project folder:
+### Intent: long jobs that know what "done" means
+
+For a job spanning several replies, the model keeps an **Intent** in the folder: which conclusions the job must establish, what each rests on, and which files or command outputs back it. When that evidence changes, whether by this reply, another conversation or your own hand, the item turns to needs recheck and everything depending on it lights up. When the model tries to finish, it's held once and asked to judge against your original question whether it's really done. Another conversation in the same folder picks up the same Intent; working practice and pitfalls go in a separate ledger. [More](docs/en/work.md#intent)
+
+### Waits: leave it running, get woken when it's time
+
+Training runs, builds, waiting on a PR review: the agent puts them in the background or sets a time, then finishes its reply instead of sitting awake. When the command ends or the time comes, it's woken to carry on. Subagents work the same way: start a training run, sleep, wake up to evaluate, then report back. [More](docs/en/work.md#waits)
+
+### Follow-ups: cut in mid-answer
+
+While the model is answering, add a line whenever something occurs to you. It isn't cut off and your words don't wait in a queue: they're handed over once it finishes the thought, the step or the sentence, and it can change course from there. If it's urgent, click ↵ on that step to hand it over at once. [More](docs/en/chat.md#generation-and-versions)
+
+### Browser panel: watch it use the web
+
+The browser the model uses sits in a panel on the right, with a red mark wherever it clicks or types, and you can take over at any time. Circle something or draw a line on the page to point it out. [More](docs/en/stage.md)
+
+### Paper and ink, all the way through
+
+It isn't a skin. Usage is ink running down; a year of usage is a page of ink dots, darker where you used more; sending is pressing a seal, playing music draws a brushed circle, and light and dark change like daylight. The interface and its motion share one brush.
+
+## Also
+
+Files and outputs (decks, spreadsheets and PDFs previewed in place), interactive charts in replies, subagents splitting up work, rolling a folder back to how it was before a reply, presets and groups, MCP and Skills, memory across conversations. Commands run under three permission levels with a sandbox on top, and a review model can judge the steps the rules aren't sure about against what you actually said. APIs: SiliconFlow, OpenAI compatible, Anthropic and ChatGPT subscription. Yan has no server of its own and your data stays on your machine; it needs only Node.js 22 and installs no dependencies. English and Chinese interfaces.
+
+## Get started
+
+**Windows**: download `yan-<version>-win-x64.zip` from [Releases](https://github.com/Master-Norna/yan/releases/latest), unzip it and double-click `言.exe`. `言.exe` is unsigned, so the first time Windows may say "Windows protected your PC"; click **More info → Run anyway**.
+
+**From source**: install Node.js 22 or later, then double-click `start.cmd` (`start.command` on macOS), or run:
 
 ```powershell
 npm start
 ```
 
-Your browser opens `http://127.0.0.1:8787`. In **Settings → Model**, fill in a display name, model ID, Base URL and API key to start. Switch the interface language in **Settings → General → Language**. The window opened by `start.cmd` is the local bridge and must stay open. In-app usage notes are under **Settings → Docs** (Chinese only for now). For use inside VS Code, opening `index.html` directly, and environment variables, see [Getting started](docs/en/start.md).
+Your browser opens `http://127.0.0.1:8787`. Add a model in **Settings → Model** and start writing; switch the interface to English in **Settings → General → Language**. The window opened by `start.cmd` is the local bridge and must stay open while you use Yan. For use inside VS Code, environment variables and macOS differences, see [Getting started](docs/en/start.md).
 
-On macOS, double-click `start.command` (if it's blocked the first time, right-click it in Finder and choose **Open**). The **Environment** toolkit is Windows-only, and the sandbox rules are written for PowerShell, so they are looser on macOS.
+## Docs
+
+In-app usage is under **Settings → Docs**; details and how things work are in the [docs](docs/en/README.md).
 
 ## Contributing
 

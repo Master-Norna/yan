@@ -2,7 +2,7 @@
 
 [中文](../README.md) · **English**
 
-The details of Yan live here, one topic per page. In-app usage notes are under **Settings → Docs** (Chinese only for now).
+The details of Yan live here, one topic per page. In-app usage notes are under **Settings → Docs**.
 
 | Page | What it covers |
 | --- | --- |
