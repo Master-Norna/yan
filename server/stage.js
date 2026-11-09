@@ -193,13 +193,18 @@ function serviceOf(body, root) {
   }
   return { args: body?.args || [], cwd: String(body?.cwd || "") };
 }
-// 本机有哪几个浏览器：Edge、Chrome 看常见的安装处，自带内核看「内核」目录
+// 本机有哪几个浏览器：Edge、Chrome 看常见的安装处，自带内核看「内核」目录。
+// 内核认版本：驱动要的是 playwright-core 的 browsers.json 里那一版（chromium-<revision>）。更新驱动后要的版本常变，
+// 旧版留在目录里也起不来——只看有没有 chromium-* 会报「已安装」，点开却是 Playwright 的「未安装」
 function localBrowsers(root) {
   const has = (/** @type {string[]} */ list) => list.some(file => !!file && fs.existsSync(file)),
-    files = platform.browserFiles();
+    files = platform.browserFiles(),
+    at = stageHome(root);
   let chromium = false;
   try {
-    chromium = fs.readdirSync(stageHome(root).engine).some(name => name.startsWith("chromium-"));
+    const { browsers } = JSON.parse(fs.readFileSync(path.join(at.deps, "node_modules", "playwright-core", "browsers.json"), "utf8"));
+    const revision = browsers.find((/** @type {any} */ item) => item.name === "chromium")?.revision;
+    chromium = !!revision && fs.existsSync(path.join(at.engine, `chromium-${revision}`));
   } catch {}
   return {
     msedge: has(files.msedge),

@@ -118,17 +118,21 @@ async function stageInstall(what) {
     const button = document.querySelector(`#settingsContent [data-stage-install="${what}"]`);
     if (button) button.textContent = stageInstallLabel();
   }, 2000);
+  let next = "";
   try {
     stageHomeState = await bridge("/api/stage/install", { what }, AbortSignal.timeout(15 * 60000));
     toast(what === "deps" ? t("驱动已安装") : t("内核已安装"));
     if (store.settings.stage?.enabled) stageSetOptions({});
+    // 用自带内核的：新驱动要的内核版本常跟着变，旧的起不来——接着装上对应的那一版
+    if (what === "deps" && store.settings.stage?.browser === "chromium" && !stageHomeState?.browsers.chromium) next = "chromium";
   } catch (error) {
     toast(String(/** @type {any} */ (error).message || error).slice(0, 160), 6000);
   } finally {
     clearInterval(ticker);
     stageInstalling = "";
     stageProgress = null;
-    if (settingsTab === "stage") renderSettings();
+    if (next) void stageInstall("chromium");
+    else if (settingsTab === "stage") renderSettings();
   }
 }
 function bindStageSettings() {

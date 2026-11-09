@@ -119,17 +119,24 @@ async function stageLaunch() {
   stage.launching = true;
   stageRender();
   try {
-    await bridge("/api/mcp/call", {
+    const { result } = await bridge("/api/mcp/call", {
       server,
       config: mcpConfigs()[server],
       tool: "browser_navigate",
       arguments: { url: "about:blank" },
       timeout: 60
     });
+    // 服务起浏览器失败（内核缺、配置目录被占）是作为结果报回的，不是抛错：照它的原话说，别报成「已开却连不上」
+    const failed =
+      result?.isError &&
+      mcpResultText(result)
+        .replace(/^#+ .*\n/gm, "")
+        .trim();
+    if (failed) throw Error(failed);
     await stageLocate();
     if (!stage.ws) toast(t`浏览器已开，但连不上调试口${stage.port ? ` ${stage.port}` : ""}`);
   } catch (error) {
-    toast(t`浏览器打开失败：${String(error.message || error).slice(0, 80)}`);
+    toast(t`浏览器打开失败：${String(error.message || error).slice(0, 160)}`, 6000);
   } finally {
     stage.launching = false;
     stageSync();
