@@ -19,5 +19,5 @@ The details of Yan live here, one topic per page. In-app usage notes are under *
 | [Skills](skills.md) | `SKILL.md` in the Claude Code format: where it goes, how to write one, how the model reads it |
 | [Browser panel](stage.md) | The model's browser, docked in a panel on the right: setup, usage, how it works |
 | [Sandbox environment](env.md) | A bundled Python and toolchains for the model, download mirrors |
-| [Memory](memory.md) | How memories are written, read and consolidated |
+| [Memory](memory.md) | How memory is brought into chats, tidied and edited |
 | [Code structure and development](development.md) | How the code is split, concatenation, tests, formatting and type checks |
