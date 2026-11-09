@@ -59,8 +59,18 @@ const MIME = {
   ".bcmap": "application/octet-stream"
 };
 
+// 这次请求的路径（解码后）。写坏的百分号转义不在这里报错：安全头照旧按主页面给，后面的 404/400 会接住
+function requestPath(req) {
+  try {
+    return decodeURIComponent(new URL(req.url, `http://${HOST}`).pathname);
+  } catch {
+    return null;
+  }
+}
+
 function securityHeaders(req, res) {
-  const isPreview = new URL(req.url, `http://${HOST}`).pathname === "/preview.html";
+  // 比的是解码后、不分大小写的路径：文件系统本就不分大小写，/PREVIEW.HTML 与 /%70review.html 交付的也是那一件
+  const isPreview = (requestPath(req) || "").toLowerCase() === "/preview.html";
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
   // 主页面另许连本机的 ws：看台直连模型所用浏览器的调试口（见 server/stage.js）。
@@ -112,14 +122,17 @@ try {
   APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8")).version || "";
 } catch {}
 // 桥接自己的代码（server.js、server/）在启动之后又改过：页面据此提醒重启，
-// 否则新页面对着旧桥接，接口对不上时的毛病无从查起
+// 否则新页面对着旧桥接，接口对不上时的毛病无从查起。
+// 拼接规则（server/build.js）不在其列：currentBundler 按 mtime 自己重载它，改它不必重启（见文件开头）
 const STARTED_AT = Date.now();
 function bridgeStale() {
   const under = dir =>
     fs
       .readdirSync(dir, { withFileTypes: true })
       .flatMap(entry => (entry.isDirectory() ? under(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
-  return [__filename, ...under(path.join(ROOT, "server"))].some(file => fs.statSync(file).mtimeMs > STARTED_AT);
+  return [__filename, ...under(path.join(ROOT, "server"))]
+    .filter(file => file !== BUILD_FILE)
+    .some(file => fs.statSync(file).mtimeMs > STARTED_AT);
 }
 function handleBootstrap(req, res) {
   sendJson(res, 200, {
@@ -240,23 +253,23 @@ const BUNDLES = {
   "/support.js": { build: () => currentBundler().bundleScript(), type: "application/javascript; charset=utf-8" },
   "/app.css": { build: () => currentBundler().bundleStyles(), type: "text/css; charset=utf-8" }
 };
-// 静态服务只开放页面运行真正需要的文件。仓库根目录里还有桥接源码、测试、.git 与用户可能临时放入的配置，
-// 不能因为它们恰好位于 ROOT 下就一并交给浏览器。页面外壳（index.html、theme-boot.js、预览沙箱、图标）都在 web/，挂在站点根上：
-// web/ 本身即白名单，加一件只需放进去；vendor/ 是随页面分发的纯前端资源，i18n/ 是界面的译文表；提示词随页面脚本拼进 /support.js。
+// web/ 整片按站点根开放：子目录里的字体、图片与根上那几件一样是公开资源，加一件只需放进去；
+// vendor/ 是随页面分发的纯前端资源，i18n/ 是界面的译文表，都在仓库根下的原位置；提示词随页面脚本拼进 /support.js。
 const PAGE_DIR = path.join(ROOT, "web");
-const REAL_ROOT = fs.realpathSync(ROOT);
+const REAL_ROOT = fs.realpathSync(ROOT),
+  REAL_PAGE_DIR = fs.realpathSync(PAGE_DIR);
 function publicStaticTarget(requested) {
   // URL 路径里的反斜杠在 Windows 上也是目录分隔符；先统一再规范化，vendor/../server.js 不能借前缀混进来。
   const webPath = requested.replace(/\\/g, "/"),
     normalized = path.posix.normalize(webPath);
   if (normalized !== webPath || normalized.startsWith("../") || path.posix.isAbsolute(normalized)) return null;
   const shared = normalized.startsWith("vendor/") || normalized.startsWith("i18n/");
-  if (!shared && normalized.includes("/")) return null;
-  const candidate = path.resolve(shared ? ROOT : PAGE_DIR, ...normalized.split("/"));
+  // 围栏按各自的白名单目录算，不按仓库根：web/ 里出现指向别处的链接，也带不出 web/ 之外。
+  const base = shared ? REAL_ROOT : REAL_PAGE_DIR;
+  const candidate = path.resolve(base, ...normalized.split("/"));
   if (!fs.existsSync(candidate)) return null;
-  // 白名单目录中若出现指向仓库外的符号链接，也不能跟出去。
   const file = fs.realpathSync(candidate),
-    relative = path.relative(REAL_ROOT, file);
+    relative = path.relative(base, file);
   if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
   const stat = fs.statSync(file);
   return stat.isFile() ? { file, stat } : null;
@@ -279,21 +292,29 @@ function serveBundle(req, res, urlPath) {
   res.end(req.method === "HEAD" ? undefined : body);
   return true;
 }
+function sendNotFound(res) {
+  res.writeHead(404, { "Content-Type": MIME[".html"], "Cache-Control": "no-store" });
+  res.end(NOT_FOUND_PAGE);
+}
 function serveStatic(req, res) {
-  const urlPath = decodeURIComponent(new URL(req.url, `http://${HOST}`).pathname);
+  const urlPath = requestPath(req);
+  if (urlPath === null) {
+    // 写坏的百分号转义是请求本身的问题，不是桥接出错：静态路径当作没有这件，接口当作参数不对
+    if (req.url.startsWith("/api/")) return sendJson(res, 400, { error: "路径编码有误" });
+    return sendNotFound(res);
+  }
   if (serveBundle(req, res, urlPath)) return;
   const requested = urlPath === "/" ? "index.html" : urlPath.slice(1);
   const target = publicStaticTarget(requested);
   if (!target) {
     if (urlPath.startsWith("/api/")) return sendJson(res, 404, { error: "未找到接口" });
-    res.writeHead(404, { "Content-Type": MIME[".html"], "Cache-Control": "no-store" });
-    return res.end(NOT_FOUND_PAGE);
+    return sendNotFound(res);
   }
   const { file, stat } = target;
   // 带上 ETag / Last-Modified：no-cache 只要求重新验证，有了校验值浏览器才会真正拿到改动后的文件，而不是沿用旧缓存
   const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
   const headers = {
-    "Content-Type": MIME[path.extname(file)] || "application/octet-stream",
+    "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream",
     "Cache-Control": "no-cache",
     ETag: etag,
     "Last-Modified": stat.mtime.toUTCString()

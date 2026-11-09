@@ -129,6 +129,26 @@ for (const privatePath of [
   check(`private repository path ${privatePath} is hidden`, response.status === 404, String(response.status));
   await response.body?.cancel();
 }
+// 预览页的安全头按「这次交付的是哪一件」给：路径解码后、不分大小写地认（Windows 的文件系统本就分不出来）
+for (const previewPath of ["/preview.html", "/%70review.html", ...(win ? ["/PREVIEW.HTML"] : [])]) {
+  const response = await fetch(BASE + previewPath, { headers: { Origin: "http://127.0.0.1:9999" } });
+  const policy = response.headers.get("content-security-policy") || "";
+  check(
+    `preview policy for ${previewPath}`,
+    response.status === 200 && policy.includes("connect-src 'none'") && policy.includes("frame-ancestors 'self'"),
+    `${response.status} ${policy.slice(0, 40)}`
+  );
+  await response.body?.cancel();
+}
+// 写坏的百分号转义是请求本身的问题：静态路径 404、接口 400，都不该报成桥接的 500
+{
+  const badStatic = await fetch(BASE + "/%E0%A4%A");
+  check("malformed escape on a static path is a 404", badStatic.status === 404, String(badStatic.status));
+  await badStatic.body?.cancel();
+  const badApi = await fetch(BASE + "/api/%E0%A4%A");
+  check("malformed escape under /api/ is a 400", badApi.status === 400, String(badApi.status));
+  await badApi.body?.cancel();
+}
 // Origin 门禁
 let r = await post("/api/work/run", { workdir, command: "echo hi" }, { Origin: "null" });
 check("Origin: null cannot reach the work API", r.status === 403, `${r.status} ${JSON.stringify(r.data)}`);

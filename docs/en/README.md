@@ -6,7 +6,7 @@ The details of Yan live here, one topic per page. In-app usage notes are under *
 
 | Page | What it covers |
 | --- | --- |
-| [Getting started](start.md) | Quick start, use inside VS Code, opening `index.html` directly, environment variables, the local bridge |
+| [Getting started](start.md) | Quick start, use inside VS Code, opening `web/index.html` directly, environment variables, the local bridge |
 | [Storage and backup](storage.md) | What the storage folder holds, sharing one copy across browsers, moving it, backup export and import |
 | [Chat](chat.md) | Sessions and input (groups, context, quotes, side threads), generation and versions (follow-ups, continuing, branches), rendering (in-page visuals, themes) |
 | [Attachments and Files](files.md) | Attachment parsing and limits, Files, output cards and preview, the audio player |
