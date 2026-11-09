@@ -1942,8 +1942,8 @@ var YAN_EN = {
   "录是一份跨对话的记忆：你的偏好、身份与约定，此后不必重述。只存于本机。":
     "Memory carries across conversations: your preferences, who you are and what's been agreed, so you needn't repeat them. It's stored only on this machine.",
   带与记: "Bringing and remembering",
-  "专司里配好「记忆」，每段对话开头便带上整份记忆，模型不必去翻。离开一段对话（换到别段、新开一段），专司「记忆」在后台读这段的问答，补记、合并、删去推翻了的，压在三千字之内；改了几条，提示一句。模型也可当场记一条，行迹里写作「记入」。":
-    "Once Memory is set up under Duties, every chat starts with the whole memory included, so the model doesn't have to look anything up. When you leave a chat (switch to another or start a new one), the Memory duty reads its exchanges in the background, adds what's new, merges and removes what's been overturned, and keeps the whole within 3,000 characters; a short notice says what changed. The model can also save an item on the spot, shown as “Remember” under Steps.",
+  "专司里配好「记忆」，每段对话开头便带上整份记忆，模型不必去翻。每一答落定，专司「记忆」就在后台读这段新近的问答，补记、合并、删去推翻了的，压在三千字之内；改了几条，提示一句。模型也可当场记一条，行迹里写作「记入」。":
+    "Once Memory is set up under Duties, every chat starts with the whole memory included, so the model doesn't have to look anything up. Whenever an answer settles, the Memory duty reads the chat's recent exchanges in the background, adds what's new, merges and removes what's been overturned, and keeps the whole within 3,000 characters; a short notice says what changed. The model can also save an item on the spot, shown as “Remember” under Steps.",
   改与忘: "Editing and forgetting",
   "设置 → 记忆先列各类，点开一类方见其中条目：每条皆可修改、删除、改归别类，长条目平时收起、点开即全文；分类名亦可改，改作已有之名即并为一类。专司里关掉「记忆」，便不带也不记，条目仍在。":
     "Settings → Memory lists the categories first; open one to see its items. Each item can be edited, deleted or moved to another category; long items are collapsed until clicked. Categories can be renamed too, and renaming one to an existing name merges them. Turning Memory off under Duties stops including and recording it; the items stay.",

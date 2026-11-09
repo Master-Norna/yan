@@ -35,9 +35,6 @@ function openHistoryMenu(id, anchor) {
   );
 }
 function newChat() {
-  // 离开一段对话：交给专司「记忆」在后台整理（见 tidyMemory）
-  const left = currentConversation();
-  if (left) void tidyMemory(left);
   closeSidePanel();
   persistDraft();
   rememberScrollPosition();
@@ -52,8 +49,6 @@ function newChat() {
 }
 function openConversation(id) {
   if (id !== currentId) {
-    const left = currentConversation();
-    if (left) void tidyMemory(left);
     closeSidePanel();
     persistDraft();
     rememberScrollPosition();

@@ -104,11 +104,12 @@ function memorySnapshot(conversation) {
   return memorySnapshots.get(conversation.id) || "";
 }
 // ── 整理 ──
-// 离开一段对话（换到别段、新开一段）、或它在后台答完而人不在跟前，就把这段还没整理过的问答交给专司「记忆」：
+// 一答落定（不再接着答），就把这段还没整理过的问答交给专司「记忆」——不等人离开：长活常挂在一页里不走。
 // 它看现有记忆与这段新近的问答，答一份增删改，没提到的条目一字不动——整份重写会一回回悄悄走样，人改过的字也会被转述掉。
-// 页面关了没来得及的，下回开页补上。一回只整理一段，依次排队：后一段看到的是前一段改过的记忆。
+// 眼前这段的系统提示里记忆已定格（见 memorySnapshot），整理改的是往后各段带的那份，不扰这段的缓存。
+// 页面关了、没成的，下回这段答完或开页时补上。一回只整理一段，依次排队：后一段看到的是前一段改过的记忆。
 // 交给它的只有用户的话与助手的答复，不给工具输出：网页里埋的「请记住……」进不来（与审查只看用户原话同理）。
-// 整理要写这段对话（记到了哪一刻），先向桥接认领：别处正在这段里作答就让开，等那边离开时再整理
+// 整理要写这段对话（记到了哪一刻），先向桥接认领：别处正在这段里作答就让开，那边答完自会整理
 let tidyQueue = Promise.resolve();
 /** @type {Set<string>} 排着或正整理的对话 */
 const tidyingIds = new Set();
@@ -133,17 +134,17 @@ function tidyMemory(conversation) {
   const id = conversation.id;
   if (tidyingIds.has(id) || !memoryOn(conversation) || !hasUntidied(conversation)) return tidyQueue;
   tidyingIds.add(id);
-  // 没成（接口不通、答得认不出清单）：这段的进度不动，下回离开时再来。不提示：没成不丢东西，配错了接口去设置里试连
+  // 没成（接口不通、答得认不出清单）：这段的进度不动，这段下回答完或开页时再来。不提示：没成不丢东西，配错了接口去设置里试连
   tidyQueue = tidyQueue
     .then(() => tidyOne(id))
-    .catch(error => console.warn("记忆整理没成，下回离开这段时再来", error))
+    .catch(error => console.warn("记忆整理没成，下回再来", error))
     .finally(() => tidyingIds.delete(id));
   return tidyQueue;
 }
-// 开页时补上：页面关着时离开的那几段（眼前这段等离开时再说）
+// 开页时补上：页面关着时没来得及、或没成的那几段
 function tidyLeftovers() {
   if (!memoryOn()) return;
-  for (const c of store.conversations) if (c.id !== currentId) void tidyMemory(c);
+  for (const c of store.conversations) void tidyMemory(c);
 }
 /** @param {string} id */
 async function tidyOne(id) {
@@ -158,8 +159,8 @@ async function tidyOne(id) {
   tidyingNow = id;
   const counts = { add: 0, update: 0, delete: 0 };
   try {
-    let turns = untidied(c);
-    while (turns.length) {
+    // 每回现取：整理的这一阵里人又问了一答，答完的接着整理；又在作答了就停，等那一答落定时再来（别把没答的问先送去）
+    for (let turns = untidied(c); turns.length && !conversationRunning(id); turns = untidied(c)) {
       // 一回装多少：问答依次装，装满一回的量为止（至少一条）。答复的结论多在末尾，截时留头留尾
       const lines = [];
       let room = TIDY_CHUNK;
@@ -180,7 +181,6 @@ async function tidyOne(id) {
       c.memoryAt = chunk.at(-1).timestamp;
       markDirty(id);
       saveStore();
-      turns = turns.slice(chunk.length);
     }
   } finally {
     tidyingNow = "";

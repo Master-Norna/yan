@@ -7,7 +7,7 @@
 /** @typedef {"memory"|"review"|"image"} DutyId */
 /** @type {Record<DutyId, { key: "dutyMemory"|"dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string }>} */
 const DUTIES = {
-  // 记忆：配好了每段对话开头带上记忆，离开一段后由它整理（见 11-memory.js）；关着即不带不记
+  // 记忆：配好了每段对话开头带上记忆，每一答落定后由它整理（见 11-memory.js）；关着即不带不记
   memory: {
     key: "dutyMemory",
     name: () => t("记忆"),

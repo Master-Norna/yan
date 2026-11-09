@@ -231,7 +231,7 @@
  * @property {boolean} [notify] 桌面通知（设置 → 通用）：页面不在眼前时答毕、待你定夺、帮手断了弹系统通知；准许各浏览器自记
  * @property {boolean} autoTitle 自动拟题（设置 → 专司）：随对话的模型，只有开关
  * @property {Duty} dutyReview 审查（设置 → 专司）：审而后行里规则标疑的那一步交它再判；关着即照规则回绝
- * @property {Duty} dutyMemory 记忆（设置 → 专司）：配好了每段对话开头带上记忆，离开一段对话后由它在后台整理；关着即不带不记
+ * @property {Duty} dutyMemory 记忆（设置 → 专司）：配好了每段对话开头带上记忆，每一答落定后由它在后台整理；关着即不带不记
  * @property {Duty} dutyImage 生图（设置 → 专司）：配了才把生图交给模型
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
