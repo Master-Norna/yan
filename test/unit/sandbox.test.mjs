@@ -637,7 +637,7 @@ test("攻击写法总表：三档与「审了也不放行」各得其所", () =>
       command
     );
 });
-test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之外时，写子命令拒绝；目录内与查看类放行", () => {
+test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之外时，只看不改才放行；目录内与查看类照旧", () => {
   for (const command of [
     "git -C .. checkout -- src/a.js",
     "git -C.. reset --hard",
@@ -646,7 +646,25 @@ test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之
     "git --git-dir=..\\.git checkout -- src/a.js",
     "git --git-dir ..\\.git reset --hard",
     "git --work-tree .. restore .",
-    'git -C "E:\\other dir" checkout -- src/a.js'
+    'git -C "E:\\other dir" checkout -- src/a.js',
+    // 全局开关夹在中间不能把子命令藏起来（--no-pager、-c 都试）
+    "git -C .. --no-pager checkout -- f.txt",
+    "git -C .. -c core.autocrlf=false reset --hard",
+    // 写子命令不能只列几个常见的：add、commit、rm、tag 一样动的是别处的仓库
+    "git -C .. add f.txt",
+    "git -C .. commit -am msg",
+    "git -C .. rm f.txt",
+    "git -C .. tag v9",
+    "git -C .. push origin main",
+    "git -C .. branch -d x",
+    "git -C .. config user.name x",
+    // 同一个 git 里的目录选项得全看：前一个在工作目录里，后一个指出去
+    "git --git-dir=.git --work-tree .. checkout -- f.txt",
+    "git -C sub -C ../.. checkout -- src/a.js",
+    // 静态看不出落到哪的（shell 展开）一律按出去了算；-c 能塞进 alias / pager，不算查看
+    "git -C $env:USERPROFILE checkout -- f.txt",
+    "git -C ~/other reset --hard",
+    "git -C .. -c core.pager=cat log"
   ])
     assert.match(screen(command), /工作目录之外/, command);
   for (const command of [
@@ -659,6 +677,16 @@ test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之
     "git -C .. diff",
     "git -C .. show HEAD",
     "git -C .. branch",
+    "git -C .. branch -a",
+    "git -C .. branch --contains main",
+    "git -C .. config --get user.name",
+    "git -C .. config user.name",
+    "git -C .. remote -v",
+    "git -C .. stash list",
+    "git -C .. log --no-pager -n 5",
+    "git -C $env:USERPROFILE log --oneline",
+    // -C 按出现次序生效：sub 再 .. 又回到工作目录
+    "git -C sub -C .. checkout -- src/a.js",
     "git status"
   ])
     assert.equal(screen(command), null, command);

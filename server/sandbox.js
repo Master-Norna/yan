@@ -259,18 +259,214 @@ function screenWritePaths(text, workdir, win, prefix) {
   }
   return null;
 }
-// git 的全局目录选项：-C <dir> 也可以连写成 -C<dir>；--git-dir / --work-tree 用 = 或空格；--bare 无参数
-const GIT_OPTION_ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`,
-  GIT_REPO_OPTION = new RegExp(
-    String.raw`\b[gG][iI][tT](?:\.exe)?\b(?:[^\n;|&]*?)\s(?:-C\s*|--git-dir(?:=|\s+)|--work-tree(?:=|\s+))(${GIT_OPTION_ARG})`,
-    "g"
-  ),
-  // git 的写子命令（连同 -C / --git-dir / --work-tree 这些全局选项一起认）；查看类的（log、status、diff、show、不带 -d 的 branch）不在其中
-  GIT_WRITE_SUB = new RegExp(
-    String.raw`\b[gG][iI][tT](?:\.exe)?\b(?:\s+(?:-C\s*${GIT_OPTION_ARG}|--git-dir(?:=|\s+)${GIT_OPTION_ARG}|--work-tree(?:=|\s+)${GIT_OPTION_ARG}|--bare))*\s+(?:clone|worktree\s+add|checkout|restore|reset|clean|stash|switch|merge|rebase|apply|am|revert|cherry-pick|pull|submodule|update-ref|gc|prune|config|init|branch\s+-[dD])\b`
-  );
-/** git 的 -C / --git-dir / --work-tree 有没有指到工作目录之外 @param {string} text @param {string} workdir @param {boolean} win */
-function gitRepoEscapes(text, workdir, win) {
+// git 的全局选项里会吃掉一个参数的几个：-C <dir>（也可连写成 -C<dir>）、--git-dir / --work-tree（= 或空格）；
+// 别的开关（--no-pager、--bare…）不带参数
+const GIT_GLOBAL_ARG = new Set([
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--exec-path",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+  "--attr-source"
+]);
+// 这些全局开关能把一条命令塞进 git 来跑（alias、pager、外部 diff），带着就不算「查看」
+const GIT_RUNS_COMMANDS = new Set(["-c", "--exec-path", "--config-env", "--namespace", "--super-prefix"]);
+// 仓库指到工作目录之外时还放行的子命令：只列敢放行的。写子命令不能穷举——列不全就等于放行一条
+// （add、commit、rm、tag 都曾漏在名单外，挪到「只认查看」才收得住）
+const GIT_READ_SUB = new Set([
+  "log",
+  "status",
+  "diff",
+  "show",
+  "blame",
+  "rev-parse",
+  "rev-list",
+  "ls-files",
+  "ls-tree",
+  "cat-file",
+  "describe",
+  "shortlog",
+  "grep",
+  "whatchanged",
+  "name-rev",
+  "for-each-ref",
+  "show-ref",
+  "diff-tree",
+  "diff-files",
+  "diff-index",
+  "count-objects",
+  "version",
+  "help",
+  "var",
+  "cherry",
+  "check-ignore",
+  "check-attr",
+  "range-diff",
+  "verify-commit",
+  "verify-tag"
+]);
+// 有的子命令要看参数才分得清读与写：branch 不带参数是列出、branch -d 是删；只认白名单里的开关
+const GIT_READ_ARGS = {
+  branch: [
+    "-a",
+    "--all",
+    "-r",
+    "--remotes",
+    "-v",
+    "-vv",
+    "--verbose",
+    "-l",
+    "--list",
+    "--show-current",
+    "--contains",
+    "--merged",
+    "--no-merged",
+    "--points-at",
+    "--format",
+    "--sort",
+    "--column",
+    "--no-column",
+    "-i",
+    "--ignore-case",
+    "--abbrev"
+  ],
+  tag: [
+    "-l",
+    "--list",
+    "-n",
+    "-v",
+    "--contains",
+    "--merged",
+    "--no-merged",
+    "--points-at",
+    "--format",
+    "--sort",
+    "--column",
+    "--no-column",
+    "-i",
+    "--ignore-case"
+  ],
+  remote: ["-v", "--verbose", "show", "get-url"],
+  stash: ["list", "show"],
+  worktree: ["list"],
+  submodule: ["status", "summary"],
+  notes: ["list", "show"],
+  reflog: ["show", "--all", "-n", "--pretty", "--format", "--date"]
+};
+// 这些开关后面跟一个取值（--contains main；--sort=-committerdate 用 = 就自成一体）
+const GIT_READ_VALUE = new Set(["--contains", "--merged", "--no-merged", "--points-at", "--format", "--sort", "--date", "-n", "get-url"]);
+/** 把一条指令切成段（未加引号的 ; | & 换行 括号处断开），每段再切成词（认单双引号） @param {string} text @returns {string[][]} */
+function commandSegments(text) {
+  const segments = [];
+  let tokens = [],
+    word = "",
+    quote = "";
+  const endWord = () => {
+      if (word) tokens.push(word);
+      word = "";
+    },
+    endSegment = () => {
+      endWord();
+      if (tokens.length) segments.push(tokens);
+      tokens = [];
+    };
+  for (const ch of String(text)) {
+    if (quote) {
+      if (ch === quote) quote = "";
+      else word += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === ";" || ch === "|" || ch === "&" || ch === "\n" || ch === "\r" || ch === "(" || ch === ")") endSegment();
+    else if (/\s/.test(ch)) endWord();
+    else word += ch;
+  }
+  endSegment();
+  return segments;
+}
+/**
+ * 一段词是不是 git 调用；是就把全局选项与子命令拆开。
+ * 只认头一个词是 git 的那种——包在引号里交给别的程序（pwsh -c "git …"）算脚本，本就不在静态筛查之内
+ * @param {string[]} tokens @returns {{dirs: string[], gitDir: string | null, workTree: string | null, opts: string[], sub: string, args: string[]} | null}
+ */
+function gitInvocation(tokens) {
+  if (!/^git(?:\.exe|\.cmd)?$/i.test(tokens[0] || "")) return null;
+  const invocation = { dirs: [], gitDir: null, workTree: null, opts: [], sub: "", args: [] };
+  let i = 1;
+  for (; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--") {
+      i++;
+      break;
+    }
+    if (!token.startsWith("-")) break;
+    // -C<dir> / -c<k=v> 可以连写，--git-dir=<dir> 用等号
+    const glued = /^-([Cc])(.+)$/.exec(token),
+      eq = token.startsWith("--") ? token.indexOf("=") : -1,
+      name = eq > 0 ? token.slice(0, eq) : token;
+    if (glued && glued[1] === "C") {
+      invocation.dirs.push(glued[2]);
+      continue;
+    }
+    if (glued && glued[1] === "c") {
+      invocation.opts.push("-c");
+      continue;
+    }
+    let value = eq > 0 ? token.slice(eq + 1) : null;
+    if (value === null && GIT_GLOBAL_ARG.has(name)) value = tokens[++i] ?? "";
+    if (name === "-C") invocation.dirs.push(value ?? "");
+    else if (name === "--git-dir") invocation.gitDir = value ?? "";
+    else if (name === "--work-tree") invocation.workTree = value ?? "";
+    else invocation.opts.push(name);
+  }
+  invocation.sub = tokens[i] ?? "";
+  invocation.args = tokens.slice(i + 1);
+  return invocation;
+}
+/** 子命令是不是只看不改（仓库指到目录外时才问） @param {string} sub @param {string[]} args */
+function gitReadOnly(sub, args) {
+  const name = sub.toLowerCase();
+  // 没有子命令：只打印用法
+  if (!name) return true;
+  if (GIT_READ_SUB.has(name)) return true;
+  // config：`git config 键` 是读、`git config 键 值` 是写；--unset / --add 这些一律算写
+  if (name === "config")
+    return (
+      args.filter(arg => !arg.startsWith("-")).length <= 1 &&
+      !args.some(arg => /^(?:--(?:unset|unset-all|add|replace-all|rename-section|remove-section|edit|append)|-e)$/.test(arg))
+    );
+  const allowed = GIT_READ_ARGS[name];
+  if (!allowed) return false;
+  // `git stash` 不带参数是存起来，不是列出
+  if (!args.length && name === "stash") return false;
+  let takesValue = false;
+  for (const arg of args) {
+    if (takesValue) {
+      takesValue = false;
+      continue;
+    }
+    const flag = arg.startsWith("--") && arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : "";
+    if (flag && GIT_READ_VALUE.has(flag) && allowed.includes(flag)) continue;
+    if (!allowed.includes(arg)) return false;
+    if (GIT_READ_VALUE.has(arg)) takesValue = true;
+  }
+  return true;
+}
+/** 参数里有 shell 展开（$HOME、%USERPROFILE%、~/x）时静态看不出落到哪，一律按出去了算 */
+function dynamicPath(value) {
+  return /[$`~]|%[^%\\/]+%/.test(value);
+}
+/**
+ * git 的 -C / --git-dir / --work-tree 有没有把仓库指到工作目录之外：是则返回拒绝语，否则 null。
+ * 目录选项按出现次序生效（-C sub -C .. 又绕回工作目录；后一个 --work-tree 覆盖前一个）；
+ * 指到外面时只放行查看类子命令。子命令自己的 pathspec 不在这里管：git 自身拒绝工作树外的路径
+ * （`git checkout -- ../x` 报 is outside repository）
+ * @param {string} text @param {string} workdir @param {boolean} win @returns {string | null}
+ */
+function gitEscapeWhy(text, workdir, win) {
   // 按 win 选 path 的那一套：测试会在 macOS 上跑 Windows 路径，不能拿 POSIX 的 resolve 去解析盘符
   const api = win ? path.win32 : path,
     root = win ? api.normalize(workdir).toLowerCase() : api.normalize(workdir).replace(/(?<=.)[\\/]+$/, ""),
@@ -278,12 +474,30 @@ function gitRepoEscapes(text, workdir, win) {
       const relative = api.relative(root, target);
       return !relative || (relative !== ".." && !relative.startsWith(`..${api.sep}`) && !api.isAbsolute(relative));
     };
-  for (const match of String(text).matchAll(GIT_REPO_OPTION)) {
-    const raw = match[1].replace(/^["']|["']$/g, ""),
-      target = win ? api.resolve(workdir, raw).toLowerCase() : api.resolve(workdir, raw);
-    if (!inside(target)) return true;
+  for (const tokens of commandSegments(text)) {
+    const invocation = gitInvocation(tokens);
+    if (!invocation) continue;
+    let cwd = workdir,
+      outside = null;
+    for (const dir of invocation.dirs) {
+      if (dynamicPath(dir)) {
+        outside = dir;
+        break;
+      }
+      cwd = api.resolve(cwd, dir);
+    }
+    for (const target of outside ? [] : [cwd, invocation.gitDir, invocation.workTree]) {
+      if (target === null) continue;
+      if (dynamicPath(target) || !inside(api.resolve(cwd, target))) {
+        outside = target;
+        break;
+      }
+    }
+    if (!outside) continue;
+    if (!invocation.opts.some(opt => GIT_RUNS_COMMANDS.has(opt)) && gitReadOnly(invocation.sub, invocation.args)) continue;
+    return `沙箱拒绝：git 的 -C / --git-dir / --work-tree 指到了工作目录之外（${outside}）；只有 log、status、diff、show 这类查看子命令能跨出去，要改动那一处请把工作目录设在那一处`;
   }
-  return false;
+  return null;
 }
 /**
  * 筛一条指令。通过返回 null；拒绝返回一句原因（给模型看的，说清怎么改）
@@ -305,10 +519,10 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
     if (why) return why;
   }
   // git 的 -C / --git-dir / --work-tree 把仓库指到别处：`git -C .. checkout -- f` 里没有一个「改动路径」，
-  // 上面的写路径规则看不出它动的是上层的工作树，于是整个漏过。这三个选项的参数在这里单独按工作目录判一次；
-  // 只有写子命令才查（git -C .. log 是查看，仍放行），目录内的 -C sub 照旧
-  if (GIT_WRITE_SUB.test(text) && gitRepoEscapes(text, workdir, win))
-    return "沙箱拒绝：git 的 -C / --git-dir / --work-tree 指到了工作目录之外；要操作别的目录，请把工作目录设在那一处";
+  // 上面的写路径规则看不出它动的是上层的工作树，于是整个漏过。这三个选项在这里按工作目录判一遍；
+  // 指到外面时只放行查看类子命令（git -C .. log 仍放行），目录内的 -C sub 照旧
+  const gitWhy = gitEscapeWhy(text, workdir, win);
+  if (gitWhy) return gitWhy;
   if (NET_TOOLS.test(text)) {
     const hosts = [...text.matchAll(/https?:\/\/([^\s/"'`:]+)(?::\d+)?/gi)].map(m => m[1]);
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
