@@ -169,6 +169,7 @@
  * @property {Fork[]} forks
  * @property {Thread[]} threads
  * @property {string} [workdir] 绑了目录即为行
+ * @property {string} [memoryAt] 记忆整理到了哪一刻：此后的问答（timestamp 更晚的）还没交给专司「记忆」整理
  * @property {CommandPolicy} [commandPolicy] 指令权限模式
  * @property {string} [reasoning] 思考档位
  * @property {string} [presetId] 用的哪个预设；空即言的本色
@@ -211,7 +212,7 @@
  * @property {CommandPolicy|""} policy 选它时的指令权限；空则照设置里的默认
  */
 /** @typedef {Pick<Profile, "baseUrl"|"apiKey"|"model"|"api">} Endpoint 发一次请求要的那几样：模型配置与专司里另配的一份都够 */
-/** @typedef {{ on: boolean, api: "openai"|"anthropic"|"siliconflow"|"chatgpt", baseUrl: string, apiKey: string, model: string, modelList: string[] }} Duty 专司里另配的一份（审查、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
+/** @typedef {{ on: boolean, api: "openai"|"anthropic"|"siliconflow"|"chatgpt", baseUrl: string, apiKey: string, model: string, modelList: string[] }} Duty 专司里另配的一份（审查、记忆、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
 /** @typedef {{ id: string, text: string, category?: string, createdAt: string, updatedAt: string, source: { conversationId: string, title: string }|null }} MemoryItem */
 /** @typedef {{ text: string, attachments: Attachment[], quote?: Quote|null, updatedAt?: string }} Draft */
 /**
@@ -230,6 +231,7 @@
  * @property {boolean} [notify] 桌面通知（设置 → 通用）：页面不在眼前时答毕、待你定夺、帮手断了弹系统通知；准许各浏览器自记
  * @property {boolean} autoTitle 自动拟题（设置 → 专司）：随对话的模型，只有开关
  * @property {Duty} dutyReview 审查（设置 → 专司）：审而后行里规则标疑的那一步交它再判；关着即照规则回绝
+ * @property {Duty} dutyMemory 记忆（设置 → 专司）：配好了每段对话开头带上记忆，离开一段对话后由它在后台整理；关着即不带不记
  * @property {Duty} dutyImage 生图（设置 → 专司）：配了才把生图交给模型
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
@@ -254,7 +256,7 @@
  * @property {Settings} settings
  * @property {Profile[]} profiles
  * @property {Conversation[]} conversations
- * @property {{ enabled: boolean, items: MemoryItem[] }} memory
+ * @property {{ since: string, items: MemoryItem[] }} memory since：专司「记忆」最近一回开起的时刻，此前的问答不拿去整理
  * @property {Record<string, Draft>} drafts
  */
 // 内置提示词都在 prompts/ 目录里，这里只做取值与填空；{{名字}} 由 vars 填入，缺文件时报错并给空串，不让请求整个失败

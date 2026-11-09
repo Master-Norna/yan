@@ -1,11 +1,19 @@
-// 言 · 设置 · 专司：主答之外各司一事的几位——拟题随对话的模型、只有开关；审查与生图各自另配一份，
+// 言 · 设置 · 专司：主答之外各司一事的几位——拟题随对话的模型、只有开关；记忆、审查与生图各自另配一份，
 // 不借模型栏里的那几份：同一份发，会挤掉主答的提示缓存，本机的模型还得多扛一路并发。
 // 审查可走 ChatGPT 订阅：借的是登录的账号、不是哪一份模型，另挑的小模型缓存各归各，免得只为审查另养一个 Key。
 // 一职一张卡，样子同模型栏：收起一行只写职名与模型名（拟题、没配的不写），最右一粒记号——墨点是开或已配，空圈是关或未配；
 // 点开先是开关，开了才铺开接口、地址、Key、模型（设计稿/110–112）
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
-/** @type {Record<"review"|"image", { key: "dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string }>} */
+/** @typedef {"memory"|"review"|"image"} DutyId */
+/** @type {Record<DutyId, { key: "dutyMemory"|"dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string }>} */
 const DUTIES = {
+  // 记忆：配好了每段对话开头带上记忆，离开一段后由它整理（见 11-memory.js）；关着即不带不记
+  memory: {
+    key: "dutyMemory",
+    name: () => t("记忆"),
+    apis: ["siliconflow", "openai", "anthropic", "chatgpt"],
+    off: () => t("关，不带记忆")
+  },
   review: {
     key: "dutyReview",
     name: () => t("审查"),
@@ -26,14 +34,14 @@ const dutyOpen = new Set();
 function dutyReady(d) {
   return !!(d?.on && d.model.trim() && (d.api === "chatgpt" || d.baseUrl.trim()));
 }
-/** @param {"review"|"image"} id */
+/** @param {DutyId} id */
 function dutyOf(id) {
   return store.settings[DUTIES[id].key];
 }
 function dutyMarkHtml(on, tip) {
   return `<span class="duty-mark${on ? " on" : ""}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"></span>`;
 }
-/** 收起时那一行：职名、配好了的模型名、记号 @param {"review"|"image"} id */
+/** 收起时那一行：职名、配好了的模型名、记号 @param {DutyId} id */
 function dutyHeadHtml(id) {
   const d = dutyOf(id),
     ready = dutyReady(d);
@@ -42,7 +50,7 @@ function dutyHeadHtml(id) {
 function dutyCardHtml(id, head, body) {
   return `<details class="profile-card" data-duty="${id}"${dutyOpen.has(id) ? " open" : ""}><summary class="profile-head">${head}</summary><div class="profile-body">${body}</div></details>`;
 }
-/** @param {"review"|"image"} id */
+/** @param {DutyId} id */
 function dutyFormHtml(id) {
   const d = dutyOf(id),
     onOff = `<div class="segmented"><button data-duty-on="${id}" data-value="true" class="${d.on ? "active" : ""}">${t(`开`)}</button><button data-duty-on="${id}" data-value="false" class="${d.on ? "" : "active"}">${t(`关`)}</button></div>`;
@@ -55,7 +63,7 @@ function dutyFormHtml(id) {
       select: "data-duty-select",
       action: "data-duty-action"
     });
-  return `<div class="profile-grid"><label class="profile-full">${t(`启用`)}${onOff}</label><label class="profile-full">${t(`接口`)}<div class="segmented">${apis}</div><small>${id === "image" ? "images/generations" : d.api === "chatgpt" ? t("额度记在 ChatGPT 订阅上") : d.api === "anthropic" ? "Messages API" : "chat/completions"}</small></label>${d.api === "chatgpt" ? chatgptAccountHtml() : `<label class="profile-full">Base URL<input class="field wide" data-duty-field="baseUrl" value="${escapeHtml(d.baseUrl)}" placeholder="${baseUrlPlaceholder(d)}"></label><label class="profile-full">API Key<input type="password" class="field wide" data-duty-field="apiKey" value="${escapeHtml(d.apiKey)}" placeholder="sk-…" autocomplete="off"></label>`}<label class="profile-full">${t(`模型`)}${model}</label></div><div class="profile-actions">${id === "review" ? `<button class="outline-btn" data-duty-action="test">${t(`测试连接`)}</button>` : ""}<span class="profile-status"></span></div>`;
+  return `<div class="profile-grid"><label class="profile-full">${t(`启用`)}${onOff}</label><label class="profile-full">${t(`接口`)}<div class="segmented">${apis}</div><small>${id === "image" ? "images/generations" : d.api === "chatgpt" ? t("额度记在 ChatGPT 订阅上") : d.api === "anthropic" ? "Messages API" : "chat/completions"}</small></label>${d.api === "chatgpt" ? chatgptAccountHtml() : `<label class="profile-full">Base URL<input class="field wide" data-duty-field="baseUrl" value="${escapeHtml(d.baseUrl)}" placeholder="${baseUrlPlaceholder(d)}"></label><label class="profile-full">API Key<input type="password" class="field wide" data-duty-field="apiKey" value="${escapeHtml(d.apiKey)}" placeholder="sk-…" autocomplete="off"></label>`}<label class="profile-full">${t(`模型`)}${model}</label></div><div class="profile-actions">${id !== "image" ? `<button class="outline-btn" data-duty-action="test">${t(`测试连接`)}</button>` : ""}<span class="profile-status"></span></div>`;
 }
 function dutySettingsHtml() {
   const title = store.settings.autoTitle,
@@ -64,7 +72,7 @@ function dutySettingsHtml() {
       `<strong class="profile-name">${t(`拟题`)}</strong><span class="profile-gist"></span>${dutyMarkHtml(title, title ? t("开") : t("关"))}`,
       `<div class="profile-grid"><label class="profile-full">${t(`自动拟题`)}<div class="segmented"><button data-setting="autoTitle" data-value="true" class="${title ? "active" : ""}">${t(`开`)}</button><button data-setting="autoTitle" data-value="false" class="${title ? "" : "active"}">${t(`关`)}</button></div></label></div>`
     );
-  return `<h2>${t(`专司`)}</h2>${titleCard}${dutyCardHtml("review", dutyHeadHtml("review"), dutyFormHtml("review"))}${dutyCardHtml("image", dutyHeadHtml("image"), dutyFormHtml("image"))}`;
+  return `<h2>${t(`专司`)}</h2>${titleCard}${/** @type {DutyId[]} */ (["memory", "review", "image"]).map(id => dutyCardHtml(id, dutyHeadHtml(id), dutyFormHtml(id))).join("")}`;
 }
 function bindDutySettings() {
   document.querySelectorAll("[data-duty]").forEach(card => {
@@ -74,7 +82,7 @@ function bindDutySettings() {
       else dutyOpen.delete(card.dataset.duty);
     });
     if (card.dataset.duty === "title") return;
-    const id = /** @type {"review"|"image"} */ (card.dataset.duty),
+    const id = /** @type {DutyId} */ (card.dataset.duty),
       d = dutyOf(id),
       status = () => card.querySelector(".profile-status");
     // 收起时那一行跟着改：模型名、记号
@@ -85,6 +93,8 @@ function bindDutySettings() {
           d.on = button.dataset.value === "true";
           // 头一回开：硅基流动的地址替它填上
           if (d.on && d.api === "siliconflow" && !d.baseUrl) d.baseUrl = SILICONFLOW_BASE;
+          // 记忆从开起这一刻算起：此前的旧对话不拿去整理（关着那阵的也不补）
+          if (d.on && id === "memory") store.memory.since = now();
           saveStore();
           renderSettings();
         })

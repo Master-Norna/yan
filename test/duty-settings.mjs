@@ -1,4 +1,4 @@
-// 设置 → 专司：拟题（从通用移来，只有开关）、审查与生图（各自另配一份）三张卡；收起一行只写职名与模型名，最右一粒记号
+// 设置 → 专司：拟题（从通用移来，只有开关）、记忆、审查与生图（各自另配一份）四张卡；收起一行只写职名与模型名，最右一粒记号
 import { writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 
@@ -6,7 +6,7 @@ const { send, evalJs, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(500);
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 6, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: true }, profiles: [{ id: "p1", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", quota: "", usedTokens: 0 }], conversations: [], memory: { enabled: true, items: [] }, drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 6, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: true }, profiles: [{ id: "p1", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", quota: "", usedTokens: 0 }], conversations: [], memory: { items: [] }, drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(900);
@@ -20,10 +20,11 @@ const rows = await evalJs(
   `[...document.querySelectorAll("#settingsContent [data-duty]")].map(c => ({ id: c.dataset.duty, name: c.querySelector(".profile-name").textContent, gist: c.querySelector(".profile-gist").textContent, on: c.querySelector(".duty-mark").classList.contains("on"), tip: c.querySelector(".duty-mark").title }))`
 );
 check(
-  "三张卡：拟题开（朱点）、审查关照规则、生图未配，收起时都不写模型",
+  "四张卡：拟题开（朱点）、记忆关不带、审查关照规则、生图未配，收起时都不写模型",
   JSON.stringify(rows.map(r => [r.id, r.on, r.tip, r.gist])) ===
     JSON.stringify([
       ["title", true, "开", ""],
+      ["memory", false, "关，不带记忆", ""],
       ["review", false, "关，照规则", ""],
       ["image", false, "未配", ""]
     ]),

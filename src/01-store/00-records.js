@@ -32,6 +32,7 @@ const defaultStore = {
     autoTitle: true,
     notify: false,
     dutyReview: normalizeDuty(null, "openai"),
+    dutyMemory: normalizeDuty(null, "openai"),
     dutyImage: normalizeDuty(null, "siliconflow"),
     pendingWorkdir: "",
     collapsedRepos: [],
@@ -46,7 +47,7 @@ const defaultStore = {
   },
   profiles: [],
   conversations: [],
-  memory: { enabled: true, items: [] },
+  memory: { since: "", items: [] },
   drafts: {}
 };
 // 结构迁移：缺的字段由下面的规整补上，这里只管「同一个字段换了意思」的那几回。
@@ -71,6 +72,7 @@ function normalizeStoreData(value) {
     delete data.library;
     const settings = { ...defaultStore.settings, ...(data.settings || {}) };
     settings.dutyReview = normalizeDuty(settings.dutyReview, "openai");
+    settings.dutyMemory = normalizeDuty(settings.dutyMemory, "openai");
     settings.dutyImage = normalizeDuty(settings.dutyImage, "siliconflow");
     delete settings.chatsDir;
     delete settings.archiveDir;
@@ -200,7 +202,7 @@ function normalizeDrafts(drafts) {
 }
 function normalizeMemory(memory) {
   return {
-    enabled: memory?.enabled !== false,
+    since: String(memory?.since || ""),
     items: (Array.isArray(memory?.items) ? memory.items : [])
       .filter(item => item?.id && typeof item.text === "string" && item.text.trim())
       .map(item => ({

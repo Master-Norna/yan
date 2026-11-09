@@ -52,7 +52,7 @@ const sideText = await evalJs(`[...document.querySelectorAll('#sideMessages .mes
 check(
   "side context: system note, quoted anchor, no later main content, lookup-only tools",
   sideText ===
-    "SIDE|sys:yes|quote:yes|secret:no|tools:search_web+fetch_page+http_request+run_js+run_command+read_file+list_files+recall+search_conversations+read_conversation|n:4",
+    "SIDE|sys:yes|quote:yes|secret:no|tools:search_web+fetch_page+http_request+run_js+run_command+read_file+list_files+search_conversations+read_conversation|n:4",
   sideText
 );
 check("main line untouched", await evalJs(`document.querySelectorAll('#messages .message').length === 4`));

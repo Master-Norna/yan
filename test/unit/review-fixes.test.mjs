@@ -29,7 +29,6 @@ test("言里给了 run_command 就也给 check_command（后台指令开了要�
     `setup: tools => {
       PROMPTS.tools = tools;
       bootstrap = { work: { archive: "C:\\\\卷宗", platform: "win32" } };
-      store.memory.enabled = false;
     }`
   ]);
   f.setup(prompts.tools);

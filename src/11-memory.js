@@ -1,19 +1,33 @@
-// 言 · 录（记忆）：条目的增删与设置页；模型用的五件工具在 15-tools/40-memory.js
+// 言 · 录（记忆）：条目的增删、带进对话、离开一段后的整理与设置页；模型用的工具在 15-tools/40-memory.js
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // ── 录（记忆）──
-// 一条条由模型在对谈中记下的话，跨对话可翻。每条归在一个分类下（言的开发、偏好……），分类不另存，就是各条上的名字：
-// 同名即同类，没有条目的分类自然消失。内容不进系统提示（只报有哪几类），模型要看得自己 recall：先看分类一览，再打开某一类。
-// 单条不截断——早先限 200 字、超出悄悄截掉，记下来的话常常没说完；现在过长就退回让模型拆开或精简
-const MAX_MEMORY_ITEMS = 324,
-  MEMORY_TEXT_CHARS = 2000,
-  MEMORY_UNSORTED = "未分类";
+// 一条条关于用户的话，跨对话都带着。每条归在一个分类下（言的开发、偏好……），分类不另存，就是各条上的名字：
+// 同名即同类，没有条目的分类自然消失。
+// 照各家的朴素做法（ChatGPT 的存下的记忆、Claude 的 userMemories、Claude Code 的 MEMORY.md）：记忆整份放进系统提示，
+// 每段对话头一问时定格；不再要模型自己去翻——原先只报分类、内容要 recall 才看得到，模型不知道里头有什么，多半就不翻。
+// 能整份带上是因为短：总长有个预算（MEMORY_BUDGET），由专司「记忆」在离开一段对话后整理——从这段的问答里补记、合并、删去推翻的，
+// 压回预算之内。主模型仍可当场 remember，只是不靠它：答题中途停下来记是分心，记不记全看它那一刻想没想起来
+const MEMORY_BUDGET = 3000,
+  MEMORY_UNSORTED = "未分类",
+  // 整理一回交多少字的问答；用户的话、助手的答复各截到多长（助手的只作上下文）
+  TIDY_CHUNK = 16000,
+  TIDY_USER_CHARS = 4000,
+  TIDY_REPLY_CHARS = 1500;
 /** 设置页「记忆」里选着的那一类；null 或已没了即最近动过的那一类 */
 let memoryCategoryOpen = null;
 /** 设置页里摊开着的那一条、正改着的那一条（id） */
 let memoryItemOpen = "",
   memoryItemEditing = "";
-function memoryEnabled() {
-  return store.memory.enabled !== false;
+/**
+ * 专司「记忆」配好了：每段对话开头带上记忆、给记与忘，离开一段后整理。预设没挑「记忆与旧谈」这一组的对话不带也不整理
+ * @param {Conversation} [conversation]
+ */
+function memoryOn(conversation) {
+  const preset = conversation ? presetOf(conversation) : null;
+  return dutyReady(store.settings.dutyMemory) && (!preset?.tools || preset.tools.includes("memory"));
+}
+function memoryChars() {
+  return store.memory.items.reduce((sum, item) => sum + item.text.length, 0);
 }
 function memoryId() {
   let id;
@@ -75,14 +89,177 @@ function addMemory(text, source = null, category = "") {
   saveStore();
   return item;
 }
+// ── 带进对话 ──
+/** @type {Map<string, string>} 各段对话头一问时定格的那份记忆：此后别处整理、记入都不改它，系统提示不变，前面的缓存接得上；本段自己记的本就在上下文里 */
+const memorySnapshots = new Map();
+/** 整份记忆，按类分段（最近动过的类在前），条目带 id 与日子：记与忘认 id，日子让模型看得出新旧 */
+function memoryText() {
+  return memoryCategories()
+    .map(cat => `「${cat.name}」\n${cat.items.map(item => memoryLine(item)).join("\n")}`)
+    .join("\n\n");
+}
+/** @param {Conversation} conversation */
+function memorySnapshot(conversation) {
+  if (!memorySnapshots.has(conversation.id)) memorySnapshots.set(conversation.id, memoryText());
+  return memorySnapshots.get(conversation.id) || "";
+}
+// ── 整理 ──
+// 离开一段对话（换到别段、新开一段）、或它在后台答完而人不在跟前，就把这段还没整理过的问答交给专司「记忆」：
+// 它看现有记忆与这段新近的问答，答一份增删改，没提到的条目一字不动——整份重写会一回回悄悄走样，人改过的字也会被转述掉。
+// 页面关了没来得及的，下回开页补上。一回只整理一段，依次排队：后一段看到的是前一段改过的记忆。
+// 交给它的只有用户的话与助手的答复，不给工具输出：网页里埋的「请记住……」进不来（与审查只看用户原话同理）。
+// 整理要写这段对话（记到了哪一刻），先向桥接认领：别处正在这段里作答就让开，等那边离开时再整理
+let tidyQueue = Promise.resolve();
+/** @type {Set<string>} 排着或正整理的对话 */
+const tidyingIds = new Set();
+/** 正整理的那一段：报到时算它在写（见 syncLeases），别处不同时写它 */
+let tidyingNow = "";
+/** 这段对话里还没整理的问答：晚于上回整理到的那一刻、也晚于记忆开起之时；帮手的回报不是用户的话，不算 @param {Conversation} c */
+function untidied(c) {
+  const after = [c.memoryAt || "", store.memory.since || ""].sort().at(-1) || "";
+  return c.messages.filter(
+    m =>
+      (m.role === "user" || m.role === "assistant") &&
+      !m.relay &&
+      m.status !== "error" &&
+      String(m.content || "").trim() &&
+      String(m.timestamp || "") > after
+  );
+}
+/** @param {Conversation} conversation */
+function tidyMemory(conversation) {
+  const id = conversation.id;
+  if (tidyingIds.has(id) || !memoryOn(conversation) || !untidied(conversation).some(m => m.role === "user")) return tidyQueue;
+  tidyingIds.add(id);
+  tidyQueue = tidyQueue
+    .then(() => tidyOne(id))
+    .catch(error => console.warn("记忆整理没成，下回离开这段时再来", error))
+    .finally(() => tidyingIds.delete(id));
+  return tidyQueue;
+}
+// 开页时补上：页面关着时离开的那几段（眼前这段等离开时再说）
+function tidyLeftovers() {
+  if (!memoryOn()) return;
+  for (const c of store.conversations) if (c.id !== currentId) void tidyMemory(c);
+}
+/** @param {string} id */
+async function tidyOne(id) {
+  let c = store.conversations.find(item => item.id === id);
+  if (!c || !memoryOn(c) || conversationRunning(id) || remoteBusy.has(id)) return;
+  // 记忆开着却没记下开起之时（配置是别处写的、旧版升上来的）：从此刻算起，此前的旧对话不拿去整理
+  if (!store.memory.since) {
+    store.memory.since = now();
+    return saveStore();
+  }
+  if (!untidied(c).some(m => m.role === "user") || !(await claimConversation(id))) return;
+  tidyingNow = id;
+  try {
+    await tidyTurns(c, id);
+  } finally {
+    tidyingNow = "";
+  }
+}
+/** @param {Conversation} c @param {string} id */
+async function tidyTurns(c, id) {
+  let turns = untidied(c);
+  const counts = { add: 0, update: 0, delete: 0 };
+  while (turns.length) {
+    // 一回装多少：问答依次装，装满一回的量为止（至少一条）
+    const lines = [];
+    let room = TIDY_CHUNK;
+    for (const m of turns) {
+      const line = m.role === "user" ? `【用户】${clip(m.content, TIDY_USER_CHARS)}` : `【助手】${clip(m.content, TIDY_REPLY_CHARS)}`;
+      if (lines.length && line.length > room) break;
+      lines.push(line);
+      room -= line.length;
+    }
+    const chunk = turns.slice(0, lines.length),
+      day = [chunk[0], chunk.at(-1)].map(m => localDay(new Date(m.timestamp))),
+      ops = await askTidier(c, lines.join("\n\n"), day[0] === day[1] ? day[0] : `${day[0]} 至 ${day[1]}`);
+    applyMemoryOps(ops, c, counts);
+    // 整理的这一阵里这段可能从磁盘换过一回（别处写过）：记在眼下那一份上
+    c = store.conversations.find(item => item.id === id) || c;
+    c.memoryAt = chunk.at(-1).timestamp;
+    markDirty(id);
+    saveStore();
+    turns = turns.slice(chunk.length);
+  }
+  refreshMemorySettings();
+  const said = [
+    counts.add ? t`记下 ${counts.add} 条` : "",
+    counts.update ? t`改 ${counts.update} 条` : "",
+    counts.delete ? t`删 ${counts.delete} 条` : ""
+  ].filter(Boolean);
+  if (said.length) toast(t`记忆：${said.join(t("、"))}`);
+}
+/** @param {string} text @param {number} max */
+function clip(text, max) {
+  const clean = String(text || "").trim();
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+}
+/** 问一回专司「记忆」：现有记忆整份、这段新近的问答；答回一份增删改 @param {Conversation} c @param {string} turns @param {string} day */
+async function askTidier(c, turns, day) {
+  /** @type {Profile} */
+  const duty = { id: "duty-memory", name: "", quota: "", usedTokens: 0, ...store.settings.dutyMemory },
+    items = store.memory.items,
+    text = prompt("memory.case", {
+      used: memoryChars(),
+      items: items.length ? items.map(item => memoryLine(item, true)).join("\n") : prompt("memory.empty"),
+      title: c.title || t("未命名"),
+      day,
+      turns
+    }),
+    response = await requestChat(duty, [{ role: "user", content: text }], AbortSignal.timeout(180000), {
+      systemPrompt: prompt("memory.system", { budget: MEMORY_BUDGET }),
+      maxTokens: 8000
+    });
+  if (!response.ok) throw Error(await describeResponseError(response));
+  const { reply, tokens } = await readWhole(response, text);
+  noteUsage("memory", tokens);
+  return parseMemoryOps(reply.content);
+}
+/** 答复里的那个 JSON 数组：裹了围栏、前后多说了几句都认；找不到就当这回没整理成 @param {string} text */
+function parseMemoryOps(text) {
+  const body = String(text || ""),
+    from = body.indexOf("["),
+    to = body.lastIndexOf("]");
+  if (from < 0 || to < from) throw Error("记忆整理没给出改动清单");
+  const ops = JSON.parse(body.slice(from, to + 1));
+  if (!Array.isArray(ops)) throw Error("记忆整理给的不是清单");
+  return ops;
+}
+/** 照清单改记忆：认不得的 id（那条刚在设置里删了）跳过；记的与已有一字不差的不重记 @param {any[]} ops @param {Conversation} c @param {{ add: number, update: number, delete: number }} counts */
+function applyMemoryOps(ops, c, counts) {
+  const source = { conversationId: c.id, title: c.title };
+  for (const op of ops) {
+    if (!op || typeof op !== "object") continue;
+    const item = op.id ? store.memory.items.find(entry => entry.id === String(op.id)) : null,
+      text = cleanMemoryText(op.text);
+    if (op.op === "delete" && item) {
+      store.memory.items = store.memory.items.filter(entry => entry !== item);
+      counts.delete += 1;
+    } else if (op.op === "update" && item && (text || op.category)) {
+      if (text) item.text = text;
+      if (op.category) item.category = cleanMemoryCategory(op.category);
+      Object.assign(item, { updatedAt: now(), source });
+      counts.update += 1;
+    } else if (op.op === "add" && text && !store.memory.items.some(entry => entry.text === text)) {
+      store.memory.items.push({
+        id: memoryId(),
+        text,
+        category: cleanMemoryCategory(op.category),
+        createdAt: now(),
+        updatedAt: now(),
+        source
+      });
+      counts.add += 1;
+    }
+  }
+}
 // 设置页开着「记忆」时，模型记入或删去要立刻反映在列表里；正在改的那条不打断（重画会把输入框连同光标冲掉）
 function refreshMemorySettings() {
   if (document.activeElement?.matches?.("#settingsContent .memory-text")) return;
   if (settingsTab === "memory" && !$("#settingsModal").classList.contains("hidden")) renderSettings();
-}
-function memoryGist(text) {
-  const line = String(text || "").replace(/\s+/g, " ");
-  return line.length > 60 ? `${line.slice(0, 60)}…` : line;
 }
 // 设置页里的一行摘要：** 去掉、空白收拢，多长由样式截
 function memoryLineGist(text) {
@@ -128,23 +305,17 @@ function memorySplitHtml(categories, open) {
 }
 function memorySettingsHtml() {
   const categories = memoryCategories(),
-    enabled = memoryEnabled(),
+    on = memoryOn(),
     open = categories.find(cat => cat.name === memoryCategoryOpen) || categories[0];
   memoryCategoryOpen = open?.name ?? null;
   return (
-    `<div class="settings-head">${brushIcon("memory", "settings-mark")}<h2>${t(`记忆`)}</h2><span class="settings-meta">${t`${store.memory.items.length} / ${MAX_MEMORY_ITEMS} 条`}${categories.length ? t` · ${categories.length} 类` : ""}</span></div>` +
-    // 「清空记忆」管的是全部，与总开关同一行，不挤在哪一类底下
-    `<div class="setting-row"><div class="setting-copy"><strong>${t(`启用记忆`)}</strong><small>${t(`关闭后条目仍保留`)}</small></div><div class="setting-actions">${
+    `<div class="settings-head">${brushIcon("memory", "settings-mark")}<h2>${t(`记忆`)}</h2><span class="settings-meta">${t`${store.memory.items.length} 条 · ${memoryChars()} / ${MEMORY_BUDGET} 字`}${categories.length ? t` · ${categories.length} 类` : ""}</span></div>` +
+    // 开关在专司里（带不带、谁来整理是一回事）；这一行只说眼下如何，「清空记忆」管的是全部，也放这一行，不挤在哪一类底下
+    `<div class="setting-row"><div class="setting-copy"><strong>${on ? t("带进对话") : t("未带进对话")}</strong><small>${
+      on ? t("每段对话开头带上，离开一段后由专司「记忆」在后台整理") : t("在专司里配好「记忆」后，才带上、才整理")
+    }</small></div><div class="setting-actions">${
       store.memory.items.length ? `<button id="clearMemory" class="outline-btn" type="button">${t(`清空记忆`)}</button>` : ""
-    }<div class="segmented">${[
-      ["true", t("开")],
-      ["false", t("关")]
-    ]
-      .map(
-        ([value, label]) =>
-          `<button data-setting="memoryEnabled" data-value="${value}" class="${String(enabled) === value ? "active" : ""}">${label}</button>`
-      )
-      .join("")}</div></div></div>` +
+    }<button id="memoryDuty" class="outline-btn" type="button">${t(`专司`)}</button></div></div>` +
     (open
       ? memorySplitHtml(categories, open)
       : `<p class="memory-empty">${t(`尚无一条`)}</p><div class="memory-foot"><button id="addMemory" class="outline-btn" type="button">${t(`手记一条`)}</button></div>`)
@@ -222,13 +393,6 @@ function bindMemoryEvents() {
       fitTextarea(area);
       area.addEventListener("input", () => {
         const text = cleanMemoryText(area.value);
-        const tooLong = text.length > MEMORY_TEXT_CHARS;
-        area.setCustomValidity(tooLong ? t`记忆最多 ${MEMORY_TEXT_CHARS} 字，当前内容尚未保存，请缩短后再完成` : "");
-        area.setAttribute("aria-invalid", String(tooLong));
-        if (tooLong) {
-          area.reportValidity();
-          return;
-        }
         if (text) {
           item.text = text;
           item.updatedAt = now();
@@ -238,10 +402,6 @@ function bindMemoryEvents() {
       // 焦点离开这一条即改完、回到只读；挪到这一条的小画上不算，免得重画吞了那一下点按。改空了即删去
       area.addEventListener("blur", e => {
         if (row.contains(e.relatedTarget)) return;
-        if (!area.reportValidity()) {
-          area.focus();
-          return;
-        }
         memoryItemEditing = "";
         if (!area.value.trim()) {
           store.memory.items = store.memory.items.filter(entry => entry !== item);
@@ -256,7 +416,6 @@ function bindMemoryEvents() {
       });
     }
     row.querySelector("[data-memory-edit]")?.addEventListener("click", () => {
-      if (memoryItemEditing === item.id && area && !area.reportValidity()) return;
       memoryItemEditing = memoryItemEditing === item.id ? "" : item.id;
       memoryItemOpen = item.id;
       renderSettings();
@@ -297,7 +456,6 @@ function bindMemoryEvents() {
   });
   // 手记一条：记在选着的那一类里（还没有一类时归「未分类」），就地摊开着改
   const jot = category => {
-    if (store.memory.items.length >= MAX_MEMORY_ITEMS) return toast(t`记忆已满 ${MAX_MEMORY_ITEMS} 条，请先删去一些`);
     const item = { id: memoryId(), text: "", category, createdAt: now(), updatedAt: now(), source: null };
     store.memory.items.push(item);
     memoryCategoryOpen = category;
@@ -305,6 +463,10 @@ function bindMemoryEvents() {
     renderSettings();
     host.querySelector(`[data-memory="${item.id}"] textarea`)?.focus();
   };
+  $("#memoryDuty")?.addEventListener("click", () => {
+    dutyOpen.add("memory");
+    openSettings("duty");
+  });
   $("#addMemory")?.addEventListener("click", () => jot(memoryCategoryOpen ?? MEMORY_UNSORTED));
   // 另起一类：就地换成输入框写名，回车即在这一类里手记第一条——类不另存，有了条目才算有这一类，
   // 第一条没写就离开，这一类也随之消失。写的是已有的名字即打开那一类

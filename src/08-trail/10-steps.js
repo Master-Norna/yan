@@ -245,23 +245,18 @@ function sourceCardsHtml(message) {
   const found = (message.steps || []).filter(step => step.status === "done").flatMap(step => TOOLS.get(step.name)?.sources?.(step) || []);
   for (const entry of found) if (entry.url && entry.read) add(entry.url, entry.title, true);
   for (const entry of found) if (entry.url && !entry.read) add(entry.url, entry.title, false);
-  // 记忆与旧谈：翻过的条目、查到并读过的对话，与网页并列列出，点开各归其处
-  const talks = new Map(),
-    memories = new Map();
-  for (const entry of found) {
+  // 旧谈：查到并读过的对话，与网页并列列出，点开即回那一段
+  const talks = new Map();
+  for (const entry of found)
     if (entry.talk && (entry.read || !talks.has(entry.talk)))
       talks.set(entry.talk, { id: entry.talk, title: entry.title, date: entry.date, read: !!entry.read });
-    if (entry.memory) memories.set(entry.memory, entry.title);
-  }
   const list = [...sources.values()],
-    local = [...talks.values(), ...[...memories].map(([id, text]) => ({ memoryId: id, text }))];
+    local = [...talks.values()];
   if (!list.length && !local.length) return "";
   const card = (source, index) =>
-    source.memoryId
-      ? `<button type="button" class="source-card source-local" data-open-memory="${escapeHtml(source.memoryId)}" title="${t(`查看这条记忆`)}"><span class="source-index">${index + 1}</span><span class="source-copy"><strong>${escapeHtml(source.text)}</strong><small>${t(`记忆`)}</small></span></button>`
-      : source.id
-        ? `<button type="button" class="source-card source-local" data-open-talk="${escapeHtml(source.id)}" title="${t(`打开这段对话`)}"><span class="source-index">${index + 1}</span><span class="source-copy"><strong>${escapeHtml(source.title)}</strong><small>${t`旧谈${source.date ? ` · ${escapeHtml(formatDay(source.date))}` : ""}`}</small></span>${source.read ? `<span class="source-read">${t(`已读`)}</span>` : ""}</button>`
-        : `<a class="source-card" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer"><span class="source-index">${index + 1}</span><span class="source-copy"><strong>${escapeHtml(source.title)}</strong><small>${escapeHtml(safeHost(source.url))}</small></span>${source.read ? `<span class="source-read">${t(`已读`)}</span>` : ""}</a>`;
+    source.id
+      ? `<button type="button" class="source-card source-local" data-open-talk="${escapeHtml(source.id)}" title="${t(`打开这段对话`)}"><span class="source-index">${index + 1}</span><span class="source-copy"><strong>${escapeHtml(source.title)}</strong><small>${t`旧谈${source.date ? ` · ${escapeHtml(formatDay(source.date))}` : ""}`}</small></span>${source.read ? `<span class="source-read">${t(`已读`)}</span>` : ""}</button>`
+      : `<a class="source-card" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer"><span class="source-index">${index + 1}</span><span class="source-copy"><strong>${escapeHtml(source.title)}</strong><small>${escapeHtml(safeHost(source.url))}</small></span>${source.read ? `<span class="source-read">${t(`已读`)}</span>` : ""}</a>`;
   const all = [...list, ...local];
   return `<details class="source-stack"><summary><span>${t(`出处`)}</span><small>${t`${all.length} 条`}</small></summary><div class="source-grid">${all.map(card).join("")}</div></details>`;
 }

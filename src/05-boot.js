@@ -69,6 +69,8 @@ async function boot() {
   delete document.documentElement.dataset.sidebar;
   restorePlace();
   render();
+  // 页面关着时离开的那几段，记忆还没整理：开页后缓一缓再补，不与开页抢
+  setTimeout(tidyLeftovers, 5000);
   // 低频巡检：哪段改了没标到也兜得住——前台轮着巡，页面藏起来时整份巡一趟（手机切走常常就不回来了）
   setInterval(() => {
     sweepSomeConversations();

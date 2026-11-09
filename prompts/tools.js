@@ -346,16 +346,16 @@
     }
   },
 
-  // 录（记忆）：五件都在浏览器里完成，不经桥接；记忆启用时提供
+  // 录（记忆）与旧谈：都在浏览器里完成，不经桥接。记与忘在专司配好了记忆时提供；查旧谈、读旧谈常给
   remember: {
     description:
-      "记一条长期有效的信息进跨对话的记忆（偏好、身份、约定、日后还会用到的结论）：一条一事、脱离本次对话也看得懂；已有相近条目给 replaces 合并。",
+      "记一条进跨对话的记忆。每段对话结束后另有整理，会从对话里补记、合并，不必事事都记；用户明说要记、或纠正了你，可以当场记。一条一事、脱离本次对话也看得懂；改写已有的一条给 replaces。",
     parameters: {
       type: "object",
       properties: {
         category: { type: "string", description: "所属分类，先沿用已有的，都不合再起新类，名字简短" },
-        text: { type: "string", description: "条目正文，不超过 2000 字" },
-        replaces: { type: "string", description: "要合并更新的已有条目 id（见 recall 的结果）" }
+        text: { type: "string", description: "条目正文" },
+        replaces: { type: "string", description: "要改写的已有条目 id（记忆里条目前方括号中的）" }
       },
       required: ["category", "text"]
     }
@@ -363,30 +363,22 @@
 
   forget: {
     description: "删除一条过时或有误的记忆。",
-    parameters: { type: "object", properties: { id: { type: "string", description: "recall 结果里的条目 id" } }, required: ["id"] }
-  },
-
-  recall: {
-    description:
-      "查看记忆：都不给则列出各类；给 category 列出那一类全部条目；给 query 跨类按关键词筛（空格分隔、须同时命中）。用户提到此前谈过的事、或问题依赖过往偏好时用。",
     parameters: {
       type: "object",
-      properties: {
-        category: { type: "string", description: "分类名，可省略" },
-        query: { type: "string", description: "关键词，可省略" }
-      }
+      properties: { id: { type: "string", description: "条目 id（记忆里条目前方括号中的）" } },
+      required: ["id"]
     }
   },
 
   search_conversations: {
-    description: "按关键词查旧对话（标题与正文，须同时命中），返回对话 id、标题、日期与命中片段；追溯记忆里没有的细节时用。",
+    description:
+      "查旧对话：给关键词按标题与正文查（须同时命中），不给则按时间列出最近的；返回对话 id、标题、日期与片段。追溯记忆里没有的细节时用。",
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string", description: "关键词，以空格分开" },
+        query: { type: "string", description: "关键词，以空格分开；省略即列最近的" },
         limit: { type: "number", description: "最多返回几段，默认 8，最大 20" }
-      },
-      required: ["query"]
+      }
     }
   },
 

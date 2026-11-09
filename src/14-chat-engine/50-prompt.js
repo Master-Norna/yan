@@ -9,10 +9,10 @@ const PROMPT_VARS = {
   "work.hint": ctx => workVars(ctx.conversation),
   "work.archive": ctx => workVars(ctx.conversation),
   "work.env": () => envVars(),
-  // 不报条数：记一条就变，系统提示一变，整段对话的缓存都作废
-  "memory.hint": () => {
-    const names = memoryCategories().map(cat => cat.name);
-    return { categories: names.length ? `，分作${names.map(name => `「${name}」`).join("")}` : "" };
+  // 整份记忆，这段对话头一问时定格（见 memorySnapshot）：别处整理、这段里记一条都不改它，系统提示一变整段的缓存就作废
+  "memory.body": ctx => {
+    const items = memoryOn(ctx.conversation) ? memorySnapshot(ctx.conversation) : "";
+    return items ? { items } : null;
   },
   "mcp.hint": ctx => mcpHintVars(ctx.tools, ctx.preset),
   "skills.hint": () => skillCatalog(),

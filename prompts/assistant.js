@@ -80,7 +80,7 @@ window.YAN_PROMPTS.order = [
   { key: "work.deliver", tool: "run_command", roles: ["main"] },
   { key: "work.env", tool: "run_command" },
   { key: "assistant.search", tool: "search_web" },
-  { key: "memory.hint", tool: "remember" },
+  { key: "memory.body", roles: ["main", "side"] },
   { key: "mcp.hint" },
   { key: "skills.hint", tool: "read_document" },
   { key: "skills.home", tool: "run_command" },

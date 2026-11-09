@@ -308,12 +308,6 @@ function bindSettingRows() {
           return;
         }
         if (key === "notify") return void setNotify(value === "true");
-        if (key === "memoryEnabled") {
-          store.memory.enabled = value === "true";
-          saveStore();
-          renderSettings();
-          return;
-        }
         store.settings[key] = ["autoTitle", "archiveRead", "sandbox", "stageFit"].includes(key) ? value === "true" : value;
         saveStore();
         applyAppearance();

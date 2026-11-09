@@ -451,13 +451,11 @@ function setupSidePanel() {
       $("#chatInput")?.closest(".composer")?.querySelector(".model-trigger")?.click();
       return;
     }
-    const local = e.target.closest("[data-open-memory], [data-open-talk]");
+    const local = e.target.closest("[data-open-talk]");
     if (local) {
       e.preventDefault();
-      if (local.dataset.openTalk) {
-        if (store.conversations.some(c => c.id === local.dataset.openTalk)) openConversation(local.dataset.openTalk);
-        else toast(t("这段对话已不在"));
-      } else openSettings("memory");
+      if (store.conversations.some(c => c.id === local.dataset.openTalk)) openConversation(local.dataset.openTalk);
+      else toast(t("这段对话已不在"));
       return;
     }
     const mark = e.target.closest("[data-note-mark]");

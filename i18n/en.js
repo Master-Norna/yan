@@ -303,7 +303,6 @@ var YAN_EN = {
   展开输出: "Show output",
   收起输出: "Hide output",
   执行失败: "Failed",
-  查看这条记忆: "View this memory",
   记忆: "Memory",
   打开这段对话: "Open this chat",
   "旧谈{0}": "Past chat{0}",
@@ -407,19 +406,24 @@ var YAN_EN = {
   "分类名；与已有分类同名即并为一类": "Category name; using an existing name merges them",
   手记一条: "Add a memory",
   删去此类: "Delete category",
-  "{0} / {1} 条": "{0} / {1}",
+  "{0} 条 · {1} / {2} 字": "{0} {0|entry|entries} · {1} / {2} characters",
   " · {0} 类": " · {0} {0|category|categories}",
-  启用记忆: "Enable memory",
-  关闭后条目仍保留: "Entries are kept when turned off",
+  带进对话: "Brought into chats",
+  未带进对话: "Not brought into chats",
+  "每段对话开头带上，离开一段后由专司「记忆」在后台整理":
+    "Included at the start of every chat; tidied in the background by the Memory duty after you leave a chat",
+  "在专司里配好「记忆」后，才带上、才整理": "Set up Memory under Duties to include and tidy it",
+  "记下 {0} 条": "{0} added",
+  "改 {0} 条": "{0} updated",
+  "删 {0} 条": "{0} removed",
+  "记忆：{0}": "Memory: {0}",
   清空记忆: "Clear memory",
   开: "On",
   关: "Off",
   尚无一条: "Nothing yet",
   "已归入「{0}」": 'Moved to "{0}"',
-  "记忆最多 {0} 字，当前内容尚未保存，请缩短后再完成": "Memory is limited to {0} characters. Not saved yet; shorten it and try again",
   "另起一类…": "New category…",
   新类名: "New category name",
-  "记忆已满 {0} 条，请先删去一些": "Memory is full ({0} {0|entry|entries}). Delete some first",
   "删去「{0}」这一类？": 'Delete the "{0}" category?',
   "其中 {0} 条记忆将被移除，无法撤销；对话不受影响。":
     "{0} {0|memory in it|memories in it} will be removed. This can't be undone; chats are not affected.",
@@ -563,6 +567,8 @@ var YAN_EN = {
   未配: "Not set up",
   未填完: "Incomplete",
   "关，照规则": "Off: rules only",
+  "关，不带记忆": "Off: no memory",
+  最近的对话: "Recent chats",
   "游目骋怀，足以极视听之娱。": "The browser the model can use.",
   "温故而知新。": "What the model remembers across chats.",
   "清简为骨，纸墨为意。": "How to use Yan.",
@@ -1338,14 +1344,11 @@ var YAN_EN = {
   内容为空: "Empty",
   过长: "Too long",
   已更新: "Updated",
-  记忆已满: "Memory full",
   已记入: "Saved",
   忘却: "Forget",
   未找到: "Not found",
   翻记忆: "Recall",
-  "{0} 类": "{0} {0|category|categories}",
   查旧谈: "Search past chats",
-  缺少关键词: "Missing query",
   "{0} 段": "{0} {0|chat|chats}",
   翻旧谈: "Read past chat",
   当前对话: "Current chat",
@@ -1804,8 +1807,8 @@ var YAN_EN = {
   观其所为: "Watching them work",
   "点行迹里的差遣签，开一扇全屏的窗：一名帮手一页，差遣与续派按先后摞下，每趟主模型交的命、每一轮的思绪与各步、最后的回报，皆在其中；数名帮手以 ‹ › 翻看。输入框上方的帮手条亦可直达。":
     "Click a subagent tag under Steps to open a full-screen window: one page per subagent, its runs stacked in order, each with the task the main model gave, every round's thinking and steps, and the final report. Page through several subagents with ‹ ›. The subagent bar above the input box leads there too.",
-  "帮手看不到这段对话，只凭任务说明行事；它不向你请示，记忆只读。页面刷新或关掉，后台的帮手随之中断。":
-    "A subagent can't see this conversation and works only from its task description; it never asks you anything, and memory is read-only for it. Reloading or closing the page interrupts subagents in the background.",
+  "帮手看不到这段对话，只凭任务说明行事；它不向你请示，也不带记忆。页面刷新或关掉，后台的帮手随之中断。":
+    "A subagent can't see this conversation and works only from its task description; it never asks you anything and doesn't carry memory. Reloading or closing the page interrupts subagents in the background.",
   "长活的骨架，属于目录": "The skeleton of a long job, kept in the folder",
   "跨几答的长活，模型可在目录里立一份「意」：这件事要成立哪几条结论，各以什么为前提、凭什么。换一段对话接着做，看到的仍是同一份。":
     "For a job that spans several replies, the model can set up an intent in the folder: which conclusions the job must establish, what each one rests on, and what backs it. Continue in another conversation and it sees the same intent.",
@@ -1938,14 +1941,14 @@ var YAN_EN = {
   "何者当记，何时可忘": "What to remember, and when to forget",
   "录是一份跨对话的记忆：你的偏好、身份与约定，此后不必重述。只存于本机。":
     "Memory carries across conversations: your preferences, who you are and what's been agreed, so you needn't repeat them. It's stored only on this machine.",
-  记与翻: "Remembering and recalling",
-  "模型认为值得留存的，一事一条记入，并归入一类（如「偏好」「言的开发」）；同类者日后记入同一类。新话题中用得着时，先看分类一览，再翻开所需的那一类。行迹里「记入」「翻记忆」以一抹冷色标示。":
-    "What the model thinks worth keeping is saved one item at a time, each filed under a category (such as “Preferences” or “Yan development”); related items later go into the same category. When a new topic needs it, the model first looks at the list of categories, then opens the one it needs. “Remember” and “Recall” are marked in a cool color under Steps.",
+  带与记: "Bringing and remembering",
+  "专司里配好「记忆」，每段对话开头便带上整份记忆，模型不必去翻。离开一段对话（换到别段、新开一段），专司「记忆」在后台读这段的问答，补记、合并、删去推翻了的，压在三千字之内；改了几条，提示一句。模型也可当场记一条，行迹里写作「记入」。":
+    "Once Memory is set up under Duties, every chat starts with the whole memory included, so the model doesn't have to look anything up. When you leave a chat (switch to another or start a new one), the Memory duty reads its exchanges in the background, adds what's new, merges and removes what's been overturned, and keeps the whole within 3,000 characters; a short notice says what changed. The model can also save an item on the spot, shown as “Remember” under Steps.",
   改与忘: "Editing and forgetting",
-  "设置 → 记忆先列各类，点开一类方见其中条目：每条皆可修改、删除、改归别类，长条目平时收起、点开即全文；分类名亦可改，改作已有之名即并为一类。整份记忆可以关闭，关闭后条目仍在。旧日未分类的条目，可请模型代为归类。":
-    "Settings → Memory lists the categories first; open one to see its items. Each item can be edited, deleted or moved to another category; long items are collapsed until clicked. Categories can be renamed too, and renaming one to an existing name merges them. Memory can be turned off as a whole, and the items stay. Older uncategorized items can be sorted by asking the model.",
-  "记忆的内容不入系统提示，只告知模型现有几条、分作哪几类；用到时方才翻阅。":
-    "Memory itself isn't put in the system prompt; the model is only told how many items there are and in which categories, and reads them when needed.",
+  "设置 → 记忆先列各类，点开一类方见其中条目：每条皆可修改、删除、改归别类，长条目平时收起、点开即全文；分类名亦可改，改作已有之名即并为一类。专司里关掉「记忆」，便不带也不记，条目仍在。":
+    "Settings → Memory lists the categories first; open one to see its items. Each item can be edited, deleted or moved to another category; long items are collapsed until clicked. Categories can be renamed too, and renaming one to an existing name merges them. Turning Memory off under Duties stops including and recording it; the items stay.",
+  "整理只读你说的话与模型的答复，不读网页、文件这些工具结果。查旧对话、读旧对话两件常给，与记忆开不开无关。":
+    "Tidying reads only what you said and the model's replies, not tool results such as web pages or files. Searching and reading past chats are always available, whether memory is on or not.",
   存储边界: "Storage and boundaries",
   "数据所在，及其边界": "Where your data lives, and its boundaries",
   所在: "Location",

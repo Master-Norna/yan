@@ -18,14 +18,15 @@ const USAGE_KINDS = [
   ["helper", () => t("帮手"), "var(--gold)"],
   ["side", () => t("旁注"), "var(--ink-2)"],
   ["review", () => t("审查"), "var(--qing)"],
+  ["memory", () => t("记忆"), "var(--ink-3)"],
   ["image", () => t("生图"), "var(--rouge)"]
 ];
 const USAGE_SHADES = [0.16, 0.32, 0.52, 0.74, 0.95],
   USAGE_CELL = 12,
   // 洇墨：粗噪声把边推毛，再晕一圈淡墨叠在下面
   USAGE_BLEED = `<defs><filter id="usageBleed" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency=".5" numOctaves="3" seed="3"/><feDisplacementMap in="SourceGraphic" scale="3.4" result="rough"/><feGaussianBlur in="rough" stdDeviation="1.35" result="blur"/><feComponentTransfer in="blur" result="halo"><feFuncA type="linear" slope=".6"/></feComponentTransfer><feMerge><feMergeNode in="halo"/><feMergeNode in="rough"/></feMerge></filter></defs>`;
-// 墨（token）是四类之和；生图另计张数，不并进总量
-const usageInk = row => (row ? ["main", "helper", "side", "review"].reduce((sum, k) => sum + (Number(row[k]) || 0), 0) : 0);
+// 墨（token）是五类之和；生图另计张数，不并进总量
+const usageInk = row => (row ? ["main", "helper", "side", "review", "memory"].reduce((sum, k) => sum + (Number(row[k]) || 0), 0) : 0);
 const usageValue = row => (usageKind ? Number(row?.[usageKind]) || 0 : usageInk(row));
 const usageAmount = (kind, n) => (kind === "image" ? t`${n} 张` : quotaAmount(n));
 const usageLocale = () => (LANG === "en" ? "en" : "zh-CN");

@@ -22,7 +22,7 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {boolean} [lookup] 旁注的一套：只查不改
  *
  * @typedef {{ ok: boolean, content: string, display: string, background?: boolean, images?: string[] }} ToolOutcome content 回给模型，display 写在标题行右侧；background：活在后台接着做，步骤由它自己收尾；images：交回的图（data: 地址），随工具结果给模型看
- * @typedef {{ url?: string, title?: string, read?: boolean, talk?: string, date?: string, memory?: string }} Source 答末「出处」的一条：网页、旧谈或记忆
+ * @typedef {{ url?: string, title?: string, read?: boolean, talk?: string, date?: string }} Source 答末「出处」的一条：网页或旧谈
  *
  * @typedef {Object} Tool
  * @property {string} name

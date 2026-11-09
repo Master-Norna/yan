@@ -228,7 +228,7 @@ check(
 );
 const report = await evalJs(`document.querySelector("#helperModal .sub-report")?.textContent.trim() || ""`);
 check("helper had its own system prompt and no delegate / ask_user", report.includes("sys:yes|delegate:no|ask:no"), report);
-check("helper can read memory but not write it", report.includes("|memw:0|memr:2|"), report);
+check("helper can search past chats but has no memory tools", report.includes("|memw:0|memr:1|"), report);
 check("file actually changed by helper", readFileSync(WORK + "/src/a.js", "utf8").includes("return 2;"));
 const steps = await evalJs(
   `JSON.stringify([...document.querySelectorAll(".message.assistant .tool-stack > .tool-stack-body .tool-step")].map(s => ({ label: s.querySelector(".tool-label").textContent, status: s.dataset.status, meta: s.querySelector(".tool-meta").textContent })))`

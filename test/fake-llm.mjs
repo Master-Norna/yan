@@ -29,6 +29,8 @@ let calls = 0,
   reviewAsks = [],
   // 生图接口收到的每一问（GET /image-asks 取走并清空）
   imageAsks = [],
+  // 记忆整理收到的每一问：系统提示与那一段话（GET /tidy-asks 取走并清空）
+  tidyAsks = [],
   flaky503 = 0,
   titleFailed = false,
   slowTitleFailed = false;
@@ -176,6 +178,12 @@ http
       reviewAsks = [];
       return;
     }
+    if (req.url.endsWith("/tidy-asks") && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(tidyAsks));
+      tidyAsks = [];
+      return;
+    }
     if (req.url.endsWith("/image-asks") && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(imageAsks));
@@ -220,6 +228,25 @@ http
         reviewAsks.push({ quick, tool: text.match(/［将要做的］\n(\w+)/)?.[1] || "" });
         const answer = text.includes("Set-Alias") ? "准" : quick ? "疑" : "驳，用户没让把这串参数发出去";
         return sse(res, [delta({ content: answer }), delta({}, { usage: { total_tokens: 3 } })]);
+      }
+      // 记忆整理（专司「记忆」，见 src/11-memory.js 的 tidyMemory）：记一条新的、改 PowerShell 那条、删「中文交流」那条；裹一层围栏、前头多一句，页面得认得出清单
+      if (String(msgs[0]?.role === "system" ? msgs[0].content : "").includes("你替一位助手整理")) {
+        const text = String(lastUser);
+        tidyAsks.push({ system: msgs[0].content, user: text });
+        const ps = text.match(/\[(m[a-z0-9]+)\][^\n]*PowerShell/)?.[1],
+          zh = text.match(/\[(m[a-z0-9]+)\][^\n]*中文交流/)?.[1],
+          ops = text.includes("MEMORY go")
+            ? [
+                { op: "add", category: "工作", text: "用户在做言的记忆模块" },
+                ...(ps ? [{ op: "update", id: ps, text: "用户偏好 PowerShell 而非 bash" }] : []),
+                ...(zh ? [{ op: "delete", id: zh }] : []),
+                { op: "update", id: "mgone", text: "认不得的 id 跳过" }
+              ]
+            : [];
+        return sse(res, [
+          delta({ content: `整理如下：\n\`\`\`json\n${JSON.stringify(ops)}\n\`\`\`` }),
+          delta({}, { usage: { total_tokens: 11 } })
+        ]);
       }
       // IMAGE-FOUR：一轮画四幅（并行），正文前两幅同段换行、后两幅另起一段，再接一句话
       // 画好的图随工具结果另作一条用户消息附回，最后一条用户话就不是这句了：按原话找
@@ -1608,13 +1635,18 @@ http
         ]);
       }
       if (typeof lastUser === "string" && lastUser.includes("SIDELOOK")) {
-        // 旁注里去查：先要一次 recall（浏览器内完成、不需桥接），拿到结果再答——旁注不该说完「我去查」就断掉
+        // 旁注里去查：先查一回旧谈（浏览器内完成、不需桥接），拿到结果再答——旁注不该说完「我去查」就断掉
         if (!toolResults.length)
           return sse(res, [
-            delta({ content: "我去翻一下记忆。" }),
+            delta({ content: "我去翻一下旧谈。" }),
             delta({
               tool_calls: [
-                { index: 0, id: "call_sl", type: "function", function: { name: "recall", arguments: JSON.stringify({ query: "术语" }) } }
+                {
+                  index: 0,
+                  id: "call_sl",
+                  type: "function",
+                  function: { name: "search_conversations", arguments: JSON.stringify({ query: "术语" }) }
+                }
               ]
             }),
             delta({}, { usage: { total_tokens: 7 } })
@@ -1995,54 +2027,51 @@ http
         ]);
       }
       if (typeof lastUser === "string" && lastUser.includes("MEMORY")) {
-        // 记忆：记入 → 再记（合并）→ 翻记忆 → 查旧谈 → 翻旧谈 → 收尾（把每步结果带回正文供检查）
+        // 记忆：系统提示里带着整份记忆；记入 → 再记（合并）→ 查旧谈 → 翻旧谈 → 列最近的旧谈 → 收尾（各步对不对由这边判好写进正文，不把工具结果抄进答复）
         const n = toolResults.length,
           sys = String(msgs[0]?.role === "system" ? msgs[0].content : ""),
-          names = (payload.tools || []).map(t => t.function.name);
+          names = (payload.tools || []).map(t => t.function.name),
+          result = i => String(toolResults[i]?.content || "");
         const call = (name, args) => [
           delta({ content: `记 ${n + 1}。` }),
           delta({ tool_calls: [{ index: 0, id: `call_m${n}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] }),
           delta({}, { usage: { total_tokens: 5 } })
         ];
-        if (lastUser.includes("MEMORY-TWICE")) {
-          // 同一轮里：翻记忆 → 记入 → 再翻同样的关键词；第二次必须拿到新结果而不是复用
-          if (n === 0) return sse(res, call("recall", { query: "twice" }));
-          if (n === 1) return sse(res, call("remember", { category: "杂记", text: "twice 关键词的记忆" }));
-          if (n === 2) return sse(res, call("recall", { query: "twice" }));
-          return sse(res, [
-            delta({
-              content: `TWICE|cats:${sys.includes("「工作」") ? "yes" : "no"}|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 40)).join(" ▸ ")}`
-            }),
-            delta({}, { usage: { total_tokens: 5 } })
-          ]);
-        }
+        const say = content => sse(res, [delta({ content }), delta({}, { usage: { total_tokens: 5 } })]);
+        // 这段对话头一问时定格的记忆：后来记的、整理出的有没有进来
+        if (lastUser.includes("MEMORY-SNAP"))
+          return say(
+            `SNAP|ps:${sys.includes("命令写成 PS 语法") ? "yes" : "no"}|bash:${sys.includes("而非 bash") ? "yes" : "no"}|work:${sys.includes("用户在做言的记忆模块") ? "yes" : "no"}|zh:${sys.includes("用户偏好中文交流") ? "yes" : "no"}`
+          );
         if (lastUser.includes("MEMORY-OFF"))
-          return sse(res, [
-            delta({
-              content: `OFF|hint:${sys.includes("跨对话的记忆") ? "yes" : "no"}|tools:${names.filter(x => ["remember", "recall", "forget"].includes(x)).length}`
-            }),
-            delta({}, { usage: { total_tokens: 5 } })
-          ]);
-        if (n === 0) return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell 而非 bash" }));
+          return say(
+            `OFF|body:${sys.includes("你跨对话的记忆") ? "yes" : "no"}|memtools:${names.filter(x => ["remember", "recall", "forget"].includes(x)).length}|talks:${names.filter(x => ["search_conversations", "read_conversation"].includes(x)).length}`
+          );
+        if (n === 0) return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell" }));
         if (n === 1) {
-          const id = String(toolResults[0].content).match(/\[(m[a-z0-9]+)\]/)?.[1];
-          return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell 而非 bash，且要求中文交流", replaces: id }));
+          const id = result(0).match(/\[(m[a-z0-9]+)\]/)?.[1];
+          return sse(res, call("remember", { category: "偏好", text: "用户偏好 PowerShell，命令写成 PS 语法", replaces: id }));
         }
-        if (n === 2) return sse(res, call("recall", { query: "powershell" }));
-        if (n === 3) return sse(res, call("search_conversations", { query: "术语" }));
-        if (n === 4) {
-          const id = String(toolResults[3].content).match(/\[([0-9a-f-]{20,})\]/)?.[1];
+        if (n === 2) return sse(res, call("search_conversations", { query: "术语" }));
+        if (n === 3) {
+          const id = result(2).match(/\[([0-9a-f-]{20,})\]/)?.[1];
           return sse(res, call("read_conversation", { id: id || "none" }));
         }
-        // 过长的一条不截断，退回去；不给参数的 recall 只列分类
-        if (n === 5) return sse(res, call("remember", { category: "偏好", text: "长".repeat(2100) }));
-        if (n === 6) return sse(res, call("recall", {}));
-        return sse(res, [
-          delta({
-            content: `MEM|hint:${sys.includes("跨对话的记忆") ? "yes" : "no"}|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 70)).join(" ▸ ")}`
-          }),
-          delta({}, { usage: { total_tokens: 5 } })
-        ]);
+        if (n === 4) return sse(res, call("search_conversations", {}));
+        const flag = ok => (ok ? "yes" : "no");
+        return say(
+          [
+            "MEM",
+            `body:${flag(sys.includes("你跨对话的记忆") && sys.includes("[m0001]") && sys.includes("用户偏好中文交流"))}`,
+            `recall:${flag(names.includes("recall"))}`,
+            `saved:${flag(result(0).startsWith("已记入 [m"))}`,
+            `merged:${flag(result(1).startsWith("已更新 [m"))}`,
+            `search:${flag(result(2).includes("「旧谈一则」共 2 条"))}`,
+            `read:${flag(result(3).includes("OLDSECRET"))}`,
+            `recent:${flag(result(4).includes("「旧谈一则」") && result(4).includes("请解释术语 X"))}`,
+            `self:${flag(result(4).includes("MEMORY go"))}`
+          ].join("|")
+        );
       }
       if (typeof lastUser === "string" && lastUser.includes("SLOPPY")) {
         // 参数写得潦草：裹了围栏、结尾多一个逗号。页面该救回来，而不是白费一轮

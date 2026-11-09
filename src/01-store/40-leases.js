@@ -17,7 +17,10 @@ function syncLeases() {
   if (leaseClaims.size) return Promise.all([...leaseClaims.values()]);
   if (leasing) return leasing;
   // 正作答的都算上（旁注的作业按它所在的对话记），后台还有帮手在做的也算；作答完了、最后一次存盘也落了地的松手
-  const running = new Set([...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys()]);
+  // 记忆正整理的那一段也算：它要写这段对话（整理到了哪一刻）
+  const running = new Set(
+    [...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys(), tidyingNow].filter(Boolean)
+  );
   for (const id of running) leaseHold.add(id);
   for (const id of [...leaseHold]) if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) leaseHold.delete(id);
   const posting = bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold] }, AbortSignal.timeout(5000));

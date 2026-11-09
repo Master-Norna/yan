@@ -15,6 +15,7 @@ async function exportData(includeFiles) {
       ...store.settings,
       mcpServers,
       dutyReview: { ...store.settings.dutyReview, apiKey: "" },
+      dutyMemory: { ...store.settings.dutyMemory, apiKey: "" },
       dutyImage: { ...store.settings.dutyImage, apiKey: "" }
     },
     profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })),
@@ -153,7 +154,7 @@ async function importData(file) {
       memoryTexts = new Set(store.memory.items.map(item => item.text));
     let memories = 0;
     for (const item of incoming.memory.items)
-      if (!memoryIds.has(item.id) && !memoryTexts.has(item.text) && store.memory.items.length < MAX_MEMORY_ITEMS) {
+      if (!memoryIds.has(item.id) && !memoryTexts.has(item.text)) {
         store.memory.items.push(item);
         memoryIds.add(item.id);
         memoryTexts.add(item.text);
