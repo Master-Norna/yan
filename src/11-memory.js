@@ -126,7 +126,8 @@ async function tuneOnce() {
     });
   let changed = 0;
   for (const op of parseMemoryOps(reply)) {
-    if (!op || typeof op !== "object" || !op.category) continue;
+    // 只认字符串：缺了 text（或给 null、数字、数组）是模型没按约定答，不能当成「空串即删去这一类」把一整类删掉
+    if (!op || typeof op !== "object" || !op.category || typeof op.text !== "string") continue;
     const name = cleanMemoryCategory(op.category),
       item = memoryOf(name);
     // 送出后动过的、删了的不认；送出时没有、这阵里别处新起的同名一类也不认
