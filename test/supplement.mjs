@@ -200,6 +200,24 @@ check(
     panelNote.open !== false,
   JSON.stringify(panelNote)
 );
+// 人亲手收起那一趟、合上窗，再点传话的签：那句话在收着的时间线里，仍要替人摊开、翻得到
+const hpTrail = `document.querySelector('#helperModal .helper-run[data-run="call_hp0"] > .sub-trail')`;
+await evalJs(
+  `(t => { if (t && !t.classList.contains("folded")) t.querySelector(":scope > .sub-fold")?.click(); return true })(${hpTrail})`
+);
+await waitFor(`${hpTrail}?.classList.contains("folded")`, 3000).catch(() => {});
+await evalJs(`document.querySelector("#helperClose").click(); true`);
+await sleep(400);
+await evalJs(`document.querySelector('#messages .tool-step-delegate[data-kind="传话"] > .tool-step-head').click(); true`);
+await sleep(600);
+const peeked = await evalJs(
+  `(t => ({ folded: t?.classList.contains("folded"), shown: !!document.querySelector('#helperModal .tool-step[data-tool="helper_note"]')?.getClientRects().length }))(${hpTrail})`
+);
+check(
+  "a run folded by hand still opens to the passed words when its relay tag is clicked",
+  peeked.folded === false && peeked.shown,
+  JSON.stringify(peeked)
+);
 await evalJs(`document.querySelector("#helperClose").click(); true`);
 
 // ---- 主模型叫停帮手：只停它一个，已做的照未完成回报（叫停得快，回报常赶在这一答收尾前到，就在这一答里递上）

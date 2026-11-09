@@ -186,7 +186,9 @@ function renderHelperList() {
 let helperPeek = ""; // 传话的签点开时替人摊开的那一趟，合窗即忘
 /** @param {Step} step */
 function helperRunFolded(step) {
-  return step.folded ?? (step.id !== helperPeek && !(step === openHelperRuns().at(-1) && step.status !== "done"));
+  // 传话替人摊开的那一趟压过人亲手收起的：不然那句话藏在收着的时间线里，翻不到
+  if (step.id === helperPeek) return false;
+  return step.folded ?? !(step === openHelperRuns().at(-1) && step.status !== "done");
 }
 /** @param {Step} step */
 function syncSubFold(trail, step) {
@@ -247,7 +249,10 @@ function toggleSubFold(id, fold) {
   const step = helperStepById(id),
     trail = $("#helperPanelBody").querySelector(`.helper-run[data-run="${CSS.escape(id)}"] > .sub-trail`);
   if (!step || !trail) return;
-  step.folded = fold ?? !helperRunFolded(step);
+  const folded = fold ?? !helperRunFolded(step);
+  // 人亲手开合了，替人摊开的那一回即作罢
+  if (helperPeek === id) helperPeek = "";
+  step.folded = folded;
   saveStoreSoon();
   syncSubFold(trail, step);
   // 从顶栏收起时，停回题头处
