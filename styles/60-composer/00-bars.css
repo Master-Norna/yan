@@ -12,10 +12,13 @@
 }
 /* 工作条：一答生成期间附在输入框上方，一条淡墨底——左边改动合计，右边在做的帮手（金色）；
    原先一名帮手一行的帮手条并进来了：帮手在行迹里有签，不必在输入框上再各占一行（见 设计稿/12-改动条与行迹 二·乙）。
-   两头是文武边：外一道粗朱、里一道细朱，如古籍的边栏，上下仍是淡线、角收方（设计稿/161 丁，左右对称）。
-   落选的：去框去底只剩一行字（158 二乙，正文淡出的那截透到字底下）；作输入框的页眉、书签、浮签、脚注线、只一道朱竖线（158 二丙、159）——
+   两头是文武边：外一道粗朱、里一道细朱，如古籍的边栏（设计稿/161 丁，左右对称）。
+   框与输入框同一副：整圈细线、同样的圆角、同一张纸带一层浅影，文武边整副收进框里两头、上下留空（设计稿/163 丁）。
+   原先方角、只上下淡线、淡墨底，压在圆角的输入框上上下不对味；粗朱边作框的左右边顺圆角弯（163 乙）成了一对括号，不像边栏了。
+   落选的：去框去底只剩一行字（158 二乙，正文淡出的那截透到字底下；162 宽随内容同病）；作输入框的页眉、书签、浮签、脚注线、只一道朱竖线（158 二丙、159）——
    都是在输入框上另起一样东西，与整页对不上；并进输入框底下那行（160）是另起结构，用户要在现有的样子上点缀；
-   同批的折角、两段之间的界栏、上沿的鱼尾（161 乙丙戊）用户没取，取了文武边、要两头对称 */
+   同批的折角、两段之间的界栏、上沿的鱼尾（161 乙丙戊）用户没取，取了文武边、要两头对称；
+   去「改」印、文武边转墨（162 丙丁）没对准毛病，不对味在角不在边 */
 .helper-bar {
   position: relative;
   display: flex;
@@ -23,12 +26,11 @@
   gap: 10px;
   width: min(100%, var(--read));
   margin: 0 auto 8px;
-  padding: 4px 12px;
+  padding: 4px 16px;
   border: 1px solid var(--line);
-  border-right: 0;
-  border-left: 0;
-  border-radius: 0;
-  background: color-mix(in srgb, var(--paper-2) 45%, var(--paper));
+  border-radius: var(--radius-l);
+  background: var(--paper);
+  box-shadow: 0 4px 16px rgba(58, 45, 29, 0.06);
   color: var(--ink-3);
   font: var(--fs-note) var(--title);
   letter-spacing: 0.06em;
@@ -38,18 +40,18 @@
 .helper-bar:after {
   content: "";
   position: absolute;
-  top: -1px;
-  bottom: -1px;
+  top: 5px;
+  bottom: 5px;
   width: 5px;
   pointer-events: none;
 }
 .helper-bar:before {
-  left: 0;
+  left: 6px;
   border-left: 2px solid color-mix(in srgb, var(--rouge) 70%, transparent);
   border-right: 1px solid color-mix(in srgb, var(--rouge) 40%, transparent);
 }
 .helper-bar:after {
-  right: 0;
+  right: 6px;
   border-right: 2px solid color-mix(in srgb, var(--rouge) 70%, transparent);
   border-left: 1px solid color-mix(in srgb, var(--rouge) 40%, transparent);
 }
