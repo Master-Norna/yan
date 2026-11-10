@@ -76,7 +76,7 @@ window.YAN_PROMPTS.order = [
   { key: "work.hint", tool: "run_command", mode: "work" },
   { key: "work.closing", tool: "run_command", mode: "work", roles: ["main"] },
   { key: "work.ledger", tool: "write_file", mode: "work", roles: ["main"] },
-  // 记忆开着才带：关于用户本人的归记忆，账本不重记
+  // 记忆开着才带：两层记忆的分工——关于用户本人、处处成立的 remember，只在这个目录成立的进目录记忆
   { key: "work.ledgerMemory", tool: "remember", mode: "work", roles: ["main"] },
   { key: "work.archive", tool: "run_command", mode: "chat" },
   { key: "work.deliver", tool: "run_command", roles: ["main"] },

@@ -253,7 +253,7 @@ function launchHelper(
         // 用户停的（停止、刷新）：不回报，也就不再叫醒谁
         if (error.name === "AbortError") return void Object.assign(step, { status: "error", result: "已止" });
         const reason = bridgeErrorText(String(error.message || error));
-        // 领命途中断的（读账本连不上之类）：同样挂着等人续
+        // 领命途中断的（读目录记忆连不上之类）：同样挂着等人续
         if (step.sub) return holdHelper(step, reason, conversation);
         step.status = "error";
         step.result = reason;
@@ -472,7 +472,7 @@ async function runDelegate(step, args, ctx, profile, past, progress, resume = fa
     host: assistant,
     title: step.title
   };
-  // 读账本、装历史之前就入册：准备中的帮手也能被停止、收信、报到。主答的中止只跟到准备结束，之后仍独自在后台做。
+  // 读目录记忆、装历史之前就入册：准备中的帮手也能被停止、收信、报到。主答的中止只跟到准备结束，之后仍独自在后台做。
   const stopStarting = () => {
     box.halted = true;
     box.controller.abort();
@@ -498,7 +498,7 @@ async function runDelegate(step, args, ctx, profile, past, progress, resume = fa
     quiet = false;
   try {
     box.controller.signal.throwIfAborted();
-    // 领命这一刻现读主对话的账本（只读）：「先定下约束、再派活」时，开页读的那份往往还没有。
+    // 领命这一刻现读主对话的目录记忆（只读）：「先定下约束、再派活」时，开页读的那份往往还没有。
     const ledger = await loadLedger(conversation, box.controller.signal, "sub");
     // 先前几趟的行迹若已另存出去，接回来再写进它的历史
     await warmConversation(conversation);

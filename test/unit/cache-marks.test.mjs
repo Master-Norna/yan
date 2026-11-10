@@ -24,7 +24,7 @@ test("marks the system prompt, the previous request's tail and the last message,
       role: "user",
       content: [
         { type: "text", text: "读 a", cache_control: EPHEMERAL },
-        { type: "text", text: "［账本］" }
+        { type: "text", text: "［目录记忆］" }
       ]
     },
     call("c1"),
@@ -62,14 +62,14 @@ test("other models get the page's marks stripped", () => {
       role: "user",
       content: [
         { type: "text", text: "问", cache_control: EPHEMERAL },
-        { type: "text", text: "［账本］" }
+        { type: "text", text: "［目录记忆］" }
       ]
     },
     plain = { role: "assistant", content: "答" };
   const [stripped, same] = stripCacheMarks([ask, plain]);
   assert.deepEqual(stripped.content, [
     { type: "text", text: "问" },
-    { type: "text", text: "［账本］" }
+    { type: "text", text: "［目录记忆］" }
   ]);
   assert.equal(same, plain);
   assert.deepEqual(ask.content[0].cache_control, EPHEMERAL, "原消息不被改动");

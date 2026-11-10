@@ -64,7 +64,7 @@ test("末尾两个换行：仍是三行，最后一个空行算一行", async ()
   assert.equal(data.text, "   1| a\n   2| b\n   3| ");
 });
 
-test("400 行的文件 limit 400：一次取完，shown 与 totalLines 相等（账本的 partial 判定据此）", async () => {
+test("400 行的文件 limit 400：一次取完，shown 与 totalLines 相等（目录记忆的 partial 判定据此）", async () => {
   put("big.txt", `${Array.from({ length: 400 }, (_, i) => `第 ${i + 1} 行`).join("\n")}\n`);
   const { data } = await call("read", { path: "big.txt", limit: 400 });
   assert.equal(data.totalLines, 400);

@@ -107,6 +107,11 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       await fs.promises.mkdir(workdir, { recursive: true }).catch(error => {
         throw Error(describeFsError(error, workdir));
       });
+    // 目录记忆原名账本：旧目录里的 .yan/账本.md 改名为 记忆.md，往后只认这一个名字（见 src/15-tools/21-files.js 的 LEDGER_PATH）。
+    // 新名已有就不动——rename 在 Windows 上会盖掉目标
+    const yan = path.join(workdir, ".yan"),
+      renamed = path.join(yan, "记忆.md");
+    if (!fs.existsSync(renamed)) await fs.promises.rename(path.join(yan, "账本.md"), renamed).catch(() => {});
     const entries = await fs.promises.readdir(workdir).catch(() => []);
     return {
       workdir,

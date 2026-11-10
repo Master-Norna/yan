@@ -20,7 +20,7 @@ const PROMPT_VARS = {
   "side.passage": ctx => (ctx.anchor ? {} : null),
   "side.whole": ctx => (ctx.anchor ? null : {}),
   "side.noTools": ctx => (ctx.tools.size ? null : {}),
-  // 账本那句的补充，跟着账本走：写不了文件就没有账本
+  // 两层记忆的分工，跟着目录记忆走：写不了文件就没有目录记忆
   "work.ledgerMemory": ctx => (ctx.tools.has("write_file") ? {} : null)
 };
 /**

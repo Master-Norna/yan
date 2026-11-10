@@ -212,7 +212,7 @@ http
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ images: [{ url: "http://127.0.0.1:8798/fake-image" }], seed: 1 }));
       }
-      // 这一问总是分段送来（首段标着缓存点、账本另起一段）：只有文字的并回一串，各分支照旧当字符串读；带图带件的仍是分段
+      // 这一问总是分段送来（首段标着缓存点、目录记忆另起一段）：只有文字的并回一串，各分支照旧当字符串读；带图带件的仍是分段
       const raw = payload.messages || [],
         msgs = raw.map(m =>
           m.role === "user" && Array.isArray(m.content) && m.content.every(part => part.type === "text")
@@ -425,8 +425,8 @@ http
       // 长活：轮内压缩的请求（开头是 fold 提示）回一份笔记；其余按任务里的记号分派
       const firstUser = String(msgs.find(m => m.role === "user")?.content || ""),
         longKey = ["LONGSUB", "LONGMAIN"].find(k => firstUser.includes(k) && !firstUser.includes("LONGRUN"));
-      // LEDGER：账本只接在这一问之后另起一段（首段是问本身；缓存标记桥接只给 Claude 留着，这里看不到，由单元测试管）、系统提示里有立账本那句；第一问不读就改账本（附着全文即算读过），第二问看到的是改后的那份
-      // LEDGERBIG：账本远超这台模型每一问能附的量——只附开头、写明共几行，末尾不附；附的是截过的，不读就改应被挡下
+      // LEDGER：目录记忆只接在这一问之后另起一段（首段是问本身；缓存标记桥接只给 Claude 留着，这里看不到，由单元测试管）、系统提示里有立目录记忆那句；第一问不读就改目录记忆（附着全文即算读过），第二问看到的是改后的那份
+      // LEDGERBIG：目录记忆远超这台模型每一问能附的量——只附开头、写明共几行，末尾不附；附的是截过的，不读就改应被挡下
       if (firstUser.includes("LEDGERBIG")) {
         if (!toolResults.length)
           return sse(res, [
@@ -436,7 +436,7 @@ http
                   index: 0,
                   id: "call_lb0",
                   type: "function",
-                  function: { name: "edit_file", arguments: JSON.stringify({ path: ".yan/账本.md", old: "TOPMARK", new: "TOPMARK2" }) }
+                  function: { name: "edit_file", arguments: JSON.stringify({ path: ".yan/记忆.md", old: "TOPMARK", new: "TOPMARK2" }) }
                 }
               ]
             }),
@@ -447,7 +447,7 @@ http
             .map(m => String(m.content))
             .join("\n"),
           marks = [
-            `cut:${/账本共 402 行，此处只附了开头 \d+ 行/.test(ask) ? "yes" : "no"}`,
+            `cut:${/目录记忆共 402 行，此处只附了开头 \d+ 行/.test(ask) ? "yes" : "no"}`,
             `head:${ask.includes("TOPMARK") ? "yes" : "no"}`,
             `tail:${ask.includes("TAILMARK") ? "yes" : "no"}`,
             `edit:${String(toolResults[0].content).startsWith("已修改") ? "yes" : "no"}`
@@ -459,8 +459,8 @@ http
           users = msgs.filter(m => m.role === "user").map(m => String(m.content)),
           last = users.at(-1),
           ask = raw.findLast(m => m.role === "user")?.content,
-          after = Array.isArray(ask) && !ask[0].text.includes("［账本") && ask.at(-1).text.startsWith("［账本 .yan/账本.md］"),
-          marks = `tail:${after ? "yes" : "no"}|once:${users.slice(0, -1).some(u => u.includes("［账本")) ? "no" : "yes"}|sys:${sys.includes(".yan/账本.md") ? "yes" : "no"}`;
+          after = Array.isArray(ask) && !ask[0].text.includes("［目录记忆") && ask.at(-1).text.startsWith("［目录记忆 .yan/记忆.md］"),
+          marks = `tail:${after ? "yes" : "no"}|once:${users.slice(0, -1).some(u => u.includes("［目录记忆")) ? "no" : "yes"}|sys:${sys.includes(".yan/记忆.md") ? "yes" : "no"}`;
         if (users.length === 1 && !toolResults.length)
           return sse(res, [
             delta({
@@ -471,7 +471,7 @@ http
                   type: "function",
                   function: {
                     name: "edit_file",
-                    arguments: JSON.stringify({ path: ".yan/账本.md", old: "达标线 0.9", new: "达标线 0.95" })
+                    arguments: JSON.stringify({ path: ".yan/记忆.md", old: "达标线 0.9", new: "达标线 0.95" })
                   }
                 }
               ]
@@ -695,26 +695,26 @@ http
           250
         );
       }
-      // BOOKSTALE：开工时附上了账本，指令随后改了它，再差遣（帮手领命时现读到新版）；主模型拿开工时那份整份写回，须被挡下
+      // BOOKSTALE：开工时附上了目录记忆，指令随后改了它，再差遣（帮手领命时现读到新版）；主模型拿开工时那份整份写回，须被挡下
       if (firstUser.includes("BOOKSTALE")) {
         const call = (id, name, args) =>
           delta({ tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] });
         if (firstTurn && !toolResults.length)
           return sse(res, [
             call("call_bs0", "run_command", {
-              command: shellCommand("Add-Content -Path .yan/账本.md -Value '- 乙' -Encoding utf8", "printf '%s\n' '- 乙' >> .yan/账本.md")
+              command: shellCommand("Add-Content -Path .yan/记忆.md -Value '- 乙' -Encoding utf8", "printf '%s\n' '- 乙' >> .yan/记忆.md")
             }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         if (firstTurn && toolResults.length === 1)
           return sse(res, [
-            call("call_bs1", "delegate", { title: "看账本", task: "BOOKHELPER：照账本办，回报看到的约束。" }),
+            call("call_bs1", "delegate", { title: "看目录记忆", task: "BOOKHELPER：照目录记忆办，回报看到的约束。" }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         if (!helperReports.length) return sse(res, [delta({ content: "等回报。" }), delta({}, { usage: { total_tokens: 5 } })]);
         if (!msgs.some(m => m.tool_calls?.some(c => c.function.name === "write_file")))
           return sse(res, [
-            call("call_bs2", "write_file", { path: ".yan/账本.md", content: "# 约束\n- 甲\n" }),
+            call("call_bs2", "write_file", { path: ".yan/记忆.md", content: "# 约束\n- 甲\n" }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         return sse(res, [
@@ -722,7 +722,7 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
-      // BOOKMID：开工时还没有账本，主模型中途立账本、再差遣；帮手领命时拿到的须是刚立的那份
+      // BOOKMID：开工时还没有目录记忆，主模型中途立目录记忆、再差遣；帮手领命时拿到的须是刚立的那份
       if (firstUser.includes("BOOKHELPER"))
         return sse(res, [
           delta({ content: `回报：ledger:${firstUser.includes("只用 CPU") ? "yes" : "no"}` }),
@@ -733,12 +733,12 @@ http
           delta({ tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] });
         if (firstTurn && !toolResults.length)
           return sse(res, [
-            call("call_bm0", "write_file", { path: ".yan/账本.md", content: "# 约束\n- 只用 CPU\n" }),
+            call("call_bm0", "write_file", { path: ".yan/记忆.md", content: "# 约束\n- 只用 CPU\n" }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         if (firstTurn && toolResults.length === 1)
           return sse(res, [
-            call("call_bm1", "delegate", { title: "看账本", task: "BOOKHELPER：照账本办，回报看到的约束。" }),
+            call("call_bm1", "delegate", { title: "看目录记忆", task: "BOOKHELPER：照目录记忆办，回报看到的约束。" }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         if (!helperReports.length) return sse(res, [delta({ content: "等回报。" }), delta({}, { usage: { total_tokens: 5 } })]);

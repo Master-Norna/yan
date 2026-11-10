@@ -234,7 +234,7 @@ const SEEING_TOOLS = new Set(["read_file", "write_file", "edit_file"]);
  * @param {Step} step 正要改的这一步
  */
 function seenBefore(conversation, step, file) {
-  // 账本每一问都附着（见 ledgerNote）：附的是全文，主模型不必再读一遍才能改；截过的不算，没看到的后半截不能被一笔覆盖掉
+  // 目录记忆每一问都附着（见 ledgerNote）：附的是全文，主模型不必再读一遍才能改；截过的不算，没看到的后半截不能被一笔覆盖掉
   if (
     !step.scope &&
     ledgers.get(conversation.id) &&
@@ -263,8 +263,8 @@ function lastSeen(conversation, step, file) {
       ) || null
   );
 }
-// 主模型写、改账本时带的指纹：这一答里亲手读写过的以那一步为准，没有的以开工时附上的那份为准——
-// 附上的就算它读过（见 seenBefore），读后别的对话又改了账本，整份写回前得认得出来。不是账本的回 null
+// 主模型写、改目录记忆时带的指纹：这一答里亲手读写过的以那一步为准，没有的以开工时附上的那份为准——
+// 附上的就算它读过（见 seenBefore），读后别的对话又改了目录记忆，整份写回前得认得出来。不是目录记忆的回 null
 /** @param {Conversation} conversation @param {Step} step @returns {string | null} */
 function ledgerSig(conversation, step, file) {
   const ledger = ledgers.get(conversation.id);
@@ -344,19 +344,21 @@ async function ensureWorkReady(conversation) {
   }
   return true;
 }
-// 账本：跨多答的长活，任务活在目录里、不活在哪一段对话里——目录下 .yan/账本.md 由主模型自己立、自己维护，
-// 只记对这件工程持续有约束、又不是一条结论的（约束与取舍、做法与环境上的要点），旧的随手淘汰；结论、进展与走不通的路归意（见 src/19-intent/）。
-// 每一答开工时读一回，附在这一问之后（见 ledgerNote 与 streamReply）：压缩了、被回报叫醒另起一答、换一段对话接着做，看到的都是同一份。
-// 附在问上而不进系统提示：账本改了也不冲掉前面的缓存。没有这个文件就什么都不附。
-// 账本记多少不设上限——有的活真要记很多；限的只是每一问附多少：随模型窗口走，取附件那把尺子的一半（它每一问都附）。
-// 超出就附开头一段并写明其余用 read_file 看——所以账本是索引：常看的写在前面，细的记录（实验数据、长清单）另立 .yan/ 下的文件、账本里留一行指向它
-const LEDGER_PATH = ".yan/账本.md";
-/** @type {Map<string, { text: string, lines: number, partial: boolean, sig: string }>} 主答附上的账本，按对话：每一答开工时读（帮手领命时现读的那份不进这里）。
- * text 是读到的那截，lines 是整份的行数；partial：读接口一回给得有限，长账本只拿到了前面；sig 是读时的指纹 */
+// 目录记忆：记忆分两层——关于用户本人、处处成立的在跨对话记忆里（见 11-memory.js，进系统提示、定格）；只在这个目录成立的
+// 活在目录里、不活在哪一段对话里——目录下 .yan/记忆.md 由主模型自己立、自己维护（原名账本，旧目录里的 账本.md 由桥接备目录时改名，
+// 见 server/work/index.js；代码里仍叫 ledger）。记这个目录往后还用得上的做法与环境要点，不论活长活短，旧的随手淘汰；
+// 结论、进展与走不通的路归意（见 src/19-intent/）。两层位置不同是因为变的快慢不同：跨对话那份很少变，定格进系统提示吃缓存；
+// 这份在活里常改、别的对话也写，每一答开工时现读，附在这一问之后（见 ledgerNote 与 streamReply），改了也不冲掉前面的缓存：
+// 压缩了、被回报叫醒另起一答、换一段对话接着做，看到的都是同一份。没有这个文件就什么都不附。
+// 目录记忆记多少不设上限——有的活真要记很多；限的只是每一问附多少：随模型窗口走，取附件那把尺子的一半（它每一问都附）。
+// 超出就附开头一段并写明其余用 read_file 看——所以目录记忆是索引：常看的写在前面，细的记录（实验数据、长清单）另立 .yan/ 下的文件、目录记忆里留一行指向它
+const LEDGER_PATH = ".yan/记忆.md";
+/** @type {Map<string, { text: string, lines: number, partial: boolean, sig: string }>} 主答附上的目录记忆，按对话：每一答开工时读（帮手领命时现读的那份不进这里）。
+ * text 是读到的那截，lines 是整份的行数；partial：读接口一回给得有限，长目录记忆只拿到了前面；sig 是读时的指纹 */
 const ledgers = new Map();
-/** @type {Set<string>} 上回附上去的账本被截过的对话：截过就不算读过全文，改它得先读 */
+/** @type {Set<string>} 上回附上去的目录记忆被截过的对话：截过就不算读过全文，改它得先读 */
 const ledgersCut = new Set();
-/** 每一问附多少账本（token） @param {Profile|null} profile */
+/** 每一问附多少目录记忆（token） @param {Profile|null} profile */
 function ledgerBudget(profile) {
   return Math.floor(inlineTextBudget(profile || activeProfile()) / 2);
 }
@@ -385,7 +387,7 @@ async function loadLedger(conversation, signal, role = "main") {
   if (role === "main") ledger ? ledgers.set(conversation.id, ledger) : ledgers.delete(conversation.id);
   return ledger;
 }
-// 附在这一问之后的一段；帮手的是只读的一份（账本只由主对话写，星形）
+// 附在这一问之后的一段；帮手的是只读的一份（目录记忆只由主对话写，星形）
 /**
  * @param {Conversation} conversation @param {"main"|"sub"} role @param {Profile|null} [profile]
  * @param {{ text: string, lines: number, partial: boolean, sig: string } | null} [ledger] 帮手的那份由领命时现读传进来

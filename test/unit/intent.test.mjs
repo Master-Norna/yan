@@ -376,7 +376,7 @@ test("无主改动：改过而没有哪一项的凭据罩着的；文件、目�
     { id: "甲", claim: "x", check: "y", anchors: ["src/a.js", "dir:lib"] },
     { id: "乙", claim: "x", check: "y", anchors: ["docs/old.md"], state: "dropped" }
   ]);
-  assert.deepEqual(f.intentUnowned(intent, ["src/a.js", "lib/deep/b.js", "libx/c.js", "docs/old.md", ".yan/账本.md", "src/a.js"]), [
+  assert.deepEqual(f.intentUnowned(intent, ["src/a.js", "lib/deep/b.js", "libx/c.js", "docs/old.md", ".yan/记忆.md", "src/a.js"]), [
     "libx/c.js",
     "docs/old.md"
   ]);

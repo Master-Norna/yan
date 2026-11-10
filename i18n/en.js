@@ -402,10 +402,20 @@ var YAN_EN = {
   "在专司里配好「记忆优化」后，才带上、才记": "Set up Memory optimization under Duties to include and record it",
   "这一类的记忆将被移除，无法撤销；对话不受影响。": "This category will be removed. This can't be undone; chats are not affected.",
   "记忆：理过 {0} 类": "Memory: {0} {0|category|categories} tidied",
+  "{0}没成，{1}：{2}": "{0} failed; {1}: {2}",
+  下一答落定时再理: "will retry after the next answer",
+  这一步照规则办: "this step follows the rules",
+  超时: "timed out",
+  "有 {0} 条不合约定的项": "{0} {0|item|items} not in the expected format",
+  没给出改动清单: "no list of changes was given",
+  给的不是清单: "the reply wasn't a list",
+  审查模型没给出准或驳: "the review model gave neither approve nor deny",
   "{0} 类 · {1} 字": "{0} {0|category|categories} · {1} characters",
   "{0} 类记忆将被移除，无法撤销；对话不受影响。":
     "{0} {0|category|categories} of memory will be removed. This can't be undone; chats are not affected.",
   记忆优化: "Memory optimization",
+  "只在某个目录成立的，执事记在那个目录的 `.yan/记忆.md`，在那里每一问都附着；不经专司，也不受这里的开关管。":
+    "What holds only in one folder is recorded by the agent in that folder's `.yan/记忆.md` and attached to every message there; it doesn't go through Duties and isn't affected by this switch.",
   "、{0} 类记忆": ", {0} memory {0|category|categories}",
   "已删去「{0}」": "Deleted “{0}”",
   "「{0}」没有变": "“{0}” unchanged",
@@ -1833,11 +1843,10 @@ var YAN_EN = {
   看意: "Viewing the intent",
   "工作目录立了意，题下一行与书眉常显一枚石青「意」：进度、一排记号，点开即卡片；行迹里「意」那一步亦可点开。卡片页头写着进度与更新于何时，右端「墨痕」记着改意、弃、撤的来历；其下是一张图，图下一份簿录，一项一行。图上的记号：青绿勾已立，泥金勾假定，泥金问号存疑（自称成立而前提未立），泥金虚圈进行中，朱圈待复核；弃了的不上图，记在墨痕里。点图上一项或簿录一行，就地展开它的验收、凭据与缘由——这些因果由程序从图与凭据推出，不经模型。卡片只给看，要改什么直接告诉模型。":
     "Once the working folder has an intent, a blue “意” mark shows in the line under the title and in the header, with progress and a row of marks; click it for the card. The intent step under Steps opens it too. The card's header shows progress and when it was last updated, with History at the right recording revisions, drops and removals; below is the graph, and below that a list, one item per line. Marks on the graph: a green tick is settled, a gold tick is assumed, a gold question mark is doubtful (claimed settled while a prerequisite isn't), a gold dashed circle is in progress, a red circle needs recheck; dropped items are left off the graph and recorded in History. Click an item on the graph or a line in the list to expand its check, evidence and reasons in place; these links are derived by the program from the graph and evidence, not by the model. The card is for viewing only; to change something, tell the model.",
-  账本: "Ledger",
-  "意记结论，你定的界限记作意里的「守」；账本记做法：摸清的路径与配置、定下的做法、踩过的坑，模型立在目录的 `.yan/账本.md`，自己增删合并，不记流水账。每一问之后附上一份，帮手领命时附一份只读的。账本可以记很多，每一问附多少随模型的窗口；附不下便附开头一段，其后的模型按需翻看。":
-    "The intent records conclusions, and limits you set are recorded in it as keeps. The ledger records how things are done: paths and settings worked out, practices agreed on, pitfalls hit. The model keeps it in the folder at `.yan/账本.md`, adding, removing and merging entries itself rather than logging every step. A copy goes with each message, and subagents get a read-only copy with their task. The ledger can grow large; how much is attached each time depends on the model's window, and if it doesn't fit, the opening part is attached and the model reads the rest as needed.",
-  "意与账本都在目录的 `.yan/` 下，换一段对话绑同一目录，接着用的仍是这两份。":
-    "Both the intent and the ledger live in the folder's `.yan/`; another conversation bound to the same folder carries on with the same two.",
+  "意记结论，你定的界限记作意里的「守」；记忆记做法：这个目录往后还用得上的路径与配置、定下的做法与习惯、踩过的坑，模型立在目录的 `.yan/记忆.md`，自己增删合并，不记流水账；关于你本人、处处成立的仍记进跨对话的记忆。每一问之后附上一份，帮手领命时附一份只读的。可以记很多，每一问附多少随模型的窗口；附不下便附开头一段，其后的模型按需翻看。":
+    "The intent records conclusions, and limits you set are recorded in it as keeps. Memory here records how things are done in this folder: paths and settings worked out, practices and habits agreed on, pitfalls hit. The model keeps it in the folder at `.yan/记忆.md`, adding, removing and merging entries itself rather than logging every step; things about you that hold everywhere still go into cross-chat memory. A copy goes with each message, and subagents get a read-only copy with their task. It can grow large; how much is attached each time depends on the model's window, and if it doesn't fit, the opening part is attached and the model reads the rest as needed.",
+  "意与记忆都在目录的 `.yan/` 下，换一段对话绑同一目录，接着用的仍是这两份。":
+    "Both the intent and memory live in the folder's `.yan/`; another conversation bound to the same folder carries on with the same two.",
   "挂上就走，到时叫醒": "Leave it running, get woken when it's time",
   "要等的事——一条指令跑完、一个时刻到来——执事挂上即可收尾，不必醒着守候；到时自会叫醒它，接着做。":
     "For anything that means waiting, a command finishing or a time arriving, the agent can leave it running and finish the reply instead of staying awake to watch; it's woken when the time comes and carries on.",

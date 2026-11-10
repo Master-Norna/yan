@@ -1,9 +1,9 @@
-// 账本：目录下 .yan/账本.md 每一答开工时读一回，接在这一问之后（之前的问不带）；附着全文即算读过，主模型可径直改；下一问看到的是改后的那份
+// 目录记忆：目录下 .yan/记忆.md 每一答开工时读一回，接在这一问之后（之前的问不带）；附着全文即算读过，主模型可径直改；下一问看到的是改后的那份
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { connect, check, sleep, PAGE, WORK } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
 mkdirSync(WORK + "/.yan", { recursive: true });
-writeFileSync(WORK + "/.yan/账本.md", "# 目标\n- 分类准确率达标线 0.9\n# 约束\n- 只用 CPU\n");
+writeFileSync(WORK + "/.yan/记忆.md", "# 目标\n- 分类准确率达标线 0.9\n# 约束\n- 只用 CPU\n");
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 await evalJs(
@@ -26,7 +26,7 @@ try {
     first
   );
   check("the main model edits the ledger without reading it first", first.includes("edit:yes"), first);
-  check("the edit landed in the file", readFileSync(WORK + "/.yan/账本.md", "utf8").includes("达标线 0.95"));
+  check("the edit landed in the file", readFileSync(WORK + "/.yan/记忆.md", "utf8").includes("达标线 0.95"));
   await evalJs(
     `document.querySelector("#chatInput").value = "接着"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
   );
@@ -34,9 +34,9 @@ try {
   const second = await evalJs(reply(1));
   check("next question carries the edited ledger, and only once", /tail:yes\|once:yes/.test(second) && second.includes("now:0.95"), second);
 
-  // 记多少不设限，附多少随窗口：四百行的账本、两万窗口的模型，只附开头并写明共几行；截过的不算读过，不读就改被挡下
+  // 记多少不设限，附多少随窗口：四百行的目录记忆、两万窗口的模型，只附开头并写明共几行；截过的不算读过，不读就改被挡下
   writeFileSync(
-    WORK + "/.yan/账本.md",
+    WORK + "/.yan/记忆.md",
     ["# 目标 TOPMARK", ...Array.from({ length: 400 }, (_, i) => `- 第${i}条：实验记录良好，继续推进下一步`), "- 末条 TAILMARK"].join("\n")
   );
   await evalJs(
@@ -50,9 +50,9 @@ try {
     cut === "LEDGERBIG|cut:yes|head:yes|tail:no|edit:no",
     cut
   );
-  check("the cut ledger was not overwritten unread", readFileSync(WORK + "/.yan/账本.md", "utf8").includes("# 目标 TOPMARK\n"));
+  check("the cut ledger was not overwritten unread", readFileSync(WORK + "/.yan/记忆.md", "utf8").includes("# 目标 TOPMARK\n"));
 } finally {
-  // 工作目录各用例共用：别让账本冠到后面用例的问上
+  // 工作目录各用例共用：别让目录记忆冠到后面用例的问上
   rmSync(WORK + "/.yan", { recursive: true, force: true });
 }
 close();

@@ -35,7 +35,7 @@ function folder() {
   };
 }
 
-test("目录凭据不因言自己的账本、意与临时稿更新而失效", async () => {
+test("目录凭据不因言自己的目录记忆、意与临时稿更新而失效", async () => {
   const { root, print, clean } = folder();
   try {
     fs.writeFileSync(path.join(root, "app.js"), "业务代码");
