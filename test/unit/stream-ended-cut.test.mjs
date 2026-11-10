@@ -115,11 +115,31 @@ test("没有结束标志的 EOF 仍报未发送结束标志，途中断线仍按
   assert.equal(cutMidway.target.content, "半句话");
 });
 
-test("用户按停（AbortError）照旧抛出，即使已收到结束块", async () => {
+test("[DONE] 到了就不再等上游关连接：收尾并取消底层流", { timeout: 3000 }, async () => {
   const f = setup();
-  for (const wire of ["", event({ content: "写了半句" }), event({ content: "写完了" }, "stop") + done]) {
+  const wire = held(event({ content: "写完了" }) + done);
+  const started = Date.now();
+  const { target, ok, error } = await read(f, wire.response);
+  assert.equal(ok, true, error?.message);
+  assert.equal(target.content, "写完了");
+  assert.ok(Date.now() - started < 1000, "上游不关连接时不该挂到静默超时");
+  assert.equal(wire.cancelled(), 1, "退出读取后要把底层流收掉");
+});
+
+test("用户按停（AbortError）照旧抛出", async () => {
+  const f = setup();
+  // 收到 [DONE] 之后不再往下读（见 pump 的收尾），那一种的按停由上层 streamReply 的 throwIfAborted 兜住；
+  // 这里覆盖还会继续读的两种：空流，与写到半句就断
+  for (const wire of ["", event({ content: "写了半句" })]) {
     const { ok, error } = await read(f, broken(wire, aborted()));
     assert.equal(ok, false);
     assert.equal(error.name, "AbortError");
   }
+});
+
+test("[DONE] 之后底层流再被中止：已在结束标志处收尾，不再读、也不报错", async () => {
+  const f = setup();
+  const { target, ok, error } = await read(f, broken(event({ content: "写完了" }) + done, aborted()));
+  assert.equal(ok, true, error?.message);
+  assert.equal(target.content, "写完了");
 });
