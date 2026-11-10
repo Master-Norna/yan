@@ -146,8 +146,11 @@ async function reviewGate(step, args, ctx, why) {
     verdict = await askReviewer(step, args, ctx, why);
   } catch (error) {
     if (error.name === "AbortError" && ctx.signal.aborted) throw error;
+    // 审查实际没在把关：弹一句，人才知道这一步是照规则过的
+    dutyFailed("review", error);
     return null;
   }
+  dutyOk("review");
   if (verdict.ok) {
     tally.streak = 0;
     reviewTally.set(key, tally);

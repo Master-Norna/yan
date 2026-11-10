@@ -5,20 +5,22 @@
 // 点开先是开关，开了才铺开接口、地址、Key、模型（设计稿/110–112）
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 /** @typedef {"memory"|"review"|"image"} DutyId */
-/** @type {Record<DutyId, { key: "dutyMemory"|"dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string }>} */
+/** @type {Record<DutyId, { key: "dutyMemory"|"dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string, fallback?: () => string }>} */
 const DUTIES = {
   // 记忆优化：配好了每段对话开头带上记忆、主模型可记，记忆改过后由它理一遍（见 11-memory.js）；关着即不带不记
   memory: {
     key: "dutyMemory",
     name: () => t("记忆优化"),
     apis: ["siliconflow", "openai", "anthropic", "chatgpt"],
-    off: () => t("关，不带记忆")
+    off: () => t("关，不带记忆"),
+    fallback: () => t("下一答落定时再理")
   },
   review: {
     key: "dutyReview",
     name: () => t("审查"),
     apis: ["siliconflow", "openai", "anthropic", "chatgpt"],
-    off: () => t("关，照规则")
+    off: () => t("关，照规则"),
+    fallback: () => t("这一步照规则办")
   },
   image: { key: "dutyImage", name: () => t("生图"), apis: ["siliconflow", "openai"], off: () => t("未配") }
 };
@@ -50,6 +52,22 @@ async function askDuty(id, text, { systemPrompt, maxTokens, signal }) {
   const { reply, tokens } = await readWhole(response, text);
   noteUsage(id, tokens);
   return String(reply.content || "");
+}
+// 专司没成（审查出错退回照规则、记忆优化没理成）：同删对话、桥接更新一样弹一句，说清没成之后怎么办。
+// 不退避、不计次——没成就下回再来（各处的取舍）；只是同一职连着出同样的错只提一回，成过一次再出错才再提：
+// 审查一答里可能连问十几步，每步都弹就成了噪声
+/** @type {Map<DutyId, string>} 各职上一回没成的原因，成了即清；只在本页内存里 */
+const dutyFaults = new Map();
+/** @param {DutyId} id @param {any} error */
+function dutyFailed(id, error) {
+  const why = error?.name === "TimeoutError" ? t("超时") : tr(bridgeErrorText(String(error?.message || error)));
+  if (dutyFaults.get(id) === why) return;
+  dutyFaults.set(id, why);
+  toast(t`${DUTIES[id].name()}没成，${DUTIES[id].fallback?.() || ""}：${why}`, 6000);
+}
+/** @param {DutyId} id */
+function dutyOk(id) {
+  dutyFaults.delete(id);
 }
 function dutyMarkHtml(on, tip) {
   return `<span class="duty-mark${on ? " on" : ""}" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"></span>`;

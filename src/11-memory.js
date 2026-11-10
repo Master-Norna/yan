@@ -108,7 +108,7 @@ function memorySnapshot(conversation) {
 // 记忆改过（有一类晚于 tunedAt：主模型记的、人在设置里改的、别处同步来的），一答落定时交专司「记忆优化」理一遍。
 // 它只读各类全文，答回要改的那几类的新全文，没提到的类一字不动。送出之后又被改过的类不认它的改法：人刚改的不被盖掉。
 // 它写的记作送出那一刻、tunedAt 也记那一刻：这阵里别处改的仍算没理过，它自己写的不算，不会一回回理自己的手笔。
-// 没成不提示：tunedAt 不动，下一答落定时再来。几页同开各自理也无妨：都按类写、写前比对过
+// 没成提示一句（见 dutyFailed，同样的错只提一回），tunedAt 不动，下一答落定时再来。几页同开各自理也无妨：都按类写、写前比对过
 let tuning = null;
 function memoryStale() {
   const at = store.memory.tunedAt || "";
@@ -117,7 +117,10 @@ function memoryStale() {
 function tuneMemory() {
   if (tuning || !memoryOn() || !memoryStale()) return tuning;
   tuning = tuneOnce()
-    .catch(error => console.warn("记忆优化没成，下回再来", error))
+    .then(
+      () => dutyOk("memory"),
+      error => dutyFailed("memory", error)
+    )
     .finally(() => (tuning = null));
   return tuning;
 }
@@ -153,7 +156,7 @@ async function tuneOnce() {
       saveStore();
       refreshMemorySettings();
     }
-    throw Error(`记忆优化给了 ${invalid} 条不合约定的项`);
+    throw Error(`有 ${invalid} 条不合约定的项`);
   }
   store.memory.tunedAt = at;
   saveStore();
@@ -165,9 +168,9 @@ function parseMemoryOps(text) {
   const body = String(text || ""),
     from = body.indexOf("["),
     to = body.lastIndexOf("]");
-  if (from < 0 || to < from) throw Error("记忆优化没给出改动清单");
+  if (from < 0 || to < from) throw Error("没给出改动清单");
   const ops = JSON.parse(body.slice(from, to + 1));
-  if (!Array.isArray(ops)) throw Error("记忆优化给的不是清单");
+  if (!Array.isArray(ops)) throw Error("给的不是清单");
   return ops;
 }
 // 设置页开着「记忆」时，记入或理过要立刻反映出来；正在打字的不打断（重画会把输入框连同已打的字一起冲掉）
