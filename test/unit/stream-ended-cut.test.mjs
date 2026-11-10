@@ -126,6 +126,29 @@ test("[DONE] 到了就不再等上游关连接：收尾并取消底层流", { ti
   assert.equal(wire.cancelled(), 1, "退出读取后要把底层流收掉");
 });
 
+test("finish_reason 之后才到的 usage 仍读到，到 [DONE] 才退出读取", { timeout: 3000 }, async () => {
+  const f = setup();
+  // 分块送：finish_reason、usage、[DONE] 各是一块，之后流仍开着（上游不关连接）
+  const encoder = new TextEncoder();
+  let cancelled = 0,
+    at = 0;
+  const wire = [event({ content: "写完了" }, "stop"), `data: {"choices":[],"usage":{"total_tokens":77}}\n\n`, done];
+  const response = new Response(
+    new ReadableStream({
+      pull: controller => {
+        if (at < wire.length) controller.enqueue(encoder.encode(wire[at++]));
+      },
+      cancel: () => void cancelled++
+    }),
+    { headers: { "content-type": "text/event-stream" } }
+  );
+  const { target, ok, error } = await read(f, response);
+  assert.equal(ok, true, error?.message);
+  assert.equal(target.content, "写完了");
+  assert.equal(target.usage?.total_tokens, 77, "带 include_usage 时用量块在 finish_reason 之后");
+  assert.equal(cancelled, 1, "到 [DONE] 才退出，并把底层流收掉");
+});
+
 test("用户按停（AbortError）照旧抛出", async () => {
   const f = setup();
   // 收到 [DONE] 之后不再往下读（见 pump 的收尾），那一种的按停由上层 streamReply 的 throwIfAborted 兜住；

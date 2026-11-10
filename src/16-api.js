@@ -548,8 +548,6 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
       if (!ended || error.name === "AbortError") throw error;
       reader.cancel().catch(() => {});
     });
-    // 收到 [DONE] 就退出了读取：把底层流收掉，桥接那头不替一个没人读的流继续转发
-    if (ended) reader.cancel().catch(() => {});
     flushThink();
     if (!ended) throw Error("接口未发送结束标志，连接已中断");
     const fault = finishFault(finishReason);
@@ -581,7 +579,8 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
           ended = true;
           // 收到结束标志就不必再等读：上游不关连接（keep-alive、代理保持）时，原先会一直挂到静默超时，
           // 正文写完这边还显示生成中，拟题、压缩、补言都压着。finish_reason 处不能退——带 include_usage 时用量块在它之后才到
-          break;
+          reader.cancel().catch(() => {});
+          return;
         }
         let failure = "";
         try {
@@ -631,7 +630,6 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
         } catch {}
         if (failure) throw Error(failure);
       }
-      if (ended) break;
       if (done) break;
     }
   }
