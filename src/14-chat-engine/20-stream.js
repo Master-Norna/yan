@@ -195,7 +195,10 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       }
     }
     if (requestJobs.get(conversation.id) === job) requestJobs.delete(conversation.id);
-    const goesOn = settleSupplements(conversation, assistant, job, profile);
+    // 收尾途中这段对话被删掉了（正文写完、成品还在解析的那几百毫秒里删的；队列里还排着补言时更直接）：
+    // 这一答的账照记，但不再在它上面起新答、拟题、压缩——那些请求的 key 已不在 store 里，界面上也没处停
+    const gone = !store.conversations.some(item => item.id === conversation.id);
+    const goesOn = gone ? false : settleSupplements(conversation, assistant, job, profile);
     if (currentId !== conversation.id || view !== "chat") conversation.unread = true;
     markDirty(conversation.id);
     saveStore();
@@ -207,9 +210,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       updateContextGauge();
     }
     renderSendButtons();
-    if (!goesOn) notifyAnswerEnd(conversation, assistant);
+    if (!goesOn && !gone) notifyAnswerEnd(conversation, assistant);
     // 压前文排在这一答撤下作业之后：之前排的话，言里收尾还在等卷宗重翻，这段仍算在作答，压缩会悄悄作罢
-    if (assistant.status === "complete") {
+    if (!gone && assistant.status === "complete") {
       setTimeout(() => maybeAutoCompact(conversation, profile), 0);
       void maybeAutoTitle(conversation, profile);
     }

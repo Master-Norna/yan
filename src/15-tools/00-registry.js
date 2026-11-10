@@ -253,6 +253,8 @@ async function runSteps(steps, conversation, assistant, signal, toolCache, offer
     if (signal.aborted) return;
     const remaining = MIN_TOOL_STATUS_MS - (performance.now() - started);
     if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+    // 凑显示时长的这一会儿里按了「止」：同样不再改回完成（haltJob 已把这一步收成「已止」）
+    if (signal.aborted) return;
     // 在后台接着做的（差遣）：这一步仍是进行中，做完由它自己收尾；先记一句「后台进行中」，下一问的行迹摘要里模型才知道它还没回来
     // 帮手快，上面凑够显示时长的那一会儿里就已交差：它收尾时记的结果不能被这句盖掉
     if (!outcome.background) step.status = step.skipped ? "skipped" : outcome.ok ? "done" : "error";
