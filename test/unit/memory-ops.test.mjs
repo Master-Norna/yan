@@ -12,7 +12,12 @@ const setupCode = `setup: (reply, seed) => {
   saveStore = () => {};
   refreshMemorySettings = () => {};
   toast = () => {};
-}`;
+},
+watchSaves: () => {
+  store.savesSeen = 0;
+  saveStore = () => (store.savesSeen += 1);
+},
+saves: () => store.savesSeen`;
 function setup(reply, seed = seedItem()) {
   const f = load(["tuneOnce", setupCode, "memory: () => store.memory"]);
   f.setup(reply, seed);
@@ -52,11 +57,19 @@ test("tuneOnce：同一类在一次答复里出现两条时，第二条也落地
   assert.equal(f.memory().items.find(item => item.category === "工作")?.text, "后写的");
 });
 
-test("tuneOnce：一条合约、一条不合约时整回不算理成，已落地的照留", async () => {
+test("tuneOnce：同一类先删、再重写时按后一条落地", async () => {
+  const f = setup('[{"category":"工作","text":""},{"category":"工作","text":"重写的"}]');
+  await f.tuneOnce();
+  assert.equal(f.memory().items.find(item => item.category === "工作")?.text, "重写的");
+});
+
+test("tuneOnce：一条合约、一条不合约时整回不算理成，已落地的照留并当场存下", async () => {
   const f = setup('[{"category":"工作","text":"改过的"},{"category":"偏好"}]');
+  f.watchSaves();
   await assert.rejects(f.tuneOnce(), /不合约定的项/);
   assert.equal(f.memory().items.find(item => item.category === "工作")?.text, "改过的");
   assert.equal(f.memory().tunedAt, "2026-01-01T00:00:00.000Z");
+  assert.equal(f.saves(), 1, "已落地的要当场存盘，不能只留在内存里");
 });
 
 test("tuneOnce：空清单（没有要改的）算理成，tunedAt 前进", async () => {

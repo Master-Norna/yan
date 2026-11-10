@@ -131,6 +131,8 @@ async function tuneOnce() {
     });
   let changed = 0,
     invalid = 0;
+  // 本批已处理过的类（写了、删了、原样未动都算）：同一类再来一条时按后来的落地，不当成「送出后被别人改过」
+  const touched = new Set();
   for (const op of parseMemoryOps(reply)) {
     // 只认字符串：缺了 text（或给 null、数字、数组）是模型没按约定答，不能当成「空串即删去这一类」把一整类删掉
     if (!op || typeof op !== "object" || !op.category || typeof op.text !== "string") {
@@ -138,15 +140,21 @@ async function tuneOnce() {
       continue;
     }
     const name = cleanMemoryCategory(op.category),
-      item = memoryOf(name),
-      // 本批自己刚写过的那几类：updatedAt 已是这一次的 at，第二条同类项不算「送出后被别人改过」
-      ours = item?.updatedAt === at;
+      item = memoryOf(name);
     // 送出后动过的、删了的不认；送出时没有、这阵里别处新起的同名一类也不认
-    if (!ours && (item ? sent.get(name) !== item.updatedAt : sent.has(name))) continue;
+    if (!touched.has(name) && (item ? sent.get(name) !== item.updatedAt : sent.has(name))) continue;
+    touched.add(name);
     if (writeMemory(name, op.text, at)) changed += 1;
   }
-  // 有一条没按约定答就不算理成：tunedAt 不前进，下一答落定时再来（已落地的照留，下次接着理）
-  if (invalid) throw Error(`记忆优化给了 ${invalid} 条不合约定的项`);
+  // 有一条没按约定答就不算理成：tunedAt 不前进，下一答落定时再来。已落地的照留，也要当场存下、画出来——
+  // 不然只在内存里，等别的动作碰巧存一次，其间多页同步可能把它盖掉
+  if (invalid) {
+    if (changed) {
+      saveStore();
+      refreshMemorySettings();
+    }
+    throw Error(`记忆优化给了 ${invalid} 条不合约定的项`);
+  }
   store.memory.tunedAt = at;
   saveStore();
   refreshMemorySettings();
