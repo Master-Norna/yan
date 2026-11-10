@@ -95,6 +95,9 @@ async function followConversations(ids, released) {
   }
   renderHistory();
   if (current && view === "chat") renderConversation(false);
+  // 别处松了手（写完、关页、崩了）：刚接手过来的这些对话里还记着「在等」的后台指令由这边重新等上，
+  // 结束时会叫醒、寄回报。只在开页时挂一次的话，多页接手后长任务做完就没人叫醒了（见 rewatchBackground）
+  rewatchBackground();
 }
 /** 这边跟着看、别处正作答：只看不动 */
 function runningElsewhere(id = currentId) {

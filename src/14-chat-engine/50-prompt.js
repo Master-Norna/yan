@@ -9,7 +9,7 @@ const PROMPT_VARS = {
   "work.hint": ctx => workVars(ctx.conversation),
   "work.archive": ctx => workVars(ctx.conversation),
   "work.env": () => envVars(),
-  // 整份记忆，这段对话头一问时定格（见 memorySnapshot）：此后记的、理过的都不改它，系统提示一变整段的缓存就作废
+  // 整份记忆，这段对话第一次拼进系统提示时定格（打开即定格，刷新后重新定格；见 memorySnapshot）：此后记的、理过的都不改它，系统提示一变整段的缓存就作废
   "memory.body": ctx => {
     const items = memoryOn(ctx.conversation) ? memorySnapshot(ctx.conversation) : "";
     return items ? { items } : null;

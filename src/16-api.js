@@ -577,7 +577,10 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
         if (!data) continue;
         if (data === "[DONE]") {
           ended = true;
-          continue;
+          // 收到结束标志就不必再等读：上游不关连接（keep-alive、代理保持）时，原先会一直挂到静默超时，
+          // 正文写完这边还显示生成中，拟题、压缩、补言都压着。finish_reason 处不能退——带 include_usage 时用量块在它之后才到
+          reader.cancel().catch(() => {});
+          return;
         }
         let failure = "";
         try {

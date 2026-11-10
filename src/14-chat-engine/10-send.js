@@ -261,7 +261,11 @@ async function deliverSupplements(job, history, budget, host, options = {}) {
     target = options.target || host;
   const queue = job.queue || [];
   job.queue = [];
-  for (const { user, step, report, note } of queue) {
+  // 递送途中按了「止」：已递上的算数，没递上的原样还回收件口——收尾时放回案上或另起一答，不能在这里打勾
+  const stopped = () => !!job.controller?.signal.aborted;
+  let sent = 0;
+  for (; sent < queue.length && !stopped(); sent += 1) {
+    const { user, step, report, note } = queue[sent];
     const mark = report !== undefined ? note : step;
     // 没落进行迹的回报（找不到挂它的那一答）：照原话递上，往后无处重装
     if (!mark) {
@@ -273,6 +277,8 @@ async function deliverSupplements(job, history, budget, host, options = {}) {
     if (report) mark.report = report;
     if (steer && user) mark.steer = true;
     const entry = await TOOLS.get(mark.name)?.replay?.(mark, { latest: true, budget });
+    // replay 可能等上几十秒（附件、翻页）：回来时已按了「止」，这一条不算递上
+    if (stopped()) break;
     if (entry) history.push(entry);
     // 那一步挪到递上的地方：到达之后、递上之前写下的话（想着想着起笔的一句、拟调用前的一段）是模型读到它之前写的，
     // 往后重装按 at 拆开这一答，留在到达处，模型下一问看到的先后就与当时不同
@@ -281,9 +287,12 @@ async function deliverSupplements(job, history, budget, host, options = {}) {
     mark.status = "done";
     mark.result = steer ? "引路" : "";
   }
+  // 没递上的留在收件口最前面，按到达的先后等下一次
+  const rest = queue.slice(sent);
+  if (rest.length) job.queue = [...rest, ...(job.queue || [])];
   // 递出去就立刻打勾。不补这一下，纯文字作答里没有下一个工具轮来顺带重画，
   // 那枚「待寄」会一直转到整答写完——模型早读到了，页面上还像没送出去
-  if (queue.length) {
+  if (sent) {
     saveStoreSoon();
     refreshSteps(host);
   }

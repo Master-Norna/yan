@@ -23,6 +23,8 @@ function recoverConversation(conversation) {
       if (message.status === "streaming") {
         message.status = message.content ? "stopped" : "error";
         message.error = "页面刷新或连接中断";
+        // 旁注也照主消息收束：只改消息状态的话，那时还没跑完的步骤会一直转圈
+        settleSteps(message, "页面刷新");
         changed = true;
       }
   return changed;

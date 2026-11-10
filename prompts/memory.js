@@ -1,5 +1,5 @@
 // 言 · 内置提示词 · 录（记忆）
-// body：专司「记忆优化」配好时接在通用段落之后，记忆整份带上，一类一段（每段对话头一问时定格，见 src/11-memory.js 的 memorySnapshot）。
+// body：专司「记忆优化」配好时接在通用段落之后，记忆整份带上，一类一段（每段对话第一次带上时定格，打开即定格、刷新后重新定格，见 src/11-memory.js 的 memorySnapshot）。
 // system / case：记忆改过后、一答落定时交给专司「记忆优化」的那一问（见 src/11-memory.js 的 tuneMemory）：只读记忆本身，不读对话
 (window.YAN_PROMPTS ||= {}).memory = {
   body: "你跨对话的记忆，按类各成一份：\n{{items}}",
