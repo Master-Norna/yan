@@ -4,7 +4,7 @@
 // 关于用户的话，按类各成一份全文（偏好、言的开发……），跨对话都带着。一类一份而非一条一事：一条条记时，模型多半另起一条、
 // 不去改旧的，越记越碎、越重复；一类一份，要记就得把那一类整份写过，旧的自然并进去。存的仍是 items（一类一项：id、类名、全文），
 // 同名的两项读入时并成一项（见 normalizeMemory）。
-// 照各家的朴素做法（ChatGPT 的已存记忆、Claude Code 的 MEMORY.md）：整份放进系统提示，每段对话头一问时定格；主模型用 remember 当场改。
+// 照各家的朴素做法（ChatGPT 的已存记忆、Claude Code 的 MEMORY.md）：整份放进系统提示，每段对话第一次拼进系统提示时定格（打开即定格，刷新后重新定格）；主模型用 remember 当场改。
 // 专司「记忆优化」是总开关（同自动拟题，多花一点换体验）：记忆改过后，一答落定时只读各类全文理一遍——去重、改掉矛盾、删废话。
 // 不读对话，额度只在记忆真改过时花。记多少不设上限；遗忘不按时长、不按字数。不记出处：没什么用，对话删了还会指空
 const MEMORY_UNSORTED = "未分类";
@@ -86,8 +86,13 @@ function hitsAll(text, terms) {
   return terms.every(term => lower.includes(term));
 }
 // ── 带进对话 ──
-/** @type {Map<string, string>} 各段对话头一问时定格的那份记忆：此后别处改、优化都不改它，系统提示不变，前面的缓存接得上；本段自己记的本就在上下文里 */
+/** @type {Map<string, string>} 各段对话第一次拼进系统提示时定格的那份记忆（打开即定格，刷新后重新定格）：此后别处改、优化都不改它，系统提示不变，前面的缓存接得上；本段自己记的本就在上下文里 */
 const memorySnapshots = new Map();
+// 用户自己动手清空记忆、删去一类：本页各段对话定的那份一并作废，下一回画到时就按现在的记忆重新定格。
+// 模型自己记的、专司理的不在此列——定格本就是为了让系统提示与缓存不变
+function forgetMemorySnapshots() {
+  memorySnapshots.clear();
+}
 /** 整份记忆，一类一段（最近动过的在前） */
 function memoryText() {
   return memoryCategories()
@@ -124,16 +129,24 @@ async function tuneOnce() {
       maxTokens: 8000,
       signal: AbortSignal.timeout(180000)
     });
-  let changed = 0;
+  let changed = 0,
+    invalid = 0;
   for (const op of parseMemoryOps(reply)) {
     // 只认字符串：缺了 text（或给 null、数字、数组）是模型没按约定答，不能当成「空串即删去这一类」把一整类删掉
-    if (!op || typeof op !== "object" || !op.category || typeof op.text !== "string") continue;
+    if (!op || typeof op !== "object" || !op.category || typeof op.text !== "string") {
+      invalid += 1;
+      continue;
+    }
     const name = cleanMemoryCategory(op.category),
-      item = memoryOf(name);
+      item = memoryOf(name),
+      // 本批自己刚写过的那几类：updatedAt 已是这一次的 at，第二条同类项不算「送出后被别人改过」
+      ours = item?.updatedAt === at;
     // 送出后动过的、删了的不认；送出时没有、这阵里别处新起的同名一类也不认
-    if (item ? sent.get(name) !== item.updatedAt : sent.has(name)) continue;
+    if (!ours && (item ? sent.get(name) !== item.updatedAt : sent.has(name))) continue;
     if (writeMemory(name, op.text, at)) changed += 1;
   }
+  // 有一条没按约定答就不算理成：tunedAt 不前进，下一答落定时再来（已落地的照留，下次接着理）
+  if (invalid) throw Error(`记忆优化给了 ${invalid} 条不合约定的项`);
   store.memory.tunedAt = at;
   saveStore();
   refreshMemorySettings();
@@ -149,9 +162,11 @@ function parseMemoryOps(text) {
   if (!Array.isArray(ops)) throw Error("记忆优化给的不是清单");
   return ops;
 }
-// 设置页开着「记忆」时，记入或理过要立刻反映出来；正在改的不打断（重画会把输入框连同光标冲掉）
+// 设置页开着「记忆」时，记入或理过要立刻反映出来；正在打字的不打断（重画会把输入框连同已打的字一起冲掉）
 function refreshMemorySettings() {
-  if (document.activeElement?.matches?.("#settingsContent .memory-text")) return;
+  // 正文框、类名框、另起一类的名字框：焦点在这些可编辑处时不重画，不然正打的字连同输入框一起没
+  const editing = document.activeElement?.closest?.("#settingsContent");
+  if (editing && /^(INPUT|TEXTAREA|SELECT)$/.test(editing.tagName)) return;
   if (settingsTab === "memory" && !$("#settingsModal").classList.contains("hidden")) renderSettings();
 }
 // 全文只认 **加粗**，别的照原样（换行由样式留着）
@@ -275,6 +290,8 @@ function bindMemoryEvents() {
       memoryEditing = false;
       if (!area.value.trim()) {
         store.memory.items = store.memory.items.filter(entry => entry !== item);
+        // 改空即删去这一类：同「删去此类」，本页各段对话定的那份一并作废
+        forgetMemorySnapshots();
         saveStore();
       }
       renderSettings();
@@ -309,6 +326,7 @@ function bindMemoryEvents() {
     )
       return;
     store.memory.items = store.memory.items.filter(entry => entry !== item);
+    forgetMemorySnapshots();
     saveStore();
     openMemoryCategory(null);
   });
@@ -322,6 +340,7 @@ function bindMemoryEvents() {
     )
       return;
     store.memory.items = [];
+    forgetMemorySnapshots();
     saveStore();
     renderSettings();
     toast(t("记忆已清空"));
