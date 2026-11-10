@@ -164,9 +164,10 @@ function parseMemoryOps(text) {
 }
 // 设置页开着「记忆」时，记入或理过要立刻反映出来；正在打字的不打断（重画会把输入框连同已打的字一起冲掉）
 function refreshMemorySettings() {
-  // 正文框、类名框、另起一类的名字框：焦点在这些可编辑处时不重画，不然正打的字连同输入框一起没
-  const editing = document.activeElement?.closest?.("#settingsContent");
-  if (editing && /^(INPUT|TEXTAREA|SELECT)$/.test(editing.tagName)) return;
+  // 正文框、类名框、另起一类的名字框：焦点在这些可编辑处时不重画，不然正打的字连同输入框一起没。
+  // 看的是焦点元素自己的标签——closest("#settingsContent") 回来的是设置面板那个容器（DIV），不是输入框
+  const active = document.activeElement;
+  if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) && active.closest?.("#settingsContent")) return;
   if (settingsTab === "memory" && !$("#settingsModal").classList.contains("hidden")) renderSettings();
 }
 // 全文只认 **加粗**，别的照原样（换行由样式留着）
