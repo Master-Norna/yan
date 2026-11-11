@@ -39,12 +39,24 @@ check(
 check("every tab has a plain-language tip", await evalJs(`[...document.querySelectorAll(".tab-btn")].every(b => b.dataset.tip)`));
 const tabTip = `getComputedStyle(document.querySelector('.tab-btn[data-tab="duty"]'), "::after")`;
 check("the tip is hidden at rest", await evalJs(`${tabTip}.opacity === "0"`));
+// 入场会把整张设置页向上移 18px；等它落定再量，不能把鼠标送到下一行。
+await evalJs(
+  `Promise.all(document.querySelector('#settingsModal .modal-panel').getAnimations().map(animation => animation.finished)).then(() => true)`
+);
 const dutyTab = await evalJs(
   `(r => ({ x: r.left + 20, y: r.top + r.height / 2 }))(document.querySelector('.tab-btn[data-tab="duty"]').getBoundingClientRect())`
 );
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: dutyTab.x, y: dutyTab.y });
 await waitFor(`${tabTip}.opacity === "1"`, 3000).catch(() => {});
-check("the tip shows when the pointer comes near", await evalJs(`${tabTip}.opacity === "1"`));
+check(
+  "the tip shows when the pointer comes near",
+  await evalJs(`${tabTip}.opacity === "1"`),
+  JSON.stringify(
+    await evalJs(
+      `({ pointed: document.elementFromPoint(${dutyTab.x}, ${dutyTab.y})?.closest('.tab-btn')?.dataset.tab, fonts: document.fonts.status, top: document.querySelector('.tab-btn[data-tab="duty"]').getBoundingClientRect().top, x: ${dutyTab.x}, y: ${dutyTab.y} })`
+    )
+  )
+);
 await shot("settings-tab-tip.png");
 await evalJs(`document.documentElement.dataset.theme = "dark"; true`);
 await sleep(200);
