@@ -17,6 +17,8 @@ All browsers share this one copy instead of each keeping its own. Two pages open
 
 **Settings → General** has a single **Storage location**. Moving it copies everything to the new place (if Yan's data is already there, it is used as is; `环境/` isn't copied and is set up again in the new place), and the old place is left untouched. It won't move while any chat is answering (on any page, background subagents included); wait for the answer to finish — otherwise the old place would still be written while copying, and the moved copy would miss that part.
 
+Before moving, Yan saves any pending settings changes. If saving fails, the storage stays in its current place and Yan explains why. Scheduled tasks are then reloaded from the new place; pending settings writes and timer responses from the old place cannot carry over into it. If another open page reports that the storage location changed, refresh that page to use the new place.
+
 If an attachment original can't be written to disk, it waits in the browser's IndexedDB and is pushed into `附件/` once reconnected. Nothing goes through any cloud.
 
 ## Backup

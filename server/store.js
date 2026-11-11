@@ -10,14 +10,14 @@
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
 // 由 server.js 装配：require("./server/store.js")({ working })——working 报各页正作答的有几段（见 server/chats.js）
 "use strict";
-const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
+const { sendJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { expandHome, pathIsInside } = require("./work/paths.js");
 
-/** @param {{ working?: () => number }} [options] */
-module.exports = function createStore({ working = () => 0 } = {}) {
+/** @param {{ working?: () => number, onMove?: () => void }} [options] */
+module.exports = function createStore({ working = () => 0, onMove = () => {} } = {}) {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
     POINTER = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "言", "位置.json"),
     CONFIG_FILE = "配置.json";
@@ -49,7 +49,20 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     if (process.env.YAN_HOME) return path.resolve(expandHome(process.env.YAN_HOME));
     return readPointer(POINTER) || HOME_ROOT;
   }
-  let root = initialRoot();
+  let root = initialRoot(),
+    revision = 0;
+  // 归当前存储根的请求：收请求体也要等，不能等完才问「现在在哪」；往返切回同一路也已是新一回。
+  // root 由页面在发起时带来，旧页尚未得知换根的也不能把内容写进新处。不带 root 的本机脚本仍可用。
+  function scopedRoute(handle, describe = errorText) {
+    return (req, res) => {
+      const at = revision;
+      return jsonRoute((body, request, response) => {
+        const expected = typeof body.root === "string" && body.root ? path.resolve(body.root) : "";
+        if (at !== revision || (expected && expected.toLowerCase() !== root.toLowerCase())) throw Error("存储位置已变化，请刷新页面后重试");
+        return handle(body, request, response);
+      }, describe)(req, res);
+    };
+  }
   const paths = () => ({
     root,
     chats: path.join(root, "对话"),
@@ -84,19 +97,17 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     const p = paths();
     return { ...p, parent: path.dirname(root), fresh: !fs.existsSync(p.config) };
   }
-  async function handleConfigLoad(req, res) {
-    try {
-      await readJson(req);
+  const handleConfigLoad = scopedRoute(
+    () => {
       const file = paths().config;
-      if (!fs.existsSync(file)) return sendJson(res, 200, { config: null, savedAt: 0 });
+      if (!fs.existsSync(file)) return { config: null, savedAt: 0 };
       const data = parseJsonText(fs.readFileSync(file, "utf8"));
       const { 言: _mark, savedAt, ...config } = data || {};
-      sendJson(res, 200, { config, savedAt: Number(savedAt) || 0 });
-    } catch (error) {
-      sendJson(res, 500, { error: `配置读不出来：${errorText(error, 200)}` });
-    }
-  }
-  const handleConfigSave = jsonRoute(
+      return { config, savedAt: Number(savedAt) || 0 };
+    },
+    error => `配置读不出来：${errorText(error, 200)}`
+  );
+  const handleConfigSave = scopedRoute(
     async (body, req, res) => {
       if (!body.config || typeof body.config !== "object") throw Error("缺少配置内容");
       ensureRoot();
@@ -151,7 +162,7 @@ module.exports = function createStore({ working = () => 0 } = {}) {
   }
   // 换位置：parent 下的 .yan 就是新根。那里已有言的数据（另一台机器拷来的、先前搬过去的）就直接用它；
   // 否则把整份拷过去。旧处原样留着（可自行删去），%APPDATA%\言\位置.json 记下新根，桥接重启后也认得
-  const handleMove = jsonRoute(
+  const handleMove = scopedRoute(
     async body => {
       const parent = path.resolve(expandHome(body.parent));
       if (!body.parent || !path.isAbsolute(expandHome(body.parent))) throw Error("存储位置需填写完整的绝对路径");
@@ -179,6 +190,8 @@ module.exports = function createStore({ working = () => 0 } = {}) {
         root = previous;
         throw error;
       }
+      revision += 1;
+      onMove();
       return { ...describe(), moved: true, adopted: existing, previous, busy: locked.slice(0, 20), busyCount: locked.length };
     },
     error => `存储位置未能更换：${errorText(error, 200)}`
@@ -187,6 +200,7 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     paths,
     describe,
     ensureRoot,
+    scopedRoute,
     routes: {
       "POST /api/store/config/load": handleConfigLoad,
       "POST /api/store/config/save": handleConfigSave,

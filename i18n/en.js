@@ -1636,6 +1636,8 @@ var YAN_EN = {
   "ChatGPT 的登录已失效，请到「设置 → 模型」里重新登录": "The ChatGPT sign-in expired. Sign in again under Settings → Models",
   "ChatGPT 的登录或存储位置已变化，请重试": "The ChatGPT sign-in or storage location changed. Please try again",
   "记忆或存储位置已变化，这批整理未写入": "Memory or the storage location changed; this optimization was not saved",
+  "存储位置已变化，请刷新页面后重试": "The storage location changed. Refresh the page and try again",
+  "配置尚未写入存储目录，稍后再换位置": "Settings have not been saved to storage yet. Try moving the storage later",
   授权未完成: "Authorization not completed",
   "列模型失败（{0}）": "Failed to list models ({0})",
   "上游接口返回 {0}": "The API returned {0}",

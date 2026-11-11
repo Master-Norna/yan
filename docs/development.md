@@ -17,4 +17,6 @@
 | `pack/` | Windows 便携包：`pack.mjs` 把运行所需的文件、官方 Node 与启动器 `言.exe`（`launcher.cs`，系统自带的 csc 编）打成 `dist/yan-<版本>-win-x64.zip`，见 [启动与运行](start.md) |
 | `server/build.js` | 拼接规则（桥接与单元测试共用）；`npm run format` 用 Prettier 统一格式，`npm run check` 用 `tsc --checkJs` 做类型检查（页面按 `jsconfig.json`，桥接按 `jsconfig.server.json`）——Prettier 经 npx 临时取用，TypeScript 与 Node 的类型表装进不入库的 node_modules（`--no-save`），只在开发时，不进运行时、不进依赖 |
 
+几条跨模块的边界只有一处定规矩：开工共用 `claimTurn`（正文、新对话、旁注、续帮手与回报），认领回来重查目录退回；旁注在 `withSideTurn` 内通过检查后才改记录并注册作业。模型的上游请求共用 `fetchUpstream`，各家与生图只给地址、鉴权和请求体。配置与候的接口经 `store.scopedRoute` 绑定发起时的根；换根成功通知定时模块重排，页面清掉上一根的配置同步簿记，读回经 `storeBridge` 核对所属根，不能让迟到回话释放新请求的锁或拿旧基准并新数据。
+
 内置提示词的写法、拼接次序与轻重之分，见 [`prompts/README.md`](../prompts/README.md)。

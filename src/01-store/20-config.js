@@ -11,6 +11,7 @@ const CONFIG_BASE_KEY = "yan-config-base",
   CONFIG_SENT_KEY = "yan-config-sent";
 let configBase = "",
   configSaving = false,
+  configSaveTask = Promise.resolve(),
   configSaveAgain = false,
   configSaveFailures = 0;
 // 发出去的几份（按 savedAt 记，连同那时这边花了多少墨）：写进了磁盘却没听到回音——超时、页面关了——下回读到的「别处的新版」
@@ -24,6 +25,20 @@ function rememberSentConfig(savedAt, meta, spent = Object.fromEntries(spentHere)
 // 基准一旦认错（回音丢了、页面关了），相减会把自己花的整份当成对方的再加一遍、一回翻一倍；这样顶多把没确认的那一截多记一回
 const spentHere = new Map(),
   spentSettled = new Map();
+// 根变了，同步会话随之重开：锁、基准、重试与未确认用量都只属于原来那一处。
+// 已拷过去的沿用页面上的完整配置再写一遍，认已有数据的以那边为准，不能跨根结算上一回的回音。
+function resetConfigSync() {
+  clearTimeout(configSaveTimer);
+  configSaveTimer = null;
+  configBase = "";
+  configSyncedAt = 0;
+  configSaving = configSaveAgain = false;
+  configSaveTask = Promise.resolve();
+  configSaveFailures = 0;
+  sentConfigs.clear();
+  spentHere.clear();
+  spentSettled.clear();
+}
 function noteSpend(id, amount) {
   spentHere.set(id, (spentHere.get(id) || 0) + amount);
 }
@@ -80,6 +95,15 @@ function scheduleConfigSave() {
   clearTimeout(configSaveTimer);
   configSaveTimer = setTimeout(saveConfigNow, 1000);
 }
+// 换位置前把此刻的配置写稳。等待期间继续改的也一并落下；写不成就留在原处，不能让刚改的设置只存在旧页内存里。
+async function settleConfig() {
+  const scope = bootstrap.store;
+  do {
+    await saveConfigNow();
+    if (bootstrap.store !== scope) throw Error("存储位置已变化，请刷新页面后重试");
+    if (configSaveFailures) throw Error("配置尚未写入存储目录，稍后再换位置");
+  } while (JSON.stringify(metaOf()) !== configBase);
+}
 /** @param {{ force?: boolean }} [options] force：不比时间戳，这边就是定论（头一回立根、以浏览器为准的导入） */
 function saveConfigNow({ force = false } = {}) {
   clearTimeout(configSaveTimer);
@@ -87,16 +111,17 @@ function saveConfigNow({ force = false } = {}) {
   // 上一次还在路上：等它回来再写这一次，免得两次互相比时间戳
   if (configSaving && !unloading) {
     configSaveAgain = true;
-    return;
+    return configSaveTask;
   }
-  const meta = JSON.stringify(metaOf()),
+  const scope = bootstrap.store,
+    meta = JSON.stringify(metaOf()),
     spent = Object.fromEntries(spentHere),
     savedAt = Math.max(Date.now(), configSyncedAt + 1),
-    body = `{"config":${meta},"savedAt":${savedAt}${force ? "" : `,"base":${configSyncedAt}`}}`;
+    body = `{"root":${JSON.stringify(scope?.root || "")},"config":${meta},"savedAt":${savedAt}${force ? "" : `,"base":${configSyncedAt}`}}`;
   configSaving = true;
   rememberSentConfig(savedAt, meta, spent);
   // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再推）
-  fetch(`${apiBase}/api/store/config/save`, {
+  configSaveTask = fetch(`${apiBase}/api/store/config/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
@@ -105,6 +130,7 @@ function saveConfigNow({ force = false } = {}) {
   })
     .then(async response => {
       const data = await response.json().catch(() => ({}));
+      if (bootstrap.store !== scope) return;
       if (response.status === 409 && data.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
       if (!response.ok) throw Error(data.error || t`请求失败（${response.status}）`);
       configSaveFailures = 0;
@@ -114,7 +140,7 @@ function saveConfigNow({ force = false } = {}) {
       settleSpend(spent);
     })
     .catch(error => {
-      if (unloading) return;
+      if (unloading || bootstrap.store !== scope) return;
       if (!configSaveFailures)
         toast(
           bridgeTimedOut(error)
@@ -126,12 +152,14 @@ function saveConfigNow({ force = false } = {}) {
       configSaveTimer = setTimeout(saveConfigNow, Math.min(5000 * 2 ** Math.min(configSaveFailures - 1, 4), 60000));
     })
     .finally(() => {
+      if (bootstrap.store !== scope) return;
       configSaving = false;
       if (configSaveAgain) {
         configSaveAgain = false;
-        saveConfigNow();
+        return saveConfigNow();
       }
     });
+  return configSaveTask;
 }
 // 磁盘上有一份配置：与这边对一对。磁盘上的不比基准新——这边改过就写下去；磁盘上的更新、这边没改过——换进来；
 // 两边都改过——三方合并后换进来，再写回去
@@ -280,7 +308,8 @@ const STORE_ROOT_KEY = "yan-store-root";
 // 与 配置.json 对一次：开页接上桥接时、桥接断了又接上时、页面从后台切回来时。看两边谁新：
 // 全新的浏览器取磁盘那份；灌进来的（没带版本标记的旧记录）以浏览器为准；这台浏览器头一回碰上这个根就合并；其余按时间戳，新的为准
 async function syncConfigWithDisk() {
-  const info = bootstrap.store || {};
+  const scope = bootstrap.store,
+    info = scope || {};
   let met = "";
   try {
     met = localStorage.getItem(STORE_ROOT_KEY) || "";
@@ -288,7 +317,8 @@ async function syncConfigWithDisk() {
   // 桥接落在一个全新的根上，这台浏览器上回用的却是别处：多半是记位置的条子没了，说一声，免得以为数据丢了
   const strayed = info.fresh && met && met.toLowerCase() !== String(info.root || "").toLowerCase();
   try {
-    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
+    const disk = await storeBridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
+    if (bootstrap.store !== scope) return;
     restoreConfigBase();
     if (!disk.config) {
       writeMeta({ disk: false });
@@ -303,6 +333,7 @@ async function syncConfigWithDisk() {
     if (strayed) toast(t`存储落在了 ${pathTail(info.root || "")}，上回用的是 ${met}；在设置 → 通用的「存储位置」填回去即可`, 8000);
     followLanguage();
   } catch (error) {
+    if (bootstrap.store !== scope) return;
     toast(t`配置未能与存储目录对齐：${String(error.message || error).slice(0, 60)}`);
   }
 }
@@ -329,8 +360,9 @@ function followLanguage() {
 // 从后台切回来：另一个浏览器可能改过配置，与磁盘上的对一对（这边有没写下去的改动也不丢，见 reconcileConfig）
 async function refreshConfigFromDisk() {
   if (configSaving) return;
+  const scope = bootstrap.store;
   try {
-    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
-    if (disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
+    const disk = await storeBridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
+    if (bootstrap.store === scope && disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
   } catch {}
 }

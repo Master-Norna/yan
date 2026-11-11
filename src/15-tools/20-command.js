@@ -263,7 +263,7 @@ function releaseBackground(conversation, messages) {
     for (const step of allSteps(message)) {
       if (step.timer?.state === "waiting") {
         settleTimer(step, "stopped", message);
-        void bridge("/api/timer/cancel", { id: step.timer.id, to: conversation.id }).catch(() => {});
+        void storeBridge("/api/timer/cancel", { id: step.timer.id, to: conversation.id }).catch(() => {});
       }
       if (step.bg?.state !== "running") continue;
       const { id, key } = step.bg;

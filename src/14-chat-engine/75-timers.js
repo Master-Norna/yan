@@ -6,8 +6,10 @@ async function listenTimers() {
   /** @type {string[]} */
   let skip = [];
   for (;;) {
+    const scope = bootstrap.store;
     try {
-      const { fired } = await bridge("/api/timer/wait", { skip });
+      const { fired } = await storeBridge("/api/timer/wait", { skip });
+      if (bootstrap.store !== scope) continue;
       const mine = fired.filter(item => !remoteBusy.has(item.to));
       skip = fired.length ? fired.filter(item => remoteBusy.has(item.to)).map(item => item.id) : [];
       if (!mine.length) continue;
@@ -19,11 +21,15 @@ async function listenTimers() {
         if (ids.every(id => store.conversations.some(c => c.id === id))) await followConversations(ids, []);
         else await syncChatsWithDisk();
       }
-      const { fired: taken } = await bridge("/api/timer/take", { ids: mine.map(item => item.id) });
+      if (bootstrap.store !== scope) continue;
+      const { fired: taken } = await storeBridge("/api/timer/take", { ids: mine.map(item => item.id) });
+      if (bootstrap.store !== scope) continue;
       for (const item of taken) deliverTimer(item);
     } catch {
       // 桥接断了一下（重启、睡眠醒来）：稍候再等
       await new Promise(resolve => setTimeout(resolve, 5000));
+    } finally {
+      if (bootstrap.store !== scope) skip = [];
     }
   }
 }

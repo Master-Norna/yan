@@ -152,7 +152,7 @@ function handleBootstrap(req, res) {
   });
 }
 // 存储根（默认 ~/.yan）：对话、卷宗、配置都在里面，换位置后下面两处跟着走；有对话正作答时不换（问 CHATS 的租约，换时才问）
-const STORE = require("./server/store.js")({ working: () => CHATS.working() });
+const STORE = require("./server/store.js")({ working: () => CHATS.working(), onMove: () => TIMERS.sync() });
 // 沙箱环境：存储根里的 环境/，桥接起的进程（指令、MCP 服务）都接上它
 const ENV = require("./server/env/index.js")({ envHome: () => STORE.paths().env });
 // 视频换壳：浏览器认不得的封装（如扩展名写作 mp4 的 MPEG-TS），预览时借环境里的 ffmpeg 原样换进 MP4（见 server/video.js）
@@ -184,7 +184,11 @@ const CHECKPOINTS = require("./server/checkpoints.js")({
   skip: () => [STORE.paths().root]
 });
 // 候 · 等时刻：模型约好的时刻由桥接记着，到点落进 存储根/候/ 再交给页面（见 server/timers.js）
-const TIMERS = require("./server/timers.js")({ home: () => path.join(STORE.paths().root, "候"), known: CHATS.exists });
+const TIMERS = require("./server/timers.js")({
+  home: () => path.join(STORE.paths().root, "候"),
+  known: CHATS.exists,
+  route: STORE.scopedRoute
+});
 const FILES = require("./server/files.js")({ filesHome: () => STORE.paths().files, playable: VIDEO.playable });
 const STAGE_LIB = require("./server/stage.js");
 // 检索与翻网页用的无头浏览器（直接请求被拦、网页要跑脚本时才起，见 server/headless.js）：配置目录只是 Cookie 与缓存，不算用户的东西，

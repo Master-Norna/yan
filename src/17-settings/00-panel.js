@@ -189,7 +189,8 @@ function bindGeneralSettings() {
       if (!next || next === (bootstrap.store?.parent || "")) return;
       let data;
       try {
-        data = await bridge("/api/store/move", { parent: next }, AbortSignal.timeout(600000));
+        await settleConfig();
+        data = await storeBridge("/api/store/move", { parent: next }, AbortSignal.timeout(600000));
       } catch (error) {
         return toast(String(error.message || error).slice(0, 80));
       }

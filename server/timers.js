@@ -6,15 +6,15 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
-const { jsonRoute, readJson, requestSignal, sendJson, writeAtomic, readJsonFile } = require("./http.js");
+const { jsonRoute, requestSignal, writeAtomic, readJsonFile } = require("./http.js");
 
 // setTimeout 至多等这么久（约 24.8 天），再远的到时候再排一回
 const MAX_DELAY = 2 ** 31 - 1;
 // 页面的长等：这么久没有新的就空手回，页面随即再等——顺带让它重新看一眼先前跳过的（那时那段对话别处正在答）
 const WAIT_MS = 60000;
 
-/** @param {{ home: () => string, known: (id: string) => boolean }} options */
-module.exports = function createTimers({ home, known }) {
+/** @param {{ home: () => string, known: (id: string) => boolean, route?: typeof jsonRoute }} options */
+module.exports = function createTimers({ home, known, route = jsonRoute }) {
   const firedDir = () => path.join(home(), "到点"),
     bookFile = () => path.join(home(), "约.json");
   /** @type {Set<() => void>} 正等着的页面 */
@@ -54,11 +54,13 @@ module.exports = function createTimers({ home, known }) {
     return taken;
   }
   // 页面等着：有没被跳过的就当场回，没有就挂着，有新的到点或等满一分钟再回
-  async function handleWait(req, res) {
-    const body = await readJson(req).catch(() => ({})),
+  const handleWait = route(async (body, req, res) => {
+    sync();
+    const at = home(),
       skip = new Set(Array.isArray(body.skip) ? body.skip.map(String) : []),
       fresh = () => pending().filter(item => !skip.has(item.id)),
       signal = requestSignal(res);
+    if (signal.aborted) return;
     let fired = fresh();
     if (!fired.length)
       await new Promise(resolve => {
@@ -72,10 +74,10 @@ module.exports = function createTimers({ home, known }) {
         signal.addEventListener("abort", done, { once: true });
       });
     if (signal.aborted || res.writableEnded || res.destroyed) return;
-    fired = fired.length ? fired : fresh();
-    sendJson(res, 200, { fired });
-  }
-  const handleTake = jsonRoute(body => ({ fired: take(Array.isArray(body.ids) ? body.ids.map(String) : []) }));
+    // 等待归发起时的根；换根唤回旧等待时交空手，不把新根的信递给尚未换过来的旧页面。
+    return { fired: home() === at ? (fired.length ? fired : fresh()) : [] };
+  });
+  const handleTake = route(body => ({ fired: take(Array.isArray(body.ids) ? body.ids.map(String) : []) }));
 
   // ---------- 约好的时刻 ----------
   /** @type {{ seq: number, timers: Array<{ id: string, to: string, step: string, note: string, due: number, every?: number, created: number }> }} */
@@ -88,6 +90,7 @@ module.exports = function createTimers({ home, known }) {
     const saved = readJsonFile(bookAt);
     book = Array.isArray(saved?.timers) ? { seq: Number(saved.seq) || 0, timers: saved.timers } : { seq: 0, timers: [] };
     arm();
+    for (const wake of [...waiters]) wake();
   }
   let armed = null;
   function save() {
@@ -133,7 +136,7 @@ module.exports = function createTimers({ home, known }) {
     if (changed) save();
     arm();
   }
-  const handleSet = jsonRoute(body => {
+  const handleSet = route(body => {
     sync();
     const to = String(body.to || ""),
       due = Number(body.due),
@@ -156,7 +159,7 @@ module.exports = function createTimers({ home, known }) {
     return timer;
   });
   // 取消：到点前叫停；没有的（已叫过、已取消）回 found: false
-  const handleCancel = jsonRoute(body => {
+  const handleCancel = route(body => {
     sync();
     const id = String(body.id || ""),
       timer = book.timers.find(item => item.id === id && (!body.to || item.to === body.to));
@@ -166,13 +169,14 @@ module.exports = function createTimers({ home, known }) {
     arm();
     return { found: true, timer };
   });
-  const handleList = jsonRoute(() => {
+  const handleList = route(() => {
     sync();
     return { timers: book.timers };
   });
   sync();
 
   return {
+    sync,
     routes: {
       "POST /api/timer/set": handleSet,
       "POST /api/timer/cancel": handleCancel,

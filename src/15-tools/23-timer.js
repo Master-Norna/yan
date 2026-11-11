@@ -19,7 +19,7 @@ defineTool({
     if (!note) return { ok: false, content: t("note 为空：写上到时给自己的话"), display: "缺 note" };
     if ("error" in when) return { ok: false, content: when.error, display: "时刻无效" };
     step.title = step.gist = note;
-    const timer = await bridge("/api/timer/set", { to: conversation.id, step: step.id, note, due: when.due, every }, signal);
+    const timer = await storeBridge("/api/timer/set", { to: conversation.id, step: step.id, note, due: when.due, every }, signal);
     step.timer = { id: timer.id, due: timer.due, ...(every ? { every } : {}), state: "waiting", created: timer.created };
     renderClepsydra();
     return {
@@ -96,7 +96,7 @@ async function checkTimer(step, id, stop, conversation, signal) {
   const started = timerStepOf(conversation, id);
   step.title = `${id}${stop ? t(" · 取消") : ""}`;
   if (stop) {
-    const data = await bridge("/api/timer/cancel", { id, to: conversation.id }, signal);
+    const data = await storeBridge("/api/timer/cancel", { id, to: conversation.id }, signal);
     if (started) settleTimer(started, data.found ? "stopped" : "done");
     return {
       ok: true,
@@ -104,7 +104,7 @@ async function checkTimer(step, id, stop, conversation, signal) {
       display: data.found ? "已取消" : "不在等"
     };
   }
-  const { timers } = await bridge("/api/timer/list", {}, signal),
+  const { timers } = await storeBridge("/api/timer/list", {}, signal),
     timer = timers.find(item => item.id === id && item.to === conversation.id);
   if (!timer) return { ok: true, content: t`没有在等的 ${id}（已叫过或已取消）`, display: "不在等" };
   return {
@@ -117,7 +117,7 @@ async function checkTimer(step, id, stop, conversation, signal) {
 async function reconcileTimers() {
   const steps = store.conversations.flatMap(c => c.messages.flatMap(m => (m.steps || []).filter(step => step.timer?.state === "waiting")));
   if (!steps.length) return;
-  const { timers } = await bridge("/api/timer/list", {}).catch(() => ({ timers: null }));
+  const { timers } = await storeBridge("/api/timer/list", {}).catch(() => ({ timers: null }));
   if (!timers) return;
   const live = new Map(timers.map(timer => [timer.id, timer]));
   for (const step of steps) {
