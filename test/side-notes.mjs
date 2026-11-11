@@ -215,6 +215,22 @@ check(
 await evalJs(`document.querySelector('#sideMessages .message.user [data-action="edit"]').click(); true`);
 await sleep(150);
 check("side question opens an editor", await evalJs(`!!document.querySelector('#sideMessages .message-edit-input')`));
+// 检查没有通过时，编辑保留在框里，不能先改原问、却留下原答。
+await evalJs(`(() => {
+  const state=__yanState(), p=state.profiles.find(p=>p.id===state.settings.activeProfileId)||state.profiles[0];
+  window.__sideQuota={p,quota:p.quota,usedTokens:p.usedTokens}; p.quota='1k';p.usedTokens=1000;
+  document.querySelector('#sideMessages .message-edit-input').value='SIDE 未能重答';
+  document.querySelector('#sideMessages [data-action="save-edit"]').click();
+})()`);
+await sleep(150);
+check(
+  "旁注未能重答时原问原答不动，编辑文字仍在",
+  await evalJs(`
+  __yanState().conversations.flatMap(c=>c.threads||[]).some(t=>t.messages.some(m=>m.role==='user'&&m.content==='SIDE whole')) &&
+  document.querySelector('#sideMessages .message-edit-input')?.value==='SIDE 未能重答'
+`)
+);
+await evalJs(`Object.assign(__sideQuota.p,{quota:__sideQuota.quota,usedTokens:__sideQuota.usedTokens}); delete window.__sideQuota; true`);
 await evalJs(
   `document.querySelector('#sideMessages .message-edit-input').value = "SIDE edited"; document.querySelector('#sideMessages [data-action="save-edit"]').click(); true`
 );

@@ -99,10 +99,7 @@ async function wakeWithReports(conversation, items) {
   if (!items.length || !store.conversations.some(c => c.id === conversation.id)) return;
   // 几处页面同开：照发送的规矩先认领，别处正在这段里作答就等它松手（报到每几秒一回，见 syncLeases）再来。
   // 等过之后按 id 重找：别处写过的，这边读回来已换了一个对象。这段或相交的目录正退回的也等它退完（认领之后再看，等的工夫里可能点了退回）
-  if (
-    !requestJob(conversation.id) &&
-    (remoteBusy.has(conversation.id) || !(await claimConversation(conversation.id)) || rewindingOver(conversation))
-  )
+  if (!requestJob(conversation.id) && (remoteBusy.has(conversation.id) || !(await claimTurn(conversation, { quiet: true }))))
     return void setTimeout(() => {
       const fresh = store.conversations.find(c => c.id === conversation.id);
       if (fresh) void wakeWithReports(fresh, items);
