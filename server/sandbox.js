@@ -1740,7 +1740,7 @@ const RSYNC_READ_VALUES = new Set(
 function argumentsAt(scanned, start) {
   const text = scanned.text;
   const tokens = [];
-  for (let i = start; i < text.length;) {
+  for (let i = start; i < text.length; ) {
     if (/\s/.test(text[i]) && text[i] !== "\n") {
       i++;
       continue;
