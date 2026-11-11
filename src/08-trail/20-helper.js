@@ -170,14 +170,29 @@ function toggleHelperList(open) {
 function renderHelperList() {
   const host = $("#helperList");
   if (!host) return;
-  const all = allDelegateSteps();
-  host.innerHTML = helperLatestRuns()
-    .map((step, i) => {
-      const { status } = delegateSubState(step),
-        meta = helperRunsMeta(all.filter(run => helperKey(run) === helperKey(step)));
-      return `<button type="button" class="helper-list-item${helperKey(step) === helperKeyOpen ? " here" : ""}" data-helper-pick="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><span class="helper-list-no">${i + 1}</span><span class="helper-list-title">${escapeHtml(step.title || t("领命中"))}</span><span class="helper-list-meta">${escapeHtml(meta)}</span></button>`;
-    })
-    .join("");
+  const all = allDelegateSteps(),
+    latest = helperLatestRuns();
+  // 同面板里的各趟：名单没变就就地更新。整块换掉会重置悬停、焦点与呼吸动画，每次报进展都闪一下。
+  if ([...host.children].some((row, i) => row.dataset.helperKey !== (latest[i] && helperKey(latest[i])))) host.innerHTML = "";
+  latest.forEach((step, i) => {
+    const key = helperKey(step),
+      { status } = delegateSubState(step),
+      meta = helperRunsMeta(all.filter(run => helperKey(run) === key));
+    let row = host.children[i];
+    if (!row) {
+      host.insertAdjacentHTML(
+        "beforeend",
+        `<button type="button" class="helper-list-item" data-helper-key="${escapeHtml(key)}"><span class="helper-list-no"></span><span class="helper-list-title"></span><span class="helper-list-meta"></span></button>`
+      );
+      row = host.lastElementChild;
+    }
+    row.classList.toggle("here", key === helperKeyOpen);
+    if (row.dataset.helperPick !== step.id) row.dataset.helperPick = step.id;
+    if (row.dataset.status !== status) row.dataset.status = status;
+    rollText(row.querySelector(".helper-list-no"), String(i + 1));
+    rollText(row.querySelector(".helper-list-title"), step.title || t("领命中"));
+    rollText(row.querySelector(".helper-list-meta"), meta);
+  });
 }
 // 帮手行迹的收起：每趟一行题头（折角 · 行迹 · 几轮 · 几步，与主行迹题头同一枚折角，点它开合）。
 // 同主行迹：做着摊开、交了差就收，只露回报；最近一趟断了、没做成的摊着，好看清停在哪。点签开窗不另摊开——原先点哪趟就摊哪趟，

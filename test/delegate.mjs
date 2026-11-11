@@ -50,6 +50,15 @@ for (let i = 0; i < 200; i++) {
     if (cards >= 2 || (cards >= 1 && i > 20)) {
       await evalJs(`[...document.querySelectorAll(".message.assistant .tool-step-delegate > .tool-step-head")].at(-1).click(); true`);
       panelOpened = true;
+      if (cards >= 2) {
+        await evalJs(
+          `document.querySelector('#helperNav [data-helper-list]').click(); window.__helperListRows = [...document.querySelectorAll('#helperList .helper-list-item')]; window.__helperListMeta = window.__helperListRows.map(row => row.textContent); true`
+        );
+        const at = await evalJs(
+          `(r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))(window.__helperListRows[0].getBoundingClientRect())`
+        );
+        await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at });
+      }
     }
   }
   const s = await evalJs(
@@ -80,6 +89,14 @@ for (let i = 0; i < 200; i++) {
   await sleep(60);
 }
 check("helper timeline runs live in the side panel", panelLiveSeen, [...new Set(seen)].slice(0, 6).join(" | "));
+check(
+  "hovering the helper picker keeps its rows while progress changes",
+  await evalJs(
+    `window.__helperListRows?.length === 2 && window.__helperListRows.every(row => row.isConnected) && window.__helperListRows.some((row, i) => row.textContent !== window.__helperListMeta[i])`
+  )
+);
+if (await evalJs(`!document.querySelector('#helperList').classList.contains('hidden')`))
+  await evalJs(`document.querySelector('#helperNav [data-helper-list]').click(); true`);
 check("the trail keeps only a marker, no nested helper steps", nestedInTrail === 0, String(nestedInTrail));
 check("two helpers ran in parallel", bothRunning, [...new Set(seen)].slice(0, 6).join(" | "));
 check("the work bar above the composer names both running helpers", !!barBoth, [...new Set(seen)].slice(-3).join(" | "));
