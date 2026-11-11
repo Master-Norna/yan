@@ -23,7 +23,13 @@ const SECRET_ENV = /KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|PRIVATE/i;
 const INLINE_SPACE = String.raw`[^\S\r\n]`;
 const SHELL_WORD = String.raw`(?:"(?:\\.|[^"\\\n])*"|'[^'\n]*'|[^\s"';&|()]+)`;
 // xargs / env 的普通选项仍供其它命令规则使用；sudo 不靠枚举包装词的选项来识别。
-const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|exec|nohup|nice(?:${INLINE_SPACE}+-n${INLINE_SPACE}+-?\d+)?|time|timeout${INLINE_SPACE}+\d+(?:\.\d+)?[smhd]?|command(?=${INLINE_SPACE}+[^-\s])|xargs(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|env(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)${INLINE_SPACE}+)*`;
+const ENV_VAL_OPT = String.raw`(?:-(?:[0iv]*)?[uCSP]|--(?:chdir|split-string|unset))${INLINE_SPACE}+${SHELL_WORD}`;
+const ENV_NOVAL_OPT = String.raw`-(?!(?:[0iv]*)?[uCSP](?:${INLINE_SPACE}|$)|-(?:chdir|split-string|unset)(?:${INLINE_SPACE}|$))[^\s"';&|()]+`;
+const ENV_OPTS = String.raw`(?:${ENV_VAL_OPT}|${ENV_NOVAL_OPT})`;
+const EXEC_VAL_OPT = String.raw`-[cl]*a(?:${INLINE_SPACE}+${SHELL_WORD}|[^\s"';&|()]+)`;
+const EXEC_NOVAL_OPT = String.raw`-[cl]+`;
+const EXEC_OPTS = String.raw`exec(?:${INLINE_SPACE}+(?:${EXEC_VAL_OPT}|${EXEC_NOVAL_OPT}))*(?:${INLINE_SPACE}+--)?`;
+const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|${EXEC_OPTS}|nohup|nice(?:${INLINE_SPACE}+-n${INLINE_SPACE}+-?\d+)?|time(?:${INLINE_SPACE}+-p\b)?|timeout${INLINE_SPACE}+\d+(?:\.\d+)?[smhd]?|command(?:${INLINE_SPACE}+-p\b)?(?:${INLINE_SPACE}+--)?(?=${INLINE_SPACE}+\S)|xargs(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|env(?:${INLINE_SPACE}+${ENV_OPTS})*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)${INLINE_SPACE}+)*`;
 const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh(?:\.exe)?${INLINE_SPACE}+(?:--(?:rcfile|init-file)${INLINE_SPACE}+${SHELL_WORD}${INLINE_SPACE}+|--[\w-]+${INLINE_SPACE}+|-o${INLINE_SPACE}+\S+${INLINE_SPACE}+|-(?!o\s)[^c\s-]+${INLINE_SPACE}+)*-[a-z]*c[a-z]*${INLINE_SPACE}+(?:--${INLINE_SPACE}+)?["']?`;
 const CMD =
   String.raw`(?:^|[;&|({)\n]|\$[\w:]+${INLINE_SPACE}*=(?=${INLINE_SPACE}*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))${INLINE_SPACE}*["']?(?:&${INLINE_SPACE}*["']?)?` +
@@ -71,6 +77,8 @@ const PIPE_SHELL = new RegExp(
   String.raw`^${INLINE_SPACE}*${PREFIX}["']?(?:[^\s"';&|(){}]*/)?(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?["']?(?=\s|$)`,
   "i"
 );
+const REDIRECTION =
+  /(?:\b\d+)?(?:<<-?|<<<|>>?|>[&|]|<&|<>|<)\s*(?:'[^'\n]*'|"(?:\\.|[^"\\\n])*"|\\[\s\S]|[^\s"';&|()<>]+)+|&>>?\s*(?:'[^'\n]*'|"(?:\\.|[^"\\\n])*"|\\[\s\S]|[^\s"';&|()<>]+)+/g;
 const SCRIPT_START = new RegExp(
   String.raw`^${INLINE_SPACE}*${PREFIX}(?:${SHELL}|(?:cmd(?:\.exe)?\b[^\n]*?/[ck]|(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?[-/](?:${prefixesOf("command")}))${INLINE_SPACE}+["'])`,
   "i"
@@ -115,6 +123,616 @@ function quoteContext(text, shell, offset = 0) {
   }
   return { text, shell, offset, single, double, substitution };
 }
+function decodeAnsiC(str) {
+  let res = "";
+  let i = 0;
+  while (i < str.length) {
+    if (str.charCodeAt(i) === 0) break;
+    if (str[i] === "\\" && i + 1 < str.length) {
+      const c = str[i + 1];
+      if (c === "a") { res += "\x07"; i += 2; }
+      else if (c === "b") { res += "\b"; i += 2; }
+      else if (c === "e" || c === "E") { res += "\x1b"; i += 2; }
+      else if (c === "f") { res += "\f"; i += 2; }
+      else if (c === "n") { res += "\n"; i += 2; }
+      else if (c === "r") { res += "\r"; i += 2; }
+      else if (c === "t") { res += "\t"; i += 2; }
+      else if (c === "v") { res += "\v"; i += 2; }
+      else if (c === "\\") { res += "\\"; i += 2; }
+      else if (c === "'") { res += "'"; i += 2; }
+      else if (c === '"') { res += '"'; i += 2; }
+      else if (c === "?") { res += "?"; i += 2; }
+      else if (c === "x") {
+        const hex = str.slice(i + 2, i + 4).match(/^[0-9a-fA-F]{1,2}/);
+        if (hex) {
+          const b = parseInt(hex[0], 16);
+          if (b === 0) break;
+          res += String.fromCharCode(b);
+          i += 2 + hex[0].length;
+        } else {
+          res += "\\x";
+          i += 2;
+        }
+      } else if (c === "u" || c === "U") {
+        const maxLen = c === "u" ? 4 : 8;
+        const hex = str.slice(i + 2, i + 2 + maxLen).match(/^[0-9a-fA-F]+/);
+        if (hex) {
+          const cp = parseInt(hex[0], 16);
+          if (cp === 0) break;
+          if (cp >= 0 && cp <= 0x10ffff) {
+            res += String.fromCodePoint(cp);
+          } else {
+            res += "\\" + c;
+          }
+          i += 2 + hex[0].length;
+        } else {
+          res += "\\" + c;
+          i += 2;
+        }
+      } else if (c === "c") {
+        if (i + 2 < str.length) {
+          const ctrl = str.charCodeAt(i + 2);
+          const b = ctrl >= 64 && ctrl <= 95 ? ctrl - 64 : ctrl >= 97 && ctrl <= 122 ? ctrl - 96 : ctrl;
+          if (b === 0) break;
+          res += String.fromCharCode(b);
+          i += 3;
+        } else {
+          res += "\\c";
+          i += 2;
+        }
+      } else if (/^[0-7]/.test(c)) {
+        const oct = str.slice(i + 1, i + 4).match(/^[0-7]{1,3}/);
+        if (oct) {
+          const byte = parseInt(oct[0], 8) & 0xff;
+          if (byte === 0) break;
+          res += String.fromCharCode(byte);
+          i += 1 + oct[0].length;
+        } else {
+          res += "\\" + c;
+          i += 2;
+        }
+      } else {
+        res += "\\" + c;
+        i += 2;
+      }
+    } else {
+      res += str[i];
+      i++;
+    }
+  }
+  return res;
+}
+function findHeredocEnd(text, delim, dash, startPos, to, quoted = true) {
+  let pos = startPos;
+  while (pos < to) {
+    let logicalLine = "";
+    let lineStart = pos;
+    let lineEnd = pos;
+    while (lineEnd < to) {
+      let nl = text.indexOf("\n", lineEnd);
+      if (nl === -1 || nl > to) nl = to;
+      let piece = text.slice(lineEnd, nl);
+      if (piece.endsWith("\r")) piece = piece.slice(0, -1);
+      let trailingSlashes = 0;
+      let k = piece.length - 1;
+      while (k >= 0 && piece[k] === "\\") {
+        trailingSlashes++;
+        k--;
+      }
+      if (!quoted && trailingSlashes % 2 === 1 && nl < to) {
+        logicalLine += piece.slice(0, -1);
+        lineEnd = nl + 1;
+        continue;
+      }
+      logicalLine += piece;
+      lineEnd = nl < to ? nl + 1 : nl;
+      break;
+    }
+    let line = logicalLine;
+    if (dash) line = line.replace(/^[ \t]+/, "");
+    if (line === delim) {
+      const termLineStart = lineStart;
+      const termLineEnd = lineEnd;
+      return { termLineStart, termLineEnd };
+    }
+    pos = lineEnd;
+  }
+  return null;
+}
+function findParamEnd(text, startPos, to) {
+  let p = startPos;
+  let braceDepth = 1;
+  while (p < to) {
+    const c = text[p];
+    if (c === "\\") {
+      p += 2;
+      continue;
+    }
+    if (c === "$" && text[p + 1] === "'") {
+      let q = p + 2;
+      while (q < to && text[q] !== "'") {
+        if (text[q] === "\\" && q + 1 < to) q += 2;
+        else q++;
+      }
+      p = q < to ? q + 1 : to;
+      continue;
+    }
+    if (c === "$" && text[p + 1] === '"') {
+      let q = p + 2;
+      while (q < to && text[q] !== '"') {
+        if (text[q] === "\\" && q + 1 < to) q += 2;
+        else q++;
+      }
+      p = q < to ? q + 1 : to;
+      continue;
+    }
+    if (c === "'") {
+      const end = text.indexOf("'", p + 1);
+      p = end === -1 || end >= to ? to : end + 1;
+      continue;
+    }
+    if (c === '"') {
+      let q = p + 1;
+      while (q < to) {
+        if (text[q] === "\\") q += 2;
+        else if (text[q] === "$" && text[q + 1] === "(") {
+          const sub = findSubstEnd(text, q + 2, to);
+          q = sub === -1 ? to : sub + 1;
+        } else if (text[q] === "`") {
+          let b = q + 1;
+          while (b < to && text[b] !== "`") {
+            if (text[b] === "\\" && b + 1 < to) b += 2;
+            else b++;
+          }
+          q = b < to ? b + 1 : to;
+        } else if (text[q] === '"') {
+          q++;
+          break;
+        } else q++;
+      }
+      p = q;
+      continue;
+    }
+    if (c === "`") {
+      let b = p + 1;
+      while (b < to && text[b] !== "`") {
+        if (text[b] === "\\" && b + 1 < to) b += 2;
+        else b++;
+      }
+      p = b < to ? b + 1 : to;
+      continue;
+    }
+    if (c === "$" && text[p + 1] === "(") {
+      const sub = findSubstEnd(text, p + 2, to);
+      p = sub === -1 ? to : sub + 1;
+      continue;
+    }
+    if (c === "$" && text[p + 1] === "{") {
+      braceDepth++;
+      p += 2;
+      continue;
+    }
+    if (c === "}") {
+      braceDepth--;
+      if (braceDepth === 0) return p;
+      p++;
+      continue;
+    }
+    p++;
+  }
+  return -1;
+}
+function isReservedWordPos(text, pos, startPos) {
+  let b = pos - 1;
+  while (b >= startPos && (text[b] === " " || text[b] === "\t")) b--;
+  if (b < startPos) return true;
+  if (text[b] === "\n" || text[b] === ";" || text[b] === "&" || text[b] === "|" || text[b] === "(") return true;
+  if (text[b] === "!") {
+    let prev = b - 1;
+    while (prev >= startPos && (text[prev] === " " || text[prev] === "\t")) prev--;
+    if (prev < startPos || /[\s;&|()]/.test(text[prev])) return true;
+  }
+  const prevWord = text.slice(Math.max(startPos, b - 5), b + 1).match(/\b(then|else|do)$/);
+  if (prevWord) {
+    let prev = b + 1 - prevWord[1].length - 1;
+    while (prev >= startPos && (text[prev] === " " || text[prev] === "\t")) prev--;
+    if (prev < startPos || /[\s;&|()]/.test(text[prev])) return true;
+  }
+  return false;
+}
+function matchCaseHeader(text, pos, to) {
+  let p = pos;
+  if (p >= to || !/\s/.test(text[p])) return null;
+  while (p < to && /\s/.test(text[p])) p++;
+  let hasWord = false;
+  while (p < to) {
+    const c = text[p];
+    if (c === "$" && (text[p + 1] === "'" || text[p + 1] === '"')) {
+      const qChar = text[p + 1];
+      let q = p + 2;
+      while (q < to && text[q] !== qChar) {
+        if (text[q] === "\\" && q + 1 < to) q += 2;
+        else q++;
+      }
+      p = q < to ? q + 1 : to;
+      hasWord = true;
+    } else if (c === "$" && text[p + 1] === "{") {
+      const paramEnd = findParamEnd(text, p + 2, to);
+      if (paramEnd === -1) return null;
+      p = paramEnd + 1;
+      hasWord = true;
+    } else if (c === "'" || c === '"') {
+      const quote = c;
+      p++;
+      while (p < to && text[p] !== quote) {
+        if (quote === '"' && text[p] === "\\" && p + 1 < to) p += 2;
+        else p++;
+      }
+      if (p < to) p++;
+      hasWord = true;
+    } else if (c === "\\") {
+      p += 2;
+      hasWord = true;
+    } else if (c === "$" && text[p + 1] === "(") {
+      const sub = findSubstEnd(text, p + 2, to);
+      if (sub === -1) return null;
+      p = sub + 1;
+      hasWord = true;
+    } else if (c === "`") {
+      let b = p + 1;
+      while (b < to && text[b] !== "`") {
+        if (text[b] === "\\" && b + 1 < to) b += 2;
+        else b++;
+      }
+      p = b < to ? b + 1 : to;
+      hasWord = true;
+    } else if (/\s/.test(c)) {
+      let next = p;
+      while (next < to && /\s/.test(text[next])) next++;
+      if (hasWord && text.startsWith("in", next) && (next + 2 >= to || /[\s;&|()]/.test(text[next + 2]))) {
+        return next + 2;
+      }
+      p = next;
+    } else if (/^[;&|()]/.test(c)) {
+      return null;
+    } else {
+      hasWord = true;
+      p++;
+    }
+  }
+  return null;
+}
+function findSubstEnd(text, startPos, to) {
+  let depth = 1;
+  let arithDepth = 0;
+  let pos = startPos;
+  const heredocs = [];
+  const caseStack = [];
+  while (pos < to) {
+    const ch = text[pos];
+    if (ch === "\\") {
+      pos += 2;
+      continue;
+    }
+    if (ch === "#" && (pos === startPos || /[\s;&|()]/.test(text[pos - 1]))) {
+      while (pos < to && text[pos] !== "\n" && text[pos] !== "\r") pos++;
+      continue;
+    }
+    if (ch === "$" && text[pos + 1] === "'") {
+      let q = pos + 2;
+      while (q < to && text[q] !== "'") {
+        if (text[q] === "\\" && q + 1 < to) q += 2;
+        else q++;
+      }
+      pos = q < to ? q + 1 : to;
+      continue;
+    }
+    if (ch === "$" && text[pos + 1] === '"') {
+      let q = pos + 2;
+      while (q < to && text[q] !== '"') {
+        if (text[q] === "\\" && q + 1 < to) q += 2;
+        else q++;
+      }
+      pos = q < to ? q + 1 : to;
+      continue;
+    }
+    if (ch === "'") {
+      const end = text.indexOf("'", pos + 1);
+      pos = end === -1 || end >= to ? to : end + 1;
+      continue;
+    }
+    if (ch === '"') {
+      let p = pos + 1;
+      while (p < to) {
+        if (text[p] === "\\") {
+          p += 2;
+        } else if (text[p] === "$" && text[p + 1] === "(") {
+          const sub = findSubstEnd(text, p + 2, to);
+          p = sub === -1 ? to : sub + 1;
+        } else if (text[p] === "`") {
+          let b = p + 1;
+          while (b < to && text[b] !== "`") {
+            if (text[b] === "\\" && b + 1 < to) b += 2;
+            else b++;
+          }
+          p = b < to ? b + 1 : to;
+        } else if (text[p] === '"') {
+          p++;
+          break;
+        } else p++;
+      }
+      pos = p;
+      continue;
+    }
+    if (ch === "`") {
+      let b = pos + 1;
+      while (b < to && text[b] !== "`") {
+        if (text[b] === "\\" && b + 1 < to) b += 2;
+        else b++;
+      }
+      pos = b < to ? b + 1 : to;
+      continue;
+    }
+    if (ch === "$" && text[pos + 1] === "(" && text[pos + 2] === "(") {
+      depth += 2;
+      arithDepth += 2;
+      pos += 3;
+      continue;
+    }
+    if (ch === "$" && text[pos + 1] === "{") {
+      const paramEnd = findParamEnd(text, pos + 2, to);
+      pos = paramEnd === -1 ? to : paramEnd + 1;
+      continue;
+    }
+    if (arithDepth === 0 && ch === "<" && text[pos + 1] === "<" && text[pos + 2] !== "<") {
+      const dash = text[pos + 2] === "-";
+      let p = pos + 2 + (dash ? 1 : 0);
+      while (p < to && (text[p] === " " || text[p] === "\t")) p++;
+      let delim = "",
+        delimEnd = p,
+        quoted = false;
+      while (delimEnd < to) {
+        const c = text[delimEnd];
+        if (c === "'") {
+          const end = text.indexOf("'", delimEnd + 1);
+          if (end === -1 || end >= to) break;
+          delim += text.slice(delimEnd + 1, end);
+          delimEnd = end + 1;
+          quoted = true;
+        } else if (c === '"') {
+          let nextQuote = delimEnd + 1;
+          let content = "";
+          let closed = false;
+          while (nextQuote < to && text[nextQuote] !== "\n") {
+            if (text[nextQuote] === "\\") {
+              if (nextQuote + 1 < to && text[nextQuote + 1] !== "\n") {
+                const nextCh = text[nextQuote + 1];
+                if (/[$`"\\\r\n]/.test(nextCh)) {
+                  content += nextCh;
+                  nextQuote += 2;
+                  continue;
+                }
+              }
+            }
+            if (text[nextQuote] === '"') {
+              closed = true;
+              break;
+            }
+            content += text[nextQuote];
+            nextQuote++;
+          }
+          if (!closed) break;
+          delim += content;
+          delimEnd = nextQuote + 1;
+          quoted = true;
+        } else if (c === "$" && text[delimEnd + 1] === "'") {
+          let p = delimEnd + 2;
+          let raw = "";
+          let closed = false;
+          while (p < to && text[p] !== "\n") {
+            if (text[p] === "\\") {
+              if (p + 1 < to && text[p + 1] !== "\n") {
+                raw += text.slice(p, p + 2);
+                p += 2;
+                continue;
+              }
+            }
+            if (text[p] === "'") {
+              closed = true;
+              p++;
+              break;
+            }
+            raw += text[p];
+            p++;
+          }
+          if (!closed) break;
+          delim += decodeAnsiC(raw);
+          delimEnd = p;
+          quoted = true;
+        } else if (c === "$" && text[delimEnd + 1] === '"') {
+          let p = delimEnd + 2;
+          let content = "";
+          let closed = false;
+          while (p < to && text[p] !== "\n") {
+            if (text[p] === "\\") {
+              if (p + 1 < to && text[p + 1] !== "\n") {
+                const nextCh = text[p + 1];
+                if (/[$`"\\\r\n]/.test(nextCh)) {
+                  content += nextCh;
+                  p += 2;
+                  continue;
+                }
+              }
+            }
+            if (text[p] === '"') {
+              closed = true;
+              p++;
+              break;
+            }
+            content += text[p];
+            p++;
+          }
+          if (!closed) break;
+          delim += content;
+          delimEnd = p;
+          quoted = true;
+        } else if (c === "\\") {
+          if (delimEnd + 1 < to && text[delimEnd + 1] !== "\n" && text[delimEnd + 1] !== "\r") {
+            delim += text[delimEnd + 1];
+            delimEnd += 2;
+            quoted = true;
+          } else if (delimEnd + 1 < to && text[delimEnd + 1] === "\n") {
+            delimEnd += 2;
+          } else if (delimEnd + 2 < to && text[delimEnd + 1] === "\r" && text[delimEnd + 2] === "\n") {
+            delimEnd += 3;
+          } else break;
+        } else if (/[\s;&|()<>]/.test(c)) break;
+        else {
+          delim += c;
+          delimEnd++;
+        }
+      }
+      if (delim) {
+        heredocs.push({ delim, dash, quoted });
+        pos = delimEnd;
+        continue;
+      }
+    }
+    if (ch === "\n") {
+      pos++;
+      if (heredocs.length) {
+        let cur = pos;
+        while (heredocs.length) {
+          const doc = heredocs.shift();
+          const found = findHeredocEnd(text, doc.delim, doc.dash, cur, to, doc.quoted);
+          if (!found) break;
+          cur = found.termLineEnd;
+        }
+        pos = cur;
+      }
+      continue;
+    }
+    if (ch === "c" && text.slice(pos, pos + 4) === "case" && isReservedWordPos(text, pos, startPos)) {
+      const afterIn = matchCaseHeader(text, pos + 4, to);
+      if (afterIn !== null) {
+        caseStack.push(depth);
+        pos = afterIn;
+        continue;
+      }
+    }
+    if (ch === "e" && text.slice(pos, pos + 4) === "esac" && isReservedWordPos(text, pos, startPos) && (pos + 4 >= to || /[\s;&|()<>]/.test(text[pos + 4]))) {
+      if (caseStack.length > 0 && depth === caseStack[caseStack.length - 1]) {
+        caseStack.pop();
+        pos += 4;
+        continue;
+      }
+    }
+    if (ch === "(") {
+      if (arithDepth > 0) arithDepth++;
+      depth++;
+      pos++;
+      continue;
+    }
+    if (ch === ")") {
+      if (arithDepth > 0) arithDepth--;
+      if (caseStack.length > 0 && depth === caseStack[caseStack.length - 1]) {
+        pos++;
+        continue;
+      }
+      depth--;
+      if (depth === 0) return pos;
+      pos++;
+      continue;
+    }
+    pos++;
+  }
+  return -1;
+}
+function unquoteWord(text) {
+  let res = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "$" && text[i + 1] === "'") {
+      let p = i + 2;
+      let raw = "";
+      while (p < text.length && text[p] !== "'") {
+        if (text[p] === "\\" && p + 1 < text.length) {
+          raw += text.slice(p, p + 2);
+          p += 2;
+        } else {
+          raw += text[p];
+          p++;
+        }
+      }
+      res += decodeAnsiC(raw);
+      i = p < text.length ? p + 1 : text.length;
+    } else if (ch === "$" && text[i + 1] === '"') {
+      let p = i + 2;
+      while (p < text.length) {
+        if (text[p] === "\\" && p + 1 < text.length) {
+          if (text[p + 1] === "\n") {
+            p += 2;
+          } else if (text[p + 1] === "\r" && text[p + 2] === "\n") {
+            p += 3;
+          } else {
+            res += text[p + 1];
+            p += 2;
+          }
+        } else if (text[p] === '"') {
+          p++;
+          break;
+        } else {
+          res += text[p];
+          p++;
+        }
+      }
+      i = p;
+    } else if (ch === "'") {
+      const end = text.indexOf("'", i + 1);
+      if (end === -1) {
+        res += text.slice(i + 1);
+        break;
+      }
+      res += text.slice(i + 1, end);
+      i = end + 1;
+    } else if (ch === '"') {
+      let p = i + 1;
+      while (p < text.length) {
+        if (text[p] === "\\" && p + 1 < text.length) {
+          if (text[p + 1] === "\n") {
+            p += 2;
+          } else if (text[p + 1] === "\r" && text[p + 2] === "\n") {
+            p += 3;
+          } else {
+            res += text[p + 1];
+            p += 2;
+          }
+        } else if (text[p] === '"') {
+          p++;
+          break;
+        } else {
+          res += text[p];
+          p++;
+        }
+      }
+      i = p;
+    } else if (ch === "\\") {
+      if (i + 1 < text.length && text[i + 1] === "\n") {
+        i += 2;
+      } else if (i + 2 < text.length && text[i + 1] === "\r" && text[i + 2] === "\n") {
+        i += 3;
+      } else if (i + 1 < text.length) {
+        res += text[i + 1];
+        i += 2;
+      } else break;
+    } else {
+      res += ch;
+      i++;
+    }
+  }
+  return res;
+}
 // 一份扫描同时提供注释已抹掉的文本、语法视图与 sudo 整词视图，索引始终不变。
 // 普通参数隐藏分隔符与整段引号内容；执行字符串展开一层，$() 则进入自己的上下文。
 function shellText(text, shell) {
@@ -124,7 +742,21 @@ function shellText(text, shell) {
   const quotes = new Map();
   const frames = [];
   const push = (context, from, to, shellBody, quote = "") => {
-    frames.push({ context, at: from, to, shellBody, quote, start: from, checked: false, scriptAt: -1 });
+    frames.push({
+      context,
+      at: from,
+      to,
+      shellBody,
+      quote,
+      start: from,
+      stmtStart: from,
+      parenDepth: 0,
+      braceDepth: 0,
+      checked: false,
+      scriptAt: -1,
+      heredocs: [],
+      arithDepth: 0
+    });
   };
   push(quoteContext(text, shell), 0, text.length, false);
   // 引号与 $() 共用所在文本的收尾表；执行字符串另建一层，彼此不重叠。
@@ -169,6 +801,193 @@ function shellText(text, shell) {
       }
       continue;
     }
+    if (shell === "powershell" && text[i] === "@" && (text[i + 1] === "'" || text[i + 1] === '"')) {
+      let nl = i + 2;
+      while (nl < to && text[nl] !== "\n" && text[nl] !== "\r") {
+        if (text[nl] !== " " && text[nl] !== "\t") break;
+        nl++;
+      }
+      if (nl < to && (text[nl] === "\n" || text[nl] === "\r")) {
+        const q = text[i + 1];
+        let termIdx = text.indexOf("\n" + q + "@", nl);
+        if (termIdx === -1) termIdx = text.indexOf("\r\n" + q + "@", nl);
+        if (termIdx !== -1 && termIdx < to) {
+          if (termIdx > 0 && text[termIdx - 1] === "\r") termIdx--;
+          const endAt = termIdx + (text[termIdx] === "\r" ? 4 : 3);
+          quotes.set(at, offset + endAt);
+          if (q === '"') {
+            let j = i;
+            while (j < endAt) {
+              if (text[j] === "`" && j + 1 < endAt) {
+                unquoted[offset + j] = unquoted[offset + j + 1] = " ";
+                syntax[offset + j] = syntax[offset + j + 1] = " ";
+                j += 2;
+                continue;
+              }
+              const subEnd = context.substitution[j + 2];
+              if (text[j] === "$" && text[j + 1] === "(" && subEnd >= 0 && subEnd < endAt) {
+                unquoted[offset + j] = " ";
+                unquoted[offset + j + 1] = "(";
+                unquoted[offset + subEnd] = ")";
+                push(context, j + 2, subEnd, frame.shellBody);
+                j = subEnd + 1;
+              } else {
+                unquoted[offset + j] = " ";
+                syntax[offset + j] = text[j] === "\n" || text[j] === "\r" ? text[j] : " ";
+                j++;
+              }
+            }
+          } else {
+            for (let j = i; j < endAt; j++) {
+              unquoted[offset + j] = " ";
+              syntax[offset + j] = text[j] === "\n" || text[j] === "\r" ? text[j] : " ";
+            }
+          }
+          frame.at = endAt;
+          continue;
+        }
+      }
+    }
+    if (shell !== "cmd" && text[i] === "$" && text[i + 1] === "(" && text[i + 2] === "(") {
+      frame.arithDepth += 2;
+      frame.at += 3;
+      continue;
+    }
+    if (frame.arithDepth > 0) {
+      if (text[i] === "(") {
+        frame.arithDepth++;
+        frame.at++;
+        continue;
+      }
+      if (text[i] === ")") {
+        frame.arithDepth--;
+        frame.at++;
+        continue;
+      }
+    }
+    if (
+      frame.arithDepth === 0 &&
+      shell !== "cmd" &&
+      text[i] === "<" &&
+      text[i + 1] === "<" &&
+      text[i + 2] !== "<" &&
+      (i === 0 || text[i - 1] !== "<")
+    ) {
+      const dash = text[i + 2] === "-";
+      let p = i + 2 + (dash ? 1 : 0);
+      while (p < to && (text[p] === " " || text[p] === "\t")) p++;
+      let delim = "",
+        quoted = false,
+        delimEnd = p;
+      while (delimEnd < to) {
+        const ch = text[delimEnd];
+        if (ch === "'") {
+          const nextSingle = text.indexOf("'", delimEnd + 1);
+          if (nextSingle === -1 || nextSingle >= to || text.slice(delimEnd + 1, nextSingle).includes("\n")) break;
+          delim += text.slice(delimEnd + 1, nextSingle);
+          delimEnd = nextSingle + 1;
+          quoted = true;
+        } else if (ch === '"') {
+          let nextQuote = delimEnd + 1;
+          let content = "";
+          let closed = false;
+          while (nextQuote < to && text[nextQuote] !== "\n") {
+            if (text[nextQuote] === "\\") {
+              if (nextQuote + 1 < to && text[nextQuote + 1] !== "\n") {
+                const nextCh = text[nextQuote + 1];
+                if (/[$`"\\\r\n]/.test(nextCh)) {
+                  content += nextCh;
+                  nextQuote += 2;
+                  continue;
+                }
+              }
+            }
+            if (text[nextQuote] === '"') {
+              closed = true;
+              break;
+            }
+            content += text[nextQuote];
+            nextQuote++;
+          }
+          if (!closed) break;
+          delim += content;
+          delimEnd = nextQuote + 1;
+          quoted = true;
+        } else if (ch === "$" && text[delimEnd + 1] === "'") {
+          let p = delimEnd + 2;
+          let raw = "";
+          let closed = false;
+          while (p < to && text[p] !== "\n") {
+            if (text[p] === "\\") {
+              if (p + 1 < to && text[p + 1] !== "\n") {
+                raw += text.slice(p, p + 2);
+                p += 2;
+                continue;
+              }
+            }
+            if (text[p] === "'") {
+              closed = true;
+              p++;
+              break;
+            }
+            raw += text[p];
+            p++;
+          }
+          if (!closed) break;
+          delim += decodeAnsiC(raw);
+          delimEnd = p;
+          quoted = true;
+        } else if (ch === "$" && text[delimEnd + 1] === '"') {
+          let p = delimEnd + 2;
+          let content = "";
+          let closed = false;
+          while (p < to && text[p] !== "\n") {
+            if (text[p] === "\\") {
+              if (p + 1 < to && text[p + 1] !== "\n") {
+                const nextCh = text[p + 1];
+                if (/[$`"\\\r\n]/.test(nextCh)) {
+                  content += nextCh;
+                  p += 2;
+                  continue;
+                }
+              }
+            }
+            if (text[p] === '"') {
+              closed = true;
+              p++;
+              break;
+            }
+            content += text[p];
+            p++;
+          }
+          if (!closed) break;
+          delim += content;
+          delimEnd = p;
+          quoted = true;
+        } else if (ch === "\\") {
+          if (delimEnd + 1 < to && text[delimEnd + 1] !== "\n" && text[delimEnd + 1] !== "\r") {
+            delim += text[delimEnd + 1];
+            delimEnd += 2;
+            quoted = true;
+          } else if (delimEnd + 1 < to && text[delimEnd + 1] === "\n") {
+            delimEnd += 2;
+          } else if (delimEnd + 2 < to && text[delimEnd + 1] === "\r" && text[delimEnd + 2] === "\n") {
+            delimEnd += 3;
+          } else break;
+        } else if (/[\s;&|()<>]/.test(ch)) {
+          break;
+        } else {
+          delim += ch;
+          delimEnd++;
+        }
+      }
+      if (delim) {
+        frame.heredocs.push({ delim, dash, quoted, cmdStart: frame.stmtStart });
+        quotes.set(at, offset + delimEnd - 1);
+        frame.at = delimEnd;
+        continue;
+      }
+    }
     if (text[i] === '"' || (shell !== "cmd" && text[i] === "'")) {
       const end = text[i] === '"' ? context.double[i + 1] : context.single[i + 1];
       if (end < 0 || end >= to) {
@@ -189,6 +1008,153 @@ function shellText(text, shell) {
         push(quoteContext(text.slice(i + 1, end), bodyShell, at + 1), 0, end - i - 1, true);
       } else push(context, i + 1, end, frame.shellBody, text[i]);
     } else if (";&|(){}\n".includes(text[i])) {
+      if (text[i] === "(") {
+        if (frame.arithDepth === 0) frame.parenDepth++;
+      } else if (text[i] === ")") {
+        if (frame.arithDepth === 0 && frame.parenDepth > 0) frame.parenDepth--;
+      } else if (text[i] === "{") {
+        frame.braceDepth++;
+      } else if (text[i] === "}") {
+        if (frame.braceDepth > 0) frame.braceDepth--;
+      }
+      if (";&|\n".includes(text[i]) && frame.parenDepth === 0 && frame.braceDepth === 0) {
+        frame.stmtStart = i + 1;
+      }
+      if (text[i] === "\n" && frame.heredocs?.length) {
+        let nextStart = i + 1;
+        while (frame.heredocs.length) {
+          const doc = frame.heredocs.shift();
+          const found = findHeredocEnd(text, doc.delim, doc.dash, nextStart, to, doc.quoted);
+          if (!found) {
+            frame.heredocs.length = 0;
+            break;
+          }
+          const { termLineStart, termLineEnd } = found;
+          const rawCmd = text.slice(doc.cmdStart, i);
+          const cleanCmd = rawCmd.replace(REDIRECTION, " ");
+          let isShell = PIPE_SHELL.test(unquoteWord(cleanCmd));
+          if (!isShell) {
+            const segments = cleanCmd.split(/[;&|(){}]/);
+            for (const seg of segments) {
+              const trimmed = unquoteWord(seg.trim());
+              if (trimmed && PIPE_SHELL.test(trimmed)) {
+                isShell = true;
+                break;
+              }
+            }
+          }
+          if (!isShell && /[|]/.test(cleanCmd)) {
+            let p = termLineEnd;
+            while (p < to) {
+              let nl = text.indexOf("\n", p);
+              if (nl === -1 || nl > to) nl = to;
+              let line = text.slice(p, nl).trim();
+              if (line && !line.startsWith("#")) break;
+              p = nl < to ? nl + 1 : nl;
+            }
+            const nextSegment = text.slice(p, to).split(/[;&|\n(){}]/)[0].trim();
+            if (nextSegment && PIPE_SHELL.test(unquoteWord(nextSegment))) {
+              isShell = true;
+            }
+          }
+          if (isShell) {
+            push(quoteContext(text.slice(nextStart, termLineStart), "posix", offset + nextStart), 0, termLineStart - nextStart, frame.shellBody);
+            for (let j = termLineStart; j < termLineEnd; j++) {
+              unquoted[offset + j] = " ";
+              if (text[j] !== "\n" && text[j] !== "\r") {
+                syntax[offset + j] = " ";
+                chars[offset + j] = " ";
+              }
+            }
+          } else {
+            if (!doc.quoted) {
+              let j = nextStart;
+              while (j < termLineStart) {
+                if (text[j] === "\\" && j + 1 < termLineStart && /[$`"\\\r\n]/.test(text[j + 1])) {
+                  const step = text[j + 1] === "\r" && text[j + 2] === "\n" ? 3 : 2;
+                  for (let s = 0; s < step; s++) {
+                    unquoted[offset + j + s] = " ";
+                    syntax[offset + j + s] = " ";
+                    if (text[j + s] !== "\n" && text[j + s] !== "\r") chars[offset + j + s] = " ";
+                  }
+                  j += step;
+                  continue;
+                }
+                if (text[j] === "$") {
+                  let p = j + 1;
+                  while (p < termLineStart && text[p] === "\\") {
+                    if (text[p + 1] === "\n") p += 2;
+                    else if (text[p + 1] === "\r" && text[p + 2] === "\n") p += 3;
+                    else break;
+                  }
+                  if (p < termLineStart && text[p] === "(") {
+                    const subEnd = findSubstEnd(text, p + 1, termLineStart);
+                    if (subEnd >= 0 && subEnd < termLineStart) {
+                      unquoted[offset + j] = " ";
+                      unquoted[offset + p] = "(";
+                      unquoted[offset + subEnd] = ")";
+                      push(context, p + 1, subEnd, frame.shellBody);
+                      j = subEnd + 1;
+                      continue;
+                    } else {
+                      push(context, p + 1, termLineStart, frame.shellBody);
+                      j = termLineStart;
+                      continue;
+                    }
+                  }
+                }
+                if (text[j] === "`") {
+                  let btEnd = j + 1;
+                  while (btEnd < termLineStart && text[btEnd] !== "`") {
+                    if (text[btEnd] === "\\" && btEnd + 1 < termLineStart) btEnd += 2;
+                    else btEnd++;
+                  }
+                  if (btEnd < termLineStart && text[btEnd] === "`") {
+                    unquoted[offset + j] = " ";
+                    unquoted[offset + btEnd] = " ";
+                    syntax[offset + j] = "(";
+                    syntax[offset + btEnd] = ")";
+                    push(context, j + 1, btEnd, frame.shellBody);
+                    j = btEnd + 1;
+                    continue;
+                  } else {
+                    push(context, j + 1, termLineStart, frame.shellBody);
+                    j = termLineStart;
+                    continue;
+                  }
+                } else {
+                  unquoted[offset + j] = " ";
+                  syntax[offset + j] = text[j] === "\n" || text[j] === "\r" ? text[j] : " ";
+                  if (text[j] !== "\n" && text[j] !== "\r") chars[offset + j] = " ";
+                  j++;
+                }
+              }
+            } else {
+              for (let j = nextStart; j < termLineStart; j++) {
+                unquoted[offset + j] = " ";
+                syntax[offset + j] = text[j] === "\n" || text[j] === "\r" ? text[j] : " ";
+                if (text[j] !== "\n" && text[j] !== "\r") chars[offset + j] = " ";
+              }
+            }
+            for (let j = termLineStart; j < termLineEnd; j++) {
+              unquoted[offset + j] = " ";
+              if (text[j] !== "\n" && text[j] !== "\r") {
+                syntax[offset + j] = " ";
+                chars[offset + j] = " ";
+              }
+            }
+            quotes.set(offset + nextStart, offset + termLineEnd - 1);
+          }
+          nextStart = termLineEnd;
+        }
+        frame.start = nextStart;
+        frame.stmtStart = nextStart;
+        frame.parenDepth = 0;
+        frame.braceDepth = 0;
+        frame.checked = false;
+        frame.at = nextStart;
+        continue;
+      }
       frame.start = i + 1;
       frame.checked = false;
       frame.at++;
@@ -225,12 +1191,26 @@ const HIDDEN = HIDDEN_COMMAND,
 // 续行（反引号、反斜杠）之后的一行不是指令位，那可能正是写入目标
 const LINE_START = String.raw`(?<![${"`"}\\][ \t]*\r?\n)^`,
   CALL_SITE = String.raw`(?:${LINE_START}|[;|({&])[ \t]*`,
-  UNQUOTED_EXE_DIR = new RegExp(
-    String.raw`((?:${CALL_SITE}(?:\.[ \t]+)?|\$[\w:]+[ \t]*=[ \t]*|\bcmd(?:\.exe)?\b[^\n]*?\s/[ck][ \t]*["']?|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s[-/](?:${prefixesOf("command")})[ \t]+["']?)${PREFIX}(?:${SHELL}${PREFIX})?)[^\s"'${"`"};|&<>(){}]*[\\/]`,
+  UNQUOTED_EXE_DIR_WIN = new RegExp(
+    String.raw`((?:${CALL_SITE}(?:\.[ \t]+)?|\$[\w:]+[ \t]*=[ \t]*|\bcmd(?:\.exe)?\b[^\n]*?\s/[ck][ \t]*["']?|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s[-/](?:${prefixesOf("command")})[ \t]+["']?)${PREFIX}(?:${SHELL}${PREFIX})?)[^\s"'${"`"};|&<>(){}]*[\\/](?=[^\s"'${"`"};|&<>(){}]+)`,
     "gim"
   ),
-  QUOTED_EXE_DIR = new RegExp(String.raw`((?:(?<!&)&|${CALL_SITE}\.)[ \t]*["'])[^"'\n]*[\\/]`, "gim");
-const withoutExeDir = (/** @type {string} */ text) => text.replace(UNQUOTED_EXE_DIR, "$1").replace(QUOTED_EXE_DIR, "$1");
+  UNQUOTED_EXE_DIR_POSIX = new RegExp(
+    String.raw`((?:${CALL_SITE}(?:\.[ \t]+)?|\$[\w:]+[ \t]*=[ \t]*|\bcmd(?:\.exe)?\b[^\n]*?\s/[ck][ \t]*["']?|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s[-/](?:${prefixesOf("command")})[ \t]+["']?)${PREFIX}(?:${SHELL}${PREFIX})?)(?:[A-Za-z]:[^\s"'${"`"};|&<>(){}]*[\\/]|[\w.]+\.[\w.]+\\|[^\s"'${"`"};|&<>(){}]*\/)(?=[^\s"'${"`"};|&<>(){}]+)`,
+    "gim"
+  ),
+  QUOTED_EXE_DIR = new RegExp(String.raw`((?:(?<!&)&|${CALL_SITE}\.)[ \t]*["'])[^"'\n]*[\\/]`, "gim"),
+  POSIX_CMD_ESCAPES = new RegExp(
+    String.raw`((?:${CALL_SITE}(?:\.[ \t]+)?|\$[\w:]+[ \t]*=[ \t]*|\bcmd(?:\.exe)?\b[^\n]*?\s/[ck][ \t]*["']?|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s[-/](?:${prefixesOf("command")})[ \t]+["']?)${PREFIX}(?:${SHELL}${PREFIX})?)([^\s"'${"`"};|&<>()]+)`,
+    "gim"
+  );
+const withoutExeDir = (/** @type {string} */ text, win = process.platform === "win32") =>
+  win
+    ? text.replace(UNQUOTED_EXE_DIR_WIN, "$1").replace(QUOTED_EXE_DIR, "$1")
+    : text
+        .replace(UNQUOTED_EXE_DIR_POSIX, "$1")
+        .replace(QUOTED_EXE_DIR, "$1")
+        .replace(POSIX_CMD_ESCAPES, (_, pfx, cmd) => pfx + cmd.replace(/\\([a-zA-Z0-9_.-])/g, "$1"));
 // 指令里禁用的写法，只此一张表：[筛查器（test）, 一句原因, 适用的档]。逐条对整段指令文本查，命中即拒。
 // 严＝screenCommand（问而后行）；宽＝screenLoose（审而后行、径行开着沙箱时）；审＝screenAutoReview（审而后行的规则）。
 // 宽与审不是第二个沙箱：常规开发、安装、Git（含回退与清理）、本机进程、联网、整机查看、写到目录之外都放行，只拦明确会伤及宿主机或难以恢复的动作。
@@ -377,7 +1357,8 @@ const BRIDGE_WHY = "指令不调言的本机桥接（它的接口不经请示与
 function screenUnreviewable(command, { platform = process.platform } = {}) {
   const text = String(command || "");
   if (callsBridge(text)) return BRIDGE_WHY;
-  const scanned = shellText(withoutExeDir(text), platform === "win32" ? "powershell" : "posix");
+  const win = platform === "win32";
+  const scanned = shellText(withoutExeDir(text, win), win ? "powershell" : "posix");
   return HIDDEN.test(scanned.syntax) || pipesToShell(scanned.syntax) ? HIDDEN_WHY : null;
 }
 // 文件工具会用 screenPath 拦机密文件；指令通道也得拦显式点名，否则 `Get-Content .env` 能从 shell 绕过去。
@@ -568,8 +1549,8 @@ function screenWritePaths(scanned, workdir, win, prefix) {
 function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const raw = String(command || "");
   if (callsBridge(raw)) return `沙箱拒绝：${BRIDGE_WHY}`;
-  const text = withoutExeDir(raw),
-    win = platform === "win32",
+  const win = platform === "win32",
+    text = withoutExeDir(raw, win),
     scanned = shellText(text, win ? "powershell" : "posix");
   const forbidden = forbiddenWhy(scanned, "严");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
@@ -595,8 +1576,9 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
 function screenAutoReview(command, { platform = process.platform } = {}) {
   const raw = String(command || "");
   if (callsBridge(raw)) return `审查拒绝：${BRIDGE_WHY}`;
-  const text = withoutExeDir(raw),
-    scanned = shellText(text, platform === "win32" ? "powershell" : "posix"),
+  const win = platform === "win32",
+    text = withoutExeDir(raw, win),
+    scanned = shellText(text, win ? "powershell" : "posix"),
     forbidden = forbiddenWhy(scanned, "审");
   if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
@@ -613,8 +1595,9 @@ function screenAutoReview(command, { platform = process.platform } = {}) {
 function screenLoose(command, { platform = process.platform } = {}) {
   const raw = String(command || "");
   if (callsBridge(raw)) return `沙箱拒绝：${BRIDGE_WHY}`;
-  const text = withoutExeDir(raw),
-    scanned = shellText(text, platform === "win32" ? "powershell" : "posix"),
+  const win = platform === "win32",
+    text = withoutExeDir(raw, win),
+    scanned = shellText(text, win ? "powershell" : "posix"),
     forbidden = forbiddenWhy(scanned, "宽");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
   if (DIRECT_FILE_MUTATION.test(scanned.syntax) && REVIEW_SYSTEM_PATH.test(stripReadSources(scanned)))
