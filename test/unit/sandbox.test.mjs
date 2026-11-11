@@ -981,7 +981,11 @@ const TABLE = [
     "nohup launchctl start x",
     "command launchctl kill TERM x",
     "echo x | xargs -n1 launchctl remove",
-    "FOO=bar launchctl disable gui/501/x"
+    "FOO=bar launchctl disable gui/501/x",
+    "nice -n5 launchctl load x",
+    "nice -n-5 launchctl load x",
+    "timeout -k 1 5 launchctl load x",
+    "timeout -k1 5 launchctl load x"
   ].map(command => [command, "x", "x", "x", "o"]),
   ...[
     "command -v launchctl",
@@ -1069,6 +1073,9 @@ const TABLE = [
     "bash.exe -c 'sudo id'",
     'echo "$(sudo id)"',
     "sudo",
+    "sudo>/tmp/out id",
+    "sudo</tmp/in id",
+    "sudo 2>/tmp/err id",
     "env X=y sudo id",
     "nice sudo x",
     "nice -n 5 sudo x",
@@ -1126,7 +1133,14 @@ const TABLE = [
     "sh -c 'cat x | bash'",
     "powershell -Command 'cat x | bash'",
     "cmd /c 'cat x | bash'",
-    "echo done; sh -c 'cat x | bash'"
+    "echo done; sh -c 'cat x | bash'",
+    "cat x | sh>out",
+    "cat x | sh 2>err",
+    "cat x | 2>/dev/null sh",
+    "cat x | 2>&1 sh",
+    "cat x | < /dev/null sh",
+    "cat x |& sh",
+    "cat x |& /bin/bash"
   ].map(command => [command, "x", "x", "x", "x"]),
   [String.raw`Get-Content C:\logs\| sh`, "x", "x", "x", "x", { darwin: "oooo" }],
   ...[

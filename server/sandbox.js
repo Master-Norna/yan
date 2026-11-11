@@ -29,7 +29,7 @@ const ENV_OPTS = String.raw`(?:${ENV_VAL_OPT}|${ENV_NOVAL_OPT})`;
 const EXEC_VAL_OPT = String.raw`-[cl]*a(?:${INLINE_SPACE}+${SHELL_WORD}|[^\s"';&|()]+)`;
 const EXEC_NOVAL_OPT = String.raw`-[cl]+`;
 const EXEC_OPTS = String.raw`exec(?:${INLINE_SPACE}+(?:${EXEC_VAL_OPT}|${EXEC_NOVAL_OPT}))*(?:${INLINE_SPACE}+--)?`;
-const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|${EXEC_OPTS}|nohup|nice(?:${INLINE_SPACE}+-n${INLINE_SPACE}+-?\d+)?|time(?:${INLINE_SPACE}+-p\b)?|timeout${INLINE_SPACE}+\d+(?:\.\d+)?[smhd]?|command(?:${INLINE_SPACE}+-p\b)?(?:${INLINE_SPACE}+--)?(?=${INLINE_SPACE}+\S)|xargs(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|env(?:${INLINE_SPACE}+${ENV_OPTS})*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)${INLINE_SPACE}+)*`;
+const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|${EXEC_OPTS}|nohup|nice(?:${INLINE_SPACE}+-n${INLINE_SPACE}*-?\d+)?|time(?:${INLINE_SPACE}+-p\b)?|timeout${INLINE_SPACE}+(?:-[kK]${INLINE_SPACE}*\d+(?:\.\d+)?[smhd]?${INLINE_SPACE}+)?\d+(?:\.\d+)?[smhd]?|command(?:${INLINE_SPACE}+-p\b)?(?:${INLINE_SPACE}+--)?(?=${INLINE_SPACE}+\S)|xargs(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|env(?:${INLINE_SPACE}+${ENV_OPTS})*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)${INLINE_SPACE}+)*`;
 const SHELL = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh(?:\.exe)?${INLINE_SPACE}+(?:--(?:rcfile|init-file)${INLINE_SPACE}+${SHELL_WORD}${INLINE_SPACE}+|--[\w-]+${INLINE_SPACE}+|-o${INLINE_SPACE}+\S+${INLINE_SPACE}+|-(?!o\s)[^c\s-]+${INLINE_SPACE}+)*-[a-z]*c[a-z]*${INLINE_SPACE}+(?:--${INLINE_SPACE}+)?["']?`;
 const CMD =
   String.raw`(?:^|[;&|({)\n]|\$[\w:]+${INLINE_SPACE}*=(?=${INLINE_SPACE}*[^\s"'])|\bcmd(?:\.exe)?\b[^\n]*?/[ck]|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?(?=[\s"'&]))${INLINE_SPACE}*["']?(?:&${INLINE_SPACE}*["']?)?` +
@@ -74,9 +74,56 @@ const HIDDEN_COMMAND = new RegExp(
   "im"
 );
 const PIPE_SHELL = new RegExp(
-  String.raw`^${INLINE_SPACE}*${PREFIX}["']?(?:[^\s"';&|(){}]*/)?(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?["']?(?=\s|$)`,
+  String.raw`^${INLINE_SPACE}*${PREFIX}["']?(?:[^\s"';&|(){}]*/)?(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?["']?(?=[\s<>]|$)`,
   "i"
 );
+const PIPE_REDIR_OP = /^(?:<<<|<<-|<<|>>|>&|<&|<>|>\||&>>|&>|>|<)/;
+// 跳过一处重定向（可带 fd 前缀与目标词），返回目标之后的位置；当前位置不是重定向则返回 -1。
+// 手工扫而不塞进正则：重定向目标里的数字与运算符符号会让正则回溯组合爆炸。
+function skipPipeRedir(/** @type {string} */ text, /** @type {number} */ at) {
+  let i = at;
+  while (i < text.length && text[i] >= "0" && text[i] <= "9") i++;
+  const op = PIPE_REDIR_OP.exec(text.slice(i));
+  if (!op) return -1;
+  i += op[0].length;
+  while (i < text.length && /[^\S\r\n]/.test(text[i])) i++;
+  // 目标是一个 shell 词：引号段、转义与裸段可以拼接（>"foo"sh 是文件名 foosh，不是命令 sh）
+  const target = i;
+  for (;;) {
+    const ch = text[i];
+    if (ch === '"') {
+      let j = i + 1;
+      for (; j < text.length; j++) {
+        if (text[j] === "\\") j++;
+        else if (text[j] === '"') break;
+      }
+      if (j >= text.length) return -1;
+      i = j + 1;
+    } else if (ch === "'") {
+      const close = text.indexOf("'", i + 1);
+      if (close < 0) return -1;
+      i = close + 1;
+    } else if (ch === "\\") {
+      if (i + 1 >= text.length) return -1;
+      i += 2;
+    } else if (i < text.length && !/[\s;&|()<>]/.test(ch)) {
+      i++;
+    } else break;
+  }
+  return i > target ? i : -1;
+}
+// 管道段里的 shell 前后都可以带重定向：cat x | 2>/dev/null sh、cat x | sh>out、cat x | <in sh。
+// 先把前导重定向（含其目标词）整个吃掉，再认命令名——「> sh」的 sh 是文件名不是 shell。
+function pipeRunsShell(/** @type {string} */ segment) {
+  let i = 0;
+  for (;;) {
+    while (i < segment.length && /[^\S\r\n]/.test(segment[i])) i++;
+    const next = skipPipeRedir(segment, i);
+    if (next < 0) break;
+    i = next;
+  }
+  return PIPE_SHELL.test(segment.slice(i));
+}
 const REDIRECTION =
   /(?:\b\d+)?(?:<<-?|<<<|>>?|>[&|]|<&|<>|<)\s*(?:'[^'\n]*'|"(?:\\.|[^"\\\n])*"|\\[\s\S]|[^\s"';&|()<>]+)+|&>>?\s*(?:'[^'\n]*'|"(?:\\.|[^"\\\n])*"|\\[\s\S]|[^\s"';&|()<>]+)+/g;
 const SCRIPT_START = new RegExp(
@@ -1405,7 +1452,8 @@ function shellText(text, shell) {
 function pipesToShell(/** @type {string} */ text) {
   if (!text.includes("|")) return false;
   let start = 0,
-    piped = false;
+    piped = false,
+    pipeAmp = false;
   for (let i = 0; i <= text.length; i++) {
     const ch = text[i];
     if (piped && ch === "\n" && !text.slice(start, i).trim()) {
@@ -1413,15 +1461,24 @@ function pipesToShell(/** @type {string} */ text) {
       continue;
     }
     if (i < text.length && !";&|\n(){".includes(ch)) continue;
+    // >&、<&、&>、&>> 里的 & 属于重定向运算符，不是命令分隔符
+    if (ch === "&" && (text[i - 1] === ">" || text[i - 1] === "<" || text[i + 1] === ">")) continue;
     const segment = text.slice(start, i);
-    if (piped && PIPE_SHELL.test(segment)) return true;
+    if (piped && pipeRunsShell(segment)) return true;
+    // |& 是 bash 的管道运算符（stdout 与 stderr 一起喂给下一个指令），& 不结束这条管道
+    if (pipeAmp && ch === "&") {
+      pipeAmp = false;
+      start = i + 1;
+      continue;
+    }
     piped = ch === "|" && text[i - 1] !== "|" && text[i + 1] !== "|";
+    pipeAmp = ch === "|" && text[i + 1] === "&";
     start = i + 1;
   }
   return false;
 }
 const HIDDEN = HIDDEN_COMMAND,
-  SUDO_WORD = /(^|[\s;&|()])sudo(?=$|[\s;&|()])/i,
+  SUDO_WORD = /(^|[\s;&|()<>])sudo(?=$|[\s;&|()<>])/i,
   HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
 // 指令位上的程序可以写全路径（C:\Windows\System32\reg.exe、& "C:\Program Files\…\reg.exe"）。规则都按命令名认，筛之前先去掉程序的目录，
 // 禁用规则、外联、写动词就不必各自认路径；程序自己的路径也不再算它碰的路径——& "C:\Program Files\7-Zip\7z.exe" x a.zip 并没有往系统目录里写。
@@ -1683,7 +1740,7 @@ const RSYNC_READ_VALUES = new Set(
 function argumentsAt(scanned, start) {
   const text = scanned.text;
   const tokens = [];
-  for (let i = start; i < text.length; ) {
+  for (let i = start; i < text.length;) {
     if (/\s/.test(text[i]) && text[i] !== "\n") {
       i++;
       continue;
