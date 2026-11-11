@@ -805,6 +805,7 @@ var YAN_EN = {
   准备中: "Setting up",
   已备好: "Ready",
   尚未准备: "Not set up",
+  "仅 Windows": "Windows only",
   "准备中…": "Setting up…",
   更新环境: "Update environment",
   准备环境: "Set up environment",
