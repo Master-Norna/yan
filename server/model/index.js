@@ -55,11 +55,19 @@ async function peekLead(body) {
   const reader = body.getReader();
   /** @type {Uint8Array[]} */
   const chunks = [];
+  let blanks = 0;
   for (;;) {
     const { value, done } = await reader.read();
     if (value && value.byteLength) {
+      const first = value.findIndex(byte => !BLANK.has(byte));
+      blanks += first < 0 ? value.byteLength : first;
+      // 判定前的空白也占缓冲：沿用同一上限，超了明确报错，不能等流结束才处理。
+      if (blanks > SNIFF_LIMIT) {
+        await reader.cancel().catch(() => {});
+        throw Object.assign(Error(`上游正文开头的空白超过 ${SNIFF_LIMIT / 1024 / 1024} MB，无法判定响应格式，不再往下读`), { status: 415 });
+      }
       chunks.push(value);
-      for (const byte of value) if (!BLANK.has(byte)) return { chunks, reader, first: byte };
+      if (first >= 0) return { chunks, reader, first: value[first] };
     }
     if (done) return { chunks, reader, first: 0 };
   }
@@ -126,6 +134,7 @@ async function collectText(chunks, reader, limit = Infinity) {
 async function eventBody(response, provider) {
   /** @param {any} error */
   const cut = error => {
+    if (error.status) throw error;
     throw Object.assign(Error(`上游连接中断：${error.cause?.code || error.cause?.message || error.message}`), {
       status: 502,
       name: error.name

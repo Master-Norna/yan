@@ -28,7 +28,7 @@ const openai = { baseUrl: "http://relay.test/v1", model: "gpt-x" };
 
 // 一只源源不断吐 1 MiB 块的身子：开头给 head（默认 { ，一眼不是事件流），之后每块都是同一段字。
 // 被拉走几块、有没有被掐掉都记下来——超了上限还继续往下读，这里就看得出来
-function runaway(total, head = "{") {
+function runaway(total, head = "{", padding = "x") {
   const encoder = new TextEncoder();
   const blocks = Math.ceil(total / MiB);
   let pulled = 0,
@@ -38,7 +38,7 @@ function runaway(total, head = "{") {
       if (pulled >= blocks) return controller.close();
       const at = pulled++,
         size = Math.min(MiB, total - at * MiB),
-        fill = at === 0 ? head + "x".repeat(size - head.length) : "x".repeat(size);
+        fill = at === 0 ? head + padding.repeat(size - head.length) : padding.repeat(size);
       controller.enqueue(encoder.encode(fill));
     },
     cancel() {
@@ -104,6 +104,25 @@ async function ask(profile = openai) {
   await chat(Readable.from([Buffer.from(JSON.stringify(body))]), res);
   return res;
 }
+
+test("判定前源源不断的纯空白：沿用 8 MiB 上限，明确报错并取消上游", async () => {
+  const wire = runaway(40 * MiB, " ", " ");
+  answer(wire.body, "text/plain");
+  const res = await ask();
+  assert.equal(res.status, 415);
+  assert.match(res.json.error, /开头的空白超过 8 MB/);
+  assert.match(res.json.error, /无法判定响应格式/);
+  assert.ok(wire.pulled <= 10, `不应把 ${wire.pulled} MiB 空白整份读完`);
+  assert.ok(wire.cancelled);
+});
+
+test("判定前正好 8 MiB 空白：后面的事件流照旧逐字节交回", async () => {
+  const wire = " ".repeat(LIMIT) + 'data: {"choices":[{"delta":{"content":"好"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n';
+  answer(chunked(wire, MiB), "text/event-stream");
+  const res = await ask();
+  assert.equal(res.status, 200);
+  assert.equal(res.text, wire);
+});
 
 test("正文不是事件流又超过 8 MiB：415 说清不再往下读，读到上限就停手", { timeout: 15000 }, async () => {
   const wire = runaway(40 * MiB);

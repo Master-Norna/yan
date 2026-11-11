@@ -1634,9 +1634,13 @@ var YAN_EN = {
   "还没登录 ChatGPT：到「设置 → 模型」里点「登录」": "Not signed in to ChatGPT. Click Sign in under Settings → Models",
   "ChatGPT 的登录凭证没能换新：{0}": "Could not refresh the ChatGPT credentials: {0}",
   "ChatGPT 的登录已失效，请到「设置 → 模型」里重新登录": "The ChatGPT sign-in expired. Sign in again under Settings → Models",
+  "ChatGPT 的登录或存储位置已变化，请重试": "The ChatGPT sign-in or storage location changed. Please try again",
+  "记忆或存储位置已变化，这批整理未写入": "Memory or the storage location changed; this optimization was not saved",
   授权未完成: "Authorization not completed",
   "列模型失败（{0}）": "Failed to list models ({0})",
   "上游接口返回 {0}": "The API returned {0}",
+  "上游正文开头的空白超过 {0} MB，无法判定响应格式，不再往下读":
+    "The API response starts with over {0} MB of whitespace; its format could not be determined, so reading stopped",
   "请填写 Base URL 和模型 ID": "Enter a Base URL and model ID",
   "请填写 Base URL": "Enter a Base URL",
   消息不能为空: "Message can't be empty",
