@@ -12,6 +12,17 @@ const wd = "E:\\项目\\言",
 const mac = command => screenCommand(command, "/Users/a/proj", { platform: "darwin" });
 
 test("注释与空行：两种平台的四档筛查各自 200ms 内返回", () => {
+  // 先把各档的正则跑热：首次使用要付一次性的编译开销，200ms 量的是筛查耗时而不是 JIT
+  for (const platform of ["win32", "darwin"]) {
+    const options = { platform };
+    for (const check of [
+      c => screenCommand(c, platform === "win32" ? wd : "/Users/a/proj", options),
+      screenLoose,
+      screenAutoReview,
+      screenUnreviewable
+    ])
+      check("true", options);
+  }
   for (const command of [
     "# c\n".repeat(2000),
     "\n".repeat(4000),
