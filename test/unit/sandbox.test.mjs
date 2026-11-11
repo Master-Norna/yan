@@ -753,6 +753,12 @@ const TABLE = [
     "powershell -Command 'env -u X sudo id'",
     'cmd /c "echo sudo x"'
   ].map(command => [command, "x", "x", "x", "o"]),
+  // $() 里的 case / ${} / heredoc 不能让收尾提前配对，否则正文被留在引号视图里。
+  ...[
+    'x=a; echo "$(case $x in a) echo hi; sudo id;; esac)"',
+    'echo "$(echo ${x:-)}; sudo id)"',
+    'echo "$(cat <<EOF\n)\nEOF\n; sudo id)"'
+  ].map(command => [command, "x", "x", "x", "o"]),
   ...[String.raw`sh -c 'rg "a\"|sh" src'`, 'cmd /c "echo x ^| sh"'].map(command => [command, "o", "o", "o", "o"]),
   ['rg "a`"|sh" src', "o", "o", "o", "o", { darwin: "xxxx" }],
   ...[String.raw`rg "a\"|sh" src`, String.raw`grep -E "a\"b|c" x; grep -E "powershell|pwsh" y`].map(command => [

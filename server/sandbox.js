@@ -413,6 +413,8 @@ function matchCaseHeader(text, pos, to) {
     } else if (/\s/.test(c)) {
       let next = p;
       while (next < to && /\s/.test(text[next])) next++;
+      // case 的 WORD 与 in 必须同在一行（bash 对跨行报语法错误）；\<换行> 由上面的转义分支吃掉，不受影响
+      if (/[\r\n]/.test(text.slice(p, next))) return null;
       if (hasWord && text.startsWith("in", next) && (next + 2 >= to || /[\s;&|()]/.test(text[next + 2]))) {
         return next + 2;
       }
@@ -425,6 +427,118 @@ function matchCaseHeader(text, pos, to) {
     }
   }
   return null;
+}
+// 解析 << 后的定界符字：可含引号、$'...'、$"..." 与转义；end 是定界符之后的位置。
+// 定界符是单个字，跨行的 '...' 不算（与 shellText 既有判断一致）。findSubstEnd、shellText 与 substEnds 共用。
+function heredocOp(text, pos, to) {
+  const dash = text[pos + 2] === "-";
+  let p = pos + 2 + (dash ? 1 : 0);
+  while (p < to && (text[p] === " " || text[p] === "\t")) p++;
+  let delim = "",
+    quoted = false,
+    end = p;
+  while (end < to) {
+    const c = text[end];
+    if (c === "'") {
+      const nextSingle = text.indexOf("'", end + 1);
+      if (nextSingle === -1 || nextSingle >= to || text.slice(end + 1, nextSingle).includes("\n")) break;
+      delim += text.slice(end + 1, nextSingle);
+      end = nextSingle + 1;
+      quoted = true;
+    } else if (c === '"') {
+      let nextQuote = end + 1;
+      let content = "";
+      let closed = false;
+      while (nextQuote < to && text[nextQuote] !== "\n") {
+        if (text[nextQuote] === "\\") {
+          if (nextQuote + 1 < to && text[nextQuote + 1] !== "\n") {
+            const nextCh = text[nextQuote + 1];
+            if (/[$`"\\\r\n]/.test(nextCh)) {
+              content += nextCh;
+              nextQuote += 2;
+              continue;
+            }
+          }
+        }
+        if (text[nextQuote] === '"') {
+          closed = true;
+          break;
+        }
+        content += text[nextQuote];
+        nextQuote++;
+      }
+      if (!closed) break;
+      delim += content;
+      end = nextQuote + 1;
+      quoted = true;
+    } else if (c === "$" && text[end + 1] === "'") {
+      let q = end + 2;
+      let raw = "";
+      let closed = false;
+      while (q < to && text[q] !== "\n") {
+        if (text[q] === "\\") {
+          if (q + 1 < to && text[q + 1] !== "\n") {
+            raw += text.slice(q, q + 2);
+            q += 2;
+            continue;
+          }
+        }
+        if (text[q] === "'") {
+          closed = true;
+          q++;
+          break;
+        }
+        raw += text[q];
+        q++;
+      }
+      if (!closed) break;
+      delim += decodeAnsiC(raw);
+      end = q;
+      quoted = true;
+    } else if (c === "$" && text[end + 1] === '"') {
+      let q = end + 2;
+      let content = "";
+      let closed = false;
+      while (q < to && text[q] !== "\n") {
+        if (text[q] === "\\") {
+          if (q + 1 < to && text[q + 1] !== "\n") {
+            const nextCh = text[q + 1];
+            if (/[$`"\\\r\n]/.test(nextCh)) {
+              content += nextCh;
+              q += 2;
+              continue;
+            }
+          }
+        }
+        if (text[q] === '"') {
+          closed = true;
+          q++;
+          break;
+        }
+        content += text[q];
+        q++;
+      }
+      if (!closed) break;
+      delim += content;
+      end = q;
+      quoted = true;
+    } else if (c === "\\") {
+      if (end + 1 < to && text[end + 1] !== "\n" && text[end + 1] !== "\r") {
+        delim += text[end + 1];
+        end += 2;
+        quoted = true;
+      } else if (end + 1 < to && text[end + 1] === "\n") {
+        end += 2;
+      } else if (end + 2 < to && text[end + 1] === "\r" && text[end + 2] === "\n") {
+        end += 3;
+      } else break;
+    } else if (/[\s;&|()<>]/.test(c)) break;
+    else {
+      delim += c;
+      end++;
+    }
+  }
+  return delim ? { delim, dash, quoted, end } : null;
 }
 function findSubstEnd(text, startPos, to) {
   let depth = 1;
@@ -509,116 +623,10 @@ function findSubstEnd(text, startPos, to) {
       continue;
     }
     if (arithDepth === 0 && ch === "<" && text[pos + 1] === "<" && text[pos + 2] !== "<") {
-      const dash = text[pos + 2] === "-";
-      let p = pos + 2 + (dash ? 1 : 0);
-      while (p < to && (text[p] === " " || text[p] === "\t")) p++;
-      let delim = "",
-        delimEnd = p,
-        quoted = false;
-      while (delimEnd < to) {
-        const c = text[delimEnd];
-        if (c === "'") {
-          const end = text.indexOf("'", delimEnd + 1);
-          if (end === -1 || end >= to) break;
-          delim += text.slice(delimEnd + 1, end);
-          delimEnd = end + 1;
-          quoted = true;
-        } else if (c === '"') {
-          let nextQuote = delimEnd + 1;
-          let content = "";
-          let closed = false;
-          while (nextQuote < to && text[nextQuote] !== "\n") {
-            if (text[nextQuote] === "\\") {
-              if (nextQuote + 1 < to && text[nextQuote + 1] !== "\n") {
-                const nextCh = text[nextQuote + 1];
-                if (/[$`"\\\r\n]/.test(nextCh)) {
-                  content += nextCh;
-                  nextQuote += 2;
-                  continue;
-                }
-              }
-            }
-            if (text[nextQuote] === '"') {
-              closed = true;
-              break;
-            }
-            content += text[nextQuote];
-            nextQuote++;
-          }
-          if (!closed) break;
-          delim += content;
-          delimEnd = nextQuote + 1;
-          quoted = true;
-        } else if (c === "$" && text[delimEnd + 1] === "'") {
-          let p = delimEnd + 2;
-          let raw = "";
-          let closed = false;
-          while (p < to && text[p] !== "\n") {
-            if (text[p] === "\\") {
-              if (p + 1 < to && text[p + 1] !== "\n") {
-                raw += text.slice(p, p + 2);
-                p += 2;
-                continue;
-              }
-            }
-            if (text[p] === "'") {
-              closed = true;
-              p++;
-              break;
-            }
-            raw += text[p];
-            p++;
-          }
-          if (!closed) break;
-          delim += decodeAnsiC(raw);
-          delimEnd = p;
-          quoted = true;
-        } else if (c === "$" && text[delimEnd + 1] === '"') {
-          let p = delimEnd + 2;
-          let content = "";
-          let closed = false;
-          while (p < to && text[p] !== "\n") {
-            if (text[p] === "\\") {
-              if (p + 1 < to && text[p + 1] !== "\n") {
-                const nextCh = text[p + 1];
-                if (/[$`"\\\r\n]/.test(nextCh)) {
-                  content += nextCh;
-                  p += 2;
-                  continue;
-                }
-              }
-            }
-            if (text[p] === '"') {
-              closed = true;
-              p++;
-              break;
-            }
-            content += text[p];
-            p++;
-          }
-          if (!closed) break;
-          delim += content;
-          delimEnd = p;
-          quoted = true;
-        } else if (c === "\\") {
-          if (delimEnd + 1 < to && text[delimEnd + 1] !== "\n" && text[delimEnd + 1] !== "\r") {
-            delim += text[delimEnd + 1];
-            delimEnd += 2;
-            quoted = true;
-          } else if (delimEnd + 1 < to && text[delimEnd + 1] === "\n") {
-            delimEnd += 2;
-          } else if (delimEnd + 2 < to && text[delimEnd + 1] === "\r" && text[delimEnd + 2] === "\n") {
-            delimEnd += 3;
-          } else break;
-        } else if (/[\s;&|()<>]/.test(c)) break;
-        else {
-          delim += c;
-          delimEnd++;
-        }
-      }
-      if (delim) {
-        heredocs.push({ delim, dash, quoted });
-        pos = delimEnd;
+      const op = heredocOp(text, pos, to);
+      if (op) {
+        heredocs.push({ delim: op.delim, dash: op.dash, quoted: op.quoted });
+        pos = op.end;
         continue;
       }
     }
@@ -676,6 +684,303 @@ function findSubstEnd(text, startPos, to) {
     pos++;
   }
   return -1;
+}
+// $() 收尾的一趟前扫：ends[$ 的位置] = 配对 ) 的位置，配对规则与 findSubstEnd 相同
+// （引号、注释、heredoc、case、${}、$(())），powershell 用反引号转义、无 ANSI-C 串与反引号命令替换；
+// 但用显式栈代替递归，深层嵌套不会爆栈，整表一次算完不按起点重扫。
+// ${}、未加引号 heredoc 正文与 case 匹配词里的 $( 也会执行：它们不影响外层括号配对，
+// 但内部 $( 的收尾要记进同一张表——这些区域作为子串任务入队扫描，彼此不重叠，总开销仍是 O(n)。
+/**
+ * @typedef {{ kind: "code", depth: number, arith: number, heredocs: { delim: string, dash: boolean, quoted: boolean }[], cases: number[], start: number, open: number } | { kind: "param", depth: number } | { kind: "squote" | "ansi" | "btick" | "dquote" | "pshere" }} SubstMode
+ */
+function substEnds(text, shell) {
+  const ends = new Int32Array(text.length).fill(-1),
+    jobs = [{ text, shell, base: 0 }];
+  while (jobs.length) {
+    const job = jobs.pop();
+    scanSubst(job.text, job.shell, job.base, ends, jobs);
+  }
+  return ends;
+}
+function scanSubst(text, shell, base, ends, jobs) {
+  const posix = shell !== "powershell",
+    n = text.length,
+    /** @type {SubstMode[]} */
+    stack = [{ kind: "code", depth: 0, arith: 0, heredocs: [], cases: [], start: 0, open: -1 }];
+  const top = () => stack[stack.length - 1];
+  const openSubst = (dollar, arith) => {
+    stack.push({ kind: "code", depth: arith ? 2 : 1, arith: arith ? 2 : 0, heredocs: [], cases: [], start: dollar + 2, open: dollar });
+  };
+  const mergeSubst = (from, to, subShell) => {
+    if (to > from + 1) jobs.push({ text: text.slice(from, to), shell: subShell, base: base + from });
+  };
+  let i = 0;
+  while (i < n) {
+    const mode = top(),
+      ch = text[i];
+    if (mode.kind === "pshere") {
+      // PowerShell @"..."@ here-string：正文里只有 $( 会展开，` 转义，行首 "@ 收尾。
+      if (ch === "\n") {
+        i++;
+        if (text[i] === '"' && text[i + 1] === "@") {
+          stack.pop();
+          i += 2;
+        }
+        continue;
+      }
+      if (ch === "`") {
+        i += 2;
+        continue;
+      }
+      if (ch === "$" && text[i + 1] === "(") {
+        openSubst(i, text[i + 2] === "(");
+        i += text[i + 2] === "(" ? 3 : 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (mode.kind === "param") {
+      // ${...}：里面的 $( 会执行、) 不外溢；嵌套 ${} 计深度，转义与引号跟所在 shell。
+      if (posix && ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (!posix && ch === "`") {
+        i += 2;
+        continue;
+      }
+      if (ch === "$" && text[i + 1] === "(") {
+        openSubst(i, text[i + 2] === "(");
+        i += text[i + 2] === "(" ? 3 : 2;
+        continue;
+      }
+      if (ch === "$" && text[i + 1] === "{") {
+        mode.depth++;
+        i += 2;
+        continue;
+      }
+      if (ch === "}") {
+        if (--mode.depth === 0) stack.pop();
+        i++;
+        continue;
+      }
+      if (posix && ch === "$" && text[i + 1] === "'") {
+        stack.push({ kind: "ansi" });
+        i += 2;
+        continue;
+      }
+      if (posix && ch === "$" && text[i + 1] === '"') {
+        stack.push({ kind: "dquote" });
+        i += 2;
+        continue;
+      }
+      if (posix && ch === "`") {
+        stack.push({ kind: "btick" });
+        i++;
+        continue;
+      }
+      if (ch === "'") {
+        stack.push({ kind: "squote" });
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        stack.push({ kind: "dquote" });
+        i++;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (mode.kind !== "code") {
+      if (mode.kind === "dquote") {
+        if (posix ? ch === "\\" : ch === "`") {
+          i += 2;
+          continue;
+        }
+        if (posix && ch === "`") {
+          stack.push({ kind: "btick" });
+          i++;
+          continue;
+        }
+        if (ch === "$" && text[i + 1] === "(") {
+          openSubst(i, text[i + 2] === "(");
+          i += text[i + 2] === "(" ? 3 : 2;
+          continue;
+        }
+        if (ch === '"') {
+          stack.pop();
+          i++;
+          continue;
+        }
+        i++;
+        continue;
+      }
+      if (mode.kind === "btick") {
+        // 反引号体是执行上下文：$( 要照常配对，但 ) 不外溢到外层括号。
+        if (ch === "\\") {
+          i += 2;
+          continue;
+        }
+        if (ch === "$" && text[i + 1] === "(") {
+          openSubst(i, text[i + 2] === "(");
+          i += text[i + 2] === "(" ? 3 : 2;
+          continue;
+        }
+        if (ch === "`") {
+          stack.pop();
+          i++;
+          continue;
+        }
+        i++;
+        continue;
+      }
+      const close = mode.kind === "squote" || mode.kind === "ansi" ? "'" : "`";
+      if (ch === close) {
+        stack.pop();
+        i++;
+      } else if (ch === "\\" && mode.kind !== "squote" && i + 1 < n) i += 2;
+      else i++;
+      continue;
+    }
+    // code：执行上下文。posix 的 \ 与反引号串、powershell 的反引号转义在这里分岔。
+    if (posix && ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (!posix && ch === "`") {
+      i += 2;
+      continue;
+    }
+    if (ch === "#" && commentAt(text, i, shell)) {
+      while (i < n && text[i] !== "\n" && text[i] !== "\r") i++;
+      continue;
+    }
+    if (posix && ch === "$" && text[i + 1] === "'") {
+      stack.push({ kind: "ansi" });
+      i += 2;
+      continue;
+    }
+    if (ch === "$" && text[i + 1] === '"') {
+      // $"..." 在 bash 里仍展开 $( 与反引号，按可展开双引号处理。
+      stack.push({ kind: "dquote" });
+      i += 2;
+      continue;
+    }
+    if (posix && ch === "`") {
+      stack.push({ kind: "btick" });
+      i++;
+      continue;
+    }
+    if (ch === "$" && text[i + 1] === "(") {
+      openSubst(i, text[i + 2] === "(");
+      i += text[i + 2] === "(" ? 3 : 2;
+      continue;
+    }
+    if (ch === "$" && text[i + 1] === "{") {
+      stack.push({ kind: "param", depth: 1 });
+      i += 2;
+      continue;
+    }
+    if (ch === "'") {
+      stack.push({ kind: "squote" });
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      stack.push({ kind: "dquote" });
+      i++;
+      continue;
+    }
+    if (!posix && ch === "@") {
+      // PowerShell here-string：@" / @' 后只跟空白到行尾；"@ 正文里 $( 展开，'@ 全字面量。
+      const q = text[i + 1];
+      if (q === '"' || q === "'") {
+        let nl = i + 2;
+        while (nl < n && (text[nl] === " " || text[nl] === "\t")) nl++;
+        if (nl < n && (text[nl] === "\n" || text[nl] === "\r")) {
+          if (q === '"') {
+            stack.push({ kind: "pshere" });
+            i = nl;
+            continue;
+          }
+          const term = text.indexOf("\n" + q + "@", nl);
+          if (term !== -1) {
+            i = term + 3;
+            continue;
+          }
+        }
+      }
+    }
+    if (ch === "<" && text[i + 1] === "<" && text[i + 2] !== "<" && (i === 0 || text[i - 1] !== "<") && mode.arith === 0) {
+      const op = heredocOp(text, i, n);
+      if (op) {
+        mode.heredocs.push({ delim: op.delim, dash: op.dash, quoted: op.quoted });
+        i = op.end;
+        continue;
+      }
+    }
+    if (ch === "\n") {
+      i++;
+      if (mode.heredocs.length) {
+        let cur = i;
+        while (mode.heredocs.length) {
+          const doc = mode.heredocs.shift();
+          const found = findHeredocEnd(text, doc.delim, doc.dash, cur, n, doc.quoted);
+          if (!found) break;
+          if (!doc.quoted) mergeSubst(cur, found.termLineStart, "posix");
+          cur = found.termLineEnd;
+        }
+        i = cur;
+      }
+      continue;
+    }
+    if (ch === "c" && text.slice(i, i + 4) === "case" && isReservedWordPos(text, i, mode.start)) {
+      const afterIn = matchCaseHeader(text, i + 4, n);
+      if (afterIn !== null) {
+        mode.cases.push(mode.depth);
+        mergeSubst(i + 4, afterIn, shell);
+        i = afterIn;
+        continue;
+      }
+    }
+    if (
+      ch === "e" &&
+      text.slice(i, i + 4) === "esac" &&
+      isReservedWordPos(text, i, mode.start) &&
+      (i + 4 >= n || /[\s;&|()<>]/.test(text[i + 4]))
+    ) {
+      if (mode.cases.length > 0 && mode.depth === mode.cases[mode.cases.length - 1]) {
+        mode.cases.pop();
+        i += 4;
+        continue;
+      }
+    }
+    if (ch === "(") {
+      if (mode.arith > 0) mode.arith++;
+      mode.depth++;
+      i++;
+      continue;
+    }
+    if (ch === ")") {
+      if (mode.arith > 0) mode.arith--;
+      if (mode.cases.length > 0 && mode.depth === mode.cases[mode.cases.length - 1]) {
+        i++;
+        continue;
+      }
+      if (mode.depth > 0) mode.depth--;
+      if (mode.depth === 0) {
+        if (mode.open >= 0) {
+          ends[base + mode.open] = base + i;
+          stack.pop();
+        }
+      }
+      i++;
+      continue;
+    }
+    i++;
+  }
 }
 function unquoteWord(text) {
   let res = "";
@@ -788,6 +1093,9 @@ function shellText(text, shell) {
     });
   };
   push(quoteContext(text, shell), 0, text.length, false);
+  // $() 的收尾不能用 substitution 表：它只按裸括号配对，case 的 )、${} 与 heredoc 正文里的 ) 会被当成收尾，
+  // 把 ; sudo id 这类正文留在引号视图里。substEnds 一趟前扫按 findSubstEnd 同一套规则配对，按 context 缓存。
+  const substEnd = (context, dollar) => (context.ends ??= substEnds(context.text, context.shell))[dollar];
   // 引号与 $() 共用所在文本的收尾表；执行字符串另建一层，彼此不重叠。
   // 每个字符只生成一次视图，深层 $() 不再递归复制整段正文。
   while (frames.length) {
@@ -801,8 +1109,9 @@ function shellText(text, shell) {
     }
     if (frame.quote) {
       const escaped = escapes(text, i, shell, frame.quote),
-        end = context.substitution[i + 2];
-      if (!escaped && frame.quote === '"' && shell !== "cmd" && text[i] === "$" && text[i + 1] === "(" && end >= 0 && end < to) {
+        subst = !escaped && frame.quote === '"' && shell !== "cmd" && text[i] === "$" && text[i + 1] === "(",
+        end = subst ? substEnd(context, i) : -1;
+      if (subst && end >= 0 && end < to) {
         unquoted[at] = " ";
         unquoted[at + 1] = "(";
         unquoted[offset + end] = ")";
@@ -853,7 +1162,7 @@ function shellText(text, shell) {
                 j += 2;
                 continue;
               }
-              const subEnd = context.substitution[j + 2];
+              const subEnd = text[j] === "$" && text[j + 1] === "(" ? substEnd(context, j) : -1;
               if (text[j] === "$" && text[j + 1] === "(" && subEnd >= 0 && subEnd < endAt) {
                 unquoted[offset + j] = " ";
                 unquoted[offset + j + 1] = "(";
@@ -902,118 +1211,11 @@ function shellText(text, shell) {
       text[i + 2] !== "<" &&
       (i === 0 || text[i - 1] !== "<")
     ) {
-      const dash = text[i + 2] === "-";
-      let p = i + 2 + (dash ? 1 : 0);
-      while (p < to && (text[p] === " " || text[p] === "\t")) p++;
-      let delim = "",
-        quoted = false,
-        delimEnd = p;
-      while (delimEnd < to) {
-        const ch = text[delimEnd];
-        if (ch === "'") {
-          const nextSingle = text.indexOf("'", delimEnd + 1);
-          if (nextSingle === -1 || nextSingle >= to || text.slice(delimEnd + 1, nextSingle).includes("\n")) break;
-          delim += text.slice(delimEnd + 1, nextSingle);
-          delimEnd = nextSingle + 1;
-          quoted = true;
-        } else if (ch === '"') {
-          let nextQuote = delimEnd + 1;
-          let content = "";
-          let closed = false;
-          while (nextQuote < to && text[nextQuote] !== "\n") {
-            if (text[nextQuote] === "\\") {
-              if (nextQuote + 1 < to && text[nextQuote + 1] !== "\n") {
-                const nextCh = text[nextQuote + 1];
-                if (/[$`"\\\r\n]/.test(nextCh)) {
-                  content += nextCh;
-                  nextQuote += 2;
-                  continue;
-                }
-              }
-            }
-            if (text[nextQuote] === '"') {
-              closed = true;
-              break;
-            }
-            content += text[nextQuote];
-            nextQuote++;
-          }
-          if (!closed) break;
-          delim += content;
-          delimEnd = nextQuote + 1;
-          quoted = true;
-        } else if (ch === "$" && text[delimEnd + 1] === "'") {
-          let p = delimEnd + 2;
-          let raw = "";
-          let closed = false;
-          while (p < to && text[p] !== "\n") {
-            if (text[p] === "\\") {
-              if (p + 1 < to && text[p + 1] !== "\n") {
-                raw += text.slice(p, p + 2);
-                p += 2;
-                continue;
-              }
-            }
-            if (text[p] === "'") {
-              closed = true;
-              p++;
-              break;
-            }
-            raw += text[p];
-            p++;
-          }
-          if (!closed) break;
-          delim += decodeAnsiC(raw);
-          delimEnd = p;
-          quoted = true;
-        } else if (ch === "$" && text[delimEnd + 1] === '"') {
-          let p = delimEnd + 2;
-          let content = "";
-          let closed = false;
-          while (p < to && text[p] !== "\n") {
-            if (text[p] === "\\") {
-              if (p + 1 < to && text[p + 1] !== "\n") {
-                const nextCh = text[p + 1];
-                if (/[$`"\\\r\n]/.test(nextCh)) {
-                  content += nextCh;
-                  p += 2;
-                  continue;
-                }
-              }
-            }
-            if (text[p] === '"') {
-              closed = true;
-              p++;
-              break;
-            }
-            content += text[p];
-            p++;
-          }
-          if (!closed) break;
-          delim += content;
-          delimEnd = p;
-          quoted = true;
-        } else if (ch === "\\") {
-          if (delimEnd + 1 < to && text[delimEnd + 1] !== "\n" && text[delimEnd + 1] !== "\r") {
-            delim += text[delimEnd + 1];
-            delimEnd += 2;
-            quoted = true;
-          } else if (delimEnd + 1 < to && text[delimEnd + 1] === "\n") {
-            delimEnd += 2;
-          } else if (delimEnd + 2 < to && text[delimEnd + 1] === "\r" && text[delimEnd + 2] === "\n") {
-            delimEnd += 3;
-          } else break;
-        } else if (/[\s;&|()<>]/.test(ch)) {
-          break;
-        } else {
-          delim += ch;
-          delimEnd++;
-        }
-      }
-      if (delim) {
-        frame.heredocs.push({ delim, dash, quoted, cmdStart: frame.stmtStart });
-        quotes.set(at, offset + delimEnd - 1);
-        frame.at = delimEnd;
+      const op = heredocOp(text, i, to);
+      if (op) {
+        frame.heredocs.push({ delim: op.delim, dash: op.dash, quoted: op.quoted, cmdStart: frame.stmtStart });
+        quotes.set(at, offset + op.end - 1);
+        frame.at = op.end;
         continue;
       }
     }
