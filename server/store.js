@@ -5,7 +5,7 @@
 //   技能/      言自己认的技能，一份一个目录、内有 SKILL.md（见 server/skills.js）
 //   配置.json  设置、模型配置（含 API Key）、记忆与草稿——几个浏览器共用这一份，不再各存一套
 //   用量.json  按日记的各类用量（见 server/usage.js）
-// 在设置里换了位置，整份拷到新处，%APPDATA%\言\位置.json 写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
+// 在设置里换了位置，整份拷到新处，系统数据目录里的 位置.json 写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
 // 条子不放在 ~/.yan 里：旧处是叫人自行删去的，条子若在里头，删了旧数据也就删了条子，下次开又回到默认处。
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
 // 由 server.js 装配：require("./server/store.js")({ working })——working 报各页正作答的有几段（见 server/chats.js）
@@ -16,10 +16,20 @@ const path = require("node:path");
 const os = require("node:os");
 const { expandHome, pathIsInside } = require("./work/paths.js");
 
+const WIN = process.platform === "win32",
+  MAC = process.platform === "darwin";
+
 /** @param {{ working?: () => number }} [options] */
 module.exports = function createStore({ working = () => 0 } = {}) {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
-    POINTER = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "言", "位置.json"),
+    POINTER_DIR = WIN
+      ? process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming")
+      : MAC
+        ? path.join(os.homedir(), "Library", "Application Support")
+        : process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"),
+    POINTER = path.join(POINTER_DIR, "言", "位置.json"),
+    // 早前 macOS / 类 Unix 版沿用了 Windows 的 %APPDATA% 写法：搬家后旧条子只读一次，写新条子时顺手清掉
+    LEGACY_POINTER = WIN ? "" : path.join(os.homedir(), "AppData", "Roaming", "言", "位置.json"),
     CONFIG_FILE = "配置.json";
   // 把现存祖先的链接也算进去，避免选到旧根内部的 junction 后递归拷贝自身。
   function physicalPath(value) {
@@ -41,13 +51,18 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     return typeof pointed === "string" && path.isAbsolute(pointed) ? path.resolve(pointed) : "";
   }
   function writePointer(target) {
-    if (target.toLowerCase() === HOME_ROOT.toLowerCase()) return fs.rmSync(POINTER, { force: true });
+    if (target.toLowerCase() === HOME_ROOT.toLowerCase()) {
+      fs.rmSync(POINTER, { force: true });
+      if (LEGACY_POINTER) fs.rmSync(LEGACY_POINTER, { force: true });
+      return;
+    }
     fs.mkdirSync(path.dirname(POINTER), { recursive: true });
     writeAtomic(POINTER, JSON.stringify({ 言: "位置", root: target }, null, 1));
+    if (LEGACY_POINTER) fs.rmSync(LEGACY_POINTER, { force: true });
   }
   function initialRoot() {
     if (process.env.YAN_HOME) return path.resolve(expandHome(process.env.YAN_HOME));
-    return readPointer(POINTER) || HOME_ROOT;
+    return readPointer(POINTER) || (LEGACY_POINTER && readPointer(LEGACY_POINTER)) || HOME_ROOT;
   }
   let root = initialRoot();
   const paths = () => ({
@@ -150,7 +165,7 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     return { count, busy };
   }
   // 换位置：parent 下的 .yan 就是新根。那里已有言的数据（另一台机器拷来的、先前搬过去的）就直接用它；
-  // 否则把整份拷过去。旧处原样留着（可自行删去），%APPDATA%\言\位置.json 记下新根，桥接重启后也认得
+  // 否则把整份拷过去。旧处原样留着（可自行删去），系统数据目录里的 位置.json 记下新根，桥接重启后也认得
   const handleMove = jsonRoute(
     async body => {
       const parent = path.resolve(expandHome(body.parent));
