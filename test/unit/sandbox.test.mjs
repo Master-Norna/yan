@@ -371,7 +371,11 @@ test("screenCommand：指令通道也不许显式碰机密文件或直接改 .gi
     "type src\\.env.local",
     'cat "keys/id_rsa"',
     "Get-Content config/secrets.yaml",
-    "Remove-Item certs/site.pfx"
+    "Remove-Item certs/site.pfx",
+    // 数据流写法碰的是同一件文件本身
+    "Get-Content .env::$DATA",
+    "type config\\secrets.json::$DATA",
+    "node -e \"fs.readFileSync('keys/id_rsa::$DATA')\""
   ])
     assert.match(screen(command), /机密|凭据/, command);
   for (const command of ["Set-Content .git/config x", "Remove-Item .git/hooks/pre-commit", "echo x > .git/config"])
@@ -396,6 +400,14 @@ test("screenPath：机密文件不读不写，.git 内部不写、可读；别�
     assert.match(screenPath(p), /机密文件/, p);
     assert.match(screenPath(p, { write: true }), /机密文件/, p);
   }
+  // Windows 的数据流写法（x::$DATA、x:stream）碰的是同一件文件本身：判之前剥掉，别让它绕过这一道
+  if (process.platform === "win32")
+    for (const p of [".env::$DATA", "src/.env:stream", "a/id_rsa::$DATA", "key.pem:$DATA", "config\\secrets.json::$DATA"]) {
+      assert.match(screenPath(p), /机密文件/, p);
+      assert.match(screenPath(p, { write: true }), /机密文件/, p);
+    }
+  // 别的平台上冒号是文件名的一部分：不能剥，keys/service:prod.pem 仍是私钥
+  else assert.match(screenPath("keys/service:prod.pem"), /机密文件/);
   assert.equal(screenPath(".git/config"), null);
   assert.match(screenPath(".git/config", { write: true }), /\.git 内部/);
   assert.match(screenPath(".git\\hooks\\pre-commit", { write: true }), /\.git 内部/);
@@ -462,14 +474,17 @@ test("三档筛查都不放指令调言的本机桥接：它的接口不经请�
     `Invoke-RestMethod http://localhost:${port}/api/store`,
     `node -e "fetch('http://[::1]:${port}/api/work/run')"`,
     `wget 127.0.0.1:${port}/api/bootstrap`,
-    `curl -X POST http://127.0.0.1:${port}/api/timer/set -d "{}"`
+    `curl -X POST http://127.0.0.1:${port}/api/timer/set -d "{}"`,
+    // 端口写前导零（:08787）：.NET 与 Node 都当作同一个端口解析，这一道也要认出来
+    `curl http://localhost:0${port}/api/work/run`,
+    `Invoke-RestMethod http://127.0.0.1:000${port}/api/store`
   ]) {
     assert.match(screen(command), /沙箱拒绝：指令不调言的本机桥接/, command);
     assert.match(screenLoose(command), /沙箱拒绝：指令不调言的本机桥接/, command);
     assert.match(screenAutoReview(command), /审查拒绝：指令不调言的本机桥接/, command);
   }
   // 别的本机端口照常能测；端口只是前缀相同的不算
-  for (const command of ["curl http://127.0.0.1:3000/", `curl http://127.0.0.1:${port}0/`]) {
+  for (const command of ["curl http://127.0.0.1:3000/", `curl http://127.0.0.1:${port}0/`, `curl http://127.0.0.1:0${port}0/`]) {
     assert.equal(screen(command), null, command);
     assert.equal(screenAutoReview(command), null, command);
   }
@@ -816,7 +831,7 @@ const TABLE = [
     "cat <<EOF\n$(echo case " + "x".repeat(30) + "; echo fine)\nEOF",
     "cat <<EOF\n$(echo case x in x; echo ok)\nEOF",
     "cat <<EOF\n$(echo ${x:-)}; echo ok)\nEOF",
-    "cat <<EOF\n$(echo `echo \")\"`; echo ok)\nEOF",
+    'cat <<EOF\n$(echo `echo ")"`; echo ok)\nEOF',
     "cat <<EOF\n$\\\n(echo fine)\nEOF",
     "cat <<E\\\nOF\nhello\nEOF",
     "cat <<E\\\nOF\n$(echo fine)\nEOF",
@@ -862,7 +877,7 @@ const TABLE = [
     "cat <<$'#\\400'\nhello\n#\neval 'printf MARKER'\n#Ā",
     "cat <<'EOF' |\neval 'printf MARKER'\nEOF\nsh",
     "cat <<$'EOF'\nhello\nEOF\neval 'printf MARKER'\n$EOF",
-    'cat <<$"EOF"\nhello\nEOF\neval \'printf MARKER\'\n$EOF',
+    "cat <<$\"EOF\"\nhello\nEOF\neval 'printf MARKER'\n$EOF",
     "cat <<EOF\n$(case x in x) echo ok;; esac; eval echo)\nEOF",
     "cat <<EOF\n$(echo case " + "x".repeat(30) + "; eval echo)\nEOF",
     "cat <<EOF\n$(echo case x in x; eval 'printf MARKER')\nEOF",
@@ -882,14 +897,7 @@ const TABLE = [
     "s\\h <<'EOF'\neval (x)\nEOF",
     "s\\\nh <<'EOF'\neval printf MARKER\nEOF",
     "cat <<EOF\n$(echo `echo \")\"`; eval 'printf MARKER')\nEOF"
-  ].map(command => [
-    command,
-    "x",
-    "x",
-    "x",
-    "x",
-    { win32: "oooo" }
-  ]),
+  ].map(command => [command, "x", "x", "x", "x", { win32: "oooo" }]),
   ...["\\sudo id"].map(command => [command, "x", "x", "x", "o"]),
   // 注释先抹掉；落单引号不能遮住后续指令。
   ...[
@@ -1283,4 +1291,97 @@ test("攻击写法总表：三档与「审了也不放行」各得其所", () =>
         `${platform}: ${command}`
       );
     }
+});
+
+test("screenCommand：先 cd 到工作目录之外、再动仓库，一样拒绝；目录内的 cd 与查看类照旧", () => {
+  for (const command of [
+    "cd ..; git checkout -- f.txt",
+    "cd ..; git reset --hard",
+    "cd C:\\other; git checkout -- src/a.js",
+    "pushd ..; git clean -fdx",
+    "Set-Location ..; git restore .",
+    "cd ..; git add f.txt",
+    "Set-Location -Path ..; git restore .",
+    // 去向静态看不出的 cd 之后，再动仓库按出去了算
+    "cd $env:TEMP\\repo; git commit -m x",
+    "cd; git reset --hard"
+  ])
+    assert.match(screen(command), /工作目录之外/, command);
+  for (const command of [
+    "cd sub; git checkout -- f.txt",
+    "cd sub; git commit -m x",
+    "cd ..; git log --oneline",
+    "cd ..; git status",
+    "cd ..; rg TODO src",
+    "git checkout -- f.txt",
+    // 先后要对上：git 在 cd 之前，动的是工作目录
+    "git commit -m x; cd C:\\other; python a.py",
+    // cd 过的目录接着算：sub 再 -C .. 落回工作目录；出去又回来也算回来
+    "cd sub; git -C .. checkout -- f.txt",
+    "cd ..\\言; git commit -m x",
+    // branch / tag 的 --list 后面是模式，不是要建的名
+    'cd ..; git tag --list "v1.3*"',
+    "cd ..; git branch --list feat*",
+    // 写明了 --get 一类的 config，多出的操作数是模式或 URL
+    "git -C .. config --get-urlmatch http https://example.com/",
+    "git -C .. config --get-all remote.origin.fetch main"
+  ])
+    assert.equal(screen(command), null, command);
+  // 工作目录本身带 $ 或短文件名里的 ~：那是已解析好的目录，不是 shell 展开
+  for (const dir of ["C:\\tmp\\cost$repo", "C:\\Users\\RUNNER~1\\work"]) assert.equal(screenCommand("git add f.txt", dir, win), null, dir);
+});
+
+test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之外时，只看不改才放行；目录内与查看类照旧", () => {
+  for (const command of [
+    "git -C .. checkout -- src/a.js",
+    "git -C.. reset --hard",
+    "git -C ../other clean -fdx",
+    "git -C E:\\other checkout -- src/a.js",
+    "git --git-dir=..\\.git checkout -- src/a.js",
+    "git --git-dir ..\\.git reset --hard",
+    "git --work-tree .. restore .",
+    'git -C "E:\\other dir" checkout -- src/a.js',
+    // 全局开关夹在中间不能把子命令藏起来（--no-pager、-c 都试）
+    "git -C .. --no-pager checkout -- f.txt",
+    "git -C .. -c core.autocrlf=false reset --hard",
+    // 写子命令不能只列几个常见的：add、commit、rm、tag 一样动的是别处的仓库
+    "git -C .. add f.txt",
+    "git -C .. commit -am msg",
+    "git -C .. rm f.txt",
+    "git -C .. tag v9",
+    "git -C .. push origin main",
+    "git -C .. branch -d x",
+    "git -C .. config user.name x",
+    // 同一个 git 里的目录选项得全看：前一个在工作目录里，后一个指出去
+    "git --git-dir=.git --work-tree .. checkout -- f.txt",
+    "git -C sub -C ../.. checkout -- src/a.js",
+    // 静态看不出落到哪的（shell 展开）一律按出去了算；-c 能塞进 alias / pager，不算查看
+    "git -C $env:USERPROFILE checkout -- f.txt",
+    "git -C ~/other reset --hard",
+    "git -C .. -c core.pager=cat log"
+  ])
+    assert.match(screen(command), /工作目录之外/, command);
+  for (const command of [
+    "git -C sub checkout -- src/a.js",
+    "git -C . reset --hard",
+    "git checkout -- src/a.js",
+    "git reset --hard",
+    "git -C .. log --oneline",
+    "git -C .. status",
+    "git -C .. diff",
+    "git -C .. show HEAD",
+    "git -C .. branch",
+    "git -C .. branch -a",
+    "git -C .. branch --contains main",
+    "git -C .. config --get user.name",
+    "git -C .. config user.name",
+    "git -C .. remote -v",
+    "git -C .. stash list",
+    "git -C .. log --no-pager -n 5",
+    "git -C $env:USERPROFILE log --oneline",
+    // -C 按出现次序生效：sub 再 .. 又回到工作目录
+    "git -C sub -C .. checkout -- src/a.js",
+    "git status"
+  ])
+    assert.equal(screen(command), null, command);
 });

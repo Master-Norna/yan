@@ -13,7 +13,8 @@ const { screenStorePath, screenStoreCommand } = require("../../server/sandbox.js
 const win = process.platform === "win32",
   R = win ? "E:\\聊天记录\\.yan" : "/Users/a/聊天记录/.yan",
   J = (...p) => path.join(R, ...p),
-  project = win ? "E:\\项目\\言" : "/Users/a/project";
+  project = win ? "E:\\项目\\言" : "/Users/a/project",
+  onlyWindows = { skip: !win && "用例写的是 Windows 路径" };
 
 test("screenStoreCommand：点名配置、备份、登录文件且靠近存储根的拦下，别处的同名字样放行", () => {
   for (const [command, workdir] of win
@@ -42,16 +43,24 @@ test("screenStoreCommand：点名配置、备份、登录文件且靠近存储�
   assert.equal(screenStoreCommand(`Get-Content "${J("配置.json")}"`, "", "D:\\x"), null, "没给存储根不判");
 });
 
-test("screenStorePath：根下这几样（含备份目录里的）拦下，卷宗里同名的放行，大小写不论", () => {
-  for (const p of [
-    J("配置.json"),
-    J("配置备份", "2026.json"),
-    J("ChatGPT 登录.json"),
-    win ? "e:\\聊天记录\\.YAN\\配置.JSON" : "/Users/a/聊天记录/.YAN/配置.JSON"
-  ])
+test("screenStorePath：根下这几样（含备份目录里的）拦下，卷宗里同名的放行，大小写不论", onlyWindows, () => {
+  for (const p of [J("配置.json"), J("配置备份", "2026.json"), J("ChatGPT 登录.json"), "e:\\聊天记录\\.YAN\\配置.JSON"])
     assert.ok(screenStorePath(p, R), p);
-  for (const p of [J("卷宗", "a.md"), J("卷宗", "配置.json"), J("对话")]) assert.equal(screenStorePath(p, R), null, p);
+  // Windows 的数据流写法碰的是同一件文件本身：剥掉再比，别让它绕过这一道
+  for (const p of [J("配置.json::$DATA"), J("ChatGPT 登录.json::$DATA"), "e:\\聊天记录\\.YAN\\配置.JSON:stream"])
+    assert.ok(screenStorePath(p, R), p);
+  for (const p of [J("卷宗", "a.md"), J("卷宗", "配置.json"), J("对话"), J("卷宗", "配置.json::$DATA")])
+    assert.equal(screenStorePath(p, R), null, p);
 });
+
+test(
+  "screenStorePath：别的平台上存储根带冒号也认得出（冒号是路径的一部分，不当数据流剥）",
+  { skip: process.platform === "win32" && "只在非 Windows 上成立" },
+  () => {
+    const colon = "/tmp/user:data/.yan";
+    assert.ok(screenStorePath(`${colon}/配置.json`, colon));
+  }
+);
 
 const root = path.resolve("test/.tmp/store-secrets"),
   archive = path.join(root, "卷宗");
@@ -91,7 +100,9 @@ test("宽档、没开沙箱也拦：读、写配置，读备份", async () => {
   for (const [route, body] of [
     ["read", { path: path.join(root, "配置.json"), roam: true, permission: "auto" }],
     ["read", { path: path.join(root, "配置备份", "a.json"), roam: true, permission: "review" }],
-    ["write", { path: path.join(root, "配置.json"), content: "{}", roam: true, permission: "auto" }]
+    ["write", { path: path.join(root, "配置.json"), content: "{}", roam: true, permission: "auto" }],
+    // 数据流写法（配置.json::$DATA）碰的是同一件文件本身，不能借它把 Key 读出来（只有 Windows 上才是）
+    ...(process.platform === "win32" ? [["read", { path: `${path.join(root, "配置.json")}::$DATA`, roam: true, permission: "auto" }]] : [])
   ]) {
     const { status, data } = await call(route, body);
     assert.notEqual(status, 200, `${route} ${body.path}`);
@@ -114,3 +125,21 @@ test("指令点名存储根的配置：径行、不开沙箱也不跑", async ()
   assert.notEqual(status, 200);
   assert.match(data.error, /配置与登录文件/);
 });
+
+test("screenStorePath：UNC 共享目录作为存储根时，剥离数据流后仍保留 \\\\ 前缀", onlyWindows, () => {
+  const uncRoot = "\\\\server\\share\\.yan";
+  assert.ok(screenStorePath("\\\\server\\share\\.yan\\配置.json", uncRoot));
+  assert.ok(screenStorePath("\\\\server\\share\\.yan\\配置.json::$DATA", uncRoot));
+});
+
+test(
+  "screenStorePath：POSIX 平台上存储根下这几样拦下，卷宗里同名的放行",
+  { skip: process.platform === "win32" && "只在非 Windows 上成立" },
+  () => {
+    const root = "/Users/a/聊天记录/.yan",
+      j = (...p) => path.join(root, ...p);
+    for (const p of [j("配置.json"), j("配置备份", "2026.json"), j("ChatGPT 登录.json"), "/Users/a/聊天记录/.YAN/配置.JSON"])
+      assert.ok(screenStorePath(p, root), p);
+    for (const p of [j("卷宗", "a.md"), j("卷宗", "配置.json"), j("对话")]) assert.equal(screenStorePath(p, root), null, p);
+  }
+);
