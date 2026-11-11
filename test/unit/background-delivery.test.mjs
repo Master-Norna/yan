@@ -39,7 +39,8 @@ for (const cancel of [true, false])
         assert.equal(response.status, 200);
         assert.ok(report.id && report.running);
       }
-      await sleep(3400);
+      if (cancel) await sleep(3400);
+      else for (let i = 0; i < 160 && !fs.existsSync(path.join(root, "result.txt")); i++) await sleep(50);
       assert.equal(fs.existsSync(path.join(root, "result.txt")), !cancel);
     } finally {
       controller.abort();
