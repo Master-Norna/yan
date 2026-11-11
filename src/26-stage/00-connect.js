@@ -198,8 +198,9 @@ function stageMessage(message) {
   const params = message.params || {};
   if (message.method === "Target.targetCreated" || message.method === "Target.targetInfoChanged") {
     const info = params.targetInfo;
-    if (!stageTabType(info) || (stage.helperCtx && info.browserContextId === stage.helperCtx)) return;
-    if (stageNotTab(info)) return void stageDropTab(info.targetId);
+    // 空页后来才补出类型与地址：不再是标签时，要撤掉此前收进来的那一项。
+    if (!stageTabType(info) || (stage.helperCtx && info.browserContextId === stage.helperCtx) || stageNotTab(info))
+      return void stageDropTab(info.targetId);
     const fresh = !stage.tabs.has(info.targetId);
     stage.tabs.set(info.targetId, { title: info.title, url: info.url, ctx: info.browserContextId });
     // 模型新开了一页：跟过去。人用中键、Ctrl 点链接开的是后台的一页，与浏览器一样留在原处

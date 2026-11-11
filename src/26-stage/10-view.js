@@ -305,11 +305,12 @@ async function stageRefreshTabs() {
   let changed = false;
   for (const info of result?.targetInfos || []) {
     const tab = stage.tabs.get(info.targetId);
-    if (!stageTabType(info) || !tab || (tab.title === info.title && tab.url === info.url)) continue;
-    if (stageNotTab(info)) {
+    if (!tab) continue;
+    if (!stageTabType(info) || stageNotTab(info)) {
       stageDropTab(info.targetId);
       continue;
     }
+    if (tab.title === info.title && tab.url === info.url) continue;
     Object.assign(tab, { title: info.title, url: info.url });
     changed = true;
   }
