@@ -195,8 +195,14 @@ check(
 await evalJs(`document.querySelector("#editMemory").click(); true`);
 await sleep(100);
 await evalJs(
-  `(a => { a.value = ""; a.dispatchEvent(new Event("input")); a.blur(); })(document.querySelector("#settingsContent .memory-text")); true`
+  `(a => { a.value = ""; a.dispatchEvent(new Event("input")); })(document.querySelector("#settingsContent .memory-text")); true`
 );
+// 真正点「完成」：失焦到头部按钮时不重画，最终提交由按钮接手，不能把旧正文画回来。
+const doneAt = await evalJs(
+  `(r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))(document.querySelector("#editMemory").getBoundingClientRect())`
+);
+for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
+  await send("Input.dispatchMouseEvent", { type, ...doneAt, ...(type === "mouseMoved" ? {} : { button: "left", clickCount: 1 }) });
 await sleep(200);
 check(
   "emptying a category deletes it",

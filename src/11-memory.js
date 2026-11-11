@@ -106,9 +106,9 @@ function memorySnapshot(conversation) {
 }
 // ── 优化 ──
 // 记忆改过（有一类晚于 tunedAt：主模型记的、人在设置里改的、别处同步来的），一答落定时交专司「记忆优化」理一遍。
-// 它只读各类全文，答回要改的那几类的新全文，没提到的类一字不动。送出之后又被改过的类不认它的改法：人刚改的不被盖掉。
-// 它写的记作送出那一刻、tunedAt 也记那一刻：这阵里别处改的仍算没理过，它自己写的不算，不会一回回理自己的手笔。
-// 没成提示一句（见 dutyFailed，同样的错只提一回），tunedAt 不动，下一答落定时再来。几页同开各自理也无妨：都按类写、写前比对过
+// 它只读各类全文，答回要改的那几类的新全文，没提到的类一字不动。可以并类、改类名，整批都依赖送出的那份全文：
+// 等待期间记忆或存储根变了，这一批就作废，不能只按结果类名比对——搬到新类里的旧内容也会把人刚删改的带回来。
+// 它写的与 tunedAt 都记作送出那一刻，不会一回回理自己的手笔。没成提示一句（见 dutyFailed，同样的错只提一回），下一答落定时再来
 let tuning = null;
 function memoryStale() {
   const at = store.memory.tunedAt || "";
@@ -126,28 +126,23 @@ function tuneMemory() {
 }
 async function tuneOnce() {
   const at = now(),
-    sent = new Map(store.memory.items.map(item => [item.category, item.updatedAt])),
+    root = bootstrap.store?.root,
+    sent = JSON.stringify(store.memory),
     reply = await askDuty("memory", prompt("memory.case", { items: memoryText() }), {
       systemPrompt: prompt("memory.system"),
       maxTokens: 8000,
       signal: AbortSignal.timeout(180000)
     });
+  if (bootstrap.store?.root !== root || JSON.stringify(store.memory) !== sent) throw Error("记忆或存储位置已变化，这批整理未写入");
   let changed = 0,
     invalid = 0;
-  // 本批已处理过的类（写了、删了、原样未动都算）：同一类再来一条时按后来的落地，不当成「送出后被别人改过」
-  const touched = new Set();
   for (const op of parseMemoryOps(reply)) {
     // 只认字符串：缺了 text（或给 null、数字、数组）是模型没按约定答，不能当成「空串即删去这一类」把一整类删掉
     if (!op || typeof op !== "object" || !op.category || typeof op.text !== "string") {
       invalid += 1;
       continue;
     }
-    const name = cleanMemoryCategory(op.category),
-      item = memoryOf(name);
-    // 送出后动过的、删了的不认；送出时没有、这阵里别处新起的同名一类也不认
-    if (!touched.has(name) && (item ? sent.get(name) !== item.updatedAt : sent.has(name))) continue;
-    touched.add(name);
-    if (writeMemory(name, op.text, at)) changed += 1;
+    if (writeMemory(op.category, op.text, at)) changed += 1;
   }
   // 有一条没按约定答就不算理成：tunedAt 不前进，下一答落定时再来。已落地的照留，也要当场存下、画出来——
   // 不然只在内存里，等别的动作碰巧存一次，其间多页同步可能把它盖掉
@@ -262,7 +257,18 @@ function memoryNameField(target, className, settle) {
 }
 function bindMemoryEvents() {
   const host = $("#settingsContent"),
-    item = memoryCategoryOpen === null ? null : memoryOf(memoryCategoryOpen);
+    item = memoryCategoryOpen === null ? null : memoryOf(memoryCategoryOpen),
+    area = /** @type {HTMLTextAreaElement|null} */ (host.querySelector(".memory-text"));
+  // 点「完成」与移开焦点走同一次提交：空正文在编辑期间暂留，落定时才删类。
+  const finish = () => {
+    memoryEditing = false;
+    if (area && item && !area.value.trim()) {
+      store.memory.items = store.memory.items.filter(entry => entry !== item);
+      forgetMemorySnapshots();
+      saveStore();
+    }
+    renderSettings();
+  };
   host
     .querySelectorAll("[data-memory-cat]")
     .forEach(button => button.addEventListener("click", () => openMemoryCategory(button.dataset.memoryCat || null)));
@@ -280,12 +286,11 @@ function bindMemoryEvents() {
     openMemoryCategory(to);
   });
   $("#memoryCatName")?.addEventListener("keydown", e => e.key === "Enter" && e.target.blur());
-  $("#editMemory")?.addEventListener("click", () => openMemoryCategory(memoryCategoryOpen, !memoryEditing));
+  $("#editMemory")?.addEventListener("click", () => (memoryEditing ? finish() : openMemoryCategory(memoryCategoryOpen, true)));
   // 点一下正文即改；划选字时不算
   host.querySelector("[data-memory-body]")?.addEventListener("click", () => {
     if (!String(window.getSelection()).trim()) openMemoryCategory(memoryCategoryOpen, true);
   });
-  const area = /** @type {HTMLTextAreaElement|null} */ (host.querySelector(".memory-text"));
   if (area && item) {
     fitTextarea(area);
     area.addEventListener("input", () => {
@@ -299,14 +304,7 @@ function bindMemoryEvents() {
     // 焦点离开即改完、回到只读；挪到头上的小画不算，免得重画吞了那一下点按。改空了即删去这一类
     area.addEventListener("blur", e => {
       if (host.querySelector(".memory-pane-head")?.contains(e.relatedTarget)) return;
-      memoryEditing = false;
-      if (!area.value.trim()) {
-        store.memory.items = store.memory.items.filter(entry => entry !== item);
-        // 改空即删去这一类：同「删去此类」，本页各段对话定的那份一并作废
-        forgetMemorySnapshots();
-        saveStore();
-      }
-      renderSettings();
+      finish();
     });
     area.addEventListener("keydown", e => {
       if (e.key !== "Escape") return;

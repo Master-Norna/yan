@@ -17,7 +17,8 @@ watchSaves: () => {
   store.savesSeen = 0;
   saveStore = () => (store.savesSeen += 1);
 },
-saves: () => store.savesSeen`;
+saves: () => store.savesSeen,
+root: value => { bootstrap.store = { root: value }; }`;
 function setup(reply, seed = seedItem()) {
   const f = load(["tuneOnce", setupCode, "memory: () => store.memory"]);
   f.setup(reply, seed);
@@ -77,3 +78,31 @@ test("tuneOnce：空清单（没有要改的）算理成，tunedAt 前进", asyn
   await f.tuneOnce();
   assert.notEqual(f.memory().tunedAt, "2026-01-01T00:00:00.000Z");
 });
+
+test("tuneOnce：输入未变时仍可改类名、并类", async () => {
+  const f = setup('[{"category":"工作","text":""},{"category":"项目","text":"用户在做言的记忆模块"}]');
+  await f.tuneOnce();
+  assert.deepEqual(
+    f.memory().items.map(({ category, text }) => ({ category, text })),
+    [{ category: "项目", text: "用户在做言的记忆模块" }]
+  );
+});
+
+for (const change of ["clear", "edit", "add", "root", "tuned"])
+  test(`tuneOnce：等待期间 ${change} 后，跨类结果整批作废且不推进 tunedAt`, async () => {
+    let reply;
+    const f = setup(new Promise(resolve => (reply = resolve)));
+    f.watchSaves();
+    f.root("A");
+    const tuning = f.tuneOnce();
+    if (change === "clear") f.memory().items = [];
+    if (change === "edit") f.memory().items[0].text = "用户刚纠正的新内容";
+    if (change === "add") f.memory().items.push({ id: "m2", category: "偏好", text: "新的偏好", updatedAt: "2026-02-01" });
+    if (change === "root") f.root("B");
+    if (change === "tuned") f.memory().tunedAt = "2026-02-01T00:00:00.000Z";
+    const before = JSON.stringify(f.memory());
+    reply('[{"category":"工作","text":""},{"category":"项目","text":"旧内容"}]');
+    await assert.rejects(tuning, /记忆或存储位置已变化/);
+    assert.equal(JSON.stringify(f.memory()), before);
+    assert.equal(f.saves(), 0);
+  });
