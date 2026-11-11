@@ -117,6 +117,27 @@ for (const invalid of [false, true])
       assert.equal(read("B").tokens.access_token, "new-B");
     }));
 
+test("A → B → A 换根：回到原凭证仍复用在途换新，不重复消费刷新令牌", async () =>
+  fixture(async ({ provider, switchRoot, read }) => {
+    const replies = [deferred(), deferred()];
+    let calls = 0;
+    globalThis.fetch = () => replies[calls++].promise;
+    const first = provider.headers({}, {});
+    switchRoot("B");
+    const middle = assert.rejects(provider.headers({}, {}), /登录或存储位置已变化/);
+    switchRoot("A");
+    const again = provider.headers({}, {});
+    assert.equal(calls, 2);
+    replies[0].resolve(fresh("A"));
+    assert.deepEqual(
+      (await Promise.all([first, again])).map(h => h.Authorization),
+      ["Bearer new-A", "Bearer new-A"]
+    );
+    replies[1].resolve(fresh("B"));
+    await middle;
+    assert.equal(read("B").tokens.access_token, "access-B");
+  }));
+
 for (const change of ["logout", "root"])
   test(`授权回调换令牌途中 ${change}：旧授权不能落盘`, async () =>
     fixture(async ({ call, read, switchRoot }) => {

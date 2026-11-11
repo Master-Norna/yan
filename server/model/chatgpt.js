@@ -95,22 +95,21 @@ module.exports = function createChatgpt({ home }) {
   }
 
   // 换新一次只走一回：几段对话同时开工时不能各拿旧刷新令牌去换（刷新令牌换一次就作废旧的，第二个会被当成重放）
-  let refreshing = null;
+  const refreshing = new Map();
   async function accessToken() {
     const target = file(),
       auth = load();
     if (!auth.tokens?.access_token) throw Error("还没登录 ChatGPT：到「设置 → 模型」里点「登录」");
     if (auth.tokens.expires_at - Date.now() > 5 * 60 * 1000) return auth.tokens.access_token;
-    const before = JSON.stringify(auth);
-    if (refreshing?.file === target && refreshing.before === before) return refreshing.promise;
+    const before = JSON.stringify(auth),
+      key = `${target}\u0000${before}`;
+    if (refreshing.has(key)) return refreshing.get(key);
     // 换根、退出、重新登录后，旧请求的成功与失效回话都不能动新凭证；同一份凭证仍只换一回。
     const check = () => {
       if (file() !== target || JSON.stringify(load()) !== before)
         throw Object.assign(Error("ChatGPT 的登录或存储位置已变化，请重试"), { status: 400 });
     };
-    const refresh = { file: target, before, promise: null };
-    refreshing = refresh;
-    refresh.promise = (async () => {
+    const refresh = (async () => {
       try {
         const fresh = await tokenRequest({
           grant_type: "refresh_token",
@@ -132,10 +131,9 @@ module.exports = function createChatgpt({ home }) {
         save(rest);
         throw Error("ChatGPT 的登录已失效，请到「设置 → 模型」里重新登录");
       }
-    })().finally(() => {
-      if (refreshing === refresh) refreshing = null;
-    });
-    return refresh.promise;
+    })().finally(() => refreshing.delete(key));
+    refreshing.set(key, refresh);
+    return refresh;
   }
   // 缓存键另放进请求头的 session_id：后端照它把请求送到存着前文缓存的那一处，光有请求体里的 prompt_cache_key 一回也不中
   // （2026-10-09 实测：同一前缀隔半分钟再发，带它读到 99%，不带一直是 0）
