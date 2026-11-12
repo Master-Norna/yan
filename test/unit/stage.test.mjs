@@ -92,6 +92,7 @@ test("接法由言补齐：在人写的 --config 上合并，人写了的照人�
   assert.deepEqual(launched(bare).launchOptions.args, [
     "--remote-debugging-port=9288",
     "--remote-allow-origins=http://127.0.0.1:8787,http://127.0.0.1:9288",
+    "--hide-crash-restore-bubble",
     "--window-position=-32000,-32000"
   ]);
   // 结果里的文件写全路径
@@ -119,7 +120,8 @@ test("接法由言补齐：在人写的 --config 上合并，人写了的照人�
   assert.deepEqual(browser.launchOptions.args, [
     "--remote-debugging-port=9300",
     "--remote-allow-origins=http://127.0.0.1:8787,http://127.0.0.1:9300",
-    "--window-position=0,0"
+    "--window-position=0,0",
+    "--hide-crash-restore-bubble"
   ]);
   // 接别处起好的浏览器（--cdp-endpoint）：它的启动参数言管不着，不补
   assert.deepEqual(
