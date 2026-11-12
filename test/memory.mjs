@@ -146,9 +146,40 @@ check(
   await evalJs(`document.querySelector("#settingsContent .memory-body")?.textContent === "用户偏好中文交流；命令用 PowerShell 而非 bash"`)
 );
 await shot("memory-settings.png");
-// 点一下正文即改
+check(
+  "read-only memory uses an arrow cursor, including the category name",
+  await evalJs(
+    `[...document.querySelectorAll("#settingsContent .memory-body, #settingsContent .memory-cat-name")].every(n => getComputedStyle(n).cursor === "default") && !document.querySelector("#memoryCatName")`
+  )
+);
+// 只有「修改」进入编辑；点正文仍只读，字可划选
 await evalJs(`document.querySelector("#settingsContent .memory-body").click(); true`);
 await sleep(100);
+check(
+  "clicking memory text keeps it read-only",
+  await evalJs(`!!document.querySelector("#settingsContent .memory-body") && !document.querySelector("#settingsContent .memory-text")`)
+);
+check(
+  "read-only memory text can still be selected for copying",
+  await evalJs(`(() => {
+    const body = document.querySelector("#settingsContent .memory-body");
+    if (!body) return false;
+    const selection = getSelection(), range = document.createRange();
+    range.selectNodeContents(body);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const selected = String(selection) === body.textContent;
+    selection.removeAllRanges();
+    return selected;
+  })()`)
+);
+await evalJs(`document.activeElement.blur(); document.querySelector("#editMemory").click(); true`);
+check(
+  "the modify button enables editing and focuses the text",
+  await evalJs(
+    `document.activeElement?.matches(".memory-text") && !!document.querySelector("#memoryCatName") && getComputedStyle(document.activeElement).cursor === "text"`
+  )
+);
 await evalJs(
   `(a => { a.value = "用户偏好中文交流\\n改过的一行"; a.dispatchEvent(new Event("input")); })(document.querySelector("#settingsContent .memory-text")); true`
 );
@@ -164,6 +195,7 @@ check(
   await evalJs(`!document.querySelector("#settingsContent .memory-text") && !!document.querySelector("#settingsContent .memory-body")`)
 );
 // 改名成已有的一类：并进去
+await evalJs(`document.querySelector("#editMemory").click(); true`);
 await evalJs(`(i => { i.value = "工作"; i.dispatchEvent(new Event("change")); })(document.querySelector("#memoryCatName")); true`);
 await sleep(200);
 check(

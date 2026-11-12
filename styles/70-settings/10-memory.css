@@ -1,4 +1,4 @@
-/* 记忆分栏（设计稿/49 甲）：左一列类目，右边选着那一类的全文（记忆一类一份），平时只读，点一下或「改」才换输入框。
+/* 记忆分栏（设计稿/49 甲）：左一列类目，右边选着那一类的全文（记忆一类一份），平时只读，点「改」才换输入框。
    落选：先列分类、点进去再列条目（一层套一层，回来只靠一枚小「‹ 记忆」）；常开输入框（像没画完） */
 .memory-split {
   display: grid;
@@ -63,7 +63,7 @@ input.memory-cat-new {
   padding: 10px 0 6px;
   border-bottom: 1px solid var(--line);
 }
-/* 分类名就地可改：改成已有的名字即并入那一类 */
+/* 分类名随正文一起进入编辑：改成已有的名字即并入那一类 */
 .memory-cat-name {
   field-sizing: content;
   min-width: 3em;
@@ -76,9 +76,13 @@ input.memory-cat-new {
   color: var(--ink);
   font: 600 15px var(--title);
   letter-spacing: 0.06em;
+  cursor: default;
 }
-.memory-cat-name:hover,
-.memory-cat-name:focus {
+input.memory-cat-name {
+  cursor: text;
+}
+input.memory-cat-name:hover,
+input.memory-cat-name:focus {
   border-bottom-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .memory-day {
@@ -118,7 +122,7 @@ input.memory-cat-new {
 }
 .memory-body {
   white-space: pre-wrap;
-  cursor: text;
+  cursor: default;
 }
 .memory-body b {
   font-weight: 600;

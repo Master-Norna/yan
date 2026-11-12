@@ -180,11 +180,15 @@ function refreshMemorySettings() {
 function memoryRichText(text) {
   return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 }
-// 分栏：左一列类目（选着的左缘一道朱、名字加重），末尾「另起一类」；右边这一类的全文，顶上类名就地可改，「改」「删去此类」两枚小画。
-// 全文平时只读，点「改」或点一下正文（没在划选字时）才换输入框
+// 分栏：左一列类目（选着的左缘一道朱、名字加重），末尾「另起一类」；右边这一类的全文，顶上「改」「删去此类」两枚小画。
+// 类名与全文平时只读，点「改」才换输入框
 function memorySplitHtml(categories, open) {
   const pane = open
-    ? `<div class="memory-pane-head"><input id="memoryCatName" class="memory-cat-name" value="${escapeHtml(open.category)}" maxlength="24" spellcheck="false" aria-label="${t(`分类名`)}" title="${t(`分类名；与已有分类同名即并为一类`)}"><span class="memory-day">${escapeHtml(formatDay(open.updatedAt))}</span><span class="memory-spacer"></span><span class="memory-ops"><button type="button" id="editMemory" title="${memoryEditing ? t("完成") : t("修改")}">${brushIcon("edit")}</button><button type="button" id="dropMemoryCat" class="memory-del" title="${t(`删去此类`)}">${brushIcon("strike")}</button></span></div>` +
+    ? `<div class="memory-pane-head">${
+        memoryEditing
+          ? `<input id="memoryCatName" class="memory-cat-name" value="${escapeHtml(open.category)}" maxlength="24" spellcheck="false" aria-label="${t(`分类名`)}" title="${t(`分类名；与已有分类同名即并为一类`)}">`
+          : `<span class="memory-cat-name">${escapeHtml(open.category)}</span>`
+      }<span class="memory-day">${escapeHtml(formatDay(open.updatedAt))}</span><span class="memory-spacer"></span><span class="memory-ops"><button type="button" id="editMemory" title="${memoryEditing ? t("完成") : t("修改")}">${brushIcon("edit")}</button><button type="button" id="dropMemoryCat" class="memory-del" title="${t(`删去此类`)}">${brushIcon("strike")}</button></span></div>` +
       `<div class="memory-sheet">${
         memoryEditing
           ? `<textarea class="memory-text" spellcheck="false" aria-label="${t(`记忆内容`)}">${escapeHtml(open.text)}</textarea>`
@@ -287,10 +291,6 @@ function bindMemoryEvents() {
   });
   $("#memoryCatName")?.addEventListener("keydown", e => e.key === "Enter" && e.target.blur());
   $("#editMemory")?.addEventListener("click", () => (memoryEditing ? finish() : openMemoryCategory(memoryCategoryOpen, true)));
-  // 点一下正文即改；划选字时不算
-  host.querySelector("[data-memory-body]")?.addEventListener("click", () => {
-    if (!String(window.getSelection()).trim()) openMemoryCategory(memoryCategoryOpen, true);
-  });
   if (area && item) {
     fitTextarea(area);
     area.addEventListener("input", () => {
