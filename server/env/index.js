@@ -110,6 +110,7 @@ module.exports = function createEnv({ envHome }) {
   function status() {
     return {
       home: envHome(),
+      supported: process.platform === "win32",
       state: readState(),
       packs: PACKS.map(({ id, name, tag, note, hint = "", base = false, pip = [], npm = [] }) => ({
         id,

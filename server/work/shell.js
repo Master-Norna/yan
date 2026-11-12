@@ -1,6 +1,9 @@
 // 言 · 桥接 · 执事的 shell：起指令（输出转 UTF-8、机密环境变量按沙箱去掉）、整棵收掉进程树、后台指令；桥接退出时一并收掉
 "use strict";
 const { spawn, spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const sandbox = require("../sandbox.js");
 const { OWN_GROUP, killTree, killTreeSync } = require("../platform.js");
 const { tail, decodeClixml, encodePowerShell } = require("./text.js");
@@ -30,14 +33,51 @@ const WORK_OUTPUT_LIMIT = 20000;
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 const shownOutput = (text, stderr = false) =>
   tail((stderr && process.platform === "win32" ? decodeClixml(text) : text).replace(ANSI, ""), WORK_OUTPUT_LIMIT);
+// macOS 的严档沙箱：静态筛查管得住写法，管不住脚本里现拼的路径；seatbelt 把写盘收进工作目录（外加临时与各家缓存），读与联网照旧
+const MAC_SEATBELT = process.platform === "darwin" && fs.existsSync("/usr/bin/sandbox-exec"),
+  SB_STRING = value => JSON.stringify(String(value));
+function realpathForSeatbelt(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return path.resolve(target);
+  }
+}
+function macSeatbeltProfile(cwd) {
+  const home = os.homedir(),
+    allowed = new Set([
+      realpathForSeatbelt(cwd),
+      realpathForSeatbelt(os.tmpdir()),
+      "/private/tmp",
+      "/tmp",
+      "/private/var/tmp",
+      "/var/tmp",
+      "/private/var/folders",
+      "/var/folders",
+      "/dev",
+      path.join(home, ".npm"),
+      path.join(home, ".cache"),
+      path.join(home, "Library", "Caches"),
+      path.join(home, ".cargo"),
+      path.join(home, ".rustup"),
+      path.join(home, ".m2"),
+      path.join(home, ".gradle"),
+      path.join(home, "go")
+    ]);
+  const filters = [...allowed].map(dir => `(subpath ${SB_STRING(dir)})`).join(" ");
+  return `(version 1)\n(allow default)\n(deny file-write* (require-not (require-any ${filters})))\n`;
+}
 module.exports = function createShell({ toolEnv }) {
   // 起一个 shell 跑指令（Windows 上外面包一层，见 POWERSHELL_WRAPPER）；指令经环境变量递进去，比塞进命令行能长两倍多
-  function spawnShell(command, cwd, { boxed = false, env = {} } = {}) {
-    const win = process.platform === "win32";
+  function spawnShell(command, cwd, { boxed = false, env = {}, seatbelt = false } = {}) {
+    const win = process.platform === "win32",
+      macBox = MAC_SEATBELT && boxed && seatbelt && process.platform === "darwin";
     const args = win
       ? ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(POWERSHELL_WRAPPER)]
-      : ["-c", command];
-    const child = spawn(win ? (PWSH ? "pwsh.exe" : "powershell.exe") : "/bin/sh", args, {
+      : macBox
+        ? ["-p", macSeatbeltProfile(cwd), "/bin/sh", "-c", command]
+        : ["-c", command];
+    const child = spawn(win ? (PWSH ? "pwsh.exe" : "powershell.exe") : macBox ? "/usr/bin/sandbox-exec" : "/bin/sh", args, {
       cwd,
       windowsHide: true,
       ...OWN_GROUP,
@@ -77,9 +117,9 @@ module.exports = function createShell({ toolEnv }) {
   }
   // 正在跑的 shell（前台与后台）：桥接退出时整棵收掉，不留在后台改文件、占端口
   const runningShells = new Set();
-  function runShell(command, cwd, timeoutMs, signal = null, { boxed = false, env = {} } = {}) {
+  function runShell(command, cwd, timeoutMs, signal = null, { boxed = false, env = {}, seatbelt = false } = {}) {
     return new Promise(resolve => {
-      const child = spawnShell(command, cwd, { boxed, env });
+      const child = spawnShell(command, cwd, { boxed, env, seatbelt });
       let stdout = "",
         stderr = "",
         timedOut = false;
@@ -127,12 +167,12 @@ module.exports = function createShell({ toolEnv }) {
   let backgroundSeq = 0;
   // 编号在桥接重启后从 bg1 重数：另记一个带这次启动标记的 key，页面刷新后重新等上时按它认，不会等到别的指令上
   const BOOT = Date.now().toString(36);
-  function startBackground(command, workdir, boxed) {
-    return enlist(spawnJob(command, workdir, boxed));
+  function startBackground(command, workdir, boxed, seatbelt = false) {
+    return enlist(spawnJob(command, workdir, boxed, seatbelt));
   }
   // 起进程、接住两路输出，先不编号：前台指令也这样起，跑完了就不占编号与名额，转入后台时才登记（enlist）
-  function spawnJob(command, workdir, boxed) {
-    const child = spawnShell(command, workdir, { boxed }),
+  function spawnJob(command, workdir, boxed, seatbelt = false) {
+    const child = spawnShell(command, workdir, { boxed, seatbelt }),
       job = {
         id: "",
         key: "",
@@ -182,8 +222,8 @@ module.exports = function createShell({ toolEnv }) {
   // （用户补言、主模型递话给帮手，见 releaseForeground），就编号转入后台接着跑，不掐——模型当即拿回结果去做别的、读插话，
   // 结束时照后台指令的路子叫醒它。页面停止生成（signal）才连整棵进程树收掉
   const releases = new Map();
-  async function runForeground(command, workdir, boxed, waitMs, signal, ticket) {
-    const job = spawnJob(command, workdir, boxed);
+  async function runForeground(command, workdir, boxed, waitMs, signal, ticket, seatbelt = false) {
+    const job = spawnJob(command, workdir, boxed, seatbelt);
     let timer, onAbort;
     const why = await Promise.race([
       job.ended.then(() => "ended"),

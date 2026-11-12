@@ -133,7 +133,9 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       if (guarded) throw Error(guarded);
       const boxed = body.sandbox === true,
         // 审而后行里规则拦下、审查模型照用户的原话准了的这一条：不再过宽的沙箱与审查规则（存储根那一道、调桥接与藏字仍守）
-        reviewed = body.permission === "review" && body.reviewed === true;
+        reviewed = body.permission === "review" && body.reviewed === true,
+        // macOS 上严档沙箱再加一道 seatbelt：静态筛查管不住脚本里现拼的写盘路径（见 server/work/shell.js）
+        seatbelt = strictBox(body);
       const unreviewable = reviewed && sandbox.screenUnreviewable(command);
       if (unreviewable) throw Error(`审查拒绝：${unreviewable}`);
       if (boxed && !reviewed) {
@@ -147,7 +149,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       if (body.background === true) {
         if (res.destroyed) return;
         console.log(`${stamp()} $ （后台）${command.slice(0, 120)}`);
-        const job = startBackground(command, workdir, boxed);
+        const job = startBackground(command, workdir, boxed, seatbelt);
         let delivered = false;
         const disconnected = () => {
           if (!delivered) discardBackground(job);
@@ -168,7 +170,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       // 指令能跑多久不受它限，只是模型不该被一条指令攥住十分钟以上（单位给错，60000 当毫秒，就是十几个小时）
       if (body.ticket) {
         const waitMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 600000),
-          { job, report } = await runForeground(command, workdir, boxed, waitMs, signal, String(body.ticket));
+          { job, report } = await runForeground(command, workdir, boxed, waitMs, signal, String(body.ticket), seatbelt);
         if (!report) return;
         // 转入了后台、编号却没能交到页面：无人能再凭编号叫停它，收掉
         if (res.destroyed) return report.running && discardBackground(job);
@@ -180,7 +182,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       const hook = body.hook && typeof body.hook === "object" ? body.hook : null,
         env = hook ? { YAN_TOOL: String(hook.tool || ""), YAN_TARGET: String(hook.target || "") } : {};
       const started = Date.now(),
-        result = await runShell(command, workdir, timeoutMs, signal, { boxed, env });
+        result = await runShell(command, workdir, timeoutMs, signal, { boxed, env, seatbelt });
       if (result.aborted) console.log(`${stamp()}   已中止：${command.slice(0, 80)}`);
       if (!res.writableEnded && !res.destroyed) sendJson(res, 200, { ...result, durationMs: Date.now() - started });
     } catch (error) {

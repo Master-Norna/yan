@@ -20,7 +20,7 @@ Switch the interface language in **Settings → General → Language** (中文 /
 
 The CMD window opened by `start.cmd` is the local bridge process and must stay open. If you close it, pages already loaded stay for a while, but reloading, model forwarding, web access and the agent all stop. If the browser is open but the page says the local bridge has stopped, look at that window first: when the bridge exits it stays open and prints the reason (port in use, node missing and so on) instead of flashing away.
 
-On macOS, double-click `start.command` (if it's blocked the first time, right-click it in Finder and choose **Open**). The **Environment** toolkit is Windows-only, and the sandbox rules are written for PowerShell, so they are looser on macOS.
+On macOS, double-click `start.command` (if it's blocked the first time, right-click it in Finder and choose **Open**). The **Environment** toolkit is Windows-only (Settings explains this and disables setup; use the system Python and Node, e.g. via Homebrew). Under **Ask first**, the strict sandbox additionally wraps writes with macOS `sandbox-exec`, confined to the working folder plus temp and caches; **Auto-review** and **Full auto** still rely on rule screening only.
 
 ## Windows portable package
 
@@ -43,7 +43,7 @@ Yan must be opened through the local bridge: run `start.cmd` (or `npm start`) an
 ## Environment variables
 
 - `YAN_PORT`: change the bridge port; default `8787`
-- `YAN_HOME`: set the storage folder directly (chats, Files and settings all live in it); default `~/.yan/`. When set, the file that remembers the storage location, `%APPDATA%\言\位置.json`, is neither read nor written (used by tests)
+- `YAN_HOME`: set the storage folder directly (chats, Files and settings all live in it); default `~/.yan/`. When set, the file that remembers the storage location in the system data directory is neither read nor written (used by tests)
 - `YAN_DEBUG=1`: print every request and every abnormally closed connection to the console. Use it when the page reports "Failed to fetch" or that the local bridge has stopped, to see whether the request reached the bridge at all
 
 ## The local bridge
