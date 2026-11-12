@@ -50,15 +50,29 @@ module.exports = function createStore({ working = () => 0 } = {}) {
     const pointed = readJsonFile(file)?.root;
     return typeof pointed === "string" && path.isAbsolute(pointed) ? path.resolve(pointed) : "";
   }
+  // 新条子写入是搬家的提交点：写成了才算搬完，写失败 handleMove 把根退回去，两边仍一致。
+  // 早前 %APPDATA% 落位的旧条子只是兼容性残留，读取时 POINTER 优先于它；清理尽力而为——
+  // 删不掉（比如父目录只读）不翻搬家的结果，残留条子也会被新条子盖住
+  function dropLegacyPointer() {
+    if (!LEGACY_POINTER) return;
+    try {
+      fs.rmSync(LEGACY_POINTER, { force: true });
+    } catch {}
+  }
   function writePointer(target) {
     if (target.toLowerCase() === HOME_ROOT.toLowerCase()) {
-      fs.rmSync(POINTER, { force: true });
-      if (LEGACY_POINTER) fs.rmSync(LEGACY_POINTER, { force: true });
+      // 回默认处在非 Windows 上也显式写条子：旧条子删不掉时它重启后仍在，而 POINTER 优先于它，默认处照旧生效
+      if (WIN) fs.rmSync(POINTER, { force: true });
+      else {
+        fs.mkdirSync(path.dirname(POINTER), { recursive: true });
+        writeAtomic(POINTER, JSON.stringify({ 言: "位置", root: HOME_ROOT }, null, 1));
+      }
+      dropLegacyPointer();
       return;
     }
     fs.mkdirSync(path.dirname(POINTER), { recursive: true });
     writeAtomic(POINTER, JSON.stringify({ 言: "位置", root: target }, null, 1));
-    if (LEGACY_POINTER) fs.rmSync(LEGACY_POINTER, { force: true });
+    dropLegacyPointer();
   }
   function initialRoot() {
     if (process.env.YAN_HOME) return path.resolve(expandHome(process.env.YAN_HOME));
