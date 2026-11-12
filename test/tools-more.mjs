@@ -1,8 +1,10 @@
 // 新添的几件工具：run_js 在隔离沙箱里算（超时能杀掉）、http_request 与 download_file 走桥接的地址门禁、update_plan 在行迹里画成清单
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
 const workdir = `${TMP}/tools-more-work`.split("/").join(process.platform === "win32" ? "\\" : "/");
+// 上一回留下的下载会让这一回同名下载改叫「models (2).json」，断言与回复里的路径都对不上：先清干净
+rmSync(workdir, { recursive: true, force: true });
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 await evalJs(

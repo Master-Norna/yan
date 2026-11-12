@@ -183,6 +183,8 @@ try {
   const wants = name => !only.length || only.some(o => name.includes(o));
   // 桥接安全检查：单独一个桥接实例，不需要浏览器
   if (wants("bridge-security")) {
+    // 这一路的存储根在 TMP/security，不在下面统一清的 TMP/.yan 里：上一回留的配置会让 savedAt 接着往上加，断言对不上
+    rmSync(path.join(TMP, "security"), { recursive: true, force: true });
     start(process.execPath, ["server.js"], {
       cwd: ROOT,
       // YAN_TEST_SECRET_TOKEN：名字像机密的环境变量，沙箱里的指令不该看见它（bridge-security 里查）
