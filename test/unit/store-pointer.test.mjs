@@ -1,4 +1,4 @@
-// 位置条子（系统数据目录里的 位置.json）：搬家的提交点与旧版 %APPDATA% 残留条子的回归（见 server/store.js 的 writePointer）。
+// 位置条子（系统数据目录里的 位置.json）：macOS 搬家的提交点与旧版 %APPDATA% 残留条子的回归（见 server/store.js 的 writePointer）。
 // 从前新条子写成之后才删旧条子，旧条子删不掉会让搬家报失败、运行中的根退回旧处，可条子已经指向新处——重启后根对不上。
 // store.js 与本测试共享 node:fs / node:os 模块对象：临时劫持方法注入文件系统异常（不靠 chmod——测试可能以 root 跑），
 // 也不碰真在用的 ~/.yan 与 %APPDATA%：os.homedir 指到临时家目录，YAN_HOME 全程不设（设了就不写条子，见 writePointer 的调用处）
@@ -13,20 +13,23 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url),
   STORE_PATH = require.resolve("../../server/store.js");
 
-// 条子落位与 server/store.js 同源：非 Windows 在系统配置目录（macOS 为 ~/Library/Application Support），
-// 早前版本误写在 ~/AppData/Roaming；Windows 只认 %APPDATA%
+// 条子落位与 server/store.js 同源：macOS 在 ~/Library/Application Support，Windows 只认 %APPDATA%；
+// 早前 macOS 误写在 ~/AppData/Roaming 的旧条子只作兼容读取
 function pointerPaths(home, platform) {
-  const POINTER_DIR =
-    platform === "win32"
-      ? process.env.APPDATA || path.join(home, "AppData", "Roaming")
-      : platform === "darwin"
-        ? path.join(home, "Library", "Application Support")
-        : process.env.XDG_CONFIG_HOME || path.join(home, ".config");
-  return {
-    HOME_ROOT: path.join(home, ".yan"),
-    POINTER: path.join(POINTER_DIR, "言", "位置.json"),
-    LEGACY_POINTER: platform === "win32" ? "" : path.join(home, "AppData", "Roaming", "言", "位置.json")
-  };
+  const HOME_ROOT = path.join(home, ".yan");
+  if (platform === "darwin")
+    return {
+      HOME_ROOT,
+      POINTER: path.join(home, "Library", "Application Support", "言", "位置.json"),
+      LEGACY_POINTER: path.join(home, "AppData", "Roaming", "言", "位置.json")
+    };
+  if (platform === "win32")
+    return {
+      HOME_ROOT,
+      POINTER: path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "言", "位置.json"),
+      LEGACY_POINTER: ""
+    };
+  throw Error(`未模拟的平台：${platform}`);
 }
 
 function writeConfig(root, name) {
@@ -38,7 +41,7 @@ function writePointerFile(file, root) {
 }
 const pointerRoot = file => JSON.parse(fs.readFileSync(file, "utf8")).root;
 
-// 换平台要重新 require：WIN/MAC 是 store.js 的模块级常量，require 时定死
+// 换平台要重新 require：MAC 是 store.js 的模块级常量，require 时定死
 async function withSandbox(platform, run) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-store-pointer-")),
     home = path.join(base, "home"),
@@ -46,11 +49,9 @@ async function withSandbox(platform, run) {
     savedHomedir = os.homedir,
     savedEnv = {
       YAN_HOME: process.env.YAN_HOME,
-      APPDATA: process.env.APPDATA,
-      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME
+      APPDATA: process.env.APPDATA
     };
   delete process.env.YAN_HOME;
-  delete process.env.XDG_CONFIG_HOME;
   if (platform === "win32") process.env.APPDATA = path.join(base, "appdata");
   else delete process.env.APPDATA;
   Object.defineProperty(process, "platform", { ...savedPlatform, value: platform });
@@ -66,7 +67,7 @@ async function withSandbox(platform, run) {
   } finally {
     Object.defineProperty(process, "platform", savedPlatform);
     os.homedir = savedHomedir;
-    for (const key of ["YAN_HOME", "APPDATA", "XDG_CONFIG_HOME"]) {
+    for (const key of ["YAN_HOME", "APPDATA"]) {
       if (savedEnv[key] === undefined) delete process.env[key];
       else process.env[key] = savedEnv[key];
     }
@@ -104,124 +105,121 @@ function patchFs(name, fn) {
 
 // 旧条子（可读但删不掉，比如父目录只读）：清理是兼容性收尾，失败不翻搬家的结果；
 // 新条子已提交，重启后 POINTER 优先于残留的旧条子，根与运行中一致
-for (const platform of ["darwin", "linux"])
-  test(`旧条子删不掉：搬家照样成功，重启后根与运行中一致（${platform}）`, async () => {
-    await withSandbox(platform, async ({ base, home, loadStore }) => {
-      const p = pointerPaths(home, platform),
-        oldRoot = path.join(base, "旧根"),
-        next = path.join(base, "新处", ".yan");
-      fs.mkdirSync(oldRoot, { recursive: true });
-      writeConfig(oldRoot, "旧根那份");
-      // 只有早前版本误写的旧条子：initialRoot 落到它指的地方
-      writePointerFile(p.LEGACY_POINTER, oldRoot);
-      const store = loadStore()();
-      store.ensureRoot();
-      assert.equal(store.paths().root, oldRoot);
-      const { post, close } = await serve(store);
+test("macOS：旧条子删不掉时搬家仍成功，重启后根与运行中一致", async () => {
+  await withSandbox("darwin", async ({ base, home, loadStore }) => {
+    const p = pointerPaths(home, "darwin"),
+      oldRoot = path.join(base, "旧根"),
+      next = path.join(base, "新处", ".yan");
+    fs.mkdirSync(oldRoot, { recursive: true });
+    writeConfig(oldRoot, "旧根那份");
+    // 只有早前版本误写的旧条子：initialRoot 落到它指的地方
+    writePointerFile(p.LEGACY_POINTER, oldRoot);
+    const store = loadStore()();
+    store.ensureRoot();
+    assert.equal(store.paths().root, oldRoot);
+    const { post, close } = await serve(store);
+    try {
+      const restore = patchFs("rmSync", real => (file, ...args) => {
+        if (String(file) === p.LEGACY_POINTER) throw Object.assign(Error("旧条子删不掉"), { code: "EPERM" });
+        return real(file, ...args);
+      });
+      let moved;
       try {
-        const restore = patchFs("rmSync", real => (file, ...args) => {
-          if (String(file) === p.LEGACY_POINTER) throw Object.assign(Error("旧条子删不掉"), { code: "EPERM" });
-          return real(file, ...args);
-        });
-        let moved;
-        try {
-          moved = await post("/api/store/move", { parent: path.join(base, "新处") });
-        } finally {
-          restore();
-        }
-        assert.equal(moved.status, 200, JSON.stringify(moved.data));
-        assert.equal(moved.data.moved, true);
-        assert.equal(moved.data.root, next);
-        assert.equal(store.paths().root, next, "运行中的根换到新处");
-        assert.ok(fs.existsSync(p.LEGACY_POINTER), "删不掉的旧条子留着");
-        assert.equal(pointerRoot(p.POINTER), next, "新条子已写入");
-        assert.equal(loadStore()().paths().root, next, "重启后根与运行中一致");
+        moved = await post("/api/store/move", { parent: path.join(base, "新处") });
       } finally {
-        await close();
+        restore();
       }
-    });
+      assert.equal(moved.status, 200, JSON.stringify(moved.data));
+      assert.equal(moved.data.moved, true);
+      assert.equal(moved.data.root, next);
+      assert.equal(store.paths().root, next, "运行中的根换到新处");
+      assert.ok(fs.existsSync(p.LEGACY_POINTER), "删不掉的旧条子留着");
+      assert.equal(pointerRoot(p.POINTER), next, "新条子已写入");
+      assert.equal(loadStore()().paths().root, next, "重启后根与运行中一致");
+    } finally {
+      await close();
+    }
   });
+});
 
 // 新条子写不进（提交点失败）：搬家报错、根退回旧处；旧条子在提交之后才清理，写失败时两份条子都原样还在，
 // 不会出现「旧条子已删、新条子没写成」把原存储位置丢掉的情况
-for (const platform of ["darwin", "linux"])
-  test(`新条子写不进：搬家失败，旧位置的条子原样保留（${platform}）`, async () => {
-    await withSandbox(platform, async ({ base, home, loadStore }) => {
-      const p = pointerPaths(home, platform),
-        oldRoot = path.join(base, "旧根"),
-        legacyRoot = path.join(base, "更早的根"),
-        next = path.join(base, "新处", ".yan");
-      fs.mkdirSync(oldRoot, { recursive: true });
-      writeConfig(oldRoot, "旧根那份");
-      writePointerFile(p.LEGACY_POINTER, legacyRoot);
-      writePointerFile(p.POINTER, oldRoot);
-      const store = loadStore()();
-      store.ensureRoot();
-      assert.equal(store.paths().root, oldRoot);
-      const { post, close } = await serve(store);
+test("macOS：新条子写不进时搬家失败，旧位置条子原样保留", async () => {
+  await withSandbox("darwin", async ({ base, home, loadStore }) => {
+    const p = pointerPaths(home, "darwin"),
+      oldRoot = path.join(base, "旧根"),
+      legacyRoot = path.join(base, "更早的根"),
+      next = path.join(base, "新处", ".yan");
+    fs.mkdirSync(oldRoot, { recursive: true });
+    writeConfig(oldRoot, "旧根那份");
+    writePointerFile(p.LEGACY_POINTER, legacyRoot);
+    writePointerFile(p.POINTER, oldRoot);
+    const store = loadStore()();
+    store.ensureRoot();
+    assert.equal(store.paths().root, oldRoot);
+    const { post, close } = await serve(store);
+    try {
+      const restore = patchFs("writeFileSync", real => (file, ...args) => {
+        // writeAtomic 先写 POINTER.<戳>.tmp 再改名，临时文件名以条子路径开头，一并拦下
+        if (String(file).startsWith(p.POINTER)) throw Object.assign(Error("条子写不进"), { code: "EACCES" });
+        return real(file, ...args);
+      });
+      let moved;
       try {
-        const restore = patchFs("writeFileSync", real => (file, ...args) => {
-          // writeAtomic 先写 POINTER.<戳>.tmp 再改名，临时文件名以条子路径开头，一并拦下
-          if (String(file).startsWith(p.POINTER)) throw Object.assign(Error("条子写不进"), { code: "EACCES" });
-          return real(file, ...args);
-        });
-        let moved;
-        try {
-          moved = await post("/api/store/move", { parent: path.join(base, "新处") });
-        } finally {
-          restore();
-        }
-        assert.equal(moved.status, 400);
-        assert.match(moved.data.error, /存储位置未能更换/);
-        assert.equal(store.paths().root, oldRoot, "根退回旧处");
-        assert.equal(pointerRoot(p.POINTER), oldRoot, "条子没被动过");
-        assert.equal(pointerRoot(p.LEGACY_POINTER), legacyRoot, "兼容性残留也原样还在");
-        assert.equal(loadStore()().paths().root, oldRoot, "重启后仍是旧根");
+        moved = await post("/api/store/move", { parent: path.join(base, "新处") });
       } finally {
-        await close();
+        restore();
       }
-    });
+      assert.equal(moved.status, 400);
+      assert.match(moved.data.error, /存储位置未能更换/);
+      assert.equal(store.paths().root, oldRoot, "根退回旧处");
+      assert.equal(pointerRoot(p.POINTER), oldRoot, "条子没被动过");
+      assert.equal(pointerRoot(p.LEGACY_POINTER), legacyRoot, "兼容性残留也原样还在");
+      assert.equal(loadStore()().paths().root, oldRoot, "重启后仍是旧根");
+    } finally {
+      await close();
+    }
   });
+});
 
-// 回默认处在非 Windows 上也显式写条子（root=HOME_ROOT）：旧条子删不掉时重启后 POINTER 优先，
+// 回默认处在 macOS 上也显式写条子（root=HOME_ROOT）：旧条子删不掉时重启后 POINTER 优先，
 // 残留的旧条子不会把根拉回旧目录
-for (const platform of ["darwin", "linux"])
-  test(`回默认处：旧条子删不掉也不复活，重启仍落默认根（${platform}）`, async () => {
-    await withSandbox(platform, async ({ base, home, loadStore }) => {
-      const p = pointerPaths(home, platform),
-        customRoot = path.join(base, "自定义", ".yan"),
-        legacyRoot = path.join(base, "更早的根");
-      fs.mkdirSync(customRoot, { recursive: true });
-      writeConfig(customRoot, "自定义那份");
-      writePointerFile(p.POINTER, customRoot);
-      writePointerFile(p.LEGACY_POINTER, legacyRoot);
-      const store = loadStore()();
-      store.ensureRoot();
-      assert.equal(store.paths().root, customRoot, "POINTER 优先于旧条子");
-      const { post, close } = await serve(store);
+test("macOS：回默认处时旧条子删不掉也不复活，重启仍落默认根", async () => {
+  await withSandbox("darwin", async ({ base, home, loadStore }) => {
+    const p = pointerPaths(home, "darwin"),
+      customRoot = path.join(base, "自定义", ".yan"),
+      legacyRoot = path.join(base, "更早的根");
+    fs.mkdirSync(customRoot, { recursive: true });
+    writeConfig(customRoot, "自定义那份");
+    writePointerFile(p.POINTER, customRoot);
+    writePointerFile(p.LEGACY_POINTER, legacyRoot);
+    const store = loadStore()();
+    store.ensureRoot();
+    assert.equal(store.paths().root, customRoot, "POINTER 优先于旧条子");
+    const { post, close } = await serve(store);
+    try {
+      const restore = patchFs("rmSync", real => (file, ...args) => {
+        if (String(file) === p.LEGACY_POINTER) throw Object.assign(Error("旧条子删不掉"), { code: "EPERM" });
+        return real(file, ...args);
+      });
+      let moved;
       try {
-        const restore = patchFs("rmSync", real => (file, ...args) => {
-          if (String(file) === p.LEGACY_POINTER) throw Object.assign(Error("旧条子删不掉"), { code: "EPERM" });
-          return real(file, ...args);
-        });
-        let moved;
-        try {
-          moved = await post("/api/store/move", { parent: home });
-        } finally {
-          restore();
-        }
-        assert.equal(moved.status, 200, JSON.stringify(moved.data));
-        assert.equal(moved.data.moved, true);
-        assert.equal(moved.data.root, p.HOME_ROOT);
-        assert.equal(store.paths().root, p.HOME_ROOT);
-        assert.equal(pointerRoot(p.POINTER), p.HOME_ROOT, "默认处也显式写了条子");
-        assert.ok(fs.existsSync(p.LEGACY_POINTER), "删不掉的旧条子留着");
-        assert.equal(loadStore()().paths().root, p.HOME_ROOT, "重启不复活旧目录");
+        moved = await post("/api/store/move", { parent: home });
       } finally {
-        await close();
+        restore();
       }
-    });
+      assert.equal(moved.status, 200, JSON.stringify(moved.data));
+      assert.equal(moved.data.moved, true);
+      assert.equal(moved.data.root, p.HOME_ROOT);
+      assert.equal(store.paths().root, p.HOME_ROOT);
+      assert.equal(pointerRoot(p.POINTER), p.HOME_ROOT, "默认处也显式写了条子");
+      assert.ok(fs.existsSync(p.LEGACY_POINTER), "删不掉的旧条子留着");
+      assert.equal(loadStore()().paths().root, p.HOME_ROOT, "重启不复活旧目录");
+    } finally {
+      await close();
+    }
   });
+});
 
 // Windows 不回归：条子只认 %APPDATA%（LEGACY_POINTER 为空，同名旧文件既不读也不删），
 // 回默认处照旧删条子而不是写条子
