@@ -821,6 +821,8 @@ var YAN_EN = {
     "The whole environment folder will be deleted and packages must be reinstalled. Chats, Files and settings are not affected.",
 
   // ---- 设置 · MCP ----
+  "删除服务「{0}」？": 'Delete server "{0}"?',
+  "该服务将断开连接，配置将被移除。": "This server will be disconnected and its configuration removed.",
   "＋ 新增服务": "+ Add server",
   "收起 JSON": "Hide JSON",
   "以 JSON 编辑": "Edit as JSON",

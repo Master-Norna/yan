@@ -209,7 +209,7 @@ function bindMcpEvents() {
     $("#mcpJson").textContent = mcpJsonOpen ? t("收起 JSON") : t("以 JSON 编辑");
   });
   // 整页一个委托：设置页每画一回，这一页连同监听一起换新
-  $("#mcpPage").addEventListener("click", event => {
+  $("#mcpPage").addEventListener("click", async event => {
     const target = event.target.closest("button");
     if (!target) return;
     if (target.id === "mcpJsonReveal") {
@@ -281,6 +281,15 @@ function bindMcpEvents() {
       return;
     }
     if (action === "delete") {
+      if (
+        !(await askConfirm({
+          title: t`删除服务「${before}」？`,
+          body: t("该服务将断开连接，配置将被移除。"),
+          ok: t("删除")
+        })) ||
+        !form.isConnected
+      )
+        return;
       const { [before]: _gone, ...rest } = mcpUserConfigs();
       mcpEditing = null;
       delete mcp.servers[before];

@@ -13,7 +13,7 @@ const web = spawn(process.execPath, [FAKE, "--http", String(HTTP_PORT)], { stdio
   old = spawn(process.execPath, [FAKE, "--sse", String(SSE_PORT)], { stdio: "ignore" });
 process.on("exit", () => (web.kill(), old.kill()));
 
-const { send, evalJs, waitFor, close } = await connect();
+const { send, evalJs, waitFor, shot, close } = await connect();
 const seed = {
   version: 4,
   settings: {
@@ -158,6 +158,35 @@ await evalJs(setJson(`JSON.stringify({ legacy: { url: "http://127.0.0.1:${SSE_PO
 await waitFor(`/2 件工具|连不上/.test(${card("legacy")}?.textContent || "")`, 30000);
 const legacy = await evalJs(`${card("legacy")}.textContent`);
 check("a url-only legacy SSE server is reached by falling back from streamable HTTP", /2 件工具/.test(legacy), legacy);
+// 删除先确认；取消不改配置、不冲掉表单里没保存的字，确认后才移除
+await evalJs(`${card("legacy")}.querySelector('[data-mcp-action="edit"]').click(); true`);
+const beforeDelete = await evalJs(`JSON.stringify(__yanState().settings.mcpServers)`);
+await evalJs(
+  `document.querySelector('[data-mcp-edit="legacy"] [data-f="note"]').value = "尚未保存的说明"; document.querySelector('[data-mcp-form="delete"]').click(); true`
+);
+const deleteConfirm = await evalJs(`!document.querySelector("#confirmModal").classList.contains("hidden")`);
+check(
+  "deleting an MCP server asks first and names the saved server",
+  deleteConfirm && (await evalJs(`document.querySelector("#confirmTitle").textContent.includes("legacy")`))
+);
+check(
+  "the server config is unchanged while confirmation is pending",
+  (await evalJs(`JSON.stringify(__yanState().settings.mcpServers)`)) === beforeDelete
+);
+if (deleteConfirm) {
+  await shot("mcp-delete-confirm.png");
+  await evalJs(`document.querySelector("#confirmCancel").click(); true`);
+  check(
+    "canceling deletion keeps the config and unsaved form text",
+    (await evalJs(`JSON.stringify(__yanState().settings.mcpServers)`)) === beforeDelete &&
+      (await evalJs(`document.querySelector('[data-mcp-edit="legacy"] [data-f="note"]')?.value === "尚未保存的说明"`))
+  );
+  await evalJs(`document.querySelector('[data-mcp-form="delete"]').click(); true`);
+  await waitFor(`!document.querySelector("#confirmModal").classList.contains("hidden")`);
+  await evalJs(`document.querySelector("#confirmOk").click(); true`);
+  await waitFor(`!__yanState().settings.mcpServers.legacy && !document.querySelector('[data-mcp-edit="legacy"]')`);
+  check("confirming deletion removes the server from settings and the cards", await evalJs(`!${card("legacy")}`));
+}
 // 环境页：列出工具包，Python 是底、勾着且不能取消；点一张就记进设置
 await evalJs(`document.querySelector('.tab-btn[data-tab="env"]').click(); true`);
 await waitFor(`document.querySelectorAll("#envPacks [data-env-pack]").length > 3`, 15000);
