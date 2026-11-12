@@ -395,25 +395,26 @@ var YAN_EN = {
   已止: "Stopped",
 
   // ---- 记忆 ----
+  "每一问带上最新的整份记忆，模型自行决定记入、更新与忘记。记忆一类一份，要记便把那一类整份改过，行迹里写作「记入」。":
+    "Every question includes the latest full memory. The main model decides what to remember, update, or forget. Memory is kept as one text per category; the model rewrites that category, shown as “Remember” under Steps.",
+  "设置 → 记忆左列各类，右边是选中那一类的全文，点「修改」编辑，改空即删去这一类；分类名亦可改，改作已有之名即并为一类。关掉「带进对话」，便不带也不记，记忆仍在。":
+    "Settings → Memory lists categories on the left and the selected text on the right. Choose Modify to edit; empty text deletes the category. Renaming a category to an existing name merges them. Turning off Include in chats stops including and recording memory while keeping it saved.",
+  "查旧对话、读旧对话两件常给，与记忆开不开无关。": "Searching and reading past chats are always available, whether memory is on or off.",
+  "每一问带上最新记忆，由主模型决定记入、更新与忘记":
+    "Each question includes the latest memory; the main model decides what to remember, update, or forget",
+  记忆已变化: "Memory changed",
+  未写入: "Not saved",
+
   手记: "Manual",
   尚无记忆: "No memory yet",
-  "每段对话开头带上；记忆改过后，由专司「记忆优化」理一遍":
-    "Included at the start of every chat; after it changes, the Memory optimization duty goes over it",
-  "在专司里配好「记忆优化」后，才带上、才记": "Set up Memory optimization under Duties to include and record it",
   "这一类的记忆将被移除，无法撤销；对话不受影响。": "This category will be removed. This can't be undone; chats are not affected.",
-  "记忆：理过 {0} 类": "Memory: {0} {0|category|categories} tidied",
   "{0}没成，{1}：{2}": "{0} failed; {1}: {2}",
-  下一答落定时再理: "will retry after the next answer",
   这一步照规则办: "this step follows the rules",
   超时: "timed out",
-  "有 {0} 条不合约定的项": "{0} {0|item|items} not in the expected format",
-  没给出改动清单: "no list of changes was given",
-  给的不是清单: "the reply wasn't a list",
   审查模型没给出准或驳: "the review model gave neither approve nor deny",
   "{0} 类 · {1} 字": "{0} {0|category|categories} · {1} characters",
   "{0} 类记忆将被移除，无法撤销；对话不受影响。":
     "{0} {0|category|categories} of memory will be removed. This can't be undone; chats are not affected.",
-  记忆优化: "Memory optimization",
   "只在某个目录成立的，执事记在那个目录的 `.yan/记忆.md`，在那里每一问都附着；不经专司，也不受这里的开关管。":
     "What holds only in one folder is recorded by the agent in that folder's `.yan/记忆.md` and attached to every message there; it doesn't go through Duties and isn't affected by this switch.",
   "、{0} 类记忆": ", {0} memory {0|category|categories}",
@@ -1960,13 +1961,7 @@ var YAN_EN = {
   "录是一份跨对话的记忆：你的偏好、身份与约定，此后不必重述。只存于本机。":
     "Memory carries across conversations: your preferences, who you are and what's been agreed, so you needn't repeat them. It's stored only on this machine.",
   带与记: "Bringing and remembering",
-  "专司里配好「记忆优化」，每段对话开头便带上整份记忆，模型不必去翻。记忆一类一份，模型要记便把那一类整份改过，行迹里写作「记入」。记忆改过后，一答落定时专司「记忆优化」理一遍：合并重复、改掉矛盾、删去废话；理过几类，提示一句。":
-    "Once Memory optimization is set up under Duties, every chat starts with the whole memory included, so the model doesn't have to look anything up. Memory is kept as one text per category; to remember something the model rewrites that whole category, shown as “Remember” under Steps. After the memory changes, the Memory optimization duty goes over it when an answer settles: merging repeats, fixing contradictions and cutting filler; a short notice says how many categories it touched.",
   改与忘: "Editing and forgetting",
-  "设置 → 记忆左列各类，右边是选中那一类的全文，点一下即改，改空即删去这一类；分类名亦可改，改作已有之名即并为一类。专司里关掉「记忆优化」，便不带也不记，记忆仍在。":
-    "Settings → Memory lists the categories on the left and the selected one's full text on the right; click it to edit, and emptying it deletes the category. Categories can be renamed too, and renaming one to an existing name merges them. Turning Memory optimization off under Duties stops including and recording it; the memory stays.",
-  "记忆优化只读记忆本身，不读对话。查旧对话、读旧对话两件常给，与记忆开不开无关。":
-    "Memory optimization reads only the memory itself, not your chats. Searching and reading past chats are always available, whether memory is on or not.",
   存储边界: "Storage and boundaries",
   "数据所在，及其边界": "Where your data lives, and its boundaries",
   所在: "Location",

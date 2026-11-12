@@ -29,8 +29,6 @@ let calls = 0,
   reviewAsks = [],
   // 生图接口收到的每一问（GET /image-asks 取走并清空）
   imageAsks = [],
-  // 记忆优化收到的每一问：系统提示与那一段话（GET /tidy-asks 取走并清空）
-  tidyAsks = [],
   flaky503 = 0,
   titleFailed = false,
   slowTitleFailed = false;
@@ -178,12 +176,7 @@ http
       reviewAsks = [];
       return;
     }
-    if (req.url.endsWith("/tidy-asks") && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(tidyAsks));
-      tidyAsks = [];
-      return;
-    }
+
     if (req.url.endsWith("/image-asks") && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(imageAsks));
@@ -228,21 +221,6 @@ http
         reviewAsks.push({ quick, tool: text.match(/［将要做的］\n(\w+)/)?.[1] || "" });
         const answer = text.includes("Set-Alias") ? "准" : quick ? "疑" : "驳，用户没让把这串参数发出去";
         return sse(res, [delta({ content: answer }), delta({}, { usage: { total_tokens: 3 } })]);
-      }
-      // 记忆优化（专司「记忆优化」，见 src/11-memory.js 的 tuneMemory）：「偏好」两行并成一行、另起「工作」一类；裹一层围栏、前头多一句，页面得认得出清单
-      if (String(msgs[0]?.role === "system" ? msgs[0].content : "").includes("你替一位助手精简")) {
-        const text = String(lastUser);
-        tidyAsks.push({ system: msgs[0].content, user: text });
-        const ops = text.includes("用户偏好 PowerShell")
-          ? [
-              { category: "偏好", text: "用户偏好中文交流；命令用 PowerShell 而非 bash" },
-              { category: "工作", text: "用户在做言的记忆模块" }
-            ]
-          : [];
-        return sse(res, [
-          delta({ content: `理过如下：\n\`\`\`json\n${JSON.stringify(ops)}\n\`\`\`` }),
-          delta({}, { usage: { total_tokens: 11 } })
-        ]);
       }
       // IMAGE-FOUR：一轮画四幅（并行），正文前两幅同段换行、后两幅另起一段，再接一句话
       // 画好的图随工具结果另作一条用户消息附回，最后一条用户话就不是这句了：按原话找
@@ -2035,10 +2013,10 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ];
         const say = content => sse(res, [delta({ content }), delta({}, { usage: { total_tokens: 5 } })]);
-        // 这段对话头一问时定格的记忆：后来记的、理过的有没有进来
+        // 每一问带上最新记忆，同一答的系统提示不变
         if (lastUser.includes("MEMORY-SNAP"))
           return say(
-            `SNAP|bash:${sys.includes("而非 bash") ? "yes" : "no"}|work:${sys.includes("用户在做言的记忆模块") ? "yes" : "no"}|zh:${sys.includes("用户偏好中文交流") ? "yes" : "no"}`
+            `SNAP|ps:${sys.includes("用户偏好 PowerShell") ? "yes" : "no"}|work:${sys.includes("用户在做言的记忆模块") ? "yes" : "no"}|zh:${sys.includes("用户偏好中文交流") ? "yes" : "no"}`
           );
         if (lastUser.includes("MEMORY-OFF"))
           return say(
@@ -2047,25 +2025,26 @@ http
         if (n === 0) return sse(res, call("remember", { category: "偏好", text: "用户偏好中文交流\n用户偏好 PowerShell" }));
         if (n === 1) return sse(res, call("remember", { category: "杂记", text: "临时一条" }));
         if (n === 2) return sse(res, call("remember", { category: "杂记", text: "" }));
-        if (n === 3) return sse(res, call("search_conversations", { query: "术语" }));
-        if (n === 4) {
-          const id = result(3).match(/\[([0-9a-f-]{20,})\]/)?.[1];
+        if (n === 3) return sse(res, call("remember", { category: "工作", text: "用户在做言的记忆模块" }));
+        if (n === 4) return sse(res, call("search_conversations", { query: "术语" }));
+        if (n === 5) {
+          const id = result(4).match(/\[([0-9a-f-]{20,})\]/)?.[1];
           return sse(res, call("read_conversation", { id: id || "none" }));
         }
-        if (n === 5) return sse(res, call("search_conversations", {}));
+        if (n === 6) return sse(res, call("search_conversations", {}));
         const flag = ok => (ok ? "yes" : "no");
         return say(
           [
             "MEM",
             `body:${flag(sys.includes("你跨对话的记忆") && sys.includes("「偏好」\n用户偏好中文交流") && !sys.includes("[m"))}`,
             `forget:${flag(names.includes("forget") || names.includes("recall"))}`,
-            `rewrote:${flag(result(0) === "已写入「偏好」")}`,
-            `added:${flag(result(1) === "已写入「杂记」")}`,
+            `rewrote:${flag(result(0) === "已写入「偏好」\n用户偏好中文交流\n用户偏好 PowerShell")}`,
+            `added:${flag(result(1) === "已写入「杂记」\n临时一条")}`,
             `dropped:${flag(result(2) === "已删去「杂记」")}`,
-            `search:${flag(result(3).includes("「旧谈一则」共 2 条"))}`,
-            `read:${flag(result(4).includes("OLDSECRET"))}`,
-            `recent:${flag(result(5).includes("「旧谈一则」") && result(5).includes("请解释术语 X"))}`,
-            `self:${flag(result(5).includes("MEMORY go"))}`
+            `search:${flag(result(4).includes("「旧谈一则」共 2 条"))}`,
+            `read:${flag(result(5).includes("OLDSECRET"))}`,
+            `recent:${flag(result(6).includes("「旧谈一则」") && result(6).includes("请解释术语 X"))}`,
+            `self:${flag(result(6).includes("MEMORY go"))}`
           ].join("|")
         );
       }

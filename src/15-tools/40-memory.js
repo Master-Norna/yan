@@ -1,23 +1,36 @@
 // 言 · 录（记忆）与旧谈：都在浏览器里完成，不经桥接，也不需确认——每一步都在行迹里显示，记忆在设置页可改可删。
-// remember 在专司「记忆优化」配好时才有、只给主模型：记忆一类一份，写的是那一类改后的全文（见 11-memory.js）。
+// remember 只给主模型：记忆一类一份，写的是那一类改后的全文；按本答读到的版本核对（见 11-memory.js）。
 // 查旧谈、读旧谈常给：翻的是自己的对话，与记忆开不开无关
 const CONVERSATION_MESSAGE_CHARS = 1500; // read_conversation 每条消息最多给这么多字
 defineTool({
   name: "remember",
   group: "memory",
   label: t("记入"),
-  offer: () => memoryOn(),
+  offer: ctx => memoryOn(ctx.conversation),
   mainOnly: true,
   sideEffect: true,
-  run(step, args) {
-    const category = cleanMemoryCategory(args.category),
-      did = writeMemory(category, args.text);
+  run(step, args, { memory, memoryUpdates, conversation }) {
+    const category = cleanMemoryCategory(args.category);
     step.title = category;
+    if (!memoryOn(conversation)) return { ok: false, content: "记忆已关闭，没有写入。", display: "未写入" };
+    if (!memory) return { ok: false, content: "本答未带入记忆，没有写入。", display: "未写入" };
+    const item = memoryOf(category),
+      stamp = memoryStamp(item);
+    if ((memory.get(category) || "") !== stamp) {
+      memoryUpdates?.set(category, stamp);
+      return {
+        ok: false,
+        content: `「${category}」在本答读入后已变化，没有写入。请以以下最新内容为基础重新修改：\n${item ? item.text : "（此类已删去）"}`,
+        display: "记忆已变化"
+      };
+    }
+    const did = writeMemory(category, args.text);
+    memoryUpdates?.set(category, memoryStamp(memoryOf(category)));
     if (did) saveStore();
     refreshMemorySettings();
     if (did === "delete") return { ok: true, content: t`已删去「${category}」`, display: "删去" };
     if (!did) return { ok: true, content: t`「${category}」没有变`, display: "未变" };
-    return { ok: true, content: t`已写入「${category}」`, display: did === "add" ? "新起" : "" };
+    return { ok: true, content: `已写入「${category}」\n${memoryOf(category).text}`, display: did === "add" ? "新起" : "" };
   }
 });
 

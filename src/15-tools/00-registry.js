@@ -10,6 +10,8 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {AbortSignal} signal
  * @property {Set<string>} [offered] 这一轮交给模型的工具名：不在其中的一律不执行
  * @property {boolean} [lookup] 旁注：只查不改（按需给的 MCP 只放只读的几件）
+ * @property {Map<string, string>} [memory] 主答已读到的各类记忆版本，随成功写入或冲突回话更新
+ * @property {Map<string, string>} [memoryUpdates] 本批工具交回的版本，整批完成后才算模型读过
  *
  * @typedef {Object} OfferContext 此处给不给某件工具，看这几样
  * @property {Conversation} conversation
@@ -222,11 +224,13 @@ function toolPresentation(step) {
  * @param {Conversation} conversation
  * @param {Message} assistant
  * @param {boolean} [lookup] 旁注：只查不改
+ * @param {Map<string, string>} [memory]
  */
-async function runSteps(steps, conversation, assistant, signal, toolCache, offered, lookup = false) {
+async function runSteps(steps, conversation, assistant, signal, toolCache, offered, lookup = false, memory = undefined) {
   const outcomes = new Map(),
     images = [],
-    ctx = { conversation, assistant, signal, offered, lookup };
+    memoryUpdates = new Map(),
+    ctx = { conversation, assistant, signal, offered, lookup, memory, memoryUpdates };
   const runOne = async step => {
     // 一批里前一件跑着时按了停：后面排着的不再动手（写记忆、起请示都算动手）
     signal.throwIfAborted();
@@ -271,6 +275,8 @@ async function runSteps(steps, conversation, assistant, signal, toolCache, offer
     await Promise.all(steps.slice(i, j).map(runOne));
     i = j;
   }
+  // 同一轮预先拟好的两次写入，后一次还没看见前一次的结果，不能借它更新后的版本越过核对。
+  for (const [category, stamp] of memoryUpdates) memory?.set(category, stamp);
   return { outcomes, images };
 }
 // 生成结束（停止、出错或中断）时，还在转圈或等待确认的步骤一并收束，不留下永远转圈的卡片。

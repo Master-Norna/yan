@@ -15,7 +15,6 @@ async function exportData(includeFiles) {
       ...store.settings,
       mcpServers,
       dutyReview: { ...store.settings.dutyReview, apiKey: "" },
-      dutyMemory: { ...store.settings.dutyMemory, apiKey: "" },
       dutyImage: { ...store.settings.dutyImage, apiKey: "" }
     },
     profiles: store.profiles.map(profile => ({ ...profile, apiKey: "" })),

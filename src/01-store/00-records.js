@@ -32,7 +32,7 @@ const defaultStore = {
     autoTitle: true,
     notify: false,
     dutyReview: normalizeDuty(null, "openai"),
-    dutyMemory: normalizeDuty(null, "openai"),
+    memoryEnabled: true,
     dutyImage: normalizeDuty(null, "siliconflow"),
     pendingWorkdir: "",
     collapsedRepos: [],
@@ -47,7 +47,7 @@ const defaultStore = {
   },
   profiles: [],
   conversations: [],
-  memory: { tunedAt: "", items: [] },
+  memory: { items: [] },
   drafts: {}
 };
 // 结构迁移：缺的字段由下面的规整补上，这里只管「同一个字段换了意思」的那几回。
@@ -72,7 +72,14 @@ function normalizeStoreData(value) {
     delete data.library;
     const settings = { ...defaultStore.settings, ...(data.settings || {}) };
     settings.dutyReview = normalizeDuty(settings.dutyReview, "openai");
-    settings.dutyMemory = normalizeDuty(settings.dutyMemory, "openai");
+    // 旧专司开关迁到记忆页，保留开关选择；不再保留那份接口、密钥与模型。
+    settings.memoryEnabled =
+      typeof data.settings?.memoryEnabled === "boolean"
+        ? data.settings.memoryEnabled
+        : typeof data.settings?.dutyMemory?.on === "boolean"
+          ? data.settings.dutyMemory.on
+          : data.memory?.enabled !== false;
+    delete settings.dutyMemory;
     settings.dutyImage = normalizeDuty(settings.dutyImage, "siliconflow");
     delete settings.chatsDir;
     delete settings.archiveDir;
@@ -221,5 +228,5 @@ function normalizeMemory(memory) {
       if (updatedAt > same.updatedAt) same.updatedAt = updatedAt;
     }
   }
-  return { tunedAt: String(memory?.tunedAt || ""), items: [...byName.values()] };
+  return { items: [...byName.values()] };
 }

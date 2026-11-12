@@ -1,9 +1,6 @@
-// 录（记忆）：专司「记忆优化」配好时整份记忆进系统提示（一类一段）、每段头一问时定格；remember 写一类的全文、写空即删；
-// 查旧谈（关键词与最近）、翻旧谈；记忆改过后一答落定即交专司「记忆优化」理一遍（只读记忆、照清单改那几类），没改过不理；
-// 旧版一条一事的同类几条读入时并成一类；设置页一类一份全文，可改、改空即删、改名并类；专司里关掉即不带不记
+// 主模型自主维护记忆，无需另配模型；每问带最新版，设置开关与旧谈工具各自独立。
 import { connect, check, sleep, PAGE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
-const FAKE = "http://127.0.0.1:8798";
 const mainDone = n =>
   `document.querySelectorAll('#messages .message.assistant').length === ${n} && [...document.querySelectorAll('#messages .message.assistant')].at(-1)?.dataset.status === "complete"`;
 const lastText = () =>
@@ -11,7 +8,6 @@ const lastText = () =>
     `[...[...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelectorAll('.markdown')].map(n => n.textContent.trim()).join(" ")`
   );
 const memory = () => evalJs(`__yanState().memory`);
-const tuneAsks = async () => (await fetch(`${FAKE}/tidy-asks`)).json();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 // 预置一段旧对话，供查旧谈、翻旧谈
@@ -34,32 +30,30 @@ const old = {
     }
   ]
 };
-// 旧版一条一事：同类两条（一条还带着出处），读入时并成「偏好」一类；tunedAt 晚于它们，开页时不算改过
-const duty = { on: true, api: "openai", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", model: "tidy", modelList: [] },
-  seed = [
-    {
-      id: "m0001",
-      text: "用户偏好中文交流",
-      category: "偏好",
-      createdAt: "2026-10-02T00:00:00.000Z",
-      updatedAt: "2026-10-02T00:00:00.000Z",
-      source: null
-    },
-    {
-      id: "m0002",
-      text: "用户偏好中文交流",
-      category: "偏好",
-      createdAt: "2026-10-03T00:00:00.000Z",
-      updatedAt: "2026-10-03T00:00:00.000Z",
-      source: { conversationId: "gone", title: "早没了的对话" }
-    }
-  ];
+// 旧版一条一事：同类两条读入时并成一类。没有记忆专司配置，也能直接使用。
+const seed = [
+  {
+    id: "m0001",
+    text: "用户偏好中文交流",
+    category: "偏好",
+    createdAt: "2026-10-02T00:00:00.000Z",
+    updatedAt: "2026-10-02T00:00:00.000Z",
+    source: null
+  },
+  {
+    id: "m0002",
+    text: "用户偏好中文交流",
+    category: "偏好",
+    createdAt: "2026-10-03T00:00:00.000Z",
+    updatedAt: "2026-10-03T00:00:00.000Z",
+    source: { conversationId: "gone", title: "早没了的对话" }
+  }
+];
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 6, settings: { name: "测", theme: "light", inkMotion: "off", mode: "chat", activeProfileId: "p1", autoTitle: false, dutyMemory: ${JSON.stringify(duty)} }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [${JSON.stringify(old)}], memory: { tunedAt: "2026-10-05T00:00:00.000Z", items: ${JSON.stringify(seed)} }, library: [], drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 6, settings: { name: "测", theme: "light", inkMotion: "off", mode: "chat", activeProfileId: "p1", autoTitle: false }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", maxTokens: 8192, quota: "100k", usedTokens: 0, systemPrompt: "" }], conversations: [${JSON.stringify(old)}], memory: { items: ${JSON.stringify(seed)} }, library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
-await tuneAsks();
 check(
   "old one-fact items of a category merge into one, without their source",
   await evalJs(
@@ -88,45 +82,26 @@ check(
   await lastText()
 );
 const labels = await evalJs(`[...document.querySelectorAll('#messages .tool-step .tool-label')].map(n => n.textContent).join("|")`);
-check("step cards labeled in the house style", labels === "记入|记入|记入|查旧谈|翻旧谈|查旧谈", labels);
+check("step cards labeled in the house style", labels === "记入|记入|记入|记入|查旧谈|翻旧谈|查旧谈", labels);
 const sources = await evalJs(
   `(d => d ? [...d.querySelectorAll(".source-card")].map(c => c.querySelector("strong").textContent + "|" + (c.querySelector(".source-read") ? "read" : "")) : null)([...document.querySelectorAll('#messages .message.assistant')].at(-1).querySelector(".source-stack"))`
 );
 check("sources list the old talk, read", JSON.stringify(sources) === JSON.stringify(["旧谈一则|read"]), JSON.stringify(sources));
 
-// 这一答改过记忆：落定即交专司「记忆优化」，只读记忆本身，照清单改那几类
-await waitFor(`__yanState().memory.items.some(i => i.category === "工作")`, 20000);
-const asks = await tuneAsks();
-check("memory changed in an answer gets optimized once it settles", asks.length === 1, JSON.stringify(asks.length));
 check(
-  "the optimizer reads the memory by category, not the chat",
-  asks[0].user.includes("「偏好」\n用户偏好中文交流\n用户偏好 PowerShell") &&
-    !asks[0].user.includes("MEMORY go") &&
-    !asks[0].user.includes("杂记"),
-  asks[0]?.user
+  "the main model's writes are saved without a separate memory model",
+  (await memory()).items.length === 2 &&
+    (await memory()).items.some(i => i.category === "偏好" && i.text === "用户偏好中文交流\n用户偏好 PowerShell")
 );
-const tuned = await memory();
-check(
-  "its rewrites land per category",
-  tuned.items.length === 2 &&
-    tuned.items.some(i => i.category === "偏好" && i.text === "用户偏好中文交流；命令用 PowerShell 而非 bash") &&
-    tuned.items.some(i => i.category === "工作" && i.text === "用户在做言的记忆模块") &&
-    !!tuned.tunedAt,
-  JSON.stringify(tuned)
-);
-check("a notice says how many categories", await evalJs(`document.querySelector("#toast").textContent === "记忆：理过 2 类"`));
-
-// 同一段里再问：系统提示仍是头一问时那份（缓存接得上）；这一答没改记忆，不再理
 await sendMain("MEMORY-SNAP", 2);
-check("the memory is frozen for the chat at its first ask", (await lastText()) === "SNAP|bash:no|work:no|zh:yes", await lastText());
-await sleep(800);
-check("an answer that changed no memory is not optimized", (await tuneAsks()).length === 0);
-
-// 新起一段：带的是理过的记忆
+check(
+  "the next question in the same chat carries the latest memory",
+  (await lastText()) === "SNAP|ps:yes|work:yes|zh:yes",
+  await lastText()
+);
 await newChat();
 await sendMain("MEMORY-SNAP", 1, "#welcomeInput", "#welcome .send-trigger");
-await waitFor(`[...document.querySelectorAll('#messages .message.assistant')].at(-1)?.textContent.includes("SNAP|")`);
-check("a new chat carries the optimized memory", (await lastText()) === "SNAP|bash:yes|work:yes|zh:yes", await lastText());
+check("another chat also carries the latest memory", (await lastText()) === "SNAP|ps:yes|work:yes|zh:yes", await lastText());
 
 // 设置页：一类一份全文，可改、改空即删、改名并类
 await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
@@ -134,7 +109,7 @@ await sleep(200);
 await evalJs(`document.querySelector('.tab-btn[data-tab="memory"]').click(); true`);
 await sleep(200);
 check(
-  "memory tab renders with seal, counts and the duty state",
+  "memory tab renders with seal, counts and its own switch",
   await evalJs(
     `(h => h.querySelector(".settings-mark path") && h.querySelector("h2")?.textContent === "记忆" && /^2 类 · \\d+ 字$/.test(h.querySelector(".settings-meta")?.textContent) && h.querySelector(".setting-copy strong")?.textContent === "带进对话" && h.querySelectorAll(".memory-cat[data-memory-cat]").length === 2 && !h.querySelector(".memory-text"))(document.querySelector("#settingsContent"))`
   )
@@ -143,7 +118,7 @@ await evalJs(`document.querySelector('#settingsContent [data-memory-cat="偏好"
 await sleep(150);
 check(
   "a category shows its whole text, read-only",
-  await evalJs(`document.querySelector("#settingsContent .memory-body")?.textContent === "用户偏好中文交流；命令用 PowerShell 而非 bash"`)
+  await evalJs(`document.querySelector("#settingsContent .memory-body")?.textContent === "用户偏好中文交流\\n用户偏好 PowerShell"`)
 );
 await shot("memory-settings.png");
 check(
@@ -240,27 +215,26 @@ check(
   "emptying a category deletes it",
   (await memory()).items.length === 0 && (await evalJs(`!!document.querySelector("#settingsContent .memory-empty")`))
 );
-// 「专司」一钮直达专司那一栏，记忆优化卡摊开着；在那里关掉
-await evalJs(`document.querySelector("#memoryDuty").click(); true`);
-await sleep(200);
-check(
-  "the duty button opens the memory optimization card under duties",
-  await evalJs(`document.querySelector(".tab-btn.active").dataset.tab === "duty" && document.querySelector('[data-duty="memory"]').open`)
-);
-await evalJs(`document.querySelector('[data-duty-on="memory"][data-value="false"]').click(); true`);
-await sleep(200);
-check("turning it off persists", await evalJs(`__yanState().settings.dutyMemory.on === false`));
+// 清空后同一对话下一问不再携带旧正文；先前打开过的另一对话也读取最新版。
 await evalJs(`document.querySelector("#closeSettings").click(); true`);
-await sleep(300);
-await newChat();
-await sendMain("MEMORY-OFF", 1, "#welcomeInput", "#welcome .send-trigger");
-await waitFor(`[...document.querySelectorAll('#messages .message.assistant')].at(-1)?.textContent.includes("OFF|")`);
+await sendMain("MEMORY-SNAP", 2);
+check("deleting memory is visible on the next question", (await lastText()) === "SNAP|ps:no|work:no|zh:no", await lastText());
+await openTalk("MEMORY go");
+await sendMain("MEMORY-SNAP", 3);
+check("a previously opened chat also drops the old memory", (await lastText()) === "SNAP|ps:no|work:no|zh:no", await lastText());
+await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
+await evalJs(`document.querySelector('.tab-btn[data-tab="memory"]').click(); true`);
+// 全局记忆独立开关：专司中没有记忆模型卡。
+await evalJs(`document.querySelector('[data-memory-enabled="false"]').click(); true`);
+check("turning memory off persists", await evalJs(`__yanState().settings.memoryEnabled === false`));
+await evalJs(`document.querySelector('.tab-btn[data-tab="duty"]').click(); true`);
+check("no memory duty remains", await evalJs(`!document.querySelector('[data-duty="memory"]')`));
+await evalJs(`document.querySelector("#closeSettings").click(); true`);
+await sendMain("MEMORY-OFF", 4);
 check(
-  "off: no memory, no memory tools, past chats still searchable",
+  "off: no memory or memory writes; past chat tools stay available",
   (await lastText()) === "OFF|body:no|memtools:0|talks:2",
   await lastText()
 );
-await openTalk("旧谈一则");
-await sleep(800);
-check("off: nothing is optimized", (await tuneAsks()).length === 0);
-close();
+
+await close();

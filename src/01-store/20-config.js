@@ -248,7 +248,6 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
     settings,
     profiles: byId(base.profiles, mine.profiles, theirs.profiles, mergeProfile),
     memory: {
-      tunedAt: same(mine.memory?.tunedAt, base.memory?.tunedAt) ? theirs.memory?.tunedAt : mine.memory?.tunedAt,
       items: byId(base.memory?.items, mine.memory?.items, theirs.memory?.items)
     },
     drafts: keyed(base.drafts, mine.drafts, theirs.drafts)
@@ -289,7 +288,6 @@ function mergeConfig(config) {
   };
   store.profiles = union(disk.profiles, store.profiles);
   store.memory = normalizeMemory({
-    tunedAt: disk.memory.tunedAt || store.memory.tunedAt,
     items: union(disk.memory.items, store.memory.items)
   });
   store.drafts = { ...store.drafts, ...disk.drafts };

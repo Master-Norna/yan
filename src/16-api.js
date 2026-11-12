@@ -77,7 +77,7 @@ function spendTokens(profile, amount, kind = "main") {
   noteUsage(kind, amount);
   return live;
 }
-// 用量簿（设置 → 模型 顶上的用量卡）：每花一笔按本地日期、按类记下——主答（拟题、整理前文随它）、帮手、旁注、审查、记忆优化记墨，生图记张数。
+// 用量簿（设置 → 模型 顶上的用量卡）：每花一笔按本地日期、按类记下——主答（拟题、整理前文随它）、帮手、旁注、审查记墨（旧版记忆整理的用量仍保留），生图记张数。
 // 攒几秒一并报给桥接，由它往 用量.json 上加（见 server/usage.js）；报不上的留着下回再报，离页时随 keepalive 送出
 /** @typedef {"main"|"helper"|"side"|"review"|"memory"|"image"} UsageKind */
 let usagePending = new Map(),
