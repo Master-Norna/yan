@@ -103,8 +103,16 @@ function resolveCommand(command, args, env) {
         const key = Object.keys(env).find(item => item.toUpperCase() === name.toUpperCase());
         return key ? String(env[key]) : whole;
       }),
-    quote = value => (/[\s"&|<>^()]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
-  return { file: [found, ...args.map(expand)].map(quote).join(" "), args: [], shell: true };
+    quote = value => (!value || /[\s"&|<>^()]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+  // 展开结果里也可能含 %NAME%（环境变量的值、令牌或路径里的字面量）。经一层环境变量转交，
+  // 让 cmd 只替换占位符，不再展开结果本身；直接拼进命令行会多展开一次，又把参数拆散。
+  const encoded = args.map(expand).map((value, index) => {
+    let key = `YAN_MCP_ARG_${index}`;
+    while (Object.keys(env).some(name => name.toUpperCase() === key)) key += "_";
+    env[key] = quote(value);
+    return `%${key}%`;
+  });
+  return { file: [quote(found), ...encoded].join(" "), args: [], shell: true };
 }
 function findOnPath(command, env) {
   if (path.isAbsolute(command) || /[\\/]/.test(command)) return command;
