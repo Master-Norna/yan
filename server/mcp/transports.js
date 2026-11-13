@@ -95,8 +95,16 @@ function resolveCommand(command, args, env) {
   if (process.platform !== "win32") return { file: command, args, shell: false };
   const found = findOnPath(command, env);
   if (!/\.(cmd|bat)$/i.test(found)) return { file: found, args, shell: false };
-  const quote = value => (/[\s"&|<>^()]/.test(value) ? `"${String(value).replace(/"/g, '""')}"` : String(value));
-  return { file: [found, ...args].map(quote).join(" "), args: [], shell: true };
+  // 经 shell 起的这条命令，cmd 会先把参数里的 %NAME% 展开一遍；展开出来的值若带空格，cmd 还会按空格把它劈开，
+  // 连同后面的参数一并错位（%PATH% 一带就散）。与其让它劈，不如照 cmd 的规矩在这里先展开好，引号与空格仍由 quote 管。
+  // 未定义的、落单的 % 原样留着——cmd 也这样
+  const expand = value =>
+      String(value).replace(/%([^%\s]+)%/g, (whole, name) => {
+        const key = Object.keys(env).find(item => item.toUpperCase() === name.toUpperCase());
+        return key ? String(env[key]) : whole;
+      }),
+    quote = value => (/[\s"&|<>^()]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+  return { file: [found, ...args.map(expand)].map(quote).join(" "), args: [], shell: true };
 }
 function findOnPath(command, env) {
   if (path.isAbsolute(command) || /[\\/]/.test(command)) return command;
