@@ -8,7 +8,8 @@
 // 在设置里换了位置，整份拷到新处，%APPDATA%\言\位置.json 写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
 // 条子不放在 ~/.yan 里：旧处是叫人自行删去的，条子若在里头，删了旧数据也就删了条子，下次开又回到默认处。
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
-// 由 server.js 装配：require("./server/store.js")({ working })——working 报各页正作答的有几段（见 server/chats.js）
+// 由 server.js 装配：working 报各页正作答的有几段（见 server/chats.js），background 报有没有后台指令在跑（见 server/work/shell.js）
+// 两样都占着根：作答中的对话正往旧处写，后台指令的工作目录也多半在根里，换位置要等它们松手
 "use strict";
 const { sendJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
 const fs = require("node:fs");
@@ -16,8 +17,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { expandHome, pathIsInside } = require("./work/paths.js");
 
-/** @param {{ working?: () => number, onMove?: () => void }} [options] */
-module.exports = function createStore({ working = () => 0, onMove = () => {} } = {}) {
+/** @param {{ working?: () => number, background?: () => boolean, onMove?: () => void }} [options] */
+module.exports = function createStore({ working = () => 0, background = () => false, onMove = () => {} } = {}) {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
     POINTER = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "言", "位置.json"),
     CONFIG_FILE = "配置.json";
@@ -172,6 +173,9 @@ module.exports = function createStore({ working = () => 0, onMove = () => {} } =
       // 有对话正作答（哪一页都算）：拷到一半它还往旧处写，搬过去的就缺了这一截；等答完再换
       const busy = working();
       if (busy) throw Error(`${busy} 段对话正在作答，等答完再换`);
+      // 后台指令还在跑也一样：它的工作目录多半就在存储根里（没绑目录时是 工作/），拷完照旧往旧处写；
+      // 而旧处是叫人自行删去的，删了它就没处落笔了。等它结束再换（见 server/work/shell.js 的 backgroundRunning）
+      if (background()) throw Error("有后台指令还在跑，等它结束再换");
       const existing = fs.existsSync(path.join(next, CONFIG_FILE));
       let locked = [];
       if (!existing) {
