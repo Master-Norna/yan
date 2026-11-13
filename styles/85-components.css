@@ -547,11 +547,12 @@ button.source-local {
     monospace;
   color: var(--ink-2);
 }
-/* 表格按内容收，列少时不必占满一整张纸 */
+/* 表格按内容收，列少时不必占满一整张纸；宽表在纸内滚动，不让单元格越过纸边撑宽预览台 */
 .file-viewer-fit {
   width: auto;
   max-width: 100%;
   margin: 0 auto;
+  overflow-x: auto;
 }
 .file-viewer-table {
   width: 100%;
