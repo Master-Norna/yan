@@ -162,7 +162,7 @@ function saveConfigNow({ force = false } = {}) {
   return configSaveTask;
 }
 // 立刻把配置写下去、等它落定（记忆要当场知道那一类是否被别处改过，见 15-tools/40-memory.js 的 remember）。
-// 写不成（桥接不在、超时）就照旧留给退避重试：那时也判不了冲突，不拦这一步
+// 回 true 才算真写进了存储目录；写不成（桥接不在、超时）留给退避重试，回 false——那时判不了冲突，也不拦这一步
 async function flushConfig() {
   const scope = bootstrap.store;
   clearTimeout(configSaveTimer);
@@ -171,11 +171,12 @@ async function flushConfig() {
     try {
       await saveConfigNow();
     } catch {
-      return; // 写不成（桥接不在、超时）：判不了冲突，也不拦这一步
+      return false; // 写不成：判不了冲突，也不拦这一步
     }
-    if (bootstrap.store !== scope) return;
-    if (!configSaving && !configSaveAgain) return;
+    if (bootstrap.store !== scope) return false;
+    if (!configSaving && !configSaveAgain) return !configSaveFailures;
   }
+  return false;
 }
 // 磁盘上有一份配置：与这边对一对。磁盘上的不比基准新——这边改过就写下去；磁盘上的更新、这边没改过——换进来；
 // 两边都改过——三方合并后换进来，再写回去

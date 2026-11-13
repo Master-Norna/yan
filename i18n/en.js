@@ -423,6 +423,7 @@ var YAN_EN = {
   "已写入「{0}」": "Wrote “{0}”",
   未变: "Unchanged",
   新起: "New",
+  待落盘: "Not yet saved",
   记忆内容: "Memory content",
   修改: "Edit",
   另起一类: "New category",

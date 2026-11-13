@@ -20,7 +20,7 @@ function setup() {
       store = { settings: { memoryEnabled: true }, profiles: [], conversations: [], memory: { items: [] }, drafts: {} };
       saveStore = () => {};
       refreshMemorySettings = () => {};
-      flushConfig = async () => {};
+      flushConfig = async () => true;
     }`,
     `setFlush: fn => { flushConfig = fn; }`
   ]);
@@ -116,9 +116,10 @@ test("remember：落盘时发现别处改过，交回最新正文而不报成功
   assert.equal(memoryUpdates.get("偏好"), f.memoryStamp(f.store.memory.items[0]), "同批再写按新版核对");
 });
 
-test("remember：没有冲突（写不成就判不了）照旧算写下了", async () => {
+test("remember：真写进了存储目录才报「已写入」", async () => {
   const f = setup();
   f.store.memory.items = [item("m1", "偏好", "偏好中文")];
+  f.setFlush(async () => true);
   const memory = new Map([["偏好", f.memoryStamp(f.store.memory.items[0])]]);
   const result = await f.TOOLS.get("remember").run(
     {},
@@ -126,5 +127,25 @@ test("remember：没有冲突（写不成就判不了）照旧算写下了", asy
     { memory, memoryUpdates: new Map(), conversation: { id: "c1" } }
   );
   assert.equal(result.ok, true);
+  assert.match(result.content, /已写入/);
+  assert.equal(result.display, "", "这一类原本就有，行迹上不必另标");
   assert.equal(f.store.memory.items[0].text, "偏好中文\n回答简短");
+});
+
+test("remember：桥接不在、写不成时说「待落盘」，不报已写入", async () => {
+  // 保存失败时另有一个提示条，但那一条长任务里未必看得见：工具结果自己得说清没存住
+  const f = setup();
+  f.store.memory.items = [item("m1", "偏好", "偏好中文")];
+  f.setFlush(async () => false);
+  const memory = new Map([["偏好", f.memoryStamp(f.store.memory.items[0])]]);
+  const result = await f.TOOLS.get("remember").run(
+    {},
+    { category: "偏好", text: "偏好中文\n回答简短" },
+    { memory, memoryUpdates: new Map(), conversation: { id: "c1" } }
+  );
+  assert.equal(result.ok, true, "本页确实改好了，不算失败");
+  assert.doesNotMatch(result.content, /已写入/);
+  assert.match(result.content, /还没写进存储目录/);
+  assert.equal(result.display, "待落盘");
+  assert.equal(f.store.memory.items[0].text, "偏好中文\n回答简短", "本页照旧改成新内容");
 });

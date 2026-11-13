@@ -26,12 +26,14 @@ defineTool({
     }
     const did = writeMemory(category, args.text);
     memoryUpdates?.set(category, memoryStamp(memoryOf(category)));
+    let flushed = true;
     if (did) {
       notePendingMemory(category);
       saveStore();
       // 本页的版本核对挡不住别的浏览器：真落盘时若那边也改过这一类，磁盘上的留作正本，把最新正文交回重写
-      // （见 01-store/20-config.js 的 mergeMemoryItems）。写不成（桥接不在、超时）时没有冲突可报，照旧算写下了
-      await flushConfig();
+      // （见 01-store/20-config.js 的 mergeMemoryItems）。写不成（桥接不在、超时）时判不了冲突，
+      // 但也不能报「已写入」——这一答里按新内容算，落盘留给退避重试，回话里说清
+      flushed = await flushConfig();
       const clash = takeMemoryClash(category);
       if (clash !== null) {
         memoryUpdates?.set(category, memoryStamp(memoryOf(category)));
@@ -46,6 +48,12 @@ defineTool({
     refreshMemorySettings();
     if (did === "delete") return { ok: true, content: t`已删去「${category}」`, display: "删去" };
     if (!did) return { ok: true, content: t`「${category}」没有变`, display: "未变" };
+    if (!flushed)
+      return {
+        ok: true,
+        content: `「${category}」本页已改好，但还没写进存储目录（会自动重试）。这一答里按新内容算，别当它已经存住。\n${memoryOf(category).text}`,
+        display: "待落盘"
+      };
     return { ok: true, content: `已写入「${category}」\n${memoryOf(category).text}`, display: did === "add" ? "新起" : "" };
   }
 });
