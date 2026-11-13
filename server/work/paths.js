@@ -7,6 +7,9 @@ const os = require("node:os");
 
 // 脚本与中间文件放在卷宗里的隐藏目录 .草稿/<对话id>/，页面不列它
 const SCRATCH_DIR = ".草稿";
+// 意的落点，按工作目录算。目录的记忆与运行数据多在 .yan/ 下、按仓库的 .gitignore 不进版本库，
+// 意却是任务状态：退回代码时它得跟着退。检查点要绕开忽略规则把这一件收进快照（见 server/checkpoints.js），两处认同一个字面
+const INTENT_PATH = ".yan/意.json";
 // 列目录、检索、卷宗都不往里钻的目录
 const WORK_SKIP = new Set([
   "node_modules",
@@ -122,6 +125,7 @@ function relPath(workdir, file) {
 
 module.exports = {
   SCRATCH_DIR,
+  INTENT_PATH,
   WORK_SKIP,
   expandHome,
   resolveWorkdir,
