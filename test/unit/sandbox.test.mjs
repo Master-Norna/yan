@@ -691,6 +691,55 @@ test("iex：站在指令位上的不论怎么收尾都算藏字，三档一致�
   }
 });
 
+test("外层双引号里的 $() 先按外层 Shell 求值，再扫描内层 bash 脚本", () => {
+  const dangerous = [`bash -c "echo '$(Stop-Computer)'"`, `bash -c "echo foo # $(Stop-Computer)"`];
+  for (const platform of ["win32", "darwin"]) {
+    const scanners = [
+      ["严", command => screenCommand(command, platform === "win32" ? wd : "/Users/a/proj", { platform })],
+      ["宽", command => screenLoose(command, { platform })],
+      ["审", command => screenAutoReview(command, { platform })]
+    ];
+    for (const command of dangerous) {
+      for (const [tier, screen] of scanners) assert.ok(screen(command), `${platform} ${tier}: ${command}`);
+      assert.equal(screenUnreviewable(command, { platform }), null, `${platform} 不可审: ${command}`);
+    }
+
+    const escaped =
+      platform === "win32"
+        ? "bash -c \"echo '`$(Stop-Computer)'\""
+        : "bash -c \"echo '\\$(Stop-Computer)'\"";
+    for (const command of [escaped, `bash -c "echo '$(echo safe)'"`, `bash -c "echo foo # $(echo safe)"`])
+      for (const [tier, screen] of scanners) assert.equal(screen(command), null, `${platform} ${tier}: ${command}`);
+  }
+});
+
+test("Invoke-Expression 搜索文本不算藏字命令，站在指令位上的四档都拦", () => {
+  const searches = [
+    String.raw`grep -rn -i "iex\|Invoke-Expression\|HIDDEN" src docs/a.md`,
+    "rg Invoke-Expression src",
+    "git log -S Invoke-Expression",
+    'echo "use Invoke-Expression carefully"'
+  ];
+  const hidden = [
+    "Invoke-Expression $script",
+    'Invoke-Expression("Stop-"+"Computer")',
+    "Invoke-Expression($s)",
+    "$r = @{a = Invoke-Expression $s}",
+    "$r[0] = Invoke-Expression $s"
+  ];
+  for (const platform of ["win32", "darwin"]) {
+    const scanners = [
+      command => screenCommand(command, platform === "win32" ? wd : "/Users/a/proj", { platform }),
+      command => screenLoose(command, { platform }),
+      command => screenAutoReview(command, { platform }),
+      command => screenUnreviewable(command, { platform })
+    ];
+    for (const command of searches)
+      for (const screen of scanners) assert.equal(screen(command), null, `${platform}: ${command}`);
+    for (const command of hidden) for (const screen of scanners) assert.ok(screen(command), `${platform}: ${command}`);
+  }
+});
+
 test("不带后缀的 credentials：带路径才算凭据文件，严档拦、宽档放；只是搜字或同名别的文件放行", () => {
   for (const command of [
     "cat ~/.aws/credentials",

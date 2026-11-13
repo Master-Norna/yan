@@ -56,7 +56,7 @@ const ELEVATION = new RegExp(
   "im"
 );
 // 藏字：编码过的指令、拿 Invoke-Expression 跑拼出来的字串——筛查与审查都只看得到一串编码，判不了它要做什么。
-// iex 按指令位认，后面可贴括号、引号或就此收尾（irm x | iex、iex(irm x)）；赋值的右边也算在执行。rg iex a.txt 是搜字，不算
+// Invoke-Expression 与 iex 按指令位认，后面可贴括号、引号或就此收尾（irm x | iex、iex(irm x)）；赋值的右边也算在执行。rg iex a.txt 是搜字，不算
 // PowerShell 认参数名的任意前缀，也认 / 开头：-en、-encodedc、/enc 都是 -EncodedCommand，串再短也能跑。所以站在指令位的 powershell / pwsh（可带路径、可经 Start-Process）
 // 后面见到就算；-Command、-File 之后的属于被跑的东西（powershell -c "node -e 1"），不算。别的程序的 -e 只认一长串 base64 那一条
 const prefixesOf = (/** @type {string} */ word) => Array.from(word, (_, i) => word.slice(0, i + 1)).join("|");
@@ -67,7 +67,7 @@ const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?
 // & 要在语句开头：a & (b) 是 pandas 之类脚本里的按位与
 const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])${INLINE_SPACE}*[&.]${INLINE_SPACE}*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
 const HIDDEN_COMMAND = new RegExp(
-  String.raw`\bInvoke-Expression\b|(?:${CMD}|=\s*)iex(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
+  String.raw`(?:${CMD}|=\s*)(?:Invoke-Expression|iex)(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
     String.raw`|${CMD}eval(?=[\s"']|$)|${CMD}(?:source|\.)\s+<\(` +
     String.raw`|${CMD}(?:ba|z|da|k)?sh\s+(?:-[^\s]+\s+)*<\(` +
     String.raw`|${CMD}${SHELL}\$\(`,
@@ -740,20 +740,20 @@ function findSubstEnd(text, startPos, to) {
 /**
  * @typedef {{ kind: "code", depth: number, arith: number, heredocs: { delim: string, dash: boolean, quoted: boolean }[], cases: number[], start: number, open: number } | { kind: "param", depth: number } | { kind: "squote" | "ansi" | "btick" | "dquote" | "pshere" }} SubstMode
  */
-function substEnds(text, shell) {
+function substEnds(text, shell, doubleQuoted = false) {
   const ends = new Int32Array(text.length).fill(-1),
-    jobs = [{ text, shell, base: 0 }];
+    jobs = [{ text, shell, base: 0, doubleQuoted }];
   while (jobs.length) {
     const job = jobs.pop();
-    scanSubst(job.text, job.shell, job.base, ends, jobs);
+    scanSubst(job.text, job.shell, job.base, ends, jobs, job.doubleQuoted);
   }
   return ends;
 }
-function scanSubst(text, shell, base, ends, jobs) {
+function scanSubst(text, shell, base, ends, jobs, doubleQuoted = false) {
   const posix = shell !== "powershell",
     n = text.length,
     /** @type {SubstMode[]} */
-    stack = [{ kind: "code", depth: 0, arith: 0, heredocs: [], cases: [], start: 0, open: -1 }];
+    stack = doubleQuoted ? [{ kind: "dquote" }] : [{ kind: "code", depth: 0, arith: 0, heredocs: [], cases: [], start: 0, open: -1 }];
   const top = () => stack[stack.length - 1];
   const openSubst = (dollar, arith) => {
     stack.push({ kind: "code", depth: arith ? 2 : 1, arith: arith ? 2 : 0, heredocs: [], cases: [], start: dollar + 2, open: dollar });
@@ -1122,13 +1122,14 @@ function shellText(text, shell) {
     unquoted = text.split("");
   const quotes = new Map();
   const frames = [];
-  const push = (context, from, to, shellBody, quote = "") => {
+  const push = (context, from, to, shellBody, quote = "", outerQuote = false) => {
     frames.push({
       context,
       at: from,
       to,
       shellBody,
       quote,
+      outerQuote,
       start: from,
       stmtStart: from,
       parenDepth: 0,
@@ -1159,17 +1160,25 @@ function shellText(text, shell) {
         subst = !escaped && frame.quote === '"' && shell !== "cmd" && text[i] === "$" && text[i + 1] === "(",
         end = subst ? substEnd(context, i) : -1;
       if (subst && end >= 0 && end < to) {
-        unquoted[at] = " ";
-        unquoted[at + 1] = "(";
-        unquoted[offset + end] = ")";
+        if (frame.outerQuote) {
+          for (let j = i; j <= end; j++) {
+            const index = offset + j;
+            chars[index] = syntax[index] = unquoted[index] = text[j];
+          }
+        } else {
+          unquoted[at] = " ";
+          unquoted[at + 1] = "(";
+          unquoted[offset + end] = ")";
+        }
         frame.at = end + 1;
         push(context, i + 2, end, frame.shellBody);
       } else {
         const next = Math.min(i + (escaped ? 2 : 1), to);
-        for (let j = i; j < next; j++) {
-          unquoted[offset + j] = " ";
-          if (";&|(){}\r\n".includes(text[j])) syntax[offset + j] = "\x01";
-        }
+        if (!frame.outerQuote)
+          for (let j = i; j < next; j++) {
+            unquoted[offset + j] = " ";
+            if (";&|(){}\r\n".includes(text[j])) syntax[offset + j] = "\x01";
+          }
         frame.at = next;
       }
       continue;
@@ -1282,8 +1291,14 @@ function shellText(text, shell) {
       frame.at = end + 1;
       if (i === frame.scriptAt) {
         const command = text.slice(frame.start, i),
+          body = text.slice(i + 1, end),
           bodyShell = CMD_SCRIPT.test(command) ? "cmd" : POSIX_SCRIPT.test(command) ? "posix" : "powershell";
-        push(quoteContext(text.slice(i + 1, end), bodyShell, at + 1), 0, end - i - 1, true);
+        if (text[i] === '"') {
+          const outer = quoteContext(body, shell, at + 1);
+          outer.ends = substEnds(body, shell, true);
+          push(outer, 0, body.length, true, '"', true);
+        }
+        push(quoteContext(body, bodyShell, at + 1), 0, body.length, true);
       } else push(context, i + 1, end, frame.shellBody, text[i]);
     } else if (";&|(){}\n".includes(text[i])) {
       if (text[i] === "(") {
