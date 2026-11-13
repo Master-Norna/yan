@@ -11,7 +11,8 @@
     "unit": "node --test \"test/unit/*.test.mjs\"",
     "test": "node --test \"test/unit/*.test.mjs\" && node test/run.mjs",
     "format": "npx prettier@3.3.3 --write .",
-    "pack": "node pack/pack.mjs"
+    "pack": "node pack/pack.mjs",
+    "pack:smoke": "node pack/pack.mjs && node pack/smoke.mjs"
   },
   "engines": {
     "node": ">=22"

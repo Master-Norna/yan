@@ -20,3 +20,13 @@
 几条跨模块的边界只有一处定规矩：开工共用 `claimTurn`（正文、新对话、旁注、续帮手与回报），认领回来重查目录退回；旁注在 `withSideTurn` 内通过检查后才改记录并注册作业。模型的上游请求共用 `fetchUpstream`，各家与生图只给地址、鉴权和请求体。配置与候的接口经 `store.scopedRoute` 绑定发起时的根；换根成功通知定时模块重排，页面清掉上一根的配置同步簿记，读回经 `storeBridge` 核对所属根，不能让迟到回话释放新请求的锁或拿旧基准并新数据。
 
 内置提示词的写法、拼接次序与轻重之分，见 [`prompts/README.md`](../prompts/README.md)。
+
+## 按需验证
+
+Windows 另跑 Node 22 的轻量单测，核对 `engines` 下限，先作参考；Windows 与 macOS 的端到端失败时都上传截图。版本号两处一致由单测守着。
+
+以下几件不进常规跑批：
+
+- `node test/prompt-size.mjs`：看四档提示词体量，与 `test/prompt-size.json` 的基准比差值；确认数值合理后加 `--save` 更新基准。
+- `node test/sandbox-replay.mjs --diff`：拿存储根里真实用过的指令回放沙箱规则，含历史版本、旁注与另存的帮手行迹；改 `server/sandbox.js` 后必跑。
+- `npm run pack:smoke`：打包后解开 zip，用包里自带的 Node 起桥接，核对 `/api/bootstrap` 与首页；发版前必跑。打包、启动相关的 PR 按 `.github/workflows/pack.yml` 的路径条件自动跑。

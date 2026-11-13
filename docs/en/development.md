@@ -20,3 +20,13 @@ Zero dependencies, no transpiling: the source is split into many parts, and when
 Shared boundaries have one owner. All turn entry points use `claimTurn`: main replies, new chats, side notes, resumed helpers and incoming reports recheck folder restoration after claiming the lease. Side notes change records and register their job inside `withSideTurn`, after the checks pass. Model requests use `fetchUpstream`; providers and image generation supply the URL, authentication and body. Settings and timer routes use `store.scopedRoute` to bind requests to the storage root at entry. A successful move reschedules timers, resets the page's settings-sync bookkeeping, and uses `storeBridge` to reject replies from a previous root. A late response must never release a new request's lock or merge old settings into the new root.
 
 For how the built-in prompts are written, their concatenation order and the split between light and heavy, see [`prompts/README.md`](../../prompts/README.md) (in Chinese).
+
+## Additional validation
+
+Windows also runs lightweight unit tests on Node 22 to check the `engines` floor, for reference only. Both Windows and macOS upload screenshots when end-to-end tests fail. A unit test keeps the two version strings in sync.
+
+These checks run separately from the regular batch:
+
+- `node test/prompt-size.mjs`: show prompt sizes for four modes and their delta against `test/prompt-size.json`; use `--save` to update the baseline after reviewing the numbers.
+- `node test/sandbox-replay.mjs --diff`: replay recorded commands against the sandbox rules, including previous versions, side threads and separately stored helper trails; required after changing `server/sandbox.js`.
+- `npm run pack:smoke`: build and unzip the package, start its bridge with the bundled Node, and check `/api/bootstrap` and the home page; required before a release. Packaging and startup PRs run it automatically when they match the path filters in `.github/workflows/pack.yml`.

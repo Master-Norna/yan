@@ -82,7 +82,7 @@ defineTool({
     )) {
       if (c.id === conversation.id) continue;
       const lines = c.messages.filter(m => (m.role === "user" || m.role === "assistant") && m.content);
-      if (terms.length && !hitsAll(`${c.title}\n${lines.map(m => m.content).join("\n")}`, terms)) continue;
+      if (terms.length && !hitsAll(c.title, lines, terms)) continue;
       // 片段：命中的那一句前后；列最近的则取头一问的开头
       const hit = terms.length ? lines.find(m => m.content.toLowerCase().includes(terms[0])) : lines.find(m => m.role === "user"),
         text = String(hit?.content || "").replace(/\s+/g, " ");
