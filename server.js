@@ -181,6 +181,7 @@ const CHATS = require("./server/chats.js")({
 // 检查点：一答头一回动手改文件前记下目录的样子，可退回到那一刻（见 server/checkpoints.js）。存储根在工作目录里头时不把它记进去
 const CHECKPOINTS = require("./server/checkpoints.js")({
   home: () => path.join(STORE.paths().root, "检查点"),
+  deleted: id => CHATS.deleted(id),
   skip: () => [STORE.paths().root]
 });
 // 候 · 等时刻：模型约好的时刻由桥接记着，到点落进 存储根/候/ 再交给页面（见 server/timers.js）

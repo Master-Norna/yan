@@ -124,12 +124,13 @@ test("首拍还在队列里时删掉对话：拍完也不落册，别的对话�
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     root = path.join(base, "work"),
     home = path.join(base, "检查点"),
-    // 删掉的记号收一小段（这里调成 1 秒）：既收住在路上的那张，也不至于一直不收
-    { post, points, close } = await serve(home, { dropGraceMs: 1000 });
+    deleted = new Set(),
+    { post, points, close } = await serve(home, { deleted: id => deleted.has(id) });
   try {
     for (let i = 0; i < 200; i++) write(root, `src/${i}.txt`, `件 ${i}`);
     // 拍摄先入队、删除后到：等它拍完再看有没有落下那一册
     const taking = post("/api/checkpoint/take", { root, conversation: "c1", answer: "m1" });
+    deleted.add("c1");
     await points.dropConversation("c1");
     const took = await taking;
     assert.equal(took.status, 200, JSON.stringify(took));
@@ -139,11 +140,45 @@ test("首拍还在队列里时删掉对话：拍完也不落册，别的对话�
     // 另一段对话照常拍：别人删它的不牵连
     assert.equal((await post("/api/checkpoint/take", { root, conversation: "c2", answer: "m2" })).status, 200);
     assert.equal(books().length, 1);
-    // 删掉之后又从备份恢复同一段对话（id 沿用 c1），过了那一小段：再拍的照常落册
-    await new Promise(resolve => setTimeout(resolve, 1100));
-    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "m3" })).status, 200);
+    // 删除记录仍在时晚到的旧请求不收；恢复清掉记录后，立即拍新答，不等任意时长。
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "late" })).discarded, true);
+    deleted.delete("c1");
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "m3" })).discarded, undefined);
     assert.equal(books().filter(name => name.includes("c1~m3")).length, 1);
   } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("拍摄途中删除又恢复：旧拍摄不复活，新答立即能拍", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, points, close } = await serve(path.join(base, "检查点")),
+    original = fs.promises.stat;
+  let entered, release;
+  const started = new Promise(resolve => (entered = resolve)),
+    paused = new Promise(resolve => (release = resolve));
+  write(root, "a.txt", "原件");
+  fs.promises.stat = async (...args) => {
+    if (args[0] === path.join(root, "a.txt")) {
+      entered();
+      await paused;
+    }
+    return original(...args);
+  };
+  try {
+    const taking = post("/api/checkpoint/take", { root, conversation: "c1", answer: "old" });
+    await started;
+    await points.dropConversation("c1");
+    release();
+    assert.equal((await taking).discarded, true, "旧拍摄即使在恢复后才完成也不落册");
+    fs.promises.stat = original;
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "new" })).discarded, undefined);
+    assert.equal((await post("/api/checkpoint/diff", { root, conversation: "c1", answer: "new" })).status, 200);
+  } finally {
+    release();
+    fs.promises.stat = original;
     await close();
     fs.rmSync(base, { recursive: true, force: true });
   }
