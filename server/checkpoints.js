@@ -84,8 +84,8 @@ function ignored(rules, rel, dir) {
   return out;
 }
 
-/** @param {{ home: () => string, skip?: () => string[] }} options */
-module.exports = function createCheckpoints({ home, skip = () => [] }) {
+/** @param {{ home: () => string, skip?: () => string[], dropGraceMs?: number }} options */
+module.exports = function createCheckpoints({ home, skip = () => [], dropGraceMs = 2 * 60 * 1000 }) {
   const same = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
   /** @param {string} dir */
   const storeAt = dir => ({ dir, objects: path.join(dir, "对象"), book: path.join(dir, "册"), index: path.join(dir, "索引.json") });
@@ -103,6 +103,10 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
   // 同一个目录一回只办一件（两段对话同绑一个目录、同时动手）：索引、对象都不至于互相踩
   /** @type {Map<string, Promise<any>>} */
   const queues = new Map();
+  // 最近删掉的对话（<对话>~ → 删的时刻）：只收「删除前后这两下里还在路上」的那一张。
+  // 只认很短的一段（dropGraceMs），删掉后从备份恢复同一段对话（id 沿用）时不至于一直不收它的检查点
+  /** @type {Map<string, number>} */
+  const droppedConversations = new Map();
   function serial(store, task) {
     const before = queues.get(store.dir) || Promise.resolve(),
       run = before.catch(() => {}).then(task);
@@ -190,7 +194,12 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
   }
   // ---------- 记下此刻 ----------
   async function take(rootDir, key) {
-    const store = storeOf(rootDir);
+    const store = storeOf(rootDir),
+      // 拍这张册的工夫里这段对话被删了（见 dropConversation）：写书之前再看一眼
+      prefix = key.slice(0, key.indexOf("~") + 1),
+      began = Date.now();
+    // 记着的删除只收一小段：过时即清，免得删掉后从备份恢复的同一段对话一直拍不了
+    for (const [dropped, at] of droppedConversations) if (began - at > dropGraceMs) droppedConversations.delete(dropped);
     return serial(store, async () => {
       const started = Date.now(),
         index = readJsonFile(store.index, {}),
@@ -217,6 +226,13 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       // 目录树自下而上存成对象：没变的子目录哈希不变
       const save = items => putObject(store, JSON.stringify(items.map(item => (item[0] === "d" ? ["d", item[1], save(item[2])] : item))));
       const rootHash = save(tree);
+      // 开拍时这段对话刚被删（删除请求可能还赶在拍摄请求前头到）：这一张不落册。
+      // 隔久了的照常拍——那是删掉之后从备份恢复的同一段对话，id 沿用
+      const droppedAt = droppedConversations.get(prefix);
+      if (droppedAt !== undefined && began - droppedAt < dropGraceMs) {
+        collect(store);
+        return { key, files, read, ms: Date.now() - started, discarded: true };
+      }
       fs.mkdirSync(store.book, { recursive: true });
       writeAtomic(
         path.join(store.book, `${key}.json`),
@@ -386,12 +402,18 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
   /** @param {string} conversation */
   async function dropConversation(conversation) {
     const prefix = `${String(conversation).replace(/[^\w-]/g, "")}~`;
-    if (prefix === "~" || !fs.existsSync(home())) return;
+    if (prefix === "~") return;
+    // 先记下：正在拍、还没写册的那一张（take 在同一队列里排着）与晚一步到的拍摄据此不落册
+    droppedConversations.set(prefix, Date.now());
+    for (const [key, at] of droppedConversations) if (Date.now() - at > dropGraceMs) droppedConversations.delete(key);
+    if (!fs.existsSync(home())) return;
     for (const code of fs.readdirSync(home())) {
-      const store = storeAt(path.join(home(), code)),
-        pages = fs.existsSync(store.book) ? fs.readdirSync(store.book).filter(name => name.startsWith(prefix)) : [];
-      if (!pages.length) continue;
+      const store = storeAt(path.join(home(), code));
+      // 册的名单要在同一个目录队列里取：首拍还没写册时账上先没有它，in-flight 的那张稍后写完，
+      // 这一回就得等它先落定再看一眼——不然删完才写出册来，那幅快照从此没人引用、也不会被回收
       await serial(store, async () => {
+        const pages = fs.existsSync(store.book) ? fs.readdirSync(store.book).filter(name => name.startsWith(prefix)) : [];
+        if (!pages.length) return;
         for (const name of pages) fs.rmSync(path.join(store.book, name), { force: true });
         collect(store);
       });

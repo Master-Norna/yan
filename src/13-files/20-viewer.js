@@ -214,9 +214,11 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
       );
     return withZipImages(`<div class="file-viewer-text markdown">${note}${renderMarkdown(text)}</div>`, data);
   }
-  const text = await reader.text();
-  if (kind === "markdown") return `<div class="file-viewer-text markdown">${renderMarkdown(text.slice(0, 200000))}</div>`;
-  return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(text.slice(0, 200000))}</pre>${text.length > 200000 ? `<p class="file-viewer-note">${t(`仅显示前 20 万字`)}</p>` : ""}</div>`;
+  const text = await reader.text(),
+    // 截了要说一声：不然读的人当预览的末尾就是文件的末尾（原文件不动，下载、以本机程序打开都在）
+    cut = text.length > 200000 ? `<p class="file-viewer-note">${t("仅显示前 20 万字")}</p>` : "";
+  if (kind === "markdown") return `<div class="file-viewer-text markdown">${renderMarkdown(text.slice(0, 200000))}${cut}</div>`;
+  return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(text.slice(0, 200000))}</pre>${cut}</div>`;
 }
 // CSV / TSV：引号里的换行仍属于同一个字段，显示上限按记录计。
 function parseDelimited(text, split, limit = Infinity) {

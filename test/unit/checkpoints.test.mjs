@@ -11,8 +11,8 @@ import { createRequire } from "node:module";
 const createCheckpoints = createRequire(import.meta.url)("../../server/checkpoints.js");
 const { ignoreRule, ignored } = createCheckpoints;
 
-async function serve(home) {
-  const points = createCheckpoints({ home: () => home });
+async function serve(home, options = {}) {
+  const points = createCheckpoints({ home: () => home, ...options });
   const server = http.createServer((req, res) => points.routes[`POST ${req.url}`](req, res)).listen(0, "127.0.0.1");
   await new Promise(resolve => server.once("listening", resolve));
   const post = (route, body) =>
@@ -114,6 +114,35 @@ test("第二回只读变了的；没变的子目录与内容共用对象；对�
     assert.equal(fs.readFileSync(path.join(root, "main.txt"), "utf8"), "第一版");
     const gone = await post("/api/checkpoint/diff", { root, conversation: "c2", answer: "m2" });
     assert.equal(gone.status, 400);
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("首拍还在队列里时删掉对话：拍完也不落册，别的对话照常", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    home = path.join(base, "检查点"),
+    // 删掉的记号收一小段（这里调成 1 秒）：既收住在路上的那张，也不至于一直不收
+    { post, points, close } = await serve(home, { dropGraceMs: 1000 });
+  try {
+    for (let i = 0; i < 200; i++) write(root, `src/${i}.txt`, `件 ${i}`);
+    // 拍摄先入队、删除后到：等它拍完再看有没有落下那一册
+    const taking = post("/api/checkpoint/take", { root, conversation: "c1", answer: "m1" });
+    await points.dropConversation("c1");
+    const took = await taking;
+    assert.equal(took.status, 200, JSON.stringify(took));
+    const books = () =>
+      fs.existsSync(home) ? fs.readdirSync(home, { recursive: true }).filter(name => /册[\\/].+\.json$/.test(name)) : [];
+    assert.deepEqual(books(), [], "删掉的对话不该留下册");
+    // 另一段对话照常拍：别人删它的不牵连
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c2", answer: "m2" })).status, 200);
+    assert.equal(books().length, 1);
+    // 删掉之后又从备份恢复同一段对话（id 沿用 c1），过了那一小段：再拍的照常落册
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "m3" })).status, 200);
+    assert.equal(books().filter(name => name.includes("c1~m3")).length, 1);
   } finally {
     await close();
     fs.rmSync(base, { recursive: true, force: true });
