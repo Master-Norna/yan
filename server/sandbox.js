@@ -67,11 +67,11 @@ const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?
 // & 要在语句开头：a & (b) 是 pandas 之类脚本里的按位与
 const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])${INLINE_SPACE}*[&.]${INLINE_SPACE}*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
 const HIDDEN_COMMAND = new RegExp(
-  String.raw`(?:${CMD}|=\s*)(?:Invoke-Expression|iex)(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
+  String.raw`(?:${CMD}|=\s*)(?:Invoke-Expression|iex|\.(?=(?<dotSpace>(?:${INLINE_SPACE}|\x60\x01\n?)+)(?:Invoke-Expression|"Invoke-Expression"|'Invoke-Expression')(?![\w.-])))(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
     String.raw`|${CMD}eval(?=[\s"']|$)|${CMD}(?:source|\.)\s+<\(` +
     String.raw`|${CMD}(?:ba|z|da|k)?sh\s+(?:-[^\s]+\s+)*<\(` +
     String.raw`|${CMD}${SHELL}\$\(`,
-  "im"
+  "dgim"
 );
 const PIPE_SHELL = new RegExp(
   String.raw`^${INLINE_SPACE}*${PREFIX}["']?(?:[^\s"';&|(){}]*/)?(?:(?:ba|z|da|k)?sh|powershell|pwsh)(?:\.exe)?["']?(?=[\s<>]|$)`,
@@ -1495,6 +1495,14 @@ function pipesToShell(/** @type {string} */ text) {
 const HIDDEN = HIDDEN_COMMAND,
   SUDO_WORD = /(^|[\s;&|()<>])sudo(?=$|[\s;&|()<>])/i,
   HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
+function hasHiddenCommand(scanned) {
+  for (const match of scanned.syntax.matchAll(HIDDEN)) {
+    const gap = match.indices.groups.dotSpace;
+    // syntax 把所有转义的下一字符都换成 \x01；点调用只把真实的反引号换行当空白。
+    if (!gap || /^(?:[^\S\r\n]|\x60\r?\n)+$/.test(scanned.text.slice(gap[0], gap[1]))) return true;
+  }
+  return false;
+}
 // 指令位上的程序可以写全路径（C:\Windows\System32\reg.exe、& "C:\Program Files\…\reg.exe"）。规则都按命令名认，筛之前先去掉程序的目录，
 // 禁用规则、外联、写动词就不必各自认路径；程序自己的路径也不再算它碰的路径——& "C:\Program Files\7-Zip\7z.exe" x a.zip 并没有往系统目录里写。
 // 带引号的只认 & 与 . 之后的：别处的引号是字串，("C:\Windows\x") 正可能是写入目标；cmd /c、powershell -c 后面的引号裹的是整条指令，也按不带引号的认。
@@ -1632,7 +1640,9 @@ const forbiddenWhy = (scanned, tier) => {
   return RULES.find(
     ([pattern, , tiers]) =>
       tiers.includes(tier) &&
-      (pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax) || (pattern === HIDDEN && pipesToShell(scanned.syntax)))
+      (pattern === HIDDEN
+        ? hasHiddenCommand(scanned) || pipesToShell(scanned.syntax)
+        : pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax))
   )?.[1];
 };
 // 环境变量的两种写法（$env:X、${env:X} 与 %X%）从同一份名单生成，补一个名字两边都有
@@ -1671,7 +1681,7 @@ function screenUnreviewable(command, { platform = process.platform } = {}) {
   if (callsBridge(text)) return BRIDGE_WHY;
   const win = platform === "win32";
   const scanned = shellText(withoutExeDir(text, win), win ? "powershell" : "posix");
-  return HIDDEN.test(scanned.syntax) || pipesToShell(scanned.syntax) ? HIDDEN_WHY : null;
+  return hasHiddenCommand(scanned) || pipesToShell(scanned.syntax) ? HIDDEN_WHY : null;
 }
 // 文件工具会用 screenPath 拦机密文件；指令通道也得拦显式点名，否则 `Get-Content .env` 能从 shell 绕过去。
 // 这里只认完整的路径片段，避免把 `dotnet user-secrets list`、`env.d.ts` 这类正常参数误判成文件。
