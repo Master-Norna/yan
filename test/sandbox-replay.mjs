@@ -5,8 +5,10 @@
 //   node test/sandbox-replay.mjs            只看当前规则拦下哪些、共几条
 //   node test/sandbox-replay.mjs --diff     再与 HEAD 那版比，列出判定变了的（新拦的多半是误伤，逐条看）
 //   node test/sandbox-replay.mjs --limit 50 多列几条（默认 20）
+//   node test/sandbox-replay.mjs --platform win32  按指定平台判（默认本机；判定与平台有关，别拿 mac 的语料按 win32 过）
 // 只读：不写存储根，不碰 8787；--diff 会在 server/ 下临时放一份 HEAD 的 sandbox.js，跑完即删。
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +19,8 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const limit = Number(args[args.indexOf("--limit") + 1]) || 20;
+const platformIndex = args.indexOf("--platform");
+const platform = platformIndex >= 0 && args[platformIndex + 1] ? args[platformIndex + 1] : process.platform;
 
 // 存在 YAN_HOME 就用它；否则读 %APPDATA%\言\位置.json 的 root（换过存储位置的机器靠它找到现在的根）
 function storeRoot() {
@@ -55,14 +59,54 @@ function commandsIn(chat) {
   return found;
 }
 
+// 收了尾的一答，帮手的步骤与思绪另存在 对话/行迹/<对话短码>/<key>.json（见 src/01-store/35-cold.js），
+// 对话文件里只留 cold 记号。不接回来，那些帮手跑过的 run_command 一条都捞不到
+const codeOf = id => crypto.createHash("sha1").update(String(id)).digest("hex").slice(0, 10);
+function coldPieces(id) {
+  const dir = path.join(talks, "行迹", codeOf(id)),
+    pieces = new Map();
+  if (!id || !fs.existsSync(dir)) return pieces;
+  for (const name of fs.readdirSync(dir).filter(file => file.endsWith(".json"))) {
+    try {
+      pieces.set(name.replace(/\.json$/, ""), JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")));
+    } catch {
+      /* 坏的接不上就不接，照实少数几条 */
+    }
+  }
+  return pieces;
+}
+// 接回冷行迹：与页面 warmConversation 一样，手上已有（并进来的新份）的不盖；返回接上了几答
+function warmCold(chat, pieces) {
+  let warmed = 0;
+  const lists = [
+    chat.messages,
+    ...(Array.isArray(chat.forks) ? chat.forks : []).map(item => item?.messages),
+    ...(Array.isArray(chat.threads) ? chat.threads : []).map(item => item?.messages)
+  ];
+  for (const list of lists)
+    for (const message of Array.isArray(list) ? list : []) {
+      const piece = message?.cold?.key && pieces.get(String(message.cold.key));
+      if (!piece) continue;
+      for (const step of message.steps || []) {
+        const part = step.sub?.id && piece.subs?.[step.sub.id];
+        if (part && step.sub.steps === undefined) step.sub.steps = part.steps || [];
+      }
+      warmed += 1;
+    }
+  return warmed;
+}
+
 const root = storeRoot();
 const talks = path.join(root, "对话");
+// 没绑定目录的对话（普通聊天），指令实际是在卷宗里跑的（src/06-mode-welcome/00-mode.js 的 workRoot → archiveDir）
+const archive = path.join(root, "卷宗");
 if (!fs.existsSync(talks)) {
   console.error(`没有找到对话目录：${talks}\n（存储根不对时用 YAN_HOME 指定，或先在设置里换位置）`);
   process.exit(1);
 }
 
 const cases = [];
+let warmedMessages = 0;
 for (const name of fs.readdirSync(talks).filter(file => file.endsWith(".json"))) {
   let chat;
   try {
@@ -71,14 +115,15 @@ for (const name of fs.readdirSync(talks).filter(file => file.endsWith(".json")))
   } catch {
     continue;
   }
-  const workdir = typeof chat.workdir === "string" && chat.workdir ? chat.workdir : ROOT;
+  warmedMessages += warmCold(chat, coldPieces(chat.id));
+  const workdir = typeof chat.workdir === "string" && chat.workdir ? chat.workdir : archive;
   for (const command of commandsIn(chat)) cases.push({ command, workdir, talk: chat.title || name });
 }
 
 const { screenCommand } = require(path.join(ROOT, "server/sandbox.js"));
-const verdict = (screen, item) => screen(item.command, item.workdir, { platform: "win32" });
+const verdict = (screen, item) => screen(item.command, item.workdir, { platform });
 const blocked = cases.filter(item => verdict(screenCommand, item));
-console.log(`存储根 ${root}`);
+console.log(`存储根 ${root}　按 ${platform} 判　接回冷行迹 ${warmedMessages} 答`);
 console.log(
   `共 ${cases.length} 条指令（${new Set(cases.map(item => item.talk)).size} 段对话）：放行 ${cases.length - blocked.length}、拦下 ${blocked.length}`
 );
