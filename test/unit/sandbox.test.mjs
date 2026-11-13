@@ -704,10 +704,7 @@ test("外层双引号里的 $() 先按外层 Shell 求值，再扫描内层 bash
       assert.equal(screenUnreviewable(command, { platform }), null, `${platform} 不可审: ${command}`);
     }
 
-    const escaped =
-      platform === "win32"
-        ? "bash -c \"echo '`$(Stop-Computer)'\""
-        : "bash -c \"echo '\\$(Stop-Computer)'\"";
+    const escaped = platform === "win32" ? "bash -c \"echo '`$(Stop-Computer)'\"" : "bash -c \"echo '\\$(Stop-Computer)'\"";
     for (const command of [escaped, `bash -c "echo '$(echo safe)'"`, `bash -c "echo foo # $(echo safe)"`])
       for (const [tier, screen] of scanners) assert.equal(screen(command), null, `${platform} ${tier}: ${command}`);
   }
@@ -734,8 +731,7 @@ test("Invoke-Expression 搜索文本不算藏字命令，站在指令位上的�
       command => screenAutoReview(command, { platform }),
       command => screenUnreviewable(command, { platform })
     ];
-    for (const command of searches)
-      for (const screen of scanners) assert.equal(screen(command), null, `${platform}: ${command}`);
+    for (const command of searches) for (const screen of scanners) assert.equal(screen(command), null, `${platform}: ${command}`);
     for (const command of hidden) for (const screen of scanners) assert.ok(screen(command), `${platform}: ${command}`);
   }
 });
