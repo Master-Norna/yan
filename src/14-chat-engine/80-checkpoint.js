@@ -46,6 +46,8 @@ function checkpointBefore({ conversation, assistant }) {
       assistant.id,
       bridge("/api/checkpoint/take", { root, conversation: conversation.id, answer: assistant.id }, AbortSignal.timeout(600000))
         .then(done => {
+          // 拍摄时这段对话已被删：册没有落下，别在消息上记一笔（日后退回会说「检查点已不在」）
+          if (done.discarded) return;
           assistant.checkpoint = { root, at: now(), files: done.files };
           markDirty(conversation.id);
         })

@@ -22,6 +22,7 @@ async function exportData(includeFiles) {
   };
   let blob,
     files = 0;
+  const missing = [];
   if (includeFiles) {
     // 附件原件只带仍在用的那几件：存储目录与浏览器里的暂存都翻，谁有取谁。原件合起来可能上 GB，
     // 拼成一个大字符串会超出浏览器的字符串上限、点了没反应——一件一件接进 Blob，内存里只过一件
@@ -29,7 +30,11 @@ async function exportData(includeFiles) {
     blob = new Blob([`${JSON.stringify(safeStore, whole).slice(0, -1)},"attachments":[`], { type: "application/json" });
     for (const id of attachmentKeepIds()) {
       const record = await getAttachment(id).catch(() => null);
-      if (!record) continue;
+      if (!record) {
+        // 取不到的原件照样略过，但要照实说：不能让人以为备份是完整的（与冷行迹取不回来时的提示同一个原则）
+        missing.push(attachmentNameOf(id));
+        continue;
+      }
       blob = new Blob([blob, files ? "," : "", JSON.stringify(record)], { type: "application/json" });
       uncacheAttachment(id);
       files += 1;
@@ -41,7 +46,59 @@ async function exportData(includeFiles) {
   a.download = t`言-备份-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  toast(t`备份已导出${includeFiles ? t`（含 ${files} 件附件原件）` : ""}；不含 API Key`);
+  toast(
+    includeFiles
+      ? t`备份已导出（含 ${files} 件附件原件${missing.length ? t`，${missing.length} 件未能取到：${missing.slice(0, 3).join("、")}${missing.length > 3 ? "…" : ""}` : ""}）；不含 API Key`
+      : t("备份已导出；不含 API Key"),
+    missing.length ? 8000 : undefined
+  );
+}
+// 附件 id 对应的名字：导出时点出哪几件没带上
+/** @param {string} id */
+function attachmentNameOf(id) {
+  for (const message of store.conversations.flatMap(everyMessage))
+    for (const attachment of message.attachments || []) if (attachment.id === id) return attachment.name || id;
+  return id;
+}
+// 大备份里附件数组的读法：从 `,"attachments":[` 之后逐字节走，括号配平了才交出一件，内存里只过一件。
+// 走到末尾还要核对确实收了口：数组的 `]`、顶层的 `}` 都在，其后只有空白。复制、下载断在中途的备份不能当完整的，
+// 否则尾部原件悄悄没了、提示还是「已导入」（见 importData 的 incomplete）
+/** @param {Uint8Array} bytes @param {number} from 数组内容的起点 */
+function attachmentReader(bytes, from) {
+  const decoder = new TextDecoder(),
+    blank = b => b === 32 || b === 9 || b === 10 || b === 13;
+  return (async function* () {
+    let depth = 0,
+      inString = false,
+      escaped = false,
+      start = -1,
+      closed = false,
+      after = bytes.length;
+    for (let i = from; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (b === 92) escaped = true;
+        else if (b === 34) inString = false;
+        continue;
+      }
+      if (b === 34) inString = true;
+      else if (b === 123) {
+        if (depth++ === 0) start = i;
+      } else if (b === 125) {
+        if (--depth === 0) yield JSON.parse(decoder.decode(bytes.subarray(start, i + 1)));
+      } else if (b === 93 && depth === 0) {
+        closed = true;
+        after = i + 1;
+        break;
+      }
+    }
+    let i = after;
+    while (i < bytes.length && blank(bytes[i])) i += 1;
+    const whole = closed && !inString && depth === 0 && bytes[i] === 125;
+    if (whole) while (++i < bytes.length && blank(bytes[i]));
+    if (!whole || i < bytes.length) throw Object.assign(Error(t("备份文件不完整，尾部在复制或下载时断掉了")), { code: "truncated" });
+  })();
 }
 // 读备份：小的整份解析；带着上百 MB 附件原件的，整份读成一个字符串会超出浏览器的上限——按字节找到末尾的附件数组，
 // 前面的记录照常解析，原件一件一件解出来交给调用者，内存里只过一件
@@ -67,29 +124,9 @@ async function readBackup(file) {
     }
   if (at < 0) return { data: JSON.parse(decoder.decode(bytes)), attachments: (async function* () {})() };
   const data = JSON.parse(`${decoder.decode(bytes.subarray(0, at))}}`);
-  async function* attachments() {
-    let depth = 0,
-      inString = false,
-      escaped = false,
-      start = -1;
-    for (let i = at + marker.length; i < bytes.length; i++) {
-      const b = bytes[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (b === 92) escaped = true;
-        else if (b === 34) inString = false;
-        continue;
-      }
-      if (b === 34) inString = true;
-      else if (b === 123) {
-        if (depth++ === 0) start = i;
-      } else if (b === 125) {
-        if (--depth === 0) yield JSON.parse(decoder.decode(bytes.subarray(start, i + 1)));
-      } else if (b === 93 && depth === 0) break;
-    }
-  }
+  // 末尾的收口在 attachmentReader 里核对：读到半截即抛，前面已读出的照旧交出
   data.attachments = true;
-  return { data, attachments: attachments() };
+  return { data, attachments: attachmentReader(bytes, at + marker.length) };
 }
 // 导入采用合并策略：按 id 跳过已存在的对话 / 模型 / 分组 / 预设，MCP 服务按名字跳过，附件原件只在本机缺失时写入。
 // 分组与预设要随对话一起回来：对话里记着 groupId、presetId，定义不在，组织方式与提示词就丢了
@@ -143,12 +180,19 @@ async function importData(file) {
         store.drafts[key] = draft;
         drafts += 1;
       }
-    for await (const record of attachments)
-      if (record?.id && record.data !== undefined && !(await getAttachment(record.id))) {
-        await putAttachment(record);
-        uncacheAttachment(record.id);
-        files += 1;
-      }
+    // 大备份的附件一件一件读：读到半截时（复制、下载断在中途）前面几件已经写下，照实说只恢复了这些
+    let incomplete = false;
+    try {
+      for await (const record of attachments)
+        if (record?.id && record.data !== undefined && !(await getAttachment(record.id))) {
+          await putAttachment(record);
+          uncacheAttachment(record.id);
+          files += 1;
+        }
+    } catch (error) {
+      if (error?.code !== "truncated") throw error;
+      incomplete = true;
+    }
     // 记忆一类一项：同名一类的全文接上去（一字不差的行不重接，见 normalizeMemory），没有的类添上
     const memoryWas = new Map(store.memory.items.map(item => [item.category, item.text]));
     store.memory = normalizeMemory({ ...store.memory, items: [...store.memory.items, ...incoming.memory.items] });
@@ -157,9 +201,9 @@ async function importData(file) {
     saveStore();
     render();
     renderSettings();
-    toast(
-      t`已导入 ${conversations} 段对话、${added} 个模型${groups ? t`、${groups} 个分组` : ""}${presets ? t`、${presets} 个预设` : ""}${servers ? t`、${servers} 个 MCP 服务（密钥需重填）` : ""}${drafts ? t`、${drafts} 份草稿` : ""}${memories ? t`、${memories} 类记忆` : ""}${files ? t`，恢复 ${files} 件附件原件` : ""}${data.attachments ? "" : t("；备份不含附件原件，旧附件将显示为不可用")}`
-    );
+    const summary = t`已导入 ${conversations} 段对话、${added} 个模型${groups ? t`、${groups} 个分组` : ""}${presets ? t`、${presets} 个预设` : ""}${servers ? t`、${servers} 个 MCP 服务（密钥需重填）` : ""}${drafts ? t`、${drafts} 份草稿` : ""}${memories ? t`、${memories} 类记忆` : ""}${files ? t`，恢复 ${files} 件附件原件` : ""}${data.attachments ? "" : t("；备份不含附件原件，旧附件将显示为不可用")}`;
+    // 备份本身就断了：不能拿完整导入的提示盖过去，要说清只恢复了读到时的那一截
+    toast(incomplete ? t`备份文件不完整，只恢复了能读到的部分：${summary}` : summary, incomplete ? 8000 : undefined);
   } catch (error) {
     toast(t`导入失败：${String(error.message || error).slice(0, 80)}`);
   }

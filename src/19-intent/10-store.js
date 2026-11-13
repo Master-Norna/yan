@@ -155,7 +155,7 @@ async function intentRecheck(conversation, assistant, watch, signal) {
     keeps = intentKeeps(held.intent, closed),
     keys = keepAnchors(held.intent, closed),
     acted = allSteps(assistant).some(
-      step => step.status === "done" && TOOLS.get(step.name)?.group === "work" && TOOLS.get(step.name)?.sideEffect
+      step => step.status === "done" && TOOLS.get(step.name)?.group === "work" && (step.effect ?? TOOLS.get(step.name)?.sideEffect === true)
     );
   if (!keys.length || !acted) return null;
   const prints = await intentPrints(conversation, keys, signal);
@@ -183,7 +183,7 @@ function keepAnchors(intent, closed) {
 /** @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx @returns {Promise<ToolOutcome|null>} 拦下即交回这一步的结果 */
 async function keepHook(step, args, ctx) {
   const held = intents.get(ctx.conversation.id);
-  if (!held || step.name === "update_intent" || !TOOLS.get(step.name)?.sideEffect) return null;
+  if (!held || step.name === "update_intent" || !sideEffectOf(TOOLS.get(step.name), args)) return null;
   const target = String(args.command ?? args.path ?? args.url ?? JSON.stringify(args)),
     policy = commandPolicyOf(ctx.conversation),
     hit = intentKeeps(held.intent, answerClosed(ctx.conversation, held.intent))

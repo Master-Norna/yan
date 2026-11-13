@@ -28,9 +28,9 @@ function setup() {
     f.memoryText(memory);
     return memory;
   };
-  const write = (memory, text, category = "偏好") => {
+  const write = async (memory, text, category = "偏好") => {
     const memoryUpdates = new Map();
-    const result = f.TOOLS.get("remember").run({}, { category, text }, { memory, memoryUpdates, conversation: { id: "c1" } });
+    const result = await f.TOOLS.get("remember").run({}, { category, text }, { memory, memoryUpdates, conversation: { id: "c1" } });
     for (const [name, stamp] of memoryUpdates) memory.set(name, stamp);
     return result;
   };
@@ -81,19 +81,19 @@ test("同一对话下一问带最新版；内容未变时全文稳定", () => {
   assert.equal(f.PROMPT_VARS["memory.body"](ctx), null);
 });
 
-test("主模型同一答内可连续修改、增加、删除；成功结果给回保存的正文", () => {
+test("主模型同一答内可连续修改、增加、删除；成功结果给回保存的正文", async () => {
   const f = setup(),
     seen = f.read();
-  assert.equal(f.write(seen, "偏好中文\n命令用 PowerShell").ok, true);
-  assert.equal(f.write(seen, "偏好中文\n命令用 PowerShell\n解释简短").ok, true);
-  assert.match(f.write(seen, "新的计划", "计划").content, /新的计划/);
-  assert.equal(f.write(seen, "", "计划").ok, true);
+  assert.equal((await f.write(seen, "偏好中文\n命令用 PowerShell")).ok, true);
+  assert.equal((await f.write(seen, "偏好中文\n命令用 PowerShell\n解释简短")).ok, true);
+  assert.match((await f.write(seen, "新的计划", "计划")).content, /新的计划/);
+  assert.equal((await f.write(seen, "", "计划")).ok, true);
   assert(!f.memory().items.some(item => item.category === "计划"));
-  assert.equal(f.write(seen, "", "计划").ok, true);
+  assert.equal((await f.write(seen, "", "计划")).ok, true);
 });
 
 for (const change of ["edit", "delete", "recreate", "add"])
-  test(`整类覆盖前 ${change}：拒绝旧版，返回最新内容后可以重新修改`, () => {
+  test(`整类覆盖前 ${change}：拒绝旧版，返回最新内容后可以重新修改`, async () => {
     const f = setup(),
       seen = f.read();
     const category = change === "add" ? "计划" : "偏好";
@@ -105,45 +105,45 @@ for (const change of ["edit", "delete", "recreate", "add"])
     }
     if (change === "add") f.writeMemory(category, "别处刚记的计划");
     const before = JSON.stringify(f.memory());
-    const rejected = f.write(seen, "按旧认识写的", category);
+    const rejected = await f.write(seen, "按旧认识写的", category);
     assert.equal(rejected.ok, false);
     assert.equal(JSON.stringify(f.memory()), before);
     assert.match(
       rejected.content,
       change === "delete" ? /此类已删去/ : new RegExp(f.memory().items.find(i => i.category === category).text)
     );
-    assert.equal(f.write(seen, "结合最新正文改过的", category).ok, true);
+    assert.equal((await f.write(seen, "结合最新正文改过的", category)).ok, true);
   });
 
-test("另一答、旁注或计数读取不会刷新正在作答者的版本；无关分类的改动不拦写", () => {
+test("另一答、旁注或计数读取不会刷新正在作答者的版本；无关分类的改动不拦写", async () => {
   const f = setup(),
     first = f.read();
   f.writeMemory("偏好", "别处刚纠正的");
   f.read();
   f.memoryText();
-  assert.equal(f.write(first, "旧偏好").ok, false);
+  assert.equal((await f.write(first, "旧偏好")).ok, false);
   const latest = f.read();
   f.writeMemory("计划", "别处的计划");
-  assert.equal(f.write(latest, "偏好中文\n已确认的新偏好").ok, true);
+  assert.equal((await f.write(latest, "偏好中文\n已确认的新偏好")).ok, true);
 });
 
-test("作答期间关闭记忆，不再允许记入", () => {
+test("作答期间关闭记忆，不再允许记入", async () => {
   const f = setup(),
     seen = f.read();
   f.settings().memoryEnabled = false;
-  assert.equal(f.write(seen, "不应保存").ok, false);
+  assert.equal((await f.write(seen, "不应保存")).ok, false);
   assert.equal(f.memory().items[0].text, "偏好中文");
 });
 
-test("同批预拟的两次覆盖都须核对原版本，冲突回话尚未交回时不能越过检查", () => {
+test("同批预拟的两次覆盖都须核对原版本，冲突回话尚未交回时不能越过检查", async () => {
   const f = setup(),
     memory = f.read(),
     memoryUpdates = new Map();
   const ctx = { memory, memoryUpdates, conversation: { id: "c1" } };
   f.writeMemory("偏好", "别处刚纠正的");
   for (const text of ["旧版第一次覆盖", "旧版第二次覆盖"])
-    assert.equal(f.TOOLS.get("remember").run({}, { category: "偏好", text }, ctx).ok, false);
+    assert.equal((await f.TOOLS.get("remember").run({}, { category: "偏好", text }, ctx)).ok, false);
   assert.equal(f.memory().items[0].text, "别处刚纠正的");
   for (const [category, stamp] of memoryUpdates) memory.set(category, stamp);
-  assert.equal(f.write(memory, "模型看过新正文后的修改").ok, true);
+  assert.equal((await f.write(memory, "模型看过新正文后的修改")).ok, true);
 });

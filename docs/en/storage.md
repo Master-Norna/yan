@@ -23,4 +23,4 @@ If an attachment original can't be written to disk, it waits in the browser's In
 
 ## Backup
 
-- Backup export and import: on export you can tick **Include attachments**. Import merges (chats and models that already exist are skipped by id, and non-conflicting drafts are merged); Files is a folder in the storage location and isn't part of backups. Backups never include API keys.
+- Backup export and import: on export you can tick **Include attachments**. Import merges (chats and models that already exist are skipped by id, and non-conflicting drafts are merged); Files is a folder in the storage location and isn't part of backups. Backups never include API keys. A backup with attachments is large and read one attachment at a time, and its end is checked afterwards: one cut short while copying or downloading is reported as incomplete, only the readable part is restored, and no success message is shown. If some attachments can't be read on export, the toast names how many are missing.

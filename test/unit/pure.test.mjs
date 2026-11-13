@@ -560,7 +560,7 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
       { id: "b", name: "B", quota: "", usedTokens: 0 },
       { id: "c", name: "C", quota: "", usedTokens: 0 }
     ],
-    memory: { enabled: true, items: [{ id: "m1", text: "旧" }] },
+    memory: { enabled: true, items: [{ id: "m1", category: "一", text: "旧" }] },
     drafts: { x: { text: "草" } }
   };
   const mine = {
@@ -574,8 +574,8 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
     memory: {
       enabled: true,
       items: [
-        { id: "m1", text: "旧" },
-        { id: "m2", text: "我记的" }
+        { id: "m1", category: "一", text: "旧" },
+        { id: "m2", category: "二", text: "我记的" }
       ]
     },
     drafts: {}
@@ -592,8 +592,8 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
     memory: {
       enabled: true,
       items: [
-        { id: "m1", text: "旧" },
-        { id: "m3", text: "它记的" }
+        { id: "m1", category: "一", text: "旧" },
+        { id: "m3", category: "三", text: "它记的" }
       ]
     },
     drafts: { x: { text: "草" }, y: { text: "它的草稿" } }

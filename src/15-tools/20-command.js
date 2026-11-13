@@ -106,16 +106,19 @@ defineTool({
   label: t("后台"),
   offer: ctx => ctx.files,
   html: workStepHtml,
+  // 看它在跑、看几时到都只是读；结束后台、取消定时是动了手（守要能把它拦下，见 19-intent/10-store.js 的 keepHook）
+  sideEffect: args => args.stop === true,
   async run(step, args, { conversation, assistant, signal }) {
     const id = args.id.trim(),
       stop = args.stop === true;
     if (/^t\d+$/.test(id)) return checkTimer(step, id, stop, conversation, signal);
     const started = bgStepOf(conversation, id);
     step.title = `${id}${stop ? t(" · 结束") : ""}`;
-    // 模型亲手结束它：不必再叫醒一回
-    if (stop && started) bgWatches.get(started.id)?.abort();
     // 带上开它时记下的 key：编号在桥接重启后会重数，只凭编号会读到、停掉同号的另一条（见 server/work/shell.js 的 checkBackground）
     const data = await bridge("/api/work/check", { id, stop, wait: Number(args.wait) || 0, key: started?.bg?.key || "" }, signal);
+    // 停止确认了才撤监听：请求失败、桥接没收到的话，后台照旧跑着，撤了就再没人叫醒（abort 之后不会重挂）。
+    // 还跑着的（杀了还没落下）也撤——模型亲手结束的，不必再叫醒一回
+    if (stop && started) bgWatches.get(started.id)?.abort();
     step.output = commandOutput(data);
     if (!data.running) {
       step.exitCode = data.exitCode;
@@ -241,7 +244,7 @@ function bgEndedText(relay) {
 function bgStepOf(conversation, id) {
   return (
     conversation.messages
-      .flatMap(message => message.steps || [])
+      .flatMap(message => allSteps(message))
       .filter(step => step.bg?.id === id)
       .at(-1) || null
   );

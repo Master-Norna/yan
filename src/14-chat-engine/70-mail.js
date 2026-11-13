@@ -7,13 +7,22 @@
 // relay 是那一项的画法（谁回来了），不给就按帮手画
 /** @type {Map<string, Array<{ report: string, step: Step, profile: Profile|null, relay?: any }>>} */
 const mailbags = new Map();
+// 挂这一项的步骤还在眼前这一条路上吗（按 id 认：别处写过这段，store 里已换了对象，旧闭包仍指向同一步）
+/** @param {Conversation} conversation @param {Step} [step] */
+function stepInPath(conversation, step) {
+  return !step || conversation.messages.some(message => allSteps(message).some(item => item.id === step.id));
+}
 /** @param {Conversation} conversation */
 function mailReport(conversation, item) {
   // 对象会换：别处写过这段，catchUpConversation 把 store 里的换成了新对象，而帮手、后台指令的闭包还攥着旧的那一个。
   // 按 id 取当前的那一份；真删了（找不到）就照手里这份往下走，写下的没人再读，也就到头了
-  conversation = store.conversations.find(c => c.id === conversation.id) || conversation;
+  const live = store.conversations.find(c => c.id === conversation.id);
+  conversation = live || conversation;
   // 帮手开的后台指令，结束时叫醒的是帮手自己（见 mailHelper），不是主对话
   if (item.step?.scope) return void mailHelper(conversation, item.step.scope, item);
+  // 挂它的那一步已不在眼前这一条路上（切了版本、重答把那一答换下）：结果是另一版的，不往这一版里送。
+  // 这一段已不在 store 里（删了、目录正重读）时不比——没有「眼前这一条路」可比，照旧寄给手里这份
+  if (live && !stepInPath(live, item.step)) return;
   const job = requestJob(conversation.id);
   if (job) return void deliverInline(conversation, job, item);
   const bag = mailbags.get(conversation.id);
