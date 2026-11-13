@@ -9,7 +9,7 @@ defineTool({
   offer: ctx => memoryOn(ctx.conversation),
   mainOnly: true,
   sideEffect: true,
-  run(step, args, { memory, memoryUpdates, conversation }) {
+  async run(step, args, { memory, memoryUpdates, conversation }) {
     const category = cleanMemoryCategory(args.category);
     step.title = category;
     if (!memoryOn(conversation)) return { ok: false, content: "记忆已关闭，没有写入。", display: "未写入" };
@@ -26,7 +26,23 @@ defineTool({
     }
     const did = writeMemory(category, args.text);
     memoryUpdates?.set(category, memoryStamp(memoryOf(category)));
-    if (did) saveStore();
+    if (did) {
+      notePendingMemory(category);
+      saveStore();
+      // 本页的版本核对挡不住别的浏览器：真落盘时若那边也改过这一类，磁盘上的留作正本，把最新正文交回重写
+      // （见 01-store/20-config.js 的 mergeMemoryItems）。写不成（桥接不在、超时）时没有冲突可报，照旧算写下了
+      await flushConfig();
+      const clash = takeMemoryClash(category);
+      if (clash !== null) {
+        memoryUpdates?.set(category, memoryStamp(memoryOf(category)));
+        refreshMemorySettings();
+        return {
+          ok: false,
+          content: `「${category}」在别处改过，没有写入。请以以下最新内容为基础重新修改：\n${clash || "（此类已删去）"}`,
+          display: "记忆已变化"
+        };
+      }
+    }
     refreshMemorySettings();
     if (did === "delete") return { ok: true, content: t`已删去「${category}」`, display: "删去" };
     if (!did) return { ok: true, content: t`「${category}」没有变`, display: "未变" };

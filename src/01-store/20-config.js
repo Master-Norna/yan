@@ -161,6 +161,22 @@ function saveConfigNow({ force = false } = {}) {
     });
   return configSaveTask;
 }
+// 立刻把配置写下去、等它落定（记忆要当场知道那一类是否被别处改过，见 15-tools/40-memory.js 的 remember）。
+// 写不成（桥接不在、超时）就照旧留给退避重试：那时也判不了冲突，不拦这一步
+async function flushConfig() {
+  const scope = bootstrap.store;
+  clearTimeout(configSaveTimer);
+  configSaveTimer = null;
+  for (let i = 0; i < 4; i++) {
+    try {
+      await saveConfigNow();
+    } catch {
+      return; // 写不成（桥接不在、超时）：判不了冲突，也不拦这一步
+    }
+    if (bootstrap.store !== scope) return;
+    if (!configSaving && !configSaveAgain) return;
+  }
+}
 // 磁盘上有一份配置：与这边对一对。磁盘上的不比基准新——这边改过就写下去；磁盘上的更新、这边没改过——换进来；
 // 两边都改过——三方合并后换进来，再写回去
 function reconcileConfig(config, savedAt) {
@@ -184,8 +200,64 @@ function reconcileConfig(config, savedAt) {
   adoptConfig(mergeConfig3(JSON.parse(configBase), JSON.parse(mine), theirs, unsettledSpend), savedAt, JSON.stringify(theirs));
   saveConfigNow();
 }
+// 记忆一类一份，按类名合（见 11-memory.js）：旧版同类几条、删后重建，id 都对不上，按 id 比会当成两回事。
+// 两边都动过同一类时不默默取本地：磁盘上的那份留作正本，把冲突记下来交回 remember 重写（见 takeMemoryClash）。
+// 这与别处的合并取舍不同——记忆是主模型按「本答读到的那一版」整类改写的，本地压过对方就是拿旧认识盖掉新事实。
+/** @param {MemoryItem[]} [base] @param {MemoryItem[]} [mine] @param {MemoryItem[]} [theirs] */
+function mergeMemoryItems(base, mine, theirs) {
+  const index = list => new Map((Array.isArray(list) ? list : []).filter(item => item?.category).map(item => [item.category, item])),
+    same = (a, b) => JSON.stringify(a) === JSON.stringify(b),
+    B = index(base),
+    M = index(mine),
+    T = index(theirs),
+    out = new Map(T);
+  for (const category of new Set([...B.keys(), ...M.keys(), ...T.keys()])) {
+    const bv = B.get(category),
+      mv = M.get(category),
+      tv = T.get(category);
+    if (same(mv, bv)) continue; // 自己没动：磁盘上的照旧（改过、删了都算）
+    if (same(tv, bv)) {
+      // 只有自己动了
+      if (mv) out.set(category, mv);
+      else out.delete(category);
+      continue;
+    }
+    if (!mv && !tv) {
+      out.delete(category); // 两边都删了：不是冲突
+      continue;
+    }
+    // 两边都动过同一类而改的不一样：磁盘上的留着，冲突交回这一答重写
+    noteMemoryClash(category, tv);
+    if (tv) out.set(category, tv);
+    else out.delete(category);
+  }
+  const order = [...new Set([...T.keys(), ...M.keys()])];
+  return order.map(category => out.get(category)).filter(Boolean);
+}
+// 这一答正要写的那几类（remember 记下的）：落盘时若发现别处也改过，记下磁盘上的正文，交回模型重写。
+// 只回报这一答真要写的那几类——别处之间的冲突不该算到这一步头上
+const pendingMemoryWrites = new Set(),
+  memoryClashes = new Map();
+/** @param {string} category */
+function notePendingMemory(category) {
+  pendingMemoryWrites.add(category);
+}
+/** @param {string} category @param {MemoryItem | undefined} item 磁盘上的那一份；已删即 undefined */
+function noteMemoryClash(category, item) {
+  if (!pendingMemoryWrites.has(category)) return;
+  memoryClashes.set(category, item ? String(item.text || "") : "");
+}
+// 取走这一类的冲突（没有即 null），连同这一问的待写记号一并销掉
+/** @param {string} category @returns {string | null} */
+function takeMemoryClash(category) {
+  pendingMemoryWrites.delete(category);
+  if (!memoryClashes.has(category)) return null;
+  const text = /** @type {string} */ (memoryClashes.get(category));
+  memoryClashes.delete(category);
+  return text;
+}
 // 三方合并：base 是上次对齐时的那份。同一样东西，自己没动过的取对方的，自己动过的取自己的；
-// 模型、卷宗、记忆按 id 逐件比，设置与草稿按键逐项比；用量取对方的、加上这边还没确认写下的（unsettled，缺省按基准相减），不互相抹掉
+// 模型、卷宗按 id 逐件比，记忆按类名比，设置与草稿按键逐项比；用量取对方的、加上这边还没确认写下的（unsettled，缺省按基准相减），不互相抹掉
 function mergeConfig3(base, mine, theirs, unsettled = null) {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const keyed = (b, m, t, pick = (bv, mv, tv) => (same(mv, bv) ? tv : mv)) => {
@@ -248,7 +320,7 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
     settings,
     profiles: byId(base.profiles, mine.profiles, theirs.profiles, mergeProfile),
     memory: {
-      items: byId(base.memory?.items, mine.memory?.items, theirs.memory?.items)
+      items: mergeMemoryItems(base.memory?.items, mine.memory?.items, theirs.memory?.items)
     },
     drafts: keyed(base.drafts, mine.drafts, theirs.drafts)
   };
@@ -287,8 +359,22 @@ function mergeConfig(config) {
     mcpServers: { ...(store.settings.mcpServers || {}), ...(disk.settings.mcpServers || {}) }
   };
   store.profiles = union(disk.profiles, store.profiles);
+  // 记忆按类名合：没有基准时磁盘上的那份为准。这一答正写的那几类若两边都有而正文不同，记下冲突交回重写；
+  // 本地那一份也不再接上去——不然 normalizeMemory 会把两份正文接成一段，模型看到的还不是磁盘上的那份
+  for (const category of pendingMemoryWrites) {
+    const diskItem = disk.memory.items.find(item => item.category === category),
+      localItem = store.memory.items.find(item => item.category === category);
+    if (diskItem && localItem && diskItem.text !== localItem.text) noteMemoryClash(category, diskItem);
+  }
   store.memory = normalizeMemory({
-    items: union(disk.memory.items, store.memory.items)
+    items: [
+      ...disk.memory.items,
+      ...store.memory.items.filter(
+        item =>
+          !disk.memory.items.some(other => other.id === item.id) &&
+          !(pendingMemoryWrites.has(item.category) && disk.memory.items.some(other => other.category === item.category))
+      )
+    ]
   });
   store.drafts = { ...store.drafts, ...disk.drafts };
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
