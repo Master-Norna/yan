@@ -172,6 +172,30 @@ check(
   busyMove.status === 400 && busyText.includes("正在作答") && !existsSync(busyTarget),
   `${busyMove.status} ${busyText.slice(0, 160)}`
 );
+// 后台指令还在跑（工作目录就在存储根里）：也不换——拷完它照旧往旧处写，新处永远缺这一截
+const bgRun = await fetch(PAGE + "api/work/run", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ command: "Start-Sleep -Seconds 30; 'done'", background: true, workdir: native(HOME) })
+});
+const bg = await bgRun.json();
+const bgTarget = `${TMP}/bg-move`;
+const bgMove = await fetch(PAGE + "api/store/move", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ parent: native(bgTarget) })
+});
+const bgText = await bgMove.text();
+await fetch(PAGE + "api/work/check", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ id: bg.id, key: bg.key, stop: true, wait: 3000 })
+});
+check(
+  "storage move waits while a background command is running",
+  bg.running === true && bgMove.status === 400 && bgText.includes("后台指令") && !existsSync(bgTarget),
+  `${bgRun.status} ${JSON.stringify(bg).slice(0, 80)} / ${bgMove.status} ${bgText.slice(0, 160)}`
+);
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(200);
 await evalJs(`document.querySelector('[data-tab="env"]').click(); true`);

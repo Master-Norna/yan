@@ -34,7 +34,8 @@ async function serve(store) {
 }
 
 // 用 YAN_HOME 指定旧根：既不碰真在用的 ~/.yan，也不写位置条子（见 server/store.js 的 initialRoot 与 writePointer）
-async function withStore(run) {
+// options 透传给 createStore：换位置的另一道门槛（后台指令在跑）要能单独演出来
+async function withStore(run, options = {}) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-store-move-")),
     home = path.join(base, "旧处"),
     saved = process.env.YAN_HOME;
@@ -42,7 +43,7 @@ async function withStore(run) {
   fs.mkdirSync(home, { recursive: true });
   let close = async () => {};
   try {
-    const store = createStore({ working: () => 0 });
+    const store = createStore({ working: () => 0, ...options });
     store.ensureRoot();
     writeConfig(home, "旧处那份");
     const served = await serve(store);
@@ -87,6 +88,27 @@ test("新处建不出目录时：抛错之后根还是旧根，接着写的东�
     assert.equal(second.data.moved, true);
     assert.equal(store.describe().root, path.join(other, ".yan"));
   });
+});
+
+test("后台指令在跑时不换位置，结束了照常换", async () => {
+  // 复现过的样子：主答已收尾（没有作答租约）、后台指令照跑，迁移被放行；拷过去 5 行，之后它继续往旧处写，新处永远停在 5 行
+  let running = true;
+  await withStore(
+    async ({ store, base, home, post }) => {
+      const parent = path.join(base, "新处"),
+        blocked = await post("/api/store/move", { parent });
+      assert.equal(blocked.status, 400);
+      assert.match(blocked.data.error, /后台指令还在跑/);
+      assert.equal(store.describe().root, home, "根没有换");
+      assert.equal(fs.existsSync(path.join(parent, ".yan")), false, "新处没有建出来");
+      running = false; // 后台结束了，这一道门放开
+      const moved = await post("/api/store/move", { parent });
+      assert.equal(moved.status, 200);
+      assert.equal(moved.data.moved, true);
+      assert.equal(store.describe().root, path.join(parent, ".yan"));
+    },
+    { background: () => running }
+  );
 });
 
 test("换根成功：根换到新处，旧处那份拷过去，新处建起对话与卷宗", async () => {
