@@ -195,6 +195,9 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
             continue;
           }
           items.push(["d", entry.name, inner]);
+          // 整棵被忽略、只为意进来的这一层，自己也要记一笔「不明」：只记了底下现有的几个兄弟，
+          // 日后 .gitignore 那条规则去掉、新露出来的兄弟（日志、探针）就会被当成这一答新加的删掉
+          if (reenter) items.push(["x", entry.name]);
         } else if (entry.isFile()) {
           items.push(ignored(own, sub, false) && sub !== INTENT_PATH ? ["x", entry.name] : await visit(full, sub, entry.name));
         }

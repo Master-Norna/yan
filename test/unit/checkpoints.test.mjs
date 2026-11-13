@@ -129,6 +129,40 @@ test(".gitignore 写着 .yan/ 时，意仍进快照、跟着退回；同目录�
   }
 });
 
+test(".gitignore 里的 .yan/ 后来去掉，新露出来的兄弟不会被当成这一答新加的删掉", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, ".gitignore", ".yan/\n");
+    write(root, ".yan/意.json", '{"root":"第一版"}');
+    write(root, ".yan/记忆.md", "目录记忆");
+    const took = await post("/api/checkpoint/take", key);
+    assert.equal(took.status, 200, JSON.stringify(took));
+    assert.equal(took.files, 2, "只收 .gitignore 与 .yan/意.json");
+    // 忽略规则后来去掉了：.yan 从此照常遍历，那一刻没记下的兄弟这一刻露出来
+    write(root, ".gitignore", "");
+    write(root, ".yan/新日志.log", "新");
+    write(root, ".yan/意.json", '{"root":"第二版"}');
+    const { changes } = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      changes.map(c => `${c.kind} ${c.path}`),
+      ["changed .gitignore", "changed .yan/意.json"],
+      "新露出来的兄弟不列进来"
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual(done.failed, []);
+    assert.equal(fs.readFileSync(path.join(root, ".yan/新日志.log"), "utf8"), "新", "退回不删它");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/记忆.md"), "utf8"), "目录记忆", "那一刻没记下的不碰");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/意.json"), "utf8"), '{"root":"第一版"}', "意照旧跟着退回");
+    assert.equal(fs.readFileSync(path.join(root, ".gitignore"), "utf8"), ".yan/\n");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("第二回只读变了的；没变的子目录与内容共用对象；对话删了册与独有的对象跟着清", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     root = path.join(base, "work"),
