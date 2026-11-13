@@ -3,6 +3,7 @@
 // 另一个浏览器头一回碰上这个根，两边的模型配置并起来；存储位置换到别处整份拷过去、再换回来用回原来的；导入旧版备份先按启动时同一套迁移规整
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP, HOME, CHATS } from "./lib.mjs";
+import { shellCommand } from "./helpers/shell-command.mjs";
 const ELSEWHERE = `${TMP}/elsewhere`;
 const native = p => p.split("/").join(process.platform === "win32" ? "\\" : "/");
 const { send, evalJs, waitFor, close } = await connect();
@@ -174,7 +175,7 @@ check(
 );
 // 后台指令还在跑（工作目录就在存储根里）：也不换——拷完它照旧往旧处写，新处永远缺这一截
 // 指令要跨平台：Mac 上没有 PowerShell，写 Start-Sleep 会立刻以 127 退出，这条就白测了（macOS 那组逮到过）
-const bgCommand = process.platform === "win32" ? "Start-Sleep -Seconds 30; 'done'" : "sleep 30; echo done";
+const bgCommand = shellCommand("Start-Sleep -Seconds 30; 'done'", "sleep 30; echo done");
 const bgRun = await fetch(PAGE + "api/work/run", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
