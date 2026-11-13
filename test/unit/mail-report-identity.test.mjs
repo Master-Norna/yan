@@ -7,7 +7,10 @@ import { load } from "./harness.mjs";
 
 test("回报按 id 落到 store 里当前那份对话上，不写进帮手攥着的旧对象", () => {
   const f = load(["mailReport", "store", `install: job => { requestJob = () => job; refreshSteps = () => {}; }`]);
-  const current = { id: "A", messages: [{ id: "a1", role: "assistant", content: "", steps: [] }] };
+  const current = {
+    id: "A",
+    messages: [{ id: "a1", role: "assistant", content: "", steps: [{ id: "s1", name: "run_command", status: "done" }] }]
+  };
   f.store.conversations = [current];
   // 帮手那边攥着的旧对象：同一个 id，另一份引用；行迹还是空的（被换掉之后这边没再写过）
   const stale = { id: "A", messages: [{ id: "a1", role: "assistant", content: "" }] };
@@ -21,6 +24,17 @@ test("回报按 id 落到 store 里当前那份对话上，不写进帮手攥着
   assert.equal(note.relay.step, "s1");
   assert.equal(job.queue[0].note, note);
   assert.equal(stale.messages[0].steps, undefined, "旧对象上一个字也没写");
+});
+
+test("挂这一项的步骤已不在当前路径上（切了版本）：结果不往这一版里送", () => {
+  const f = load(["mailReport", "store", `install: job => { requestJob = () => job; refreshSteps = () => {}; }`]);
+  const current = { id: "A", messages: [{ id: "a2", role: "assistant", content: "", steps: [{ id: "s-new" }] }] };
+  f.store.conversations = [current];
+  const job = { assistantId: "a2", queue: [] };
+  f.install(job);
+  f.mailReport(current, { report: "旧版后台结束了", step: { id: "s-old", title: "训练", status: "done" } });
+  assert.equal(job.queue.length, 0, "没有送进这一答的收件口");
+  assert.equal(current.messages[0].steps.length, 1, "行迹里也没落回报");
 });
 
 test("这一段已被删掉（store 里找不到它）：回报不会把这段造回 store", () => {
