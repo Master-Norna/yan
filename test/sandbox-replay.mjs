@@ -35,10 +35,16 @@ function storeRoot() {
   return path.join(os.homedir(), ".yan");
 }
 
+// 当前路径、换下的版本与旁注都留着真实指令；接冷行迹与捞指令须走同一份消息名单。
+const messageLists = chat => [
+  chat.messages,
+  ...(Array.isArray(chat.forks) ? chat.forks : []).map(item => item?.messages),
+  ...(Array.isArray(chat.threads) ? chat.threads : []).map(item => item?.messages)
+];
 // 对话里指令躺在 steps[].arguments（JSON 字符串），帮手的那一层在 step.sub.steps 里；逐层走，不假设层级
 function commandsIn(chat) {
   const found = [];
-  const stack = [chat.messages || []];
+  const stack = messageLists(chat);
   while (stack.length) {
     const node = stack.pop();
     if (!node || typeof node !== "object") continue;
@@ -78,12 +84,7 @@ function coldPieces(id) {
 // 接回冷行迹：与页面 warmConversation 一样，手上已有（并进来的新份）的不盖；返回接上了几答
 function warmCold(chat, pieces) {
   let warmed = 0;
-  const lists = [
-    chat.messages,
-    ...(Array.isArray(chat.forks) ? chat.forks : []).map(item => item?.messages),
-    ...(Array.isArray(chat.threads) ? chat.threads : []).map(item => item?.messages)
-  ];
-  for (const list of lists)
+  for (const list of messageLists(chat))
     for (const message of Array.isArray(list) ? list : []) {
       const piece = message?.cold?.key && pieces.get(String(message.cold.key));
       if (!piece) continue;
