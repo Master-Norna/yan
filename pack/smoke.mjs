@@ -7,16 +7,53 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(ROOT, "dist");
 const SYSTEM = process.env.SystemRoot || "C:\\Windows";
-const TAR = path.join(SYSTEM, "System32", "tar.exe");
 const TASKKILL = path.join(SYSTEM, "System32", "taskkill.exe");
 const version = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
 // 抽查这几件：启动器、桥接、包清单、页面源码、随包 Node——任何一件缺了，用户双击都起不来
 const NEED = ["言.exe", "server.js", "package.json", "src/00-state.js", "web/index.html", "node/node.exe"];
+
+// 自己解 zip，不借系统 tar：发布物就是这个 zip，能不能解、解得对不对该由它自己证明。
+// （CI 的 tar 在我们写的中文条目名上报「filename 读不出」，同一个包本机却能解——各版本宽严不一，索性不用它；
+//   顺带按中央目录的 CRC 与大小核对每一件，比 tar 走一遍更严。）
+function unzip(zipFile, dest) {
+  const buffer = fs.readFileSync(zipFile);
+  let end = -1;
+  for (let at = buffer.length - 22; at >= Math.max(0, buffer.length - 65557); at--)
+    if (buffer.readUInt32LE(at) === 0x06054b50) {
+      end = at;
+      break;
+    }
+  if (end < 0) throw Error("找不到中央目录尾，不是 zip");
+  const count = buffer.readUInt16LE(end + 10);
+  let at = buffer.readUInt32LE(end + 16);
+  for (let index = 0; index < count; index++) {
+    if (buffer.readUInt32LE(at) !== 0x02014b50) throw Error("中央目录坏了");
+    const method = buffer.readUInt16LE(at + 10),
+      crc = buffer.readUInt32LE(at + 16),
+      packed = buffer.readUInt32LE(at + 20),
+      size = buffer.readUInt32LE(at + 24),
+      nameLength = buffer.readUInt16LE(at + 28),
+      extraLength = buffer.readUInt16LE(at + 30),
+      commentLength = buffer.readUInt16LE(at + 32),
+      offset = buffer.readUInt32LE(at + 42),
+      name = buffer.subarray(at + 46, at + 46 + nameLength).toString("utf8");
+    if (name.split("/").includes("..")) throw Error(`条目名越界：${name}`);
+    const from = offset + 30 + buffer.readUInt16LE(offset + 26) + buffer.readUInt16LE(offset + 28),
+      body = buffer.subarray(from, from + packed),
+      data = method === 0 ? body : zlib.inflateRawSync(body);
+    if (data.length !== size || zlib.crc32(data) !== crc) throw Error(`条目解出来对不上：${name}`);
+    const target = path.join(dest, ...name.split("/"));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, data);
+    at += 46 + nameLength + extraLength + commentLength;
+  }
+}
 
 const say = text => console.log(`· ${text}`);
 let temp = "",
@@ -52,11 +89,13 @@ const freePort = () =>
 
 const zip = path.join(DIST, `yan-${version}-win-x64.zip`);
 if (!fs.existsSync(zip)) fail(`没有 ${path.relative(ROOT, zip)}：先跑 npm run pack`);
-if (!fs.existsSync(TAR)) fail(`找不到 ${TAR}（解压用系统自带的 tar）`);
 
 temp = fs.mkdtempSync(path.join(os.tmpdir(), "yan-pack-smoke-"));
-const unzip = spawnSync(TAR, ["-xf", zip, "-C", temp], { encoding: "utf8" });
-if (unzip.status !== 0) fail(`解压失败：${(unzip.stderr || unzip.stdout || "").trim()}`);
+try {
+  unzip(zip, temp);
+} catch (error) {
+  fail(`解不开 ${path.basename(zip)}：${error.message}`);
+}
 const home = path.join(temp, "言");
 say(`已解开 ${path.basename(zip)}`);
 
