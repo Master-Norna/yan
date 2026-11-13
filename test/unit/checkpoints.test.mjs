@@ -129,6 +129,33 @@ test(".gitignore 写着 .yan/ 时，意仍进快照、跟着退回；同目录�
   }
 });
 
+test("忽略的 .yan 已存在但意尚未创建：退回删去新意，保留记忆与新日志", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, ".gitignore", ".yan/\n");
+    write(root, ".yan/记忆.md", "目录记忆");
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    write(root, ".yan/意.json", '{"root":"新建的意"}');
+    write(root, ".yan/新日志.log", "新日志");
+    const { changes } = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      changes.map(change => `${change.kind} ${change.path}`),
+      ["added .yan/意.json"]
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([done.restored, done.removed, done.failed], [0, 1, []]);
+    assert.equal(fs.existsSync(path.join(root, ".yan/意.json")), false);
+    assert.equal(fs.readFileSync(path.join(root, ".yan/记忆.md"), "utf8"), "目录记忆");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/新日志.log"), "utf8"), "新日志");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test(".gitignore 里的 .yan/ 后来去掉，新露出来的兄弟不会被当成这一答新加的删掉", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     root = path.join(base, "work"),

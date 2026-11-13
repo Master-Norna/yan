@@ -155,8 +155,7 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
   // 走一遍目录：每件文件交给 visit（拿到相对路径与 stat），返回这一层的条目；跳过的与读不了的照上面的规矩。
   // .yan/ 常被仓库的 .gitignore 整棵忽略（目录记忆与运行数据不随仓库提交），可意是任务状态：退回代码时它得跟着退。
   // 所以意这一件不进「忽略」那一类——.yan 单为它进得去，其下别的照旧记「不明」、不下钻，日志、探针、记忆不会被拷进快照
-  const INTENT_DIR = INTENT_PATH.slice(0, INTENT_PATH.lastIndexOf("/")),
-    INTENT_NAME = INTENT_PATH.slice(INTENT_PATH.lastIndexOf("/") + 1);
+  const INTENT_DIR = INTENT_PATH.slice(0, INTENT_PATH.lastIndexOf("/"));
   async function walk(root, visit) {
     const skipped = skip().map(dir => path.resolve(dir));
     /** @param {boolean} sealed 这一层整棵被忽略、只为收意进来：除它以外一律记「不明」 */
@@ -172,7 +171,10 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       for (const entry of entries) {
         const full = path.join(abs, entry.name),
           sub = rel ? `${rel}/${entry.name}` : entry.name;
-        if (entry.isSymbolicLink() || skipped.some(dir => same(dir, full))) continue;
+        if (entry.isSymbolicLink() || skipped.some(dir => same(dir, full))) {
+          if (sub === INTENT_PATH) items.push(["x", entry.name]);
+          continue;
+        }
         // 只为收意而进来的这一层：别的（记忆、探针、日志、浏览器配置）一律「不明」，不下钻
         if (sealed && !(entry.isFile() && sub === INTENT_PATH)) {
           items.push(["x", entry.name]);
@@ -181,8 +183,8 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
         if (entry.isDirectory()) {
           if (WORK_SKIP.has(entry.name)) continue;
           const shut = ignored(own, sub, true),
-            // 装着意的 .yan：忽略也进去一趟，只收那一件
-            reenter = shut && sub === INTENT_DIR && fs.existsSync(path.join(full, INTENT_NAME));
+            // 意还没创建也进去看一眼：确认它那一刻不存在，退回才能删掉这一答新建的。
+            reenter = shut && sub === INTENT_DIR;
           if (shut && !reenter) {
             items.push(["x", entry.name]);
             continue;
@@ -302,7 +304,11 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash });
       else if (now.files.get(rel) !== hash) changes.push({ path: rel, kind: "changed", hash });
     // 那一刻读不了的（被占着的文件、进不去的夹）与忽略的，连同其下的，此刻有也不删
-    const unclear = rel => [...then.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+    const unclear = rel => {
+      // 确实读过 .yan 这一层、意也没有单独记作不明：它的缺席是已知的，不能被父层的不明盖住。
+      if (rel === INTENT_PATH && then.dirs.has(INTENT_DIR) && !then.unknown.has(rel)) return false;
+      return [...then.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+    };
     for (const rel of now.files.keys()) if (!then.files.has(rel) && !unclear(rel)) changes.push({ path: rel, kind: "added" });
     const holds = (paths, dir) => [...paths].some(rel => rel.startsWith(`${dir}/`));
     for (const dir of then.dirs)
