@@ -751,8 +751,11 @@ var YAN_EN = {
   // ---- 设置 · 备份 ----
   "正在收拢附件原件…": "Collecting attachments…",
   "言-备份-{0}.json": "yan-backup-{0}.json",
-  "（含 {0} 件附件原件）": " (with {0} {0|attachment|attachments})",
-  "备份已导出{0}；不含 API Key": "Backup exported{0}; API keys are not included",
+  "备份已导出（含 {0} 件附件原件{1}）；不含 API Key": "Backup exported (with {0} {0|attachment|attachments}{1}); API keys are not included",
+  "，{0} 件未能取到：{1}{2}": ", {0} could not be read: {1}{2}",
+  "备份已导出；不含 API Key": "Backup exported; API keys are not included",
+  "备份文件不完整，尾部在复制或下载时断掉了": "The backup is incomplete: it was cut short while being copied or downloaded",
+  "备份文件不完整，只恢复了能读到的部分：{0}": "The backup is incomplete; only the readable part was restored: {0}",
   "有 {0} 答另存的行迹没能取回，备份里缺它们的思绪与帮手经过":
     "{0} {0|reply's|replies'} stored trail could not be loaded; the backup lacks their reasoning and helper runs",
   "不是言的备份文件，或版本不兼容": "Not a Yan backup file, or an incompatible version",
