@@ -79,9 +79,21 @@ function keywordTerms(query) {
     .split(/\s+/)
     .filter(Boolean);
 }
-function hitsAll(text, terms) {
-  const lower = String(text || "").toLowerCase();
-  return terms.every(term => lower.includes(term));
+/** 这些词是否都出现过。题头与各条消息分开找，不先把它们拼成一整段——一段几 MB 的长对话，
+ *  拼一次就是给主线程多备一份全文，而命中多半在前几条就齐了。
+ *  与「拼起来再逐个 includes」等价：词是按空白切出来的、本身不含换行，不会恰好跨在两段之间。 */
+function hitsAll(title, messages, terms) {
+  const left = new Set(terms);
+  const scan = piece => {
+    const lower = String(piece || "").toLowerCase();
+    for (const term of [...left]) if (lower.includes(term)) left.delete(term);
+  };
+  scan(title);
+  for (const message of messages) {
+    if (!left.size) break;
+    scan(message.content);
+  }
+  return !left.size;
 }
 // ── 带进对话 ──
 /** 模型读到的一类的版本：删后重建即使正文相同，也不当作旧的一类。 */
