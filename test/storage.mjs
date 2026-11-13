@@ -173,10 +173,12 @@ check(
   `${busyMove.status} ${busyText.slice(0, 160)}`
 );
 // 后台指令还在跑（工作目录就在存储根里）：也不换——拷完它照旧往旧处写，新处永远缺这一截
+// 指令要跨平台：Mac 上没有 PowerShell，写 Start-Sleep 会立刻以 127 退出，这条就白测了（macOS 那组逮到过）
+const bgCommand = process.platform === "win32" ? "Start-Sleep -Seconds 30; 'done'" : "sleep 30; echo done";
 const bgRun = await fetch(PAGE + "api/work/run", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ command: "Start-Sleep -Seconds 30; 'done'", background: true, workdir: native(HOME) })
+  body: JSON.stringify({ command: bgCommand, background: true, workdir: native(HOME) })
 });
 const bg = await bgRun.json();
 const bgTarget = `${TMP}/bg-move`;
