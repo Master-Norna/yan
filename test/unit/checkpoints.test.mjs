@@ -88,6 +88,47 @@ test("记下、对照、退回：改了的改回、删了的补回、新出的�
   }
 });
 
+test(".gitignore 写着 .yan/ 时，意仍进快照、跟着退回；同目录的日志与探针不搬进去", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, ".gitignore", ".yan/\n");
+    write(root, "src/a.js", "代码");
+    write(root, ".yan/意.json", '{"root":"第一版"}');
+    write(root, ".yan/记忆.md", "目录记忆");
+    write(root, ".yan/检查探针/run-all.ps1", "探针");
+    write(root, ".yan/全面检查.log", "日志");
+    const took = await post("/api/checkpoint/take", key);
+    assert.equal(took.status, 200, JSON.stringify(took));
+    assert.equal(took.files, 3, "只收 .gitignore、src/a.js 与 .yan/意.json");
+    // 这一答改了意；.yan 下没进快照的几件也跟着变了、还多出一件
+    write(root, ".yan/意.json", '{"root":"第二版"}');
+    write(root, ".yan/记忆.md", "改过的记忆");
+    write(root, ".yan/检查探针/run-all.ps1", "改过的探针");
+    write(root, ".yan/新日志.log", "新");
+    const { changes } = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      changes.map(c => `${c.kind} ${c.path}`),
+      ["changed .yan/意.json"],
+      "确认窗只列意这一件"
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([done.restored, done.removed, done.failed], [1, 0, []]);
+    assert.equal(fs.readFileSync(path.join(root, ".yan/意.json"), "utf8"), '{"root":"第一版"}', "意跟着退回");
+    // .yan 下没进快照的照此刻的样子留着：改了的不改回、新出的不删
+    assert.equal(fs.readFileSync(path.join(root, ".yan/记忆.md"), "utf8"), "改过的记忆");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/检查探针/run-all.ps1"), "utf8"), "改过的探针");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/新日志.log"), "utf8"), "新");
+    assert.equal(fs.readFileSync(path.join(root, "src/a.js"), "utf8"), "代码");
+    assert.deepEqual((await post("/api/checkpoint/diff", key)).changes, []);
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("第二回只读变了的；没变的子目录与内容共用对象；对话删了册与独有的对象跟着清", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     root = path.join(base, "work"),

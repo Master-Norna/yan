@@ -6,6 +6,8 @@
 // 不进的：列目录、检索也不钻的那几类（node_modules、.git、dist……，见 work/paths.js 的 WORK_SKIP），.gitignore 里写了的，链接，
 // 存储根本身（工作目录把它包在里面时）；.git/info/exclude 与 .gitignore 同样认。读不了的文件（被占着）记一笔「不明」，退回时不动它——不能因为没读到就当它不该在。
 // 忽略的也记一笔「不明」：这一答可能改了忽略规则，那一刻忽略的（.env、数据集）此刻露了出来，它们没进快照也恢复不了，不能当这一答新加的删掉。
+// 只一件例外：.yan/ 里的意（见 work/paths.js 的 INTENT_PATH）。仓库的 .gitignore 多写着 .yan/，可意是任务状态，
+// 退回代码时它得跟着退（10-31 定）；.yan/ 下别的照旧忽略，日志、探针、目录记忆不往快照里搬
 // 只管目录里的文件：指令写到目录之外的、MCP 改的远端，都退不了
 "use strict";
 const fs = require("node:fs");
@@ -14,7 +16,7 @@ const crypto = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Transform } = require("node:stream");
 const { jsonRoute, errorText, writeAtomic, readJsonFile, fileHash } = require("./http.js");
-const { WORK_SKIP } = require("./work/paths.js");
+const { WORK_SKIP, INTENT_PATH } = require("./work/paths.js");
 
 const KEY = /^[\w-]{1,80}~[\w-]{1,80}$/;
 
@@ -150,10 +152,15 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
       throw error;
     }
   }
-  // 走一遍目录：每件文件交给 visit（拿到相对路径与 stat），返回这一层的条目；跳过的与读不了的照上面的规矩
+  // 走一遍目录：每件文件交给 visit（拿到相对路径与 stat），返回这一层的条目；跳过的与读不了的照上面的规矩。
+  // .yan/ 常被仓库的 .gitignore 整棵忽略（目录记忆与运行数据不随仓库提交），可意是任务状态：退回代码时它得跟着退。
+  // 所以意这一件不进「忽略」那一类——.yan 单为它进得去，其下别的照旧记「不明」、不下钻，日志、探针、记忆不会被拷进快照
+  const INTENT_DIR = INTENT_PATH.slice(0, INTENT_PATH.lastIndexOf("/")),
+    INTENT_NAME = INTENT_PATH.slice(INTENT_PATH.lastIndexOf("/") + 1);
   async function walk(root, visit) {
     const skipped = skip().map(dir => path.resolve(dir));
-    const down = async (abs, rel, rules) => {
+    /** @param {boolean} sealed 这一层整棵被忽略、只为收意进来：除它以外一律记「不明」 */
+    const down = async (abs, rel, rules, sealed) => {
       // 浏览的起点自己就是跳过的一处（工作目录选成了存储根本身）：整棵都不记——不这么判，
       // 「检查点/」「对话/」会被自己照进快照，退回时把它们当作新增删掉
       if (skipped.some(dir => same(dir, path.resolve(abs)))) return [];
@@ -166,27 +173,35 @@ module.exports = function createCheckpoints({ home, skip = () => [] }) {
         const full = path.join(abs, entry.name),
           sub = rel ? `${rel}/${entry.name}` : entry.name;
         if (entry.isSymbolicLink() || skipped.some(dir => same(dir, full))) continue;
+        // 只为收意而进来的这一层：别的（记忆、探针、日志、浏览器配置）一律「不明」，不下钻
+        if (sealed && !(entry.isFile() && sub === INTENT_PATH)) {
+          items.push(["x", entry.name]);
+          continue;
+        }
         if (entry.isDirectory()) {
           if (WORK_SKIP.has(entry.name)) continue;
-          if (ignored(own, sub, true)) {
+          const shut = ignored(own, sub, true),
+            // 装着意的 .yan：忽略也进去一趟，只收那一件
+            reenter = shut && sub === INTENT_DIR && fs.existsSync(path.join(full, INTENT_NAME));
+          if (shut && !reenter) {
             items.push(["x", entry.name]);
             continue;
           }
           let inner;
           try {
-            inner = await down(full, sub, own);
+            inner = await down(full, sub, own, reenter);
           } catch {
             items.push(["x", entry.name]);
             continue;
           }
           items.push(["d", entry.name, inner]);
         } else if (entry.isFile()) {
-          items.push(ignored(own, sub, false) ? ["x", entry.name] : await visit(full, sub, entry.name));
+          items.push(ignored(own, sub, false) && sub !== INTENT_PATH ? ["x", entry.name] : await visit(full, sub, entry.name));
         }
       }
       return items;
     };
-    return down(root, "", []);
+    return down(root, "", [], false);
   }
   // ---------- 记下此刻 ----------
   async function take(rootDir, key) {

@@ -5,14 +5,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { jsonRoute, requestSignal, fileHash } = require("../http.js");
-const { WORK_SKIP, SCRATCH_DIR, describeFsError, relPath } = require("./paths.js");
+const { WORK_SKIP, SCRATCH_DIR, INTENT_PATH, describeFsError, relPath } = require("./paths.js");
 const writeTextAtomic = require("./atomic.js");
 
 module.exports = function createIntent(work) {
   const { failed, resolveWorkdir, targetOf, lockFile } = work;
-  // ---- 意：一件工程要成立的结论图，存在目录的 .yan/意.json，跨对话沿用（页面怎么折、怎么判见 src/19-intent/）。
+  // ---- 意：一件工程要成立的结论图，存在目录的 .yan/意.json（INTENT_PATH），跨对话沿用（页面怎么折、怎么判见 src/19-intent/）。
   // 桥接是唯一的写者：几段对话、几个页面同时改，写时带上读到的版本，对不上就把此刻的那份交回、由页面重算再写，不会互相覆盖
-  const INTENT_PATH = ".yan/意.json";
   const textVersion = text => (text ? createHash("sha1").update(text).digest("hex") : "");
   async function readIntent(file) {
     const text = await fs.promises.readFile(file, "utf8").catch(error => {
