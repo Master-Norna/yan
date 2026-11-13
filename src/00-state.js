@@ -211,7 +211,7 @@
  * @property {CommandPolicy|""} policy 选它时的指令权限；空则照设置里的默认
  */
 /** @typedef {Pick<Profile, "baseUrl"|"apiKey"|"model"|"api">} Endpoint 发一次请求要的那几样：模型配置与专司里另配的一份都够 */
-/** @typedef {{ on: boolean, api: "openai"|"anthropic"|"siliconflow"|"chatgpt", baseUrl: string, apiKey: string, model: string, modelList: string[] }} Duty 专司里另配的一份（审查、记忆、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
+/** @typedef {{ on: boolean, api: "openai"|"anthropic"|"siliconflow"|"chatgpt", baseUrl: string, apiKey: string, model: string, modelList: string[] }} Duty 专司里另配的一份（审查、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
 /** @typedef {{ id: string, category: string, text: string, updatedAt: string }} MemoryItem 记忆的一类：类名与全文 */
 /** @typedef {{ text: string, attachments: Attachment[], quote?: Quote|null, updatedAt?: string }} Draft */
 /**
