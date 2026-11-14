@@ -152,19 +152,20 @@ function openRepoMenu(dir, anchor) {
     { kind: "group", key: dir }
   );
 }
-// 删除一整组：组里的对话连同附件一并移除（目录里的文件一个不碰）。别的页面正写着的那几段跳过，不硬删；置顶的本就不在这一组里
+// 删除一整组：组里的对话连同附件一并移除（目录里的文件一个不碰）。别的页面正写着的那几段跳过，不硬删。
+// 「组里」照侧栏的归组口径算：置顶的单列、归进「集」组的在那一组里，都绑着这个目录也不属于这一组（见 renderHistory 的分法）
 /** @param {string} dir */
 async function removeWorkdirGroup(dir) {
-  const members = store.conversations.filter(c => !c.pinned && isWork(c) && c.workdir === dir),
+  const members = store.conversations.filter(c => !c.pinned && !groupOf(c) && isWork(c) && c.workdir === dir),
     busy = members.filter(c => runningElsewhere(c.id)),
     targets = members.filter(c => !busy.includes(c)),
-    pinned = store.conversations.filter(c => c.pinned && isWork(c) && c.workdir === dir).length,
+    outside = store.conversations.filter(c => (c.pinned || groupOf(c)) && isWork(c) && c.workdir === dir).length,
     name = workdirTitle(dir);
   if (!targets.length) return toast(busy.length ? t("此组正在另一页面作答，暂不能删除") : t("这一组已没有对话"));
   const notes = [
     t`组里的 ${targets.length} 段对话将连同附件一并移除，目录里的文件不动，无法撤销。`,
     busy.length ? t`另有 ${busy.length} 段正在另一页面作答，这回不动。` : "",
-    pinned ? t`另有 ${pinned} 段置顶的对话不在这一组里，也不动。` : ""
+    outside ? t`另有 ${outside} 段置顶或已归入分组的对话，不在此组，也不动。` : ""
   ].filter(Boolean);
   if (!(await askConfirm({ title: t`删除「${name}」这一组？`, body: notes.join("\n"), ok: t("删除") }))) return;
   for (const c of targets) purgeConversation(c);
