@@ -21,7 +21,6 @@ function renderChips(work) {
   approve.querySelector(".chip-text").textContent = meta[0];
   approve.classList.toggle("on", policy !== "ask");
   approve.title = t`${meta[0]}：${meta[1]}（新对话默认）`;
-  renderGroupTags();
 }
 // 附件签「＋」：展开后二选一——外件（本机文件）或卷宗（已收入的文件，点选即置于案上，在这张菜单里接着选）
 function openAttachMenu(anchor) {
@@ -219,13 +218,6 @@ function setupChips() {
         renderHistory();
       }
     });
-  $("#welcomeGroup").onclick = () => {
-    delete store.settings.pendingGroupId;
-    saveStore();
-    renderChips(workMode());
-    renderHeader();
-  };
-  $("#chatGroup").onclick = () => openGroupsPage(groupOf(currentConversation())?.id || null);
   $("#approveChip").onclick = () => {
     store.settings.commandPolicyDefault = nextCommandPolicy(store.settings.commandPolicyDefault);
     saveStore();

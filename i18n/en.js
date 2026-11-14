@@ -1158,7 +1158,6 @@ var YAN_EN = {
   切换明暗: "Toggle light/dark",
   移除引文: "Remove quote",
   落墨于此: "Ask anything",
-  "新对话归入此组 · 撤去": "New chats go into this group · remove",
   发送: "Send",
   修改标题: "Edit title",
   卷宗里的位置: "Location in Files",
@@ -1167,7 +1166,6 @@ var YAN_EN = {
   对所选文字: "For the selected text",
   引为下一问的引文: "Quote in the next message",
   "就此处另开旁注，不入正文": "Open a side thread here, kept out of the main chat",
-  所在分组: "Group",
   当前上下文大小: "Current context size",
   回到旁注目录: "Back to side threads",
   移除这条旁注: "Remove this side thread",
@@ -1897,8 +1895,8 @@ var YAN_EN = {
   "这两样只管新起的对话；已在组中的对话照旧。":
     "These two settings apply only to new conversations; ones already in the group stay as they are.",
   在组中行文: "Working in a group",
-  "侧栏组首的「＋」或分组页的「在此组新建」另起一段，输入框「＋」旁标着所归之组，点之即撤去。侧栏里的组与「工」组一样按时间排，组里一有新言，整组便靠前。组里的对话置顶，只在组内居前，右上角折一小角为记。解散只拆组，对话退回散列。":
-    "Start a new conversation from “＋” at the head of a group in the sidebar, or “New chat in this group” on the groups page; the group is shown beside “＋” in the input box, and clicking it removes the conversation from the group. Groups in the sidebar are ordered by time like folder groups: as soon as something new is said in one, the whole group moves up. A pinned conversation in a group goes to the top of that group only, marked by a small folded corner at the top right. Ungrouping only breaks up the group; its conversations go back to the loose list.",
+  "侧栏组首的「＋」或分组页的「在此组新建」另起一段，新对话即归此组；点「翻页」另起则不归。侧栏里的组与「工」组一样按时间排，组里一有新言，整组便靠前。组里的对话置顶，只在组内居前，右上角折一小角为记。解散只拆组，对话退回散列。":
+    "Start a new conversation from “＋” at the head of a group in the sidebar, or “New chat in this group” on the groups page; the new chat joins that group. To keep it out, start it with “New chat” instead. Groups in the sidebar are ordered by time like folder groups: as soon as something new is said in one, the whole group moves up. A pinned conversation in a group goes to the top of that group only, marked by a small folded corner at the top right. Ungrouping only breaks up the group; its conversations go back to the loose list.",
   接入外部服务: "Connecting outside services",
   "借 MCP，言可调用别处的能力，如 GitHub 的仓库与议题，或其他项目自带的工具。接入只需配置，无需改动代码。":
     "Through MCP, Yan can use capabilities from elsewhere, such as GitHub repositories and issues, or tools that ship with other projects. Connecting takes only configuration, no code changes.",

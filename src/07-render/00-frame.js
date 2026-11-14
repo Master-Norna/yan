@@ -24,7 +24,6 @@ function render(shouldScroll = false) {
   $("#openLibrary").classList.toggle("active", library);
   $("#openGroups").classList.toggle("active", groups);
   renderGroupsCount();
-  renderGroupTags();
   if (library) renderLibrary();
   else if (groups) renderGroupsPage();
   else if (c) renderConversation(shouldScroll);
