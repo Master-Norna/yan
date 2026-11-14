@@ -123,6 +123,13 @@ function renderHistory() {
             `<div class="history-group"><div class="history-label">${label}</div>${items.map(node => (node.kind === "repo" ? repoHtml(node) : node.kind === "set" ? setHtml(node) : item(node.c))).join("")}</div>`
         )
         .join("") || `<div class="history-empty">${query ? t("没有匹配的对话") : t("尚无旧墨")}</div>`;
+    // 正改名的那一段这一回没画出来（被删、被搜掉、换进新版）：这次改名作罢。不然状态一直留着，
+    // 该段再出现时组名处凭空是个输入框，双击改名也被挡（见 24-groups.js 的 startSectionRename）
+    if (renamingSection && !$("#history .group-rename")) renamingSection = null;
+    if (renamingId && !$("#history .history-rename:not(.group-rename)")) {
+      renamingId = null;
+      renamingDirty = false;
+    }
     const input = $("#history .history-rename");
     if (input) {
       input.focus();

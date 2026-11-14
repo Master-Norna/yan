@@ -5,7 +5,8 @@
 // 数据取自各段存着的步骤（step.bg.state 为 running、step.timer.state 为 waiting），别处页面挂的也在。
 // 落选的：工作条添一格（只是一行状态字）、流末一道虚线（翻远了看不见）、一炷香（设计稿/73）；直壶正滴读作高脚杯、侧嘴壶、一滴落水（设计稿/74）
 let clepsydraOpen = false,
-  clepsydraTimer = 0;
+  clepsydraTimer = 0,
+  clepsydraPanelHtml = "";
 /** 还在等的候：跑着的后台指令（帮手开的也算）与没到点的时刻，各带所在对话与挂上的时刻；没记时刻的旧步骤按那一答开头算 */
 function runningBackground() {
   const list = [];
@@ -94,7 +95,15 @@ function renderClepsydra() {
   button.setAttribute("aria-label", t`候 ${list.length} 条`);
   button.setAttribute("aria-expanded", String(clepsydraOpen));
   panel.classList.toggle("hidden", !clepsydraOpen);
-  if (clepsydraOpen) panel.innerHTML = clepsydraListHtml(list, now);
+  // 簿录开着时，租约每 3 秒的同步也会走到这里；内容没变就别整段重建——否则键盘焦点被夺、悬停浮出的
+  // 整条指令被撤、跨过一次重画的点击也会落空。分钟粒度的「已跑多久」变了才换
+  if (clepsydraOpen) {
+    const html = clepsydraListHtml(list, now);
+    if (html !== clepsydraPanelHtml) {
+      panel.innerHTML = html;
+      clepsydraPanelHtml = html;
+    }
+  } else clepsydraPanelHtml = "";
 }
 function setClepsydraOpen(open) {
   clepsydraOpen = open;

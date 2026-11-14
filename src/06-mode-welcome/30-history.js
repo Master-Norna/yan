@@ -122,6 +122,8 @@ function togglePin(id) {
   renderHistory();
 }
 function startRename(id) {
+  // 两处改名同时只留一处：「集」「工」组首与对话条目共用侧栏里同一个改名框位（见 07-render/10-history.js 的 typed）
+  renamingSection = null;
   renamingId = id;
   renamingDirty = false;
   renderHistory();

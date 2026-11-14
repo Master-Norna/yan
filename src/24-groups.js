@@ -50,6 +50,9 @@ function startGroupRename(id) {
 }
 /** @param {string} key 侧栏里那一段的键：group:组 id，或目录 */
 function startSectionRename(key) {
+  // 对话条目的改名与这里同时只留一处（见 06-mode-welcome/30-history.js 的 startRename）
+  renamingId = null;
+  renamingDirty = false;
   renamingSection = key;
   renderHistory();
   const input = /** @type {HTMLInputElement|null} */ ($("#history .group-rename"));
@@ -170,6 +173,11 @@ async function removeWorkdirGroup(dir) {
   // 确认期间别处仍可接手作答、改归组或换进新版：只删原先选中、现在仍属于这一组且未被别页占用的记录。
   const confirmed = new Set(targets.map(c => c.id)),
     removing = store.conversations.filter(c => confirmed.has(c.id) && historyKey(c) === dir && !runningElsewhere(c.id));
+  // 一条也没剩下：别报「已删除 0 段对话」，照实说这一回没动
+  if (!removing.length) {
+    render();
+    return toast(t("这一组已没有对话"));
+  }
   for (const c of removing) purgeConversation(c);
   // 组散尽了，自起的名字也就没处可挂；还有对话绑着就留着
   if (!store.conversations.some(c => isWork(c) && c.workdir === dir)) delete (store.settings.workdirNames || {})[dir];
