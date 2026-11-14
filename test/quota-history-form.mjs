@@ -163,7 +163,7 @@ check(
 await evalJs(`document.querySelector("#history .history-repo").click(); true`);
 await sleep(200);
 // 组头右侧的「＋」在此目录另起一纸
-await evalJs(`document.querySelectorAll("#history .repo-new")[1].click(); true`);
+await evalJs(`document.querySelectorAll("#history .history-repo-group [data-history-workdir]")[1].click(); true`);
 await sleep(400);
 check(
   "＋ on a folder starts a new sheet in that folder",

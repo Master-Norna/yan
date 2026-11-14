@@ -924,6 +924,15 @@ var YAN_EN = {
   "解散分组「{0}」？": 'Ungroup "{0}"?',
   "组里的 {0} 段对话退回散列，不会删除。": "Its {0} {0|chat|chats} go back to the main list; nothing is deleted.",
   "此组尚无对话。": "This group has no chats.",
+  "删除「{0}」这一组？": 'Delete the "{0}" group?',
+  "组里的 {0} 段对话将连同附件一并移除，目录里的文件不动，无法撤销。":
+    "Its {0} {0|chat|chats} will be removed along with their attachments. Files in the folder stay untouched. This can't be undone.",
+  "另有 {0} 段正在另一页面作答，这回不动。": "{0} more are replying in another page and will be left alone this time.",
+  "另有 {0} 段置顶或已归入分组的对话，不在此组，也不动。":
+    "{0} {0|chat is|chats are} pinned or in a collection, outside this group, and will be left alone.",
+  "已删除 {0} 段对话": "Deleted {0} {0|chat|chats}",
+  "此组正在另一页面作答，暂不能删除": "This group is replying in another page and can't be deleted now",
+  这一组已没有对话: "This group has no chats left",
   解散: "Ungroup",
   设置: "Settings",
   "新建分组…": "New group…",

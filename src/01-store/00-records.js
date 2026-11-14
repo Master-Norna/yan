@@ -36,6 +36,7 @@ const defaultStore = {
     dutyImage: normalizeDuty(null, "siliconflow"),
     pendingWorkdir: "",
     collapsedRepos: [],
+    workdirNames: {},
     commandPolicyDefault: "ask",
     sandbox: true,
     toolReach: "anywhere",
@@ -113,6 +114,17 @@ function normalizeStoreData(value) {
         presetId: String(group.presetId || ""),
         workdir: String(group.workdir || "")
       }));
+    // 目录组自起的名字（键：目录），只改侧栏显示、不动真实目录；空名与空键不存
+    settings.workdirNames = Object.fromEntries(
+      Object.entries(settings.workdirNames && typeof settings.workdirNames === "object" ? settings.workdirNames : {})
+        .map(([dir, name]) => [
+          String(dir),
+          String(name || "")
+            .replace(/\s+/g, " ")
+            .trim()
+        ])
+        .filter(([dir, name]) => dir && name)
+    );
     return {
       ...structuredClone(defaultStore),
       ...data,

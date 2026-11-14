@@ -671,6 +671,25 @@ test("mergeConfig3：两处各添预设、分组、MCP 与环境工具时都留�
   assert.equal(merged.env.pip, "sympy");
   assert.equal(merged.env.mirror, "official");
 });
+test("mergeConfig3：目录组的名字按目录合并，两页各改一个不互相盖掉", () => {
+  const meta = names => ({
+    version: 6,
+    settings: { theme: "light", workdirNames: names },
+    profiles: [],
+    memory: { enabled: true, items: [] },
+    drafts: {}
+  });
+  // 同一份底子，这边给 b 起名、那边给 a 起名：两个名字都该留下（整份换掉会只剩后写的那个）
+  const merged = f.mergeConfig3(meta({}), meta({ "E:/b": "乙" }), meta({ "E:/a": "甲" })).settings;
+  assert.deepEqual(merged.workdirNames, { "E:/a": "甲", "E:/b": "乙" });
+  // 一边改回目录名（删掉那个键）、另一边没动它：删照键传播，另一边新起的名字留着
+  const removed = f.mergeConfig3(
+    meta({ "E:/a": "甲", "E:/b": "乙" }),
+    meta({ "E:/b": "乙" }),
+    meta({ "E:/a": "甲", "E:/b": "乙", "E:/c": "丙" })
+  ).settings;
+  assert.deepEqual(removed.workdirNames, { "E:/b": "乙", "E:/c": "丙" });
+});
 test("looksLikeMermaid / liftBareHtml：写岔了的流程图、没包围栏的交互内容照样认得，普通代码与别的 HTML 不误伤", () => {
   assert.equal(f.looksLikeMermaid("flowchart TD\n  A --> B"), true);
   assert.equal(f.looksLikeMermaid("%% 注\ngraph LR;\n  A --> B"), true);

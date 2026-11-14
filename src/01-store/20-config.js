@@ -303,6 +303,8 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
     settings.presets = byId(baseSettings.presets, mineSettings.presets, theirSettings.presets, (b, m, t) => keyed(b, m, t));
   if (has("groups")) settings.groups = byId(baseSettings.groups, mineSettings.groups, theirSettings.groups, (b, m, t) => keyed(b, m, t));
   if (has("mcpServers")) settings.mcpServers = keyed(baseSettings.mcpServers, mineSettings.mcpServers, theirSettings.mcpServers);
+  // 目录组的名字按键合并：两页各改一个目录，后写者不会把先写者的整份名字替掉（一页改回目录名＝删掉那个键，也照键传播）
+  if (has("workdirNames")) settings.workdirNames = keyed(baseSettings.workdirNames, mineSettings.workdirNames, theirSettings.workdirNames);
   if (has("env")) {
     const oldEnv = { ...defaultStore.settings.env, ...(baseSettings.env || {}) },
       myEnv = mineSettings.env || {},
