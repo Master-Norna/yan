@@ -60,6 +60,7 @@ function renameGroup(id, value) {
   if (!group || !name || name === group.name) return;
   group.name = name;
   saveStore();
+  renderWelcome();
 }
 function commitGroupRename(value) {
   const id = renamingGroupId;
@@ -88,6 +89,7 @@ async function dissolveGroup(id) {
   if (groupPageId === id) groupPageId = null;
   saveStore();
   renderHistory();
+  renderWelcome();
   if (view === "groups") renderGroupsPage();
 }
 // 组首「⋯」：改名、打开组的设置（分组页里这一组）、解散；在此组新建已有「＋」，不再列

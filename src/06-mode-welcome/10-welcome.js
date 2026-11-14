@@ -1,8 +1,15 @@
 // 言 · 欢迎页：首次引导、提示词与问候
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 function renderWelcome() {
-  const work = workMode();
-  $("#welcome .seal").textContent = work ? "行" : "言";
+  const work = workMode(),
+    group = pendingGroup(),
+    seal = $("#welcome .seal");
+  // 眉题的印章说这一问落在哪儿：归了组是「集」（旁写组名），绑了目录是「行」，都没有是「言」
+  seal.textContent = group ? "集" : work ? "行" : "言";
+  seal.title = group ? t`这一问将归入「${group.name}」` : "";
+  const mode = $("#welcomeMode");
+  mode.textContent = group ? group.name : work ? t("执事") : t("对谈");
+  mode.title = group ? group.name : "";
   $("#welcomeSub").textContent = work ? t("以目录为案，言起而事行") : t("长问慢答，尽付纸墨");
   // 节气名只在中文界面注（见 12-season.js）
   $("#welcomeTerm").textContent = LANG === "en" ? "" : solarTerm();

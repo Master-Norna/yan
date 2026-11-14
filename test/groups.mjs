@@ -97,12 +97,14 @@ check(
   )
 );
 
-// 在此组新建：模型按钮标出组的预设；发出后新对话归组、用组的预设
+// 在此组新建：欢迎页眉题说这一问落进哪一组，模型按钮标出组的预设；发出后新对话归组、用组的预设
 await evalJs(`document.querySelector("#groupNewChat").click(); true`);
 await sleep(200);
 check(
-  "new chat in the group uses the group's preset, with no group tag by the ＋",
-  await evalJs(`!document.querySelector("#welcomeGroup") && document.querySelector("#welcome .model-extra").textContent.includes("读书人")`)
+  "new chat in the group reads 集 and the group name on the welcome eyebrow, with the group's preset",
+  await evalJs(
+    `document.querySelector("#welcome .seal").textContent === "集" && document.querySelector("#welcomeMode").textContent === "诗书" && document.querySelector("#welcome .model-extra").textContent.includes("读书人")`
+  )
 );
 await evalJs(
   `document.querySelector("#welcomeInput").value = "PLAIN 组内"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
@@ -115,14 +117,17 @@ check(
   )
 );
 await waitFor(`document.querySelector(".message.assistant")?.dataset.status === "complete"`, 10000);
-check("the chat page keeps no group tag by the ＋", await evalJs(`!document.querySelector("#chatGroup")`));
+check("the chat page carries no group tag by the ＋", await evalJs(`!document.querySelector("#chatGroup")`));
 
-// 翻页起的是散列的一段：不带分组
+// 翻页起的是散列的一段：不带分组，眉题回「言」
 await evalJs(`document.querySelector('[data-group-new="${groupId}"]').click(); true`);
 await sleep(100);
 await evalJs(`document.querySelector("#newChat").click(); true`);
 await sleep(150);
-check("plain 翻页 drops the pending group", await evalJs(`!__yanState().settings.pendingGroupId`));
+check(
+  "plain 翻页 drops the pending group and the seal goes back to 言",
+  await evalJs(`!__yanState().settings.pendingGroupId && document.querySelector("#welcome .seal").textContent === "言"`)
+);
 
 // 组按时间排：组里刚有新言，整组落在「今天」一段，不另立「分组」一段
 const placed = await evalJs(

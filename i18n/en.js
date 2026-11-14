@@ -1895,8 +1895,8 @@ var YAN_EN = {
   "这两样只管新起的对话；已在组中的对话照旧。":
     "These two settings apply only to new conversations; ones already in the group stay as they are.",
   在组中行文: "Working in a group",
-  "侧栏组首的「＋」或分组页的「在此组新建」另起一段，新对话即归此组；点「翻页」另起则不归。侧栏里的组与「工」组一样按时间排，组里一有新言，整组便靠前。组里的对话置顶，只在组内居前，右上角折一小角为记。解散只拆组，对话退回散列。":
-    "Start a new conversation from “＋” at the head of a group in the sidebar, or “New chat in this group” on the groups page; the new chat joins that group. To keep it out, start it with “New chat” instead. Groups in the sidebar are ordered by time like folder groups: as soon as something new is said in one, the whole group moves up. A pinned conversation in a group goes to the top of that group only, marked by a small folded corner at the top right. Ungrouping only breaks up the group; its conversations go back to the loose list.",
+  "侧栏组首的「＋」或分组页的「在此组新建」另起一段，新对话即归此组（欢迎页眉题的印章随之改作「集」、一旁写出组名）；点「翻页」另起则不归。侧栏里的组与「工」组一样按时间排，组里一有新言，整组便靠前。组里的对话置顶，只在组内居前，右上角折一小角为记。解散只拆组，对话退回散列。":
+    "Start a new conversation from “＋” at the head of a group in the sidebar, or “New chat in this group” on the groups page; the new chat joins that group (the welcome page's eyebrow seal turns into 集 with the group's name beside it). To keep it out, start it with “New chat” instead. Groups in the sidebar are ordered by time like folder groups: as soon as something new is said in one, the whole group moves up. A pinned conversation in a group goes to the top of that group only, marked by a small folded corner at the top right. Ungrouping only breaks up the group; its conversations go back to the loose list.",
   接入外部服务: "Connecting outside services",
   "借 MCP，言可调用别处的能力，如 GitHub 的仓库与议题，或其他项目自带的工具。接入只需配置，无需改动代码。":
     "Through MCP, Yan can use capabilities from elsewhere, such as GitHub repositories and issues, or tools that ship with other projects. Connecting takes only configuration, no code changes.",
@@ -2003,6 +2003,7 @@ var YAN_EN = {
   "只需 Node.js 22 或更高版本，无需安装依赖。": "Needs only Node.js 22 or later; no dependencies to install.",
   // ---- 欢迎页（问候另写在 src/06-mode-welcome/10-welcome.js；推荐语里留给人填的写在方括号里） ----
   "以目录为案，言起而事行": "Work in a folder: plan, edit, run",
+  "这一问将归入「{0}」": 'This message goes into "{0}"',
   "长问慢答，尽付纸墨": "Ask at length, read at leisure",
   "对话、卷宗、附件与配置同在本机的一个存储目录，言没有自己的服务器；复制即是备份。":
     "Chats, files, attachments and settings live in one folder on this machine; Yan has no server of its own. Copy the folder to back it up.",

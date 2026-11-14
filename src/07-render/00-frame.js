@@ -37,7 +37,6 @@ function render(shouldScroll = false) {
 }
 function renderHeader() {
   renderModelTriggers();
-  $("#welcomeMode").textContent = workMode() ? t("执事") : t("对谈");
   $("#displayNameSidebar").textContent = store.settings.name;
   $("#avatar").textContent = store.settings.name.trim().slice(0, 1) || t("客");
   const dark = document.documentElement.dataset.theme === "dark",
