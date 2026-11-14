@@ -76,7 +76,11 @@ async function deleteConversation(id) {
   if (runningElsewhere(id)) return toast(t("此对话正在另一页面作答，暂不能删除"));
   if (!(await askConfirm({ title: t("删除这段对话？"), body: t`「${removed.title}」将连同其附件一起移除，无法撤销。`, ok: t("删除") })))
     return;
-  purgeConversation(removed);
+  // 确认期间那一页可能已接手，目录同步也可能换进新版；动手前重取当前记录。
+  const current = store.conversations.find(c => c.id === id);
+  if (!current) return;
+  if (runningElsewhere(id)) return toast(t("此对话正在另一页面作答，暂不能删除"));
+  purgeConversation(current);
   saveStore();
   render();
   toast(t("对话已删除"));

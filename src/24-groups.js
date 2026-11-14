@@ -156,7 +156,7 @@ function openRepoMenu(dir, anchor) {
 // 「组里」照侧栏的归组口径算：置顶的单列、归进「集」组的在那一组里，都绑着这个目录也不属于这一组（见 renderHistory 的分法）
 /** @param {string} dir */
 async function removeWorkdirGroup(dir) {
-  const members = store.conversations.filter(c => !c.pinned && !groupOf(c) && isWork(c) && c.workdir === dir),
+  const members = store.conversations.filter(c => historyKey(c) === dir),
     busy = members.filter(c => runningElsewhere(c.id)),
     targets = members.filter(c => !busy.includes(c)),
     outside = store.conversations.filter(c => (c.pinned || groupOf(c)) && isWork(c) && c.workdir === dir).length,
@@ -168,12 +168,15 @@ async function removeWorkdirGroup(dir) {
     outside ? t`另有 ${outside} 段置顶或已归入分组的对话，不在此组，也不动。` : ""
   ].filter(Boolean);
   if (!(await askConfirm({ title: t`删除「${name}」这一组？`, body: notes.join("\n"), ok: t("删除") }))) return;
-  for (const c of targets) purgeConversation(c);
+  // 确认期间别处仍可接手作答、改归组或换进新版：只删原先选中、现在仍属于这一组且未被别页占用的记录。
+  const confirmed = new Set(targets.map(c => c.id)),
+    removing = store.conversations.filter(c => confirmed.has(c.id) && historyKey(c) === dir && !runningElsewhere(c.id));
+  for (const c of removing) purgeConversation(c);
   // 组散尽了，自起的名字也就没处可挂；还有对话绑着就留着
   if (!store.conversations.some(c => isWork(c) && c.workdir === dir)) delete (store.settings.workdirNames || {})[dir];
   saveStore();
   render();
-  toast(t`已删除 ${targets.length} 段对话`);
+  toast(t`已删除 ${removing.length} 段对话`);
 }
 // 对话「⋯」里的「移入分组」：列出各组，另有新建一组与移出
 /** @param {Conversation} c @param {Element} anchor */
