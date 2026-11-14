@@ -1574,3 +1574,17 @@ test("screenCommand：git 的 -C / --git-dir / --work-tree 指到工作目录之
   ])
     assert.equal(screen(command), null, command);
 });
+
+test("写参数紧贴路径（-oC:\\x）与 Set-Item 定义函数：目录与系统目录都看得见，别名定义照拦", () => {
+  // 7z / curl 把输出路径紧贴在 -o 后面：严档看得见目录外，宽与审档看得见系统目录
+  assert.match(screen("7z x a.zip -oC:\\Windows\\x"), /越出了工作目录/);
+  assert.match(screen("7z x a.zip -o..\\x"), /不用 \.\. 上溯/);
+  assert.match(screenLoose("7z x a.zip -oC:\\Windows\\x", win), /系统目录/);
+  assert.match(screenAutoReview("7z x a.zip -oC:\\Windows\\x", win), /系统目录/);
+  assert.equal(screen("7z x a.zip -o.\\build"), null);
+  // Set-Item 的 function: / alias: 是另写一套名字：严宽都拦（审档由宽的沙箱送审），只是搜字不算
+  assert.match(screen("Set-Item -Path function:t -Value Invoke-Expression; t $payload"), /不定义别名/);
+  assert.match(screenLoose("Set-Item function:t Invoke-Expression", win), /不定义别名/);
+  assert.equal(screen("echo Set-Item function:t"), null);
+  assert.equal(screen("rg 'Set-Item function:t' src"), null);
+});

@@ -50,7 +50,10 @@ const cmdlet = (/** @type {string} */ names) => new RegExp(String.raw`${CMD}(?:$
 // 改「项」的 cmdlet 与它们在 Windows PowerShell 里的别名（ni = New-Item、sp = Set-ItemProperty……）：注册表那条与写动词表都用
 const ITEM_WRITERS = String.raw`(?:New|Set|Remove|Clear|Rename|Copy|Move)-Item(?:Property)?|ni|si|ri|cli|rni|rn|cpi|mi|sp|rp|clp|rnp|mp`;
 // 定义别名等于给写动词换个名字，静态筛查就认不出来了；与 Invoke-Expression 同属「藏字」
-const ALIASING = new RegExp(String.raw`${cmd("(?:Set|New)-Alias|sal|nal").source}|${CMD}alias\s+[^\s=]+\s*=`, "im");
+const ALIASING = new RegExp(
+  String.raw`${cmd("(?:Set|New)-Alias|sal|nal").source}|${CMD}alias\s+[^\s=]+\s*=|${CMD}(?:Set|New)-Item\s+(?:-(?:Path|LiteralPath)\s+)?["']?(?:function|alias):`,
+  "im"
+);
 const ELEVATION = new RegExp(
   String.raw`-Verb\s+RunAs\b|${cmd(String.raw`(?:/\S*/)?sudo`).source}|${cmd("osascript", String.raw`[^\n]*(?:with\s+administrator\s+privileges\b|administratorPrivileges\s*:\s*true\b)`).source}`,
   "im"
@@ -1886,6 +1889,12 @@ function stripReadSources(scanned, sources = true) {
   }
   return chars.join("");
 }
+// 判定「写」时用的文本：只读来源先抹掉；7z、curl 这类把输出路径紧贴在 -o 后面（-oC:\x、-o..\x）的，
+// 路径前没有空白，盘符与 .. 都认不出来，先拆开再扫（--output 与 -o 不混；只影响判定，不改实际指令）
+/** @param {ReturnType<typeof shellText>} scanned */
+function writeScanText(scanned) {
+  return stripReadSources(scanned).replace(/(^|[\s"'])-o(?=[\\/"']|\.\.[\\/]|[A-Za-z]:[\\/])/gi, "$1-o ");
+}
 /**
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，
  * 整条都按「写」处理，它顺带读的那些路径也一并受约束——静态看不出哪个参数是源、哪个是目标，
@@ -1893,7 +1902,7 @@ function stripReadSources(scanned, sources = true) {
  * @param {ReturnType<typeof shellText>} scanned @param {string} workdir @param {boolean} win @param {string} prefix
  */
 function screenWritePaths(scanned, workdir, win, prefix) {
-  const writeText = stripReadSources(scanned);
+  const writeText = writeScanText(scanned);
   // 用户目录与系统目录：只是读的来源可以（把 ~/x.txt 拷进来），写进去不行
   if (HOME_SYSTEM_PATH.test(writeText)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
@@ -2212,7 +2221,7 @@ function screenAutoReview(command, { platform = process.platform } = {}) {
     forbidden = forbiddenWhy(scanned, "审");
   if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
-  if (DIRECT_FILE_MUTATION.test(scanned.syntax) && REVIEW_SYSTEM_PATH.test(stripReadSources(scanned)))
+  if (DIRECT_FILE_MUTATION.test(scanned.syntax) && REVIEW_SYSTEM_PATH.test(writeScanText(scanned)))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
@@ -2230,7 +2239,7 @@ function screenLoose(command, { platform = process.platform } = {}) {
     scanned = shellText(text, win ? "powershell" : "posix"),
     forbidden = forbiddenWhy(scanned, "宽");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
-  if (DIRECT_FILE_MUTATION.test(scanned.syntax) && REVIEW_SYSTEM_PATH.test(stripReadSources(scanned)))
+  if (DIRECT_FILE_MUTATION.test(scanned.syntax) && REVIEW_SYSTEM_PATH.test(writeScanText(scanned)))
     return "沙箱拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
