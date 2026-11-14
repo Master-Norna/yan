@@ -305,6 +305,8 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
   if (has("mcpServers")) settings.mcpServers = keyed(baseSettings.mcpServers, mineSettings.mcpServers, theirSettings.mcpServers);
   // 目录组的名字按键合并：两页各改一个目录，后写者不会把先写者的整份名字替掉（一页改回目录名＝删掉那个键，也照键传播）
   if (has("workdirNames")) settings.workdirNames = keyed(baseSettings.workdirNames, mineSettings.workdirNames, theirSettings.workdirNames);
+  // 「哪一组停在原处」的时刻同样按键合并：两页各删不同组的一段，后写者不会把另一组的时刻抹掉
+  if (has("groupAt")) settings.groupAt = keyed(baseSettings.groupAt, mineSettings.groupAt, theirSettings.groupAt);
   if (has("env")) {
     const oldEnv = { ...defaultStore.settings.env, ...(baseSettings.env || {}) },
       myEnv = mineSettings.env || {},
@@ -362,8 +364,9 @@ function mergeConfig(config) {
     mcpServers: { ...(store.settings.mcpServers || {}), ...(disk.settings.mcpServers || {}) }
   };
   store.profiles = union(disk.profiles, store.profiles);
-  // 记忆按类名合：没有基准时磁盘上的那份为准。这一答正写的那几类若两边都有而正文不同，记下冲突交回重写；
-  // 本地那一份也不再接上去——不然 normalizeMemory 会把两份正文接成一段，模型看到的还不是磁盘上的那份
+  // 记忆按类名合：没有基准时，两边同名的整类正文由 normalizeMemory 依次接起（头一回碰上这个存储根，
+  // 两处各自记下的东西都不该丢）；这一答正写的那几类例外——两边都有而正文不同就记下冲突交回重写，
+  // 本地那一份不接上去，否则模型会把自己要改写的那一版和磁盘上的拼成一段
   for (const category of pendingMemoryWrites) {
     const diskItem = disk.memory.items.find(item => item.category === category),
       localItem = store.memory.items.find(item => item.category === category);

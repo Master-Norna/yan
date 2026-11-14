@@ -690,6 +690,21 @@ test("mergeConfig3：目录组的名字按目录合并，两页各改一个不�
   ).settings;
   assert.deepEqual(removed.workdirNames, { "E:/b": "乙", "E:/c": "丙" });
 });
+test("mergeConfig3：「哪一组停在原处」的时刻也按键合并，两页各删不同组不互相盖掉", () => {
+  const meta = groupAt => ({
+    version: 6,
+    settings: { theme: "light", groupAt },
+    profiles: [],
+    memory: { enabled: true, items: [] },
+    drafts: {}
+  });
+  const merged = f.mergeConfig3(
+    meta({}),
+    meta({ "group:g1": "2026-11-14T10:00:00Z" }),
+    meta({ "group:g2": "2026-11-14T11:00:00Z" })
+  ).settings;
+  assert.deepEqual(merged.groupAt, { "group:g2": "2026-11-14T11:00:00Z", "group:g1": "2026-11-14T10:00:00Z" });
+});
 test("looksLikeMermaid / liftBareHtml：写岔了的流程图、没包围栏的交互内容照样认得，普通代码与别的 HTML 不误伤", () => {
   assert.equal(f.looksLikeMermaid("flowchart TD\n  A --> B"), true);
   assert.equal(f.looksLikeMermaid("%% 注\ngraph LR;\n  A --> B"), true);

@@ -149,3 +149,41 @@ test("remember：桥接不在、写不成时说「待落盘」，不报已写入
   assert.equal(result.display, "待落盘");
   assert.equal(f.store.memory.items[0].text, "偏好中文\n回答简短", "本页照旧改成新内容");
 });
+
+test("没有基准时两边同类记忆按类名接起，两处记下的都不丢；本地独有的类别留着", () => {
+  const f = load([
+    "mergeConfig",
+    "store",
+    `setup: () => {
+      store.settings = { memoryEnabled: true, activeProfileId: "" };
+      store.profiles = [];
+      store.conversations = [];
+      store.memory = {
+        items: [
+          { id: "m1", category: "偏好", text: "偏好中文", updatedAt: "2026-01-01" },
+          { id: "m3", category: "计划", text: "在本机立的计划", updatedAt: "2026-01-01" }
+        ]
+      };
+      store.drafts = {};
+      renderHeader = () => {};
+      renderHistory = () => {};
+      renderQuota = () => {};
+    }`
+  ]);
+  const disk = {
+    version: 1,
+    settings: {},
+    profiles: [],
+    memory: { items: [{ id: "m2", category: "偏好", text: "偏好英文", updatedAt: "2026-01-02" }] },
+    drafts: {}
+  };
+  f.setup();
+  f.mergeConfig(disk);
+  // 同名一类：两段正文依次接起（不是取其一），模型看得到两处记下的东西
+  const pref = f.store.memory.items.find(item => item.category === "偏好");
+  assert.equal(f.store.memory.items.filter(item => item.category === "偏好").length, 1);
+  assert.match(pref.text, /偏好中文/);
+  assert.match(pref.text, /偏好英文/);
+  // 磁盘上没有的类别，本地那份留着
+  assert.equal(f.store.memory.items.find(item => item.category === "计划")?.text, "在本机立的计划");
+});
