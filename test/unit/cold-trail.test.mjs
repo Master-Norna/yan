@@ -73,6 +73,28 @@ test("收了尾才算：作答中、帮手还在做、后台还在跑的都不�
   );
 });
 
+for (const status of ["complete", "stopped", "error"])
+  test(`帮手${status}后后台指令仍在执行：保存与重载都保留候`, () => {
+    const f = load(["settledMessage", "chatJson", "warmMessages", "store", "runningBackground"]);
+    const c = conversation(),
+      message = c.messages[1],
+      helper = message.steps[0];
+    helper.sub.status = status;
+    helper.sub.steps[0].bg = { id: "bg1", key: "k1", state: "running", started: Date.now() };
+    f.store.conversations = [c];
+    assert.equal(f.runningBackground().length, 1);
+    assert.equal(f.settledMessage(message), false, "帮手的状态不能代替它所开指令的状态");
+    // 已经另存过的旧记录接回来后，也不能继续把仍在执行的步骤从对话里剥离。
+    message.cold = { key: "old-trail" };
+    f.warmMessages.add(message);
+    const saved = JSON.parse(f.chatJson(c));
+    assert.equal(saved.messages[1].cold, undefined);
+    f.store.conversations = [saved];
+    assert.equal(f.runningBackground().length, 1, "刷新后候仍能找到后台指令");
+    helper.sub.steps[0].bg.state = "done";
+    assert.equal(f.settledMessage(message), true, "指令结束后仍可正常另存行迹");
+  });
+
 test("带记号的一答：接回了与没接回的落盘一模一样，只留记号与帮手的题头", () => {
   const { chatJson, coldPiece, applyColdPiece, warmMessages } = load(["chatJson", "coldPiece", "applyColdPiece", "warmMessages"]);
   const warm = conversation();
