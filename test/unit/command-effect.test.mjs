@@ -14,8 +14,10 @@ test("sideEffectOf：看后台是读，结束它才是动手；run_command 照�
   assert.equal(f.sideEffectOf(check, { id: "bg1" }), false);
   assert.equal(f.sideEffectOf(check, { id: "bg1", stop: true }), true);
   assert.equal(f.sideEffectOf(f.TOOLS.get("run_command"), { command: "ls" }), true);
-  // 函数式的副作用不自动带 digest：看一眼后台不该在下一问里留一行
-  assert.equal(check.digest, undefined);
+  // 函数式的副作用不自动带 digest；这一件显式写了：只看时给空串（下一问不留这一行），真结束、取消时给一行
+  assert.equal(typeof check.digest, "function");
+  assert.equal(check.digest({ name: "check_command", effect: false, title: "bg1", result: "进行中" }), "");
+  assert.match(check.digest({ name: "check_command", effect: true, title: "bg1 · 结束", result: "已结束 · 退出码 0" }), /bg1 · 结束/);
 });
 
 test("守写了 on: check_command：结束后台过不了禁令，普通查看照旧放行", async () => {

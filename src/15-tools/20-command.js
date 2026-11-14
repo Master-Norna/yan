@@ -108,6 +108,8 @@ defineTool({
   html: workStepHtml,
   // 看它在跑、看几时到都只是读；结束后台、取消定时是动了手（守要能把它拦下，见 19-intent/10-store.js 的 keepHook）
   sideEffect: args => args.stop === true,
+  // 查看不必留痕；结束、取消得让下一问的行迹摘要知道（「有副作用必须留痕」，函数式 sideEffect 不自动带 digest）
+  digest: step => (step.effect ? `${step.title || t("后台")} → ${step.result || ""}` : ""),
   async run(step, args, { conversation, assistant, signal }) {
     const id = args.id.trim(),
       stop = args.stop === true;
@@ -117,8 +119,9 @@ defineTool({
     // 带上开它时记下的 key：编号在桥接重启后会重数，只凭编号会读到、停掉同号的另一条（见 server/work/shell.js 的 checkBackground）
     const data = await bridge("/api/work/check", { id, stop, wait: Number(args.wait) || 0, key: started?.bg?.key || "" }, signal);
     // 停止确认了才撤监听：请求失败、桥接没收到的话，后台照旧跑着，撤了就再没人叫醒（abort 之后不会重挂）。
-    // 还跑着的（杀了还没落下）也撤——模型亲手结束的，不必再叫醒一回
-    if (stop && started) bgWatches.get(started.id)?.abort();
+    // 还跑着的（杀了还没落下）也别撤：签要等它真结束才收口，现在就撤的话它永远停在「进行中」，
+    // 漏壶一直列着，等着它的帮手也一直睡着（见 watchBackground 的 finally）
+    if (stop && started && !data.running) bgWatches.get(started.id)?.abort();
     step.output = commandOutput(data);
     if (!data.running) {
       step.exitCode = data.exitCode;
