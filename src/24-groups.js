@@ -37,7 +37,6 @@ function moveToGroup(c, groupId) {
   markDirty(c.id);
   saveStore();
   renderHistory();
-  renderGroupTags();
   if (view === "groups") renderGroupsPage();
 }
 // 在此组另起一段：新对话归进这一组；组带了预设的就用组的预设（预设带模型的连模型一起，见 activeProfile）
@@ -66,7 +65,7 @@ function renameGroup(id, value) {
   if (!group || !name || name === group.name) return;
   group.name = name;
   saveStore();
-  renderGroupTags();
+  renderWelcome();
 }
 // 目录组的名字：自起的名字优先，没起过就用目录末段。只改侧栏显示的字，真实路径不动（悬停仍是完整目录）
 /** @param {string} dir */
@@ -123,7 +122,7 @@ async function dissolveGroup(id) {
   if (groupPageId === id) groupPageId = null;
   saveStore();
   renderHistory();
-  renderGroupTags();
+  renderWelcome();
   if (view === "groups") renderGroupsPage();
 }
 // 组首「⋯」：改名、打开组的设置（分组页里这一组）、解散；在此组新建已有「＋」，不再列
@@ -205,19 +204,6 @@ function openMoveMenu(c, anchor) {
     ],
     { kind: "group-move" }
   );
-}
-
-// ---------- 输入框左下「＋」旁的分组签：欢迎页是待归的那一组（可撤），对话页是这段对话所在的组（点开分组页） ----------
-function renderGroupTags() {
-  const pending = pendingGroup(),
-    own = groupOf(currentConversation());
-  for (const [tag, group] of [
-    [$("#welcomeGroup"), pending],
-    [$("#chatGroup"), own]
-  ]) {
-    tag.classList.toggle("hidden", !group);
-    tag.querySelector(".group-tag-name").textContent = group?.name || "";
-  }
 }
 
 // ---------- 分组页 ----------
