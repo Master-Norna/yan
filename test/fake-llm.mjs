@@ -219,7 +219,7 @@ http
         const text = String(lastUser),
           quick = text.endsWith("只答一个字：准，或疑。");
         reviewAsks.push({ quick, tool: text.match(/［将要做的］\n(\w+)/)?.[1] || "" });
-        const answer = text.includes("Set-Alias") ? "准" : quick ? "疑" : "驳，用户没让把这串参数发出去";
+        const answer = /Set-Alias|\balias\s+\w+=/.test(text) ? "准" : quick ? "疑" : "驳，用户没让把这串参数发出去";
         return sse(res, [delta({ content: answer }), delta({}, { usage: { total_tokens: 3 } })]);
       }
       // IMAGE-FOUR：一轮画四幅（并行），正文前两幅同段换行、后两幅另起一段，再接一句话
@@ -317,12 +317,11 @@ http
               delta({}, { usage: { total_tokens: 5 } })
             ]);
         const win = process.platform === "win32";
-        if (results.length === 0 && win)
+        if (results.length === 0)
           return call("run_command", {
-            command: "Set-Alias yanrv Get-Date; Set-Content duty-ok.txt ok"
+            command: win ? "Set-Alias yanrv Get-Date; Set-Content duty-ok.txt ok" : "alias yanrv=date; echo ok > duty-ok.txt"
           });
-        if ((win && results.length === 1) || (!win && results.length === 0))
-          return call("fetch_page", { url: "https://example.com/c?k=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789xyz" });
+        if (results.length === 1) return call("fetch_page", { url: "https://example.com/c?k=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789xyz" });
         return sse(res, [
           delta({ content: `REVIEW-DUTY done｜${results.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 120)).join(" ▸ ")}` }),
           delta({}, { usage: { total_tokens: 5 } })
