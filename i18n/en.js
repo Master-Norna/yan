@@ -1797,8 +1797,8 @@ var YAN_EN = {
   "附件的来路，成品的归处": "Where attachments come from, where outputs go",
   "附件随一问送出；卷宗是跨对话的书架，常用文件收存于此。":
     "Attachments go out with a message; Files is a shelf shared by all conversations, for the files you use often.",
-  "点「＋」、拖入或粘贴皆可：图片、文本、代码、PDF 与 Office 文档。文档先在本机抽出正文；单件不过 32 MB，一次至多 10 件、合计 64 MB。":
-    "Click “＋”, drag in or paste: images, text, code, PDF and Office documents. Documents have their text extracted on this machine first; up to 32 MB each, at most 10 at a time and 64 MB in total.",
+  "点「＋」、拖入或粘贴皆可：图片、文本、代码、PDF 与 Office 文档。文档先在本机抽出正文；单件不过 256 MB，一次至多 10 件。":
+    "Click “＋”, drag in or paste: images, text, code, PDF and Office documents. Documents have their text extracted on this machine first; up to 256 MB each, at most 10 at a time.",
   "侧栏的「卷宗」即存储位置里的 `卷宗/` 目录。拖入，或在附件上按「藏」收存；需随消息送出时，从「＋」中选「卷宗」。页上可新建夹、就地改名（亦可按 F2），条子拖到夹上即移入；删夹则连同其中一并删去。":
     "Files in the sidebar is the `卷宗/` folder in your storage location. Drag files in, or press the save mark on an attachment to keep it; to send one with a message, choose Files under “＋”. On the page you can make folders and rename in place (or press F2); drag an item onto a folder to move it in. Deleting a folder deletes what's inside too.",
   "卷宗里的文档对每段对话皆可读，模型用到时方才取回；设置 → 工具中可关闭。":

@@ -92,6 +92,6 @@ for (const kind of ["目录组", "单条"]) {
     assert.deepEqual(files, []);
     assert.equal(f.store.conversations[0].id, "c1");
     assert.equal(f.store.settings.workdirNames[dir], "言记");
-    assert.equal(notices.at(-1), kind === "目录组" ? "已删除 0 段对话" : "此对话正在另一页面作答，暂不能删除");
+    assert.equal(notices.at(-1), kind === "目录组" ? "这一组已没有对话" : "此对话正在另一页面作答，暂不能删除");
   });
 }
