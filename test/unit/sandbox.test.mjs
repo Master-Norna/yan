@@ -713,6 +713,8 @@ test("外层双引号里的 $() 先按外层 Shell 求值，再扫描内层 bash
 test("Invoke-Expression 搜索文本不算藏字命令，站在指令位上的四档都拦", () => {
   const searches = [
     String.raw`grep -rn -i "iex\|Invoke-Expression\|HIDDEN" src docs/a.md`,
+    "rg '. Invoke-Expression' src",
+    "rg '. <# ordinary comment #> Invoke-Expression' src",
     "rg Invoke-Expression src",
     "git log -S Invoke-Expression",
     'echo "use Invoke-Expression carefully"'
@@ -724,6 +726,25 @@ test("Invoke-Expression 搜索文本不算藏字命令，站在指令位上的�
     "$r = @{a = Invoke-Expression $s}",
     "$r[0] = Invoke-Expression $s"
   ];
+  const tick = "`";
+  for (const gap of [
+    " ",
+    ` ${tick}\n`,
+    ` ${tick}\r\n`,
+    ` ${tick}\n${tick}\n`,
+    ` ${tick}\r\n${tick}\r\n`,
+    ` ${tick}\n \t${tick}\r\n`,
+    " <# ordinary comment #> ",
+    ` <# ordinary comment #> ${tick}\n`,
+    ` ${tick}\r\n<# ordinary comment #> ${tick}\n`
+  ]) {
+    for (const name of ["Invoke-Expression", "'Invoke-Expression'", '"Invoke-Expression"']) {
+      const call = `.${gap}${name} $s`;
+      hidden.push(call, `$r = ${call}`, `$(${call})`);
+      if (gap.includes("<#") && !gap.includes(tick)) hidden.push(`echo "$(${call})"`);
+    }
+    searches.push(`rg '.${gap}Invoke-Expression' src`, `echo ".${gap}Invoke-Expression"`);
+  }
   for (const platform of ["win32", "darwin"]) {
     const scanners = [
       command => screenCommand(command, platform === "win32" ? wd : "/Users/a/proj", { platform }),

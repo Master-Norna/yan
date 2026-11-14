@@ -67,7 +67,7 @@ const POWERSHELL_ENCODED = String.raw`${CMD}(?:Start-Process\s+(?:-FilePath\s+)?
 // & 要在语句开头：a & (b) 是 pandas 之类脚本里的按位与
 const COMPUTED_CALL = String.raw`(?:^|[;|({\n=])${INLINE_SPACE}*[&.]${INLINE_SPACE}*\(|\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\b|\.InvokeCommand\.(?:InvokeScript|NewScriptBlock)\b`;
 const HIDDEN_COMMAND = new RegExp(
-  String.raw`(?:${CMD}|=\s*)(?:Invoke-Expression|iex|\.(?=(?<dotSpace>(?:${INLINE_SPACE}|\x60\x01\n?)+)(?:Invoke-Expression|"Invoke-Expression"|'Invoke-Expression')(?![\w.-])))(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
+  String.raw`(?:${CMD}|=\s*)(?:Invoke-Expression|iex|\.(?=(?<dotSpace>(?:${INLINE_SPACE}|\x60\x01\n?)+)(?:Invoke-Expression|"Invoke-Expression"|'Invoke-Expression'|(?=<#))(?![\w.-])))(?![\w.-])|-EncodedCommand\b|(^|\s)-(enc|ec|e)\s+[A-Za-z0-9+=]{32,}|${POWERSHELL_ENCODED}|${COMPUTED_CALL}` +
     String.raw`|${CMD}eval(?=[\s"']|$)|${CMD}(?:source|\.)\s+<\(` +
     String.raw`|${CMD}(?:ba|z|da|k)?sh\s+(?:-[^\s]+\s+)*<\(` +
     String.raw`|${CMD}${SHELL}\$\(`,
@@ -144,13 +144,15 @@ function commentAt(text, at, shell) {
 }
 // 每个位置只计算一次单引号、双引号和 $() 的收尾；依赖都在右边，倒序填表即可。
 // -1 也缓存：未收尾时按普通字符前进，不为下一个起点重扫同一后缀。
-function quoteContext(text, shell, offset = 0) {
+function quoteContext(text, shell, offset = 0, dotComments = false) {
   const single = new Int32Array(text.length + 2).fill(-1),
     double = new Int32Array(text.length + 2).fill(-1),
     substitution = new Int32Array(text.length + 2).fill(-1);
-  let newline = text.length;
+  let newline = text.length,
+    blockEnd = -1;
   for (let i = text.length - 1; i >= 0; i--) {
     const ch = text[i];
+    if (dotComments && ch === "#" && text[i + 1] === ">") blockEnd = i + 2;
     if (ch === "\n" || ch === "\r") newline = i;
     single[i] = ch === "'" ? i : single[i + 1];
     if (escapes(text, i, shell, '"')) double[i] = double[i + 2];
@@ -159,6 +161,7 @@ function quoteContext(text, shell, offset = 0) {
     else double[i] = double[i + 1];
 
     if (escapes(text, i, shell)) substitution[i] = substitution[i + 2];
+    else if (dotComments && shell !== "cmd" && blockEnd >= 0 && ch === "<" && text[i + 1] === "#") substitution[i] = substitution[blockEnd];
     else if (commentAt(text, i, shell)) substitution[i] = substitution[newline + 1];
     else if (ch === '"' || (shell !== "cmd" && ch === "'")) {
       const end = ch === '"' ? double[i + 1] : single[i + 1];
@@ -740,16 +743,16 @@ function findSubstEnd(text, startPos, to) {
 /**
  * @typedef {{ kind: "code", depth: number, arith: number, heredocs: { delim: string, dash: boolean, quoted: boolean }[], cases: number[], start: number, open: number } | { kind: "param", depth: number } | { kind: "squote" | "ansi" | "btick" | "dquote" | "pshere" }} SubstMode
  */
-function substEnds(text, shell, doubleQuoted = false) {
+function substEnds(text, shell, doubleQuoted = false, dotComments = false) {
   const ends = new Int32Array(text.length).fill(-1),
     jobs = [{ text, shell, base: 0, doubleQuoted }];
   while (jobs.length) {
     const job = jobs.pop();
-    scanSubst(job.text, job.shell, job.base, ends, jobs, job.doubleQuoted);
+    scanSubst(job.text, job.shell, job.base, ends, jobs, job.doubleQuoted, dotComments);
   }
   return ends;
 }
-function scanSubst(text, shell, base, ends, jobs, doubleQuoted = false) {
+function scanSubst(text, shell, base, ends, jobs, doubleQuoted = false, dotComments = false) {
   const posix = shell !== "powershell",
     n = text.length,
     /** @type {SubstMode[]} */
@@ -761,7 +764,8 @@ function scanSubst(text, shell, base, ends, jobs, doubleQuoted = false) {
   const mergeSubst = (from, to, subShell) => {
     if (to > from + 1) jobs.push({ text: text.slice(from, to), shell: subShell, base: base + from });
   };
-  let i = 0;
+  let i = 0,
+    noBlockEnd = false;
   while (i < n) {
     const mode = top(),
       ch = text[i];
@@ -899,6 +903,14 @@ function scanSubst(text, shell, base, ends, jobs, doubleQuoted = false) {
     if (!posix && ch === "`") {
       i += 2;
       continue;
+    }
+    if (dotComments && !noBlockEnd && ch === "<" && text[i + 1] === "#") {
+      const end = text.indexOf("#>", i + 2);
+      if (end >= 0) {
+        i = end + 2;
+        continue;
+      }
+      noBlockEnd = true;
     }
     if (ch === "#" && commentAt(text, i, shell)) {
       while (i < n && text[i] !== "\n" && text[i] !== "\r") i++;
@@ -1116,7 +1128,7 @@ function unquoteWord(text) {
 }
 // 一份扫描同时提供注释已抹掉的文本、语法视图与 sudo 整词视图，索引始终不变。
 // 普通参数隐藏分隔符与整段引号内容；执行字符串展开一层，$() 则进入自己的上下文。
-function shellText(text, shell) {
+function shellText(text, shell, dotComments = false) {
   const chars = text.split(""),
     syntax = text.split(""),
     unquoted = text.split("");
@@ -1140,10 +1152,10 @@ function shellText(text, shell) {
       arithDepth: 0
     });
   };
-  push(quoteContext(text, shell), 0, text.length, false);
+  push(quoteContext(text, shell, 0, dotComments), 0, text.length, false);
   // $() 的收尾不能用 substitution 表：它只按裸括号配对，case 的 )、${} 与 heredoc 正文里的 ) 会被当成收尾，
   // 把 ; sudo id 这类正文留在引号视图里。substEnds 一趟前扫按 findSubstEnd 同一套规则配对，按 context 缓存。
-  const substEnd = (context, dollar) => (context.ends ??= substEnds(context.text, context.shell))[dollar];
+  const substEnd = (context, dollar) => (context.ends ??= substEnds(context.text, context.shell, false, dotComments))[dollar];
   // 引号与 $() 共用所在文本的收尾表；执行字符串另建一层，彼此不重叠。
   // 每个字符只生成一次视图，深层 $() 不再递归复制整段正文。
   while (frames.length) {
@@ -1294,11 +1306,11 @@ function shellText(text, shell) {
           body = text.slice(i + 1, end),
           bodyShell = CMD_SCRIPT.test(command) ? "cmd" : POSIX_SCRIPT.test(command) ? "posix" : "powershell";
         if (text[i] === '"') {
-          const outer = quoteContext(body, shell, at + 1);
-          outer.ends = substEnds(body, shell, true);
+          const outer = quoteContext(body, shell, at + 1, dotComments);
+          outer.ends = substEnds(body, shell, true, dotComments);
           push(outer, 0, body.length, true, '"', true);
         }
-        push(quoteContext(body, bodyShell, at + 1), 0, body.length, true);
+        push(quoteContext(body, bodyShell, at + 1, dotComments), 0, body.length, true);
       } else push(context, i + 1, end, frame.shellBody, text[i]);
     } else if (";&|(){}\n".includes(text[i])) {
       if (text[i] === "(") {
@@ -1355,7 +1367,7 @@ function shellText(text, shell) {
           }
           if (isShell) {
             push(
-              quoteContext(text.slice(nextStart, termLineStart), "posix", offset + nextStart),
+              quoteContext(text.slice(nextStart, termLineStart), "posix", offset + nextStart, dotComments),
               0,
               termLineStart - nextStart,
               frame.shellBody
@@ -1461,7 +1473,7 @@ function shellText(text, shell) {
       frame.at++;
     } else frame.at++;
   }
-  return { text: chars.join(""), quotes, syntax: syntax.join(""), unquoted: unquoted.join("") };
+  return { text: chars.join(""), source: text, shell, quotes, syntax: syntax.join(""), unquoted: unquoted.join("") };
 }
 // 引号内的分隔符已由共用扫描遮掉，每段只检查一次。
 function pipesToShell(/** @type {string} */ text) {
@@ -1495,13 +1507,36 @@ function pipesToShell(/** @type {string} */ text) {
 const HIDDEN = HIDDEN_COMMAND,
   SUDO_WORD = /(^|[\s;&|()<>])sudo(?=$|[\s;&|()<>])/i,
   HIDDEN_WHY = "不用编码或拼接的指令，直接写出来";
-function hasHiddenCommand(scanned) {
+function hasHiddenCommand(scanned, dotComments = false) {
+  const spacing = /<#[\s\S]*?#>|(?:[^\S\r\n]|\x60\r?\n)+/y,
+    name = /(?:Invoke-Expression|"Invoke-Expression"|'Invoke-Expression')(?![\w.-])/iy;
+  let commentEnd = 0;
   for (const match of scanned.syntax.matchAll(HIDDEN)) {
     const gap = match.indices.groups.dotSpace;
     // syntax 把所有转义的下一字符都换成 \x01；点调用只把真实的反引号换行当空白。
-    if (!gap || /^(?:[^\S\r\n]|\x60\r?\n)+$/.test(scanned.text.slice(gap[0], gap[1]))) return true;
+    if (!gap) {
+      if (!dotComments) return true;
+      continue;
+    }
+    if (!/^(?:[^\S\r\n]|\x60\r?\n)+$/.test(scanned.text.slice(gap[0], gap[1]))) continue;
+    if (!scanned.syntax.startsWith("<#", gap[1])) {
+      if (!dotComments) return true;
+      continue;
+    }
+    if (gap[1] < commentEnd) continue;
+    // 块注释的 #> 可能已被行注释视图抹掉；只从已确认的点调用位置读原文，不改共用视图。
+    let at = gap[1];
+    while (true) {
+      spacing.lastIndex = at;
+      if (!spacing.test(scanned.source)) break;
+      at = spacing.lastIndex;
+    }
+    commentEnd = scanned.source.startsWith("<#", at) ? scanned.source.length : at;
+    name.lastIndex = at;
+    if (name.test(scanned.source)) return true;
   }
-  return false;
+  // 只补查块注释点调用的 $() 配对；原扫描及其它规则的命中不变。
+  return !dotComments && scanned.source.includes("<#") && hasHiddenCommand(shellText(scanned.source, scanned.shell, true), true);
 }
 // 指令位上的程序可以写全路径（C:\Windows\System32\reg.exe、& "C:\Program Files\…\reg.exe"）。规则都按命令名认，筛之前先去掉程序的目录，
 // 禁用规则、外联、写动词就不必各自认路径；程序自己的路径也不再算它碰的路径——& "C:\Program Files\7-Zip\7z.exe" x a.zip 并没有往系统目录里写。
