@@ -17,9 +17,15 @@ await waitFor(
   `[...document.querySelectorAll(".html-app")].length === 4 && [...document.querySelectorAll(".html-app")].every(a => a.dataset.appState === "ready" || a.dataset.appState === "error")`,
   20000
 ).catch(() => {});
+// 块高由块里的 ResizeObserver 报来（见 sizeHtmlApp），CSS 给这个高带 0.24 秒过渡：读真实几何会抢在过渡中间，
+// 读到样式里的默认高（快的机器更容易中——它 ready 得早）。这里读产品设上去的内联高，同样的数与同样的上下限，不受过渡影响
+await waitFor(
+  `(() => { const apps = [...document.querySelectorAll(".html-app")]; return apps.length === 4 && apps.every(a => a.querySelector(".html-app-stage").style.height); })()`,
+  5000
+).catch(() => {});
 const apps = JSON.parse(
   await evalJs(
-    `JSON.stringify([...document.querySelectorAll(".html-app")].map(a => ({ state: a.dataset.appState, label: a.querySelector(".code-lang").textContent, detail: a.querySelector(".code-lang").title, height: a.querySelector(".html-app-stage").getBoundingClientRect().height })))`
+    `JSON.stringify([...document.querySelectorAll(".html-app")].map(a => ({ state: a.dataset.appState, label: a.querySelector(".code-lang").textContent, detail: a.querySelector(".code-lang").title, height: parseFloat(a.querySelector(".html-app-stage").style.height) })))`
   )
 );
 check(
@@ -31,7 +37,7 @@ check("no mermaid / echarts is loaded into the page itself", await evalJs(`!wind
 check(
   "each block takes the height of its content instead of a fixed box",
   apps.every(a => a.height > 40 && a.height < 520) && new Set(apps.map(a => Math.round(a.height))).size > 1,
-  JSON.stringify(apps.map(a => a.height))
+  JSON.stringify(apps)
 );
 await sleep(400);
 await shot("viz-light.png");
