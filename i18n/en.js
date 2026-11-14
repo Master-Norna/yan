@@ -327,7 +327,7 @@ var YAN_EN = {
   复制回报: "Copy report",
   主模型交的命: "Task from the lead agent",
   "不到 1 分钟": "Under 1 min",
-  "在跑 · {0}": "Running · {0}",
+  "进行中 · {0}": "Running · {0}",
   "约定 · {0}": "Scheduled · {0}",
   新对话: "New chat",
   当前: "Current",

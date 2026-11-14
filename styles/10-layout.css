@@ -937,7 +937,7 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   letter-spacing: 0.04em;
   animation: rise var(--dur-rise) var(--ease-ink);
 }
-/* 两节的头：在跑 / 约定；第二节起与上一节隔开一点 */
+/* 两节的头：进行中 / 约定；第二节起与上一节隔开一点 */
 .clepsydra-sec {
   padding: 8px 0 5px;
   color: var(--ink-2);
