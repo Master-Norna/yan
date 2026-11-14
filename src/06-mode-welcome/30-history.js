@@ -76,27 +76,32 @@ async function deleteConversation(id) {
   if (runningElsewhere(id)) return toast(t("此对话正在另一页面作答，暂不能删除"));
   if (!(await askConfirm({ title: t("删除这段对话？"), body: t`「${removed.title}」将连同其附件一起移除，无法撤销。`, ok: t("删除") })))
     return;
-  // 主答、旁注、后台的帮手一并停下，后台指令连进程收掉
-  haltConversation(id, { removing: true });
-  if (currentId === id) closeSidePanel();
-  const draftFiles = draftRecord(id).attachments.map(file => file.id);
-  clearDraft(id);
-  void cleanScratch(removed);
-  void deleteAttachments([...attachmentIds(everyMessage(removed)), ...draftFiles]);
-  // 它所在的组记下它的时刻：删了组里最新的一段，组仍停在原处，不随余下几段的时刻往下挪；组删空了一并忘掉
-  const key = historyKey(removed),
-    held = (store.settings.groupAt ||= {});
-  store.conversations = store.conversations.filter(c => c.id !== id);
-  if (key && !store.conversations.some(c => historyKey(c) === key)) delete held[key];
-  else if (key && !(held[key] >= removed.updatedAt)) held[key] = removed.updatedAt;
-  void deleteConversationStorage(id);
-  if (currentId === id) {
-    currentId = null;
-    pendingAttachments = [];
-  }
+  purgeConversation(removed);
   saveStore();
   render();
   toast(t("对话已删除"));
+}
+// 把一段对话从存储与侧栏里抹去：主答、旁注、后台的帮手一并停下，附件、草稿、检查点一并清。
+// 不确认、不存盘、不重画——单条删除与整组删除同走这一条，各自决定问法与收尾
+/** @param {Conversation} c */
+function purgeConversation(c) {
+  haltConversation(c.id, { removing: true });
+  if (currentId === c.id) closeSidePanel();
+  const draftFiles = draftRecord(c.id).attachments.map(file => file.id);
+  clearDraft(c.id);
+  void cleanScratch(c);
+  void deleteAttachments([...attachmentIds(everyMessage(c)), ...draftFiles]);
+  // 它所在的组记下它的时刻：删了组里最新的一段，组仍停在原处，不随余下几段的时刻往下挪；组删空了一并忘掉
+  const key = historyKey(c),
+    held = (store.settings.groupAt ||= {});
+  store.conversations = store.conversations.filter(item => item.id !== c.id);
+  if (key && !store.conversations.some(item => historyKey(item) === key)) delete held[key];
+  else if (key && !(held[key] >= c.updatedAt)) held[key] = c.updatedAt;
+  void deleteConversationStorage(c.id);
+  if (currentId === c.id) {
+    currentId = null;
+    pendingAttachments = [];
+  }
 }
 // 一段对话在侧栏落在哪一组：分组是 group:组 id，目录组是目录（置顶的不进目录组），散着的没有；与 renderHistory 的归法、collapsedRepos 的键一致
 /** @param {Conversation} c */
@@ -205,7 +210,7 @@ function bindHistoryEvents() {
   });
   $("#history").addEventListener("click", e => {
     const toggle = e.target.closest("[data-repo-toggle]");
-    if (toggle) {
+    if (toggle && !e.target.closest(".group-rename")) {
       const dir = toggle.dataset.repoToggle,
         set = new Set(store.settings.collapsedRepos || []);
       set.has(dir) ? set.delete(dir) : set.add(dir);
