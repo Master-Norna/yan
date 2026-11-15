@@ -337,6 +337,8 @@ function openImageSet(items, index, trigger = null) {
         .join("")
     : "";
   if (many) void loadThumbnails(strip);
+  // 看图框里的图也认这一道：原件取不回来时不挂破图
+  mendImages(/** @type {HTMLElement} */ ($("#imageViewer")));
   return showImageAt(index, true);
 }
 // 摊开组里的第几件，先按窗口大小看；附件要先从库里取，取到时已换了别件就作罢

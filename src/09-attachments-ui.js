@@ -244,7 +244,8 @@ async function loadThumbnails(root) {
       let url = thumbCache.get(id);
       if (!url) {
         const file = await getAttachment(id);
-        if (!file || file.kind !== "image") continue;
+        // 原件没取到、或记录里没有数据：留空，不拿一个空地址去设 src（那会落成破图）
+        if (!file || file.kind !== "image" || typeof file.data !== "string" || !file.data) continue;
         url = file.data;
         thumbCache.set(id, url);
         if (thumbCache.size > 40) thumbCache.delete(thumbCache.keys().next().value);

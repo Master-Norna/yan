@@ -1,0 +1,94 @@
+// 正文里的图：模型写得再歪（空、./、#、以 / 收尾、sandbox:/、认不出名字、srcset），页面也不留破图——
+// 由页面按这段对话的落脚处认，取不到就留下它想说的那句话。正常的路照样画得出来，Windows 反斜杠的也能。
+import { mkdirSync, writeFileSync } from "node:fs";
+import { connect, check, sleep, PAGE, HOME } from "./lib.mjs";
+const { send, evalJs, close } = await connect();
+// 卷宗里放一张真图：1×1 透明 PNG
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+mkdirSync(`${HOME}/卷宗`, { recursive: true });
+writeFileSync(`${HOME}/卷宗/probe.png`, PNG);
+const winPath = `${HOME}/卷宗/probe.png`.replace(/\//g, "\\");
+const body = [
+  "正路 ![正路](probe.png)",
+  `反斜杠 ![反斜杠](${winPath})`,
+  "空 ![空](./)",
+  "井 ![井](#)",
+  "目录 ![目录](probe.png/)",
+  "沙盒 ![沙盒](sandbox:/mnt/data/x.png)",
+  "裸名 ![裸名](chart)",
+  "坏数据 ![坏数据](data:image/png;base64,AAA)",
+  "外站 ![外站](https://example.com/x.png)",
+  '照源 ![照源](probe.png) <img srcset="probe.png 2x" alt="照源">',
+  '坏表单 <input type="image" src="probe.png" alt="坏表单">'
+].join("\n\n");
+const conv = {
+  id: "c1",
+  title: "图的写法",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  profileId: "p1",
+  messages: [
+    { id: "u1", role: "user", content: "看看", timestamp: new Date().toISOString() },
+    { id: "a1", role: "assistant", content: body, timestamp: new Date().toISOString(), status: "complete", modelName: "假模型", steps: [] }
+  ]
+};
+const state = {
+  version: 5,
+  settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false, mode: "chat" },
+  profiles: [
+    {
+      id: "p1",
+      source: "custom",
+      name: "假模型",
+      model: "fake",
+      baseUrl: "http://127.0.0.1:8798/v1",
+      apiKey: "k",
+      temperature: 0.7,
+      maxTokens: 8192,
+      quota: "",
+      usedTokens: 0,
+      systemPrompt: ""
+    }
+  ],
+  conversations: [conv],
+  library: [],
+  drafts: {}
+};
+await send("Page.navigate", { url: PAGE + "preview.html" });
+await sleep(600);
+await evalJs(`localStorage.setItem("yan-chat-v1", ${JSON.stringify(JSON.stringify(state))}); true`);
+await send("Page.navigate", { url: PAGE });
+await sleep(1800);
+await evalJs(`document.querySelector('[data-conversation="c1"] .history-open')?.click(); true`);
+await sleep(2500);
+const view = JSON.parse(
+  await evalJs(
+    `JSON.stringify({
+      imgs: [...document.querySelectorAll(".markdown img")].map(img => ({ src: img.getAttribute("src"), nw: img.naturalWidth, complete: img.complete, alt: img.getAttribute("alt") })),
+      shots: [...document.querySelectorAll(".reply-shot img")].map(img => img.naturalWidth),
+      remote: document.querySelectorAll(".markdown .remote-shot").length,
+      formSrc: document.querySelector(".markdown input[type=image]")?.getAttribute("src") || null,
+      text: document.querySelector(".markdown")?.textContent || ""
+    })`
+  )
+);
+check(
+  "正文里没有加载失败的图",
+  view.imgs.every(img => !img.src || !img.complete || img.nw > 0),
+  JSON.stringify(view.imgs)
+);
+check(
+  "没有图把 src 留成页内相对路径（空、./、#、以 / 收尾都不行）",
+  view.imgs.every(img => !img.src || /^(?:data:|\/api\/)/.test(img.src)),
+  JSON.stringify(view.imgs.map(img => img.src))
+);
+check(
+  "认不出的图留下它想说的那句话",
+  ["空", "井", "目录", "沙盒", "裸名"].every(word => view.text.includes(word)),
+  view.text.slice(0, 200)
+);
+check("坏掉的数据图也不留破图", !view.imgs.some(img => img.alt === "坏数据"));
+check("相对路径与 Windows 反斜杠的图都画得出来", view.shots.filter(nw => nw > 0).length >= 2, JSON.stringify(view.shots));
+check("外链图仍是待取的素纸，页面不去取", view.remote >= 1 && view.imgs.every(img => !/^https?:/.test(img.src || "")));
+check("input[type=image] 也不让浏览器去取", !view.formSrc, JSON.stringify(view.formSrc));
+close();
