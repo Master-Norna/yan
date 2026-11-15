@@ -704,6 +704,22 @@ test("mergeConfig3：「哪一组停在原处」的时刻也按键合并，两�
     meta({ "group:g2": "2026-11-14T11:00:00Z" })
   ).settings;
   assert.deepEqual(merged.groupAt, { "group:g2": "2026-11-14T11:00:00Z", "group:g1": "2026-11-14T10:00:00Z" });
+  // 同一组两边都往后挪过时刻（各删了一段）：取较晚的那个——先写盘的那页再存一次，不会把晚的盖回早的
+  const same = key =>
+    f.mergeConfig3(
+      meta({ [key]: "2026-11-14T09:00:00Z" }),
+      meta({ [key]: "2026-11-14T10:00:00Z" }),
+      meta({ [key]: "2026-11-14T11:00:00Z" })
+    ).settings.groupAt[key];
+  assert.equal(same("group:g1"), "2026-11-14T11:00:00Z");
+  assert.equal(same("E:/proj"), "2026-11-14T11:00:00Z");
+  // 组删空（这一页把键清了）、另一边没动：键跟着删，组不再留着旧时刻
+  const cleared = f.mergeConfig3(
+    meta({ "group:g1": "2026-11-14T09:00:00Z" }),
+    meta({}),
+    meta({ "group:g1": "2026-11-14T09:00:00Z" })
+  ).settings;
+  assert.equal("group:g1" in (cleared.groupAt || {}), false);
 });
 test("looksLikeMermaid / liftBareHtml：写岔了的流程图、没包围栏的交互内容照样认得，普通代码与别的 HTML 不误伤", () => {
   assert.equal(f.looksLikeMermaid("flowchart TD\n  A --> B"), true);

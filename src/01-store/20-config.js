@@ -305,8 +305,13 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
   if (has("mcpServers")) settings.mcpServers = keyed(baseSettings.mcpServers, mineSettings.mcpServers, theirSettings.mcpServers);
   // 目录组的名字按键合并：两页各改一个目录，后写者不会把先写者的整份名字替掉（一页改回目录名＝删掉那个键，也照键传播）
   if (has("workdirNames")) settings.workdirNames = keyed(baseSettings.workdirNames, mineSettings.workdirNames, theirSettings.workdirNames);
-  // 「哪一组停在原处」的时刻同样按键合并：两页各删不同组的一段，后写者不会把另一组的时刻抹掉
-  if (has("groupAt")) settings.groupAt = keyed(baseSettings.groupAt, mineSettings.groupAt, theirSettings.groupAt);
+  // 「哪一组停在原处」的时刻同样按键合并：两页各删不同组的一段，后写者不会把另一组的时刻抹掉。
+  // 它是时间锚点，不是「最后选择的设置」：两边都动过同一组时取较晚的那一个，否则先删到 10:00 的那页再存一次，
+  // 会把另一页 11:00 的值盖回去，组又往下掉（同键取本地值只适用于「最后一次选择即结果」的项）
+  if (has("groupAt"))
+    settings.groupAt = keyed(baseSettings.groupAt, mineSettings.groupAt, theirSettings.groupAt, (b, m, t) =>
+      String(t) > String(m) ? t : m
+    );
   if (has("env")) {
     const oldEnv = { ...defaultStore.settings.env, ...(baseSettings.env || {}) },
       myEnv = mineSettings.env || {},
