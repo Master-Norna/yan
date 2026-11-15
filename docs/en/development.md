@@ -19,6 +19,8 @@ Zero dependencies, no transpiling: the source is split into many parts, and when
 
 Shared boundaries have one owner. All turn entry points use `claimTurn`: main replies, new chats, side notes, resumed helpers and incoming reports recheck folder restoration after claiming the lease. Side notes change records and register their job inside `withSideTurn`, after the checks pass. Model requests use `fetchUpstream`; providers and image generation supply the URL, authentication and body. Settings and timer routes use `store.scopedRoute` to bind requests to the storage root at entry. A successful move reschedules timers, resets the page's settings-sync bookkeeping, and uses `storeBridge` to reject replies from a previous root. A late response must never release a new request's lock or merge old settings into the new root.
 
+New sandbox argument rules use the execution ranges and quote spans from `shellText`, with `commandInvocations` / `argumentsAt` identifying commands and arguments. `scanWrites` provides both mutation detection and attached `-o` paths; provider alias rules inspect target arguments only. Validate combinations of assignments, indentation, one shell wrapper and argument quotes, alongside plain strings and value arguments, then replay real commands against a fixed pre-change commit.
+
 For how the built-in prompts are written, their concatenation order and the split between light and heavy, see [`prompts/README.md`](../../prompts/README.md) (in Chinese).
 
 ## Additional validation
