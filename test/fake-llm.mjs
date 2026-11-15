@@ -1106,7 +1106,8 @@ http
         );
       // 带附件的一问是分段内容：正文在第一段
       const lastText = Array.isArray(lastUser) ? String(lastUser.find(part => part.type === "text")?.text || "") : lastUser;
-      if (typeof lastUser === "string" && lastUser.includes("靠一个称呼认出这段对话")) {
+      // 拟题要求与问答素材分处 system / user；不再靠 user 里的命名要求认请求。
+      if (msgs.some(m => m.role === "system" && String(m.content).startsWith("为给出的对话取一个简短名目"))) {
         // TITLEFAIL：头一次拟题时装作网络出错，页面不该就此把这段对话标成「已拟题」
         if (lastUser.includes("TITLEFAIL") && !titleFailed) {
           titleFailed = true;
