@@ -54,6 +54,40 @@ const ALIASING = new RegExp(
   String.raw`${cmd("(?:Set|New)-Alias|sal|nal").source}|${CMD}alias\s+[^\s=]+\s*=|${CMD}(?:Set|New)-Item\s+(?:-(?:Path|LiteralPath)\s+)?["']?(?:function|alias):`,
   "im"
 );
+// Set-Item / New-Item（PowerShell 里也写作 si / ni）往 alias: 或 function: 这个 provider 路径上写，就是在定义别名。
+// 参数可以换序，还可以插 -Force、-Confirm:$false 这类开关，正则一个个列不全；于是认到指令位上的命令名之后，
+// 取到这一段的末尾（引号里的 ; 与 | 已被 syntax 遮掉），看参数里有没有以 provider 前缀开头的词。
+// echo Set-Item …、rg "Set-Item alias:t" 里的 Set-Item 不在指令位，不算
+const SET_ITEM_NAMES = String.raw`(?:Set|New)-Item|si|ni`;
+// 参数里以 alias: / function: 开头的那个词才是它要写的 provider 目标；-Value 后面跟的只是值
+// （Set-Item env:FOO -Value alias:t 不是定义别名），值可以连写（-Value:alias:t）。
+// provider 还能带全名（Microsoft.PowerShell.Core\Alias:t），前缀在词首或一段路径的头上都算
+/** @param {string} args */
+function providerTargetIn(args) {
+  const tokens = args.match(/"[^"]*"|'[^']*'|[^\s;&|()<>{}]+/g) || [];
+  for (let i = 0; i < tokens.length; i++) {
+    const bare = tokens[i].replace(/^["']|["']$/g, "");
+    if (/^-(?:Item)?Value(?::|$)/i.test(bare)) {
+      if (/^-(?:Item)?Value$/i.test(bare)) i++;
+      continue;
+    }
+    if (/(?:^|[\\/])(?:alias|function):/i.test(bare)) return true;
+  }
+  return false;
+}
+/** @param {ReturnType<typeof shellText>} scanned */
+function aliasByProvider(scanned) {
+  if (!/\b(?:Set-Item|New-Item|si|ni)\b/i.test(scanned.syntax)) return false;
+  const names = scanned.shell === "powershell" ? SET_ITEM_NAMES : String.raw`(?:Set|New)-Item`,
+    re = new RegExp(String.raw`${CMD}(?:${names})(?=[\s;|&)}"']|$)`, "gi");
+  for (const match of scanned.syntax.matchAll(re)) {
+    const from = match.index + match[0].length;
+    let end = from;
+    while (end < scanned.syntax.length && !/[;\n|&)}]/.test(scanned.syntax[end])) end++;
+    if (providerTargetIn(scanned.text.slice(from, end))) return true;
+  }
+  return false;
+}
 const ELEVATION = new RegExp(
   String.raw`-Verb\s+RunAs\b|${cmd(String.raw`(?:/\S*/)?sudo`).source}|${cmd("osascript", String.raw`[^\n]*(?:with\s+administrator\s+privileges\b|administratorPrivileges\s*:\s*true\b)`).source}`,
   "im"
@@ -1680,7 +1714,9 @@ const forbiddenWhy = (scanned, tier) => {
       tiers.includes(tier) &&
       (pattern === HIDDEN
         ? hasHiddenCommand(scanned) || pipesToShell(scanned.syntax)
-        : pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax))
+        : pattern === ALIASING
+          ? ALIASING.test(scanned.syntax) || aliasByProvider(scanned)
+          : pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax))
   )?.[1];
 };
 // 环境变量的两种写法（$env:X、${env:X} 与 %X%）从同一份名单生成，补一个名字两边都有
@@ -1889,11 +1925,41 @@ function stripReadSources(scanned, sources = true) {
   }
   return chars.join("");
 }
+// 会带输出路径、且路径能紧贴在 -o 后面的程序：7z 的 -o{dir}、curl 的 -ofile、gcc 的 -oout.exe。
+// 紧贴写法只在它们后面才算路径；别处的 -o 只是某段文字里的一段（Write-Output "-oC:\x"、正则里的 -o）
+const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|clang\+\+|ld|dotnet)(?:\.exe)?$/i;
+// 这一段命令的程序名：段首那个词（前面可带 & 调用符，也可以是被引号包住的路径）。
+// 套了 cmd /c、powershell -Command 这类壳的，再往里看一层
+/** @param {ReturnType<typeof shellText>} scanned @param {number} at */
+function segmentProgram(scanned, at) {
+  let start = at;
+  while (start > 0 && !/[;&|\n({]/.test(scanned.syntax[start - 1])) start--;
+  // 取到这一段末尾：-o 可能就在引号里（curl "-oC:\x"），截到它跟前会把引号截断、切不出完整的词
+  let end = at;
+  while (end < scanned.syntax.length && !/[;\n|&)}]/.test(scanned.syntax[end])) end++;
+  const words = scanned.text.slice(start, end).match(/"[^"]*"|'[^']*'|[^\s;&|()<>{}]+/g) || [],
+    name = word =>
+      (word || "")
+        .replace(/^["']|["']$/g, "")
+        .split(/[\\/]/)
+        .pop() || "",
+    first = (words[0] === "&" ? words.slice(1) : words)[0];
+  if (!/^(?:cmd|powershell|pwsh|sh|bash|zsh)(?:\.exe)?$/i.test(name(first))) return name(first);
+  const rest = words.slice(words.indexOf(first) + 1),
+    quoted = rest.find(word => /^["']/.test(word)),
+    inner = quoted ? quoted.slice(1, -1) : rest.filter(word => !/^[-/]/.test(word)).join(" ");
+  return name((inner.match(/"[^"]*"|'[^']*'|[^\s;&|()<>{}]+/g) || []).find(word => !/^[-/]/.test(word)));
+}
 // 判定「写」时用的文本：只读来源先抹掉；7z、curl 这类把输出路径紧贴在 -o 后面（-oC:\x、-o..\x）的，
-// 路径前没有空白，盘符与 .. 都认不出来，先拆开再扫（--output 与 -o 不混；只影响判定，不改实际指令）
+// 路径前没有空白，盘符与 .. 都认不出来，先拆开再扫。只拆命令段里、且那一段的程序是会写文件的那些——
+// 整段文本不分场合地拆，会把字符串里的 "-oC:\Windows\note.txt" 当成写入目标（--output 与 -o 不混；只影响判定，不改实际指令）
 /** @param {ReturnType<typeof shellText>} scanned */
 function writeScanText(scanned) {
-  return stripReadSources(scanned).replace(/(^|[\s"'])-o(?=[\\/"']|\.\.[\\/]|[A-Za-z]:[\\/])/gi, "$1-o ");
+  const text = stripReadSources(scanned);
+  if (!/-o/i.test(text)) return text;
+  return text.replace(/(^|[\s"'])-o(?=[\\/"']|\.\.[\\/]|[A-Za-z]:[\\/])/gi, (whole, lead, offset) =>
+    ATTACHED_OUTPUT_TOOL.test(segmentProgram(scanned, offset + lead.length)) ? `${lead}-o ` : whole
+  );
 }
 /**
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，

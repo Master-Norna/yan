@@ -1582,9 +1582,41 @@ test("写参数紧贴路径（-oC:\\x）与 Set-Item 定义函数：目录与系
   assert.match(screenLoose("7z x a.zip -oC:\\Windows\\x", win), /系统目录/);
   assert.match(screenAutoReview("7z x a.zip -oC:\\Windows\\x", win), /系统目录/);
   assert.equal(screen("7z x a.zip -o.\\build"), null);
+  // 套了壳的、或用 & 调用的，一样看得见
+  assert.match(screen('cmd /c "7z x a.zip -oC:\\Windows\\x"'), /越出了工作目录/);
+  assert.match(screen('powershell -c "7z x a.zip -oC:\\Windows\\x"'), /越出了工作目录/);
+  assert.match(screen("& 'C:\\Program Files\\7-Zip\\7z.exe' x a.zip -oC:\\Windows\\x"), /越出了工作目录/);
+  // 紧贴的 -o 只在会写文件的程序后面才算路径：字符串里的一段、tar 的 -o（不是路径）都不算，别为它误伤整条指令
+  for (const command of [
+    'Write-Output "-oC:\\Windows\\note.txt"; Set-Content .\\result.txt ok',
+    'Set-Content .\\a.txt "x -oC:\\Windows\\y"',
+    'rg "-oC:\\Windows" src; Set-Content .\\a ok',
+    "tar -xf a.tar -oC:\\Windows\\x"
+  ]) {
+    assert.equal(screen(command), null, command);
+    assert.equal(screenLoose(command, win), null, command);
+    assert.equal(screenAutoReview(command, win), null, command);
+  }
   // Set-Item 的 function: / alias: 是另写一套名字：严宽都拦（审档由宽的沙箱送审），只是搜字不算
   assert.match(screen("Set-Item -Path function:t -Value Invoke-Expression; t $payload"), /不定义别名/);
   assert.match(screenLoose("Set-Item function:t Invoke-Expression", win), /不定义别名/);
   assert.equal(screen("echo Set-Item function:t"), null);
   assert.equal(screen("rg 'Set-Item function:t' src"), null);
+  // 参数可以换序、可以插 -Force / -Confirm 一类开关，也可以写 PowerShell 的别名 si / ni：认的是这一段里的 provider 前缀
+  for (const command of [
+    "Set-Item -Force -Path alias:t -Value Invoke-Expression",
+    "Set-Item -Value Invoke-Expression -Path alias:t -Force",
+    'Set-Item -LiteralPath "function:t" -Value Invoke-Expression -Confirm:$false',
+    "New-Item -Force -Path alias:t -Value Invoke-Expression",
+    "si -Path alias:t -Value Invoke-Expression",
+    "ni -Path function:t -Value Invoke-Expression"
+  ]) {
+    assert.match(screen(command), /不定义别名/, command);
+    assert.match(screenLoose(command, win), /不定义别名/, command);
+  }
+  // -Value 后面跟的是值，不是 provider 目标；查看别名的命令也不拦
+  assert.equal(screen("Set-Item -Path env:FOO -Value alias:t"), null);
+  assert.equal(screen("Get-Item alias:t"), null);
+  // provider 全名（Microsoft.PowerShell.Core\Alias:t）里带着 powershell 字样，先被藏字那条拦下；同样不放行
+  assert.ok(screen("Set-Item -Path Microsoft.PowerShell.Core\\Alias:t -Value Invoke-Expression"));
 });
