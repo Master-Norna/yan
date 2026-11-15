@@ -1929,6 +1929,9 @@ function stripReadSources(scanned, sources = true) {
 // 会带输出路径、且路径能紧贴在 -o 后面的程序：7z 的 -o{dir}、curl 的 -ofile、gcc 的 -oout.exe。
 // 紧贴写法只在它们后面才算路径；别处的 -o 只是某段文字里的一段（Write-Output "-oC:\x"、正则里的 -o）
 const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|clang\+\+|ld|dotnet)(?:\.exe)?$/i;
+// 段首可能带着执行前缀（env、nohup、timeout、xargs……）或赋值（$r = …、NAME=…）：真正的程序名在后头
+const SEGMENT_PREFIX = new RegExp(String.raw`^(?:${PREFIX})`);
+const SEGMENT_ASSIGN = new RegExp(String.raw`^\$[\w:]+${INLINE_SPACE}*=${INLINE_SPACE}*(?=[^\s"'])`);
 // 这一段命令的程序名：段首那个词（前面可带 & 调用符，也可以是被引号包住的路径）。
 // 套了 cmd /c、powershell -Command 这类壳的，再往里看一层
 /** @param {ReturnType<typeof shellText>} scanned @param {number} at */
@@ -1938,6 +1941,18 @@ function segmentProgram(scanned, at) {
   // 取到这一段末尾：-o 可能就在引号里（curl "-oC:\x"），截到它跟前会把引号截断、切不出完整的词
   let end = at;
   while (end < scanned.syntax.length && !/[;\n|&)}]/.test(scanned.syntax[end])) end++;
+  for (let guard = 0; guard < 8; guard++) {
+    const head = scanned.syntax.slice(start, end);
+    // PREFIX 能匹配空串，先单独试赋值，再试前缀，免得空匹配把赋值那一支挡住
+    const assign = SEGMENT_ASSIGN.exec(head);
+    if (assign) {
+      start += assign[0].length;
+      continue;
+    }
+    const lead = SEGMENT_PREFIX.exec(head);
+    if (!lead || !lead[0]) break;
+    start += lead[0].length;
+  }
   const words = scanned.text.slice(start, end).match(/"[^"]*"|'[^']*'|[^\s;&|()<>{}]+/g) || [],
     name = word =>
       (word || "")

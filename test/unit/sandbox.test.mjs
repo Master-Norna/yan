@@ -1585,6 +1585,9 @@ test("写参数紧贴路径（-oC:\\x）与 Set-Item 定义函数：目录与系
   // -o 后紧贴 .. 的也先按「写」处理：gcc / curl 不在写动词表里，靠输出参数这一支开门，路径规则才跑得到
   assert.match(screen("gcc -o..\\x a.c"), /不用 \.\. 上溯/);
   assert.match(screen("curl -o..\\x http://127.0.0.1:9/a"), /不用 \.\. 上溯/);
+  // 执行前缀与赋值先剥掉再认程序名：env gcc …、$r = 7z …
+  assert.match(mac("env gcc a.c -o/usr/local/bin/a"), /越出了工作目录/);
+  assert.match(screen("$r = 7z x a.zip -oC:\\Windows\\x"), /越出了工作目录/);
   // 套了壳的、或用 & 调用的，一样看得见
   assert.match(screen('cmd /c "7z x a.zip -oC:\\Windows\\x"'), /越出了工作目录/);
   assert.match(screen('powershell -c "7z x a.zip -oC:\\Windows\\x"'), /越出了工作目录/);
