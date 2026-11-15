@@ -94,22 +94,51 @@ function setupMarkdown() {
   });
   if (window.DOMPurify) {
     // 模型写「下载《x.docx》」时常把链接指向 sandbox:/、file:/// 或一个裸文件名——页面上没有这样的路。
-    // 把文件名记在 data-file、原路记在 data-path 上，去掉 href；点击时按原路在这段对话的落脚处取那件来下载，取不到再到卷宗里找同名的（见 10-archive.js）。
-    // 图片同理：![截图](page-1.png) 的 src 也记成 data-file，是这一答工具交回的画面就画成那幅（见 renderReplyShots）
+    // 把文件名记在 data-file、原路记在 data-path 上，去掉 href；点击时按原路在这段对话的落脚处取那件来下载，取不到再到卷宗里找同名的（见 10-archive.js）
     DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
-      if (!((node.tagName === "A" && data.attrName === "href") || (node.tagName === "IMG" && data.attrName === "src"))) return;
-      // 外链图不让页面自己去取，记下图址，画成一张待取的素纸（见 renderRemoteShots）
-      if (node.tagName === "IMG" && /^https?:\/\//i.test(String(data.attrValue).trim())) {
-        node.setAttribute("data-remote", String(data.attrValue).trim());
-        data.keepAttr = false;
-        return;
-      }
-      // 图不要求扩展名：模型把要画的图写成「![图](chart)」时，照原样留着页面就去取本页的 /chart，落成破图
-      const name = localFileName(data.attrValue, node.tagName === "IMG");
+      if (!(node.tagName === "A" && data.attrName === "href")) return;
+      // 链接不要求扩展名也说不出个所以然的留着原样（页内锚点、邮件、网址）
+      const name = localFileName(data.attrValue);
       if (!name) return;
       node.setAttribute("data-file", name);
       node.setAttribute("data-path", data.attrValue);
       data.keepAttr = false;
+    });
+    // 正文里的一幅图，从不交给浏览器自己去取：模型写的路（相对、Windows 绝对、sandbox:/、认不出名字的）都记下来，由页面按这段对话的落脚处认，
+    // 取不到就留说明文字（见 drawRefImage）。只有三样例外：data: 本身就是数据；http(s) 外链另记 data-remote，人点了才经桥接取（见 renderRemoteShots）。
+    // 这一步落在 beforeSanitizeAttributes，比逐属性那道钩子早：marked 会把带反斜杠的路编成 C:%5C…，DOMPurify 见协议不合法就把 src 整个丢掉，
+    // 逐属性那道钩子根本收不到，Windows 绝对路径的图便只剩一个没有 src 的 img。srcset 也一样——浏览器会从它去取，一并收下
+    DOMPurify.addHook("beforeSanitizeAttributes", node => {
+      if (node.tagName === "SOURCE") {
+        node.removeAttribute("srcset");
+        return;
+      }
+      // 会画出破图的还有 input[type=image]：同样不交给浏览器去取（正文里极少见，但一处守住）
+      if (node.tagName === "INPUT" && node.getAttribute("type") === "image") {
+        node.removeAttribute("src");
+        return;
+      }
+      if (node.tagName !== "IMG") return;
+      const set = node.getAttribute("srcset"),
+        raw = node.getAttribute("src") ?? (set ? set.split(",")[0].trim().split(/\s+/)[0] : null);
+      node.removeAttribute("src");
+      node.removeAttribute("srcset");
+      if (raw === null) return;
+      const value = String(raw).trim();
+      if (/^data:/i.test(value)) {
+        node.setAttribute("src", value);
+        return;
+      }
+      if (/^https?:\/\//i.test(value)) {
+        node.setAttribute("data-remote", value);
+        return;
+      }
+      // 图不要求扩展名：模型把要画的图写成「![图](chart)」时，照原样留着页面就去取本页的 /chart，落成破图。
+      // 名字认不出的（空、./、#、以 / 收尾）也记下原路，走同一套兜底，不留 src。
+      // 名字从原值取（localFileName 自己会解转义）：先解一遍再给它，plot%231.png 会被当成带片段的 plot
+      const name = localFileName(value, true);
+      if (name) node.setAttribute("data-file", name);
+      node.setAttribute("data-path", value);
     });
     DOMPurify.addHook("afterSanitizeAttributes", node => {
       if (node.tagName === "A" && node.hasAttribute("href")) {
@@ -121,17 +150,17 @@ function setupMarkdown() {
   }
 }
 // 不是网址、末段像个文件名的链接：取出文件名。网址、邮件、页内锚点都不算；bare 时末段不必带扩展名
+// 先去掉 ?# 再解转义、最后切段：反过来（先解再切）会把 plot%231.png 当成带片段的 plot 截掉；
+// 而解转义后那段 Windows 的路（marked 写成 %5C…）才是带斜杠的整条路，先切则取不出末段、名成了空
 /** @param {string} href @param {boolean} [bare] */
 function localFileName(href, bare = false) {
   const raw = String(href || "").trim();
   if (!raw || /^(?:https?|mailto|tel|data|blob):/i.test(raw) || raw.startsWith("#")) return "";
-  let name = raw
-    .replace(/[?#].*$/, "")
-    .split(/[\\/]/)
-    .pop();
+  let path = raw.replace(/[?#].*$/, "");
   try {
-    name = decodeURIComponent(name);
+    path = decodeURIComponent(path);
   } catch {}
+  const name = path.split(/[\\/]/).pop();
   return (bare ? /^[^<>:"|?*\u0000-\u001f]+$/ : /^[^<>:"|?*\u0000-\u001f]+\.[a-z0-9]{1,8}$/i).test(name) ? name : "";
 }
 function renderMath(tex, display) {
@@ -212,6 +241,29 @@ async function renderPendingMath(root) {
 // 画进页面之后：各种嵌件起来（见上 EMBEDS 的 mount）
 function renderEnhancements(root) {
   for (const embed of EMBEDS) embed.mount?.(root);
+  mendImages(root);
+}
+// 一幅图取不到，哪儿也不留破图：正文里留下它想说的那句话（alt），带框的小样干脆收掉。
+// 这一道兜的是所有画图的路（缩略图、外链图、坏掉的数据图、往后新加的），而各条路自己的兜底仍先跑——
+// 由 drawRefImage 接手的图打了 data-refImage，不去抢它「按同名找回」的那一步
+/** @param {Element} root */
+function mendImages(root) {
+  for (const node of root.querySelectorAll?.("img:not([data-mended])") || []) {
+    const img = /** @type {HTMLImageElement} */ (node);
+    if (img.dataset.refImage) continue;
+    img.dataset.mended = "1";
+    const mended = () => {
+      if (!img.isConnected || !img.getAttribute("src")) return;
+      const words = img.getAttribute("alt") || "",
+        shot = img.closest(".reply-shot, .fi-thumb, .quote-shot");
+      if (shot && !words) shot.remove();
+      else if (shot) shot.replaceWith(words);
+      else img.replaceWith(words);
+    };
+    img.addEventListener("error", mended, { once: true });
+    // 监听挂上之前就失败了的（页面里早有一阵、src 早取过；正在取的 complete 是 false，不碰）
+    if (img.complete && img.naturalWidth === 0) mended();
+  }
 }
 defineEmbed({ name: "math", mount: root => void renderPendingMath(root) });
 // 正文里引了工具交回的画面（模型写「![截图](page-1.png)」或「[查看截图](page-1.png)」）：就地画出那幅，点开进图片查看器。
@@ -225,7 +277,7 @@ function renderReplyShots(root) {
   const inline = root.querySelectorAll?.(":is(.markdown, .trail-note, .sub-report) img[src^='data:']") || [];
   for (const img of inline) img.decode().catch(() => img.isConnected && img.replaceWith(img.getAttribute("alt") || ""));
   const remote = renderRemoteShots(root),
-    refs = root.querySelectorAll?.(":is(.markdown, .trail-note, .sub-report) [data-file]") || [];
+    refs = root.querySelectorAll?.(":is(.markdown, .trail-note, .sub-report) :is([data-file], [data-path])") || [];
   if (!refs.length && !remote) return;
   const c = currentConversation(),
     messages = c ? everyMessage(c) : [];
@@ -361,6 +413,8 @@ function refreshRemoteShots(url) {
     if (root) roots.add(root);
   }
   if (remoteShots.has(url)) for (const root of roots) groupReplyShots(root);
+  // 取回来的那幅若也打不开，同样不留破图
+  for (const root of roots) mendImages(root);
 }
 // 接连几幅（一轮画的几稿）收成一叠，不一路往下堆：同段里只隔着换行的，或这段以图收尾、下一段只有图的。
 // 流式时已收尾的段落一段段补进来，这里每回把新到的接进前面那一叠；只在同一个容器里挪，尾段重画时不会多出一份

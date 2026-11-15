@@ -197,7 +197,8 @@ async function locateRef(raw, name, anchor) {
 /** @param {Element} ref 带 data-path / data-file 的 img @param {RefAnchor} anchor @param {string} words 说明文字 @returns {Element} 画好的那一件 */
 function drawRefImage(ref, anchor, words) {
   const name = ref.getAttribute("data-file") || "",
-    target = refTarget(ref.getAttribute("data-path"), anchor) || refTarget(name, anchor);
+    raw = ref.getAttribute("data-path") || "",
+    target = raw || name ? refTarget(raw, anchor) || (name ? refTarget(name, anchor) : null) : null;
   let frame, img;
   if (anchor.document) {
     frame = img = /** @type {HTMLImageElement} */ (ref);
@@ -210,15 +211,25 @@ function drawRefImage(ref, anchor, words) {
     shotShape(frame);
     ref.replaceWith(frame);
   }
-  /** @param {RefTarget} found */
+  // 这一幅由这里接手（取不到会换成说明文字），统一兜底那道别抢前面「按同名找回」的一步
+  img.dataset.refImage = "1";
+  const lost = () => frame.replaceWith(words || name || "");
+  /** @param {RefTarget|null} found */
   const show = found => {
+    if (!found) return lost();
     if (frame !== img) frame.dataset.openFile = found.file;
     img.src = refUrl(found);
   };
-  const lost = () => frame.replaceWith(words);
+  // 连路都算不出（sandbox:/ 之类、空路径）：不猜、也不请求，直接留说明文字
+  if (!target) {
+    lost();
+    return frame;
+  }
   img.addEventListener(
     "error",
     async () => {
+      // 先摘掉 src 再去找：认搬走的可能要问一阵，这期间页面上留的是那句说明文字，不挂一个破图
+      img.removeAttribute("src");
       const found = await relocateRef(name, anchor);
       if (!found) return lost();
       img.addEventListener("error", lost, { once: true });
