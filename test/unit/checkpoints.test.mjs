@@ -11,8 +11,8 @@ import { createRequire } from "node:module";
 const createCheckpoints = createRequire(import.meta.url)("../../server/checkpoints.js");
 const { ignoreRule, ignored } = createCheckpoints;
 
-async function serve(home) {
-  const points = createCheckpoints({ home: () => home });
+async function serve(home, options = {}) {
+  const points = createCheckpoints({ home: () => home, ...options });
   const server = http.createServer((req, res) => points.routes[`POST ${req.url}`](req, res)).listen(0, "127.0.0.1");
   await new Promise(resolve => server.once("listening", resolve));
   const post = (route, body) =>
@@ -88,6 +88,108 @@ test("记下、对照、退回：改了的改回、删了的补回、新出的�
   }
 });
 
+test(".gitignore 写着 .yan/ 时，意仍进快照、跟着退回；同目录的日志与探针不搬进去", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, ".gitignore", ".yan/\n");
+    write(root, "src/a.js", "代码");
+    write(root, ".yan/意.json", '{"root":"第一版"}');
+    write(root, ".yan/记忆.md", "目录记忆");
+    write(root, ".yan/检查探针/run-all.ps1", "探针");
+    write(root, ".yan/全面检查.log", "日志");
+    const took = await post("/api/checkpoint/take", key);
+    assert.equal(took.status, 200, JSON.stringify(took));
+    assert.equal(took.files, 3, "只收 .gitignore、src/a.js 与 .yan/意.json");
+    // 这一答改了意；.yan 下没进快照的几件也跟着变了、还多出一件
+    write(root, ".yan/意.json", '{"root":"第二版"}');
+    write(root, ".yan/记忆.md", "改过的记忆");
+    write(root, ".yan/检查探针/run-all.ps1", "改过的探针");
+    write(root, ".yan/新日志.log", "新");
+    const { changes } = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      changes.map(c => `${c.kind} ${c.path}`),
+      ["changed .yan/意.json"],
+      "确认窗只列意这一件"
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([done.restored, done.removed, done.failed], [1, 0, []]);
+    assert.equal(fs.readFileSync(path.join(root, ".yan/意.json"), "utf8"), '{"root":"第一版"}', "意跟着退回");
+    // .yan 下没进快照的照此刻的样子留着：改了的不改回、新出的不删
+    assert.equal(fs.readFileSync(path.join(root, ".yan/记忆.md"), "utf8"), "改过的记忆");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/检查探针/run-all.ps1"), "utf8"), "改过的探针");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/新日志.log"), "utf8"), "新");
+    assert.equal(fs.readFileSync(path.join(root, "src/a.js"), "utf8"), "代码");
+    assert.deepEqual((await post("/api/checkpoint/diff", key)).changes, []);
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("忽略的 .yan 已存在但意尚未创建：退回删去新意，保留记忆与新日志", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, ".gitignore", ".yan/\n");
+    write(root, ".yan/记忆.md", "目录记忆");
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    write(root, ".yan/意.json", '{"root":"新建的意"}');
+    write(root, ".yan/新日志.log", "新日志");
+    const { changes } = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      changes.map(change => `${change.kind} ${change.path}`),
+      ["added .yan/意.json"]
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([done.restored, done.removed, done.failed], [0, 1, []]);
+    assert.equal(fs.existsSync(path.join(root, ".yan/意.json")), false);
+    assert.equal(fs.readFileSync(path.join(root, ".yan/记忆.md"), "utf8"), "目录记忆");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/新日志.log"), "utf8"), "新日志");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test(".gitignore 里的 .yan/ 后来去掉，新露出来的兄弟不会被当成这一答新加的删掉", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, ".gitignore", ".yan/\n");
+    write(root, ".yan/意.json", '{"root":"第一版"}');
+    write(root, ".yan/记忆.md", "目录记忆");
+    const took = await post("/api/checkpoint/take", key);
+    assert.equal(took.status, 200, JSON.stringify(took));
+    assert.equal(took.files, 2, "只收 .gitignore 与 .yan/意.json");
+    // 忽略规则后来去掉了：.yan 从此照常遍历，那一刻没记下的兄弟这一刻露出来
+    write(root, ".gitignore", "");
+    write(root, ".yan/新日志.log", "新");
+    write(root, ".yan/意.json", '{"root":"第二版"}');
+    const { changes } = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      changes.map(c => `${c.kind} ${c.path}`),
+      ["changed .gitignore", "changed .yan/意.json"],
+      "新露出来的兄弟不列进来"
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual(done.failed, []);
+    assert.equal(fs.readFileSync(path.join(root, ".yan/新日志.log"), "utf8"), "新", "退回不删它");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/记忆.md"), "utf8"), "目录记忆", "那一刻没记下的不碰");
+    assert.equal(fs.readFileSync(path.join(root, ".yan/意.json"), "utf8"), '{"root":"第一版"}', "意照旧跟着退回");
+    assert.equal(fs.readFileSync(path.join(root, ".gitignore"), "utf8"), ".yan/\n");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("第二回只读变了的；没变的子目录与内容共用对象；对话删了册与独有的对象跟着清", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     root = path.join(base, "work"),
@@ -115,6 +217,70 @@ test("第二回只读变了的；没变的子目录与内容共用对象；对�
     const gone = await post("/api/checkpoint/diff", { root, conversation: "c2", answer: "m2" });
     assert.equal(gone.status, 400);
   } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("首拍还在队列里时删掉对话：拍完也不落册，别的对话照常", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    home = path.join(base, "检查点"),
+    deleted = new Set(),
+    { post, points, close } = await serve(home, { deleted: id => deleted.has(id) });
+  try {
+    for (let i = 0; i < 200; i++) write(root, `src/${i}.txt`, `件 ${i}`);
+    // 拍摄先入队、删除后到：等它拍完再看有没有落下那一册
+    const taking = post("/api/checkpoint/take", { root, conversation: "c1", answer: "m1" });
+    deleted.add("c1");
+    await points.dropConversation("c1");
+    const took = await taking;
+    assert.equal(took.status, 200, JSON.stringify(took));
+    const books = () =>
+      fs.existsSync(home) ? fs.readdirSync(home, { recursive: true }).filter(name => /册[\\/].+\.json$/.test(name)) : [];
+    assert.deepEqual(books(), [], "删掉的对话不该留下册");
+    // 另一段对话照常拍：别人删它的不牵连
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c2", answer: "m2" })).status, 200);
+    assert.equal(books().length, 1);
+    // 删除记录仍在时晚到的旧请求不收；恢复清掉记录后，立即拍新答，不等任意时长。
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "late" })).discarded, true);
+    deleted.delete("c1");
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "m3" })).discarded, undefined);
+    assert.equal(books().filter(name => name.includes("c1~m3")).length, 1);
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("拍摄途中删除又恢复：旧拍摄不复活，新答立即能拍", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, points, close } = await serve(path.join(base, "检查点")),
+    original = fs.promises.stat;
+  let entered, release;
+  const started = new Promise(resolve => (entered = resolve)),
+    paused = new Promise(resolve => (release = resolve));
+  write(root, "a.txt", "原件");
+  fs.promises.stat = async (...args) => {
+    if (args[0] === path.join(root, "a.txt")) {
+      entered();
+      await paused;
+    }
+    return original(...args);
+  };
+  try {
+    const taking = post("/api/checkpoint/take", { root, conversation: "c1", answer: "old" });
+    await started;
+    await points.dropConversation("c1");
+    release();
+    assert.equal((await taking).discarded, true, "旧拍摄即使在恢复后才完成也不落册");
+    fs.promises.stat = original;
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "c1", answer: "new" })).discarded, undefined);
+    assert.equal((await post("/api/checkpoint/diff", { root, conversation: "c1", answer: "new" })).status, 200);
+  } finally {
+    release();
+    fs.promises.stat = original;
     await close();
     fs.rmSync(base, { recursive: true, force: true });
   }

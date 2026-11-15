@@ -16,7 +16,7 @@ function settledMessage(m) {
   return (
     m?.role === "assistant" &&
     m.status === "complete" &&
-    (m.steps || []).every(
+    allSteps(m).every(
       step =>
         ["done", "error", "skipped"].includes(step.status) &&
         step.bg?.state !== "running" &&
@@ -167,7 +167,11 @@ function carryWarm(prev, next) {
 /** @param {Conversation} c */
 function warmInView(c) {
   void warmConversation(c).then(applied => {
-    if (!applied || currentId !== c.id || view !== "chat") return;
+    if (!applied) return;
+    // 旧版可能把帮手仍在执行的后台指令另存了：接回后补上入口与监听。
+    rewatchBackground();
+    renderClepsydra();
+    if (currentId !== c.id || view !== "chat") return;
     renderConversation(false);
     renderHelperPanel();
     if (sidePanelOpen()) renderSidePanel();

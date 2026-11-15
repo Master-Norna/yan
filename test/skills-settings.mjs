@@ -52,6 +52,13 @@ check(
 await evalJs(`${row("回信")}.click(); true`);
 await waitFor(`${view("回信")} && document.querySelector("[data-skill-view]").textContent.includes("逐条答")`, 8000);
 check("clicking a row opens it to read, not to edit", await evalJs(`!document.querySelector("[data-skill-editor]")`));
+check(
+  "the skill name, description and body use an arrow cursor while reading",
+  await evalJs(
+    `[...document.querySelectorAll("[data-skill-view] .skill-view-name, [data-skill-view] .memory-body")].every(n => getComputedStyle(n).cursor === "default")`
+  )
+);
+await shot("skills-reading.png");
 await evalJs(`document.querySelector("[data-skill-modify]").click(); true`);
 await waitFor(
   `!!document.querySelector('[data-skill-field="body"]') && document.querySelector('[data-skill-field="body"]').value.includes("逐条答")`,

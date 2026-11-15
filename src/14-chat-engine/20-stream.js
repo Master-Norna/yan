@@ -100,8 +100,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     releaseQuota = reserveTokens(profile, estimateTokens(history) + (Number(profile.maxTokens) || 8192));
     if (profile.tools !== false) await Promise.all([mcpForTurn(), refreshSkills()]);
     const tools = profile.tools !== false ? toolDefinitions(conversation, { profile }) : null;
+    const memory = new Map();
     const overrides = {
-      systemPrompt: systemPrompt(conversation, tools),
+      systemPrompt: systemPrompt(conversation, tools, { memory }),
       tools,
       reasoning: conversation.reasoning || "",
       head: history.length,
@@ -121,6 +122,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       }
     };
     await runRounds(assistant, history, {
+      memory,
       profile,
       conversation,
       host: assistant,
@@ -216,7 +218,5 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       setTimeout(() => maybeAutoCompact(conversation, profile), 0);
       void maybeAutoTitle(conversation, profile);
     }
-    // 一答落定（不再接着答）：记忆改过的话，交专司「记忆优化」理一遍
-    if (!goesOn) void tuneMemory();
   }
 }

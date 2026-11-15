@@ -7,7 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { jsonRoute, writeAtomic, parseJsonText, errorText } = require("./http.js");
 
-const KINDS = ["main", "helper", "side", "review", "memory", "image"];
+const KINDS = ["main", "helper", "side", "review", "image"];
 
 /** @param {{ file: () => string }} options */
 module.exports = function createUsage({ file }) {

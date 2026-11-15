@@ -1,0 +1,33 @@
+# 便携包冒烟：解开打好的 zip、用包里自带的 Node 起一次桥接、问一句 /api/bootstrap 与首页（pack/smoke.mjs）。
+# 只在 pack/ 与启动相关的文件变动时跑，或手动触发；不进分支保护的必过项——打包要下 Node、编启动器，每个 PR 都跑不值。
+# 发版前另在本地跑一遍 npm run pack:smoke（见 docs/development.md 的发版一节）。
+name: 便携包
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "pack/**"
+      - "server.js"
+      - "start.cmd"
+      - ".github/workflows/pack.yml"
+
+concurrency:
+  group: pack-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: 打包 · 冒烟
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm run pack
+      - run: node pack/smoke.mjs

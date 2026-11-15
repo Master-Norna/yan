@@ -3,6 +3,7 @@
 // OpenAI 系交回 data[].url 或 data[].b64_json。不论网址（硅基流动的一小时就失效）还是 base64，一律在这里取成 data: 地址交给页面，页面收进卷宗
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
 const { readLimitedBytes, fetchPublicResponse } = require("../web.js");
+const fetchUpstream = require("./upstream.js");
 
 const SILICONFLOW = config => config.api === "siliconflow" || /siliconflow/i.test(config.baseUrl);
 const IMAGE_LIMIT = 40 * 1024 * 1024;
@@ -60,7 +61,7 @@ module.exports = function createImage({ resolveProfile, upstreamError }) {
           ? { model: config.model, prompt, batch_size: 1, ...(size ? { image_size: size } : {}) }
           : { model: config.model, prompt, n: 1, ...(size ? { size } : {}) };
       console.log(`${stamp()} → ${config.model}：生图${size ? ` ${size}` : ""}`);
-      const response = await fetch(imagesUrl(config.baseUrl), {
+      const response = await fetchUpstream(imagesUrl(config.baseUrl), {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",

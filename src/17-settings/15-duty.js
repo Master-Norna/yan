@@ -1,20 +1,12 @@
-// 言 · 设置 · 专司：主答之外各司一事的几位——拟题随对话的模型、只有开关；记忆优化、审查与生图各自另配一份，
+// 言 · 设置 · 专司：主答之外各司一事的几位——拟题随对话的模型、只有开关；审查与生图各自另配一份，
 // 不借模型栏里的那几份：同一份发，会挤掉主答的提示缓存，本机的模型还得多扛一路并发。
 // 审查可走 ChatGPT 订阅：借的是登录的账号、不是哪一份模型，另挑的小模型缓存各归各，免得只为审查另养一个 Key。
 // 一职一张卡，样子同模型栏：收起一行只写职名与模型名（拟题、没配的不写），最右一粒记号——墨点是开或已配，空圈是关或未配；
 // 点开先是开关，开了才铺开接口、地址、Key、模型（设计稿/110–112）
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
-/** @typedef {"memory"|"review"|"image"} DutyId */
-/** @type {Record<DutyId, { key: "dutyMemory"|"dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string, fallback?: () => string }>} */
+/** @typedef {"review"|"image"} DutyId */
+/** @type {Record<DutyId, { key: "dutyReview"|"dutyImage", name: () => string, apis: Duty["api"][], off: () => string, fallback?: () => string }>} */
 const DUTIES = {
-  // 记忆优化：配好了每段对话开头带上记忆、主模型可记，记忆改过后由它理一遍（见 11-memory.js）；关着即不带不记
-  memory: {
-    key: "dutyMemory",
-    name: () => t("记忆优化"),
-    apis: ["siliconflow", "openai", "anthropic", "chatgpt"],
-    off: () => t("关，不带记忆"),
-    fallback: () => t("下一答落定时再理")
-  },
   review: {
     key: "dutyReview",
     name: () => t("审查"),
@@ -41,8 +33,8 @@ function dutyOf(id) {
   return store.settings[DUTIES[id].key];
 }
 /**
- * 问一回专司里另配的那一位（审查、记忆优化）：拼成一份临时的模型配置——不扣余墨、不认思考档位，花的墨只记进用量簿的这一类
- * @param {"review"|"memory"} id @param {string} text @param {{ systemPrompt: string, maxTokens: number, signal: AbortSignal }} options
+ * 问一回专司里另配的那一位（审查）：拼成一份临时的模型配置——不扣余墨、不认思考档位，花的墨只记进用量簿的这一类
+ * @param {"review"} id @param {string} text @param {{ systemPrompt: string, maxTokens: number, signal: AbortSignal }} options
  */
 async function askDuty(id, text, { systemPrompt, maxTokens, signal }) {
   /** @type {Profile} */
@@ -53,7 +45,7 @@ async function askDuty(id, text, { systemPrompt, maxTokens, signal }) {
   noteUsage(id, tokens);
   return String(reply.content || "");
 }
-// 专司没成（审查出错退回照规则、记忆优化没理成）：同删对话、桥接更新一样弹一句，说清没成之后怎么办。
+// 专司没成（审查出错退回照规则）：同删对话、桥接更新一样弹一句，说清没成之后怎么办。
 // 不退避、不计次——没成就下回再来（各处的取舍）；只是同一职连着出同样的错只提一回，成过一次再出错才再提：
 // 审查一答里可能连问十几步，每步都弹就成了噪声
 /** @type {Map<DutyId, string>} 各职上一回没成的原因，成了即清；只在本页内存里 */

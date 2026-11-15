@@ -327,7 +327,7 @@ var YAN_EN = {
   复制回报: "Copy report",
   主模型交的命: "Task from the lead agent",
   "不到 1 分钟": "Under 1 min",
-  "在跑 · {0}": "Running · {0}",
+  "进行中 · {0}": "Running · {0}",
   "约定 · {0}": "Scheduled · {0}",
   新对话: "New chat",
   当前: "Current",
@@ -395,25 +395,26 @@ var YAN_EN = {
   已止: "Stopped",
 
   // ---- 记忆 ----
+  "每一问带上最新的整份记忆，模型自行决定记入、更新与忘记。记忆一类一份，要记便把那一类整份改过，行迹里写作「记入」。":
+    "Every question includes the latest full memory. The main model decides what to remember, update, or forget. Memory is kept as one text per category; the model rewrites that category, shown as “Remember” under Steps.",
+  "设置 → 记忆左列各类，右边是选中那一类的全文，点「修改」编辑，改空即删去这一类；分类名亦可改，改作已有之名即并为一类。关掉「带进对话」，便不带也不记，记忆仍在。":
+    "Settings → Memory lists categories on the left and the selected text on the right. Choose Modify to edit; empty text deletes the category. Renaming a category to an existing name merges them. Turning off Include in chats stops including and recording memory while keeping it saved.",
+  "查旧对话、读旧对话两件常给，与记忆开不开无关。": "Searching and reading past chats are always available, whether memory is on or off.",
+  "每一问带上最新记忆，由主模型决定记入、更新与忘记":
+    "Each question includes the latest memory; the main model decides what to remember, update, or forget",
+  记忆已变化: "Memory changed",
+  未写入: "Not saved",
+
   手记: "Manual",
   尚无记忆: "No memory yet",
-  "每段对话开头带上；记忆改过后，由专司「记忆优化」理一遍":
-    "Included at the start of every chat; after it changes, the Memory optimization duty goes over it",
-  "在专司里配好「记忆优化」后，才带上、才记": "Set up Memory optimization under Duties to include and record it",
   "这一类的记忆将被移除，无法撤销；对话不受影响。": "This category will be removed. This can't be undone; chats are not affected.",
-  "记忆：理过 {0} 类": "Memory: {0} {0|category|categories} tidied",
   "{0}没成，{1}：{2}": "{0} failed; {1}: {2}",
-  下一答落定时再理: "will retry after the next answer",
   这一步照规则办: "this step follows the rules",
   超时: "timed out",
-  "有 {0} 条不合约定的项": "{0} {0|item|items} not in the expected format",
-  没给出改动清单: "no list of changes was given",
-  给的不是清单: "the reply wasn't a list",
   审查模型没给出准或驳: "the review model gave neither approve nor deny",
   "{0} 类 · {1} 字": "{0} {0|category|categories} · {1} characters",
   "{0} 类记忆将被移除，无法撤销；对话不受影响。":
     "{0} {0|category|categories} of memory will be removed. This can't be undone; chats are not affected.",
-  记忆优化: "Memory optimization",
   "只在某个目录成立的，执事记在那个目录的 `.yan/记忆.md`，在那里每一问都附着；不经专司，也不受这里的开关管。":
     "What holds only in one folder is recorded by the agent in that folder's `.yan/记忆.md` and attached to every message there; it doesn't go through Duties and isn't affected by this switch.",
   "、{0} 类记忆": ", {0} memory {0|category|categories}",
@@ -422,6 +423,7 @@ var YAN_EN = {
   "已写入「{0}」": "Wrote “{0}”",
   未变: "Unchanged",
   新起: "New",
+  待落盘: "Not yet saved",
   记忆内容: "Memory content",
   修改: "Edit",
   另起一类: "New category",
@@ -579,7 +581,6 @@ var YAN_EN = {
   未配: "Not set up",
   未填完: "Incomplete",
   "关，照规则": "Off: rules only",
-  "关，不带记忆": "Off: no memory",
   最近的对话: "Recent chats",
   "游目骋怀，足以极视听之娱。": "The browser the model can use.",
   "温故而知新。": "What the model remembers across chats.",
@@ -751,8 +752,11 @@ var YAN_EN = {
   // ---- 设置 · 备份 ----
   "正在收拢附件原件…": "Collecting attachments…",
   "言-备份-{0}.json": "yan-backup-{0}.json",
-  "（含 {0} 件附件原件）": " (with {0} {0|attachment|attachments})",
-  "备份已导出{0}；不含 API Key": "Backup exported{0}; API keys are not included",
+  "备份已导出（含 {0} 件附件原件{1}）；不含 API Key": "Backup exported (with {0} {0|attachment|attachments}{1}); API keys are not included",
+  "，{0} 件未能取到：{1}{2}": ", {0} could not be read: {1}{2}",
+  "备份已导出；不含 API Key": "Backup exported; API keys are not included",
+  "备份文件不完整，尾部在复制或下载时断掉了": "The backup is incomplete: it was cut short while being copied or downloaded",
+  "备份文件不完整，只恢复了能读到的部分：{0}": "The backup is incomplete; only the readable part was restored: {0}",
   "有 {0} 答另存的行迹没能取回，备份里缺它们的思绪与帮手经过":
     "{0} {0|reply's|replies'} stored trail could not be loaded; the backup lacks their reasoning and helper runs",
   "不是言的备份文件，或版本不兼容": "Not a Yan backup file, or an incompatible version",
@@ -822,6 +826,8 @@ var YAN_EN = {
     "The whole environment folder will be deleted and packages must be reinstalled. Chats, Files and settings are not affected.",
 
   // ---- 设置 · MCP ----
+  "删除服务「{0}」？": 'Delete server "{0}"?',
+  "该服务将断开连接，配置将被移除。": "This server will be disconnected and its configuration removed.",
   "＋ 新增服务": "+ Add server",
   "收起 JSON": "Hide JSON",
   "以 JSON 编辑": "Edit as JSON",
@@ -919,6 +925,15 @@ var YAN_EN = {
   "解散分组「{0}」？": 'Ungroup "{0}"?',
   "组里的 {0} 段对话退回散列，不会删除。": "Its {0} {0|chat|chats} go back to the main list; nothing is deleted.",
   "此组尚无对话。": "This group has no chats.",
+  "删除「{0}」这一组？": 'Delete the "{0}" group?',
+  "组里的 {0} 段对话将连同附件一并移除，目录里的文件不动，无法撤销。":
+    "Its {0} {0|chat|chats} will be removed along with their attachments. Files in the folder stay untouched. This can't be undone.",
+  "另有 {0} 段正在另一页面作答，这回不动。": "{0} more are replying in another page and will be left alone this time.",
+  "另有 {0} 段置顶或已归入分组的对话，不在此组，也不动。":
+    "{0} {0|chat is|chats are} pinned or in a collection, outside this group, and will be left alone.",
+  "已删除 {0} 段对话": "Deleted {0} {0|chat|chats}",
+  "此组正在另一页面作答，暂不能删除": "This group is replying in another page and can't be deleted now",
+  这一组已没有对话: "This group has no chats left",
   解散: "Ungroup",
   设置: "Settings",
   "新建分组…": "New group…",
@@ -1153,7 +1168,6 @@ var YAN_EN = {
   切换明暗: "Toggle light/dark",
   移除引文: "Remove quote",
   落墨于此: "Ask anything",
-  "新对话归入此组 · 撤去": "New chats go into this group · remove",
   发送: "Send",
   修改标题: "Edit title",
   卷宗里的位置: "Location in Files",
@@ -1162,7 +1176,6 @@ var YAN_EN = {
   对所选文字: "For the selected text",
   引为下一问的引文: "Quote in the next message",
   "就此处另开旁注，不入正文": "Open a side thread here, kept out of the main chat",
-  所在分组: "Group",
   当前上下文大小: "Current context size",
   回到旁注目录: "Back to side threads",
   移除这条旁注: "Remove this side thread",
@@ -1636,7 +1649,8 @@ var YAN_EN = {
   "ChatGPT 的登录凭证没能换新：{0}": "Could not refresh the ChatGPT credentials: {0}",
   "ChatGPT 的登录已失效，请到「设置 → 模型」里重新登录": "The ChatGPT sign-in expired. Sign in again under Settings → Models",
   "ChatGPT 的登录或存储位置已变化，请重试": "The ChatGPT sign-in or storage location changed. Please try again",
-  "记忆或存储位置已变化，这批整理未写入": "Memory or the storage location changed; this optimization was not saved",
+  "存储位置已变化，请刷新页面后重试": "The storage location changed. Refresh the page and try again",
+  "配置尚未写入存储目录，稍后再换位置": "Settings have not been saved to storage yet. Try moving the storage later",
   授权未完成: "Authorization not completed",
   "列模型失败（{0}）": "Failed to list models ({0})",
   "上游接口返回 {0}": "The API returned {0}",
@@ -1784,8 +1798,8 @@ var YAN_EN = {
   "附件的来路，成品的归处": "Where attachments come from, where outputs go",
   "附件随一问送出；卷宗是跨对话的书架，常用文件收存于此。":
     "Attachments go out with a message; Files is a shelf shared by all conversations, for the files you use often.",
-  "点「＋」、拖入或粘贴皆可：图片、文本、代码、PDF 与 Office 文档。文档先在本机抽出正文；单件不过 32 MB，一次至多 10 件、合计 64 MB。":
-    "Click “＋”, drag in or paste: images, text, code, PDF and Office documents. Documents have their text extracted on this machine first; up to 32 MB each, at most 10 at a time and 64 MB in total.",
+  "点「＋」、拖入或粘贴皆可：图片、文本、代码、PDF 与 Office 文档。文档先在本机抽出正文；单件不过 256 MB，一次至多 10 件。":
+    "Click “＋”, drag in or paste: images, text, code, PDF and Office documents. Documents have their text extracted on this machine first; up to 256 MB each, at most 10 at a time.",
   "侧栏的「卷宗」即存储位置里的 `卷宗/` 目录。拖入，或在附件上按「藏」收存；需随消息送出时，从「＋」中选「卷宗」。页上可新建夹、就地改名（亦可按 F2），条子拖到夹上即移入；删夹则连同其中一并删去。":
     "Files in the sidebar is the `卷宗/` folder in your storage location. Drag files in, or press the save mark on an attachment to keep it; to send one with a message, choose Files under “＋”. On the page you can make folders and rename in place (or press F2); drag an item onto a folder to move it in. Deleting a folder deletes what's inside too.",
   "卷宗里的文档对每段对话皆可读，模型用到时方才取回；设置 → 工具中可关闭。":
@@ -1891,8 +1905,8 @@ var YAN_EN = {
   "这两样只管新起的对话；已在组中的对话照旧。":
     "These two settings apply only to new conversations; ones already in the group stay as they are.",
   在组中行文: "Working in a group",
-  "侧栏组首的「＋」或分组页的「在此组新建」另起一段，输入框「＋」旁标着所归之组，点之即撤去。侧栏里的组与「工」组一样按时间排，组里一有新言，整组便靠前。组里的对话置顶，只在组内居前，右上角折一小角为记。解散只拆组，对话退回散列。":
-    "Start a new conversation from “＋” at the head of a group in the sidebar, or “New chat in this group” on the groups page; the group is shown beside “＋” in the input box, and clicking it removes the conversation from the group. Groups in the sidebar are ordered by time like folder groups: as soon as something new is said in one, the whole group moves up. A pinned conversation in a group goes to the top of that group only, marked by a small folded corner at the top right. Ungrouping only breaks up the group; its conversations go back to the loose list.",
+  "侧栏组首的「＋」或分组页的「在此组新建」另起一段，新对话即归此组（欢迎页眉题的印章随之改作「集」、一旁写出组名）；点「翻页」另起则不归。侧栏里的组与「工」组一样按时间排，组里一有新言，整组便靠前。组里的对话置顶，只在组内居前，右上角折一小角为记。解散只拆组，对话退回散列。":
+    "Start a new conversation from “＋” at the head of a group in the sidebar, or “New chat in this group” on the groups page; the new chat joins that group (the welcome page's eyebrow seal turns into 集 with the group's name beside it). To keep it out, start it with “New chat” instead. Groups in the sidebar are ordered by time like folder groups: as soon as something new is said in one, the whole group moves up. A pinned conversation in a group goes to the top of that group only, marked by a small folded corner at the top right. Ungrouping only breaks up the group; its conversations go back to the loose list.",
   接入外部服务: "Connecting outside services",
   "借 MCP，言可调用别处的能力，如 GitHub 的仓库与议题，或其他项目自带的工具。接入只需配置，无需改动代码。":
     "Through MCP, Yan can use capabilities from elsewhere, such as GitHub repositories and issues, or tools that ship with other projects. Connecting takes only configuration, no code changes.",
@@ -1957,13 +1971,7 @@ var YAN_EN = {
   "录是一份跨对话的记忆：你的偏好、身份与约定，此后不必重述。只存于本机。":
     "Memory carries across conversations: your preferences, who you are and what's been agreed, so you needn't repeat them. It's stored only on this machine.",
   带与记: "Bringing and remembering",
-  "专司里配好「记忆优化」，每段对话开头便带上整份记忆，模型不必去翻。记忆一类一份，模型要记便把那一类整份改过，行迹里写作「记入」。记忆改过后，一答落定时专司「记忆优化」理一遍：合并重复、改掉矛盾、删去废话；理过几类，提示一句。":
-    "Once Memory optimization is set up under Duties, every chat starts with the whole memory included, so the model doesn't have to look anything up. Memory is kept as one text per category; to remember something the model rewrites that whole category, shown as “Remember” under Steps. After the memory changes, the Memory optimization duty goes over it when an answer settles: merging repeats, fixing contradictions and cutting filler; a short notice says how many categories it touched.",
   改与忘: "Editing and forgetting",
-  "设置 → 记忆左列各类，右边是选中那一类的全文，点一下即改，改空即删去这一类；分类名亦可改，改作已有之名即并为一类。专司里关掉「记忆优化」，便不带也不记，记忆仍在。":
-    "Settings → Memory lists the categories on the left and the selected one's full text on the right; click it to edit, and emptying it deletes the category. Categories can be renamed too, and renaming one to an existing name merges them. Turning Memory optimization off under Duties stops including and recording it; the memory stays.",
-  "记忆优化只读记忆本身，不读对话。查旧对话、读旧对话两件常给，与记忆开不开无关。":
-    "Memory optimization reads only the memory itself, not your chats. Searching and reading past chats are always available, whether memory is on or not.",
   存储边界: "Storage and boundaries",
   "数据所在，及其边界": "Where your data lives, and its boundaries",
   所在: "Location",
@@ -2005,6 +2013,7 @@ var YAN_EN = {
   "只需 Node.js 22 或更高版本，无需安装依赖。": "Needs only Node.js 22 or later; no dependencies to install.",
   // ---- 欢迎页（问候另写在 src/06-mode-welcome/10-welcome.js；推荐语里留给人填的写在方括号里） ----
   "以目录为案，言起而事行": "Work in a folder: plan, edit, run",
+  "这一问将归入「{0}」": 'This message goes into "{0}"',
   "长问慢答，尽付纸墨": "Ask at length, read at leisure",
   "对话、卷宗、附件与配置同在本机的一个存储目录，言没有自己的服务器；复制即是备份。":
     "Chats, files, attachments and settings live in one folder on this machine; Yan has no server of its own. Copy the folder to back it up.",

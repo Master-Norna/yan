@@ -166,7 +166,9 @@ function segmentRow(title, desc, key, items, active) {
 }
 
 function storageSize() {
-  const bytes = new Blob([JSON.stringify(store)]).size;
+  // 只算「配置」那一份（设置、模型、记忆、草稿……，即 配置.json 的内容）；
+  // 整份 store 还带着所有对话，长对话能把这一格算成几十 MB，数字误导人也拖慢这一页
+  const bytes = new Blob([JSON.stringify(metaOf())]).size;
   return bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 }
 // 存储位置的更换排着队来（见 bindGeneralSettings 里的 commitStore）
@@ -189,7 +191,8 @@ function bindGeneralSettings() {
       if (!next || next === (bootstrap.store?.parent || "")) return;
       let data;
       try {
-        data = await bridge("/api/store/move", { parent: next }, AbortSignal.timeout(600000));
+        await settleConfig();
+        data = await storeBridge("/api/store/move", { parent: next }, AbortSignal.timeout(600000));
       } catch (error) {
         return toast(String(error.message || error).slice(0, 80));
       }

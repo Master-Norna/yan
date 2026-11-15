@@ -300,6 +300,8 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
   return {
     working,
     exists,
+    // 检查点认同一份删除记录；恢复保存会清掉它，不另设过期窗口。
+    deleted: id => Boolean(readTombstones(chatsHome())[id]),
     routes: {
       "POST /api/chats/load": handleLoad,
       "POST /api/chats/save": handleSave,

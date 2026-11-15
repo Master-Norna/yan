@@ -29,6 +29,20 @@ jobs:
       - run: npm run check
       - run: npx --yes prettier@3.3.3 --check .
 
+  # 最低版本另在 Windows 上跑一遍：engines 写的是 >=22，macOS 那份跑的也是 22，但 macOS 走不到沙箱、任务栏、
+  # .cmd 启动器这些只有 Windows 才有的路。只跑单测，不重跑端到端；名字不进分支保护，先作参考。
+  check-node22:
+    name: 单测 · Node 22（不挡合并）
+    runs-on: windows-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm run unit
+
   e2e:
     name: 端到端
     runs-on: windows-latest
@@ -39,6 +53,15 @@ jobs:
         with:
           node-version: 24
       - run: node test/run.mjs
+      # 失败时留下的截图就在 test/.tmp 下（lib.mjs 的 shot）；Windows 是必过项，没有附件维护者只能本地复现才看得到画面
+      - if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: yan-test-diagnostics-windows
+          path: test/.tmp/*.png
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
   macos:
     name: macOS 测试（不挡合并）

@@ -10,23 +10,34 @@ const require = createRequire(import.meta.url);
 const createWork = require("../../server/work/index.js");
 const { screenStorePath, screenStoreCommand } = require("../../server/sandbox.js");
 
-const R = "E:\\聊天记录\\.yan",
-  J = (...p) => [R, ...p].join("\\"),
-  onlyWindows = { skip: process.platform !== "win32" && "用例写的是 Windows 路径" };
+const win = process.platform === "win32",
+  R = win ? "E:\\聊天记录\\.yan" : "/Users/a/聊天记录/.yan",
+  J = (...p) => path.join(R, ...p),
+  project = win ? "E:\\项目\\言" : "/Users/a/project",
+  onlyWindows = { skip: !win && "用例写的是 Windows 路径" };
 
-test("screenStoreCommand：点名配置、备份、登录文件且靠近存储根的拦下，别处的同名字样放行", onlyWindows, () => {
-  for (const [command, workdir] of [
-    [`Get-Content "${J("配置.json")}"`, "D:\\x"],
-    ["type ..\\配置.json", J("卷宗")],
-    ["Get-Content $HOME\\.yan\\配置备份\\a.json", "E:\\项目\\言"],
-    ["cat E:/聊天记录/.yan/*", "E:\\项目\\言"],
-    [`Get-Content "${J("ChatGPT 登录.json")}"`, "D:\\x"]
-  ])
+test("screenStoreCommand：点名配置、备份、登录文件且靠近存储根的拦下，别处的同名字样放行", () => {
+  for (const [command, workdir] of win
+    ? [
+        [`Get-Content "${J("配置.json")}"`, "D:\\x"],
+        ["type ..\\配置.json", J("卷宗")],
+        ["Get-Content $HOME\\.yan\\配置备份\\a.json", "E:\\项目\\言"],
+        ["cat E:/聊天记录/.yan/*", "E:\\项目\\言"],
+        [`Get-Content "${J("ChatGPT 登录.json")}"`, "D:\\x"]
+      ]
+    : [
+        [`cat "${J("配置.json")}"`, "/tmp/x"],
+        ["cat ../配置.json", J("卷宗")],
+        ["cat $HOME/.yan/配置备份/a.json", project],
+        ["cat ~/.yan/配置.json", project],
+        [`cat ${R}/*`, project],
+        [`cat "${J("ChatGPT 登录.json")}"`, "/tmp/x"]
+      ])
     assert.ok(screenStoreCommand(command, R, workdir), command);
   for (const [command, workdir] of [
-    ['rg "配置.json" server', "E:\\项目\\言"],
-    [`Get-ChildItem ${J("卷宗")}`, "E:\\项目\\言"],
-    [`Get-Content ${J("卷宗", "报告.md")}`, J("卷宗")]
+    ['rg "配置.json" server', project],
+    [`${win ? "Get-ChildItem" : "ls"} ${J("卷宗")}`, project],
+    [`${win ? "Get-Content" : "cat"} ${J("卷宗", "报告.md")}`, J("卷宗")]
   ])
     assert.equal(screenStoreCommand(command, R, workdir), null, command);
   assert.equal(screenStoreCommand(`Get-Content "${J("配置.json")}"`, "", "D:\\x"), null, "没给存储根不判");
@@ -114,3 +125,21 @@ test("指令点名存储根的配置：径行、不开沙箱也不跑", async ()
   assert.notEqual(status, 200);
   assert.match(data.error, /配置与登录文件/);
 });
+
+test("screenStorePath：UNC 共享目录作为存储根时，剥离数据流后仍保留 \\\\ 前缀", onlyWindows, () => {
+  const uncRoot = "\\\\server\\share\\.yan";
+  assert.ok(screenStorePath("\\\\server\\share\\.yan\\配置.json", uncRoot));
+  assert.ok(screenStorePath("\\\\server\\share\\.yan\\配置.json::$DATA", uncRoot));
+});
+
+test(
+  "screenStorePath：POSIX 平台上存储根下这几样拦下，卷宗里同名的放行",
+  { skip: process.platform === "win32" && "只在非 Windows 上成立" },
+  () => {
+    const root = "/Users/a/聊天记录/.yan",
+      j = (...p) => path.join(root, ...p);
+    for (const p of [j("配置.json"), j("配置备份", "2026.json"), j("ChatGPT 登录.json"), "/Users/a/聊天记录/.YAN/配置.JSON"])
+      assert.ok(screenStorePath(p, root), p);
+    for (const p of [j("卷宗", "a.md"), j("卷宗", "配置.json"), j("对话")]) assert.equal(screenStorePath(p, root), null, p);
+  }
+);

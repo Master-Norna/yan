@@ -32,6 +32,8 @@ class McpClient {
       await this.open(new SseTransport(this.config));
     }
     this.tools = await this.listTools();
+    // 连上时拉的这一份就是基线：页面这一问会自己来取（/api/mcp/list），此刻不算「变过」
+    this.toolsChanged = false;
     return this;
   }
   async open(transport) {
@@ -58,7 +60,7 @@ class McpClient {
       tools.push(...page.tools);
       cursor = page.nextCursor;
     } while (cursor);
-    this.toolsChanged = false;
+    // 这里不清 toolsChanged：清单变了要等页面真拿到新的一份才算交接完（见 index.js 的 handleList 与 handleCall）
     return tools;
   }
   /** 调一件工具；signal 断了就告诉服务端取消。等连接、重拉工具时已经停了的，不再发出（abort 事件只响一次，事后挂上的听不到） */

@@ -72,10 +72,24 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
       const names = Object.keys(servers);
       const settled = await Promise.allSettled(names.map(name => ensure(name, servers[name]).ready));
       const out = {};
-      settled.forEach((result, i) => {
+      for (const [i, result] of settled.entries()) {
         const name = names[i];
-        if (result.status === "rejected") return (out[name] = { ok: false, error: String(result.reason?.message || result.reason) });
+        if (result.status === "rejected") {
+          out[name] = { ok: false, error: String(result.reason?.message || result.reason) };
+          continue;
+        }
         const client = result.value;
+        // 服务报过工具变了：交回页面的必须是变后的那一份。调用时内部重拉的那一份页面还没拿到，不算交接完，
+        // 所以这里把标记兑现成一次重拉（拉的时候又变了就再来一回，至多两回）
+        for (let round = 0; round < 2 && client.toolsChanged; round++) {
+          client.toolsChanged = false;
+          try {
+            client.tools = await client.listTools();
+          } catch {
+            client.toolsChanged = true; // 拉不到：留着旧表与标记，下一回再试
+            break;
+          }
+        }
         out[name] = {
           ok: true,
           server: client.server,
@@ -88,7 +102,7 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
             annotations
           }))
         };
-      });
+      }
       return { servers: out };
     },
     error => errorText(error, Infinity)
@@ -105,7 +119,9 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
         timeout: Number(body.timeout) > 0 ? Math.min(Number(body.timeout) * 1000, 2 ** 31 - 1) : undefined,
         signal
       });
-      await attachLinkedImages(result, body.config);
+      // 补图用实际起连接的那一份配置：游目只递几项选择，command / cwd 是 prepareMcp 展开后挂进 client.config 的，
+      // 拿原始选择项（没有 command）会直接跳过，命名截图就只剩一行链接
+      await attachLinkedImages(result, client.config);
       sendJson(res, 200, { result, toolsChanged: client.toolsChanged });
     } catch (error) {
       if (!res.destroyed) sendJson(res, 400, { error: String(error.message || error) });

@@ -74,14 +74,29 @@ try {
   check("switching rows waits a moment", await evalJs(shown("reasoning")));
   await waitFor(`${shown("preset")} && !(${shown("reasoning")})`);
   check("then the other row's column takes over", true);
-  // 路过别的栏就到了浮列上：不换。两处坐标先量好再连着移——量一处要一次往返，慢机器上（CI 的 macOS）
-  // 路过与落到浮列之间就超了切栏的宽限（120 ms），那一栏真被换上了
+  // 路过别的栏就到了浮列上：不换。两处坐标先量好，两次移出去一条也不等回话——等一次回话就要一次往返，
+  // 慢机器上（CI 的 macOS）路过与落到浮列之间就超了切栏的宽限（120 ms），那一栏真被换上了
   const across = await center(FLY("reasoning")),
     onto = await center(`#modelMenu [data-preset="s1"]`);
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...across });
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...onto });
+  await Promise.all([
+    send("Input.dispatchMouseEvent", { type: "mouseMoved", ...across }),
+    send("Input.dispatchMouseEvent", { type: "mouseMoved", ...onto })
+  ]);
   await sleep(250);
-  check("moving across a row onto the open column keeps it", (await evalJs(shown("preset"))) && !(await evalJs(shown("reasoning"))));
+  const kept = (await evalJs(shown("preset"))) && !(await evalJs(shown("reasoning")));
+  check(
+    "moving across a row onto the open column keeps it",
+    kept,
+    kept
+      ? ""
+      : JSON.stringify({
+          preset: await evalJs(shown("preset")),
+          reasoning: await evalJs(shown("reasoning")),
+          under: await evalJs(
+            `(() => { const n = document.elementFromPoint(${onto.x}, ${onto.y}); return n ? (n.closest(".model-sub") ? "model-sub" : n.className || n.tagName) : "none"; })()`
+          )
+        })
+  );
 
   await moveTo(FLY("reasoning"));
   await waitFor(shown("reasoning"));

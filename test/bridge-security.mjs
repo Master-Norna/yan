@@ -805,6 +805,33 @@ check("screen: a harmless command passes", r.status === 200 && r.data.why === nu
   );
   other.close();
 }
+// 生图也经过同一条模型出站边界：上游可正常在本机，重定向却不能借道清掉言自己的草稿。
+{
+  const dir = `${ARCHIVE}/.草稿/生图重定向探针`,
+    marker = `${dir}/keep.txt`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(marker, "只供隔离测试");
+  const relay = http
+    .createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(307, { Location: `${BASE}/api/archive/clean` });
+        res.end();
+      });
+    })
+    .listen(0, "127.0.0.1");
+  await new Promise(resolve => relay.once("listening", resolve));
+  try {
+    r = await post("/api/image", {
+      profile: { baseUrl: `http://127.0.0.1:${relay.address().port}/v1`, model: "image-probe" },
+      prompt: "山水"
+    });
+    check("生图上游重定向不能触发桥接受信操作", r.status === 403 && existsSync(marker), JSON.stringify(r.data));
+  } finally {
+    relay.closeAllConnections();
+    await new Promise(resolve => relay.close(resolve));
+  }
+}
 rmSync(ARCHIVE, { recursive: true, force: true });
 rmSync(WORK, { recursive: true, force: true });
 rmSync(OUTSIDE, { recursive: true, force: true });

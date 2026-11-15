@@ -242,6 +242,7 @@ function catchUpConversation(item, { quiet = false } = {}) {
   if (!quiet) {
     if (c.id === currentId && view === "chat") renderConversation(false);
     renderHistory();
+    renderClepsydra();
   }
   return next;
 }

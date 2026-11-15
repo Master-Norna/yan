@@ -28,19 +28,17 @@ async function maybeAutoTitle(conversation, profile) {
   try {
     const firstId = first.id,
       user = String(first.content || (first.attachments || []).map(a => a.name).join("、") || t("（附件）"));
-    const ask = prompt("assistant.title", {
-      user: user.slice(0, 1200),
-      assistant: reply ? t`\n\n助手：${String(reply.content).slice(0, 1200)}` : ""
-    });
+    const instruction = prompt("assistant.title"),
+      ask = t`用户：${user.slice(0, 1200)}` + (reply ? t`\n\n助手：${String(reply.content).slice(0, 1200)}` : "");
     // 题目只有几个字，可它是与一答并行发出的：接口忙、模型慢起（会思考的先想再写）时三十秒常常不够，三次都超时就再也拟不上题。
     // 超时给到两分钟；输出上限不能只按题目本身算——会思考的模型把思考也计在 max_tokens 里；开了思考档位的降到最低一档，拟题用不着深想
     const response = await requestChat(profile, [{ role: "user", content: ask }], AbortSignal.timeout(120000), {
       maxTokens: 4000,
-      systemPrompt: "",
+      systemPrompt: instruction,
       reasoning: conversation.reasoning ? "low" : ""
     });
     if (!response.ok) return;
-    const temp = await readAside(response, profile, ask);
+    const temp = await readAside(response, profile, instruction + "\n\n" + ask);
     // 不截字数：长短由提示词定，放不下由侧栏、书眉自己省略，文件名另有上限（见 server/chats.js 的 safeTitle）。
     // 原先截在 24 个码点，字母空格也算一个，「Nushell bytes remove 技术博客」就成了「…技术博」
     const title =

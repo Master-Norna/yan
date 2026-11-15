@@ -16,18 +16,23 @@ async function preparing(task) {
 }
 // 开工前：工作目录立起来，再向桥接认领这段对话——两页同时开工，桥接按先来后到只放一页（见 claimConversation）
 /** @param {Conversation} c */
-async function prepareTurn(c) {
+async function prepareTurn(c, { fresh = false } = {}) {
   if (!(await ensureWorkReady(c))) return false;
-  if (!(await claimConversation(c.id))) {
-    toast(t("此对话正在另一页面作答，稍后再发"));
+  if (!(await claimTurn(c))) return false;
+  return !conversationRunning(c.id) && (fresh || store.conversations.includes(c));
+}
+// 任何开工入口都认这一道：正文、新对话、旁注、续帮手与回报。目录准备由各入口按需做；
+// 认领要等桥接，回来后按当前那份对话重看目录，期间开始的退回不能被漏过。quiet 供回报稍候重试，不反复弹提示。
+/** @param {Conversation} c @param {{ quiet?: boolean }} [options] */
+async function claimTurn(c, { quiet = false } = {}) {
+  const denied = text => {
+    if (!quiet) toast(t(text));
     return false;
-  }
+  };
+  if (runningElsewhere(c.id) || !(await claimConversation(c.id))) return denied("此对话正在另一页面作答，稍后再发");
   // 等的这一会儿，后台回报可能已在这段里另起了一答，这段也可能已被删掉。正退回目录的不开工：动手写下的会被退回盖掉
-  if (rewindingOver(c)) {
-    toast(t("正在退回目录，稍后再发"));
-    return false;
-  }
-  return !conversationRunning(c.id) && store.conversations.includes(c);
+  const live = store.conversations.find(item => item.id === c.id) || c;
+  return rewindingOver(live) ? denied("正在退回目录，稍后再发") : true;
 }
 async function sendOrStop() {
   if (sendPreparing) return;
@@ -83,9 +88,7 @@ async function sendOrStop() {
         reasoning: normalizeReasoning(profile.reasoning)
       };
     }
-    if (fresh) {
-      if (!(await ensureWorkReady(c))) return;
-    } else if (!(await prepareTurn(c))) return;
+    if (!(await prepareTurn(c, { fresh }))) return;
     // 还在点发送的那个输入框前：照常收走案上的东西；已换走了：发的是当时那份，那份草稿里减去发出的、等待时接着写的留着，
     // 眼前这段的输入框不动，也不把人拉回来
     const stayed = draftKey() === sendingDraftKey;

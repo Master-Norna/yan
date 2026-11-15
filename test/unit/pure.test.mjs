@@ -560,7 +560,7 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
       { id: "b", name: "B", quota: "", usedTokens: 0 },
       { id: "c", name: "C", quota: "", usedTokens: 0 }
     ],
-    memory: { enabled: true, items: [{ id: "m1", text: "旧" }] },
+    memory: { enabled: true, items: [{ id: "m1", category: "一", text: "旧" }] },
     drafts: { x: { text: "草" } }
   };
   const mine = {
@@ -574,8 +574,8 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
     memory: {
       enabled: true,
       items: [
-        { id: "m1", text: "旧" },
-        { id: "m2", text: "我记的" }
+        { id: "m1", category: "一", text: "旧" },
+        { id: "m2", category: "二", text: "我记的" }
       ]
     },
     drafts: {}
@@ -592,8 +592,8 @@ test("mergeConfig3：自己改过的取自己的，没改的取对方的；按 i
     memory: {
       enabled: true,
       items: [
-        { id: "m1", text: "旧" },
-        { id: "m3", text: "它记的" }
+        { id: "m1", category: "一", text: "旧" },
+        { id: "m3", category: "三", text: "它记的" }
       ]
     },
     drafts: { x: { text: "草" }, y: { text: "它的草稿" } }
@@ -670,6 +670,56 @@ test("mergeConfig3：两处各添预设、分组、MCP 与环境工具时都留�
   assert.deepEqual(merged.env.packs, ["data", "office", "web", "media", "image"]);
   assert.equal(merged.env.pip, "sympy");
   assert.equal(merged.env.mirror, "official");
+});
+test("mergeConfig3：目录组的名字按目录合并，两页各改一个不互相盖掉", () => {
+  const meta = names => ({
+    version: 6,
+    settings: { theme: "light", workdirNames: names },
+    profiles: [],
+    memory: { enabled: true, items: [] },
+    drafts: {}
+  });
+  // 同一份底子，这边给 b 起名、那边给 a 起名：两个名字都该留下（整份换掉会只剩后写的那个）
+  const merged = f.mergeConfig3(meta({}), meta({ "E:/b": "乙" }), meta({ "E:/a": "甲" })).settings;
+  assert.deepEqual(merged.workdirNames, { "E:/a": "甲", "E:/b": "乙" });
+  // 一边改回目录名（删掉那个键）、另一边没动它：删照键传播，另一边新起的名字留着
+  const removed = f.mergeConfig3(
+    meta({ "E:/a": "甲", "E:/b": "乙" }),
+    meta({ "E:/b": "乙" }),
+    meta({ "E:/a": "甲", "E:/b": "乙", "E:/c": "丙" })
+  ).settings;
+  assert.deepEqual(removed.workdirNames, { "E:/b": "乙", "E:/c": "丙" });
+});
+test("mergeConfig3：「哪一组停在原处」的时刻也按键合并，两页各删不同组不互相盖掉", () => {
+  const meta = groupAt => ({
+    version: 6,
+    settings: { theme: "light", groupAt },
+    profiles: [],
+    memory: { enabled: true, items: [] },
+    drafts: {}
+  });
+  const merged = f.mergeConfig3(
+    meta({}),
+    meta({ "group:g1": "2026-11-14T10:00:00Z" }),
+    meta({ "group:g2": "2026-11-14T11:00:00Z" })
+  ).settings;
+  assert.deepEqual(merged.groupAt, { "group:g2": "2026-11-14T11:00:00Z", "group:g1": "2026-11-14T10:00:00Z" });
+  // 同一组两边都往后挪过时刻（各删了一段）：取较晚的那个——先写盘的那页再存一次，不会把晚的盖回早的
+  const same = key =>
+    f.mergeConfig3(
+      meta({ [key]: "2026-11-14T09:00:00Z" }),
+      meta({ [key]: "2026-11-14T10:00:00Z" }),
+      meta({ [key]: "2026-11-14T11:00:00Z" })
+    ).settings.groupAt[key];
+  assert.equal(same("group:g1"), "2026-11-14T11:00:00Z");
+  assert.equal(same("E:/proj"), "2026-11-14T11:00:00Z");
+  // 组删空（这一页把键清了）、另一边没动：键跟着删，组不再留着旧时刻
+  const cleared = f.mergeConfig3(
+    meta({ "group:g1": "2026-11-14T09:00:00Z" }),
+    meta({}),
+    meta({ "group:g1": "2026-11-14T09:00:00Z" })
+  ).settings;
+  assert.equal("group:g1" in (cleared.groupAt || {}), false);
 });
 test("looksLikeMermaid / liftBareHtml：写岔了的流程图、没包围栏的交互内容照样认得，普通代码与别的 HTML 不误伤", () => {
   assert.equal(f.looksLikeMermaid("flowchart TD\n  A --> B"), true);

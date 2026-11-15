@@ -82,6 +82,8 @@ function prepareBrowser(config, where) {
     origins.add(`http://127.0.0.1:${port}`);
     const line = `--remote-allow-origins=${[...origins].join(",")}`;
     allow < 0 ? extra.push(line) : (extra[allow] = line);
+    // 服务退出可能连浏览器一并结束；原生恢复气泡不在游目的网页画面里，不能让它挡着下次打开。
+    if (!extra.includes("--hide-crash-restore-bubble")) extra.push("--hide-crash-restore-bubble");
     // 无头的不必挪；人自己定了窗口位置的照人的
     if (!args.includes("--headless") && launch.headless !== true && !extra.some(item => item.startsWith("--window-position="))) {
       extra.push("--window-position=-32000,-32000");

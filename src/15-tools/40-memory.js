@@ -1,23 +1,60 @@
 // 言 · 录（记忆）与旧谈：都在浏览器里完成，不经桥接，也不需确认——每一步都在行迹里显示，记忆在设置页可改可删。
-// remember 在专司「记忆优化」配好时才有、只给主模型：记忆一类一份，写的是那一类改后的全文（见 11-memory.js）。
+// remember 只给主模型：记忆一类一份，写的是那一类改后的全文；按本答读到的版本核对（见 11-memory.js）。
 // 查旧谈、读旧谈常给：翻的是自己的对话，与记忆开不开无关
 const CONVERSATION_MESSAGE_CHARS = 1500; // read_conversation 每条消息最多给这么多字
 defineTool({
   name: "remember",
   group: "memory",
   label: t("记入"),
-  offer: () => memoryOn(),
+  offer: ctx => memoryOn(ctx.conversation),
   mainOnly: true,
   sideEffect: true,
-  run(step, args) {
-    const category = cleanMemoryCategory(args.category),
-      did = writeMemory(category, args.text);
+  async run(step, args, { memory, memoryUpdates, conversation }) {
+    const category = cleanMemoryCategory(args.category);
     step.title = category;
-    if (did) saveStore();
+    if (!memoryOn(conversation)) return { ok: false, content: "记忆已关闭，没有写入。", display: "未写入" };
+    if (!memory) return { ok: false, content: "本答未带入记忆，没有写入。", display: "未写入" };
+    const item = memoryOf(category),
+      stamp = memoryStamp(item);
+    if ((memory.get(category) || "") !== stamp) {
+      memoryUpdates?.set(category, stamp);
+      return {
+        ok: false,
+        content: `「${category}」在本答读入后已变化，没有写入。请以以下最新内容为基础重新修改：\n${item ? item.text : "（此类已删去）"}`,
+        display: "记忆已变化"
+      };
+    }
+    const did = writeMemory(category, args.text);
+    memoryUpdates?.set(category, memoryStamp(memoryOf(category)));
+    let flushed = true;
+    if (did) {
+      notePendingMemory(category);
+      saveStore();
+      // 本页的版本核对挡不住别的浏览器：真落盘时若那边也改过这一类，磁盘上的留作正本，把最新正文交回重写
+      // （见 01-store/20-config.js 的 mergeMemoryItems）。写不成（桥接不在、超时）时判不了冲突，
+      // 但也不能报「已写入」——这一答里按新内容算，落盘留给退避重试，回话里说清
+      flushed = await flushConfig();
+      const clash = takeMemoryClash(category);
+      if (clash !== null) {
+        memoryUpdates?.set(category, memoryStamp(memoryOf(category)));
+        refreshMemorySettings();
+        return {
+          ok: false,
+          content: `「${category}」在别处改过，没有写入。请以以下最新内容为基础重新修改：\n${clash || "（此类已删去）"}`,
+          display: "记忆已变化"
+        };
+      }
+    }
     refreshMemorySettings();
     if (did === "delete") return { ok: true, content: t`已删去「${category}」`, display: "删去" };
     if (!did) return { ok: true, content: t`「${category}」没有变`, display: "未变" };
-    return { ok: true, content: t`已写入「${category}」`, display: did === "add" ? "新起" : "" };
+    if (!flushed)
+      return {
+        ok: true,
+        content: `「${category}」本页已改好，但还没写进存储目录（会自动重试）。这一答里按新内容算，别当它已经存住。\n${memoryOf(category).text}`,
+        display: "待落盘"
+      };
+    return { ok: true, content: `已写入「${category}」\n${memoryOf(category).text}`, display: did === "add" ? "新起" : "" };
   }
 });
 
@@ -45,7 +82,7 @@ defineTool({
     )) {
       if (c.id === conversation.id) continue;
       const lines = c.messages.filter(m => (m.role === "user" || m.role === "assistant") && m.content);
-      if (terms.length && !hitsAll(`${c.title}\n${lines.map(m => m.content).join("\n")}`, terms)) continue;
+      if (terms.length && !hitsAll(c.title, lines, terms)) continue;
       // 片段：命中的那一句前后；列最近的则取头一问的开头
       const hit = terms.length ? lines.find(m => m.content.toLowerCase().includes(terms[0])) : lines.find(m => m.role === "user"),
         text = String(hit?.content || "").replace(/\s+/g, " ");

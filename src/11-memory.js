@@ -1,24 +1,22 @@
-// 言 · 录（记忆）：一类一份、带进对话、改过后由专司「记忆优化」理一遍，与设置页；模型用的工具在 15-tools/40-memory.js
+// 言 · 录（记忆）：主模型维护、一类一份、每问带上最新版，与设置页；模型用的工具在 15-tools/40-memory.js
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // ── 录（记忆）──
 // 关于用户的话，按类各成一份全文（偏好、言的开发……），跨对话都带着。一类一份而非一条一事：一条条记时，模型多半另起一条、
 // 不去改旧的，越记越碎、越重复；一类一份，要记就得把那一类整份写过，旧的自然并进去。存的仍是 items（一类一项：id、类名、全文），
 // 同名的两项读入时并成一项（见 normalizeMemory）。
-// 照各家的朴素做法（ChatGPT 的已存记忆、Claude Code 的 MEMORY.md）：整份放进系统提示，每段对话第一次拼进系统提示时定格（打开即定格，刷新后重新定格）；主模型用 remember 当场改。
-// 专司「记忆优化」是总开关（同自动拟题，多花一点换体验）：记忆改过后，一答落定时只读各类全文理一遍——去重、改掉矛盾、删废话。
-// 不读对话，额度只在记忆真改过时花。记多少不设上限；遗忘不按时长、不按字数。不记出处：没什么用，对话删了还会指空
+// 整份放进系统提示：每一问现取，同一答内固定；只有内容变了才影响提示缓存。记多少不设上限，不按时间遗忘、不记出处。
 const MEMORY_UNSORTED = "未分类";
 /** 设置页「记忆」里选着的那一类；null 或已没了即最近动过的那一类 */
 let memoryCategoryOpen = null;
 /** 设置页右栏正改着这一类的全文 */
 let memoryEditing = false;
 /**
- * 专司「记忆优化」配好了：每段对话开头带上记忆、给 remember，改过后理一遍。预设没挑「记忆与旧谈」这一组的对话不带
+ * 记忆开关控制带入与记入；预设没挑「记忆与旧谈」这一组的对话不带
  * @param {Conversation} [conversation]
  */
 function memoryOn(conversation) {
   const preset = conversation ? presetOf(conversation) : null;
-  return dutyReady(store.settings.dutyMemory) && (!preset?.tools || preset.tools.includes("memory"));
+  return store.settings.memoryEnabled !== false && (!preset?.tools || preset.tools.includes("memory"));
 }
 function memoryChars() {
   return store.memory.items.reduce((sum, item) => sum + item.text.length, 0);
@@ -55,10 +53,10 @@ function memoryOf(name) {
 }
 /**
  * 写一类的全文：空的即删去这一类，没有这一类即新起；存不存由调用的定
- * @param {string} category @param {string} text @param {string} [at] 记作哪一刻改的（优化记在它送出之时，见 tuneOnce）
+ * @param {string} category @param {string} text
  * @returns {""|"add"|"update"|"delete"}
  */
-function writeMemory(category, text, at = now()) {
+function writeMemory(category, text) {
   const name = cleanMemoryCategory(category),
     clean = cleanMemoryText(text),
     item = memoryOf(name);
@@ -69,10 +67,10 @@ function writeMemory(category, text, at = now()) {
   }
   if (item) {
     if (item.text === clean) return "";
-    Object.assign(item, { text: clean, updatedAt: at });
+    Object.assign(item, { text: clean, updatedAt: now() });
     return "update";
   }
-  store.memory.items.push({ id: memoryId(), category: name, text: clean, updatedAt: at });
+  store.memory.items.push({ id: memoryId(), category: name, text: clean, updatedAt: now() });
   return "add";
 }
 function keywordTerms(query) {
@@ -81,94 +79,40 @@ function keywordTerms(query) {
     .split(/\s+/)
     .filter(Boolean);
 }
-function hitsAll(text, terms) {
-  const lower = String(text || "").toLowerCase();
-  return terms.every(term => lower.includes(term));
+/** 这些词是否都出现过。题头与各条消息分开找，不先把它们拼成一整段——一段几 MB 的长对话，
+ *  拼一次就是给主线程多备一份全文，而命中多半在前几条就齐了。
+ *  与「拼起来再逐个 includes」等价：词是按空白切出来的、本身不含换行，不会恰好跨在两段之间。 */
+function hitsAll(title, messages, terms) {
+  const left = new Set(terms);
+  const scan = piece => {
+    const lower = String(piece || "").toLowerCase();
+    for (const term of [...left]) if (lower.includes(term)) left.delete(term);
+  };
+  scan(title);
+  for (const message of messages) {
+    if (!left.size) break;
+    scan(message.content);
+  }
+  return !left.size;
 }
 // ── 带进对话 ──
-/** @type {Map<string, string>} 各段对话第一次拼进系统提示时定格的那份记忆（打开即定格，刷新后重新定格）：此后别处改、优化都不改它，系统提示不变，前面的缓存接得上；本段自己记的本就在上下文里 */
-const memorySnapshots = new Map();
-// 用户自己动手清空记忆、删去一类：本页各段对话定的那份一并作废，下一回画到时就按现在的记忆重新定格。
-// 模型自己记的、专司理的不在此列——定格本就是为了让系统提示与缓存不变
-function forgetMemorySnapshots() {
-  memorySnapshots.clear();
+/** 模型读到的一类的版本：删后重建即使正文相同，也不当作旧的一类。 */
+function memoryStamp(item) {
+  return item ? JSON.stringify([item.id, item.text, item.updatedAt]) : "";
 }
-/** 整份记忆，一类一段（最近动过的在前） */
-function memoryText() {
+/** 整份记忆，一类一段；主答同时记下各类版本，写入时核对，旁注与计数不改主答的这份记录。
+ * @param {Map<string, string>|null} [seen]
+ */
+function memoryText(seen = null) {
+  seen?.clear();
   return memoryCategories()
-    .map(item => `「${item.category}」\n${item.text}`)
+    .map(item => {
+      seen?.set(item.category, memoryStamp(item));
+      return `「${item.category}」\n${item.text}`;
+    })
     .join("\n\n");
 }
-/** @param {Conversation} conversation */
-function memorySnapshot(conversation) {
-  if (!memorySnapshots.has(conversation.id)) memorySnapshots.set(conversation.id, memoryText());
-  return memorySnapshots.get(conversation.id) || "";
-}
-// ── 优化 ──
-// 记忆改过（有一类晚于 tunedAt：主模型记的、人在设置里改的、别处同步来的），一答落定时交专司「记忆优化」理一遍。
-// 它只读各类全文，答回要改的那几类的新全文，没提到的类一字不动。可以并类、改类名，整批都依赖送出的那份全文：
-// 等待期间记忆或存储根变了，这一批就作废，不能只按结果类名比对——搬到新类里的旧内容也会把人刚删改的带回来。
-// 它写的与 tunedAt 都记作送出那一刻，不会一回回理自己的手笔。没成提示一句（见 dutyFailed，同样的错只提一回），下一答落定时再来
-let tuning = null;
-function memoryStale() {
-  const at = store.memory.tunedAt || "";
-  return store.memory.items.some(item => String(item.updatedAt) > at);
-}
-function tuneMemory() {
-  if (tuning || !memoryOn() || !memoryStale()) return tuning;
-  tuning = tuneOnce()
-    .then(
-      () => dutyOk("memory"),
-      error => dutyFailed("memory", error)
-    )
-    .finally(() => (tuning = null));
-  return tuning;
-}
-async function tuneOnce() {
-  const at = now(),
-    root = bootstrap.store?.root,
-    sent = JSON.stringify(store.memory),
-    reply = await askDuty("memory", prompt("memory.case", { items: memoryText() }), {
-      systemPrompt: prompt("memory.system"),
-      maxTokens: 8000,
-      signal: AbortSignal.timeout(180000)
-    });
-  if (bootstrap.store?.root !== root || JSON.stringify(store.memory) !== sent) throw Error("记忆或存储位置已变化，这批整理未写入");
-  let changed = 0,
-    invalid = 0;
-  for (const op of parseMemoryOps(reply)) {
-    // 只认字符串：缺了 text（或给 null、数字、数组）是模型没按约定答，不能当成「空串即删去这一类」把一整类删掉
-    if (!op || typeof op !== "object" || !op.category || typeof op.text !== "string") {
-      invalid += 1;
-      continue;
-    }
-    if (writeMemory(op.category, op.text, at)) changed += 1;
-  }
-  // 有一条没按约定答就不算理成：tunedAt 不前进，下一答落定时再来。已落地的照留，也要当场存下、画出来——
-  // 不然只在内存里，等别的动作碰巧存一次，其间多页同步可能把它盖掉
-  if (invalid) {
-    if (changed) {
-      saveStore();
-      refreshMemorySettings();
-    }
-    throw Error(`有 ${invalid} 条不合约定的项`);
-  }
-  store.memory.tunedAt = at;
-  saveStore();
-  refreshMemorySettings();
-  if (changed) toast(t`记忆：理过 ${changed} 类`);
-}
-/** 答复里的那个 JSON 数组：裹了围栏、前后多说了几句都认；找不到就当这回没理成 @param {string} text */
-function parseMemoryOps(text) {
-  const body = String(text || ""),
-    from = body.indexOf("["),
-    to = body.lastIndexOf("]");
-  if (from < 0 || to < from) throw Error("没给出改动清单");
-  const ops = JSON.parse(body.slice(from, to + 1));
-  if (!Array.isArray(ops)) throw Error("给的不是清单");
-  return ops;
-}
-// 设置页开着「记忆」时，记入或理过要立刻反映出来；正在打字的不打断（重画会把输入框连同已打的字一起冲掉）
+// 设置页开着「记忆」时，记忆变动要立刻反映出来；正在打字的不打断（重画会把输入框连同已打的字一起冲掉）
 function refreshMemorySettings() {
   // 正文框、类名框、另起一类的名字框：焦点在这些可编辑处时不重画，不然正打的字连同输入框一起没。
   // 看的是焦点元素自己的标签——closest("#settingsContent") 回来的是设置面板那个容器（DIV），不是输入框
@@ -180,11 +124,15 @@ function refreshMemorySettings() {
 function memoryRichText(text) {
   return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 }
-// 分栏：左一列类目（选着的左缘一道朱、名字加重），末尾「另起一类」；右边这一类的全文，顶上类名就地可改，「改」「删去此类」两枚小画。
-// 全文平时只读，点「改」或点一下正文（没在划选字时）才换输入框
+// 分栏：左一列类目（选着的左缘一道朱、名字加重），末尾「另起一类」；右边这一类的全文，顶上「改」「删去此类」两枚小画。
+// 类名与全文平时只读，点「改」才换输入框
 function memorySplitHtml(categories, open) {
   const pane = open
-    ? `<div class="memory-pane-head"><input id="memoryCatName" class="memory-cat-name" value="${escapeHtml(open.category)}" maxlength="24" spellcheck="false" aria-label="${t(`分类名`)}" title="${t(`分类名；与已有分类同名即并为一类`)}"><span class="memory-day">${escapeHtml(formatDay(open.updatedAt))}</span><span class="memory-spacer"></span><span class="memory-ops"><button type="button" id="editMemory" title="${memoryEditing ? t("完成") : t("修改")}">${brushIcon("edit")}</button><button type="button" id="dropMemoryCat" class="memory-del" title="${t(`删去此类`)}">${brushIcon("strike")}</button></span></div>` +
+    ? `<div class="memory-pane-head">${
+        memoryEditing
+          ? `<input id="memoryCatName" class="memory-cat-name" value="${escapeHtml(open.category)}" maxlength="24" spellcheck="false" aria-label="${t(`分类名`)}" title="${t(`分类名；与已有分类同名即并为一类`)}">`
+          : `<span class="memory-cat-name">${escapeHtml(open.category)}</span>`
+      }<span class="memory-day">${escapeHtml(formatDay(open.updatedAt))}</span><span class="memory-spacer"></span><span class="memory-ops"><button type="button" id="editMemory" title="${memoryEditing ? t("完成") : t("修改")}">${brushIcon("edit")}</button><button type="button" id="dropMemoryCat" class="memory-del" title="${t(`删去此类`)}">${brushIcon("strike")}</button></span></div>` +
       `<div class="memory-sheet">${
         memoryEditing
           ? `<textarea class="memory-text" spellcheck="false" aria-label="${t(`记忆内容`)}">${escapeHtml(open.text)}</textarea>`
@@ -209,12 +157,9 @@ function memorySettingsHtml() {
   if (!open) memoryEditing = false;
   return (
     `<div class="settings-head">${brushIcon("memory", "settings-mark")}<h2>${t(`记忆`)}</h2><span class="settings-meta">${t`${categories.length} 类 · ${memoryChars()} 字`}</span></div>` +
-    // 开关在专司里（带不带、谁来理是一回事）；这一行只说眼下如何，「清空记忆」管的是全部，也放这一行
-    `<div class="setting-row"><div class="setting-copy"><strong>${on ? t("带进对话") : t("未带进对话")}</strong><small>${
-      on ? t("每段对话开头带上；记忆改过后，由专司「记忆优化」理一遍") : t("在专司里配好「记忆优化」后，才带上、才记")
-    }</small></div><div class="setting-actions">${
+    `<div class="setting-row"><div class="setting-copy"><strong>${on ? t("带进对话") : t("未带进对话")}</strong><small>${t("每一问带上最新记忆，由主模型决定记入、更新与忘记")}</small></div><div class="setting-actions">${
       categories.length ? `<button id="clearMemory" class="outline-btn" type="button">${t(`清空记忆`)}</button>` : ""
-    }<button id="memoryDuty" class="outline-btn" type="button">${t(`专司`)}</button></div></div>` +
+    }<div class="segmented"><button data-memory-enabled="true" class="${on ? "active" : ""}">${t("开")}</button><button data-memory-enabled="false" class="${on ? "" : "active"}">${t("关")}</button></div></div></div>` +
     memorySplitHtml(categories, open)
   );
 }
@@ -264,7 +209,6 @@ function bindMemoryEvents() {
     memoryEditing = false;
     if (area && item && !area.value.trim()) {
       store.memory.items = store.memory.items.filter(entry => entry !== item);
-      forgetMemorySnapshots();
       saveStore();
     }
     renderSettings();
@@ -287,10 +231,6 @@ function bindMemoryEvents() {
   });
   $("#memoryCatName")?.addEventListener("keydown", e => e.key === "Enter" && e.target.blur());
   $("#editMemory")?.addEventListener("click", () => (memoryEditing ? finish() : openMemoryCategory(memoryCategoryOpen, true)));
-  // 点一下正文即改；划选字时不算
-  host.querySelector("[data-memory-body]")?.addEventListener("click", () => {
-    if (!String(window.getSelection()).trim()) openMemoryCategory(memoryCategoryOpen, true);
-  });
   if (area && item) {
     fitTextarea(area);
     area.addEventListener("input", () => {
@@ -312,10 +252,13 @@ function bindMemoryEvents() {
       area.blur();
     });
   }
-  $("#memoryDuty")?.addEventListener("click", () => {
-    dutyOpen.add("memory");
-    openSettings("duty");
-  });
+  host.querySelectorAll("[data-memory-enabled]").forEach(button =>
+    button.addEventListener("click", () => {
+      store.settings.memoryEnabled = button.dataset.memoryEnabled === "true";
+      saveStore();
+      renderSettings();
+    })
+  );
   // 另起一类：就地换成输入框写名，回车即起一类、就地写全文；没写就离开，这一类随之消失。写的是已有的名字即打开那一类
   $("#newMemoryCat")?.addEventListener("click", e => {
     memoryNameField(e.currentTarget, "memory-cat memory-cat-new", typed => {
@@ -336,7 +279,6 @@ function bindMemoryEvents() {
     )
       return;
     store.memory.items = store.memory.items.filter(entry => entry !== item);
-    forgetMemorySnapshots();
     saveStore();
     openMemoryCategory(null);
   });
@@ -350,7 +292,6 @@ function bindMemoryEvents() {
     )
       return;
     store.memory.items = [];
-    forgetMemorySnapshots();
     saveStore();
     renderSettings();
     toast(t("记忆已清空"));

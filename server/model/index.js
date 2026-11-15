@@ -11,7 +11,7 @@
 const { Readable } = require("node:stream");
 const { finished } = require("node:stream/promises");
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
-const { OUTBOUND_MARK } = require("../web.js");
+const fetchUpstream = require("./upstream.js");
 const openai = require("./openai.js");
 const anthropic = require("./anthropic.js");
 const { hinted } = require("./chatgpt.js");
@@ -193,9 +193,8 @@ module.exports = function createModel({ home }) {
   // 列模型；接口没给出列表（不是 { data } 或 { models } 的样子）回 null。kind 为 image 时列画图的（专司里的生图）
   async function listModels(provider, config, kind = "") {
     if (provider.models) return provider.models(config);
-    const response = await fetch(provider.modelsUrl(config, kind), {
-      // 带上「桥接自己转出」的标记：baseUrl 指向桥接自己的受信接口时，server.js 据此拒绝，不替页面当跳板
-      headers: { ...(await provider.headers(config)), [OUTBOUND_MARK]: "1" },
+    const response = await fetchUpstream(provider.modelsUrl(config, kind), {
+      headers: await provider.headers(config),
       signal: AbortSignal.timeout(20000)
     });
     if (!response.ok) throw Error(await upstreamError(response));
@@ -261,10 +260,9 @@ module.exports = function createModel({ home }) {
       console.log(`${stamp()} → ${config.model}：${messages.length} 条消息${payload.tools ? `，工具 ${payload.tools.length} 个` : ""}`);
       // 上游的状态码原样带回页面（连不上记作 502）：429、5xx、过载这些页面会等一等再试，参数错之类的 4xx 不试
       const upstream = provider.request(payload, config);
-      const response = await fetch(provider.url(config), {
+      const response = await fetchUpstream(provider.url(config), {
         method: "POST",
-        // 带上「桥接自己转出」的标记：baseUrl 指向桥接自己的受信接口时，server.js 据此拒绝，不替页面当跳板
-        headers: { ...(await provider.headers(config, upstream)), [OUTBOUND_MARK]: "1" },
+        headers: await provider.headers(config, upstream),
         body: JSON.stringify(upstream),
         signal: requestSignal(res)
       }).catch(error => {

@@ -319,12 +319,11 @@ function heldHelpers(conversation) {
 async function resumeHelpers(conversation, steps = heldHelpers(conversation)) {
   steps = steps.filter(step => step.status === "interrupted" && step.sub);
   if (!steps.length) return;
-  if (runningElsewhere(conversation.id)) return toast(t("此对话正在另一页面作答，稍后再续"));
   const profile = requestJob(conversation.id)?.profile || activeProfile(conversation);
   if (!profile) return openSettings("models");
   if (quotaBlocked(profile)) return toast(t("余墨已尽，请调高上限或更换模型"));
   // 认领一回：几处页面同开时，只有一处续得上
-  if (!(await claimConversation(conversation.id))) return toast(t("此对话正在另一页面作答，稍后再续"));
+  if (!(await claimTurn(conversation))) return;
   if (!store.conversations.includes(conversation)) return;
   for (const asked of steps) {
     if (asked.status !== "interrupted") continue;

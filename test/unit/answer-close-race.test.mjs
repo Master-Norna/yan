@@ -35,7 +35,6 @@ test("streamReply：收尾途中对话被删，不再在它上面起新答、拟
       ledgerNote = () => "";
       intentNote = () => "";
       toolDefinitions = () => [{ type: "function", function: { name: "probe" } }];
-      tuneMemory = () => {};
       notifyAnswerEnd = finalizeAssistant = renderChatMeta = renderOutline = updateContextGauge = () => {};
       startTurn = async () => { counts.starts += 1; };
       maybeAutoTitle = async () => { counts.titles += 1; };

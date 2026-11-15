@@ -37,23 +37,22 @@ function settledDigest(message) {
 }
 /** @param {{ steps?: Step[] }} message 一答；帮手的一趟也一样：续派时它上一趟的行迹冠在新的活前面 */
 function stepsDigest(message, label = t("行迹")) {
-  const steps = (message.steps || []).filter(step => TOOLS.get(step.name)?.digest);
+  // 函数式 digest 按这一答的实际情形给行（如 check_command 只有真的结束、取消才算动过手）；
+  // 给空串即这一回不值得留痕，不能写成空的一行混进摘要
+  const steps = (message.steps || [])
+    .map(step => {
+      const digest = TOOLS.get(step.name)?.digest;
+      if (!digest) return "";
+      return digest === true
+        ? `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? t("用户跳过") : step.result || step.status}`
+        : digest(step);
+    })
+    .filter(Boolean);
   if (!steps.length) return "";
-  const line = step => {
-    const digest = TOOLS.get(step.name).digest;
-    return digest === true
-      ? `${step.name} ${String(step.title || "").slice(0, 80)} → ${step.status === "skipped" ? t("用户跳过") : step.result || step.status}`
-      : digest(step);
-  };
-  // 步数多了留头留尾：开头几步是怎么起的，末尾是做到了哪——续写、下一问最要紧的是后者，只留开头的话长活做到哪全丢了
   const items =
     steps.length > DIGEST_HEAD + DIGEST_TAIL
-      ? [
-          ...steps.slice(0, DIGEST_HEAD).map(line),
-          t`…中间 ${steps.length - DIGEST_HEAD - DIGEST_TAIL} 步从略…`,
-          ...steps.slice(-DIGEST_TAIL).map(line)
-        ]
-      : steps.map(line);
+      ? [...steps.slice(0, DIGEST_HEAD), t`…中间 ${steps.length - DIGEST_HEAD - DIGEST_TAIL} 步从略…`, ...steps.slice(-DIGEST_TAIL)]
+      : steps;
   return `［${label}］${items.join("；")}`;
 }
 const DIGEST_HEAD = 4,

@@ -5,6 +5,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Readable, Writable } from "node:stream";
 import { createRequire } from "node:module";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const require = createRequire(import.meta.url);
 const { OUTBOUND_MARK } = require("../../server/web.js");
@@ -103,4 +106,34 @@ test("没填 API Key 的配置也带标记：标记不靠鉴权头顺路带上",
   await ask({ baseUrl: "http://relay.test/v1", model: "gpt-x" });
   assert.equal(sent.headers[OUTBOUND_MARK], "1");
   assert.equal("Authorization" in sent.headers, false, "没填 Key 就不该凭空多出一个鉴权头");
+});
+
+test("生图与对话共用模型的出站边界，鉴权照旧", async () => {
+  answer = () => new Response(JSON.stringify({ data: [{ b64_json: "iVBORw0KGgo=" }] }));
+  const res = new Res();
+  await model.routes["POST /api/image"](Readable.from([Buffer.from(JSON.stringify({ profile: openai, prompt: "一片山水" }))]), res);
+  assert.equal(res.status, 200, res.text);
+  assert.equal(sent.headers[OUTBOUND_MARK], "1");
+  assert.equal(sent.headers.Authorization, "Bearer sk-test");
+  assert.match(JSON.parse(res.text).images[0].data, /^data:image\/png;base64,/);
+});
+
+test("订阅自有的列模型请求也经过共同出口", async () => {
+  const home = mkdtempSync(path.join(tmpdir(), "yan-model-outbound-"));
+  writeFileSync(
+    path.join(home, "ChatGPT 登录.json"),
+    JSON.stringify({ tokens: { access_token: "test-access", refresh_token: "test-refresh", expires_at: Date.now() + 3600e3 } })
+  );
+  try {
+    const subscribed = createModel({ home: () => home }),
+      res = new Res();
+    answer = () => new Response(JSON.stringify({ data: [{ slug: "test-model", visibility: "list" }] }));
+    await subscribed.routes["POST /api/models"](Readable.from([Buffer.from(JSON.stringify({ profile: { api: "chatgpt" } }))]), res);
+    assert.equal(res.status, 200, res.text);
+    assert.equal(sent.headers[OUTBOUND_MARK], "1");
+    assert.equal(sent.headers.Authorization, "Bearer test-access");
+    assert.deepEqual(JSON.parse(res.text).models, ["test-model"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

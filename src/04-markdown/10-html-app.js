@@ -255,6 +255,16 @@ function syncAppScroll(el) {
       "*"
     );
 }
+// 载入兜底只管「iframe 根本没应声」：沙箱页没起来、预览运行时没跑起来，才判「未能载入」。
+// 它一开口（ready 是第一条）这条计时就撤掉——mermaid 有 3.5 MB，冷态下首次解析常超过六秒，
+// 那是画得慢，不是载入失败；后到的 ready 虽会把状态改回来，但错字已闪了一下（见 test/viz-inline.mjs）
+const appLoadTimers = new WeakMap();
+function settleHtmlAppLoad(el) {
+  const timer = appLoadTimers.get(el);
+  if (!timer) return;
+  clearTimeout(timer);
+  appLoadTimers.delete(el);
+}
 function mountHtmlApp(el) {
   const id = `app${uid().replace(/[^a-z0-9]/gi, "")}`;
   el.dataset.appId = id;
@@ -265,12 +275,17 @@ function mountHtmlApp(el) {
   if (label) label.textContent = t("html · 正在载入");
   const stage = el.querySelector(".html-app-stage");
   stage.innerHTML = `<iframe sandbox="allow-scripts" title="${t(`隔离的 HTML 交互预览`)}" src="./preview.html#${id}"></iframe>`;
-  setTimeout(() => {
-    if (!el.isConnected || el.dataset.appId !== id || el.dataset.appState !== "loading") return;
-    el.dataset.appState = "error";
-    el.classList.add("html-app-error");
-    if (label) label.textContent = t("html · 未能载入");
-  }, 6000);
+  settleHtmlAppLoad(el);
+  appLoadTimers.set(
+    el,
+    setTimeout(() => {
+      appLoadTimers.delete(el);
+      if (!el.isConnected || el.dataset.appId !== id || el.dataset.appState !== "loading") return;
+      el.dataset.appState = "error";
+      el.classList.add("html-app-error");
+      if (label) label.textContent = t("html · 未能载入");
+    }, 6000)
+  );
 }
 function renderHtmlApps(root) {
   for (const el of root.querySelectorAll(".html-app[data-html-app]:not([data-rendered])")) mountHtmlApp(el);
@@ -329,6 +344,7 @@ function bindHtmlAppEvents() {
       el => el.dataset.appId === data.id && el.querySelector("iframe")?.contentWindow === event.source
     );
     if (!app) return;
+    settleHtmlAppLoad(app);
     if (data.type === "yan-preview-ready") return sendHtmlApp(app);
     if (data.type === "yan-preview-size") return sizeHtmlApp(app, Number(data.height) || 0);
     if (data.type === "yan-preview-escape") return void (app.classList.contains("work-expanded") && closeExpandedWork());

@@ -5,3 +5,5 @@ test/.tmp/
 support.js
 app.css
 dist/
+# 本机的目录记忆与运行数据，不随仓库分发
+.yan/

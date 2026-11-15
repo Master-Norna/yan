@@ -70,6 +70,7 @@
  * @property {Array<{ text: string, status: string }>} [plan] update_plan 的清单
  * @property {number} [exitCode]
  * @property {boolean} [readOnly] 只读指令，免确认
+ * @property {boolean} [effect] 这一步算不算动了手（见 15-tools/00-registry.js 的 sideEffectOf）：守、缓存作废、收尾重查都按它判，check_command 看后台为假、结束它为真
  * @property {string} [sandboxWhy] 问而后行里严的沙箱会拦下它的原因；请示时写明，批了就出沙箱跑
  * @property {{ id: string, claim: string, target: string }} [gate] 正等用户批的守的关口（见 keepHook），批完即去
  * @property {string[] | boolean} [granted] 批过了哪几条守的关口（旧存盘是 true）：这件工具自己不再另问，审查也知道那几条守这一步已照过
@@ -211,7 +212,7 @@
  * @property {CommandPolicy|""} policy 选它时的指令权限；空则照设置里的默认
  */
 /** @typedef {Pick<Profile, "baseUrl"|"apiKey"|"model"|"api">} Endpoint 发一次请求要的那几样：模型配置与专司里另配的一份都够 */
-/** @typedef {{ on: boolean, api: "openai"|"anthropic"|"siliconflow"|"chatgpt", baseUrl: string, apiKey: string, model: string, modelList: string[] }} Duty 专司里另配的一份（审查、记忆、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
+/** @typedef {{ on: boolean, api: "openai"|"anthropic"|"siliconflow"|"chatgpt", baseUrl: string, apiKey: string, model: string, modelList: string[] }} Duty 专司里另配的一份（审查、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
 /** @typedef {{ id: string, category: string, text: string, updatedAt: string }} MemoryItem 记忆的一类：类名与全文 */
 /** @typedef {{ text: string, attachments: Attachment[], quote?: Quote|null, updatedAt?: string }} Draft */
 /**
@@ -230,10 +231,11 @@
  * @property {boolean} [notify] 桌面通知（设置 → 通用）：页面不在眼前时答毕、待你定夺、帮手断了弹系统通知；准许各浏览器自记
  * @property {boolean} autoTitle 自动拟题（设置 → 专司）：随对话的模型，只有开关
  * @property {Duty} dutyReview 审查（设置 → 专司）：审而后行里规则标疑的那一步交它再判；关着即照规则回绝
- * @property {Duty} dutyMemory 记忆优化（设置 → 专司）：配好了每段对话开头带上记忆、主模型可记，记忆改过后由它理一遍；关着即不带不记
+ * @property {boolean} memoryEnabled 全局记忆（设置 → 记忆）：每问带上最新版，由主模型维护；关着即不带不记
  * @property {Duty} dutyImage 生图（设置 → 专司）：配了才把生图交给模型
  * @property {string} [pendingWorkdir] 欢迎页目录签里待绑的目录
  * @property {string[]} collapsedRepos
+ * @property {Record<string, string>} [workdirNames] 目录组自起的名字（键：目录）：只改侧栏显示，不动真实目录；空即用目录末段
  * @property {Record<string, string>} [groupAt] 侧栏各组删过的对话里最近动过的时刻（键同 collapsedRepos：目录，或 group:组 id）：删了组里最新的一段，组不往下掉（见 historyKey）
  * @property {CommandPolicy} commandPolicyDefault 新对话默认的指令权限模式
  * @property {boolean} [sandbox] 沙箱总开关（默认开）：桥接那头筛指令、锁目录、去机密环境变量
@@ -255,7 +257,7 @@
  * @property {Settings} settings
  * @property {Profile[]} profiles
  * @property {Conversation[]} conversations
- * @property {{ tunedAt: string, items: MemoryItem[] }} memory tunedAt：专司「记忆优化」上回理到的那一刻，此后改过的类还没理过
+ * @property {{ items: MemoryItem[] }} memory 一类一份全文，由主模型维护
  * @property {Record<string, Draft>} drafts
  */
 // 内置提示词都在 prompts/ 目录里，这里只做取值与填空；{{名字}} 由 vars 填入，缺文件时报错并给空串，不让请求整个失败
@@ -272,7 +274,7 @@ function prompt(path, vars = {}) {
 function fillTemplate(text, vars = {}) {
   return (Array.isArray(text) ? text.join("\n") : String(text)).replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? "")).trim();
 }
-const APP_VERSION = "1.3.3"; // 与 package.json 同步；以桥接返回的为准
+const APP_VERSION = "1.3.9"; // 与 package.json 同步；以桥接返回的为准
 const FOLLOW_THRESHOLD = 80;
 // 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；按轮计，同一轮并发的几次调用只算一轮。
 // 默认值在这里，实际值在「设置 → 工具」里可改，留空（记作 0）即不限

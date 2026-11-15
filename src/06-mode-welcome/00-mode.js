@@ -12,7 +12,9 @@ function sandboxed() {
 }
 function workMode() {
   const c = currentConversation();
-  return c ? isWork(c) : !!(store.settings.pendingWorkdir || "").trim();
+  // 与发送时同一口径（见 14-chat-engine/10-send.js）：待绑的目录优先，其次是待归组自带默认目录——
+  // 后者发出去也是执事，欢迎页的印章、副标题与推荐语都得照这个说，不能一边称对谈、一边落进绑了目录的对话
+  return c ? isWork(c) : !!(store.settings.pendingWorkdir || "").trim() || !!pendingGroup()?.workdir;
 }
 // 卷宗目录：存储根里的 卷宗/（桥接报来的位置）；没绑目录的对话，工具都落在这里
 function archiveDir() {

@@ -30,7 +30,7 @@ function usageSum(a, b) {
  * @param {Message|SubAgent} target 写进哪里：主答、旁注的消息，或帮手
  * @param {Array<Record<string, any>>} history 送给接口的消息，就地追加
  * @param {{ profile: Profile, conversation: Conversation, host: Message, signal: AbortSignal, overrides: Record<string, any>,
- *   tally: ReturnType<typeof newTally>, roundLimit: number, scope?: string, kind?: UsageKind, inbox?: any, budget?: number,
+ *   tally: ReturnType<typeof newTally>, roundLimit: number, scope?: string, kind?: UsageKind, inbox?: any, budget?: number, memory?: Map<string, string>,
  *   onFrame?: (() => void)|null, onStatus?: (label?: string) => void, afterRound?: () => Promise<string>,
  *   beforeEnd?: () => Promise<Record<string, any>|null> }} run
  *   host：步骤画在哪条消息上（帮手的步骤画在主答的差遣卡里）；scope：步骤记上属于哪名帮手；kind：墨记进用量簿的哪一类（帮手按 scope 认）；
@@ -203,7 +203,7 @@ async function runRounds(target, history, run) {
       ...thoughtEcho(target, thoughtStart, profile)
     });
     const offered = new Set(overrides.tools.map(tool => tool.function?.name)),
-      { outcomes, images } = await runSteps(steps, conversation, host, signal, toolCache, offered, run.kind === "side");
+      { outcomes, images } = await runSteps(steps, conversation, host, signal, toolCache, offered, run.kind === "side", run.memory);
     // 这一批跑着时按了「止」：工具结果不再装进历史、排着的补言也不在这里递（留给 settleSupplements 放回案上），就此停住
     signal.throwIfAborted();
     for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });

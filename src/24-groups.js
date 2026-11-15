@@ -2,9 +2,10 @@
 // 侧栏有两处：历史里与「工」组一样按时间排（印文是「集」，组首「＋」在此组另起一段、「⋯」改名 / 设置 / 解散；对话拖到组上即移入、拖到组外即移出），
 // 以及「翻页」「卷宗」之下的「分组」入口——进去是分组页（与卷宗同一本簿，一组一条）：点开一组可改名、择预设、定默认目录、看组里的对话（可移出）、解散。
 // 组能带的两样都只管新起的对话：预设（提示词、工具、模型、权限一并换上）与默认目录（绑上即为行）。
-// 组里的对话置顶，只在组内排到最前，不跳出组去
-/** @type {string|null} 侧栏里正在改名的那一组 */
-let renamingGroupId = null;
+// 组里的对话置顶，只在组内排到最前，不跳出组去。
+// 「工」组是同一套画法的另一头：它由对话的 workdir 派生，不另存实体，组首「⋯」只有改名（只改侧栏显示，不动真实目录）与删除（整组对话一并移除）
+/** @type {string|null} 侧栏里正在改名的那一段：键同 collapsedRepos——「集」组是 group:组 id，目录组是目录 */
+let renamingSection = null;
 /** @type {string|null} 分组页上点开的那一组；空即列表 */
 let groupPageId = null;
 
@@ -36,7 +37,6 @@ function moveToGroup(c, groupId) {
   markDirty(c.id);
   saveStore();
   renderHistory();
-  renderGroupTags();
   if (view === "groups") renderGroupsPage();
 }
 // 在此组另起一段：新对话归进这一组；组带了预设的就用组的预设（预设带模型的连模型一起，见 activeProfile）
@@ -46,7 +46,14 @@ function newChatInGroup(id) {
   newChat();
 }
 function startGroupRename(id) {
-  renamingGroupId = id;
+  startSectionRename(`group:${id}`);
+}
+/** @param {string} key 侧栏里那一段的键：group:组 id，或目录 */
+function startSectionRename(key) {
+  // 对话条目的改名与这里同时只留一处（见 06-mode-welcome/30-history.js 的 startRename）
+  renamingId = null;
+  renamingDirty = false;
+  renamingSection = key;
   renderHistory();
   const input = /** @type {HTMLInputElement|null} */ ($("#history .group-rename"));
   input?.focus();
@@ -61,12 +68,40 @@ function renameGroup(id, value) {
   if (!group || !name || name === group.name) return;
   group.name = name;
   saveStore();
-  renderGroupTags();
+  renderWelcome();
 }
-function commitGroupRename(value) {
-  const id = renamingGroupId;
-  renamingGroupId = null;
-  renameGroup(id, value);
+// 目录组的名字：自起的名字优先，没起过就用目录末段。只改侧栏显示的字，真实路径不动（悬停仍是完整目录）
+/** @param {string} dir */
+function workdirBase(dir) {
+  return dir.split(/[\\/]/).filter(Boolean).pop() || dir || t("未定目录");
+}
+/** @param {string} dir */
+function workdirTitle(dir) {
+  return (store.settings.workdirNames || {})[dir] || workdirBase(dir);
+}
+/** @param {string} dir @param {string} value 空、或与目录末段同名，即回到用目录名 */
+function renameWorkdir(dir, value) {
+  const base = workdirBase(dir),
+    name = String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 40),
+    names = (store.settings.workdirNames ||= {});
+  if (!name || name === base) {
+    if (!(dir in names)) return;
+    delete names[dir];
+  } else {
+    if (names[dir] === name) return;
+    names[dir] = name;
+  }
+  saveStore();
+}
+function commitSectionRename(value) {
+  const key = renamingSection;
+  renamingSection = null;
+  if (!key) return renderHistory();
+  if (key.startsWith("group:")) renameGroup(key.slice(6), value);
+  else renameWorkdir(key, value);
   renderHistory();
 }
 async function dissolveGroup(id) {
@@ -90,7 +125,7 @@ async function dissolveGroup(id) {
   if (groupPageId === id) groupPageId = null;
   saveStore();
   renderHistory();
-  renderGroupTags();
+  renderWelcome();
   if (view === "groups") renderGroupsPage();
 }
 // 组首「⋯」：改名、打开组的设置（分组页里这一组）、解散；在此组新建已有「＋」，不再列
@@ -105,6 +140,50 @@ function openGroupMenu(id, anchor) {
     ],
     { kind: "group", key: id }
   );
+}
+// 「工」组首「⋯」：改名（只改侧栏显示，不动真实目录）、删除（整组对话一并移除，目录里的文件不动）。
+// 「设置」「在此目录新建」不重复进菜单：前者是「集」组独有的配置，后者组首已有「＋」
+/** @param {string} dir @param {Element} anchor */
+function openRepoMenu(dir, anchor) {
+  openMenu(
+    anchor,
+    [
+      { id: "rename", label: t("改名"), run: () => startSectionRename(dir) },
+      { id: "delete", label: t("删除"), danger: true, run: () => void removeWorkdirGroup(dir) }
+    ],
+    { kind: "group", key: dir }
+  );
+}
+// 删除一整组：组里的对话连同附件一并移除（目录里的文件一个不碰）。别的页面正写着的那几段跳过，不硬删。
+// 「组里」照侧栏的归组口径算：置顶的单列、归进「集」组的在那一组里，都绑着这个目录也不属于这一组（见 renderHistory 的分法）
+/** @param {string} dir */
+async function removeWorkdirGroup(dir) {
+  const members = store.conversations.filter(c => historyKey(c) === dir),
+    busy = members.filter(c => runningElsewhere(c.id)),
+    targets = members.filter(c => !busy.includes(c)),
+    outside = store.conversations.filter(c => (c.pinned || groupOf(c)) && isWork(c) && c.workdir === dir).length,
+    name = workdirTitle(dir);
+  if (!targets.length) return toast(busy.length ? t("此组正在另一页面作答，暂不能删除") : t("这一组已没有对话"));
+  const notes = [
+    t`组里的 ${targets.length} 段对话将连同附件一并移除，目录里的文件不动，无法撤销。`,
+    busy.length ? t`另有 ${busy.length} 段正在另一页面作答，这回不动。` : "",
+    outside ? t`另有 ${outside} 段置顶或已归入分组的对话，不在此组，也不动。` : ""
+  ].filter(Boolean);
+  if (!(await askConfirm({ title: t`删除「${name}」这一组？`, body: notes.join("\n"), ok: t("删除") }))) return;
+  // 确认期间别处仍可接手作答、改归组或换进新版：只删原先选中、现在仍属于这一组且未被别页占用的记录。
+  const confirmed = new Set(targets.map(c => c.id)),
+    removing = store.conversations.filter(c => confirmed.has(c.id) && historyKey(c) === dir && !runningElsewhere(c.id));
+  // 一条也没剩下：别报「已删除 0 段对话」，照实说这一回没动
+  if (!removing.length) {
+    render();
+    return toast(t("这一组已没有对话"));
+  }
+  for (const c of removing) purgeConversation(c);
+  // 组散尽了，自起的名字也就没处可挂；还有对话绑着就留着
+  if (!store.conversations.some(c => isWork(c) && c.workdir === dir)) delete (store.settings.workdirNames || {})[dir];
+  saveStore();
+  render();
+  toast(t`已删除 ${removing.length} 段对话`);
 }
 // 对话「⋯」里的「移入分组」：列出各组，另有新建一组与移出
 /** @param {Conversation} c @param {Element} anchor */
@@ -133,19 +212,6 @@ function openMoveMenu(c, anchor) {
     ],
     { kind: "group-move" }
   );
-}
-
-// ---------- 输入框左下「＋」旁的分组签：欢迎页是待归的那一组（可撤），对话页是这段对话所在的组（点开分组页） ----------
-function renderGroupTags() {
-  const pending = pendingGroup(),
-    own = groupOf(currentConversation());
-  for (const [tag, group] of [
-    [$("#welcomeGroup"), pending],
-    [$("#chatGroup"), own]
-  ]) {
-    tag.classList.toggle("hidden", !group);
-    tag.querySelector(".group-tag-name").textContent = group?.name || "";
-  }
 }
 
 // ---------- 分组页 ----------
@@ -276,7 +342,7 @@ $("#groups").addEventListener("keydown", event => {
   }
 });
 
-// ---------- 侧栏历史里的分组：收起 / 展开、组首「＋」、双击改名 ----------
+// ---------- 侧栏历史里的分组：收起 / 展开、组首「＋」、双击改名、组首「⋯」 ----------
 $("#history").addEventListener("click", event => {
   const target = /** @type {HTMLElement} */ (event.target);
   const toggle = target.closest("[data-group-toggle]");
@@ -294,7 +360,12 @@ $("#history").addEventListener("click", event => {
   const more = target.closest("[data-group-menu]");
   if (more) {
     event.stopPropagation();
-    openGroupMenu(more.dataset.groupMenu, more);
+    return openGroupMenu(more.dataset.groupMenu, more);
+  }
+  const repoMore = target.closest("[data-repo-menu]");
+  if (repoMore) {
+    event.stopPropagation();
+    openRepoMenu(repoMore.dataset.repoMenu, repoMore);
   }
 });
 // 拖放：对话拖到一组上（组首或组里任一条）即移入那组，拖到组外即移出；拖着经过的组首提亮。只认侧栏里拖起的对话
@@ -338,23 +409,30 @@ $("#history").addEventListener("dragend", () => {
   document.querySelectorAll("#history .dragging").forEach(node => node.classList.remove("dragging"));
 });
 $("#history").addEventListener("dblclick", event => {
-  const toggle = /** @type {HTMLElement} */ (event.target).closest("[data-group-toggle]");
-  if (toggle && !renamingGroupId) startGroupRename(toggle.dataset.groupToggle);
+  const target = /** @type {HTMLElement} */ (event.target),
+    set = target.closest("[data-group-toggle]"),
+    repo = set ? null : target.closest("[data-repo-toggle]");
+  if (!set && !repo) return;
+  if (renamingSection) return;
+  startSectionRename(set ? `group:${set.dataset.groupToggle}` : repo.dataset.repoToggle);
 });
 $("#history").addEventListener("keydown", event => {
   const input = /** @type {HTMLInputElement} */ (event.target);
-  // 组首是 div（改名时里面要放输入框，按钮里放不得）：回车与空格照按钮开合
-  if (input.dataset?.groupToggle !== undefined && (event.key === "Enter" || event.key === " ")) {
+  // 组首是 div（改名时里面要放输入框，按钮里放不得）：「集」「工」两处都靠这一句，回车与空格照按钮开合
+  if (
+    (input.dataset?.groupToggle !== undefined || input.dataset?.repoToggle !== undefined) &&
+    (event.key === "Enter" || event.key === " ")
+  ) {
     event.preventDefault();
     return input.click();
   }
   if (!input.classList?.contains("group-rename")) return;
   if (event.key === "Enter") {
     event.preventDefault();
-    commitGroupRename(input.value);
+    commitSectionRename(input.value);
   } else if (event.key === "Escape") {
     event.stopPropagation();
-    renamingGroupId = null;
+    renamingSection = null;
     renderHistory();
   }
 });
@@ -363,7 +441,7 @@ $("#history").addEventListener(
   event => {
     const input = /** @type {HTMLInputElement} */ (event.target);
     // 侧栏重画时旧输入框被移走也会失焦：那不是改完了（重画已把敲的字接到新框里）
-    if (input.classList?.contains("group-rename") && renamingGroupId && !renderingHistory) commitGroupRename(input.value);
+    if (input.classList?.contains("group-rename") && renamingSection && !renderingHistory) commitSectionRename(input.value);
   },
   true
 );

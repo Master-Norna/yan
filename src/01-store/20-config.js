@@ -11,6 +11,7 @@ const CONFIG_BASE_KEY = "yan-config-base",
   CONFIG_SENT_KEY = "yan-config-sent";
 let configBase = "",
   configSaving = false,
+  configSaveTask = Promise.resolve(),
   configSaveAgain = false,
   configSaveFailures = 0;
 // 发出去的几份（按 savedAt 记，连同那时这边花了多少墨）：写进了磁盘却没听到回音——超时、页面关了——下回读到的「别处的新版」
@@ -24,6 +25,20 @@ function rememberSentConfig(savedAt, meta, spent = Object.fromEntries(spentHere)
 // 基准一旦认错（回音丢了、页面关了），相减会把自己花的整份当成对方的再加一遍、一回翻一倍；这样顶多把没确认的那一截多记一回
 const spentHere = new Map(),
   spentSettled = new Map();
+// 根变了，同步会话随之重开：锁、基准、重试与未确认用量都只属于原来那一处。
+// 已拷过去的沿用页面上的完整配置再写一遍，认已有数据的以那边为准，不能跨根结算上一回的回音。
+function resetConfigSync() {
+  clearTimeout(configSaveTimer);
+  configSaveTimer = null;
+  configBase = "";
+  configSyncedAt = 0;
+  configSaving = configSaveAgain = false;
+  configSaveTask = Promise.resolve();
+  configSaveFailures = 0;
+  sentConfigs.clear();
+  spentHere.clear();
+  spentSettled.clear();
+}
 function noteSpend(id, amount) {
   spentHere.set(id, (spentHere.get(id) || 0) + amount);
 }
@@ -80,6 +95,15 @@ function scheduleConfigSave() {
   clearTimeout(configSaveTimer);
   configSaveTimer = setTimeout(saveConfigNow, 1000);
 }
+// 换位置前把此刻的配置写稳。等待期间继续改的也一并落下；写不成就留在原处，不能让刚改的设置只存在旧页内存里。
+async function settleConfig() {
+  const scope = bootstrap.store;
+  do {
+    await saveConfigNow();
+    if (bootstrap.store !== scope) throw Error("存储位置已变化，请刷新页面后重试");
+    if (configSaveFailures) throw Error("配置尚未写入存储目录，稍后再换位置");
+  } while (JSON.stringify(metaOf()) !== configBase);
+}
 /** @param {{ force?: boolean }} [options] force：不比时间戳，这边就是定论（头一回立根、以浏览器为准的导入） */
 function saveConfigNow({ force = false } = {}) {
   clearTimeout(configSaveTimer);
@@ -87,16 +111,17 @@ function saveConfigNow({ force = false } = {}) {
   // 上一次还在路上：等它回来再写这一次，免得两次互相比时间戳
   if (configSaving && !unloading) {
     configSaveAgain = true;
-    return;
+    return configSaveTask;
   }
-  const meta = JSON.stringify(metaOf()),
+  const scope = bootstrap.store,
+    meta = JSON.stringify(metaOf()),
     spent = Object.fromEntries(spentHere),
     savedAt = Math.max(Date.now(), configSyncedAt + 1),
-    body = `{"config":${meta},"savedAt":${savedAt}${force ? "" : `,"base":${configSyncedAt}`}}`;
+    body = `{"root":${JSON.stringify(scope?.root || "")},"config":${meta},"savedAt":${savedAt}${force ? "" : `,"base":${configSyncedAt}`}}`;
   configSaving = true;
   rememberSentConfig(savedAt, meta, spent);
   // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再推）
-  fetch(`${apiBase}/api/store/config/save`, {
+  configSaveTask = fetch(`${apiBase}/api/store/config/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
@@ -105,6 +130,7 @@ function saveConfigNow({ force = false } = {}) {
   })
     .then(async response => {
       const data = await response.json().catch(() => ({}));
+      if (bootstrap.store !== scope) return;
       if (response.status === 409 && data.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
       if (!response.ok) throw Error(data.error || t`请求失败（${response.status}）`);
       configSaveFailures = 0;
@@ -114,7 +140,7 @@ function saveConfigNow({ force = false } = {}) {
       settleSpend(spent);
     })
     .catch(error => {
-      if (unloading) return;
+      if (unloading || bootstrap.store !== scope) return;
       if (!configSaveFailures)
         toast(
           bridgeTimedOut(error)
@@ -126,12 +152,31 @@ function saveConfigNow({ force = false } = {}) {
       configSaveTimer = setTimeout(saveConfigNow, Math.min(5000 * 2 ** Math.min(configSaveFailures - 1, 4), 60000));
     })
     .finally(() => {
+      if (bootstrap.store !== scope) return;
       configSaving = false;
       if (configSaveAgain) {
         configSaveAgain = false;
-        saveConfigNow();
+        return saveConfigNow();
       }
     });
+  return configSaveTask;
+}
+// 立刻把配置写下去、等它落定（记忆要当场知道那一类是否被别处改过，见 15-tools/40-memory.js 的 remember）。
+// 回 true 才算真写进了存储目录；写不成（桥接不在、超时）留给退避重试，回 false——那时判不了冲突，也不拦这一步
+async function flushConfig() {
+  const scope = bootstrap.store;
+  clearTimeout(configSaveTimer);
+  configSaveTimer = null;
+  for (let i = 0; i < 4; i++) {
+    try {
+      await saveConfigNow();
+    } catch {
+      return false; // 写不成：判不了冲突，也不拦这一步
+    }
+    if (bootstrap.store !== scope) return false;
+    if (!configSaving && !configSaveAgain) return !configSaveFailures;
+  }
+  return false;
 }
 // 磁盘上有一份配置：与这边对一对。磁盘上的不比基准新——这边改过就写下去；磁盘上的更新、这边没改过——换进来；
 // 两边都改过——三方合并后换进来，再写回去
@@ -156,8 +201,64 @@ function reconcileConfig(config, savedAt) {
   adoptConfig(mergeConfig3(JSON.parse(configBase), JSON.parse(mine), theirs, unsettledSpend), savedAt, JSON.stringify(theirs));
   saveConfigNow();
 }
+// 记忆一类一份，按类名合（见 11-memory.js）：旧版同类几条、删后重建，id 都对不上，按 id 比会当成两回事。
+// 两边都动过同一类时不默默取本地：磁盘上的那份留作正本，把冲突记下来交回 remember 重写（见 takeMemoryClash）。
+// 这与别处的合并取舍不同——记忆是主模型按「本答读到的那一版」整类改写的，本地压过对方就是拿旧认识盖掉新事实。
+/** @param {MemoryItem[]} [base] @param {MemoryItem[]} [mine] @param {MemoryItem[]} [theirs] */
+function mergeMemoryItems(base, mine, theirs) {
+  const index = list => new Map((Array.isArray(list) ? list : []).filter(item => item?.category).map(item => [item.category, item])),
+    same = (a, b) => JSON.stringify(a) === JSON.stringify(b),
+    B = index(base),
+    M = index(mine),
+    T = index(theirs),
+    out = new Map(T);
+  for (const category of new Set([...B.keys(), ...M.keys(), ...T.keys()])) {
+    const bv = B.get(category),
+      mv = M.get(category),
+      tv = T.get(category);
+    if (same(mv, bv)) continue; // 自己没动：磁盘上的照旧（改过、删了都算）
+    if (same(tv, bv)) {
+      // 只有自己动了
+      if (mv) out.set(category, mv);
+      else out.delete(category);
+      continue;
+    }
+    if (!mv && !tv) {
+      out.delete(category); // 两边都删了：不是冲突
+      continue;
+    }
+    // 两边都动过同一类而改的不一样：磁盘上的留着，冲突交回这一答重写
+    noteMemoryClash(category, tv);
+    if (tv) out.set(category, tv);
+    else out.delete(category);
+  }
+  const order = [...new Set([...T.keys(), ...M.keys()])];
+  return order.map(category => out.get(category)).filter(Boolean);
+}
+// 这一答正要写的那几类（remember 记下的）：落盘时若发现别处也改过，记下磁盘上的正文，交回模型重写。
+// 只回报这一答真要写的那几类——别处之间的冲突不该算到这一步头上
+const pendingMemoryWrites = new Set(),
+  memoryClashes = new Map();
+/** @param {string} category */
+function notePendingMemory(category) {
+  pendingMemoryWrites.add(category);
+}
+/** @param {string} category @param {MemoryItem | undefined} item 磁盘上的那一份；已删即 undefined */
+function noteMemoryClash(category, item) {
+  if (!pendingMemoryWrites.has(category)) return;
+  memoryClashes.set(category, item ? String(item.text || "") : "");
+}
+// 取走这一类的冲突（没有即 null），连同这一问的待写记号一并销掉
+/** @param {string} category @returns {string | null} */
+function takeMemoryClash(category) {
+  pendingMemoryWrites.delete(category);
+  if (!memoryClashes.has(category)) return null;
+  const text = /** @type {string} */ (memoryClashes.get(category));
+  memoryClashes.delete(category);
+  return text;
+}
 // 三方合并：base 是上次对齐时的那份。同一样东西，自己没动过的取对方的，自己动过的取自己的；
-// 模型、卷宗、记忆按 id 逐件比，设置与草稿按键逐项比；用量取对方的、加上这边还没确认写下的（unsettled，缺省按基准相减），不互相抹掉
+// 模型、卷宗按 id 逐件比，记忆按类名比，设置与草稿按键逐项比；用量取对方的、加上这边还没确认写下的（unsettled，缺省按基准相减），不互相抹掉
 function mergeConfig3(base, mine, theirs, unsettled = null) {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const keyed = (b, m, t, pick = (bv, mv, tv) => (same(mv, bv) ? tv : mv)) => {
@@ -202,6 +303,15 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
     settings.presets = byId(baseSettings.presets, mineSettings.presets, theirSettings.presets, (b, m, t) => keyed(b, m, t));
   if (has("groups")) settings.groups = byId(baseSettings.groups, mineSettings.groups, theirSettings.groups, (b, m, t) => keyed(b, m, t));
   if (has("mcpServers")) settings.mcpServers = keyed(baseSettings.mcpServers, mineSettings.mcpServers, theirSettings.mcpServers);
+  // 目录组的名字按键合并：两页各改一个目录，后写者不会把先写者的整份名字替掉（一页改回目录名＝删掉那个键，也照键传播）
+  if (has("workdirNames")) settings.workdirNames = keyed(baseSettings.workdirNames, mineSettings.workdirNames, theirSettings.workdirNames);
+  // 「哪一组停在原处」的时刻同样按键合并：两页各删不同组的一段，后写者不会把另一组的时刻抹掉。
+  // 它是时间锚点，不是「最后选择的设置」：两边都动过同一组时取较晚的那一个，否则先删到 10:00 的那页再存一次，
+  // 会把另一页 11:00 的值盖回去，组又往下掉（同键取本地值只适用于「最后一次选择即结果」的项）
+  if (has("groupAt"))
+    settings.groupAt = keyed(baseSettings.groupAt, mineSettings.groupAt, theirSettings.groupAt, (b, m, t) =>
+      String(t) > String(m) ? t : m
+    );
   if (has("env")) {
     const oldEnv = { ...defaultStore.settings.env, ...(baseSettings.env || {}) },
       myEnv = mineSettings.env || {},
@@ -220,8 +330,7 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
     settings,
     profiles: byId(base.profiles, mine.profiles, theirs.profiles, mergeProfile),
     memory: {
-      tunedAt: same(mine.memory?.tunedAt, base.memory?.tunedAt) ? theirs.memory?.tunedAt : mine.memory?.tunedAt,
-      items: byId(base.memory?.items, mine.memory?.items, theirs.memory?.items)
+      items: mergeMemoryItems(base.memory?.items, mine.memory?.items, theirs.memory?.items)
     },
     drafts: keyed(base.drafts, mine.drafts, theirs.drafts)
   };
@@ -260,9 +369,23 @@ function mergeConfig(config) {
     mcpServers: { ...(store.settings.mcpServers || {}), ...(disk.settings.mcpServers || {}) }
   };
   store.profiles = union(disk.profiles, store.profiles);
+  // 记忆按类名合：没有基准时，两边同名的整类正文由 normalizeMemory 依次接起（头一回碰上这个存储根，
+  // 两处各自记下的东西都不该丢）；这一答正写的那几类例外——两边都有而正文不同就记下冲突交回重写，
+  // 本地那一份不接上去，否则模型会把自己要改写的那一版和磁盘上的拼成一段
+  for (const category of pendingMemoryWrites) {
+    const diskItem = disk.memory.items.find(item => item.category === category),
+      localItem = store.memory.items.find(item => item.category === category);
+    if (diskItem && localItem && diskItem.text !== localItem.text) noteMemoryClash(category, diskItem);
+  }
   store.memory = normalizeMemory({
-    tunedAt: disk.memory.tunedAt || store.memory.tunedAt,
-    items: union(disk.memory.items, store.memory.items)
+    items: [
+      ...disk.memory.items,
+      ...store.memory.items.filter(
+        item =>
+          !disk.memory.items.some(other => other.id === item.id) &&
+          !(pendingMemoryWrites.has(item.category) && disk.memory.items.some(other => other.category === item.category))
+      )
+    ]
   });
   store.drafts = { ...store.drafts, ...disk.drafts };
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
@@ -280,7 +403,8 @@ const STORE_ROOT_KEY = "yan-store-root";
 // 与 配置.json 对一次：开页接上桥接时、桥接断了又接上时、页面从后台切回来时。看两边谁新：
 // 全新的浏览器取磁盘那份；灌进来的（没带版本标记的旧记录）以浏览器为准；这台浏览器头一回碰上这个根就合并；其余按时间戳，新的为准
 async function syncConfigWithDisk() {
-  const info = bootstrap.store || {};
+  const scope = bootstrap.store,
+    info = scope || {};
   let met = "";
   try {
     met = localStorage.getItem(STORE_ROOT_KEY) || "";
@@ -288,7 +412,8 @@ async function syncConfigWithDisk() {
   // 桥接落在一个全新的根上，这台浏览器上回用的却是别处：多半是记位置的条子没了，说一声，免得以为数据丢了
   const strayed = info.fresh && met && met.toLowerCase() !== String(info.root || "").toLowerCase();
   try {
-    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
+    const disk = await storeBridge("/api/store/config/load", {}, AbortSignal.timeout(20000));
+    if (bootstrap.store !== scope) return;
     restoreConfigBase();
     if (!disk.config) {
       writeMeta({ disk: false });
@@ -303,6 +428,7 @@ async function syncConfigWithDisk() {
     if (strayed) toast(t`存储落在了 ${pathTail(info.root || "")}，上回用的是 ${met}；在设置 → 通用的「存储位置」填回去即可`, 8000);
     followLanguage();
   } catch (error) {
+    if (bootstrap.store !== scope) return;
     toast(t`配置未能与存储目录对齐：${String(error.message || error).slice(0, 60)}`);
   }
 }
@@ -329,8 +455,9 @@ function followLanguage() {
 // 从后台切回来：另一个浏览器可能改过配置，与磁盘上的对一对（这边有没写下去的改动也不丢，见 reconcileConfig）
 async function refreshConfigFromDisk() {
   if (configSaving) return;
+  const scope = bootstrap.store;
   try {
-    const disk = await bridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
-    if (disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
+    const disk = await storeBridge("/api/store/config/load", {}, AbortSignal.timeout(8000));
+    if (bootstrap.store === scope && disk.config && !configSaving) reconcileConfig(disk.config, Number(disk.savedAt) || 0);
   } catch {}
 }
