@@ -2,7 +2,7 @@
 // 由页面按这段对话的落脚处认，取不到就留下它想说的那句话。正常的路照样画得出来，Windows 反斜杠的也能。
 import { mkdirSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, HOME } from "./lib.mjs";
-const { send, evalJs, close } = await connect();
+const { send, evalJs, waitFor, close } = await connect();
 // 卷宗里放一张真图：1×1 透明 PNG
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 mkdirSync(`${HOME}/卷宗`, { recursive: true });
@@ -63,12 +63,17 @@ await evalJs(`localStorage.setItem("yan-chat-v1", ${JSON.stringify(JSON.stringif
 await send("Page.navigate", { url: PAGE });
 await sleep(1800);
 await evalJs(`document.querySelector('[data-conversation="c1"] .history-open')?.click(); true`);
-await sleep(2500);
+// 反斜杠那一幅要等原路取不到再按同名找回，慢机器上 2.5 秒未必够：等五幅都画出来再量，等不到就照现状量、由下面的断言说清少了哪一幅
+await waitFor(
+  `document.querySelectorAll(".reply-shot img").length === 5 && [...document.querySelectorAll(".reply-shot img")].every(img => img.naturalWidth > 0)`,
+  8000
+).catch(() => {});
+await sleep(120);
 const view = JSON.parse(
   await evalJs(
     `JSON.stringify({
       imgs: [...document.querySelectorAll(".markdown img")].map(img => ({ src: img.getAttribute("src"), nw: img.naturalWidth, complete: img.complete, alt: img.getAttribute("alt") })),
-      shots: [...document.querySelectorAll(".reply-shot img")].map(img => img.naturalWidth),
+      shots: [...document.querySelectorAll(".reply-shot img")].map(img => ({ alt: img.getAttribute("alt"), nw: img.naturalWidth })),
       shotFiles: [...document.querySelectorAll(".reply-shot")].map(s => s.dataset.openFile || s.dataset.openImage || s.dataset.openRemote || ""),
       remote: document.querySelectorAll(".markdown .remote-shot").length,
       formSrc: document.querySelector(".markdown input[type=image]")?.getAttribute("src") || null,
@@ -92,13 +97,23 @@ check(
   view.text.slice(0, 200)
 );
 check("坏掉的数据图也不留破图", !view.imgs.some(img => img.alt === "坏数据"));
-check("相对路径与 Windows 反斜杠的图都画得出来", view.shots.filter(nw => nw > 0).length >= 2, JSON.stringify(view.shots));
+check(
+  "相对路径与 Windows 反斜杠的图都画得出来",
+  view.shots.every(shot => shot.nw > 0),
+  JSON.stringify(view.shots)
+);
 check(
   "文件名里的转义（plot%231.png）认得出",
   view.shotFiles.some(file => file.includes("plot#1.png")),
   JSON.stringify(view.shotFiles)
 );
-check("只画出该画的五幅（正路、反斜杠、转义名、照源两幅）", view.shotFiles.length === 5, JSON.stringify(view.shotFiles));
+// 按画出来的先后认：正路、绝对路径（Windows 写成反斜杠）、转义名、照源两幅。名字对了才知道少的是哪一幅
+check(
+  "只画出该画的五幅（正路、绝对路径、转义名、照源两幅）",
+  JSON.stringify(view.shots.map(shot => shot.alt)) === JSON.stringify(["正路", "反斜杠", "转义", "照源", "照源"]) &&
+    view.shotFiles.length === 5,
+  JSON.stringify(view.shots)
+);
 check("外链图仍是待取的素纸，页面不去取", view.remote >= 1 && view.imgs.every(img => !/^https?:/.test(img.src || "")));
 check("input[type=image] 也不让浏览器去取", !view.formSrc, JSON.stringify(view.formSrc));
 close();

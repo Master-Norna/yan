@@ -150,17 +150,17 @@ function setupMarkdown() {
   }
 }
 // 不是网址、末段像个文件名的链接：取出文件名。网址、邮件、页内锚点都不算；bare 时末段不必带扩展名
+// 先去掉 ?# 再解转义、最后切段：反过来（先解再切）会把 plot%231.png 当成带片段的 plot 截掉；
+// 而解转义后那段 Windows 的路（marked 写成 %5C…）才是带斜杠的整条路，先切则取不出末段、名成了空
 /** @param {string} href @param {boolean} [bare] */
 function localFileName(href, bare = false) {
   const raw = String(href || "").trim();
   if (!raw || /^(?:https?|mailto|tel|data|blob):/i.test(raw) || raw.startsWith("#")) return "";
-  let name = raw
-    .replace(/[?#].*$/, "")
-    .split(/[\\/]/)
-    .pop();
+  let path = raw.replace(/[?#].*$/, "");
   try {
-    name = decodeURIComponent(name);
+    path = decodeURIComponent(path);
   } catch {}
+  const name = path.split(/[\\/]/).pop();
   return (bare ? /^[^<>:"|?*\u0000-\u001f]+$/ : /^[^<>:"|?*\u0000-\u001f]+\.[a-z0-9]{1,8}$/i).test(name) ? name : "";
 }
 function renderMath(tex, display) {
