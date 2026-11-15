@@ -125,22 +125,18 @@ function setupMarkdown() {
       node.removeAttribute("srcset");
       if (raw === null) return;
       const value = String(raw).trim();
-      // 名字从解过转义的路里取（marked 会把反斜杠编成 %5C）；存下的 data-path 仍是原样，refTarget 自己会解
-      let shown = value;
-      try {
-        shown = decodeURIComponent(value);
-      } catch {}
-      if (/^data:/i.test(shown)) {
+      if (/^data:/i.test(value)) {
         node.setAttribute("src", value);
         return;
       }
-      if (/^https?:\/\//i.test(shown)) {
+      if (/^https?:\/\//i.test(value)) {
         node.setAttribute("data-remote", value);
         return;
       }
       // 图不要求扩展名：模型把要画的图写成「![图](chart)」时，照原样留着页面就去取本页的 /chart，落成破图。
-      // 名字认不出的（空、./、#、以 / 收尾）也记下原路，走同一套兜底，不留 src
-      const name = localFileName(shown, true);
+      // 名字认不出的（空、./、#、以 / 收尾）也记下原路，走同一套兜底，不留 src。
+      // 名字从原值取（localFileName 自己会解转义）：先解一遍再给它，plot%231.png 会被当成带片段的 plot
+      const name = localFileName(value, true);
       if (name) node.setAttribute("data-file", name);
       node.setAttribute("data-path", value);
     });

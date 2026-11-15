@@ -337,8 +337,8 @@ function openImageSet(items, index, trigger = null) {
         .join("")
     : "";
   if (many) void loadThumbnails(strip);
-  // 看图框里的图也认这一道：原件取不回来时不挂破图
-  mendImages(/** @type {HTMLElement} */ ($("#imageViewer")));
+  // 底下那排小样取不回来时收掉，不挂破图；大图那一枚是复用的（closeImageViewer 还要 removeAttribute），不在这里换
+  mendImages(strip);
   return showImageAt(index, true);
 }
 // 摊开组里的第几件，先按窗口大小看；附件要先从库里取，取到时已换了别件就作罢
@@ -375,6 +375,8 @@ async function showImageAt(index, opening = false) {
   imageViewerRemote = item.src ? { src: item.src, name: item.name || "", url: item.url || "" } : null;
   $("#imageViewerName").textContent = label;
   const image = $("#imageViewerImage");
+  // 取不回来就摘掉 src：这一枚是复用的，不能换成别的节点（否则后再看别的图就指不到它了）
+  image.onerror = () => image.removeAttribute("src");
   image.src = src;
   image.alt = name || t("图片预览");
   setImageViewerZoom(false);

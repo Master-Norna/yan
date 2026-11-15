@@ -7,19 +7,22 @@ const { send, evalJs, close } = await connect();
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 mkdirSync(`${HOME}/卷宗`, { recursive: true });
 writeFileSync(`${HOME}/卷宗/probe.png`, PNG);
+// 文件名里带 # 的一件：转义写法 plot%231.png 要认得出它
+writeFileSync(`${HOME}/卷宗/plot#1.png`, PNG);
 const winPath = `${HOME}/卷宗/probe.png`.replace(/\//g, "\\");
 const body = [
   "正路 ![正路](probe.png)",
   `反斜杠 ![反斜杠](${winPath})`,
-  "空 ![空](./)",
-  "井 ![井](#)",
-  "目录 ![目录](probe.png/)",
-  "沙盒 ![沙盒](sandbox:/mnt/data/x.png)",
-  "裸名 ![裸名](chart)",
-  "坏数据 ![坏数据](data:image/png;base64,AAA)",
-  "外站 ![外站](https://example.com/x.png)",
-  '照源 ![照源](probe.png) <img srcset="probe.png 2x" alt="照源">',
-  '坏表单 <input type="image" src="probe.png" alt="坏表单">'
+  "转义 ![转义](plot%231.png)",
+  "甲 ![空](./)",
+  "乙 ![井](#)",
+  "丙 ![目录](nope.png/)",
+  "丁 ![沙盒](sandbox:/mnt/data/x.png)",
+  "戊 ![裸名](chart)",
+  "己 ![坏数据](data:image/png;base64,AAA)",
+  "庚 ![外站](https://example.com/x.png)",
+  '辛 ![照源](probe.png) <img srcset="probe.png 2x" alt="照源">',
+  '壬 <input type="image" src="probe.png" alt="坏表单">'
 ].join("\n\n");
 const conv = {
   id: "c1",
@@ -66,6 +69,7 @@ const view = JSON.parse(
     `JSON.stringify({
       imgs: [...document.querySelectorAll(".markdown img")].map(img => ({ src: img.getAttribute("src"), nw: img.naturalWidth, complete: img.complete, alt: img.getAttribute("alt") })),
       shots: [...document.querySelectorAll(".reply-shot img")].map(img => img.naturalWidth),
+      shotFiles: [...document.querySelectorAll(".reply-shot")].map(s => s.dataset.openFile || s.dataset.openImage || s.dataset.openRemote || ""),
       remote: document.querySelectorAll(".markdown .remote-shot").length,
       formSrc: document.querySelector(".markdown input[type=image]")?.getAttribute("src") || null,
       text: document.querySelector(".markdown")?.textContent || ""
@@ -89,6 +93,12 @@ check(
 );
 check("坏掉的数据图也不留破图", !view.imgs.some(img => img.alt === "坏数据"));
 check("相对路径与 Windows 反斜杠的图都画得出来", view.shots.filter(nw => nw > 0).length >= 2, JSON.stringify(view.shots));
+check(
+  "文件名里的转义（plot%231.png）认得出",
+  view.shotFiles.some(file => file.includes("plot#1.png")),
+  JSON.stringify(view.shotFiles)
+);
+check("只画出该画的五幅（正路、反斜杠、转义名、照源两幅）", view.shotFiles.length === 5, JSON.stringify(view.shotFiles));
 check("外链图仍是待取的素纸，页面不去取", view.remote >= 1 && view.imgs.every(img => !/^https?:/.test(img.src || "")));
 check("input[type=image] 也不让浏览器去取", !view.formSrc, JSON.stringify(view.formSrc));
 close();
