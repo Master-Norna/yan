@@ -61,7 +61,7 @@ const ALIASING = new RegExp(
 const SET_ITEM_NAMES = String.raw`(?:Set|New)-Item|si|ni`;
 // 参数里以 alias: / function: 开头的那个词才是它要写的 provider 目标；-Value 后面跟的只是值
 // （Set-Item env:FOO -Value alias:t 不是定义别名），值可以连写（-Value:alias:t）。
-// provider 还能带全名（Microsoft.PowerShell.Core\Alias:t），前缀在词首或一段路径的头上都算
+// provider 还能带全名（Microsoft.PowerShell.Core\Alias:t），也能写成 -Path:function:t，前缀在词首、冒号后或一段路径的头上都算
 /** @param {string} args */
 function providerTargetIn(args) {
   const tokens = args.match(/"[^"]*"|'[^']*'|[^\s;&|()<>{}]+/g) || [];
@@ -71,7 +71,7 @@ function providerTargetIn(args) {
       if (/^-(?:Item)?Value$/i.test(bare)) i++;
       continue;
     }
-    if (/(?:^|[\\/])(?:alias|function):/i.test(bare)) return true;
+    if (/(?:^|[\\/:=])(?:alias|function):/i.test(bare)) return true;
   }
   return false;
 }
@@ -1778,8 +1778,9 @@ const GIT_INTERNAL_PATH = /(^|[\s"'=;|&(])[^\s"'`;|&<>()]*\.git[\\/][^\s"'`;|&<>
 // 指令由 Windows PowerShell 跑，它的别名是真会执行的：sc = Set-Content、ni = New-Item、ri = Remove-Item、mi / cpi / rni 同理，
 // 一并列上；解包、克隆这类把东西放到某处的也算
 const WRITE_VERBS = String.raw`Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|Rename-Item|New-Item|Set-Item|Clear-Item|Clear-Content|Set-Acl|Compress-Archive|Expand-Archive|Export-Csv|Export-Clixml|Tee-Object|Start-Transcript|(?:New|Set|Remove|Copy|Move|Clear|Rename)-ItemProperty|robocopy|xcopy|copy|rmdir|rd|rm|del|erase|move|mv|cp|rename|ren|mkdir|md|touch|tee|attrib|mklink|fsutil|dd|sc|ac|ni|ri|mi|cpi|rni|rn|si|cli|clc|sp|rp|clp|mp|rnp|epcsv|tar|7za?|unzip|zip|chmod|chown|chflags|ln|rsync|ditto|sed\s+(?:-[^\s]+\s+)*(?:-[A-Za-z]*i|--in-place)|git\s+(?:clone|worktree\s+add)`;
-// 带输出目标的参数：curl -o、wget -O、iwr -OutFile、Start-Process 的重定向——动词本身像读，却在往某处写
-const OUTPUT_PARAMS = String.raw`(?:^|\s)(?:-o|-O|-OutFile|-OutputPath|-Destination(?:Path)?|-RedirectStandard(?:Output|Error)|--output(?:-document|-dir)?|--outdir|--out-dir)(?=[\s=:]|$)|(?:^|\s)-o(?=[\\/"'A-Za-z])`;
+// 带输出目标的参数：curl -o、wget -O、iwr -OutFile、Start-Process 的重定向——动词本身像读，却在往某处写。
+// 紧贴的 -o 也算：-oC:\x（盘符、斜杠、引号后接）与 -o..\x（上溯）都先把这条指令按「写」处理，路径检查才跑得到
+const OUTPUT_PARAMS = String.raw`(?:^|\s)(?:-o|-O|-OutFile|-OutputPath|-Destination(?:Path)?|-RedirectStandard(?:Output|Error)|--output(?:-document|-dir)?|--outdir|--out-dir)(?=[\s=:]|$)|(?:^|\s)-o(?=[\\/"'A-Za-z])|(?:^|\s)-o(?=\.\.[\\/])`;
 // .NET 直写文件：[IO.File]::WriteAllText、[IO.Directory]::Delete、New-Object IO.StreamWriter 之类
 const DOTNET_WRITE = String.raw`\[(?:System\.)?IO\.(?:File|Directory|FileInfo|DirectoryInfo)\]::(?:Write|Append|Create|Delete|Move|Copy|Replace|Set)\w*|\b(?:System\.)?IO\.(?:StreamWriter|FileStream|BinaryWriter)\b`;
 const DIRECT_FILE_MUTATION = new RegExp(

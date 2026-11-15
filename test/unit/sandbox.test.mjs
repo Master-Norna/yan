@@ -1582,6 +1582,9 @@ test("写参数紧贴路径（-oC:\\x）与 Set-Item 定义函数：目录与系
   assert.match(screenLoose("7z x a.zip -oC:\\Windows\\x", win), /系统目录/);
   assert.match(screenAutoReview("7z x a.zip -oC:\\Windows\\x", win), /系统目录/);
   assert.equal(screen("7z x a.zip -o.\\build"), null);
+  // -o 后紧贴 .. 的也先按「写」处理：gcc / curl 不在写动词表里，靠输出参数这一支开门，路径规则才跑得到
+  assert.match(screen("gcc -o..\\x a.c"), /不用 \.\. 上溯/);
+  assert.match(screen("curl -o..\\x http://127.0.0.1:9/a"), /不用 \.\. 上溯/);
   // 套了壳的、或用 & 调用的，一样看得见
   assert.match(screen('cmd /c "7z x a.zip -oC:\\Windows\\x"'), /越出了工作目录/);
   assert.match(screen('powershell -c "7z x a.zip -oC:\\Windows\\x"'), /越出了工作目录/);
@@ -1606,6 +1609,7 @@ test("写参数紧贴路径（-oC:\\x）与 Set-Item 定义函数：目录与系
   for (const command of [
     "Set-Item -Force -Path alias:t -Value Invoke-Expression",
     "Set-Item -Value Invoke-Expression -Path alias:t -Force",
+    "Set-Item -Path:function:t -Value Invoke-Expression",
     'Set-Item -LiteralPath "function:t" -Value Invoke-Expression -Confirm:$false',
     "New-Item -Force -Path alias:t -Value Invoke-Expression",
     "si -Path alias:t -Value Invoke-Expression",
