@@ -11,6 +11,19 @@ if (process.env.YAN_TEST_NO_SEATBELT) {
 }
 const root = process.env.YAN_TEST_ROOT;
 if (!root) throw Error("缺 YAN_TEST_ROOT");
+// 宿主侧的观察点：exit 钩子到底跑没跑（信号终止不走 exit 事件时才看得出）；
+// YAN_TEST_HOST_LISTENS=1 时宿主自带一个不立即退出的 SIGTERM 常驻监听，每被叫到就往 host-hits 记一笔
+process.on("exit", () => {
+  try {
+    fs.writeFileSync(`${root}/bridge-exit-mark`, "1");
+  } catch {}
+});
+if (process.env.YAN_TEST_HOST_LISTENS)
+  process.on("SIGTERM", () => {
+    try {
+      fs.appendFileSync(`${root}/host-hits`, "x\n");
+    } catch {}
+  });
 const createWork = createRequire(import.meta.url)("../../server/work/index.js");
 const work = createWork({ archiveHome: () => root, workHome: () => root, toolEnv: env => env });
 const server = http.createServer((req, res) => {
