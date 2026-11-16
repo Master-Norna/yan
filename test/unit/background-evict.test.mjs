@@ -43,14 +43,17 @@ test("未报结果的后台不被后起的指令挤出记录；报过的照旧�
     assert.notEqual(watched.lost, true, "未报结果的后台被挤出了记录");
     assert.ok(!watched.reported, "没报过的不该带 reported");
     assert.equal(watched.exitCode, 0);
-    // 报过之后就是旧账：再起 24 条，它可以被清掉（表不无限长）
-    await Promise.all(Array.from({ length: 24 }, background));
+    // 报过之后就是旧账：表已满，再起一条就会把最早那条已报过的清掉（表不无限长）
+    await background();
     const again = await post("/api/work/watch", { id: first.id, key: first.key });
     assert.equal(again.lost, true, "报过的旧账应照旧清掉");
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
+    // 结果文件出完不等于 shell 已退出，Windows 上还拿临时目录当当前目录时删不掉（EPERM/EBUSY）：
+    // 先等后台都结束，再删，并留出退出的余地重试
+    for (let i = 0; i < 100 && work.backgroundRunning(); i++) await new Promise(resolve => setTimeout(resolve, 100));
     if (path.dirname(fs.realpathSync(root)) !== parent || !path.basename(root).startsWith("yan-bg-evict-")) throw Error("测试清理越界");
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
