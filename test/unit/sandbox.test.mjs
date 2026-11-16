@@ -1664,6 +1664,15 @@ test("构建与包管理器的输出目录参数算写：严档据它看越界�
   // 不是这一个程序的这个参数就不动：git -C 是换工作目录，cargo --target 是三元组
   assert.equal(strict(`git -C ${outside} status`), null);
   assert.equal(strict("cargo build --target x86_64-pc-windows-msvc"), null);
+  // 同一条里的其它参数是读的来源，不该一并锁进工作目录（`pip install --target vendor <别处的 whl>`）
+  const whl = atWin ? "D:\\packages\\a.whl" : "/Users/a/pkgs/a.whl";
+  assert.equal(strict(`pip install --target vendor ${whl}`), null);
+  assert.equal(strict(`python -m pip install --target vendor ${whl}`), null);
+  // 紧贴写法的短选项（cmake -Bbuild、pip -tvendor）也认得出是那个参数
+  assert.equal(strict("cmake -Bbuild"), null);
+  assert.equal(strict("pip install -tvendor numpy"), null);
+  assert.match(review(`cmake -B${program}`), /系统目录/);
+  assert.match(loose(`pip install -t${system} numpy`), /系统目录/);
   // 审与宽：往系统目录里装也拦得住（原先三档全放行）
   for (const command of [
     `pip install --target ${system}`,
@@ -1688,6 +1697,13 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
   // 写得出完整路径的递归删才按目录判，工作目录里的寻常清理照旧
   assert.equal(review("Remove-Item ./build -Recurse -Force"), null);
   assert.equal(review(atWin ? "Remove-Item E:\\项目\\言\\dist -Recurse" : "Remove-Item /Users/a/proj/dist -Recurse"), null);
+  // 相对路径要按工作目录解析后判：`..\other` 一个绝对路径都没有，只找绝对路径的话它就漏过去了
+  for (const command of atWin
+    ? ["Remove-Item ..\\other -Recurse -Force", "Remove-Item -Path ..\\other -Recurse", "ri ..\\other -r -fo"]
+    : ["rm -rf ../other", "rm -r ../other/*", "rd /s /q ../other"])
+    assert.match(review(command), /整个目录/, command);
+  assert.equal(review(atWin ? "Remove-Item .\\build -Recurse" : "rm -rf ./build"), null);
+  assert.equal(review(atWin ? "Remove-Item sub\\dist -Recurse" : "rm -rf sub/dist"), null);
   // 原本就拦的最夸张那几种不受影响
   assert.match(review("Remove-Item . -Recurse -Force"), /整目录/);
   // 变量里的路径静态看不出来，与本文件其余规则一样不猜；不是递归删的也不管

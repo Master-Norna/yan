@@ -1826,19 +1826,33 @@ const BROAD_DELETE =
   /\bRemove-Item\b(?=[^\n]*(?:-Recurse|-Force))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
 // 带 -Recurse 的删除：工作目录里的算寻常清理（Remove-Item .\build -Recurse 三档都照旧放行），
 // 别处写得出完整路径的，删下去就是一整片、难以恢复——审档按文档里那句「整目录删除」回绝
-const RECURSIVE_DELETE = /\b(?:Remove-Item|ri)\b(?=[^\n]*-Recurse)|\brm\s+-[^\s]*r|\b(?:rmdir|rd)\b[^\n]*\/s/i;
-// 递归删的是哪几样：只看含递归删的那一段（按 ; | & 与换行切开），同一条指令里别处读的路径不算——
+const RECURSIVE_DELETE = /\b(?:Remove-Item|ri)\b(?=[^\n]*-(?:Recurse|r)\b)|\brm\s+-[^\s]*r|\b(?:rmdir|rd)\b[^\n]*\/s/i;
+// 递归删的是哪几样：只看删除调用自己的操作数，同一条指令里别处读的路径不算——
 // `cat /tmp/report.txt; rm -rf ./build` 里前一段只是读，不该拿它当删除目标。
-// 只认写得出完整路径的：$dir、cd 过去的相对路径静态看不出来，与本文件其余规则一样不猜
-/** @param {string} text @param {string} workdir @param {boolean} win */
-function recursiveDeleteWhy(text, workdir, win) {
-  if (!workdir || !RECURSIVE_DELETE.test(text)) return "";
+// 操作数按 workdir 解析成规范路径再判：只认绝对路径的话，`Remove-Item ..\other -Recurse` 一个绝对路径都没有，
+// 审档就这么把它放过去了。$dir、cd 过去的相对路径静态看不出来，与本文件其余规则一样不猜
+const DELETE_PROGRAM = /^(?:remove-item|ri|rm|del|erase|rmdir|rd)$/i;
+// 这一段是递归删吗：Remove-Item 的 -Recurse（可简写 -r）、rm 短选项里带 r、rmdir/rd 的 /s
+/** @param {{ name: string, args: { value: string }[] }} call */
+function recursiveDeleteCall(call) {
+  if (/^(?:rmdir|rd)$/i.test(call.name)) return call.args.some(arg => /^\/s$/i.test(arg.value));
+  if (/^rm$/i.test(call.name)) return call.args.some(arg => /^-[A-Za-z]*r/i.test(arg.value));
+  return call.args.some(arg => /^-(?:recurse|r)$/i.test(arg.value));
+}
+/** @param {any} scanned @param {string} workdir @param {boolean} win */
+function recursiveDeleteWhy(scanned, workdir, win) {
+  if (!workdir || !RECURSIVE_DELETE.test(scanned.text)) return "";
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-  for (const segment of commandSegments(text)) {
-    const line = segment.join(" ");
-    if (!RECURSIVE_DELETE.test(line)) continue;
-    for (const raw of absolutePathsIn(line, win)) {
-      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
+  for (const call of commandInvocations(scanned)) {
+    if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call)) continue;
+    for (const arg of call.args) {
+      // 选项跳过（-Recurse、-Force、cmd 的 /s /q）；`-Path X` 里那个 X 不是选项，照判
+      if (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value))) continue;
+      const raw = arg.value;
+      if (!raw) continue;
+      const candidate = win
+        ? normalizeLower(path.resolve(workdir, raw))
+        : path.normalize(path.resolve(workdir, raw)).replace(/(?<=.)[\\/]+$/, "");
       if (!pathIsInside(root, candidate)) return `审查拒绝：不代为删除工作目录之外的整个目录（${raw}）`;
     }
   }
@@ -2049,17 +2063,43 @@ function scanWrites(scanned) {
         if (/^-o.+/i.test(arg.value)) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
       }
     }
-  // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」，路径照常在剪过的全文里受约束
+  // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」。
+  // 但同一条指令里别的参数多是读的来源——`pip install --target ./vendor /opt/packages/a.whl` 里那个已打好的 whl、
+  // `cmake -B build .` 里那个源码目录——一笔算进来就把来源也锁进了工作目录。所以只让输出参数的值受约束，
+  // 其余参数位置照 READ_SOURCES 一并豁免；紧贴写法的短选项（cmake -Bbuild、pip -t/path）在参数名与值之间补一个空格，
+  // 好让下面的路径识别看见那段值
   let toolWrite = false;
+  const toolReads = [];
   if (TOOL_WRITE_HINT.test(scanned.text))
     for (const call of calls) {
       const params = outputArgsOf({ name: call.name.toLowerCase(), args: call.args });
-      if (params?.some(param => call.args.some(arg => arg.value === param || arg.value.startsWith(`${param}=`)))) toolWrite = true;
+      if (!params?.length) continue;
+      const target = new Set();
+      for (let i = 0; i < call.args.length; i++) {
+        const arg = call.args[i],
+          value = arg.value,
+          exact = params.find(param => value === param),
+          assigned = params.find(param => value.startsWith(`${param}=`)),
+          glued =
+            !exact && !assigned && params.find(param => /^-[^-]/.test(param) && value.startsWith(param) && value.length > param.length);
+        if (!exact && !assigned && !glued) continue;
+        toolWrite = true;
+        target.add(arg);
+        if (exact) {
+          const next = call.args[i + 1];
+          if (next) {
+            target.add(next);
+            i++;
+          }
+        } else if (glued) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
+      }
+      for (const arg of call.args) if (!target.has(arg)) toolReads.push(arg);
     }
   const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite;
   if (!writing) return { writing, text: "" };
   const chars = stripReadSources(scanned).split("");
   for (const at of offsets) chars[at] = " " + chars[at];
+  for (const arg of toolReads) for (let i = arg.start; i < arg.end; i++) chars[i] = " ";
   return { writing, text: chars.join("") };
 }
 /**
@@ -2390,7 +2430,7 @@ function screenAutoReview(command, { platform = process.platform, workdir = "" }
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
   // 递归删工作目录之外的一整片：只按「含递归删的那一段」判（`cat /tmp/x; rm -rf ./build` 里前一段只是读，
   // 不该拿它当删除目标）；工作目录里的照旧，那是寻常清理
-  const deleted = recursiveDeleteWhy(text, workdir, win);
+  const deleted = recursiveDeleteWhy(scanned, workdir, win);
   if (deleted) return deleted;
   const writes = scanWrites(scanned);
   if (writes.writing && REVIEW_SYSTEM_PATH.test(writes.text))
