@@ -31,8 +31,9 @@ function settledDigest(message) {
     broken = (message.steps || []).filter(
       step => step.status === "error" || step.status === "skipped" || step.status === "interrupted"
     ).length,
-    // 随桥接重启而止的也算：它不会再有回报送到，摘要留着「进行中」的话，模型会照着旧编号再开一条同号的
-    gone = (message.steps || []).filter(step => step.bg?.state === "lost").length;
+    // 不会再有回报送到的终态也算：随桥接重启而止（lost）、结束得久没能留住（evicted，见 20-command.js 的 settleBackground）。
+    // 摘要留着「进行中」的话，模型会照着旧编号再开一条同号的
+    gone = (message.steps || []).filter(step => step.bg?.state === "lost" || step.bg?.state === "evicted").length;
   if (message.trailDigest?.steps !== steps || (message.trailDigest.broken || 0) !== broken || (message.trailDigest.gone || 0) !== gone)
     message.trailDigest = { steps, broken, gone, text: stepsDigest(message, t("上一答的行迹")) };
   return message.trailDigest.text;

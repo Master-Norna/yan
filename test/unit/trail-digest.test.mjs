@@ -44,3 +44,26 @@ test("后台随桥接重启而止之后行迹摘要也重写：摘要不再写�
   assert.notEqual(lost, running, "候没了要重写，别让模型照着旧编号再开一条同号的");
   assert.match(lost, /随桥接重启而止/);
 });
+
+test("结果被挤出记录（evicted）也一样：同是不会再有回报的终态，摘要要重写", () => {
+  // #100 起 settleBackground 会记一个 evicted：结束得久、记录留不住，结果丢了。与 lost 同属终态，
+  // 只数 lost 的话这一路摘要仍写着「进行中」
+  const f = load(["settledDigest"]);
+  const step = {
+    id: "s3",
+    name: "run_command",
+    title: "挂着的预览",
+    status: "done",
+    effect: true,
+    bg: { id: "bg7", key: "BOOT-7", state: "running" },
+    result: "后台 bg7 · 进行中",
+    arguments: "{}"
+  };
+  const message = { steps: [step] };
+  const running = f.settledDigest(message);
+  step.bg.state = "evicted";
+  step.result = "后台 bg7 · 结束得久，结果没能留住";
+  const evicted = f.settledDigest(message);
+  assert.notEqual(evicted, running, "结果没能留住也要重写，别让模型以为它还在跑");
+  assert.match(evicted, /结果没能留住/);
+});
