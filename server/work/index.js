@@ -141,7 +141,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
         if (why) throw Error(why);
       }
       if (body.permission === "review" && !reviewed) {
-        const why = sandbox.screenAutoReview(command);
+        const why = sandbox.screenAutoReview(command, { workdir });
         if (why) throw Error(why);
       }
       if (body.background === true) {

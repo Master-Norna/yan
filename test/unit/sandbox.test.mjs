@@ -1627,3 +1627,62 @@ test("写参数紧贴路径（-oC:\\x）与 Set-Item 定义函数：目录与系
   // provider 全名（Microsoft.PowerShell.Core\Alias:t）里带着 powershell 字样，先被藏字那条拦下；同样不放行
   assert.ok(screen("Set-Item -Path Microsoft.PowerShell.Core\\Alias:t -Value Invoke-Expression"));
 });
+
+test("构建与包管理器的输出目录参数算写：严档据它看越界，审与宽据它看系统目录", () => {
+  const review = (command, platform = "win32") => screenAutoReview(command, { platform, workdir: wd });
+  const outside = "E:\\项目\\别处";
+  // 严档：越出工作目录就不行（原先这几条根本不算写，整条放行）
+  assert.match(screen(`npm install --prefix ${outside}`), /越出了工作目录/);
+  assert.match(screen(`pip install --target ${outside}`), /越出了工作目录/);
+  assert.match(screen(`python -m pip install --target ${outside}`), /越出了工作目录/);
+  assert.match(screen(`cargo build --target-dir ${outside}`), /越出了工作目录/);
+  assert.match(screen(`cmake -B ${outside}`), /越出了工作目录/);
+  assert.match(screen(`ninja -C ${outside}`), /越出了工作目录/);
+  // 工作目录里的照旧
+  for (const command of [
+    "npm install",
+    "npm install --prefix .\\vendor",
+    "pip install -t .\\vendor numpy",
+    "cargo build --target-dir target",
+    "cmake -B build",
+    "ninja -C build"
+  ])
+    assert.equal(screen(command), null, command);
+  // 不是这一个程序的这个参数就不动：git -C 是换工作目录，cargo --target 是三元组
+  assert.equal(screen(`git -C ${outside} status`), null);
+  assert.equal(screen(`cargo build --target x86_64-pc-windows-msvc`), null);
+  // 审与宽：往系统目录里装也拦得住（原先三档全放行）
+  for (const command of [
+    'pip install --target "C:\\Windows\\Temp\\x"',
+    "cmake -B C:\\ProgramData\\cm",
+    "cargo build --target-dir C:\\ProgramData\\cargo",
+    "ninja -C C:\\ProgramData\\ninja",
+    "npm install --prefix C:\\Windows\\Temp\\nx"
+  ]) {
+    assert.match(review(command), /系统目录/, command);
+    assert.match(screenLoose(command, win), /系统目录/, command);
+  }
+  // 写到工作目录之外照旧放行（审档只守系统本身）
+  assert.equal(review(`npm install --prefix ${outside}`), null);
+});
+
+test("审档：递归删工作目录之外的整个目录回绝，工作目录里的照旧放行", () => {
+  const review = (command, platform = "win32", dir = wd) => screenAutoReview(command, { platform, workdir: dir });
+  for (const command of [
+    "Remove-Item D:\\data -Recurse -Force",
+    "Remove-Item C:\\Users\\me\\AppData -Recurse",
+    "rm -rf D:\\data",
+    "rd /s /q C:\\Users\\me"
+  ])
+    assert.match(review(command), /整个目录/, command);
+  // 工作目录里的寻常清理、以及原本就拦的最夸张那几种，都不受影响
+  assert.equal(review("Remove-Item .\\build -Recurse -Force"), null);
+  assert.equal(review("Remove-Item E:\\项目\\言\\dist -Recurse"), null);
+  assert.match(review("Remove-Item . -Recurse -Force"), /整目录/);
+  // 变量里的路径静态看不出来，与本文件其余规则一样不猜；不是递归删的也不管
+  assert.equal(review("Remove-Item $env:TEMP\\build -Recurse"), null);
+  assert.equal(review("Remove-Item D:\\data\\a.txt"), null);
+  // POSIX 同理
+  assert.match(review("rm -rf /Users/a/other", "darwin", "/Users/a/proj"), /整个目录/);
+  assert.equal(review("rm -rf ./build", "darwin", "/Users/a/proj"), null);
+});
