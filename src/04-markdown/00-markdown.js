@@ -113,8 +113,9 @@ function setupMarkdown() {
         node.removeAttribute("srcset");
         return;
       }
-      // 会画出破图的还有 input[type=image]：同样不交给浏览器去取（正文里极少见，但一处守住）
-      if (node.tagName === "INPUT" && node.getAttribute("type") === "image") {
+      // 会画出破图的还有 input[type=image]：同样不交给浏览器去取（正文里极少见，但一处守住）。
+      // 属性值大小写照原样读回来，TYPE=IMAGE 也认（HTML 里它不分大小写）
+      if (node.tagName === "INPUT" && /^image$/i.test(node.getAttribute("type") || "")) {
         node.removeAttribute("src");
         return;
       }
