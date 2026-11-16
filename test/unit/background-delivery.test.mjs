@@ -13,9 +13,12 @@ for (const cancel of [true, false])
     const parent = fs.realpathSync(os.tmpdir()),
       root = fs.mkdtempSync(path.join(parent, "yan-bg-delivery-"));
     const work = createWork({ archiveHome: () => root, workHome: () => root, toolEnv: env => env });
-    const server = http.createServer((req, res) => work.routes["POST /api/work/run"](req, res));
+    const server = http.createServer((req, res) =>
+      (req.url === "/watch" ? work.routes["POST /api/work/watch"] : work.routes["POST /api/work/run"])(req, res)
+    );
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const controller = new AbortController();
+    let report;
     try {
       const command =
         process.platform === "win32"
@@ -34,13 +37,23 @@ for (const cancel of [true, false])
         controller.abort();
         assert.equal((await caught).name, "AbortError");
       } else {
-        const response = await request,
-          report = await response.json();
+        const response = await request;
+        report = await response.json();
         assert.equal(response.status, 200);
         assert.ok(report.id && report.running);
       }
       if (cancel) await sleep(3400);
-      else for (let i = 0; i < 160 && !fs.existsSync(path.join(root, "result.txt")); i++) await sleep(50);
+      else {
+        for (let i = 0; i < 160 && !fs.existsSync(path.join(root, "result.txt")); i++) await sleep(50);
+        // 文件落地不代表进程已退：写盘的 shell 仍以 root 为当前目录，finally 清目录在 Windows 上会撞 EBUSY；
+        // 凭已交付的编号等它真正结束，再进清理
+        const done = await fetch(`http://127.0.0.1:${server.address().port}/watch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: report.id, key: report.key })
+        }).then(r => r.json());
+        assert.equal(done.running, false);
+      }
       assert.equal(fs.existsSync(path.join(root, "result.txt")), !cancel);
     } finally {
       controller.abort();
