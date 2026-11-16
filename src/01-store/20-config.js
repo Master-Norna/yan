@@ -199,12 +199,16 @@ function reconcileConfig(config, savedAt) {
   if (!changed) return adoptConfig(config, savedAt);
   const theirs = metaOf(normalizeStoreData({ ...config, conversations: [] }));
   // 设置页里正编着哪一类记忆，那一类就留本页的（别处也改过时也不拿磁盘那份冲掉正在打的字）
-  const editing = editingMemoryCategory();
+  const editing = editingMemoryCategory(),
+    // 编辑框的 input 监听攥着 store 里那个对象，而合并交回的是解析出来的副本（同一类、另一份）；
+    // 换进配置后要把活的这个换回去，否则接着打的字落在脱了队的对象上，下一次存盘又把它抹掉
+    live = editing ? store.memory.items.find(item => item.category === editing) : null;
   adoptConfig(
     mergeConfig3(JSON.parse(configBase), JSON.parse(mine), theirs, unsettledSpend, editing ? new Set([editing]) : null),
     savedAt,
     JSON.stringify(theirs)
   );
+  if (live) store.memory.items = store.memory.items.map(item => (item.category === editing ? live : item));
   saveConfigNow();
 }
 // 记忆一类一份，按类名合（见 11-memory.js）：旧版同类几条、删后重建，id 都对不上，按 id 比会当成两回事。

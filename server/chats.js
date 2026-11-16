@@ -224,9 +224,11 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
       }
       fs.rmSync(trailDir(home, id), { recursive: true, force: true });
       // 墓碑记「什么时候删的」：补删（断着的时候删的，接上后才来）要带当时那一刻，
-      // 否则断的这段里别处写过、保存过的那份，其 savedAt 早于此刻的墓碑，就会被当成迟到的旧保存丢掉
-      const at = Math.min(Number(body.at) || Date.now(), Date.now());
-      writeTombstones(home, { ...readTombstones(home), [id]: at });
+      // 否则断的这段里别处写过、保存过的那份，其 savedAt 早于此刻的墓碑，就会被当成迟到的旧保存丢掉。
+      // 已有的墓碑更晚（别处晚些时候也删了同一段）就留着更晚那个：补删一次旧的不该把新记号抹回去
+      const at = Math.min(Number(body.at) || Date.now(), Date.now()),
+        tombstones = readTombstones(home);
+      writeTombstones(home, { ...tombstones, [id]: Math.max(at, Number(tombstones[id]) || 0) });
       void Promise.resolve(onDelete(id)).catch(() => {});
       return { removed };
     },
