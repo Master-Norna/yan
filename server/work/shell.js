@@ -79,12 +79,14 @@ function armExitHooks() {
   };
   process.on("exit", reap);
   // POSIX 的信号终止不走 exit 事件：Ctrl+C、被 kill、终端断开也要先收指令再照旧死，
-  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。once 起监听器，收完把信号重发回自己按默认动作终止
+  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。once 起监听器收完指令，
+  // 宿主自己还听着这个信号就交还它收（重发会让常驻监听多吃一次、once 型的又被吞）；
+  // 没人接才退场，但走 process.exit：exit 事件上挂的收口（MCP、无头浏览器）才能跟着跑完
   if (process.platform !== "win32")
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
       process.once(signal, () => {
         reap();
-        process.kill(process.pid, signal);
+        if (process.listenerCount(signal) === 0) process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
       });
 }
 module.exports = function createShell({ toolEnv }) {
