@@ -170,8 +170,9 @@ function watchBackground(conversation, assistant, step) {
           step = current;
         }
         // 随桥接重启而止：只把签改了，不叫醒。重启是人自己动的手，挂着的多是预览、服务，叫醒了模型多半挨个重开；
-        // 真等着结果的（训练），模型下一问从行迹摘要里看得到它止了
-        if (data.lost) return settleBackground(step, "lost", undefined, assistant);
+        // 真等着结果的（训练），模型下一问从行迹摘要里看得到它止了。结束得久、被后起的指令挤出记录的（evicted）另说一句：
+        // 不是重启，是结果没留住，同样不叫醒
+        if (data.lost) return settleBackground(step, data.evicted ? "evicted" : "lost", undefined, assistant);
         // 模型自己看过它结束了（check_command），只把签改成已结束，不再叫醒
         const fresh = !data.reported;
         if (fresh) step.output = trimOutput([step.output, commandOutput(data)].filter(Boolean).join("\n"));
@@ -212,8 +213,8 @@ function watchBackground(conversation, assistant, step) {
       holdAwake();
     });
 }
-// 签上写它此刻的样子：结束了（退出码）、亲手结束、随桥接重启而没了
-/** @param {Step} step @param {"done"|"stopped"|"lost"} state @param {Message} assistant */
+// 签上写它此刻的样子：结束了（退出码）、亲手结束、随桥接重启而没了、结束得久没能留住
+/** @param {Step} step @param {"done"|"stopped"|"lost"|"evicted"} state @param {Message} assistant */
 function settleBackground(step, state, exitCode, assistant) {
   if (!step.bg || step.bg.state !== "running") return;
   bgWatches.get(step.id)?.abort();
@@ -222,7 +223,9 @@ function settleBackground(step, state, exitCode, assistant) {
   step.result =
     state === "lost"
       ? `后台 ${step.bg.id} · 随桥接重启而止`
-      : `后台 ${step.bg.id} · 已结束${exitCode !== undefined && exitCode !== null ? ` · 退出码 ${exitCode}` : ""}`;
+      : state === "evicted"
+        ? `后台 ${step.bg.id} · 结束得久，结果没能留住`
+        : `后台 ${step.bg.id} · 已结束${exitCode !== undefined && exitCode !== null ? ` · 退出码 ${exitCode}` : ""}`;
   const conversation = store.conversations.find(c => c.messages.includes(assistant));
   if (conversation) markDirty(conversation.id);
   saveStoreSoon();
