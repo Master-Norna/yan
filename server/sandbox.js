@@ -1827,6 +1827,23 @@ const BROAD_DELETE =
 // 带 -Recurse 的删除：工作目录里的算寻常清理（Remove-Item .\build -Recurse 三档都照旧放行），
 // 别处写得出完整路径的，删下去就是一整片、难以恢复——审档按文档里那句「整目录删除」回绝
 const RECURSIVE_DELETE = /\b(?:Remove-Item|ri)\b(?=[^\n]*-Recurse)|\brm\s+-[^\s]*r|\b(?:rmdir|rd)\b[^\n]*\/s/i;
+// 递归删的是哪几样：只看含递归删的那一段（按 ; | & 与换行切开），同一条指令里别处读的路径不算——
+// `cat /tmp/report.txt; rm -rf ./build` 里前一段只是读，不该拿它当删除目标。
+// 只认写得出完整路径的：$dir、cd 过去的相对路径静态看不出来，与本文件其余规则一样不猜
+/** @param {string} text @param {string} workdir @param {boolean} win */
+function recursiveDeleteWhy(text, workdir, win) {
+  if (!workdir || !RECURSIVE_DELETE.test(text)) return "";
+  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  for (const segment of commandSegments(text)) {
+    const line = segment.join(" ");
+    if (!RECURSIVE_DELETE.test(line)) continue;
+    for (const raw of absolutePathsIn(line, win)) {
+      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
+      if (!pathIsInside(root, candidate)) return `审查拒绝：不代为删除工作目录之外的整个目录（${raw}）`;
+    }
+  }
+  return "";
+}
 
 function normalizeLower(p) {
   return path
@@ -2371,14 +2388,10 @@ function screenAutoReview(command, { platform = process.platform, workdir = "" }
     forbidden = forbiddenWhy(scanned, "审");
   if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
-  // 递归删工作目录之外的一整片：路径写得出全的按目录判，工作目录里的照旧（那是寻常清理）
-  if (workdir && RECURSIVE_DELETE.test(text)) {
-    const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-    for (const raw of absolutePathsIn(text, win)) {
-      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
-      if (!pathIsInside(root, candidate)) return `审查拒绝：不代为删除工作目录之外的整个目录（${raw}）`;
-    }
-  }
+  // 递归删工作目录之外的一整片：只按「含递归删的那一段」判（`cat /tmp/x; rm -rf ./build` 里前一段只是读，
+  // 不该拿它当删除目标）；工作目录里的照旧，那是寻常清理
+  const deleted = recursiveDeleteWhy(text, workdir, win);
+  if (deleted) return deleted;
   const writes = scanWrites(scanned);
   if (writes.writing && REVIEW_SYSTEM_PATH.test(writes.text))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";

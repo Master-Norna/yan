@@ -1693,4 +1693,9 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
   // 变量里的路径静态看不出来，与本文件其余规则一样不猜；不是递归删的也不管
   assert.equal(review("Remove-Item $env:TEMP\\build -Recurse"), null);
   assert.equal(review("Remove-Item D:\\data\\a.txt"), null);
+  // 同一条指令里别处读的路径不算删除目标（`cat /tmp/x; rm -rf ./build` 里前一段只是读）
+  assert.equal(
+    review(atWin ? "Get-Content C:\\data\\notes.txt; Remove-Item .\\build -Recurse" : "cat /tmp/report.txt; rm -rf ./build"),
+    null
+  );
 });
