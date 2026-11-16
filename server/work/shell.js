@@ -161,9 +161,13 @@ module.exports = function createShell({ toolEnv }) {
     });
   }
   // ---- 后台指令：开发服务器、监听构建这类不会自己结束的，放到后台跑，先回头几秒的输出与一个编号，之后用 check_command 取新输出或结束它。
-  // 桥接退出时一并收掉。只记最近的若干个，跑完的旧账先清
+  // 桥接退出时一并收掉。只记最近的若干个，跑完且报过的旧账先清
   const BACKGROUND_KEEP = 24,
-    backgroundJobs = new Map();
+    // 还没报过结果的不清：页面关着时结束的，再开页要凭它把结果补报上去（rewatchBackground）；被挤出表，页面就只拿到 lost，
+    // 结果与真实原因都没了。这一档只是防长期无人回来时无限长，真超了也把话说明白（watch 回 evicted，不谎称桥接重启）
+    BACKGROUND_UNREPORTED_KEEP = 64,
+    backgroundJobs = new Map(),
+    evictedJobs = new Set();
   let backgroundSeq = 0;
   // 编号在桥接重启后从 bg1 重数：另记一个带这次启动标记的 key，页面刷新后重新等上时按它认，不会等到别的指令上
   const BOOT = Date.now().toString(36);
@@ -214,7 +218,16 @@ module.exports = function createShell({ toolEnv }) {
   function enlist(job) {
     job.id = `bg${++backgroundSeq}`;
     job.key = `${BOOT}-${backgroundSeq}`;
-    for (const [id, old] of backgroundJobs) if (backgroundJobs.size >= BACKGROUND_KEEP && old.exitCode !== null) backgroundJobs.delete(id);
+    for (const [id, old] of backgroundJobs)
+      if (backgroundJobs.size >= BACKGROUND_KEEP && old.exitCode !== null && old.reported) backgroundJobs.delete(id);
+    // 没报过结果的也不能无限攒：超了丢最早结束的那几条——留下越新的越可能还用得上（Map 按插入序走，
+    // 从前往后删即从头删）。丢掉的记下编号，watch/check 问到时说得清是「结束得久、结果没留住」
+    const ended = [...backgroundJobs].filter(([, old]) => old.exitCode !== null && !old.reported);
+    for (const [id] of ended.slice(0, Math.max(0, ended.length - BACKGROUND_UNREPORTED_KEEP))) {
+      backgroundJobs.delete(id);
+      evictedJobs.add(id);
+      while (evictedJobs.size > 1024) evictedJobs.delete(evictedJobs.values().next().value);
+    }
     backgroundJobs.set(job.id, job);
     return job;
   }
@@ -287,10 +300,15 @@ module.exports = function createShell({ toolEnv }) {
   // key：页面收口时带上（编号在桥接重启后重数，不带 key 可能收到别的指令上）
   async function checkBackground(id, stop, waitMs, key = "") {
     const job = backgroundJobs.get(String(id || ""));
-    if (!job || (key && job.key !== key)) throw Error(`没有编号为 ${id} 的后台指令（桥接重启过的话，之前的后台指令已随之结束）`);
-    // 模型亲手结束的：三秒里进程没退出时也记下，稍后真退出了照「已停止」收口、不再叫醒它
-    if (stop) job.stopped = true;
+    if (!job || (key && job.key !== key))
+      throw Error(
+        evictedJobs.has(String(id))
+          ? `编号为 ${id} 的后台指令结束得久，后起的指令又多，结果没能留住`
+          : `没有编号为 ${id} 的后台指令（桥接重启过，或已被后起的指令挤出记录的话，之前的后台指令已随之结束）`
+      );
     if (stop && job.exitCode === null) {
+      // 模型亲手结束的：三秒里进程没退出时也记下，稍后真退出了照「已停止」收口、不再叫醒它
+      job.stopped = true;
       killTree(job.child);
       await new Promise(resolve => {
         const timer = setTimeout(resolve, 3000);
@@ -311,7 +329,7 @@ module.exports = function createShell({ toolEnv }) {
   // 模型自己用 check_command 看到它结束了的，也算报过（reported，带上退出码，页面只把签改成已结束）
   async function watchBackground(id, key, signal) {
     const job = backgroundJobs.get(String(id || ""));
-    if (!job || (key && job.key !== key)) return { id, lost: true };
+    if (!job || (key && job.key !== key)) return { id, lost: true, ...(evictedJobs.has(String(id)) ? { evicted: true } : {}) };
     if (job.reported) return { id, reported: true, exitCode: job.exitCode };
     const ticket = (job.watchTicket = (job.watchTicket || 0) + 1);
     await Promise.race([job.ended, new Promise(resolve => signal?.addEventListener("abort", resolve, { once: true }))]);
