@@ -143,7 +143,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
         if (why) throw Error(why);
       }
       if (body.permission === "review" && !reviewed) {
-        const why = sandbox.screenAutoReview(command);
+        const why = sandbox.screenAutoReview(command, { workdir });
         if (why) throw Error(why);
       }
       if (body.background === true) {
@@ -214,7 +214,8 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       command = String(body.command || "");
     if (body.permission === "review")
       return {
-        why: (body.sandbox === true && sandbox.screenLoose(command)) || sandbox.screenAutoReview(command),
+        // workdir 两处都要给：预检与真跑判的必须是同一条规则，否则会「预检放行、执行回绝」，也送不到审查模型
+        why: (body.sandbox === true && sandbox.screenLoose(command)) || sandbox.screenAutoReview(command, { workdir }),
         hard: !!sandbox.screenUnreviewable(command)
       };
     return { why: sandbox.screenCommand(command, workdir) };
