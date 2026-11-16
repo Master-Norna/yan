@@ -769,6 +769,8 @@ var YAN_EN = {
   "已导入 {0} 段对话、{1} 个模型{2}{3}{4}{5}{6}{7}{8}": "Imported {0} {0|chat|chats}, {1} {1|model|models}{2}{3}{4}{5}{6}{7}{8}",
   "导入失败：{0}": "Import failed: {0}",
   "导入未能做完：{0}；已并入的部分留着了": "Import didn't finish: {0}. What was already merged is kept",
+  "导入未能做完：{0}；已并入的部分留在本页了，还没能写进存储目录（会自动重试）":
+    "Import didn't finish: {0}. What was already merged is kept in this page but not yet written to the storage folder (it will retry)",
 
   // ---- 设置 · 预设 ----
   预设: "Presets",

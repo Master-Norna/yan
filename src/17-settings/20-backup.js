@@ -217,7 +217,15 @@ async function importData(file) {
       saveStore();
       render();
       if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
-      toast(t`导入未能做完：${why}；已并入的部分留着了`, 8000);
+      // 「留着了」要说准：并进来的是内存里那一截，真写进存储目录还得等这一趟落盘。
+      // 附件那一半常常正是「配额满、目录写不进」坏的，这时说「留着了」会让人以为已经存住
+      const settled = await flushConfig().catch(() => false);
+      toast(
+        settled
+          ? t`导入未能做完：${why}；已并入的部分留着了`
+          : t`导入未能做完：${why}；已并入的部分留在本页了，还没能写进存储目录（会自动重试）`,
+        8000
+      );
     } else toast(t`导入失败：${why}`);
   }
 }
