@@ -1,6 +1,6 @@
 // 言 · 设置 → 环境：给模型备一套自带的开发环境（桥接那头在 server/env/），装在存储位置的「环境」目录里，不依赖、也不改动系统。
 // 一组工具一张卡，勾上的在「准备环境」时装好；模型的指令与 MCP 服务都接着这套环境，缺的库它自己 pip / npm 装进来
-/** @type {{ home: string, state: Record<string, any>|null, packs: Array<Record<string, any>>, job: Record<string, any>|null }|null} */
+/** @type {{ home: string, supported?: boolean, state: Record<string, any>|null, packs: Array<Record<string, any>>, job: Record<string, any>|null }|null} */
 let envStatus = null,
   envPoll = 0;
 function envSettings() {
@@ -23,16 +23,19 @@ function envSettingsHtml() {
 }
 function envStatusHtml() {
   if (!envStatus) return `<div class="card"><div class="card-head"><span class="card-name">${t(`查看中…`)}</span></div></div>`;
-  const { state, job, home } = envStatus,
-    running = !!job?.running;
-  const summary = state
-    ? t`${state.python} · ${state.packs.length - 1} 组工具 · ${formatDay(state.at)}准备`
-    : t("首次准备需下载数十至数百 MB");
+  const { state, job, home, supported } = envStatus,
+    running = !!job?.running,
+    unsupported = supported === false;
+  const summary = unsupported
+    ? t("仅 Windows")
+    : state
+      ? t`${state.python} · ${state.packs.length - 1} 组工具 · ${formatDay(state.at)}准备`
+      : t("首次准备需下载数十至数百 MB");
   const log =
     job && (running || job.error)
       ? `<div class="card-note">${escapeHtml(running ? t`正在${tr(job.step) || t("开始")}…` : t`未能装成：${tr(job.error)}`)}</div><pre class="env-log">${escapeHtml(job.log.map(tr).join("\n"))}</pre>`
       : "";
-  return `<div class="card"><div class="card-head"><span class="card-name">${running ? t("准备中") : state ? t("已备好") : t("尚未准备")}</span><span class="card-state${state ? " ok" : ""}" title="${escapeHtml(summary)}">${escapeHtml(summary)}</span><span class="card-actions"><button id="envPrepare" type="button" class="outline-btn"${running ? " disabled" : ""}>${running ? t("准备中…") : state ? t("更新环境") : t("准备环境")}</button>${state && !running ? `<button id="envClear" type="button" class="danger-btn">${t(`清空`)}</button>` : ""}</span></div><div class="card-sub" title="${escapeHtml(home)}">${escapeHtml(home)}</div>${log}</div>`;
+  return `<div class="card"><div class="card-head"><span class="card-name">${running ? t("准备中") : state ? t("已备好") : t("尚未准备")}</span><span class="card-state${state ? " ok" : ""}" title="${escapeHtml(summary)}">${escapeHtml(summary)}</span><span class="card-actions"><button id="envPrepare" type="button" class="outline-btn"${running ? " disabled" : ""}>${running ? t("准备中…") : state ? t("更新环境") : t("准备环境")}</button>${state && !running ? `<button id="envClear" type="button" class="danger-btn">${t(`清空`)}</button>` : ""}</span></div><div class="card-sub" title="${escapeHtml(home)}">${escapeHtml(home)}</div>${unsupported ? `<div class="card-note">${escapeHtml(t("环境工具包只备了 Windows 版；在 macOS 上请用系统里的 Python 与 Node（可经 Homebrew 安装）"))}</div>` : ""}${log}</div>`;
 }
 // 一组一张卡：名称与说明在左，状态在右——没选是空框，选了待装是朱色实心，装好了是一笔勾；装了又取消的标「待卸」，下回准备时卸掉。
 // 底座（Python）取消不了，装好后标灰字「必备」，免得看着像点不动
