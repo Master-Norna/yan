@@ -154,6 +154,10 @@ test("接法由言补齐：在人写的 --config 上合并，人写了的照人�
     "https://ads.example.com",
     ...own
   ]);
+  // 接法写不成（这里把「游目」占成一个普通文件）：不降级成没有 blockedOrigins 的那份，宁可报错
+  const blockedRoot = mkdtempSync(path.join(tmpdir(), "yan-root-"));
+  writeFileSync(path.join(blockedRoot, "游目"), "");
+  assert.throws(() => prepareBrowser({ command: "npx", args: ["@playwright/mcp"] }, { root: blockedRoot, bridgePort: 8787 }), /接法写不进/);
 });
 
 test("游目自己的浏览器：几项选择拼成整条，家当都在存储根的「游目」里，再补接法", () => {
