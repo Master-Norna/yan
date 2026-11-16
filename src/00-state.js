@@ -76,7 +76,7 @@
  * @property {string[] | boolean} [granted] 批过了哪几条守的关口（旧存盘是 true）：这件工具自己不再另问，审查也知道那几条守这一步已照过
  * @property {{ ok: boolean, why: string }} [reviewed] 审而后行里交专司的审查模型判过：准了照做（指令带 reviewed 交桥接），驳了即不做
  * @property {boolean} [background] 后台指令
- * @property {{ id: string, key?: string, state: "running"|"done"|"stopped"|"lost", started?: number }} [bg] 后台指令的编号与此刻的样子：结束时叫醒模型（running 时页面在等它；started：起跑的时刻，书眉的漏据它算已跑多久）
+ * @property {{ id: string, key?: string, state: "running"|"done"|"stopped"|"lost"|"evicted", started?: number }} [bg] 后台指令的编号与此刻的样子：结束时叫醒模型（running 时页面在等它；started：起跑的时刻，书眉的漏据它算已跑多久；lost / evicted 是「不会再有回报送到」的两种终态，见 15-tools/20-command.js 的 settleBackground）
  * @property {{ id: string, due: number, every?: number, state: "waiting"|"done"|"stopped", created?: number }} [timer] 等时刻的候（set_timer）：桥接那头的编号、几时叫（every：此后隔多久再叫）；waiting 时书眉的漏列着它
  * @property {{ old: string, new: string } | { hunks: DiffHunk[], old: string }} [diff] 覆盖写：旧格式是前后两段；新格式只存旧侧的行与各块两侧的行号，新侧按号从这一步的参数里取（见 22-changes.js 的 hunksText）
  * @property {string} [written] write_file 写下的内容：早先的步骤记整份（过长只留开头），现在不另存——整份就在这一步的参数里
