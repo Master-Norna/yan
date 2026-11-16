@@ -37,14 +37,10 @@ check(
   )) === "报表.csv|a,b|4"
 );
 await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
-// 纸先沉下去、底淡掉，淡完才藏起、清台面
-await sleep(260);
-check(
-  "Esc closes the file preview and returns keyboard focus to its attachment",
-  await evalJs(
-    `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewerStage").innerHTML && document.activeElement === document.querySelector(".message.user .attachment-card.sent[data-open-attachment]")`
-  )
-);
+// 纸先沉下去、底淡掉，淡完才藏起、清台面。等它收定再判：固定睡一小段，机器慢一点就抢在动画中间，白红一条（macOS 上撞过）
+const closedAndFocused = `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewerStage").innerHTML && document.activeElement === document.querySelector(".message.user .attachment-card.sent[data-open-attachment]")`;
+await waitFor(closedAndFocused, 3000).catch(() => {});
+check("Esc closes the file preview and returns keyboard focus to its attachment", await evalJs(closedAndFocused));
 // 原件与对话一起落在存储根的 附件/：一个原件、一份元数据；浏览器的 IndexedDB 里不留
 const [csvId, zipId] = await evalJs(`__yanState().conversations[0].messages[0].attachments.map(a => a.id)`);
 check(
