@@ -67,6 +67,26 @@ function macSeatbeltProfile(cwd) {
   const filters = [...allowed].map(dir => `(subpath ${SB_STRING(dir)})`).join(" ");
   return `(version 1)\n(allow default)\n(deny file-write* (require-not (require-any ${filters})))\n`;
 }
+// 桥接退出时把还在跑的指令（前台的与后台的）一并收掉，连根：各份 createShell 的 runningShells 都登记在这一处，
+// 一套钩子共用（页面一份、测试里另起的几份也算，不每份都往 process 上挂监听）
+const allShells = new Set();
+let exitHooksArmed = false;
+function armExitHooks() {
+  if (exitHooksArmed) return;
+  exitHooksArmed = true;
+  const reap = () => {
+    for (const shells of allShells) for (const child of shells) killTreeSync(child);
+  };
+  process.on("exit", reap);
+  // POSIX 的信号终止不走 exit 事件：Ctrl+C、被 kill、终端断开也要先收指令再照旧死，
+  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。once 起监听器，收完把信号重发回自己按默认动作终止
+  if (process.platform !== "win32")
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.once(signal, () => {
+        reap();
+        process.kill(process.pid, signal);
+      });
+}
 module.exports = function createShell({ toolEnv }) {
   // 起一个 shell 跑指令（Windows 上外面包一层，见 POWERSHELL_WRAPPER）；指令经环境变量递进去，比塞进命令行能长两倍多
   function spawnShell(command, cwd, { boxed = false, env = {}, seatbelt = false } = {}) {
@@ -117,6 +137,8 @@ module.exports = function createShell({ toolEnv }) {
   }
   // 正在跑的 shell（前台与后台）：桥接退出时整棵收掉，不留在后台改文件、占端口
   const runningShells = new Set();
+  allShells.add(runningShells);
+  armExitHooks();
   function runShell(command, cwd, timeoutMs, signal = null, { boxed = false, env = {}, seatbelt = false } = {}) {
     return new Promise(resolve => {
       const child = spawnShell(command, cwd, { boxed, env, seatbelt });
@@ -292,10 +314,7 @@ module.exports = function createShell({ toolEnv }) {
     job.reported = true;
     killTree(job.child);
   }
-  // 桥接退出时把还在跑的指令（前台的与后台的）一并收掉，连根
-  process.on("exit", () => {
-    for (const child of runningShells) killTreeSync(child);
-  });
+  // 桥接退出（正常退与信号终止）时的收口在模块那层，见上面的 armExitHooks
   // check_command：取后台指令的新输出；stop 时先收掉它（最多等三秒）
   // key：页面收口时带上（编号在桥接重启后重数，不带 key 可能收到别的指令上）
   async function checkBackground(id, stop, waitMs, key = "") {
