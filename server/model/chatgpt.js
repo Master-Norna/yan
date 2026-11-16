@@ -149,6 +149,12 @@ module.exports = function createChatgpt({ home }) {
   // 登录：桥接在 127.0.0.1 上临时开一个回调口，用系统浏览器打开授权页；用户点了同意，浏览器带着 code 回到回调口，
   // 桥接拿 code 换令牌、存下，回调口随即关掉。十分钟没回来也关
   let pending = null;
+  // 上一次登录失败的原因。原先只挂在 pending 上：回调一失败 pending 就被收掉，status() 便再也读不到
+  // （页面 1.5 秒一轮的轮询几乎撞不上 pending 与 error 同时成立的那一瞬），于是「地区被拒」「invalid_grant」
+  // 全成了设置页上的一句「未登录」。留到下一次点登录或登录成功为止
+  let lastError = null;
+  /** @param {string} file */
+  const failure = file => (lastError?.file === file ? lastError.text : "");
   function stopPending() {
     if (!pending) return;
     clearTimeout(pending.timer);
@@ -157,6 +163,7 @@ module.exports = function createChatgpt({ home }) {
   }
   async function startLogin() {
     stopPending();
+    lastError = null;
     const target = file(),
       auth = load();
     // 本机标识：每台机器一个，头一回登录前定下，此后一直用它
@@ -176,6 +183,9 @@ module.exports = function createChatgpt({ home }) {
       if (url.pathname !== "/callback") return res.writeHead(404).end();
       const page = (status, title, line) => {
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" }).end(landing(title, line));
+        // 成败都记在这一份存储根上：设置的账号行只读 status()，除了落地页，没有别处能看到原因
+        if (status < 400) lastError = null;
+        else if (login.error) lastError = { file: login.file, text: login.error };
         if (pending === login) stopPending();
       };
       if (url.searchParams.get("state") !== state) return res.writeHead(400).end();
@@ -225,11 +235,18 @@ module.exports = function createChatgpt({ home }) {
   function status() {
     const auth = load();
     const login = pending?.file === file() ? pending : null;
-    return { signedIn: !!auth.tokens?.refresh_token, email: auth.email || "", pending: !!login, error: login?.error || "" };
+    return {
+      signedIn: !!auth.tokens?.refresh_token,
+      email: auth.email || "",
+      pending: !!login,
+      // 失败原因留到下一次点登录或登录成功：页面那一行才写得出「为什么没登进去」
+      error: login?.error || (auth.tokens?.refresh_token ? "" : failure(file()))
+    };
   }
   // 退出：向授权端吊销刷新令牌（吊销不成也照样在本机清掉），登记的 client_id 与本机标识留着，下回登录同一个账号还用它们
   async function logout() {
     stopPending();
+    lastError = null;
     const auth = load();
     if (!auth.tokens) return status();
     // 先在本机退出，立即使在途换新失效；等远端吊销期间若又登录或换根，不再回写旧状态。
