@@ -26,15 +26,17 @@ function dropRoot(root) {
   if (path.dirname(fs.realpathSync(root)) !== tmpParent || !path.basename(root).startsWith("yan-seatbelt-")) throw Error("测试清理越界");
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
 }
-// 目录外写入的落点：家目录顶层不在 seatbelt 白名单里，也不是系统目录（宽档与审查不拦）；用完即清
-const outsideRoot = path.join(home, "yan-seatbelt-out");
+// 目录外写入的落点：每轮在家目录下起一个带随机尾巴的独用目录——不在 seatbelt 白名单里，也不是系统目录；
+// 并发的几轮各用各的，也不会把同名旧目录里的东西误清掉（非 macOS 整文件跳过，占个名即可不必建目录）
+const outsideBase = MAC ? path.basename(fs.mkdtempSync(path.join(home, "yan-seatbelt-out-"))) : "yan-seatbelt-out-x";
+const outsideRoot = path.join(home, outsideBase);
 function dropOutside() {
   const real = fs.existsSync(outsideRoot) && fs.realpathSync(outsideRoot);
-  if (real && path.dirname(real) === fs.realpathSync(home) && path.basename(real) === "yan-seatbelt-out")
+  if (real && path.dirname(real) === fs.realpathSync(home) && path.basename(real).startsWith("yan-seatbelt-out-"))
     fs.rmSync(outsideRoot, { recursive: true, force: true });
 }
 // 静态筛查看不见的目录外写入：路径在跑的时候才拼出来，能拦它的只有 seatbelt
-const OUTSIDE_WRITE = name => `h=$(echo ~); mkdir -p "$h/yan-seatbelt-out/${name}" && echo hi > "$h/yan-seatbelt-out/${name}/f"`;
+const OUTSIDE_WRITE = name => `h=$(echo ~); mkdir -p "$h/${outsideBase}/${name}" && echo hi > "$h/${outsideBase}/${name}/f"`;
 const OUTSIDE_PROBE = name => `{ ${OUTSIDE_WRITE(name)} ; } || echo denied > verdict.txt`;
 
 async function boot(root) {
