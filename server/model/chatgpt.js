@@ -183,9 +183,10 @@ module.exports = function createChatgpt({ home }) {
       if (url.pathname !== "/callback") return res.writeHead(404).end();
       const page = (status, title, line) => {
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" }).end(landing(title, line));
-        // 成败都记在这一份存储根上：设置的账号行只读 status()，除了落地页，没有别处能看到原因
+        // 成败都记在这一份存储根上：设置的账号行只读 status()，除了落地页，没有别处能看到原因。
+        // 已被新的一次登录顶掉的回调（pending 换了人）不算，否则旧回调的失败会盖到新登录头上
         if (status < 400) lastError = null;
-        else if (login.error) lastError = { file: login.file, text: login.error };
+        else if (login.error && pending === login) lastError = { file: login.file, text: login.error };
         if (pending === login) stopPending();
       };
       if (url.searchParams.get("state") !== state) return res.writeHead(400).end();
