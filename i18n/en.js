@@ -44,6 +44,7 @@ var YAN_EN = {
   附件存储已中止: "Attachment storage aborted",
   旧答派出的帮手已停下: "Subagents started by the old reply were stopped",
   "这一版派出的帮手还在做，做完再切": "Subagents from this version are still running. Switch when they finish",
+  这一版挂着的后台与定时已随切换收掉了: "Background jobs and timers on this version were stopped by the switch",
   上一个版本: "Previous version",
   下一个版本: "Next version",
 

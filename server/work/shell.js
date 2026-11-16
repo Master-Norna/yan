@@ -288,6 +288,8 @@ module.exports = function createShell({ toolEnv }) {
   async function checkBackground(id, stop, waitMs, key = "") {
     const job = backgroundJobs.get(String(id || ""));
     if (!job || (key && job.key !== key)) throw Error(`没有编号为 ${id} 的后台指令（桥接重启过的话，之前的后台指令已随之结束）`);
+    // 模型亲手结束的：三秒里进程没退出时也记下，稍后真退出了照「已停止」收口、不再叫醒它
+    if (stop) job.stopped = true;
     if (stop && job.exitCode === null) {
       killTree(job.child);
       await new Promise(resolve => {
@@ -316,7 +318,7 @@ module.exports = function createShell({ toolEnv }) {
     if (ticket !== job.watchTicket || signal?.aborted) return { id, superseded: true };
     if (job.reported) return { id, reported: true, exitCode: job.exitCode };
     job.reported = true;
-    return { ...(await backgroundReport(job, 0)), command: job.command };
+    return { ...(await backgroundReport(job, 0)), command: job.command, ...(job.stopped ? { stopped: true } : {}) };
   }
   return {
     WORK_SHELL,
