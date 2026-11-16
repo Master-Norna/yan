@@ -180,12 +180,14 @@ module.exports = function createShell({ toolEnv }) {
     job.key = `${BOOT}-${backgroundSeq}`;
     for (const [id, old] of backgroundJobs)
       if (backgroundJobs.size >= BACKGROUND_KEEP && old.exitCode !== null && old.reported) backgroundJobs.delete(id);
-    let unreported = 0;
-    for (const [id, old] of backgroundJobs)
-      if (old.exitCode !== null && !old.reported && ++unreported > BACKGROUND_UNREPORTED_KEEP) {
-        backgroundJobs.delete(id);
-        evictedJobs.add(id);
-      }
+    // 没报过结果的也不能无限攒：超了丢最早结束的那几条——留下越新的越可能还用得上（Map 按插入序走，
+    // 从前往后删即从头删）。丢掉的记下编号，watch/check 问到时说得清是「结束得久、结果没留住」
+    const ended = [...backgroundJobs].filter(([, old]) => old.exitCode !== null && !old.reported);
+    for (const [id] of ended.slice(0, Math.max(0, ended.length - BACKGROUND_UNREPORTED_KEEP))) {
+      backgroundJobs.delete(id);
+      evictedJobs.add(id);
+      while (evictedJobs.size > 1024) evictedJobs.delete(evictedJobs.values().next().value);
+    }
     backgroundJobs.set(job.id, job);
     return job;
   }
