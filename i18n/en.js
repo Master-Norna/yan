@@ -768,6 +768,7 @@ var YAN_EN = {
   "；备份不含附件原件，旧附件将显示为不可用": "; the backup has no attachments, so old ones will show as unavailable",
   "已导入 {0} 段对话、{1} 个模型{2}{3}{4}{5}{6}{7}{8}": "Imported {0} {0|chat|chats}, {1} {1|model|models}{2}{3}{4}{5}{6}{7}{8}",
   "导入失败：{0}": "Import failed: {0}",
+  "导入未能做完：{0}；已并入的部分留着了": "Import didn't finish: {0}. What was already merged is kept",
 
   // ---- 设置 · 预设 ----
   预设: "Presets",
@@ -1482,6 +1483,8 @@ var YAN_EN = {
   "cmd:指令（比它的输出，宜选只读、输出稳定的）": "cmd:command (compares its output; pick a read-only command with stable output)",
   "test:指令（只比过没过：退出码为 0 即过）": "test:command (only pass or fail: exit code 0 passes)",
   指令只能一行: "Command must be one line",
+  "指令只能一行、三百字以内（更长的写成脚本文件再跑）":
+    "The command must be one line and at most 300 characters (write a longer one into a script file and run that)",
   "探针「{0}」": 'Probe "{0}"',
   "{0} {1} 回": "{0} {1}×",
   " 等 {0} 个": " and {0} more",

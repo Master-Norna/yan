@@ -327,7 +327,26 @@ function settleSupplements(conversation, assistant, job, profile) {
   if (!assistant.steps.length) delete assistant.steps;
   const users = queue.map(item => item.user),
     quote = users.find(u => u.quote)?.quote || null;
+  // 没另起成的那条路：补言放回案上（这一答没写完，或目录正退回、此刻写下的会被盖掉）
+  const putBack = () => {
+    const key = draftKey(conversation.id),
+      draft = draftRecord(conversation.id);
+    store.drafts ||= {};
+    store.drafts[key] = {
+      text: [draft.text, ...users.map(u => u.content)].filter(Boolean).join("\n\n"),
+      attachments: [...draft.attachments, ...users.flatMap(u => u.attachments || [])],
+      quote: draft.quote || quote,
+      updatedAt: now()
+    };
+    if (currentId === conversation.id && view === "chat") restoreDraft();
+    toast(t("这一答未写完，补言已放回案上"));
+  };
   if (assistant.status === "complete") {
+    // 正退回目录的，这一答另起写下的会被退回盖掉：与另外两处开一答的入口一样先看一句（见 80-checkpoint.js 的 rewindingOver）
+    if (rewindingOver(conversation)) {
+      putBack();
+      return mail();
+    }
     /** @type {Message} */
     const user = {
       id: uid(),
@@ -344,17 +363,7 @@ function settleSupplements(conversation, assistant, job, profile) {
     mail();
     return true;
   }
-  const key = draftKey(conversation.id),
-    draft = draftRecord(conversation.id);
-  store.drafts ||= {};
-  store.drafts[key] = {
-    text: [draft.text, ...users.map(u => u.content)].filter(Boolean).join("\n\n"),
-    attachments: [...draft.attachments, ...users.flatMap(u => u.attachments || [])],
-    quote: draft.quote || quote,
-    updatedAt: now()
-  };
-  if (currentId === conversation.id && view === "chat") restoreDraft();
-  toast(t("这一答未写完，补言已放回案上"));
+  putBack();
   return mail();
 }
 function titleFrom(text, attachments) {
