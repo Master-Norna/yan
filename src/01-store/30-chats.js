@@ -471,12 +471,15 @@ async function syncChatsWithDisk() {
       // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
       if (deletedChatIds.has(id)) continue;
       try {
-        await bridge(
+        const answer = await bridge(
           "/api/chats/delete",
           { root: chatsDir(), id, at: pendingChatDeletes.get(id) || undefined },
           AbortSignal.timeout(20000)
         );
         pendingChatDeletes.delete(id);
+        // 断着时删的那段，接上后发现别处在这段里写过更晚的一份：桥接按「删了以后又存，删除作废」留着没删
+        // （见 server/chats.js 的 handleDelete）。不说一声的话，用户以为删掉了，下一轮同步它又回来
+        if (answer?.kept) toast(t`这段在别处又有新的，没删`);
       } catch {}
     }
     const disk = new Map();

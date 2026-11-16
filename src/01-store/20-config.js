@@ -199,16 +199,12 @@ function reconcileConfig(config, savedAt) {
   if (!changed) return adoptConfig(config, savedAt);
   const theirs = metaOf(normalizeStoreData({ ...config, conversations: [] }));
   // 设置页里正编着哪一类记忆，那一类就留本页的（别处也改过时也不拿磁盘那份冲掉正在打的字）
-  const editing = editingMemoryCategory(),
-    // 编辑框的 input 监听攥着 store 里那个对象，而合并交回的是解析出来的副本（同一类、另一份）；
-    // 换进配置后要把活的这个换回去，否则接着打的字落在脱了队的对象上，下一次存盘又把它抹掉
-    live = editing ? store.memory.items.find(item => item.category === editing) : null;
+  const editing = editingMemoryCategory();
   adoptConfig(
     mergeConfig3(JSON.parse(configBase), JSON.parse(mine), theirs, unsettledSpend, editing ? new Set([editing]) : null),
     savedAt,
     JSON.stringify(theirs)
   );
-  if (live) store.memory.items = store.memory.items.map(item => (item.category === editing ? live : item));
   saveConfigNow();
 }
 // 记忆一类一份，按类名合（见 11-memory.js）：旧版同类几条、删后重建，id 都对不上，按 id 比会当成两回事。
@@ -359,9 +355,16 @@ function mergeConfig3(base, mine, theirs, unsettled = null, keepMemory = null) {
 // base：记作基准的那一份（默认就是换进来的这份；合并时是对方那份，自己改的仍算「改过」，写下去之前丢不了）
 function adoptConfig(config, savedAt, base = "") {
   const meta = normalizeStoreData({ ...config, conversations: [] });
+  // 设置页里正编着哪一类记忆：编辑框的 input 监听攥着换配置前 store.memory 里的那个对象，
+  // 而换进来的是解析出来的副本（同一类、另一份）。换完得把活的这个接回去，否则接着打的字
+  // 落在脱了队的对象上、下一次存盘又抹掉。`!changed` 直接换进来与两边都改过三方合并，两条路都经过这里，
+  // 所以接在这一处，不只补合并那条分支
+  const editing = editingMemoryCategory(),
+    live = editing ? store.memory?.items?.find(item => item.category === editing) : null;
   store.settings = meta.settings;
   store.profiles = meta.profiles;
   store.memory = meta.memory;
+  if (live) store.memory.items = store.memory.items.map(item => (item.category === editing ? live : item));
   store.drafts = meta.drafts;
   if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
   metaRevision = Math.max(metaRevision, savedAt);

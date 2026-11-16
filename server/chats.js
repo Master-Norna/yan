@@ -217,17 +217,22 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
       const id = String(body.id || "");
       if (!id) throw Error("缺少对话 id");
       const home = ensureDir(body.root);
+      // 补删带的是当初点删除的那一刻（at）：断的这段里别处写过、保存过的，savedAt 比它晚，
+      // 那是「删了以后又存」，保存侧（见 handleSave 的墓碑那段）认这种情况为真要它、删除记录作废。
+      // 这里也得同一口径：墓碑虽然后于它、允许之后重建，可它本身已经被这一下删掉了——
+      // 页面 A 断着时删、页面 B 在这段里写了，A 接上补删，删掉的正是 B 刚写的那份
+      const at = Math.min(Number(body.at) || Date.now(), Date.now());
+      if (savedAtOf(home, id) > at) return { removed: 0, kept: true };
       let removed = 0;
       for (const name of filesFor(home, id)) {
         fs.rmSync(path.join(home, name), { force: true });
         removed += 1;
       }
       fs.rmSync(trailDir(home, id), { recursive: true, force: true });
-      // 墓碑记「什么时候删的」：补删（断着的时候删的，接上后才来）要带当时那一刻，
-      // 否则断的这段里别处写过、保存过的那份，其 savedAt 早于此刻的墓碑，就会被当成迟到的旧保存丢掉。
+      // 墓碑记「什么时候删的」：补删要带当时那一刻，否则断的这段里别处写过、保存过的那份，
+      // 其 savedAt 早于此刻的墓碑，就会被当成迟到的旧保存丢掉。
       // 已有的墓碑更晚（别处晚些时候也删了同一段）就留着更晚那个：补删一次旧的不该把新记号抹回去
-      const at = Math.min(Number(body.at) || Date.now(), Date.now()),
-        tombstones = readTombstones(home);
+      const tombstones = readTombstones(home);
       writeTombstones(home, { ...tombstones, [id]: Math.max(at, Number(tombstones[id]) || 0) });
       void Promise.resolve(onDelete(id)).catch(() => {});
       return { removed };
