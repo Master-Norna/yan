@@ -113,14 +113,18 @@ function setupMarkdown() {
         node.removeAttribute("srcset");
         return;
       }
-      // 会画出破图的还有 input[type=image]：同样不交给浏览器去取（正文里极少见，但一处守住）
-      if (node.tagName === "INPUT" && node.getAttribute("type") === "image") {
+      // 会画出破图的还有 input[type=image]：同样不交给浏览器去取（正文里极少见，但一处守住）。
+      // 属性值大小写照原样读回来，TYPE=IMAGE 也认（HTML 里它不分大小写）
+      if (node.tagName === "INPUT" && /^image$/i.test(node.getAttribute("type") || "")) {
         node.removeAttribute("src");
         return;
       }
       if (node.tagName !== "IMG") return;
-      const set = node.getAttribute("srcset"),
-        raw = node.getAttribute("src") ?? (set ? set.split(",")[0].trim().split(/\s+/)[0] : null);
+      const set = firstSrcsetCandidate(node.getAttribute("srcset")),
+        src = node.getAttribute("src"),
+        // src 空着（src=""）而给了 srcset 的，srcset 说了算：?? 只在 src 完全缺失时才看它，空串会被当成图源，
+        // 被 srcset 指着的那幅图就根本没被认过；两样都没有才是 null
+        raw = src && src.trim() ? src : set || src;
       node.removeAttribute("src");
       node.removeAttribute("srcset");
       if (raw === null) return;
@@ -149,6 +153,14 @@ function setupMarkdown() {
     });
   }
 }
+// srcset 里第一个候选：data: 本体带逗号（data:image/png;base64,AAAA），不能按逗号切；
+// 它的地址里没有空白，取到第一段空白为止即可
+/** @param {string|null} set */
+function firstSrcsetCandidate(set) {
+  const text = String(set || "").trim();
+  if (!text) return "";
+  return (/^data:/i.test(text) ? text.split(/\s+/)[0] : text.split(",")[0].trim().split(/\s+/)[0]) || "";
+}
 // 不是网址、末段像个文件名的链接：取出文件名。网址、邮件、页内锚点都不算；bare 时末段不必带扩展名
 // 先去掉 ?# 再解转义、最后切段：反过来（先解再切）会把 plot%231.png 当成带片段的 plot 截掉；
 // 而解转义后那段 Windows 的路（marked 写成 %5C…）才是带斜杠的整条路，先切则取不出末段、名成了空
@@ -159,7 +171,15 @@ function localFileName(href, bare = false) {
   let path = raw.replace(/[?#].*$/, "");
   try {
     path = decodeURIComponent(path);
-  } catch {}
+  } catch {
+    // 整条解不开（如目录名里带一个裸 %）：只解末段，别让前面那个 % 把文件名的 %20 也留住——
+    // 留住就成了盘上不存在的名字，按同名找回也找不着
+    const at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")),
+      name = path.slice(at + 1);
+    try {
+      path = path.slice(0, at + 1) + decodeURIComponent(name);
+    } catch {}
+  }
   const name = path.split(/[\\/]/).pop();
   return (bare ? /^[^<>:"|?*\u0000-\u001f]+$/ : /^[^<>:"|?*\u0000-\u001f]+\.[a-z0-9]{1,8}$/i).test(name) ? name : "";
 }
