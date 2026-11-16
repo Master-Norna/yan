@@ -49,6 +49,7 @@ var YAN_EN = {
   // ---- 通用小件 ----
   未填写地址: "No address",
   "{0} 秒": "{0}s",
+  "{0}在别处也改过，这里留着你正在改的那一份": "{0} was also changed elsewhere; the copy you were editing here is kept",
   分: "min",
   秒: "s",
   小时: "h",

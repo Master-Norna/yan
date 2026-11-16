@@ -23,7 +23,7 @@ function setup({ items, failing = [] }) {
     "bootstrap",
     `install: (items, failing, routes) => {
       bridge = async (route, payload) => {
-        routes.push({ route, id: payload.id || "" });
+        routes.push({ route, id: payload.id || "", ...(payload.at === undefined ? {} : { at: payload.at }) });
         if (route !== "/api/chats/delete") return { items, deleted: {} };
         if (failing.includes(payload.id)) throw Error("补删没成");
         return { deleted: true };
@@ -47,17 +47,17 @@ function setup({ items, failing = [] }) {
 test("补删成功的那一段不会被补删之前的快照捡回来", async () => {
   const { f, routes } = setup({ items: [{ id: "X", savedAt: 5, conversation: conversation("X", "要删的") }] });
   f.store.conversations = [{ ...conversation("Y", "留下的") }];
-  f.pendingChatDeletes.add("X");
+  f.pendingChatDeletes.set("X", 1234);
   await f.syncChatsWithDisk();
   assert.deepEqual(
     routes,
     [
       { route: "/api/chats/load", id: "" },
-      { route: "/api/chats/delete", id: "X" }
+      { route: "/api/chats/delete", id: "X", at: 1234 }
     ],
-    "先取快照，再补删"
+    "先取快照，再补删；补删带上当时删的时刻"
   );
-  assert.deepEqual([...f.pendingChatDeletes], [], "删成了，名单清掉");
+  assert.deepEqual([...f.pendingChatDeletes.keys()], [], "删成了，名单清掉");
   assert.deepEqual(
     f.store.conversations.map(c => c.id),
     ["Y"],
@@ -74,17 +74,17 @@ test("这一轮没删成的那一段同样不捡回来，名单留着等下一�
     failing: ["Z"]
   });
   f.store.conversations = [];
-  f.pendingChatDeletes.add("X");
-  f.pendingChatDeletes.add("Z");
+  f.pendingChatDeletes.set("X", 1234);
+  f.pendingChatDeletes.set("Z", 5678);
   await f.syncChatsWithDisk();
   assert.deepEqual(
     routes.slice(1),
     [
-      { route: "/api/chats/delete", id: "X" },
-      { route: "/api/chats/delete", id: "Z" }
+      { route: "/api/chats/delete", id: "X", at: 1234 },
+      { route: "/api/chats/delete", id: "Z", at: 5678 }
     ],
     "名单上的两份都补删过"
   );
-  assert.deepEqual([...f.pendingChatDeletes], ["Z"], "删成的清掉，没删成的留着");
+  assert.deepEqual([...f.pendingChatDeletes.keys()], ["Z"], "删成的清掉，没删成的留着");
   assert.deepEqual(f.store.conversations, [], "两份都不从旧快照复活");
 });

@@ -187,3 +187,25 @@ test("没有基准时两边同类记忆按类名接起，两处记下的都不�
   // 磁盘上没有的类别，本地那份留着
   assert.equal(f.store.memory.items.find(item => item.category === "计划")?.text, "在本机立的计划");
 });
+
+test("设置页里正编着这一类：别处也改过也留本页的，不把正在打的字冲掉", () => {
+  const f = setup();
+  const merged = f.mergeConfig3(
+    meta([item("m1", "偏好", "偏好中文")]),
+    meta([item("m1", "偏好", "偏好中文\n正在打的这一行")]),
+    meta([item("m1", "偏好", "偏好英文")]),
+    null,
+    new Set(["偏好"])
+  );
+  assert.equal(merged.memory.items.length, 1);
+  assert.equal(merged.memory.items[0].text, "偏好中文\n正在打的这一行");
+  // 其余各类照旧：没在编的那一类仍取磁盘上的
+  const other = f.mergeConfig3(
+    meta([item("m1", "偏好", "a"), item("m2", "项目", "x")]),
+    meta([item("m1", "偏好", "a"), item("m2", "项目", "y")]),
+    meta([item("m1", "偏好", "a"), item("m2", "项目", "z")]),
+    null,
+    new Set(["偏好"])
+  );
+  assert.equal(other.memory.items.find(item => item.category === "项目").text, "z");
+});

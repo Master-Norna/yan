@@ -26,7 +26,9 @@ const dirtyChatIds = new Set(),
   chatWritePromises = new Map(),
   deletedChatIds = new Set(),
   chatDiskWrites = new Map(),
-  pendingChatDeletes = new Set();
+  // 待补删的对话：id → 删它的时刻。断着的时候删的，接上后要带着那一刻去补删——
+  // 桥接按这个时刻落墓碑，断的这段里别处写过、保存过的那份才不会被补删一并抹掉（见 server/chats.js 的 handleDelete）
+  pendingChatDeletes = new Map();
 let saveTimer = null;
 // 对话目录可用：桥接报了目录、上次读它没出错
 function chatsOnline() {
@@ -175,7 +177,7 @@ async function writeConversation(id) {
 // 墓碑先写进配置；哪怕这时桥接已断，下次接上也会先补删，不会从目录把它捡回来。
 async function deleteConversationStorage(id) {
   deletedChatIds.add(id);
-  pendingChatDeletes.add(id);
+  pendingChatDeletes.set(id, Date.now());
   pendingChatWrites.delete(id);
   dirtyChatIds.delete(id);
   writeMeta();
@@ -383,7 +385,11 @@ async function hydrateStore() {
   const local = readLocalStoreRecord();
   freshBrowser = !local;
   localSeeded = !!local && !local.managed;
-  for (const id of local?.pendingDeletes || []) pendingChatDeletes.add(id);
+  // 旧版存的是纯 id 的名单（没有时刻）：按「不知道」补齐，补删时桥接退回按此刻落墓碑
+  for (const item of local?.pendingDeletes || []) {
+    const [id, at] = Array.isArray(item) ? item : [item, 0];
+    if (id) pendingChatDeletes.set(String(id), Number(at) || 0);
+  }
   // 开页时的配置就是 localStorage 里那份：记下指纹，没改动时不去写 配置.json
   metaHash = hashText(JSON.stringify(metaOf()));
   let db = null;
@@ -460,12 +466,16 @@ async function syncChatsWithDisk() {
     chatsSkipped = Number(data.skipped) || 0;
     // 这一轮要补删的：data 是补删之前取的快照，过滤它得用补删前的名单——删成功的已从 pendingChatDeletes 里拿掉了，
     // 若照改小之后的集合过滤，刚删掉的那份会从旧快照里漏过去，又被当成「目录里多出来的」捡回来
-    const deleting = new Set(pendingChatDeletes);
+    const deleting = new Set(pendingChatDeletes.keys());
     for (const id of deleting) {
       // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
       if (deletedChatIds.has(id)) continue;
       try {
-        await bridge("/api/chats/delete", { root: chatsDir(), id }, AbortSignal.timeout(20000));
+        await bridge(
+          "/api/chats/delete",
+          { root: chatsDir(), id, at: pendingChatDeletes.get(id) || undefined },
+          AbortSignal.timeout(20000)
+        );
         pendingChatDeletes.delete(id);
       } catch {}
     }

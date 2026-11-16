@@ -223,7 +223,10 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
         removed += 1;
       }
       fs.rmSync(trailDir(home, id), { recursive: true, force: true });
-      writeTombstones(home, { ...readTombstones(home), [id]: Date.now() });
+      // 墓碑记「什么时候删的」：补删（断着的时候删的，接上后才来）要带当时那一刻，
+      // 否则断的这段里别处写过、保存过的那份，其 savedAt 早于此刻的墓碑，就会被当成迟到的旧保存丢掉
+      const at = Math.min(Number(body.at) || Date.now(), Date.now());
+      writeTombstones(home, { ...readTombstones(home), [id]: at });
       void Promise.resolve(onDelete(id)).catch(() => {});
       return { removed };
     },

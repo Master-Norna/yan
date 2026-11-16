@@ -198,14 +198,20 @@ function reconcileConfig(config, savedAt) {
   }
   if (!changed) return adoptConfig(config, savedAt);
   const theirs = metaOf(normalizeStoreData({ ...config, conversations: [] }));
-  adoptConfig(mergeConfig3(JSON.parse(configBase), JSON.parse(mine), theirs, unsettledSpend), savedAt, JSON.stringify(theirs));
+  // 设置页里正编着哪一类记忆，那一类就留本页的（别处也改过时也不拿磁盘那份冲掉正在打的字）
+  const editing = editingMemoryCategory();
+  adoptConfig(
+    mergeConfig3(JSON.parse(configBase), JSON.parse(mine), theirs, unsettledSpend, editing ? new Set([editing]) : null),
+    savedAt,
+    JSON.stringify(theirs)
+  );
   saveConfigNow();
 }
 // 记忆一类一份，按类名合（见 11-memory.js）：旧版同类几条、删后重建，id 都对不上，按 id 比会当成两回事。
 // 两边都动过同一类时不默默取本地：磁盘上的那份留作正本，把冲突记下来交回 remember 重写（见 takeMemoryClash）。
 // 这与别处的合并取舍不同——记忆是主模型按「本答读到的那一版」整类改写的，本地压过对方就是拿旧认识盖掉新事实。
-/** @param {MemoryItem[]} [base] @param {MemoryItem[]} [mine] @param {MemoryItem[]} [theirs] */
-function mergeMemoryItems(base, mine, theirs) {
+/** @param {MemoryItem[]} [base] @param {MemoryItem[]} [mine] @param {MemoryItem[]} [theirs] @param {Set<string>|null} [keep] 人在设置页正编着的那一类 */
+function mergeMemoryItems(base, mine, theirs, keep = null) {
   const index = list => new Map((Array.isArray(list) ? list : []).filter(item => item?.category).map(item => [item.category, item])),
     same = (a, b) => JSON.stringify(a) === JSON.stringify(b),
     B = index(base),
@@ -227,6 +233,14 @@ function mergeMemoryItems(base, mine, theirs) {
       out.delete(category); // 两边都删了：不是冲突
       continue;
     }
+    // 设置页里正编着这一类：人正打的字留着，别拿磁盘那份冲掉（重画会把输入框连同打的字一起没了）。
+    // 换完说一声，由 adoptConfig 那头的 toast 说
+    if (keep?.has(category)) {
+      if (mv) out.set(category, mv);
+      else out.delete(category);
+      if (!memoryKept.includes(category)) memoryKept.push(category);
+      continue;
+    }
     // 两边都动过同一类而改的不一样：磁盘上的留着，冲突交回这一答重写
     noteMemoryClash(category, tv);
     if (tv) out.set(category, tv);
@@ -239,6 +253,8 @@ function mergeMemoryItems(base, mine, theirs) {
 // 只回报这一答真要写的那几类——别处之间的冲突不该算到这一步头上
 const pendingMemoryWrites = new Set(),
   memoryClashes = new Map();
+// 这一回合并里，因人在设置页正编着而保住了本页的那几类：换完提一句（见 adoptConfig）
+let memoryKept = [];
 /** @param {string} category */
 function notePendingMemory(category) {
   pendingMemoryWrites.add(category);
@@ -259,7 +275,7 @@ function takeMemoryClash(category) {
 }
 // 三方合并：base 是上次对齐时的那份。同一样东西，自己没动过的取对方的，自己动过的取自己的；
 // 模型、卷宗按 id 逐件比，记忆按类名比，设置与草稿按键逐项比；用量取对方的、加上这边还没确认写下的（unsettled，缺省按基准相减），不互相抹掉
-function mergeConfig3(base, mine, theirs, unsettled = null) {
+function mergeConfig3(base, mine, theirs, unsettled = null, keepMemory = null) {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const keyed = (b, m, t, pick = (bv, mv, tv) => (same(mv, bv) ? tv : mv)) => {
     b ||= {};
@@ -330,7 +346,7 @@ function mergeConfig3(base, mine, theirs, unsettled = null) {
     settings,
     profiles: byId(base.profiles, mine.profiles, theirs.profiles, mergeProfile),
     memory: {
-      items: mergeMemoryItems(base.memory?.items, mine.memory?.items, theirs.memory?.items)
+      items: mergeMemoryItems(base.memory?.items, mine.memory?.items, theirs.memory?.items, keepMemory)
     },
     drafts: keyed(base.drafts, mine.drafts, theirs.drafts)
   };
@@ -353,7 +369,13 @@ function adoptConfig(config, savedAt, base = "") {
   renderHeader();
   renderHistory();
   renderQuota();
-  if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
+  // 焦点在设置里的输入框时不重画：会把正打的字连同输入框一起冲掉（同 11-memory.js 的 refreshMemorySettings）
+  if (!settingsInputFocused() && !$("#settingsModal").classList.contains("hidden")) renderSettings();
+  if (memoryKept.length) {
+    const names = memoryKept.map(category => `「${category}」`).join("");
+    memoryKept = [];
+    toast(t`${names}在别处也改过，这里留着你正在改的那一份`);
+  }
 }
 // 这台浏览器头一回碰上这个存储根、两边又各有一套：并起来——同一 id 的以磁盘上的为准，这边独有的模型、记忆、卷宗、草稿补进去
 function mergeConfig(config) {
