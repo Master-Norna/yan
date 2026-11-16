@@ -405,13 +405,21 @@ if (win) {
   for (let i = 0; i < 60 && count() < 2; i++) await new Promise(r => setTimeout(r, 150));
   abort.abort();
   await running;
-  await new Promise(r => setTimeout(r, 1200));
-  const after = count();
-  await new Promise(r => setTimeout(r, 1500));
+  // 中止到整棵树真被收掉要一会儿：桥接那头要起 taskkill，忙机器上这一下就慢（platform.js 另有 750 毫秒兜底）。
+  // 别在固定时刻取一次样——那会把中间的几拍当成「中止没生效」。等拍数自己停下来再判：连着一秒没新拍才算停住；
+  // 一直不停的话它自己会跑到 40 拍（整条指令走完，约十秒），那时判不过。
+  let after = count(),
+    quiet = 0;
+  for (let i = 0; i < 40 && quiet < 5 && after < 40; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    const now = count();
+    quiet = now === after ? quiet + 1 : 0;
+    after = now;
+  }
   check(
     "aborting the request kills the running command (no more ticks after the abort)",
-    after > 0 && count() === after && after < 40,
-    `${after} → ${count()}`
+    after > 0 && after < 40 && quiet >= 5,
+    `${after} 拍后静了 ${quiet * 200}ms`
   );
 }
 // ---- 同一文件的并行修改按先后排队：两处 edit 同时到，两处改动都落地，不互相覆盖
