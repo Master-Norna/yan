@@ -150,6 +150,83 @@ test("remember：桥接不在、写不成时说「待落盘」，不报已写入
   assert.equal(f.store.memory.items[0].text, "偏好中文\n回答简短", "本页照旧改成新内容");
 });
 
+test("换配置时把设置页正编着的那一类接回活对象：`!changed` 直接换与三方合并两条路都算", () => {
+  // 编辑框的 input 监听攥着 store.memory 里那个对象，而 adoptConfig 换进来的是解析出来的副本。
+  // 只补「两边都改过」那条分支的话，本页还没动手、别处先改了（走 !changed 直接换）这一路仍会让监听脱队
+  const f = load([
+    "adoptConfig",
+    "store",
+    "editingMemoryCategory",
+    "settingsInputFocused",
+    `setup: () => {
+      store = { settings: {}, profiles: [], conversations: [], memory: { items: [] }, drafts: {} };
+      applyAppearance = () => {};
+      renderHeader = () => {};
+      renderHistory = () => {};
+      renderQuota = () => {};
+      renderSettings = () => {};
+      writeMeta = () => {};
+      toast = () => {};
+    }`,
+    `setEditing: (category, focused) => { editingMemoryCategory = () => category; settingsInputFocused = () => focused; }`,
+    `current: () => store`
+  ]);
+  f.setup();
+  const store = f.current(),
+    live = item("m1", "偏好", "偏好中文");
+  store.memory.items = [live];
+  f.setEditing("偏好", true);
+  f.adoptConfig(
+    {
+      version: 1,
+      settings: { memoryEnabled: true },
+      profiles: [],
+      memory: { items: [item("m2", "偏好", "偏好英文")] },
+      drafts: {}
+    },
+    2000
+  );
+  const now = store.memory.items.find(entry => entry.category === "偏好");
+  assert.equal(now, live, "仍是同一个对象：input 监听接着落在它上面");
+  assert.equal(now.text, "偏好中文", "本页正编着的那一份留着");
+});
+
+test("没有在编任何一类时，换进来就用磁盘上的那份", () => {
+  const f = load([
+    "adoptConfig",
+    "store",
+    "editingMemoryCategory",
+    "settingsInputFocused",
+    `setup: () => {
+      store = { settings: {}, profiles: [], conversations: [], memory: { items: [] }, drafts: {} };
+      applyAppearance = () => {};
+      renderHeader = () => {};
+      renderHistory = () => {};
+      renderQuota = () => {};
+      renderSettings = () => {};
+      writeMeta = () => {};
+      toast = () => {};
+    }`,
+    `setEditing: (category, focused) => { editingMemoryCategory = () => category; settingsInputFocused = () => focused; }`,
+    `current: () => store`
+  ]);
+  f.setup();
+  const store = f.current();
+  store.memory.items = [item("m1", "偏好", "偏好中文")];
+  f.setEditing(null, false);
+  f.adoptConfig(
+    {
+      version: 1,
+      settings: { memoryEnabled: true },
+      profiles: [],
+      memory: { items: [item("m2", "偏好", "偏好英文")] },
+      drafts: {}
+    },
+    2000
+  );
+  assert.equal(store.memory.items.find(entry => entry.category === "偏好").text, "偏好英文");
+});
+
 test("没有基准时两边同类记忆按类名接起，两处记下的都不丢；本地独有的类别留着", () => {
   const f = load([
     "mergeConfig",
@@ -186,4 +263,26 @@ test("没有基准时两边同类记忆按类名接起，两处记下的都不�
   assert.match(pref.text, /偏好英文/);
   // 磁盘上没有的类别，本地那份留着
   assert.equal(f.store.memory.items.find(item => item.category === "计划")?.text, "在本机立的计划");
+});
+
+test("设置页里正编着这一类：别处也改过也留本页的，不把正在打的字冲掉", () => {
+  const f = setup();
+  const merged = f.mergeConfig3(
+    meta([item("m1", "偏好", "偏好中文")]),
+    meta([item("m1", "偏好", "偏好中文\n正在打的这一行")]),
+    meta([item("m1", "偏好", "偏好英文")]),
+    null,
+    new Set(["偏好"])
+  );
+  assert.equal(merged.memory.items.length, 1);
+  assert.equal(merged.memory.items[0].text, "偏好中文\n正在打的这一行");
+  // 其余各类照旧：没在编的那一类仍取磁盘上的
+  const other = f.mergeConfig3(
+    meta([item("m1", "偏好", "a"), item("m2", "项目", "x")]),
+    meta([item("m1", "偏好", "a"), item("m2", "项目", "y")]),
+    meta([item("m1", "偏好", "a"), item("m2", "项目", "z")]),
+    null,
+    new Set(["偏好"])
+  );
+  assert.equal(other.memory.items.find(item => item.category === "项目").text, "z");
 });

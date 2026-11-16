@@ -179,7 +179,10 @@ function readLocalStoreRecord() {
       revision: Number(meta?.revision) || 0,
       dbOnly: meta?.dbOnly === true,
       split: meta?.split === true,
-      pendingDeletes: Array.isArray(meta?.pendingDeletes) ? meta.pendingDeletes.map(String) : [],
+      // 旧版是纯 id 的名单，新版是 [id, 删除时刻]：两样都认（见 30-chats.js 的 hydrateStore 与 deleteConversationStorage）
+      pendingDeletes: Array.isArray(meta?.pendingDeletes)
+        ? meta.pendingDeletes.filter(Boolean).map(item => (Array.isArray(item) ? [String(item[0]), Number(item[1]) || 0] : String(item)))
+        : [],
       managed: !!meta
     };
   } catch {

@@ -36,6 +36,7 @@ var YAN_EN = {
   "本机对话存储失败，请先导出备份": "Failed to save chats locally. Export a backup first",
   "这段对话在另一处也写过，两边的内容已并在一起": "This chat was also edited elsewhere; both versions were merged",
   "有一段对话已在别处删除，此处随之移去": "A chat was deleted elsewhere and removed here too",
+  "这段在别处又有新的，没删": "This chat was updated elsewhere since you deleted it, so it was kept",
   "有 {0} 段对话已在别处删除，此处随之移去": "{0} {0|chat|chats} were deleted elsewhere and removed here too",
   "对话目录不可用，先存在浏览器里：{0}": "Chat folder unavailable, saving in the browser for now: {0}",
   附件存储不可用: "Attachment storage unavailable",
@@ -49,6 +50,7 @@ var YAN_EN = {
   // ---- 通用小件 ----
   未填写地址: "No address",
   "{0} 秒": "{0}s",
+  "{0}在别处也改过，这里留着你正在改的那一份": "{0} was also changed elsewhere; the copy you were editing here is kept",
   分: "min",
   秒: "s",
   小时: "h",
