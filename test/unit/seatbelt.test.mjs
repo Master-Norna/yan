@@ -179,7 +179,7 @@ test("严档对前台、显式后台、前台转后台是同一张约束", ONLY_
       assert.equal(done.running, false);
     }
     // 前台转后台：带 ticket 的指令跑到一半经 release 转入后台，约束不变
-    const pending = post("/api/work/run", { workdir: root, command: `sleep 1; ${probe("handed")}`, ticket: "t-hand", sandbox: true });
+    const pending = post("/api/work/run", { workdir: root, command: `sleep 3; ${probe("handed")}`, ticket: "t-hand", sandbox: true });
     await sleep(300);
     const released = await post("/api/work/release", { ticket: "t-hand" });
     assert.equal(released.released, true);
@@ -258,7 +258,7 @@ test("桥接退出时严档后台指令一并收掉", ONLY_MAC, async () => {
     assert.ok(await untilFile(path.join(root, "pid.txt")), "pid.txt 没落下");
     const pid = Number(fs.readFileSync(path.join(root, "pid.txt"), "utf8")),
       pgid = groupOf(pid);
-    assert.ok(alive(pid), `指令没跑起来（pid=${pid}）`);
+    assert.ok(alive(pid) && pgid > 0, `pid=${pid} pgid=${pgid}`);
     // 杀掉桥接：它的 exit 钩子把 runningShells 连进程组收掉
     child.kill("SIGTERM");
     await new Promise(resolve => child.once("exit", resolve));
