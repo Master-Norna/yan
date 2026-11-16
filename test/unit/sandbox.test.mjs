@@ -1627,3 +1627,91 @@ test("写参数紧贴路径（-oC:\\x）与 Set-Item 定义函数：目录与系
   // provider 全名（Microsoft.PowerShell.Core\Alias:t）里带着 powershell 字样，先被藏字那条拦下；同样不放行
   assert.ok(screen("Set-Item -Path Microsoft.PowerShell.Core\\Alias:t -Value Invoke-Expression"));
 });
+
+// 这两个用例里的路径要跟跑测试的机器同一种写法：pathIsInside 用的是宿主机的 path 模块，
+// 在 mac 上拿 Windows 路径去量，连「目录之内」也会被判成越界
+const atWin = process.platform === "win32",
+  atPlatform = atWin ? "win32" : "darwin",
+  atDir = atWin ? wd : "/Users/a/proj";
+
+test("构建与包管理器的输出目录参数算写：严档据它看越界，审与宽据它看系统目录", () => {
+  const strict = command => screenCommand(command, atDir, { platform: atPlatform }),
+    loose = command => screenLoose(command, { platform: atPlatform }),
+    review = command => screenAutoReview(command, { platform: atPlatform, workdir: atDir });
+  const outside = atWin ? "E:\\项目\\别处" : "/Users/a/other",
+    system = atWin ? "C:\\Windows\\Temp\\x" : "/usr/local/lib/x",
+    program = atWin ? "C:\\ProgramData\\cm" : "/etc/cm";
+  // 严档：越出工作目录就不行（原先这几条根本不算写，整条放行）
+  for (const command of [
+    `npm install --prefix ${outside}`,
+    `pip install --target ${outside}`,
+    `python -m pip install --target ${outside}`,
+    `cargo build --target-dir ${outside}`,
+    `cmake -B ${outside}`,
+    `ninja -C ${outside}`
+  ])
+    assert.match(strict(command), /越出了工作目录/, command);
+  // 工作目录里的照旧
+  for (const command of [
+    "npm install",
+    "npm install --prefix vendor",
+    "pip install -t vendor numpy",
+    "cargo build --target-dir target",
+    "cmake -B build",
+    "ninja -C build"
+  ])
+    assert.equal(strict(command), null, command);
+  // 不是这一个程序的这个参数就不动：git -C 是换工作目录，cargo --target 是三元组
+  assert.equal(strict(`git -C ${outside} status`), null);
+  assert.equal(strict("cargo build --target x86_64-pc-windows-msvc"), null);
+  // 同一条里的其它参数是读的来源，不该一并锁进工作目录（`pip install --target vendor <别处的 whl>`）
+  const whl = atWin ? "D:\\packages\\a.whl" : "/Users/a/pkgs/a.whl";
+  assert.equal(strict(`pip install --target vendor ${whl}`), null);
+  assert.equal(strict(`python -m pip install --target vendor ${whl}`), null);
+  // 紧贴写法的短选项（cmake -Bbuild、pip -tvendor）也认得出是那个参数
+  assert.equal(strict("cmake -Bbuild"), null);
+  assert.equal(strict("pip install -tvendor numpy"), null);
+  assert.match(review(`cmake -B${program}`), /系统目录/);
+  assert.match(loose(`pip install -t${system} numpy`), /系统目录/);
+  // 审与宽：往系统目录里装也拦得住（原先三档全放行）
+  for (const command of [
+    `pip install --target ${system}`,
+    `cmake -B ${program}`,
+    `cargo build --target-dir ${program}`,
+    `ninja -C ${program}`,
+    `npm install --prefix ${system}`
+  ]) {
+    assert.match(review(command), /系统目录/, command);
+    assert.match(loose(command), /系统目录/, command);
+  }
+  // 写到工作目录之外照旧放行（审档只守系统本身）
+  assert.equal(review(`npm install --prefix ${outside}`), null);
+});
+
+test("审档：递归删工作目录之外的整个目录回绝，工作目录里的照旧放行", () => {
+  const review = command => screenAutoReview(command, { platform: atPlatform, workdir: atDir });
+  for (const command of atWin
+    ? ["Remove-Item D:\\data -Recurse -Force", "Remove-Item C:\\Users\\me\\AppData -Recurse", "rd /s /q C:\\Users\\me"]
+    : ["rm -rf /Users/a/other", "rm -r /etc/x", "rd /s /q /Users/a/other"])
+    assert.match(review(command), /整个目录/, command);
+  // 写得出完整路径的递归删才按目录判，工作目录里的寻常清理照旧
+  assert.equal(review("Remove-Item ./build -Recurse -Force"), null);
+  assert.equal(review(atWin ? "Remove-Item E:\\项目\\言\\dist -Recurse" : "Remove-Item /Users/a/proj/dist -Recurse"), null);
+  // 相对路径要按工作目录解析后判：`..\other` 一个绝对路径都没有，只找绝对路径的话它就漏过去了
+  for (const command of atWin
+    ? ["Remove-Item ..\\other -Recurse -Force", "Remove-Item -Path ..\\other -Recurse", "ri ..\\other -r -fo"]
+    : ["rm -rf ../other", "rm -r ../other/*", "rd /s /q ../other"])
+    assert.match(review(command), /整个目录/, command);
+  assert.equal(review(atWin ? "Remove-Item .\\build -Recurse" : "rm -rf ./build"), null);
+  assert.equal(review(atWin ? "Remove-Item sub\\dist -Recurse" : "rm -rf sub/dist"), null);
+  // 原本就拦的最夸张那几种不受影响
+  assert.match(review("Remove-Item . -Recurse -Force"), /整目录/);
+  // 变量里的路径静态看不出来，与本文件其余规则一样不猜；不是递归删的也不管
+  assert.equal(review("Remove-Item $env:TEMP\\build -Recurse"), null);
+  assert.equal(review("Remove-Item D:\\data\\a.txt"), null);
+  // 同一条指令里别处读的路径不算删除目标（`cat /tmp/x; rm -rf ./build` 里前一段只是读）
+  assert.equal(
+    review(atWin ? "Get-Content C:\\data\\notes.txt; Remove-Item .\\build -Recurse" : "cat /tmp/report.txt; rm -rf ./build"),
+    null
+  );
+});

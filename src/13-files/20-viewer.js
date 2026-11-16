@@ -356,7 +356,13 @@ async function showImageAt(index, opening = false) {
       return;
     }
     if (revision !== imageViewerRevision) return;
-    if (!file) return toast(t("图片原件已找不到"));
+    if (!file) {
+      // 原件没了：大图那一枚是复用的，不能把上一幅留在画面里（名字也照实写）
+      $("#imageViewerImage")?.removeAttribute("src");
+      const empty = $("#imageViewerName");
+      if (empty) empty.textContent = t("图片原件已找不到");
+      return toast(t("图片原件已找不到"));
+    }
     if (file.kind !== "image") return openFileViewer({ attachmentId: item.id }, file.name, imageViewerReturnFocus?.el);
     [src, name, label] = [file.data, file.name, `${file.name || t("图片")} · ${formatFileSize(file.size)}`];
   } else if (item.src) {

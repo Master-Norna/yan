@@ -52,11 +52,24 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
       entry = null;
     }
     if (!entry) {
-      // 起之前可再补几项（游目要的浏览器接法，见 server/stage.js 的 prepareBrowser）；缓存仍按人写的配置认
-      const client = new McpClient({ name, config: prepare(config), version, toolEnv });
-      entry = { key, client, ready: client.connect() };
-      // 连不上的收掉，下次用到时重来
-      entry.ready.catch(() => client.close());
+      /** @type {any} */
+      let client = null;
+      /** @type {Promise<any>} */
+      let ready;
+      try {
+        // 起之前可再补几项（游目要的浏览器接法，见 server/stage.js 的 prepareBrowser）；缓存仍按人写的配置认
+        client = new McpClient({ name, config: prepare(config), version, toolEnv });
+        ready = client.connect();
+        // 连不上的收掉，下次用到时重来
+        ready.catch(() => client.close());
+      } catch (error) {
+        // 补不上接法（见 server/stage.js 的 prepareBrowser）：只有这一个服务起不来，别把整张服务列表带塌。
+        // 交回一条已收起的替身（下次用到时照常重试），错误照常由 /api/mcp/list 报到那张卡上
+        client = { closed: true, close() {} };
+        ready = Promise.reject(error);
+        ready.catch(() => {});
+      }
+      entry = { key, client, ready };
       clients.set(name, entry);
     }
     return entry;

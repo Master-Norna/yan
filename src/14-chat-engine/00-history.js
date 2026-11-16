@@ -30,9 +30,12 @@ function settledDigest(message) {
     // 不重写就永远写着「后台进行中」（见上面那两句注释）
     broken = (message.steps || []).filter(
       step => step.status === "error" || step.status === "skipped" || step.status === "interrupted"
-    ).length;
-  if (message.trailDigest?.steps !== steps || (message.trailDigest.broken || 0) !== broken)
-    message.trailDigest = { steps, broken, text: stepsDigest(message, t("上一答的行迹")) };
+    ).length,
+    // 不会再有回报送到的终态也算：随桥接重启而止（lost）、结束得久没能留住（evicted，见 20-command.js 的 settleBackground）。
+    // 摘要留着「进行中」的话，模型会照着旧编号再开一条同号的
+    gone = (message.steps || []).filter(step => step.bg?.state === "lost" || step.bg?.state === "evicted").length;
+  if (message.trailDigest?.steps !== steps || (message.trailDigest.broken || 0) !== broken || (message.trailDigest.gone || 0) !== gone)
+    message.trailDigest = { steps, broken, gone, text: stepsDigest(message, t("上一答的行迹")) };
   return message.trailDigest.text;
 }
 /** @param {{ steps?: Step[] }} message 一答；帮手的一趟也一样：续派时它上一趟的行迹冠在新的活前面 */

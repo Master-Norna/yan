@@ -1786,6 +1786,30 @@ const WRITE_VERBS = String.raw`Set-Content|Add-Content|Out-File|Remove-Item|Move
 // 带输出目标的参数：curl -o、wget -O、iwr -OutFile、Start-Process 的重定向——动词本身像读，却在往某处写。
 // 紧贴的 -o 由 scanWrites 在实际参数位识别，同时产生写标记与路径，不另列一份判定。
 const OUTPUT_PARAMS = String.raw`(?:^|\s)(?:-o|-O|-OutFile|-OutputPath|-Destination(?:Path)?|-RedirectStandard(?:Output|Error)|--output(?:-document|-dir)?|--outdir|--out-dir)(?=[\s=:]|$)`;
+// 构建与包管理器把东西放到哪儿：同一个参数在不同程序里意思不一样（tar -C、git -C 是换工作目录，cargo --target 是三元组），
+// 所以按程序名各列一份；认不出的不动——「这条算写」会连带把它读到的路径一起锁进工作目录（见 scanWrites）。
+// 缺了这几项，npm install --prefix D:\outside 在问而后行里根本不算写，pip install --target C:\Windows\Temp 也过得了审档
+const TOOL_OUTPUT_ARGS = {
+  npm: ["--prefix", "--cache", "--global-dir"],
+  pnpm: ["--dir", "--prefix", "--store-dir", "--cache-dir"],
+  yarn: ["--cwd", "--modules-folder", "--cache-folder"],
+  pip: ["--target", "-t", "--prefix", "--cache-dir", "--src"],
+  uv: ["--directory", "--project", "--cache-dir"],
+  cargo: ["--target-dir"],
+  cmake: ["-B", "--build"],
+  ninja: ["-C", "--directory"]
+};
+const PYTHON_TOOL = /^(?:python[0-9.]*|py)$/i,
+  TOOL_WRITE_HINT = /\b(?:npm|pnpm|yarn|pip[0-9.]*|uv|cargo|cmake|ninja|python[0-9.]*|py)\b/i;
+// `python -m pip install --target …` 也算 pip 那条：别的 -m 模块没有这份表
+/** @param {{ name: string, args: { value: string }[] }} call @returns {string[] | null} */
+function outputArgsOf(call) {
+  if (PYTHON_TOOL.test(call.name)) {
+    const at = call.args.findIndex(arg => arg.value === "-m");
+    return at >= 0 && /^pip[0-9.]*$/i.test(call.args[at + 1]?.value || "") ? TOOL_OUTPUT_ARGS.pip : null;
+  }
+  return TOOL_OUTPUT_ARGS[call.name] || null;
+}
 // .NET 直写文件：[IO.File]::WriteAllText、[IO.Directory]::Delete、New-Object IO.StreamWriter 之类
 const DOTNET_WRITE = String.raw`\[(?:System\.)?IO\.(?:File|Directory|FileInfo|DirectoryInfo)\]::(?:Write|Append|Create|Delete|Move|Copy|Replace|Set)\w*|\b(?:System\.)?IO\.(?:StreamWriter|FileStream|BinaryWriter)\b`;
 const DIRECT_FILE_MUTATION = new RegExp(
@@ -1800,6 +1824,40 @@ const REVIEW_SYSTEM_PATH = new RegExp(
 );
 const BROAD_DELETE =
   /\bRemove-Item\b(?=[^\n]*(?:-Recurse|-Force))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
+// 带 -Recurse 的删除：工作目录里的算寻常清理（Remove-Item .\build -Recurse 三档都照旧放行），
+// 别处写得出完整路径的，删下去就是一整片、难以恢复——审档按文档里那句「整目录删除」回绝
+const RECURSIVE_DELETE = /\b(?:Remove-Item|ri)\b(?=[^\n]*-(?:Recurse|r)\b)|\brm\s+-[^\s]*r|\b(?:rmdir|rd)\b[^\n]*\/s/i;
+// 递归删的是哪几样：只看删除调用自己的操作数，同一条指令里别处读的路径不算——
+// `cat /tmp/report.txt; rm -rf ./build` 里前一段只是读，不该拿它当删除目标。
+// 操作数按 workdir 解析成规范路径再判：只认绝对路径的话，`Remove-Item ..\other -Recurse` 一个绝对路径都没有，
+// 审档就这么把它放过去了。$dir、cd 过去的相对路径静态看不出来，与本文件其余规则一样不猜
+const DELETE_PROGRAM = /^(?:remove-item|ri|rm|del|erase|rmdir|rd)$/i;
+// 这一段是递归删吗：Remove-Item 的 -Recurse（可简写 -r）、rm 短选项里带 r、rmdir/rd 的 /s
+/** @param {{ name: string, args: { value: string }[] }} call */
+function recursiveDeleteCall(call) {
+  if (/^(?:rmdir|rd)$/i.test(call.name)) return call.args.some(arg => /^\/s$/i.test(arg.value));
+  if (/^rm$/i.test(call.name)) return call.args.some(arg => /^-[A-Za-z]*r/i.test(arg.value));
+  return call.args.some(arg => /^-(?:recurse|r)$/i.test(arg.value));
+}
+/** @param {any} scanned @param {string} workdir @param {boolean} win */
+function recursiveDeleteWhy(scanned, workdir, win) {
+  if (!workdir || !RECURSIVE_DELETE.test(scanned.text)) return "";
+  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  for (const call of commandInvocations(scanned)) {
+    if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call)) continue;
+    for (const arg of call.args) {
+      // 选项跳过（-Recurse、-Force、cmd 的 /s /q）；`-Path X` 里那个 X 不是选项，照判
+      if (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value))) continue;
+      const raw = arg.value;
+      if (!raw) continue;
+      const candidate = win
+        ? normalizeLower(path.resolve(workdir, raw))
+        : path.normalize(path.resolve(workdir, raw)).replace(/(?<=.)[\\/]+$/, "");
+      if (!pathIsInside(root, candidate)) return `审查拒绝：不代为删除工作目录之外的整个目录（${raw}）`;
+    }
+  }
+  return "";
+}
 
 function normalizeLower(p) {
   return path
@@ -1995,18 +2053,53 @@ const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
   const offsets = new Set();
+  // 只有可能用到下面两张表时才切这一回：-o 连写的输出文件，或构建/包管理器那几件
+  const calls = /-o/i.test(scanned.text) || TOOL_WRITE_HINT.test(scanned.text) ? commandInvocations(scanned) : [];
   if (/-o/i.test(scanned.text))
-    for (const call of commandInvocations(scanned)) {
+    for (const call of calls) {
       if (!ATTACHED_OUTPUT_TOOL.test(call.name)) continue;
       for (const arg of call.args) {
         if (arg.value === "--") break;
         if (/^-o.+/i.test(arg.value)) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
       }
     }
-  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0;
+  // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」。
+  // 但同一条指令里别的参数多是读的来源——`pip install --target ./vendor /opt/packages/a.whl` 里那个已打好的 whl、
+  // `cmake -B build .` 里那个源码目录——一笔算进来就把来源也锁进了工作目录。所以只让输出参数的值受约束，
+  // 其余参数位置照 READ_SOURCES 一并豁免；紧贴写法的短选项（cmake -Bbuild、pip -t/path）在参数名与值之间补一个空格，
+  // 好让下面的路径识别看见那段值
+  let toolWrite = false;
+  const toolReads = [];
+  if (TOOL_WRITE_HINT.test(scanned.text))
+    for (const call of calls) {
+      const params = outputArgsOf({ name: call.name.toLowerCase(), args: call.args });
+      if (!params?.length) continue;
+      const target = new Set();
+      for (let i = 0; i < call.args.length; i++) {
+        const arg = call.args[i],
+          value = arg.value,
+          exact = params.find(param => value === param),
+          assigned = params.find(param => value.startsWith(`${param}=`)),
+          glued =
+            !exact && !assigned && params.find(param => /^-[^-]/.test(param) && value.startsWith(param) && value.length > param.length);
+        if (!exact && !assigned && !glued) continue;
+        toolWrite = true;
+        target.add(arg);
+        if (exact) {
+          const next = call.args[i + 1];
+          if (next) {
+            target.add(next);
+            i++;
+          }
+        } else if (glued) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
+      }
+      for (const arg of call.args) if (!target.has(arg)) toolReads.push(arg);
+    }
+  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite;
   if (!writing) return { writing, text: "" };
   const chars = stripReadSources(scanned).split("");
   for (const at of offsets) chars[at] = " " + chars[at];
+  for (const arg of toolReads) for (let i = arg.start; i < arg.end; i++) chars[i] = " ";
   return { writing, text: chars.join("") };
 }
 /**
@@ -2326,7 +2419,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
  * 规则刻意比沙箱宽得多：目录、机密文件、.git 内部、Git 回退都不管，只看会不会伤到系统本身。
  * @param {string} command
  */
-function screenAutoReview(command, { platform = process.platform } = {}) {
+function screenAutoReview(command, { platform = process.platform, workdir = "" } = {}) {
   const raw = String(command || "");
   if (callsBridge(raw)) return `审查拒绝：${BRIDGE_WHY}`;
   const win = platform === "win32",
@@ -2335,6 +2428,10 @@ function screenAutoReview(command, { platform = process.platform } = {}) {
     forbidden = forbiddenWhy(scanned, "审");
   if (forbidden) return `审查拒绝：${forbidden}`;
   if (BROAD_DELETE.test(text)) return "审查拒绝：不代为执行整目录、通配符或磁盘级删除";
+  // 递归删工作目录之外的一整片：只按「含递归删的那一段」判（`cat /tmp/x; rm -rf ./build` 里前一段只是读，
+  // 不该拿它当删除目标）；工作目录里的照旧，那是寻常清理
+  const deleted = recursiveDeleteWhy(scanned, workdir, win);
+  if (deleted) return deleted;
   const writes = scanWrites(scanned);
   if (writes.writing && REVIEW_SYSTEM_PATH.test(writes.text))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";

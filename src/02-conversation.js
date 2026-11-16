@@ -68,8 +68,9 @@ function switchBranch(c, index, step) {
   // 眼前这一版的帮手还在做：切走了它的回报会落进别的版本里
   if (crewOf(c, tail).length) return toast(t("这一版派出的帮手还在做，做完再切"));
   // 挂在这一版上的后台与定时一并收口（与重答换下旧答同一套，见 releaseBackground）：留着它们跑完，
-  // 结果会按对话寄给换上的这一版（见 14-chat-engine/70-mail.js 的 mailReport）
-  releaseBackground(c, tail);
+  // 结果会按对话寄给换上的这一版（见 14-chat-engine/70-mail.js 的 mailReport）。收掉几条要说一声：
+  // 否则候悄悄没了，用户与模型都不知道
+  const released = releaseBackground(c, tail);
   const anchor = document.querySelector(`#messages [data-message="${CSS.escape(c.messages[index].id)}"]`),
     host = $("#chatScroll"),
     keepTop = anchor ? anchor.getBoundingClientRect().top - host.getBoundingClientRect().top : null;
@@ -80,6 +81,7 @@ function switchBranch(c, index, step) {
   editingMessageId = null;
   saveStore();
   renderConversation(false);
+  if (released) toast(t("这一版挂着的后台与定时已随切换收掉了"));
   // 面板里开着的旁注若注在被换下去的那几条上，退回目录（那里只列眼前这条路上的）
   if (sidePanelOpen()) renderSidePanel();
   // 切换后让这一条留在原来的位置，视线不用重新找

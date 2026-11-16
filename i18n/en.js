@@ -36,6 +36,7 @@ var YAN_EN = {
   "本机对话存储失败，请先导出备份": "Failed to save chats locally. Export a backup first",
   "这段对话在另一处也写过，两边的内容已并在一起": "This chat was also edited elsewhere; both versions were merged",
   "有一段对话已在别处删除，此处随之移去": "A chat was deleted elsewhere and removed here too",
+  "这段在别处又有新的，没删": "This chat was updated elsewhere since you deleted it, so it was kept",
   "有 {0} 段对话已在别处删除，此处随之移去": "{0} {0|chat|chats} were deleted elsewhere and removed here too",
   "对话目录不可用，先存在浏览器里：{0}": "Chat folder unavailable, saving in the browser for now: {0}",
   附件存储不可用: "Attachment storage unavailable",
@@ -43,12 +44,14 @@ var YAN_EN = {
   附件存储已中止: "Attachment storage aborted",
   旧答派出的帮手已停下: "Subagents started by the old reply were stopped",
   "这一版派出的帮手还在做，做完再切": "Subagents from this version are still running. Switch when they finish",
+  这一版挂着的后台与定时已随切换收掉了: "Background jobs and timers on this version were stopped by the switch",
   上一个版本: "Previous version",
   下一个版本: "Next version",
 
   // ---- 通用小件 ----
   未填写地址: "No address",
   "{0} 秒": "{0}s",
+  "{0}在别处也改过，这里留着你正在改的那一份": "{0} was also changed elsewhere; the copy you were editing here is kept",
   分: "min",
   秒: "s",
   小时: "h",
@@ -768,6 +771,9 @@ var YAN_EN = {
   "；备份不含附件原件，旧附件将显示为不可用": "; the backup has no attachments, so old ones will show as unavailable",
   "已导入 {0} 段对话、{1} 个模型{2}{3}{4}{5}{6}{7}{8}": "Imported {0} {0|chat|chats}, {1} {1|model|models}{2}{3}{4}{5}{6}{7}{8}",
   "导入失败：{0}": "Import failed: {0}",
+  "导入未能做完：{0}；已并入的部分留着了": "Import didn't finish: {0}. What was already merged is kept",
+  "导入未能做完：{0}；已并入的部分留在本页了，还没能写进存储目录（会自动重试）":
+    "Import didn't finish: {0}. What was already merged is kept in this page but not yet written to the storage folder (it will retry)",
 
   // ---- 设置 · 预设 ----
   预设: "Presets",
@@ -809,6 +815,7 @@ var YAN_EN = {
   准备中: "Setting up",
   已备好: "Ready",
   尚未准备: "Not set up",
+  "仅 Windows": "Windows only",
   "准备中…": "Setting up…",
   更新环境: "Update environment",
   准备环境: "Set up environment",
@@ -1482,6 +1489,8 @@ var YAN_EN = {
   "cmd:指令（比它的输出，宜选只读、输出稳定的）": "cmd:command (compares its output; pick a read-only command with stable output)",
   "test:指令（只比过没过：退出码为 0 即过）": "test:command (only pass or fail: exit code 0 passes)",
   指令只能一行: "Command must be one line",
+  "指令只能一行、三百字以内（更长的写成脚本文件再跑）":
+    "The command must be one line and at most 300 characters (write a longer one into a script file and run that)",
   "探针「{0}」": 'Probe "{0}"',
   "{0} {1} 回": "{0} {1}×",
   " 等 {0} 个": " and {0} more",

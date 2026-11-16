@@ -176,6 +176,8 @@ function watchBackground(conversation, assistant, step) {
         // 模型自己看过它结束了（check_command），只把签改成已结束，不再叫醒
         const fresh = !data.reported;
         if (fresh) step.output = trimOutput([step.output, commandOutput(data)].filter(Boolean).join("\n"));
+        // 模型亲手按了结束、三秒里进程还没退出的：它此刻才退出，不必再叫醒一回（不然刚起的服务被自己再报一次）
+        if (data.stopped) return settleBackground(step, "stopped", data.exitCode, assistant);
         settleBackground(step, "done", data.exitCode, assistant);
         if (!fresh) return;
         mailReport(conversation, {
@@ -267,19 +269,24 @@ function rewatchBackground() {
 // 候随它所属的那几答收口——重答改问、删对话都经这里，不各写一份：挂它的那一步没了，到时也无处可报，
 // 后台指令连进程收掉（不然成了占着端口的孤儿，新的一版再起同一个服务就撞上），约好的时刻取消。按「止」不经这里（见 haltConversation）
 /** @param {Conversation} conversation @param {Message[]} messages */
+/** @param {Conversation} conversation @param {Message[]} messages @returns {number} 收掉了几条（后台与定时合计） */
 function releaseBackground(conversation, messages) {
+  let released = 0;
   for (const message of messages)
     for (const step of allSteps(message)) {
       if (step.timer?.state === "waiting") {
         settleTimer(step, "stopped", message);
         void storeBridge("/api/timer/cancel", { id: step.timer.id, to: conversation.id }).catch(() => {});
+        released += 1;
       }
       if (step.bg?.state !== "running") continue;
       const { id, key } = step.bg;
       settleBackground(step, "stopped", undefined, message);
       void bridge("/api/work/check", { id, key, stop: true }).catch(() => {});
+      released += 1;
     }
   markDirty(conversation.id);
+  return released;
 }
 function commandOutput(data) {
   return trimOutput([data.stdout, data.stderr].filter(Boolean).join(data.stdout && data.stderr ? "\n--- stderr ---\n" : ""));

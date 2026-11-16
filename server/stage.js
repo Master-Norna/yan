@@ -105,8 +105,12 @@ function prepareBrowser(config, where) {
   try {
     fs.mkdirSync(dir, { recursive: true });
     if (!fs.existsSync(out) || fs.readFileSync(out, "utf8") !== text) fs.writeFileSync(out, text);
-  } catch {
-    return config;
+  } catch (error) {
+    // 接法写不成时不能退回人写的那一份：它没有 blockedOrigins，模型的浏览器就能打开言、改权限、关审查（11-03 那次），
+    // 而页面看不出任何差别。宁可这个服务起不来，让 /api/mcp 把原因报出来（盘满、根在只读位置、游目被同名文件占着）
+    throw Error(
+      `游目的浏览器接法写不进 ${dir}（${error.message}）：缺了它，模型能在浏览器里打开言改设置，故不降级启动；腾出位置或改存储根后重试`
+    );
   }
   const rest = at < 0 ? args : args.filter((_, i) => i !== at && !(args[at] === "--config" && i === at + 1));
   return { ...config, args: [...rest, "--config", out] };
