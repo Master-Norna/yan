@@ -22,3 +22,25 @@ test("帮手断了之后行迹摘要重写：不再写「后台进行中」，�
   step.result = "3 步 · 12 秒";
   assert.match(f.settledDigest(message), /3 步 · 12 秒/);
 });
+
+test("后台随桥接重启而止之后行迹摘要也重写：摘要不再写着「进行中」", () => {
+  const f = load(["settledDigest"]);
+  const step = {
+    id: "s2",
+    name: "run_command",
+    title: "起开发服务器",
+    status: "done",
+    effect: true,
+    bg: { id: "bg1", key: "BOOT-1", state: "running" },
+    result: "后台 bg1 · 进行中",
+    arguments: "{}"
+  };
+  const message = { steps: [step] };
+  const running = f.settledDigest(message);
+  // settleBackground（15-tools/20-command.js）把签改成「随桥接重启而止」，步数没变
+  step.bg.state = "lost";
+  step.result = "后台 bg1 · 随桥接重启而止";
+  const lost = f.settledDigest(message);
+  assert.notEqual(lost, running, "候没了要重写，别让模型照着旧编号再开一条同号的");
+  assert.match(lost, /随桥接重启而止/);
+});

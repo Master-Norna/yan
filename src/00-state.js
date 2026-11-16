@@ -47,7 +47,7 @@
  * @property {number} [startedAt] 正在做时的起始时刻（毫秒），题头据此走用时；收工即删
  * @property {boolean} [waiting] 交过进展、睡着等自己挂的后台指令（醒来即删）
  * @property {Break[]} [breaks]
- * @property {{ steps: number, broken?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数）
+ * @property {{ steps: number, broken?: number, gone?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数，gone 是那时随桥接重启而止的后台）
  * @property {ToolCall[]|null} [toolCalls]
  */
 /** @typedef {{ oldStart: number, newStart: number, oldCount: number, newCount: number }} DiffHunk 覆盖写摘出的一块：两侧各从第几行起、各有几行（新侧按号从这一步的参数里切出） */
@@ -141,7 +141,7 @@
  * @property {string} [error]
  * @property {string} [interruptedAt]
  * @property {Break[]} [breaks]
- * @property {{ steps: number, broken?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数）
+ * @property {{ steps: number, broken?: number, gone?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数，gone 是那时随桥接重启而止的后台）
  * @property {number} [durationMs]
  * @property {number} [startedAt] 正在作答时的起始时刻（毫秒），行迹题头据此走用时；收尾即删
  * @property {Deliverable[]} [deliverables] 这一答交给人看的成品（答复里链到的本机文件，见 replyDeliverables）
