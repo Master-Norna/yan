@@ -131,6 +131,9 @@ async function readBackup(file) {
 // 导入采用合并策略：按 id 跳过已存在的对话 / 模型 / 分组 / 预设，MCP 服务按名字跳过，附件原件只在本机缺失时写入。
 // 分组与预设要随对话一起回来：对话里记着 groupId、presetId，定义不在，组织方式与提示词就丢了
 async function importData(file) {
+  // 并进去的东西从哪一刻起已在内存里：中途出错（附件读到半截、配额满）要照实说「已并入的部分留着」，
+  // 不能让提示还是「导入失败」，脏标记却把这些写进目录（见下面的 catch）
+  let merged = false;
   try {
     const { data, attachments } = await readBackup(file);
     if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations))
@@ -182,6 +185,8 @@ async function importData(file) {
       }
     // 大备份的附件一件一件读：读到半截时（复制、下载断在中途）前面几件已经写下，照实说只恢复了这些
     let incomplete = false;
+    // 到此为止，对话、模型、分组、预设、MCP、草稿都已经并进内存：从这里再出错，那一截是要留着的
+    merged = true;
     try {
       for await (const record of attachments)
         if (record?.id && record.data !== undefined && !(await getAttachment(record.id))) {
@@ -205,6 +210,22 @@ async function importData(file) {
     // 备份本身就断了：不能拿完整导入的提示盖过去，要说清只恢复了读到时的那一截
     toast(incomplete ? t`备份文件不完整，只恢复了能读到的部分：${summary}` : summary, incomplete ? 8000 : undefined);
   } catch (error) {
-    toast(t`导入失败：${String(error.message || error).slice(0, 80)}`);
+    const why = String(error.message || error).slice(0, 80);
+    // 并入到一半出的错（附件读坏、配额满）：内存里并进去的那一截留着，脏标记本来也会把它们写进目录。
+    // 先把它们存下来，再照实说——不能让人以为一点没进，也不能让「导入失败」与盘上多出来的东西对不上
+    if (merged) {
+      saveStore();
+      render();
+      if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
+      // 「留着了」要说准：并进来的是内存里那一截，真写进存储目录还得等这一趟落盘。
+      // 附件那一半常常正是「配额满、目录写不进」坏的，这时说「留着了」会让人以为已经存住
+      const settled = await flushConfig().catch(() => false);
+      toast(
+        settled
+          ? t`导入未能做完：${why}；已并入的部分留着了`
+          : t`导入未能做完：${why}；已并入的部分留在本页了，还没能写进存储目录（会自动重试）`,
+        8000
+      );
+    } else toast(t`导入失败：${why}`);
   }
 }
