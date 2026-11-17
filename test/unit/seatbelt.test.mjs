@@ -201,9 +201,13 @@ test("严档对前台、显式后台、前台转后台是同一张约束", NEED_
     }
     // 前台转后台：带 ticket 的指令跑到一半经 release 转入后台，约束不变
     const pending = post("/api/work/run", { workdir: root, command: `sleep 3; ${probe("handed")}`, ticket: "t-hand", sandbox: true });
-    await sleep(300);
-    const released = await post("/api/work/release", { ticket: "t-hand" });
-    assert.equal(released.released, true);
+    // release 要等指令先把 ticket 挂上：轮询到真放为止，不拿固定等待当判据
+    let released = {};
+    for (let i = 0; i < 40 && released.released !== true; i++) {
+      released = await post("/api/work/release", { ticket: "t-hand" });
+      if (released.released !== true) await sleep(50);
+    }
+    assert.equal(released.released, true, JSON.stringify(released));
     const report = await pending;
     assert.equal(report.handedOff, "released", JSON.stringify(report));
     const done = await post("/api/work/watch", { id: report.id, key: report.key });

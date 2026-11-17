@@ -79,14 +79,19 @@ function armExitHooks() {
   };
   process.on("exit", reap);
   // POSIX 的信号终止不走 exit 事件：Ctrl+C、被 kill、终端断开也要先收指令再照旧死，
-  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。once 起监听器收完指令，
-  // 宿主自己还听着这个信号就交还它收（重发会让常驻监听多吃一次、once 型的又被吞）；
-  // 没人接才退场，但走 process.exit：exit 事件上挂的收口（MCP、无头浏览器）才能跟着跑完
+  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。once 起监听器：
+  // 信号一到先收指令（有意取舍——桥接不知道宿主会不会退，先收更安全；宿主若不退出，指令也不恢复），
+  // 宿主自己还听着这个信号就交还它定去留（重发会让常驻监听多吃一次）；
+  // 没人接才退场，但走 process.exit：exit 事件上挂的收口（MCP、无头浏览器）才能跟着跑完。
+  // listenerCount 分不清「没有宿主」与「宿主的 once 监听已消费」：once 型宿主按无宿主对待
   if (process.platform !== "win32")
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
       process.once(signal, () => {
-        reap();
-        if (process.listenerCount(signal) === 0) process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
+        try {
+          reap();
+        } finally {
+          if (process.listenerCount(signal) === 0) process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
+        }
       });
 }
 module.exports = function createShell({ toolEnv }) {
