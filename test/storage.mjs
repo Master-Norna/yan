@@ -6,6 +6,8 @@ import { connect, check, sleep, PAGE, TMP, HOME, CHATS } from "./lib.mjs";
 import { shellCommand } from "./helpers/shell-command.mjs";
 const ELSEWHERE = `${TMP}/elsewhere`;
 const native = p => p.split("/").join(process.platform === "win32" ? "\\" : "/");
+// macOS 不备环境包，环境页显示系统工具卡，没有卸载确认这一步
+const MAC = process.platform === "darwin";
 const { send, evalJs, waitFor, close } = await connect();
 const filesAt = dir =>
   existsSync(dir) ? readdirSync(dir).filter(name => name.endsWith(".json") && name !== "设置.json" && name !== "删除记录.json") : [];
@@ -202,14 +204,17 @@ check(
 await evalJs(`document.querySelector("#openSettings").click(); true`);
 await sleep(200);
 await evalJs(`document.querySelector('[data-tab="env"]').click(); true`);
-await waitFor(`document.querySelector("#envStatus")?.textContent.includes("已备好")`, 5000);
-await evalJs(`document.querySelector("#envPrepare").click(); true`);
-await waitFor(`!document.querySelector("#confirmModal").classList.contains("hidden")`, 3000);
-check(
-  "updating an environment would confirm before removing installed packs",
-  await evalJs(`document.querySelector("#confirmTitle").textContent.includes("卸载")`)
-);
-await evalJs(`document.querySelector("#confirmCancel").click(); document.querySelector('[data-tab="general"]').click(); true`);
+await waitFor(`document.querySelector("#envStatus")?.textContent.includes(${JSON.stringify(MAC ? "系统工具" : "已备好")})`, 5000);
+if (!MAC) {
+  await evalJs(`document.querySelector("#envPrepare").click(); true`);
+  await waitFor(`!document.querySelector("#confirmModal").classList.contains("hidden")`, 3000);
+  check(
+    "updating an environment would confirm before removing installed packs",
+    await evalJs(`document.querySelector("#confirmTitle").textContent.includes("卸载")`)
+  );
+  await evalJs(`document.querySelector("#confirmCancel").click(); true`);
+}
+await evalJs(`document.querySelector('[data-tab="general"]').click(); true`);
 await evalJs(
   `(i => { i.value = ${JSON.stringify(native(ELSEWHERE))}; i.dispatchEvent(new Event("change")); })(document.querySelector("#settingStore")); true`
 );
@@ -228,10 +233,10 @@ check(
   (await evalJs(`document.querySelector("#settingStore").value`)).toLowerCase().includes("elsewhere")
 );
 await evalJs(`document.querySelector('[data-tab="env"]').click(); true`);
-await waitFor(`document.querySelector("#envStatus")?.textContent.includes("尚未准备")`, 5000);
+await waitFor(`document.querySelector("#envStatus")?.textContent.includes(${JSON.stringify(MAC ? "系统工具" : "尚未准备")})`, 5000);
 check(
   "moving storage refreshes the environment status for the new root",
-  await evalJs(`document.querySelector("#envStatus")?.textContent.includes("尚未准备")`)
+  await evalJs(`document.querySelector("#envStatus")?.textContent.includes(${JSON.stringify(MAC ? "系统工具" : "尚未准备")})`)
 );
 await evalJs(`document.querySelector('[data-tab="general"]').click(); true`);
 await evalJs(
