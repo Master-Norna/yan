@@ -335,6 +335,11 @@ test("真实提示词：各节各起一行，无残留占位", () => {
   );
   assert.match(text, /^［这一答里用户说的］\n1\. 他又推了几个，看一下\n\n［更早说过的/);
   assert.match(text, /\n\n［同类外发］这一类（GitHub · pull_request_review_write）前面已经审准、做过 1 回/);
+  // 授权跟的是这件事（11-17 评审）：这一答只是问进展、催着继续同一件事时，先前那次的授权仍算数；
+  // 两个分支都要写明，别简化回「这一答没再要就从严」——长活里用户问一句进展就把授权判过期，最伤长程执行
+  assert.match(text, /这一答又要过，或只是在问进展、催着继续同一件事，按那件事的授权算/);
+  assert.match(text, /另起一件不相干的事才从严/);
+  assert.match(prompts.review.system, /那件事的授权仍算数/);
   assert.match(text, /\n\n［将要做的］/);
   assert.doesNotMatch(text, /\{\{/);
   assert.doesNotMatch(text, /\n{3,}/);
