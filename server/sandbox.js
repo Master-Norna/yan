@@ -2469,8 +2469,12 @@ const VALUE_OPTS = new Set([
   "--context",
   "-c",
   "--host",
+  "--hostname",
   "-H",
   "--config",
+  // gh 的名词之后、动词之前也会夹全局选项（gh pr --repo o/r comment 5），--method 同理会吃掉它的值
+  "--repo",
+  "--method",
   "--dotnet-cli-home"
 ]);
 /** 参数里除选项与选项值之外的词（`--` 之后全算词） @param {string[]} args */
@@ -2510,9 +2514,10 @@ function httpSends(name, args) {
     if (/^-Method$/i.test(token) && isWriteMethod(next(i))) return true;
     if (name === "curl") {
       // 短选项可连写（-d@f、-sSd、-Fname=@f、-Tfile）；-F 与 -f（--fail）不是一个，故这一句区分大小写。
-      // -G 只把普通的 -d 取值改成查询串；-F/-T 与 @文件 仍是把本地的东西送出去
+      // -G 只把普通的 -d 取值改成查询串；-F/-T 与 @文件 仍是把本地的东西送出去（分开写的 -d @文件 同此，与连写一致）
       if (/^-[A-Za-z]*[dFT]/.test(token)) {
         if (!query || /[FT]/.test(token) || token.includes("@")) return true;
+        if (/d$/.test(token) && String(next(i) || "").startsWith("@")) return true;
       }
       if (/^--data(?:-raw|-binary|-urlencode|-ascii)?(?:=|$)/i.test(token)) {
         const value = token.includes("=") ? token.slice(token.indexOf("=") + 1) : next(i);
@@ -2530,6 +2535,26 @@ function httpSends(name, args) {
     }
   }
   return false;
+}
+/**
+ * 这一段 HTTP 工具自己写明白的目的地。只看这一段的参数：
+ * 整条指令里别处出现的 localhost（payload 里、别的命令里）不能给这次上传开脱
+ * 认带协议头的地址、带路径或端口的主机与 IP；认不出的（装在变量里、只写了个主机名）留给调用方按「出去了」算
+ * @param {string[]} args
+ */
+function httpHosts(args) {
+  const hosts = [];
+  for (const arg of args) {
+    if (!arg || arg.startsWith("-") || arg.startsWith("@")) continue;
+    const url = arg.match(/^(?:https?|ftp):\/\/(\[[^\]]+\]|[^\s/?#:]+)/i);
+    if (url) {
+      hosts.push(url[1]);
+      continue;
+    }
+    if (/^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\]|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?::\d+)?[/?#]/i.test(arg))
+      hosts.push(arg.split(/[/?#]/)[0].replace(/:\d+$/, ""));
+  }
+  return hosts;
 }
 /** ssh 连的是哪台；只是版本、打印配置时返回空 @param {string[]} args */
 function sshHost(args) {
@@ -2582,9 +2607,9 @@ function egressOf(command, { platform = process.platform } = {}) {
     const args = call.args.map(arg => arg.value),
       name = call.name.toLowerCase();
     if (HTTP_SEND_TOOLS.test(name) && httpSends(name, args)) {
-      // 主机名认方括号里的 IPv6（[::1]），否则本机测服务会被当成外发
-      const hosts = [...text.matchAll(/https?:\/\/(\[[^\]]+\]|[^\s/"'`:]+)(?::\d+)?/gi)].map(match => match[1]);
+      // 目的地只从这一段自己的参数里认（主机名认方括号里的 IPv6，否则本机测服务会被当成外发）。
       // 指向本机的（curl 127.0.0.1 测本地服务）不算；看不出地址的（放在变量里）按出去了算
+      const hosts = httpHosts(args);
       if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
         return { kind: "http-upload", why: "把内容发往外部地址（curl / wget 一类的上传）", label: "HTTP 上传" };
     }
@@ -2599,13 +2624,15 @@ function egressOf(command, { platform = process.platform } = {}) {
         return { kind: "git-push", why: "把 LFS 对象推到远端（git lfs push）", label: "git lfs push" };
     }
     if (name === "gh") {
-      // 先找命令词：gh 的全局选项 -R / --repo 会吃掉一个参数（gh -R o/r pr create）
-      const at = args.findIndex(arg => {
-          const lower = arg.toLowerCase();
-          return !arg.startsWith("-") && (lower === "api" || GH_WRITE_SET.has(lower));
+      // 先找命令词：gh 的全局选项 -R / --repo 会吃掉一个参数（gh -R o/r pr create），名词之后、动词之前也会夹
+      // （gh pr --repo o/r comment 5）。一律按「剥掉选项与它吃的值」之后剩下的词来找，否则 o/r 会被当成动词
+      const words = commandWords(args),
+        at = words.findIndex(word => {
+          const lower = word.toLowerCase();
+          return lower === "api" || GH_WRITE_SET.has(lower);
         }),
-        noun = at >= 0 ? args[at].toLowerCase() : "",
-        verb = at >= 0 ? (args.slice(at + 1).find(arg => !arg.startsWith("-")) || "").toLowerCase() : "";
+        noun = at >= 0 ? words[at].toLowerCase() : "",
+        verb = at >= 0 ? (words[at + 1] || "").toLowerCase() : "";
       if (noun === "api") {
         // 先看写没写死方法：-X GET 时 -f 只是查询参数，不算写；没写方法时 -f / --input 即 POST
         let method = "";
@@ -2618,9 +2645,11 @@ function egressOf(command, { platform = process.platform } = {}) {
         if (method) {
           if (isWriteMethod(method)) return { kind: "gh:gh api", why: "调 GitHub 的 API 写数据（gh api）", label: "gh api" };
         } else if (args.some(arg => /^(?:-f|-F|--field|--raw-field|--input)(?:=|$)/.test(arg) || /^-[fF].+/.test(arg))) {
-          // graphql 的 query 是读（POST 只是它的传法）；mutation 才是写。查询语句装在变量里时看不出来，按读算
-          if (!(/graphql/i.test(text) && !/mutation/i.test(text)))
-            return { kind: "gh:gh api", why: "调 GitHub 的 API 写数据（gh api）", label: "gh api" };
+          // graphql 端点上的 query 是读（POST 只是它的传法）；mutation 才是写。查询语句装在变量里时看不出来，按读算。
+          // 只看端点参数：payload 里出现 graphql 字样（-f title=graphql）不能给 REST 的写开脱
+          const endpoint = (words[at + 1] || "").toLowerCase(),
+            query = endpoint === "graphql" && !args.some(arg => /mutation/i.test(arg));
+          if (!query) return { kind: "gh:gh api", why: "调 GitHub 的 API 写数据（gh api）", label: "gh api" };
         }
       } else if (GH_WRITE_SET.get(noun)?.has(verb)) {
         return { kind: `gh:gh ${noun} ${verb}`, why: `在 GitHub 上做写操作（gh ${noun} ${verb}）`, label: `gh ${noun} ${verb}` };
