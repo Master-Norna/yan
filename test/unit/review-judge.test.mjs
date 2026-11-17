@@ -122,6 +122,24 @@ test("回报叫醒的答仍以最近一次任务原话为准：这一答没有�
   assert.doesNotMatch(text, /后台 bg1 已结束/);
 });
 
+test("更晚的长消息不挤掉这一答的原话：6000 字预算先给这一答", () => {
+  // 旧答里那一步在用户又发了长消息之后才送审（Codex 评审 11-17）：
+  // 修复前预算从最新往前取，6000 字被更晚那条吃光，再被分节滤掉，审查看到的是「这一答用户没说什么」
+  const now = { name: "run_command" },
+    chat = {
+      id: "c",
+      messages: [
+        { role: "user", content: "改完推上去，迭代到 CI 绿" },
+        { role: "assistant", steps: [now] },
+        { role: "user", content: "另外".repeat(3000) }
+      ]
+    };
+  const text = f.reviewCase(now, {}, chat, "把本地提交推到远端", "git-push", "git push");
+  assert.match(text, /1\. 改完推上去，迭代到 CI 绿/);
+  // 更晚那条既不给授权，也不当背景
+  assert.doesNotMatch(text, /另外另外/);
+});
+
 test("同一答跨多则消息：done 只数这一答开始之前的", () => {
   const now = { name: "run_command" },
     chat = {

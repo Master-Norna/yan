@@ -231,14 +231,7 @@ function reviewWord(text) {
  * @param {Conversation} conversation @param {string} [kind] @param {string} [label]
  */
 function reviewCase(step, args, conversation, why, kind = "", label = "") {
-  const said = userWords(conversation, step),
-    lines = [];
-  let room = 6000;
-  for (let i = said.length - 1; i >= 0 && room > 0; i--) {
-    const text = said[i].text.slice(0, room);
-    lines.unshift({ ...said[i], text });
-    room -= text.length;
-  }
+  const said = userWords(conversation, step);
   // 这一步在哪一则消息里。这一答从「最近一条用户主动说的话」算起：用户新开的一答只含这一问；
   // 由后台结束、帮手回报叫醒的答没有新的用户原话（relay 不算），仍以最近一次任务原话为准——长活续推靠它
   const at = conversation.messages.findIndex(message => allSteps(message).includes(step));
@@ -250,9 +243,22 @@ function reviewCase(step, args, conversation, why, kind = "", label = "") {
     while (start >= 0 && !(conversation.messages[start].role === "user" && !conversation.messages[start].relay)) start--;
   }
   const turn = Math.max(start, 0),
-    // 只取这一答起始到含这一步那则消息之间的话：更晚的答里用户说的话不能给早先这一步授权，也不当背景
-    current = at < 0 ? lines.filter(word => word.at >= turn) : lines.filter(word => word.at >= turn && word.at <= at),
-    earlier = at < 0 ? lines.filter(word => word.at < turn) : lines.filter(word => word.at < turn),
+    // 这一答是从 turn 到含这一步那则消息之间的话；更晚的话不给这一步授权，也不当背景
+    inside = word => (at < 0 ? word.at >= turn : word.at >= turn && word.at <= at);
+  // 2026-11-17：先分节再截，6000 字预算先给这一答、余下的才给更早的。
+  // 否则后面一则长消息会先把预算吃光，再被分节滤掉，审查看到的是「这一答用户没说什么」
+  let room = 6000;
+  const take = list => {
+    const kept = [];
+    for (let i = list.length - 1; i >= 0 && room > 0; i--) {
+      const text = list[i].text.slice(0, room);
+      kept.unshift({ ...list[i], text });
+      room -= text.length;
+    }
+    return kept;
+  };
+  const current = take(said.filter(inside)),
+    earlier = take(said.filter(word => word.at < turn)),
     list = items => (items.length ? items.map((word, i) => `${i + 1}. ${word.text}`).join("\n") : "（无）"),
     // 同一类外发在「这一答」开始之前审准过几回；这一答里的重复动作共用这一答的授权，不计。没有 kind 的也不计
     done = kind
