@@ -9,6 +9,7 @@ const PROMPT_VARS = {
   "work.hint": ctx => workVars(ctx.conversation),
   "work.archive": ctx => workVars(ctx.conversation),
   "work.env": () => envVars(),
+  "work.envSystem": () => envSystemVars(),
   // 每问现取；主答保存读到的各类版本，供 remember 核对。同一答的系统提示只装一次。
   "memory.body": ctx => {
     const items = memoryOn(ctx.conversation) ? memoryText(ctx.memory) : "";

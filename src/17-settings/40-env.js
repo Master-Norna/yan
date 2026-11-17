@@ -159,11 +159,20 @@ function bindEnvEvents() {
 function envVars() {
   const state = envStatus?.state;
   if (!state) return null;
-  // macOS：用的是系统工具、没有另备的环境，work.env 那句（缺的库往隔离环境装）不成立，不带
-  if (state.system) return null;
+  // macOS：用的是系统里的工具、没有另备的环境，这一句（python、pip 都指向环境）不成立，改由 envSystemVars 说
+  if (envStatus?.system) return null;
   const kits = (envStatus.packs || [])
     .filter(pack => !pack.base && state.packs.includes(pack.id))
     .map(pack => `${pack.name}（${pack.hint || [...pack.pip, ...pack.npm].slice(0, 6).join("、")}）`);
   const extra = [...state.pip, ...state.npm];
   return { kits: [state.python, ...kits, ...(extra.length ? [`另装 ${extra.join("、")}`] : [])].join("；") };
+}
+// macOS 那一句（work.envSystem）：没有另备的环境，只说系统里现成有哪几件。
+// 给路径不给名字——PATH 里的未必就是它们（从 Finder 起的桥接 PATH 很窄）；
+// 一件都没探到时整句不带，免得拼出半句
+function envSystemVars() {
+  const tools = Object.values(envStatus?.system || {})
+    .map(tool => tool?.path)
+    .filter(Boolean);
+  return tools.length ? { tools: tools.join("、") } : null;
 }

@@ -55,6 +55,8 @@
 
   // 沙箱环境备好时接在后面（{{kits}} 是装了什么）：python、pip、npm 已指向它，缺的装进它，不必动系统
   env: "此机另备一套开发环境：{{kits}}。python、pip、uv、npm 与所列工具链都指向它，缺的库直接 pip / npm i -g / go get / cargo 装进来，不动系统。",
+  // 没有另备环境时（macOS 用系统里的工具）接在后面，{{tools}} 是探到的几件程序；与上一句互斥，只来一条
+  envSystem: "此机没有另备的环境，工具就用系统里的：{{tools}}。装库另建 venv，或用 brew，不必改系统里那一份。",
 
   // 旁注里的 run_command 只跑明确只读的（见 src/15-tools/20-command.js 的 isReadOnlyCommand）：不在其列时回给模型的话
   sideReadOnly:
