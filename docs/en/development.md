@@ -23,6 +23,12 @@ New sandbox argument rules use the execution ranges and quote spans from `shellT
 
 For how the built-in prompts are written, their concatenation order and the split between light and heavy, see [`prompts/README.md`](../../prompts/README.md) (in Chinese).
 
+## Periodic cleanup
+
+Alongside regressions and dead code, check whether features have become unnecessarily complicated: repeated definitions of the same domain type, parallel implementations of the same workflow, obsolete compatibility state left after a simplification, and small modules that existing callers could reuse. The benefit should be fewer duplicated policies, states and branches—not extra abstraction merely to shorten files or reduce a line count.
+
+Page requests to the bridge use same-origin root paths; there is no switchable bridge-address state. File, attachment, skill and backup downloads share `downloadHref` in `src/03-ui-utils.js`, with text downloads going through `downloadText`. Callers still choose the original source and filename; only Blob URLs are optionally revoked. Shared reply statuses, thinking blocks, trail digests and API kinds are each defined once in `00-state.js`; messages versus helpers and model profiles versus duties keep their own required and optional fields. Model and duty cards share `handleEndpointAction` for listing models and testing connections; review duties also warn when the selected model is absent from the list, while image generation is not judged against a text-model list. Non-SSE model responses reuse `readLimitedBytes` from `server/web.js`, including bytes already read by the format probe; SSE still passes through incrementally without this whole-body limit.
+
 ## Additional validation
 
 Windows also runs lightweight unit tests on Node 22 to check the `engines` floor, for reference only. Both Windows and macOS upload screenshots when end-to-end tests fail. A unit test keeps the two version strings in sync.

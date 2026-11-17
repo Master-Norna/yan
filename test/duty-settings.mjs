@@ -2,7 +2,7 @@
 import { writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 
-const { send, evalJs, close } = await connect();
+const { send, evalJs, waitFor, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(500);
 await evalJs(
@@ -65,8 +65,18 @@ check(
     (await evalJs(`document.querySelector('[data-duty="review"] .profile-gist').textContent`)) === "fake-review"
 );
 await evalJs(`document.querySelector('[data-duty="review"] [data-duty-action="test"]').click(); true`);
-await sleep(1500);
-check("测试连接接得通", /可用/.test(await evalJs(`document.querySelector('[data-duty="review"] .profile-status').textContent`)));
+const reviewStatus = `document.querySelector('[data-duty="review"] .profile-status').textContent`;
+await waitFor(`${reviewStatus} === "已接通，但接口的模型列表里没有 fake-review"`);
+check("接口接得通，但明确提示审查模型不在清单", (await evalJs(reviewStatus)) === "已接通，但接口的模型列表里没有 fake-review");
+await evalJs(
+  `(i => { i.value = "fake"; i.dispatchEvent(new Event("input")); })(document.querySelector('[data-duty="review"] [data-duty-field="model"]')); document.querySelector('[data-duty="review"] [data-duty-action="test"]').click(); true`
+);
+await waitFor(`/^可用 · \\d+ ms$/.test(${reviewStatus})`);
+check("换成清单内的审查模型，测试才报可用", /^可用 · \d+ ms$/.test(await evalJs(reviewStatus)));
+// 恢复独立配置，后续换接口、刷新仍应保留它，不靠给假接口添模型绕过缺席判据。
+await evalJs(
+  `(i => { i.value = "fake-review"; i.dispatchEvent(new Event("input")); })(document.querySelector('[data-duty="review"] [data-duty-field="model"]')); true`
+);
 
 // 审查可走 ChatGPT 订阅：账号一行代替地址与 Key，有模型即算配好；换回去，地址与 Key 还在
 await evalJs(`document.querySelector('[data-duty="review"] [data-duty-api="chatgpt"]').click(); true`);
@@ -94,6 +104,24 @@ check(
   (await evalJs(`__yanState().settings.dutyImage.baseUrl`)) === "https://api.siliconflow.cn/v1" &&
     (await evalJs(`document.querySelectorAll('[data-duty="image"] [data-duty-api]').length`)) === 2
 );
+
+check(
+  "生图不提供按文本模型清单测试连接的按钮",
+  !(await evalJs(`!!document.querySelector('[data-duty="image"] [data-duty-action="test"]')`))
+);
+// 明确走本地假接口；硅基流动会附加 subtype 查询，假接口不模拟这条路径。
+await evalJs(`document.querySelector('[data-duty="image"] [data-duty-api="openai"]').click(); true`);
+for (const [field, value] of [
+  ["baseUrl", "http://127.0.0.1:8798/v1"],
+  ["apiKey", "k"]
+])
+  await evalJs(
+    `(i => { i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event("input")); })(document.querySelector('[data-duty="image"] [data-duty-field="${field}"]')); true`
+  );
+await evalJs(`document.querySelector('[data-duty="image"] [data-duty-action="models"]').click(); true`);
+const imageStatus = `document.querySelector('[data-duty="image"] .profile-status').textContent`;
+await waitFor(`/^已取回 \\d+ 个模型$/.test(${imageStatus})`);
+check("生图仍能取列表，不报文本模型不存在", /^已取回 \d+ 个模型$/.test(await evalJs(imageStatus)));
 
 const shot = await send("Page.captureScreenshot", { format: "png" });
 writeFileSync(`${TMP}/duty-settings.png`, Buffer.from(shot.data, "base64"));

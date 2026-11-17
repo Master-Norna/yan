@@ -188,45 +188,56 @@ async function handleProfileAction(profile, action, card) {
     renderHeader();
     return;
   }
-  if (action === "models") {
-    const status = card.querySelector(".profile-status");
-    status.textContent = t("取列表中…");
-    try {
-      const models = await fetchModelList(profile);
+  if (action === "models" || action === "test") {
+    const result = await handleEndpointAction(profile, action, card);
+    if (!result) return;
+    if (action === "models") renderHeader();
+    // 测试连接是亲手要的一次核对：档位也重探一遍；切走设置栏后不再探。
+    if (result.card) void reportReasoningProbe(profile, result.card, action === "test");
+  }
+}
+// 两种卡共用取列表与测试连接；只接回同一活配置的结果，重画后只写此刻还在的节点。
+/** @param {Profile|Duty} endpoint @param {"models"|"test"} action @param {Element} card @param {"image"} [kind] */
+async function handleEndpointAction(endpoint, action, card, kind) {
+  const profileId = card.dataset.profileCard,
+    dutyId = /** @type {DutyId} */ (card.dataset.duty),
+    selector = profileId ? `[data-profile-card="${profileId}"]` : `[data-duty="${dutyId}"]`,
+    identity = JSON.stringify(profileForRequest(endpoint)),
+    unchanged = () =>
+      (profileId ? profiles().find(p => p.id === profileId) : dutyOf(dutyId)) === endpoint &&
+      JSON.stringify(profileForRequest(endpoint)) === identity,
+    current = () => document.querySelector(selector),
+    report = text => {
+      const status = current()?.querySelector(".profile-status");
+      if (status) status.textContent = text;
+    };
+  report(action === "models" ? t("取列表中…") : t("接通中…"));
+  try {
+    if (action === "models") {
+      const models = await fetchModelList(endpoint, kind);
+      if (!unchanged()) return null;
       if (!models.length) throw Error(t("接口未返回模型列表，请手动输入模型 ID"));
-      profile.modelList = models;
-      if (!models.includes(profile.model)) profile.model = models[0];
+      endpoint.modelList = models;
+      if (!models.includes(endpoint.model)) endpoint.model = models[0];
       saveStore();
       renderSettings();
-      renderHeader();
-      card = document.querySelector(`[data-profile-card="${profile.id}"]`);
-      if (card) card.querySelector(".profile-status").textContent = t`已取回 ${models.length} 个模型`;
-      void reportReasoningProbe(profile, card);
-    } catch (error) {
-      status.textContent = friendlyError(error.message);
-    }
-    return;
-  }
-  if (action === "test") {
-    let status = card.querySelector(".profile-status");
-    status.textContent = t("接通中…");
-    try {
-      card = document.querySelector(`[data-profile-card="${profile.id}"]`) || card;
-      status = card.querySelector(".profile-status");
-      status.textContent = t("接通中…");
+      report(t`已取回 ${models.length} 个模型`);
+    } else {
       const started = performance.now();
-      const result = await bridge("/api/test", { profile: profileForRequest(profile) });
-      // 清单里没有它：接口通着，这个模型却不在（填错了名字，或服务端只列此刻答得上来的、它正挂着）
-      if (result.modelFound === false) {
-        status.textContent = t`已接通，但接口的模型列表里没有 ${profile.model}`;
-        return;
+      const result = await bridge("/api/test", { profile: profileForRequest(endpoint) });
+      if (!unchanged()) return null;
+      // 文本清单里没有它：接口通着，这个模型却不在；生图不按文本清单判断。
+      if (kind !== "image" && result.modelFound === false) {
+        report(t`已接通，但接口的模型列表里没有 ${endpoint.model}`);
+        return null;
       }
-      status.textContent = t`可用 · ${Math.round(performance.now() - started)} ms`;
-      // 测试连接是亲手要的一次核对：档位也重探一遍
-      void reportReasoningProbe(profile, card, true);
-    } catch (error) {
-      status.textContent = friendlyError(error.message);
+      report(t`可用 · ${Math.round(performance.now() - started)} ms`);
     }
+    // 操作成功不依赖卡片仍在；调用方仍须刷新页头等非卡片界面。
+    return { card: current() };
+  } catch (error) {
+    if (unchanged()) report(friendlyError(error.message));
+    return null;
   }
 }
 /** @param {Endpoint} profile */

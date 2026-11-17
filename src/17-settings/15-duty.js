@@ -106,8 +106,7 @@ function bindDutySettings() {
     });
     if (card.dataset.duty === "title") return;
     const id = /** @type {DutyId} */ (card.dataset.duty),
-      d = dutyOf(id),
-      status = () => card.querySelector(".profile-status");
+      d = dutyOf(id);
     // 收起时那一行跟着改：模型名、记号
     const refreshHead = () => (card.querySelector(".profile-head").innerHTML = dutyHeadHtml(id));
     card.querySelectorAll("[data-duty-on]").forEach(
@@ -144,35 +143,13 @@ function bindDutySettings() {
       refreshHead();
       saveStoreSoon();
     });
-    card.querySelectorAll("[data-duty-action]").forEach(
-      button =>
-        (button.onclick = async () => {
-          if (button.dataset.dutyAction === "models") {
-            status().textContent = t("取列表中…");
-            try {
-              const models = await fetchModelList(d, id === "image" ? "image" : undefined);
-              if (!models.length) throw Error(t("接口未返回模型列表，请手动输入模型 ID"));
-              d.modelList = models;
-              if (!models.includes(d.model)) d.model = models[0];
-              saveStore();
-              renderSettings();
-              const fresh = document.querySelector(`[data-duty="${id}"] .profile-status`);
-              if (fresh) fresh.textContent = t`已取回 ${models.length} 个模型`;
-            } catch (error) {
-              status().textContent = friendlyError(error.message);
-            }
-            return;
-          }
-          status().textContent = t("接通中…");
-          try {
-            const started = performance.now();
-            await bridge("/api/test", { profile: profileForRequest(d) });
-            status().textContent = t`可用 · ${Math.round(performance.now() - started)} ms`;
-          } catch (error) {
-            status().textContent = friendlyError(error.message);
-          }
-        })
-    );
+    card
+      .querySelectorAll("[data-duty-action]")
+      .forEach(
+        button =>
+          (button.onclick = () =>
+            handleEndpointAction(d, /** @type {"models"|"test"} */ (button.dataset.dutyAction), card, id === "image" ? "image" : undefined))
+      );
   });
   if (document.querySelector("[data-duty] [data-chatgpt-account]")) void refreshChatgptAccount();
 }
