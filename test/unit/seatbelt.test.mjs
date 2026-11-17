@@ -152,6 +152,10 @@ test("严档拦下现拼的目录外写入与经目录内软链指外的写入",
   try {
     dropOutside();
     const run = command => post("/api/work/run", { workdir: root, command, sandbox: true });
+    // $h 展不出家目录时，目录外写入本来也会失败；先证明它展得出，denied 才算 seatbelt 的账
+    const homeProbe = await run(`h=$(echo ~); [ -n "$h" ] && [ -d "$h" ] && echo ok > home-ok.txt`);
+    assert.equal(homeProbe.exitCode, 0, JSON.stringify(homeProbe));
+    assert.ok(fs.existsSync(path.join(root, "home-ok.txt")), "这台机器的 sh 展不出家目录，denied 不能算 seatbelt 的账");
     // 路径在执行时才拼出：静态筛查放行，拦它的是 seatbelt
     const outside = await run(`echo ok > inside-strict.txt; ${OUTSIDE_PROBE("strict")}`);
     assert.equal(outside.exitCode, 0, JSON.stringify(outside));
