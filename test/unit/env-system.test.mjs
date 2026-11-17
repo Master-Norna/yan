@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 const createEnv = createRequire(import.meta.url)("../../server/env/index.js");
@@ -45,8 +46,19 @@ test("macOS：status 报系统探测、toolPath 退回系统、apply 把 brew �
   try {
     const status = await post("/api/env/status");
     assert.ok(status.system && typeof status.system === "object", "status 没带 system 探测结果");
-    for (const dir of ["/opt/homebrew/bin", "/usr/local/bin"])
-      if (fs.existsSync(path.join(dir, "ffmpeg"))) assert.equal(status.system.ffmpeg?.path, path.join(dir, "ffmpeg"));
+    // 期望是「按优先序第一个跑得通的」：先 brew 两处 prefix，再 PATH（与实现同序）。
+    // 两处 prefix 都装着 ffmpeg 时不能同时要求等于两个路——那是必红的写法
+    const candidates = [...["/opt/homebrew/bin", "/usr/local/bin"], ...(process.env.PATH || "").split(path.delimiter)].filter(Boolean);
+    const runs = file => {
+      try {
+        execFileSync(file, ["-version"], { stdio: "ignore", timeout: 5000 });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const firstRun = candidates.map(dir => path.join(dir, "ffmpeg")).find(runs);
+    if (firstRun) assert.equal(status.system.ffmpeg?.path, firstRun, "该按优先序取第一个跑得通的 ffmpeg");
     // toolPath：.cmd 入口查不到时退回系统那一份
     if (status.system.ffmpeg) assert.equal(env.toolPath("ffmpeg"), status.system.ffmpeg.path);
     assert.equal(env.toolPath("yan-不存在的工具"), "");

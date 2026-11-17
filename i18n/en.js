@@ -822,6 +822,7 @@ var YAN_EN = {
   开始: "Start",
   "正在{0}…": "{0}…",
   "未能装成：{0}": "Install failed: {0}",
+  "探测出错：{0}": "Detection failed: {0}",
   准备中: "Setting up",
   已备好: "Ready",
   尚未准备: "Not set up",

@@ -94,7 +94,7 @@ module.exports = function createEnv({ envHome }) {
   // 给桥接起的进程接上环境：PATH 前面加上环境的几处，pip、uv、npm 与各工具链都指向环境里；环境没备好就原样返回。
   // Windows 上环境变量名不分大小写，PATH 常写作 Path：照原来的键名接，不另起一个
   function apply(base) {
-    // macOS 不备环境包：把 brew 的 bin 目接口进 PATH，指令里直接用 ffmpeg、python3 也能找着
+    // macOS 不备环境包：把 brew 的 bin 目录接进 PATH，指令里直接用 ffmpeg、python3 也能找着
     // （与探测同序：先 brew 两处 prefix，原 PATH 殿后）
     if (process.platform === "darwin") {
       const extra = SYSTEM_DIRS.filter(dir => fs.existsSync(dir)),
@@ -325,7 +325,7 @@ module.exports = function createEnv({ envHome }) {
       probed = probeSystemTools();
       for (const tool of SYSTEM_TOOLS) {
         const hit = probed[tool.id];
-        say(hit ? `${tool.id} → ${hit.version || hit.path}` : `（没找到 ${tool.id}）`);
+        say(hit ? `${tool.id} → ${hit.version || hit.path}` : `（没找到 ${tool.id}，跳过）`);
       }
       fs.mkdirSync(envHome(), { recursive: true });
       const state = { 言: "系统环境", system: probed, at: new Date().toISOString() };
@@ -372,7 +372,9 @@ module.exports = function createEnv({ envHome }) {
 };
 
 const unique = names => [...new Set(names.map(name => String(name).trim()).filter(Boolean))];
-// 按 SYSTEM_TOOLS 逐个探：brew 两处 prefix → PATH，取第一个可执行的，跑一下拿首行版本输出
+// 按 SYSTEM_TOOLS 逐个探：brew 两处 prefix → PATH，逐处试着跑一下，认第一个跑得通的那一份。
+// 只「存在且可执行」不算——brew 里那份可能缺库、架构不对，跑起来就错；停在坏的上面，
+// 别处好的就用不上了（ffmpeg 尤其：预览视频换壳据此取壳），所以探不通就跳过、接着往下试
 function probeSystemTools() {
   const candidates = [
       ...SYSTEM_DIRS,
@@ -383,30 +385,39 @@ function probeSystemTools() {
     found = {};
   for (const tool of SYSTEM_TOOLS) {
     for (const bin of tool.bins) {
-      const hit = candidates
-        .map(dir => path.join(dir, bin))
-        .find(file => {
-          try {
-            fs.accessSync(file, fs.constants.X_OK);
-            return fs.statSync(file).isFile();
-          } catch {
-            return false;
-          }
-        });
-      if (!hit) continue;
-      let version = "";
-      try {
-        version = String(
-          execFileSync(hit, tool.args, { encoding: "utf8", timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })
-        )
-          .split("\n")[0]
-          .trim();
-      } catch {}
-      found[tool.id] = { path: hit, version };
-      break;
+      for (const dir of candidates) {
+        const file = path.join(dir, bin),
+          version = probeVersion(file, tool.args);
+        if (version === null) continue;
+        found[tool.id] = { path: file, version };
+        break;
+      }
+      if (found[tool.id]) break;
     }
   }
   return found;
+}
+// 跑一下 --version 拿版本：不是可执行文件、或跑不起来（缺库、架构不对）回 null，这个候选就不算。
+// 首行往往还带着整句版权（ffmpeg 是「ffmpeg version 7.1-… Copyright (c) 2000-2024 the FFmpeg developers」），
+// 只留前半句——它要进状态卡与系统提示，别把整行版权也带进去
+function probeVersion(file, args) {
+  try {
+    if (!fs.statSync(file).isFile()) return null;
+    fs.accessSync(file, fs.constants.X_OK);
+  } catch {
+    return null;
+  }
+  try {
+    const line = String(
+      execFileSync(file, args, { encoding: "utf8", timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })
+    )
+      .split("\n")[0]
+      .split(/\s+Copyright\b/i)[0]
+      .trim();
+    return line.length > 60 ? `${line.slice(0, 59)}…` : line;
+  } catch {
+    return null;
+  }
 }
 // 下载到文件，大的每过一成报一次进度；先写到 .part，下完才改名
 async function download(url, file, say) {

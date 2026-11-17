@@ -19,14 +19,18 @@ async function refreshEnv() {
 }
 function envSettingsHtml() {
   const s = envSettings();
-  return `<div id="envPage"><h2>${t(`环境`)}</h2><div id="envStatus">${envStatusHtml()}</div><div id="envManaged"${envStatus?.system ? ' class="hidden"' : ""}><h3 class="settings-sub">${t(`工具包`)}</h3><div id="envPacks" class="card-list">${envPacksHtml()}</div><div class="setting-row"><div class="setting-copy"><strong>${t(`另装`)}</strong><small>${t(`包名以空格分隔`)}</small></div><div class="setting-actions env-extra"><label class="setting-inline">Python<input id="envPip" class="field" spellcheck="false" placeholder="${t(`如 sympy jieba`)}" value="${escapeHtml(s.pip)}"></label><label class="setting-inline">Node<input id="envNpm" class="field" spellcheck="false" placeholder="${t(`如 pnpm`)}" value="${escapeHtml(s.npm)}"></label></div></div></div></div>`;
+  // 工具包一节只给 Windows：macOS 不备环境包。开页时 status 还没回来，先按平台定，
+  // 否则 macOS 上会先画出这一节、等 status 回来再收起（闪一下）
+  const managed = envStatus ? !envStatus.system : bootstrap.work?.platform !== "darwin";
+  return `<div id="envPage"><h2>${t(`环境`)}</h2><div id="envStatus">${envStatusHtml()}</div><div id="envManaged"${managed ? "" : ' class="hidden"'}><h3 class="settings-sub">${t(`工具包`)}</h3><div id="envPacks" class="card-list">${envPacksHtml()}</div><div class="setting-row"><div class="setting-copy"><strong>${t(`另装`)}</strong><small>${t(`包名以空格分隔`)}</small></div><div class="setting-actions env-extra"><label class="setting-inline">Python<input id="envPip" class="field" spellcheck="false" placeholder="${t(`如 sympy jieba`)}" value="${escapeHtml(s.pip)}"></label><label class="setting-inline">Node<input id="envNpm" class="field" spellcheck="false" placeholder="${t(`如 pnpm`)}" value="${escapeHtml(s.npm)}"></label></div></div></div></div>`;
 }
 // macOS 没环境包：状态卡里列系统里探到的 Python、Node 与 ffmpeg（版本与路径），「准备」即重探一遍
 function envSystemHtml(job, running) {
   const tools = envStatus?.system || {},
+    // 点「重新探测」要看得见明细：探完（成功也是）就把逐件的日志列出来，不必等到出错
     log =
-      job && (running || job.error)
-        ? `<div class="card-note">${escapeHtml(running ? t`正在${tr(job.step) || t("开始")}…` : t`未能装成：${tr(job.error)}`)}</div><pre class="env-log">${escapeHtml(job.log.map(tr).join("\n"))}</pre>`
+      job && (running || job.error || job.log.length)
+        ? `${running || job.error ? `<div class="card-note">${escapeHtml(running ? t`正在${tr(job.step) || t("开始")}…` : t`探测出错：${tr(job.error)}`)}</div>` : ""}<pre class="env-log">${escapeHtml(job.log.map(tr).join("\n"))}</pre>`
         : "",
     rows = [
       ["python", "Python"],
