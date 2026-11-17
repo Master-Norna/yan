@@ -9,6 +9,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url)),
   FAKE = path.join(HERE, "fake-mcp.mjs"),
   HTTP_PORT = 8795,
   SSE_PORT = 8794;
+// macOS 不备环境包，环境页是系统工具卡、工具包区块隐藏
+const MAC = process.platform === "darwin";
 const web = spawn(process.execPath, [FAKE, "--http", String(HTTP_PORT)], { stdio: "ignore" }),
   old = spawn(process.execPath, [FAKE, "--sse", String(SSE_PORT)], { stdio: "ignore" });
 process.on("exit", () => (web.kill(), old.kill()));
@@ -191,12 +193,14 @@ if (deleteConfirm) {
 await evalJs(`document.querySelector('.tab-btn[data-tab="env"]').click(); true`);
 await waitFor(`document.querySelectorAll("#envPacks [data-env-pack]").length > 3`, 15000);
 const envPage = await evalJs(
-  `({ base: document.querySelector('[data-env-pack="python"]').getAttribute("aria-disabled"), status: document.querySelector("#envStatus .card-name").textContent })`
+  `({ base: document.querySelector('[data-env-pack="python"]').getAttribute("aria-disabled"), status: document.querySelector("#envStatus .card-name").textContent, managedHidden: document.querySelector("#envManaged").classList.contains("hidden") })`
 );
 await evalJs(`document.querySelector('[data-env-pack="image"]').click(); true`);
 check(
   "env page lists the packs (Python as the fixed base); picking one is saved",
-  envPage.base === "true" && envPage.status === "尚未准备" && (await evalJs(`__yanState().settings.env.packs.includes("image")`)),
+  envPage.base === "true" &&
+    (MAC ? envPage.status === "系统工具" && envPage.managedHidden : envPage.status === "尚未准备") &&
+    (await evalJs(`__yanState().settings.env.packs.includes("image")`)),
   JSON.stringify(envPage)
 );
 await close();
