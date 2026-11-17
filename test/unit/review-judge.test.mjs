@@ -2,6 +2,7 @@
 // 往技能目录写的认得出带 . 与 .. 的路径；审查答复去掉开头的记号再看首字
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { load } from "./harness.mjs";
 
 const f = load([
@@ -11,7 +12,14 @@ const f = load([
   "reviewWord",
   "normalizeWorkPath",
   `setup: () => {
-    Object.assign(PROMPTS, { review: { case: "{{user}}|{{intent}}|{{action}}|{{why}}", intent: "{{text}}" } });
+    Object.assign(PROMPTS, {
+      review: {
+        case: "{{now}}{{earlier}}{{done}}|{{intent}}|{{action}}|{{why}}",
+        earlier: "|early:{{user}}",
+        done: "|done:{{count}}:{{label}}",
+        intent: "{{text}}"
+      }
+    });
     bootstrap = { store: { skills: "E:\\\\聊天记录\\\\.yan\\\\技能" } };
   }`
 ]);
@@ -42,6 +50,107 @@ test("交给审查的「用户的原话」里没有回报", () => {
   const text = f.reviewCase({ name: "fetch_page" }, { url: "https://a.example/" }, relayed, "缘由");
   assert.match(text, /构建为什么失败/);
   assert.doesNotMatch(text, /回报|用户已同意/);
+});
+
+test("授权按这一答算：更早的原话只作背景，同类外发做过几回写明", () => {
+  const now = { name: "mcp_call" },
+    chat = {
+      id: "c",
+      messages: [
+        { role: "user", content: "看一下 PR103，对照工程规范。有问题的话给出评论" },
+        {
+          role: "assistant",
+          steps: [
+            {
+              name: "mcp__github__pull_request_review_write",
+              status: "done",
+              reviewed: { ok: true, kind: "mcp:pull_request_review_write" }
+            }
+          ]
+        },
+        { role: "user", content: "他又推了几个，看一下" },
+        {
+          role: "assistant",
+          steps: [
+            // 这一答里先前也审准过一次同类外发：与这一步共用这一答的授权，不写进「已做过」的计数
+            { name: "mcp__github__add_comment", status: "done", reviewed: { ok: true, kind: "mcp:pull_request_review_write" } },
+            now
+          ]
+        }
+      ]
+    };
+  const text = f.reviewCase(
+    now,
+    { title: "second" },
+    chat,
+    "调外部服务的写操作",
+    "mcp:pull_request_review_write",
+    "GitHub · pull_request_review_write"
+  );
+  // 这一答只放「他又推了几个，看一下」；前一答的授权另作一节，不再混在同一条清单里
+  assert.match(text, /^1\. 他又推了几个，看一下/);
+  assert.match(text, /\n\n\|early:1\. 看一下 PR103/);
+  // 只数更早的答：前一答那一次算 1，这一答里先前那一次不算
+  assert.match(text, /\n\n\|done:1:GitHub · pull_request_review_write/);
+  assert.doesNotMatch(text.split("|early:")[0], /看一下 PR103/);
+  // 两节各起一行，不贴着上文
+  assert.doesNotMatch(text, /看一下\|early:/);
+  assert.doesNotMatch(text, /，看一下\|done:/);
+  // 没有 kind 的（系统级动作、写技能目录）不写「同类外发」一句
+  assert.doesNotMatch(f.reviewCase(now, {}, chat, "缘由"), /\|done:/);
+});
+
+test("回报叫醒的答仍以最近一次任务原话为准：这一答没有新的用户原话，不算未授权", () => {
+  const tool = { name: "mcp_call" },
+    chat = {
+      id: "c",
+      messages: [
+        { role: "user", content: "把 PR 迭代到 CI 绿，绿了就推" },
+        {
+          role: "assistant",
+          steps: [{ name: "run_command", status: "done", reviewed: { ok: true, kind: "git-push" } }]
+        },
+        { role: "user", content: "［后台 bg1 已结束］", relay: [{ step: "s1", title: "bg1", ok: true, kind: "bg" }] },
+        { role: "assistant", steps: [tool] }
+      ]
+    };
+  const text = f.reviewCase(tool, {}, chat, "缘由", "git-push", "git push");
+  // 这一答的授权是最近一次任务原话；回报那一问不算用户说的。
+  // 这一答从那条任务原话起算，先前那一答的 push 属于同一段任务里「这一答」的授权，不写成「已做过」
+  assert.match(text, /^1\. 把 PR 迭代到 CI 绿，绿了就推/);
+  assert.doesNotMatch(text, /\|done:/);
+  assert.doesNotMatch(text, /后台 bg1 已结束/);
+});
+
+test("找不到这一步（旁注、合成步骤）：仍从最近一条用户主动说的话算起", () => {
+  const chat = {
+    id: "c",
+    messages: [
+      { role: "user", content: "旧的一问" },
+      { role: "assistant", steps: [{ name: "addition", status: "done" }] },
+      { role: "user", content: "新的一问" },
+      { role: "assistant", steps: [] }
+    ]
+  };
+  const text = f.reviewCase({ name: "mcp_call" }, {}, chat, "缘由");
+  assert.match(text, /^1\. 新的一问\n\n\|early:1\. 旧的一问/);
+  assert.doesNotMatch(text.split("|early:")[0], /旧的一问/);
+});
+
+test("旧答里还在跑的帮手步：更晚的用户话不能给它授权", () => {
+  const helperStep = { name: "run_command" },
+    chat = {
+      id: "c",
+      messages: [
+        { role: "user", content: "把 PR 审一遍，有问题就评论" },
+        { role: "assistant", steps: [{ name: "delegate", status: "running", sub: { id: "s1", steps: [helperStep] } }] },
+        { role: "user", content: "顺便把 README 也改一下" },
+        { role: "assistant", steps: [] }
+      ]
+    };
+  const text = f.reviewCase(helperStep, {}, chat, "缘由", "git-push", "git push");
+  assert.match(text, /^1\. 把 PR 审一遍/);
+  assert.doesNotMatch(text, /README/);
 });
 
 test("请示表单上的作答是用户亲口说的：问句连答案按先后交给审查", () => {
@@ -101,7 +210,9 @@ test("作答途中寄来的补言也是用户的原话：交审查、也算用�
 
 test("意另起一节；这一步过了关口的那条守标明已照过", () => {
   const f2 = load(["reviewCase", "intents", "PROMPTS"]);
-  Object.assign(f2.PROMPTS, { review: { case: "{{user}}{{intent}}|{{action}}", intent: "［意］{{text}}" } });
+  Object.assign(f2.PROMPTS, {
+    review: { case: "{{now}}{{earlier}}{{intent}}|{{action}}", earlier: "|early:{{user}}", intent: "［意］{{text}}" }
+  });
   const nodes = {
     发布: { claim: "开 PR", needs: [], state: "doing" },
     发布审批: { claim: "发布前给用户看过、批了再发", needs: [], keep: true, ask: true },
@@ -157,4 +268,37 @@ test("审查答复：去掉开头的 Markdown 记号与引号再看首字", () =
   assert.ok(f.reviewWord("**驳**：越出所托").startsWith("驳"));
   assert.equal(f.reviewWord(""), "");
   assert.ok(!f.reviewWord("不准").startsWith("准"));
+});
+
+test("真实提示词：各节各起一行，无残留占位", () => {
+  const prompts = {};
+  new Function("window", readFileSync(new URL("../../prompts/review.js", import.meta.url), "utf8"))({ YAN_PROMPTS: prompts });
+  const g = load(["reviewCase", "PROMPTS"]);
+  Object.assign(g.PROMPTS, prompts);
+  const now = { name: "mcp_call" },
+    chat = {
+      id: "c",
+      messages: [
+        { role: "user", content: "看一下 PR103，有问题就评论" },
+        {
+          role: "assistant",
+          steps: [{ name: "mcp__github__pull_request_review_write", reviewed: { ok: true, kind: "mcp:GitHub:pull_request_review_write" } }]
+        },
+        { role: "user", content: "他又推了几个，看一下" },
+        { role: "assistant", steps: [now] }
+      ]
+    };
+  const text = g.reviewCase(
+    now,
+    {},
+    chat,
+    "调外部服务的写操作",
+    "mcp:GitHub:pull_request_review_write",
+    "GitHub · pull_request_review_write"
+  );
+  assert.match(text, /^［这一答里用户说的］\n1\. 他又推了几个，看一下\n\n［更早说过的/);
+  assert.match(text, /\n\n［同类外发］这一类（GitHub · pull_request_review_write）前面已经审准、做过 1 回/);
+  assert.match(text, /\n\n［将要做的］/);
+  assert.doesNotMatch(text, /\{\{/);
+  assert.doesNotMatch(text, /\n{3,}/);
 });

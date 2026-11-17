@@ -1,7 +1,9 @@
 // 言 · 审查：审而后行里，规则标疑的那一步交「专司」里另配的审查模型照用户的原话再判（学 Claude Code 的 auto 模式）。
 // 没开审查、或档位不是审而后行，一切照旧（规则拦的回绝，没拦的照做）；审查出错也退回这样，最坏不比没开差。
-// 标疑的几类：指令被宽的沙箱或审查规则拦下的；往外发、网址里带着一长串用户没给过的参数，或带着内容 POST 出去的；
+// 标疑的几类：指令被宽的沙箱或审查规则拦下的；指令本身把东西送出去（HTTP 上传、git push、gh 的写、远程复制、
+// 发布包、写网络共享——见 server/sandbox.js 的 egressOf）；往外发、网址里带着一长串用户没给过的参数，或带着内容 POST 出去的；
 // 往技能目录里写的（会进往后每段对话的上下文）；调 MCP 服务的写操作（见 60-mcp.js）——游目的浏览器另按 stageReviewWhy 收窄。
+// 授权按这一答算：交给审查的用户原话分「这一答」与「更早」，更早的只作背景；同一类外发审准过一回之后，再来须这一答里明确要。
 // 写记忆不审：记偏好、约定、做出来的结论本是模型自己拿主意的事，照「用户授权了没有」判几乎都驳（实测 7 回驳 3，
 // 改写成「用户说明：…」就准）；而审查看不到工具输出，分不出哪条是网页里埋来的，审了也挡不住它要挡的。条目在行迹与设置页里可改可删
 // 审查只看用户的原话、意里的目标与守、将要做的那一步；准了照做（指令带 reviewed 交桥接，规则那一道不再拦），
@@ -14,14 +16,14 @@ const reviewTally = new Map();
 /** @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx @returns {Promise<ToolOutcome|null>} 驳了即交回这一步的结果 */
 async function reviewHook(step, args, ctx) {
   if (!reviewOn(ctx.conversation)) return null;
-  const why = await reviewFlag(step, args, ctx);
-  return why ? reviewGate(step, args, ctx, why) : null;
+  const flag = await reviewFlag(step, args, ctx);
+  return flag ? reviewGate(step, args, ctx, flag) : null;
 }
 /** @param {Conversation} conversation */
 function reviewOn(conversation) {
   return commandPolicyOf(conversation) === "review" && dutyReady(store.settings.dutyReview);
 }
-/** 这一步该不该交审查：该的给一句缘由 @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx */
+/** 这一步该不该交审查：该的给一句缘由与种类（同类外发据 kind 计数） @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx */
 async function reviewFlag(step, args, ctx) {
   const { conversation, signal } = ctx;
   if (step.name === "run_command") {
@@ -32,12 +34,24 @@ async function reviewFlag(step, args, ctx) {
       signal
     ).catch(() => null);
     // 审查也不放行的（调桥接、藏字）不去问，照规则回绝
-    return screened?.why && !screened.hard ? String(screened.why).replace(/^(审查|沙箱)拒绝：/, "") : "";
+    if (!screened?.why || screened.hard) return null;
+    const why = String(screened.why).replace(/^(审查|沙箱)拒绝：/, "");
+    return { why, kind: String(screened.kind || ""), label: String(screened.label || why) };
   }
-  if (["fetch_page", "http_request", "download_file"].includes(step.name)) return egressWhy(step.name, args, conversation);
+  if (["fetch_page", "http_request", "download_file"].includes(step.name)) {
+    const why = egressWhy(step.name, args, conversation);
+    if (!why) return null;
+    // 带内容 POST 与网址里带长参数不是一回事：同类计数分开，别让一次上传给后来的长参数 GET 记账
+    const upload = step.name === "http_request" && !["GET", "HEAD"].includes(String(args.method || "GET").toUpperCase()) && !!args.body;
+    return {
+      why,
+      kind: upload ? "http-upload" : "http-get",
+      label: upload ? "带内容往外发" : "网址里带长参数往外发"
+    };
+  }
   if (["write_file", "edit_file"].includes(step.name) && insideSkills(String(args.path || ""), conversation))
-    return "往技能目录里写，往后的对话都会照着做";
-  return "";
+    return { why: "往技能目录里写，往后的对话都会照着做", kind: "", label: "" };
+  return null;
 }
 /** 往外发的：带着内容 POST 出去，或网址里有一长串用户没给过、也不是检索与网页交回的参数 */
 function egressWhy(name, args, conversation) {
@@ -62,41 +76,52 @@ function egressWhy(name, args, conversation) {
 }
 /** 用户亲口说的，连成一段好查某串字说没说过 @param {Conversation} conversation */
 function userSaid(conversation) {
-  return userWords(conversation).join("\n");
+  return userWords(conversation)
+    .map(word => word.text)
+    .join("\n");
 }
 /**
  * 用户亲口说的，一句一项、按先后：原话与作答途中寄来的补言（带上附件名），帮手回报、后台指令结束另起的那一问（带 relay）也是 user 消息，可那是工具输出，不算。
- * 用户在请示上的定夺也是亲口说的，按先后插在其间：表单的作答、守的关口上的准许（step 即将要做的那一步）
+ * 用户在请示上的定夺也是亲口说的，按先后插在其间：表单的作答、守的关口上的准许（step 即将要做的那一步）。
+ * at 是它出自第几则消息：审查据此分出「这一答」与「更早」（见 reviewCase）
  * @param {Conversation} conversation @param {Step} [step]
+ * @returns {{ text: string, at: number }[]}
  */
 function userWords(conversation, step) {
   const words = (text, attachments = []) =>
     [String(text || "").trim(), ...attachments.map(a => `［附件 ${a.name}］`)].filter(Boolean).join(" ");
   return conversation.messages
-    .flatMap(m =>
+    .flatMap((m, at) =>
       m.role === "user"
         ? m.relay
           ? []
-          : [words(m.content, m.attachments)]
+          : [{ text: words(m.content, m.attachments), at }]
         : allSteps(m).flatMap(s =>
             s.name === "user_note"
-              ? [words(s.note, s.attachments)]
+              ? [{ text: words(s.note, s.attachments), at }]
               : s.name === "ask_user" && s.answers
                 ? // 问句里写着问的是哪件事，单看答案「授权上述操作」不知所指
                   [
-                    `［请示作答］${s.form?.questions?.map((q, i) => `${q.question} → ${s.answers?.[i] || "（未答）"}`).join("；") || s.note || ""}`
+                    {
+                      text: `［请示作答］${s.form?.questions?.map((q, i) => `${q.question} → ${s.answers?.[i] || "（未答）"}`).join("；") || s.note || ""}`,
+                      at
+                    }
                   ]
                 : s.granted
                   ? // 守常写着「先给用户看、批了再做」：关口上那张请示就是给人看过这一步，写明了审查才对得上
                     [
-                      s === step
-                        ? "［守请示］用户在关口上看过下面将要做的这一步，准许了"
-                        : `［守请示］准许了 ${s.name}${s.title ? `：${s.title}` : ""}`
+                      {
+                        text:
+                          s === step
+                            ? "［守请示］用户在关口上看过下面将要做的这一步，准许了"
+                            : `［守请示］准许了 ${s.name}${s.title ? `：${s.title}` : ""}`,
+                        at
+                      }
                     ]
                   : []
           )
     )
-    .filter(Boolean);
+    .filter(word => word.text);
 }
 // 游目的浏览器：点击、按键、翻页、等待都是在用户托付的事里走动，一概送审只是每步多等一回、审查也多半照准。
 // 只审可能把东西带出去的：跳到带长串参数的网址（与翻网页同一把尺）、往页面里填进一段用户没说过的字、上传本机文件、在页面里跑代码
@@ -134,8 +159,8 @@ function insideSkills(raw, conversation) {
   return `${normalizeWorkPath(full).toLowerCase()}/`.startsWith(`${normalizeWorkPath(skills).toLowerCase()}/`);
 }
 
-/** 交审查模型判：准即返回 null 照做（step.reviewed 记下），驳即交回结果。出错退回没开审查时的样子 @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx @param {string} why */
-async function reviewGate(step, args, ctx, why) {
+/** 交审查模型判：准即返回 null 照做（step.reviewed 记下，带 kind 供同类外发计数），驳即交回结果。出错退回没开审查时的样子 @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx @param {{ why: string, kind?: string, label?: string }} flag */
+async function reviewGate(step, args, ctx, flag) {
   const key = `${ctx.assistant.id}|${step.scope || ""}`,
     tally = reviewTally.get(key) || { streak: 0, total: 0 };
   // 已叫它停手还在动手：不再请审查，照样驳
@@ -143,7 +168,7 @@ async function reviewGate(step, args, ctx, why) {
     return { ok: false, content: prompt("review.halt", { count: tally.total }), display: "审查未准" };
   let verdict;
   try {
-    verdict = await askReviewer(step, args, ctx, why);
+    verdict = await askReviewer(step, args, ctx, flag);
   } catch (error) {
     if (error.name === "AbortError" && ctx.signal.aborted) throw error;
     // 审查实际没在把关：弹一句，人才知道这一步是照规则过的
@@ -154,7 +179,7 @@ async function reviewGate(step, args, ctx, why) {
   if (verdict.ok) {
     tally.streak = 0;
     reviewTally.set(key, tally);
-    step.reviewed = { ok: true, why: verdict.why };
+    step.reviewed = { ok: true, why: verdict.why, ...(flag.kind ? { kind: flag.kind } : {}) };
     return null;
   }
   tally.streak += 1;
@@ -170,8 +195,8 @@ async function reviewGate(step, args, ctx, why) {
   };
 }
 /** 两步判：先只要一个字；疑了再同一段话换个末句要理由（前头一字不差，走缓存） @returns {Promise<{ ok: boolean, why: string }>} */
-async function askReviewer(step, args, ctx, why) {
-  const base = reviewCase(step, args, ctx.conversation, why),
+async function askReviewer(step, args, ctx, flag) {
+  const base = reviewCase(step, args, ctx.conversation, flag.why, flag.kind, flag.label),
     ask = async (tail, maxTokens) =>
       (
         await askDuty("review", `${base}\n\n${tail}`, {
@@ -192,19 +217,44 @@ function reviewWord(text) {
 }
 /**
  * 交给审查的那段话：用户亲口说的（见 userWords；新的在后、过长截去旧的）、意里的目标与守、将要做的、规则的缘由。
+ * 用户的话分两节：这一答（含启动这一答的那一问、这一答里的补言与请示作答）与更早的（只作背景——一次授权只管一次执行）。
+ * 同一类外发（kind 相同）前面审准过几回也写明：做过一次之后，再来须这一答里明确要。
  * 请示上的定夺只让审查知道人选了什么，照样由它判：人批的是要做这件事，审查还看模型这一步有没有写歪。
  * 将要做的整段交上、不截：截了的尾巴审查看不到却照样发出去，审查也会把截断当成内容残缺而驳（10-29 开 PR 连驳三回，正文 3.9k 字截在 3000）
- * @param {Conversation} conversation
+ * @param {Conversation} conversation @param {string} [kind] @param {string} [label]
  */
-function reviewCase(step, args, conversation, why) {
+function reviewCase(step, args, conversation, why, kind = "", label = "") {
   const said = userWords(conversation, step),
     lines = [];
   let room = 6000;
   for (let i = said.length - 1; i >= 0 && room > 0; i--) {
-    const text = said[i].slice(0, room);
-    lines.unshift(`${i + 1}. ${text}`);
+    const text = said[i].text.slice(0, room);
+    lines.unshift({ ...said[i], text });
     room -= text.length;
   }
+  // 这一步在哪一则消息里。这一答从「最近一条用户主动说的话」算起：用户新开的一答只含这一问；
+  // 由后台结束、帮手回报叫醒的答没有新的用户原话（relay 不算），仍以最近一次任务原话为准——长活续推靠它
+  const at = conversation.messages.findIndex(message => allSteps(message).includes(step));
+  let start = at;
+  while (start >= 0 && !(conversation.messages[start].role === "user" && !conversation.messages[start].relay)) start--;
+  // 找不到这一步（旁注的线程、合成的步骤）：也从最近一条用户主动说的话算起，至少不把整段历史都当成这一答的授权
+  if (at < 0) {
+    start = conversation.messages.length - 1;
+    while (start >= 0 && !(conversation.messages[start].role === "user" && !conversation.messages[start].relay)) start--;
+  }
+  const turn = Math.max(start, 0),
+    // 只取这一答起始到含这一步那则消息之间的话：更晚的答里用户说的话不能给早先这一步授权，也不当背景
+    current = at < 0 ? lines.filter(word => word.at >= turn) : lines.filter(word => word.at >= turn && word.at <= at),
+    earlier = at < 0 ? lines.filter(word => word.at < turn) : lines.filter(word => word.at < turn),
+    list = items => (items.length ? items.map((word, i) => `${i + 1}. ${word.text}`).join("\n") : "（无）"),
+    // 同一类外发在「这一答」开始之前审准过几回；这一答里的重复动作共用这一答的授权，不计。没有 kind 的也不计
+    done =
+      kind && turn > 0
+        ? conversation.messages
+            .slice(0, turn)
+            .flatMap(allSteps)
+            .filter(other => other.reviewed?.ok === true && other.reviewed.kind === kind).length
+        : 0;
   // 这一步过了哪条守的关口，那条守在这一步上已由人照过：写明了，审查不再拿它看不见的「给人看过没有」去对
   const held = intents.get(conversation.id)?.intent,
     gated = Array.isArray(step.granted) ? step.granted : [],
@@ -223,7 +273,9 @@ function reviewCase(step, args, conversation, why) {
       .filter(Boolean)
       .join("\n");
   return prompt("review.case", {
-    user: lines.join("\n") || "（无）",
+    now: list(current),
+    earlier: earlier.length ? `\n\n${prompt("review.earlier", { user: list(earlier) })}` : "",
+    done: done ? `\n\n${prompt("review.done", { count: done, label: label || why })}` : "",
     intent: intentText ? `\n\n${prompt("review.intent", { text: intentText })}` : "",
     action: `${step.name}\n${JSON.stringify(args, null, 1)}`,
     why

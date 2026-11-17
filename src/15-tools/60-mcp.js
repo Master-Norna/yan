@@ -256,15 +256,19 @@ async function runMcpTool(step, server, tool, args, ctx) {
     step.skipped = true;
     return { ok: false, content: prompt("assistant.declined"), display: "" };
   }
-  // 审而后行里的写操作：开了审查就交它判（见 03-review.js）；游目的浏览器只审可能把东西带出去的那几样
+  // 审而后行里的写操作：开了审查就交它判（见 03-review.js）；游目的浏览器只审可能把东西带出去的那几样。
+  // 写操作带 kind（mcp:工具名）：同类外发前面审准做过几回，审查据此从严（见 reviewCase）
   if (reviewOn(ctx.conversation)) {
-    const why =
-      server === STAGE_SERVER
-        ? stageReviewWhy(tool, args, ctx.conversation)
-        : !mcpReadOnly(spec) && !(config.autoApprove || []).includes(tool)
-          ? `调外部服务 ${server} 的写操作 ${tool}`
-          : "";
-    const denied = why && (await reviewGate(step, args, ctx, why));
+    const stage = server === STAGE_SERVER ? stageReviewWhy(tool, args, ctx.conversation) : "",
+      flag =
+        server === STAGE_SERVER
+          ? stage
+            ? { why: stage, kind: "", label: "" }
+            : null
+          : !mcpReadOnly(spec) && !(config.autoApprove || []).includes(tool)
+            ? { why: `调外部服务 ${server} 的写操作 ${tool}`, kind: `mcp:${server}:${tool}`, label: `${server} · ${tool}` }
+            : null;
+    const denied = flag && (await reviewGate(step, args, ctx, flag));
     if (denied) return denied;
   }
   const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal).finally(

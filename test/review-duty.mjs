@@ -49,7 +49,13 @@ check(
     existsSync(`${TMP}/review-duty/duty-ok.txt`),
   JSON.stringify(state.steps[0])
 );
-const fetchStep = state.steps[1];
+const pushStep = state.steps[1];
+check(
+  "往外发的指令（git push）：审查驳了，没推，理由回给主模型",
+  pushStep?.name === "run_command" && pushStep.reviewed?.ok === false && pushStep.result === "审查未准" && /审查未准/.test(state.reply),
+  JSON.stringify({ step: pushStep, reply: state.reply.slice(0, 300) })
+);
+const fetchStep = state.steps[2];
 check(
   "网址带长串参数的外发：审查驳了，没翻，理由回给主模型",
   fetchStep?.name === "fetch_page" &&
@@ -65,6 +71,8 @@ check(
   JSON.stringify(log) ===
     JSON.stringify([
       { quick: true, tool: "run_command" },
+      { quick: true, tool: "run_command" },
+      { quick: false, tool: "run_command" },
       { quick: true, tool: "fetch_page" },
       { quick: false, tool: "fetch_page" }
     ]),

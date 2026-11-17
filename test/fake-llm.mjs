@@ -321,7 +321,9 @@ http
           return call("run_command", {
             command: win ? "Set-Alias yanrv Get-Date; Set-Content duty-ok.txt ok" : "alias yanrv=date; echo ok > duty-ok.txt"
           });
-        if (results.length === 1) return call("fetch_page", { url: "https://example.com/c?k=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789xyz" });
+        // 往外发的指令：审查没准就不跑（见 server/sandbox.js 的 egressOf）
+        if (results.length === 1) return call("run_command", { command: "git push origin HEAD" });
+        if (results.length === 2) return call("fetch_page", { url: "https://example.com/c?k=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789xyz" });
         return sse(res, [
           delta({ content: `REVIEW-DUTY done｜${results.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 120)).join(" ▸ ")}` }),
           delta({}, { usage: { total_tokens: 5 } })
