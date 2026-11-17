@@ -2472,8 +2472,9 @@ const VALUE_OPTS = new Set([
   "--hostname",
   "-H",
   "--config",
-  // gh 的名词之后、动词之前也会夹全局选项（gh pr --repo o/r comment 5），--method 同理会吃掉它的值
+  // gh 的名词之后、动词之前也会夹全局选项（gh pr --repo o/r comment 5），--method 同理会吃掉它的值；-R 是 --repo 的短写法
   "--repo",
+  "-R",
   "--method",
   "--dotnet-cli-home"
 ]);
@@ -2520,8 +2521,10 @@ function httpSends(name, args) {
         if (/d$/.test(token) && String(next(i) || "").startsWith("@")) return true;
       }
       if (/^--data(?:-raw|-binary|-urlencode|-ascii)?(?:=|$)/i.test(token)) {
-        const value = token.includes("=") ? token.slice(token.indexOf("=") + 1) : next(i);
-        if (!query || String(value || "").startsWith("@")) return true;
+        const value = String((token.includes("=") ? token.slice(token.indexOf("=") + 1) : next(i)) || "");
+        // --data-urlencode 还有 name@file 的写法（secret@.env 即从本地文件读）；其余 --data* 只有开头的 @file 才是文件
+        const fromFile = value.startsWith("@") || (/urlencode/i.test(token) && !value.includes("=") && value.includes("@"));
+        if (!query || fromFile) return true;
       } else if (/^--(?:form(?:-string)?|upload-file|json)(?:=|$)/i.test(token)) return true;
       if (/^(?:-X|--request)$/i.test(token)) {
         if (isWriteMethod(next(i))) return true;
@@ -2536,22 +2539,169 @@ function httpSends(name, args) {
   }
   return false;
 }
+// 这些选项各吃一个参数：它的值不是目的地——payload 里的网址（-d 'http://localhost'）、表头的域名、
+// -o 落点的文件名，都可能长得像主机名。目的地是剥掉这些之后剩下的位置参数（curl 的网址）
+const HTTP_VALUE_SHORT = "dFTHouAebcDxXmwrEKzyYQtPUC";
+const HTTP_VALUE_LONG = new Set([
+  "--data",
+  "--data-raw",
+  "--data-binary",
+  "--data-urlencode",
+  "--data-ascii",
+  "--json",
+  "--url-query",
+  "--form",
+  "--form-string",
+  "--upload-file",
+  "--header",
+  "--proxy-header",
+  "--output",
+  "--output-dir",
+  "--user",
+  "--user-agent",
+  "--referer",
+  "--cookie",
+  "--cookie-jar",
+  "--dump-header",
+  "--proxy",
+  "--proxy-user",
+  "--request",
+  "--max-time",
+  "--connect-timeout",
+  "--expect100-timeout",
+  "--keepalive-time",
+  "--write-out",
+  "--range",
+  "--cert",
+  "--key",
+  "--pass",
+  "--cacert",
+  "--capath",
+  "--config",
+  "--time-cond",
+  "--speed-time",
+  "--speed-limit",
+  "--quote",
+  "--telnet-option",
+  "--ftp-port",
+  "--continue-at",
+  "--retry",
+  "--retry-delay",
+  "--retry-max-time",
+  "--limit-rate",
+  "--max-filesize",
+  "--max-redirs",
+  "--interface",
+  "--resolve",
+  "--connect-to",
+  "--dns-servers",
+  "--dns-interface",
+  "--dns-ipv4-addr",
+  "--dns-ipv6-addr",
+  "--local-port",
+  "--oauth2-bearer",
+  "--unix-socket",
+  "--abstract-unix-socket",
+  "--socks4",
+  "--socks4a",
+  "--socks5",
+  "--socks5-hostname",
+  "--preproxy",
+  "--noproxy",
+  "--proxy1.0",
+  "--haproxy-clientip",
+  "--trace",
+  "--trace-ascii",
+  "--stderr",
+  "--libcurl",
+  "--etag-compare",
+  "--etag-save",
+  "--hsts",
+  "--alt-svc",
+  "--doh-url",
+  "--rate",
+  "--hostpubmd5",
+  "--pinnedpubkey",
+  "--pubkey",
+  "--random-file",
+  "--egd-file",
+  "--engine",
+  "--krb",
+  "--sasl-authzid",
+  "--service-name",
+  "--tlsuser",
+  "--tlspassword",
+  "--mail-from",
+  "--mail-rcpt",
+  "--mail-auth",
+  "--post-data",
+  "--post-file",
+  "--body-data",
+  "--body-file",
+  "--method",
+  "--directory-prefix",
+  "--output-document",
+  "--load-cookies",
+  "--save-cookies",
+  "--ca-certificate",
+  "--certificate",
+  "--private-key",
+  "--tries",
+  "--timeout",
+  "--wait",
+  "--input-file",
+  "--base",
+  "--execute",
+  "--quota",
+  "--dns-timeout",
+  "--read-timeout",
+  "--http-user",
+  "--http-password",
+  "--ftp-user",
+  "--ftp-password",
+  "--bind-address",
+  "--body",
+  "--infile",
+  "--bodypath",
+  "--outfile",
+  "--headers",
+  "--contenttype",
+  "--credential",
+  "--authentication",
+  "--token",
+  "--sessionvariable",
+  "--websession",
+  "--certificatethumbprint",
+  "--maximumredirection",
+  "--timeoutsec"
+]);
+/** 这个参数是不是在吃下一个参数（值写在自己身上的 --opt=x、-d@f 不算） @param {string} arg */
+function eatsNextArg(arg) {
+  if (!arg || !arg.startsWith("-")) return false;
+  if (/^--[A-Za-z][A-Za-z0-9-]*$/.test(arg)) return HTTP_VALUE_LONG.has(arg.toLowerCase());
+  return /^-[A-Za-z]+$/.test(arg) && HTTP_VALUE_SHORT.includes(arg[arg.length - 1]);
+}
 /**
  * 这一段 HTTP 工具自己写明白的目的地。只看这一段的参数：
  * 整条指令里别处出现的 localhost（payload 里、别的命令里）不能给这次上传开脱
- * 认带协议头的地址、带路径或端口的主机与 IP；认不出的（装在变量里、只写了个主机名）留给调用方按「出去了」算
+ * 认带协议头的地址、带路径或端口的主机、裸主机名与 IP；认不出的（装在变量里）留给调用方按「出去了」算
  * @param {string[]} args
  */
 function httpHosts(args) {
   const hosts = [];
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (eatsNextArg(arg)) {
+      i++;
+      continue;
+    }
     if (!arg || arg.startsWith("-") || arg.startsWith("@")) continue;
     const url = arg.match(/^(?:https?|ftp):\/\/(\[[^\]]+\]|[^\s/?#:]+)/i);
     if (url) {
       hosts.push(url[1]);
       continue;
     }
-    if (/^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\]|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?::\d+)?[/?#]/i.test(arg))
+    if (/^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\]|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?::\d+)?(?:[/?#]|$)/i.test(arg))
       hosts.push(arg.split(/[/?#]/)[0].replace(/:\d+$/, ""));
   }
   return hosts;
@@ -2646,9 +2796,11 @@ function egressOf(command, { platform = process.platform } = {}) {
           if (isWriteMethod(method)) return { kind: "gh:gh api", why: "调 GitHub 的 API 写数据（gh api）", label: "gh api" };
         } else if (args.some(arg => /^(?:-f|-F|--field|--raw-field|--input)(?:=|$)/.test(arg) || /^-[fF].+/.test(arg))) {
           // graphql 端点上的 query 是读（POST 只是它的传法）；mutation 才是写。查询语句装在变量里时看不出来，按读算。
+          // 语句从文件读（-f query=@q.gql、--input body.json）时同样看不到，按写算，免得 mutation 藏在文件里混过去。
           // 只看端点参数：payload 里出现 graphql 字样（-f title=graphql）不能给 REST 的写开脱
           const endpoint = (words[at + 1] || "").toLowerCase(),
-            query = endpoint === "graphql" && !args.some(arg => /mutation/i.test(arg));
+            fromFile = args.some(arg => /^--input(?:=|$)/i.test(arg) || /(?:^|=)query=@/i.test(arg)),
+            query = endpoint === "graphql" && !fromFile && !args.some(arg => /mutation/i.test(arg));
           if (!query) return { kind: "gh:gh api", why: "调 GitHub 的 API 写数据（gh api）", label: "gh api" };
         }
       } else if (GH_WRITE_SET.get(noun)?.has(verb)) {
