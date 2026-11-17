@@ -103,16 +103,26 @@ async function bootHelper(root, extraEnv = {}) {
       env: { ...process.env, YAN_TEST_ROOT: root, ...extraEnv },
       stdio: ["ignore", "pipe", "inherit"]
     });
-  const port = await new Promise((resolve, reject) => {
-    let text = "";
-    child.stdout.on("data", chunk => {
-      text += chunk;
-      const found = text.match(/PORT (\d+)/);
-      if (found) resolve(Number(found[1]));
+  let port;
+  try {
+    port = await new Promise((resolve, reject) => {
+      let text = "";
+      child.stdout.on("data", chunk => {
+        text += chunk;
+        const found = text.match(/PORT (\d+)/);
+        if (found) resolve(Number(found[1]));
+      });
+      child.once("exit", () => reject(Error("helper 早退")));
+      child.once("error", reject);
     });
-    child.once("exit", () => reject(Error("helper 早退")));
-    child.once("error", reject);
-  });
+  } catch (error) {
+    // 初始化就没起来：这个 root 是废的，连带把半起的 helper 收掉，别留临时目录与进程
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    try {
+      dropRoot(root);
+    } catch {}
+    throw error;
+  }
   const post = (url, body) =>
     fetch(`http://127.0.0.1:${port}${url}`, {
       method: "POST",
@@ -181,6 +191,7 @@ test("严档拦下现拼的目录外写入与经目录内软链指外的写入",
 test("严档对前台、显式后台、前台转后台是同一张约束", NEED_SEATBELT, async () => {
   const root = tempRoot();
   const { post, close } = await boot(root);
+  let pending, report; // 失败路径也要等它落定、把转出去的那条收掉：请求被拒后指令还挂在 root 里
   try {
     dropOutside();
     const probe = tag => `echo ok > inside-${tag}.txt; ${OUTSIDE_PROBE(tag)}`;
@@ -204,7 +215,7 @@ test("严档对前台、显式后台、前台转后台是同一张约束", NEED_
       assert.equal(done.running, false);
     }
     // 前台转后台：带 ticket 的指令跑到一半经 release 转入后台，约束不变
-    const pending = post("/api/work/run", { workdir: root, command: `sleep 3; ${probe("handed")}`, ticket: "t-hand", sandbox: true });
+    pending = post("/api/work/run", { workdir: root, command: `sleep 3; ${probe("handed")}`, ticket: "t-hand", sandbox: true });
     // release 要等指令先把 ticket 挂上：轮询到真放为止，不拿固定等待当判据
     let released = {};
     for (let i = 0; i < 40 && released.released !== true; i++) {
@@ -212,12 +223,16 @@ test("严档对前台、显式后台、前台转后台是同一张约束", NEED_
       if (released.released !== true) await sleep(50);
     }
     assert.equal(released.released, true, JSON.stringify(released));
-    const report = await pending;
+    report = await pending;
     assert.equal(report.handedOff, "released", JSON.stringify(report));
     const done = await post("/api/work/watch", { id: report.id, key: report.key });
     assert.equal(done.running, false);
     await seen("handed");
   } finally {
+    // 断言挂在中途时，先等那条请求落定（最坏是 sleep 3 跑完），再按 id 亲手停一遍：
+    // 只关服务、删目录的话，还在跑的指令会拖着管道，node --test 要等它结束才肯退
+    if (pending) await pending.catch(() => {});
+    if (report && report.id) await post("/api/work/check", { id: report.id, key: report.key, stop: true }).catch(() => {});
     await close().catch(() => {});
     dropRoot(root);
     dropOutside();
@@ -319,7 +334,8 @@ test("桥接退出时严档后台指令一并收掉，exit 钩子也跑完", NEE
 test("宿主还听着信号时它只收到一次，指令照样收掉", NEED_SEATBELT, async () => {
   const root = tempRoot(),
     { child, post } = await bootHelper(root, { YAN_TEST_HOST_LISTENS: "1" });
-  let pgid = 0;
+  let pgid = 0,
+    pgid2 = 0;
   try {
     const report = await post("/api/work/run", {
       workdir: root,
@@ -339,10 +355,31 @@ test("宿主还听着信号时它只收到一次，指令照样收掉", NEED_SEA
     await sleep(300);
     assert.equal(fs.readFileSync(path.join(root, "host-hits"), "utf8").trim(), "x", "宿主监听收到了第二次（信号被重发）");
     assert.ok(alive(child.pid), "宿主有监听时桥接该交还宿主，不该自己退");
+    // 宿主继续跑着、重起一条：第二发信号也得收掉它——once 型兜底只认第一发的回归
+    const again = await post("/api/work/run", {
+      workdir: root,
+      command: "echo $$ > pid2.txt; sleep 30",
+      background: true,
+      sandbox: true
+    });
+    assert.ok(again.id, JSON.stringify(again));
+    assert.ok(await untilFile(path.join(root, "pid2.txt")), "第二条没跑起来");
+    const pid2 = Number(fs.readFileSync(path.join(root, "pid2.txt"), "utf8"));
+    pgid2 = groupOf(pid2);
+    assert.ok(alive(pid2) && pgid2 > 0, `pid2=${pid2} pgid2=${pgid2}`);
+    child.kill("SIGTERM");
+    assert.ok((await untilDead(pid2)) && (await untilDead(-pgid2)), "第二发信号没收掉新起的指令");
+    await sleep(300);
+    assert.equal(fs.readFileSync(path.join(root, "host-hits"), "utf8").trim(), "x\nx", "第二发信号宿主该再收一笔");
+    assert.ok(alive(child.pid), "第二发后桥接仍该交还宿主");
   } finally {
     if (pgid > 0)
       try {
         process.kill(-pgid, "SIGKILL");
+      } catch {}
+    if (pgid2 > 0)
+      try {
+        process.kill(-pgid2, "SIGKILL");
       } catch {}
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     dropRoot(root);
