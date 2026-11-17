@@ -4,8 +4,6 @@
 // 长请求走总线（bridgeFetch，交回与 fetch 一样的 Response）、短请求要 JSON（bridge）、读桥接回的报错（describeResponseError）
 // 桥接的引导信息（版本、存储根、目录、平台、shell）；notice 是页面自己写的桥接状态提示，在设置 → 模型顶部显示
 let bootstrap = { notice: "" };
-/** @type {string|null} 桥接的地址：页面只由桥接自己开，接上后是 ""（同源） */
-let apiBase = null;
 // 页面是不是桥接自己开的（http://127.0.0.1:端口）：是的话桥接一定在，探测失败多半只是首次加载时被大文件挤慢了，该多等、多试
 function servedByBridge() {
   return /^https?:$/.test(location.protocol) && /^(127\.0\.0\.1|localhost)$/i.test(location.hostname);
@@ -20,7 +18,6 @@ async function connectBridge() {
     if (!response.ok || !(response.headers.get("content-type") || "").includes("application/json")) return false;
     const next = await response.json();
     bootstrap = next;
-    apiBase = "";
     if (next.stale) toast(t("本机桥接已更新，请关闭桥接窗口后重新运行 start.cmd"), 8000);
     return true;
   } catch {
@@ -43,19 +40,15 @@ async function awaitBridge() {
 // 总线没接通（连不上事件流的环境、桥接刚重启、同一浏览器已开满五处言）就直接 fetch，功能一样，只是回到一请求一连接
 /** @type {EventSource|null} */
 let busSource = null,
-  busBase = "",
   busOpen = false,
   busTried = false;
 const busJobs = new Map(),
   busWaiters = [];
 function busConnect() {
-  if (busSource && busBase === apiBase) return;
-  busSource?.close();
-  busSource = null;
+  if (busSource) return;
   busOpen = busTried = false;
-  busBase = apiBase;
   if (typeof EventSource !== "function") return;
-  busSource = new EventSource(`${apiBase}/api/bus?page=${encodeURIComponent(PAGE_ID)}`);
+  busSource = new EventSource(`/api/bus?page=${encodeURIComponent(PAGE_ID)}`);
   const settle = open => {
     busOpen = open;
     busTried = true;
@@ -93,7 +86,7 @@ function busReady() {
 const DIRECT_PATHS = new Set(["/api/chats/load", "/api/chats/trail/get", "/api/files/get"]);
 /** @returns {Promise<Response>} */
 async function bridgeFetch(path, body, signal) {
-  const direct = () => fetch(`${apiBase}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body, signal });
+  const direct = () => fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body, signal });
   if (DIRECT_PATHS.has(path)) return direct();
   // 大文件与长对话直接送原请求，避免总线再包一层 JSON、服务端拆开后再复制一整份。
   // 4 Mi 个字符即使全是转义字符，外层 JSON 也小于总线的 32 MiB 上限。
@@ -104,7 +97,7 @@ async function bridgeFetch(path, body, signal) {
   // 长活每三秒存一次整段对话，十几 MB 一份，几小时就把页面撑爆
   const id = uid(),
     post = (to, payload) =>
-      fetch(`${apiBase}${to}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(
+      fetch(to, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(
         async response => ({ ok: response.ok, status: response.status, data: await response.json().catch(() => ({})) })
       );
   return new Promise((resolve, reject) => {
@@ -171,7 +164,7 @@ async function bridge(path, payload, signal) {
 /** @param {string} path @param {Record<string, any>} head @param {Blob} body @param {AbortSignal} [signal] */
 async function bridgeUpload(path, head, body, signal) {
   const json = new TextEncoder().encode(JSON.stringify(head)),
-    response = await fetch(`${apiBase}${path}?head=${json.length}`, {
+    response = await fetch(`${path}?head=${json.length}`, {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
       body: new Blob([json, body]),

@@ -9,7 +9,7 @@ const chatBody = tag =>
   });
 try {
   await send("Page.navigate", { url: PAGE });
-  // 页面接上桥接之后才有 apiBase；页面里调桥接的地方都等这一步，用例也等
+  // 等客户端脚本载好，并确认同源桥接已经能接收请求
   await waitFor(
     "typeof window.__yanBridgeFetch === 'function' && __yanBridgeFetch('/api/store/config/load', '{}').then(r => r.ok, () => false)"
   );

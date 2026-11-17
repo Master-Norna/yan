@@ -45,9 +45,11 @@ test("attachmentBody 取原件：视频有预览缓存时，交给卷宗的仍�
     )
     .listen(0, "127.0.0.1");
   await new Promise(resolve => server.once("listening", resolve));
+  const nativeFetch = globalThis.fetch;
   try {
-    const api = load(["attachmentBody", "setBase: value => { apiBase = value; }"]);
-    api.setBase(`http://127.0.0.1:${server.address().port}`);
+    // 浏览器 fetch 按页面同源解析根路径；Node 用本次测试的桥接地址补齐。
+    globalThis.fetch = (url, options) => nativeFetch(new URL(url, `http://127.0.0.1:${server.address().port}`), options);
+    const api = load(["attachmentBody"]);
     const saved = Buffer.from(await (await api.attachmentBody("video")).arrayBuffer());
     assert.equal(sha(saved), sha(original), "卷宗里的字节要与上传的原件一致");
     assert.notEqual(sha(saved), sha(preview), "不能是换壳后的预览副本");
@@ -55,6 +57,7 @@ test("attachmentBody 取原件：视频有预览缓存时，交给卷宗的仍�
     const shown = Buffer.from(await (await fetch(`http://127.0.0.1:${server.address().port}/api/files/raw?id=video`)).arrayBuffer());
     assert.equal(sha(shown), sha(preview));
   } finally {
+    globalThis.fetch = nativeFetch;
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(base, { recursive: true, force: true });

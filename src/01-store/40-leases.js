@@ -68,7 +68,7 @@ function claimConversation(id) {
 function releaseLeases() {
   if (!leaseHold.size) return;
   leaseHold.clear();
-  fetch(`${apiBase}/api/chats/lease`, {
+  fetch(`/api/chats/lease`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ owner: PAGE_ID, ids: [] }),

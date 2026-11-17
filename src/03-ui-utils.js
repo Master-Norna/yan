@@ -93,6 +93,16 @@ async function copyText(text) {
     area.remove();
   }
 }
+function downloadHref(href, name, revoke = false) {
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = name;
+  link.click();
+  if (revoke) setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+function downloadText(text, type, name) {
+  downloadHref(URL.createObjectURL(new Blob([text], { type })), name, true);
+}
 // 把正文里的某条消息滚到视口：只滚 #chatScroll 自己，不用 scrollIntoView——它会连带滚动外层容器（页面整体跟着偏一截，尤其在 VS Code 预览与移动端）。
 // 要去看别处就不再贴底：生成中落墨的下一帧会把平滑滚动拽回底部，只抖一下
 function scrollChatTo(article, block = "start", margin = 12) {

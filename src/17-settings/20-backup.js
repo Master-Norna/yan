@@ -41,11 +41,7 @@ async function exportData(includeFiles) {
     }
     blob = new Blob([blob, "]}"], { type: "application/json" });
   } else blob = new Blob([JSON.stringify(safeStore, whole, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = t`言-备份-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  downloadHref(URL.createObjectURL(blob), t`言-备份-${new Date().toISOString().slice(0, 10)}.json`, true);
   toast(
     includeFiles
       ? t`备份已导出（含 ${files} 件附件原件${missing.length ? t`，${missing.length} 件未能取到：${missing.slice(0, 3).join("、")}${missing.length > 3 ? "…" : ""}` : ""}）；不含 API Key`

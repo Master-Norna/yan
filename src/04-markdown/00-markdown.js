@@ -473,16 +473,6 @@ function groupReplyShots(root) {
   for (const row of root.querySelectorAll(".reply-shots")) row.dataset.count = t`共 ${row.children.length} 幅`;
 }
 defineEmbed({ name: "shot", mount: renderReplyShots });
-function downloadHref(href, name, revoke = false) {
-  const link = document.createElement("a");
-  link.href = href;
-  link.download = name;
-  link.click();
-  if (revoke) setTimeout(() => URL.revokeObjectURL(href), 1000);
-}
-function downloadText(text, type, name) {
-  downloadHref(URL.createObjectURL(new Blob([text], { type })), name, true);
-}
 function renderMarkdown(source = "") {
   const text = String(source).replace(/^\n+|\n+$/g, "");
   if (!text) return "";

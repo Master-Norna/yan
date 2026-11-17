@@ -143,21 +143,13 @@ async function downloadAttachment(id) {
     .then(data => data.has?.includes(id))
     .catch(() => false);
   if (onDisk) {
-    const anchor = document.createElement("a");
-    anchor.href = `${apiBase}/api/files/raw?id=${encodeURIComponent(id)}&download=1`;
-    anchor.download = "";
-    anchor.click();
+    downloadHref(`/api/files/raw?id=${encodeURIComponent(id)}&download=1`, "");
     return;
   }
   try {
     const file = await getAttachment(id);
     if (!file) return toast(t("附件原件已找不到"));
-    const anchor = document.createElement("a"),
-      objectUrl = URL.createObjectURL(attachmentBlob(file));
-    anchor.href = objectUrl;
-    anchor.download = file.name || t("附件");
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    downloadHref(URL.createObjectURL(attachmentBlob(file)), file.name || t("附件"), true);
   } catch {
     toast(t("附件读取失败"));
   }

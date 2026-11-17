@@ -73,7 +73,7 @@ function attachmentBlob(record) {
 // 带上 download：取的是落盘的原件，不是换了壳的预览副本（视频只留第一条视频与音轨，见 server/files.js 的 handleRaw 与 video.js）
 /** @param {string} id @returns {Promise<Blob|null>} */
 async function attachmentBody(id) {
-  const response = await fetch(`${apiBase}/api/files/raw?id=${encodeURIComponent(id)}&download=1`, {
+  const response = await fetch(`/api/files/raw?id=${encodeURIComponent(id)}&download=1`, {
     signal: AbortSignal.timeout(120000)
   }).catch(() => null);
   if (response?.ok) return response.blob();

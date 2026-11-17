@@ -43,12 +43,12 @@ function urlReader(url) {
 }
 // 技能带的一件：桥接直取原件
 function skillFileUrl(source, download = false) {
-  return `${apiBase}/api/skills/raw?dir=${encodeURIComponent(source.skillDir)}&path=${encodeURIComponent(source.skillPath)}${download ? "&download=1" : ""}`;
+  return `/api/skills/raw?dir=${encodeURIComponent(source.skillDir)}&path=${encodeURIComponent(source.skillPath)}${download ? "&download=1" : ""}`;
 }
 async function viewerReader(source) {
   if (source.file) return urlReader(localFileUrl(source.file));
   if (source.skillDir) return urlReader(skillFileUrl(source));
-  const url = `${apiBase}/api/files/raw?id=${encodeURIComponent(source.attachmentId)}`,
+  const url = `/api/files/raw?id=${encodeURIComponent(source.attachmentId)}`,
     head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
   if (head?.ok) return urlReader(url);
   const file = await getAttachment(source.attachmentId);
@@ -115,10 +115,7 @@ async function openViewerWithSystem() {
 function downloadViewerFile() {
   if (viewerSource?.attachmentId) void downloadAttachment(viewerSource.attachmentId);
   else if (viewerSource?.skillDir) {
-    const anchor = document.createElement("a");
-    anchor.href = skillFileUrl(viewerSource, true);
-    anchor.download = String(viewerSource.skillPath).split("/").pop() || "";
-    anchor.click();
+    downloadHref(skillFileUrl(viewerSource, true), String(viewerSource.skillPath).split("/").pop() || "");
   } else if (viewerSource?.file) downloadFile(viewerSource.file);
 }
 async function fileViewerBody(reader, name, kind, revision = viewerRevision) {

@@ -80,7 +80,7 @@ test("MCP 配置变更后，旧请求的迟到响应不能覆盖新配置", asyn
   const f = load([
     "mcp",
     "mcpReady",
-    "setMcpEnv: (configs, call) => { apiBase = 'http://localhost'; store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }"
+    "setMcpEnv: (configs, call) => { store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }"
   ]);
   const waits = [];
   const call = () => new Promise(resolve => waits.push(resolve));
@@ -100,7 +100,7 @@ test("MCP 服务全停用时，旧请求的迟到响应也不能恢复工具；�
   const f = load([
     "mcp",
     "mcpReady",
-    "setMcpEnv: (configs, call) => { apiBase = 'http://localhost'; store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }"
+    "setMcpEnv: (configs, call) => { store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }"
   ]);
   let finish;
   const sent = [];
@@ -125,7 +125,7 @@ test("MCP 服务失败后到期重试，同一配置不永久缓存失败", asyn
   const f = load([
     "mcp",
     "mcpReady",
-    "setMcpEnv: (configs, call) => { apiBase = 'http://localhost'; store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }"
+    "setMcpEnv: (configs, call) => { store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }"
   ]);
   let calls = 0;
   f.setMcpEnv({ A: { command: "a" } }, async () => {
@@ -145,7 +145,7 @@ test("MCP 服务失败后到期重试，同一配置不永久缓存失败", asyn
 test("外部服务迟迟不响应时，发送消息只等短窗口", async () => {
   const f = load([
     "mcpForTurn",
-    "setMcpEnv: (configs, call) => { apiBase = 'http://localhost'; store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }",
+    "setMcpEnv: (configs, call) => { store.settings.mcpServers = configs; bridge = call; renderMcpStatus = () => {}; }",
     "setTimer: (timer, warn) => { setTimeout = timer; clearTimeout = () => {}; toast = warn; }"
   ]);
   let finish;

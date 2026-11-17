@@ -111,7 +111,7 @@ test("大请求直连原接口，不再装进总线 JSON", async () => {
     return new Response("{}", { status: 200 });
   };
   try {
-    const f = load(["bridgeFetch", 'setup:()=>{apiBase="";busBase="";busOpen=true;busTried=true;busSource={close(){}};}']);
+    const f = load(["bridgeFetch", "setup:()=>{busOpen=true;busTried=true;busSource={close(){}};}"]);
     f.setup();
     const body = "x".repeat(4 * 1024 * 1024 + 1);
     await f.bridgeFetch("/api/archive/put", body);

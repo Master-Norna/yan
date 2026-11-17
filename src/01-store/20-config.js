@@ -121,7 +121,7 @@ function saveConfigNow({ force = false } = {}) {
   configSaving = true;
   rememberSentConfig(savedAt, meta, spent);
   // 页面要关时用 keepalive 送出去（浏览器只给它 64 KB 的余地；配置一般远小于此，超了就随它去，下次开页再推）
-  configSaveTask = fetch(`${apiBase}/api/store/config/save`, {
+  configSaveTask = fetch(`/api/store/config/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
