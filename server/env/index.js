@@ -46,9 +46,24 @@ const MIRRORS = {
   }
 };
 
+// macOS 没有环境包可装：改为探测系统里现成的 Python、Node 与 ffmpeg。brew 的两个 prefix 先看——
+// 从 Finder 或 start.command 起的桥接 PATH 往往很窄，只靠 PATH 会探漏；再看 PATH 里的
+const SYSTEM_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
+const SYSTEM_TOOLS = [
+  { id: "python", bins: ["python3", "python"], args: ["--version"] },
+  { id: "node", bins: ["node"], args: ["--version"] },
+  { id: "ffmpeg", bins: ["ffmpeg"], args: ["-version"] }
+];
+
 module.exports = function createEnv({ envHome }) {
   /** @type {{ running: boolean, step: string, log: string[], error: string } | null} */
-  let job = null;
+  let job = null,
+    probed = null; // darwin 的系统工具探测结果：每进程懒探一次，prepare（重新探测）时刷新
+  function systemTools() {
+    if (process.platform !== "darwin") return null;
+    if (!probed) probed = probeSystemTools();
+    return probed;
+  }
   const dirs = () => {
     const home = envHome();
     return {
@@ -79,6 +94,13 @@ module.exports = function createEnv({ envHome }) {
   // 给桥接起的进程接上环境：PATH 前面加上环境的几处，pip、uv、npm 与各工具链都指向环境里；环境没备好就原样返回。
   // Windows 上环境变量名不分大小写，PATH 常写作 Path：照原来的键名接，不另起一个
   function apply(base) {
+    // macOS 不备环境包：把 brew 的 bin 目接口进 PATH，指令里直接用 ffmpeg、python3 也能找着
+    // （与探测同序：先 brew 两处 prefix，原 PATH 殿后）
+    if (process.platform === "darwin") {
+      const extra = SYSTEM_DIRS.filter(dir => fs.existsSync(dir)),
+        key = Object.keys(base).find(name => name.toUpperCase() === "PATH") || "PATH";
+      return extra.length ? { ...base, [key]: [...extra, base[key]].filter(Boolean).join(path.delimiter) } : base;
+    }
     const state = readState();
     if (!state) return base;
     const d = dirs(),
@@ -111,6 +133,7 @@ module.exports = function createEnv({ envHome }) {
     return {
       home: envHome(),
       supported: process.platform === "win32",
+      system: systemTools(),
       state: readState(),
       packs: PACKS.map(({ id, name, tag, note, hint = "", base = false, pip = [], npm = [] }) => ({
         id,
@@ -280,28 +303,51 @@ module.exports = function createEnv({ envHome }) {
   }
 
   // 环境里某件工具的程序本身（照 link 立的入口读回路径）；没装、或入口不是这种形状的返回 ""。
-  // 桥接自己要调它时用：.cmd 入口得经 cmd 才起得来，直接起 exe 省一层
+  // 桥接自己要调它时用：.cmd 入口得经 cmd 才起得来，直接起 exe 省一层。
+  // macOS 没有 .cmd 入口：退回系统里探到的那一份（如 Homebrew 的 ffmpeg）
   function toolPath(name) {
     try {
       const found = /^@"([^"]+)"/.exec(fs.readFileSync(path.join(dirs().bin, `${name}.cmd`), "utf8"))?.[1] || "";
-      return found && fs.existsSync(found) ? found : "";
-    } catch {
-      return "";
-    }
+      if (found && fs.existsSync(found)) return found;
+    } catch {}
+    return systemTools()?.[name]?.path || "";
   }
 
   async function handleStatus(req, res) {
     await readJson(req).catch(() => ({}));
     sendJson(res, 200, status());
   }
+  // macOS 的「准备」：不做安装，把系统里现成的 Python、Node、ffmpeg 重探一遍记进状态
+  async function prepareSystem() {
+    const say = line => job.log.push(line);
+    try {
+      job.step = "探测系统工具";
+      probed = probeSystemTools();
+      for (const tool of SYSTEM_TOOLS) {
+        const hit = probed[tool.id];
+        say(hit ? `${tool.id} → ${hit.version || hit.path}` : `（没找到 ${tool.id}）`);
+      }
+      fs.mkdirSync(envHome(), { recursive: true });
+      const state = { 言: "系统环境", system: probed, at: new Date().toISOString() };
+      fs.writeFileSync(path.join(envHome(), STATE_FILE), JSON.stringify(state, null, 1));
+      job.step = "已探好";
+    } catch (error) {
+      job.error = String(error.message || error);
+      say(`✗ ${job.error}`);
+    } finally {
+      job.running = false;
+    }
+  }
+
   const handlePrepare = jsonRoute(
     async body => {
-      // 各件工具包下的都是 Windows 的发行版（python.exe、windows-amd64 的 zip……），别处装不上
-      if (process.platform !== "win32")
-        throw Error("环境工具包只备了 Windows 版；在 macOS 上请用系统里的 Python 与 Node（可经 Homebrew 安装）");
+      // 各件工具包下的都是 Windows 的发行版（python.exe、windows-amd64 的 zip……），别处装不上；
+      // macOS 不装包，「准备」就是重探一遍系统工具
+      if (process.platform !== "win32" && process.platform !== "darwin")
+        throw Error("环境工具包只备了 Windows 版；在这套系统上请用系统里的 Python 与 Node");
       if (!job?.running) {
         job = { running: true, step: "", log: [], error: "" };
-        void prepare(body);
+        void (process.platform === "darwin" ? prepareSystem() : prepare(body));
       }
       return status();
     },
@@ -326,6 +372,42 @@ module.exports = function createEnv({ envHome }) {
 };
 
 const unique = names => [...new Set(names.map(name => String(name).trim()).filter(Boolean))];
+// 按 SYSTEM_TOOLS 逐个探：brew 两处 prefix → PATH，取第一个可执行的，跑一下拿首行版本输出
+function probeSystemTools() {
+  const candidates = [
+      ...SYSTEM_DIRS,
+      ...String(process.env.PATH || "")
+        .split(path.delimiter)
+        .filter(Boolean)
+    ],
+    found = {};
+  for (const tool of SYSTEM_TOOLS) {
+    for (const bin of tool.bins) {
+      const hit = candidates
+        .map(dir => path.join(dir, bin))
+        .find(file => {
+          try {
+            fs.accessSync(file, fs.constants.X_OK);
+            return fs.statSync(file).isFile();
+          } catch {
+            return false;
+          }
+        });
+      if (!hit) continue;
+      let version = "";
+      try {
+        version = String(
+          execFileSync(hit, tool.args, { encoding: "utf8", timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })
+        )
+          .split("\n")[0]
+          .trim();
+      } catch {}
+      found[tool.id] = { path: hit, version };
+      break;
+    }
+  }
+  return found;
+}
 // 下载到文件，大的每过一成报一次进度；先写到 .part，下完才改名
 async function download(url, file, say) {
   const response = await fetch(url, { signal: AbortSignal.timeout(30 * 60 * 1000) });

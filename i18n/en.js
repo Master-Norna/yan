@@ -809,6 +809,16 @@ var YAN_EN = {
   "查看中…": "Checking…",
   "{0} · {1} 组工具 · {2}准备": "{0} · {1} {1|pack|packs} · {2}",
   "首次准备需下载数十至数百 MB": "First setup downloads tens to hundreds of MB",
+  "探到 {0}/3": "Detected {0}/3",
+  系统工具: "System tools",
+  探测中: "Detecting",
+  "探测中…": "Detecting…",
+  重新探测: "Re-detect",
+  未找到: "Not found",
+  "macOS 上不备环境包，指令直接用系统里的工具；经 Homebrew 安装的也能探到。":
+    "macOS uses tools already on the system instead of a bundled environment; Homebrew installs are detected too.",
+  探测系统工具: "Detecting system tools",
+  已探好: "Done",
   开始: "Start",
   "正在{0}…": "{0}…",
   "未能装成：{0}": "Install failed: {0}",
@@ -1580,6 +1590,8 @@ var YAN_EN = {
   "（没找到 {0}，跳过）": "({0} not found, skipped)",
   "环境工具包只备了 Windows 版；在 macOS 上请用系统里的 Python 与 Node（可经 Homebrew 安装）":
     "Tool packs are Windows-only. On macOS, use the system Python and Node (e.g. via Homebrew)",
+  "环境工具包只备了 Windows 版；在这套系统上请用系统里的 Python 与 Node":
+    "Tool packs are Windows-only; on this system, use the system Python and Node",
   "环境正在准备，稍候再清": "The environment is being set up; clear it later",
   "没能删干净（可能有进程正用着环境里的程序）：{0}": "Could not delete everything (a process may be using it): {0}",
   "{0} 下载失败（HTTP {1}）": "{0} download failed (HTTP {1})",
