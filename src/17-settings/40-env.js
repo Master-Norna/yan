@@ -159,11 +159,8 @@ function bindEnvEvents() {
 function envVars() {
   const state = envStatus?.state;
   if (!state) return null;
-  // macOS：状态里记的是系统探测结果，告诉模型现成的有哪些
-  if (state.system) {
-    const names = Object.entries(state.system).map(([id, hit]) => hit.version || id);
-    return { kits: `系统 ${names.join("、")}` };
-  }
+  // macOS：用的是系统工具、没有另备的环境，work.env 那句（缺的库往隔离环境装）不成立，不带
+  if (state.system) return null;
   const kits = (envStatus.packs || [])
     .filter(pack => !pack.base && state.packs.includes(pack.id))
     .map(pack => `${pack.name}（${pack.hint || [...pack.pip, ...pack.npm].slice(0, 6).join("、")}）`);
