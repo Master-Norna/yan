@@ -67,6 +67,40 @@ function macSeatbeltProfile(cwd) {
   const filters = [...allowed].map(dir => `(subpath ${SB_STRING(dir)})`).join(" ");
   return `(version 1)\n(allow default)\n(deny file-write* (require-not (require-any ${filters})))\n`;
 }
+// 桥接退出时把还在跑的指令（前台的与后台的）一并收掉，连根：各份 createShell 都登记到这一处，
+// 一套钩子共用（页面一份、测试里另起的几份也算，不每份都往 process 上挂监听）；
+// 只替有 child 在跑的那一份占位，跑空就摘掉（见 spawnShell 的 forget），旧实例不会一直留着。
+// 登记表与「钩子只挂一套」按 Symbol.for 放进 globalThis：同一进程里载入两份本模块时（实验分支把
+// server/work/ 各段按原样再载）也共用一套，下面 listenerCount 的判据才数得对
+const HOOKS = (globalThis[Symbol.for("yan.work.shellExitHooks")] ||= { armed: false, shells: new Set() });
+const allShells = HOOKS.shells;
+function armExitHooks() {
+  if (HOOKS.armed) return;
+  HOOKS.armed = true;
+  const reap = () => {
+    for (const shells of allShells) for (const child of shells) killTreeSync(child);
+  };
+  process.on("exit", reap);
+  // POSIX 的信号终止不走 exit 事件：Ctrl+C、被 kill、终端断开也要先收指令再照旧死，
+  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。用 on 而非 once：常驻宿主可能收到
+  // 多次信号，每发一次都要把此刻在跑的指令收干净（reap 幂等，已结束的由 alive() 挡住）；
+  // 只认第一发的话，宿主收完信号继续跑、重起的指令就没人管了。
+  // 信号一到先收指令（有意取舍——桥接不知道宿主会不会退，先收更安全；宿主若不退出，指令也不恢复），
+  // 宿主自己还听着这个信号就交还它定去留（重发会让常驻监听多吃一次）；
+  // 只剩自己一个监听才退场，但走 process.exit：exit 事件上挂的收口（MCP、无头浏览器）才能跟着跑完。
+  // 判据的已知盲区：分不清「没有宿主」与「宿主的 once 监听已消费」——once 型宿主先注册时，
+  // 它那一发被消费后我们就当无宿主退场，抢在它的异步收尾前。
+  if (process.platform !== "win32")
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.on(signal, () => {
+        try {
+          reap();
+        } finally {
+          // 减掉自己这一个：还有别的监听就算有人接
+          if (process.listenerCount(signal) === 1) process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
+        }
+      });
+}
 module.exports = function createShell({ toolEnv }) {
   // 起一个 shell 跑指令（Windows 上外面包一层，见 POWERSHELL_WRAPPER）；指令经环境变量递进去，比塞进命令行能长两倍多
   function spawnShell(command, cwd, { boxed = false, env = {}, seatbelt = false } = {}) {
@@ -102,6 +136,7 @@ module.exports = function createShell({ toolEnv }) {
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     runningShells.add(child);
+    allShells.add(runningShells);
     // 外壳退了、它起的孙进程（start /b 起的服务、会常驻的工具）还攥着输出管道：close 要等它们都退才来，指令一直挂着，
     // 超时与停止也收不到（外壳已不在，killTree 无从下手）。外壳退后稍等片刻，管道还没合上就松手，按外壳的退出收尾
     child.once("exit", () => {
@@ -111,12 +146,18 @@ module.exports = function createShell({ toolEnv }) {
       }, 1500);
       child.once("close", () => clearTimeout(timer));
     });
-    child.on("close", () => runningShells.delete(child));
-    child.on("error", () => runningShells.delete(child));
+    const forget = () => {
+      runningShells.delete(child);
+      if (runningShells.size === 0) allShells.delete(runningShells);
+    };
+    child.on("close", forget);
+    child.on("error", forget);
     return child;
   }
   // 正在跑的 shell（前台与后台）：桥接退出时整棵收掉，不留在后台改文件、占端口
+  // 登记与摘除都在 spawnShell 里，跟着 child 的生灭走
   const runningShells = new Set();
+  armExitHooks();
   function runShell(command, cwd, timeoutMs, signal = null, { boxed = false, env = {}, seatbelt = false } = {}) {
     return new Promise(resolve => {
       const child = spawnShell(command, cwd, { boxed, env, seatbelt });
@@ -292,10 +333,7 @@ module.exports = function createShell({ toolEnv }) {
     job.reported = true;
     killTree(job.child);
   }
-  // 桥接退出时把还在跑的指令（前台的与后台的）一并收掉，连根
-  process.on("exit", () => {
-    for (const child of runningShells) killTreeSync(child);
-  });
+  // 桥接退出（正常退与信号终止）时的收口在模块那层，见上面的 armExitHooks
   // check_command：取后台指令的新输出；stop 时先收掉它（最多等三秒）
   // key：页面收口时带上（编号在桥接重启后重数，不带 key 可能收到别的指令上）
   async function checkBackground(id, stop, waitMs, key = "") {
