@@ -207,17 +207,25 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
     }
   }
   // 发指令前先问一声会不会拦。问而后行（没说档位的也算）问严的沙箱——会拦的照样请示，用户批了这一条就出沙箱跑；
-  // 审而后行问宽的沙箱与审查规则——会拦的交专司里的审查模型再判（见 src/15-tools/03-review.js），准了即带 reviewed 来跑；
-  // 审查也不放行的（调桥接、藏字）标 hard，不必去问
+  // 审而后行问宽的沙箱、往外发的几样与审查规则——会拦的交专司里的审查模型再判（见 src/15-tools/03-review.js），
+  // 准了即带 reviewed 来跑；审查也不放行的（调桥接、藏字）标 hard，不必去问。kind 只给审查算「同类外发做过没有」
   const handleWorkScreen = jsonRoute(async body => {
     const workdir = resolveWorkdir(body.workdir),
       command = String(body.command || "");
-    if (body.permission === "review")
+    if (body.permission === "review") {
+      // workdir 要传给审查规则：预检与真跑判的必须是同一条规则，否则会「预检放行、执行回绝」，也送不到审查模型
+      const system = body.sandbox === true ? sandbox.screenLoose(command) : null,
+        egress = sandbox.egressOf(command),
+        ruled = sandbox.screenAutoReview(command, { workdir }),
+        // 两条规则都命中时都写上：审查看到的是完整的一把尺
+        why = [system, egress?.why, ruled].filter(Boolean).join("；");
       return {
-        // workdir 两处都要给：预检与真跑判的必须是同一条规则，否则会「预检放行、执行回绝」，也送不到审查模型
-        why: (body.sandbox === true && sandbox.screenLoose(command)) || sandbox.screenAutoReview(command, { workdir }),
+        why,
+        kind: egress ? egress.kind : "",
+        label: egress ? egress.label : "",
         hard: !!sandbox.screenUnreviewable(command)
       };
+    }
     return { why: sandbox.screenCommand(command, workdir) };
   }, failed);
   // 文件、列与搜、意各一段，共用上面的落点、沙箱筛查与报错写法

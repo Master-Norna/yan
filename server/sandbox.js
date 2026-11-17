@@ -2381,6 +2381,470 @@ function gitEscapeWhy(text, workdir, win) {
   }
   return null;
 }
+// ── 往外发 ──
+// 「审而后行」里问档与径行都不用它：问档本就每条都问，径行不问。这一档不请示，于是把「本地的东西送出去」
+// 也交审查判。只认写得明白的几种形状：HTTP 上传、推远端、gh 的写、远程复制、发布包、写网络共享。
+// 脚本里现拼的地址与编码过的内容追不到——静态筛查到此为止，文档里写明。
+const HTTP_SEND_TOOLS = /^(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)$/i;
+// gh 的写子命令：只列会改到 GitHub 上的；view / list / download / clone 这类查看与取回不算
+const GH_WRITE = {
+  pr: ["create", "comment", "review", "edit", "merge", "close", "reopen", "ready", "lock", "unlock", "revert"],
+  issue: ["create", "comment", "edit", "close", "reopen", "lock", "unlock", "transfer"],
+  release: ["create", "edit", "upload", "delete"],
+  repo: ["create", "fork", "edit", "delete", "rename", "archive", "unarchive", "sync", "set-default"],
+  gist: ["create", "edit", "delete"],
+  secret: ["set", "delete"],
+  variable: ["set", "delete"],
+  workflow: ["run", "enable", "disable"],
+  run: ["cancel", "rerun", "delete"],
+  label: ["create", "edit", "delete", "clone"],
+  cache: ["delete"],
+  ruleset: ["create", "edit", "delete"],
+  project: [
+    "create",
+    "edit",
+    "delete",
+    "close",
+    "copy",
+    "field-create",
+    "field-delete",
+    "item-create",
+    "item-add",
+    "item-edit",
+    "item-delete",
+    "item-archive",
+    "link",
+    "unlink"
+  ],
+  "ssh-key": ["add", "delete"],
+  "gpg-key": ["add", "delete"],
+  codespace: ["create", "delete", "stop", "rebuild", "edit", "cp"]
+};
+const GH_WRITE_SET = new Map(Object.entries(GH_WRITE).map(([noun, verbs]) => [noun, new Set(verbs)]));
+// ssh 这些选项各吃一个参数，找主机时跳过它们
+const SSH_VALUE = new Set([
+  "-b",
+  "-c",
+  "-D",
+  "-E",
+  "-e",
+  "-F",
+  "-I",
+  "-i",
+  "-J",
+  "-L",
+  "-l",
+  "-m",
+  "-O",
+  "-o",
+  "-p",
+  "-Q",
+  "-R",
+  "-S",
+  "-W",
+  "-w"
+]);
+// \\主机\共享（Windows）或 //主机/共享（POSIX）：要有「主机 + 共享」两节，且从头一个边界起。
+// Windows 上只认反斜杠——正斜杠的 //example.com/a 是网址，不是共享；\\?\ 与 \\.\ 是长路径与设备前缀，也不是共享。
+// POSIX 上带点的主机多半也是网址，不认
+const UNC_WIN = /(?:^|[\s"'=;|&(),])\\\\(?![?.]\\)[^\\/\s"'`;|&()]+\\[^\\/\s"'`;|&()]+/;
+const UNC_POSIX = /(?:^|[\s"'=;|&(),])\/\/([^\\/\s"'`;|&()]+)\/[^\\/\s"'`;|&()]+/;
+const isWriteMethod = method => !/^(?:GET|HEAD)$/i.test(String(method ?? "").replace(/^["']|["']$/g, ""));
+// 选项与它吃的那个参数：找命令词时一并跳过（npm --prefix x publish、docker --context y push）
+const VALUE_OPTS = new Set([
+  "--prefix",
+  "--workspace",
+  "-w",
+  "--cwd",
+  "--filter",
+  "--dir",
+  "-C",
+  "--registry",
+  "--userconfig",
+  "--globalconfig",
+  "--cache",
+  "--tag",
+  "--otp",
+  "--access",
+  "--context",
+  "-c",
+  "--host",
+  "--hostname",
+  "-H",
+  "--config",
+  // gh 的名词之后、动词之前也会夹全局选项（gh pr --repo o/r comment 5），--method 同理会吃掉它的值；-R 是 --repo 的短写法
+  "--repo",
+  "-R",
+  "--method",
+  "--dotnet-cli-home"
+]);
+/** 参数里除选项与选项值之外的词（`--` 之后全算词） @param {string[]} args */
+function commandWords(args) {
+  const words = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--") {
+      words.push(...args.slice(i + 1).filter(value => !value.startsWith("-")));
+      break;
+    }
+    if (!arg.startsWith("-")) {
+      words.push(arg);
+      continue;
+    }
+    const name = arg.split("=")[0];
+    if (!arg.includes("=") && VALUE_OPTS.has(name)) i++;
+  }
+  return words;
+}
+/** 判成写的文本里有没有网络共享 @param {string} text @param {boolean} win */
+function uncShare(text, win) {
+  // \\?\UNC\server\share 是长路径写法里的 UNC，仍是共享；\\?\C:\… 是本地长路径，不算
+  if (win) return /\\\\\?\\UNC\\[^\\/\s"'`;|&()]+\\[^\\/\s"'`;|&()]+/i.test(text) || UNC_WIN.test(text);
+  const match = text.match(UNC_POSIX);
+  return !!match && !match[1].includes(".");
+}
+/** 这一段 HTTP 工具是不是在把内容交出去（-d、-F、-T、-X POST、-Body 一类） @param {string} name @param {string[]} args */
+function httpSends(name, args) {
+  const next = i => args[i + 1],
+    // -G（含 -sSG 这种连写）把 -d 的取值改成查询串，仍是读
+    query = args.some(arg => arg === "--get" || /^-[A-Za-z]*G/.test(arg));
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+    // PowerShell 的 Invoke-WebRequest / Invoke-RestMethod 参数：curl、wget 在 PowerShell 里就是它们的别名
+    if (/^-(?:Body|InFile|BodyPath)$/i.test(token)) return true;
+    if (/^-Method$/i.test(token) && isWriteMethod(next(i))) return true;
+    if (name === "curl") {
+      // 短选项可连写（-d@f、-sSd、-Fname=@f、-Tfile）；-F 与 -f（--fail）不是一个，故这一句区分大小写。
+      // -G 只把普通的 -d 取值改成查询串；-F/-T 与 @文件 仍是把本地的东西送出去（分开写的 -d @文件 同此，与连写一致）
+      if (/^-[A-Za-z]*[dFT]/.test(token)) {
+        if (!query || /[FT]/.test(token) || token.includes("@")) return true;
+        if (/d$/.test(token) && String(next(i) || "").startsWith("@")) return true;
+      }
+      if (/^--data(?:-raw|-binary|-urlencode|-ascii)?(?:=|$)/i.test(token)) {
+        const value = String((token.includes("=") ? token.slice(token.indexOf("=") + 1) : next(i)) || "");
+        // --data-urlencode 还有 name@file 的写法（secret@.env 即从本地文件读）；其余 --data* 只有开头的 @file 才是文件
+        const fromFile = value.startsWith("@") || (/urlencode/i.test(token) && !value.includes("=") && value.includes("@"));
+        if (!query || fromFile) return true;
+      } else if (/^--(?:form(?:-string)?|upload-file|json)(?:=|$)/i.test(token)) return true;
+      if (/^(?:-X|--request)$/i.test(token)) {
+        if (isWriteMethod(next(i))) return true;
+      } else if (/^--request=/i.test(token)) {
+        if (isWriteMethod(token.slice(token.indexOf("=") + 1))) return true;
+      } else if (/^-X./i.test(token) && isWriteMethod(token.slice(2))) return true;
+    } else if (name === "wget") {
+      if (/^--(?:post-data|post-file|body-data|body-file)(?:=|$)/i.test(token)) return true;
+      if (/^--method$/i.test(token) && isWriteMethod(next(i))) return true;
+      if (/^--method=/i.test(token) && isWriteMethod(token.slice(token.indexOf("=") + 1))) return true;
+    }
+  }
+  return false;
+}
+// 这些选项各吃一个参数：它的值不是目的地——payload 里的网址（-d 'http://localhost'）、表头的域名、
+// -o 落点的文件名，都可能长得像主机名。目的地是剥掉这些之后剩下的位置参数（curl 的网址）
+const HTTP_VALUE_SHORT = "dFTHouAebcDxXmwrEKzyYQtPUC";
+const HTTP_VALUE_LONG = new Set([
+  "--data",
+  "--data-raw",
+  "--data-binary",
+  "--data-urlencode",
+  "--data-ascii",
+  "--json",
+  "--url-query",
+  "--form",
+  "--form-string",
+  "--upload-file",
+  "--header",
+  "--proxy-header",
+  "--output",
+  "--output-dir",
+  "--user",
+  "--user-agent",
+  "--referer",
+  "--cookie",
+  "--cookie-jar",
+  "--dump-header",
+  "--proxy",
+  "--proxy-user",
+  "--request",
+  "--max-time",
+  "--connect-timeout",
+  "--expect100-timeout",
+  "--keepalive-time",
+  "--write-out",
+  "--range",
+  "--cert",
+  "--key",
+  "--pass",
+  "--cacert",
+  "--capath",
+  "--config",
+  "--time-cond",
+  "--speed-time",
+  "--speed-limit",
+  "--quote",
+  "--telnet-option",
+  "--ftp-port",
+  "--continue-at",
+  "--retry",
+  "--retry-delay",
+  "--retry-max-time",
+  "--limit-rate",
+  "--max-filesize",
+  "--max-redirs",
+  "--interface",
+  "--resolve",
+  "--connect-to",
+  "--dns-servers",
+  "--dns-interface",
+  "--dns-ipv4-addr",
+  "--dns-ipv6-addr",
+  "--local-port",
+  "--oauth2-bearer",
+  "--unix-socket",
+  "--abstract-unix-socket",
+  "--socks4",
+  "--socks4a",
+  "--socks5",
+  "--socks5-hostname",
+  "--preproxy",
+  "--noproxy",
+  "--proxy1.0",
+  "--haproxy-clientip",
+  "--trace",
+  "--trace-ascii",
+  "--stderr",
+  "--libcurl",
+  "--etag-compare",
+  "--etag-save",
+  "--hsts",
+  "--alt-svc",
+  "--doh-url",
+  "--rate",
+  "--hostpubmd5",
+  "--pinnedpubkey",
+  "--pubkey",
+  "--random-file",
+  "--egd-file",
+  "--engine",
+  "--krb",
+  "--sasl-authzid",
+  "--service-name",
+  "--tlsuser",
+  "--tlspassword",
+  "--mail-from",
+  "--mail-rcpt",
+  "--mail-auth",
+  "--post-data",
+  "--post-file",
+  "--body-data",
+  "--body-file",
+  "--method",
+  "--directory-prefix",
+  "--output-document",
+  "--load-cookies",
+  "--save-cookies",
+  "--ca-certificate",
+  "--certificate",
+  "--private-key",
+  "--tries",
+  "--timeout",
+  "--wait",
+  "--input-file",
+  "--base",
+  "--execute",
+  "--quota",
+  "--dns-timeout",
+  "--read-timeout",
+  "--http-user",
+  "--http-password",
+  "--ftp-user",
+  "--ftp-password",
+  "--bind-address",
+  "--body",
+  "--infile",
+  "--bodypath",
+  "--outfile",
+  "--headers",
+  "--contenttype",
+  "--credential",
+  "--authentication",
+  "--token",
+  "--sessionvariable",
+  "--websession",
+  "--certificatethumbprint",
+  "--maximumredirection",
+  "--timeoutsec"
+]);
+/** 这个参数是不是在吃下一个参数（值写在自己身上的 --opt=x、-d@f 不算） @param {string} arg */
+function eatsNextArg(arg) {
+  if (!arg || !arg.startsWith("-")) return false;
+  if (/^--[A-Za-z][A-Za-z0-9-]*$/.test(arg)) return HTTP_VALUE_LONG.has(arg.toLowerCase());
+  return /^-[A-Za-z]+$/.test(arg) && HTTP_VALUE_SHORT.includes(arg[arg.length - 1]);
+}
+/**
+ * 这一段 HTTP 工具自己写明白的目的地。只看这一段的参数：
+ * 整条指令里别处出现的 localhost（payload 里、别的命令里）不能给这次上传开脱
+ * 认带协议头的地址、带路径或端口的主机、裸主机名与 IP；认不出的（装在变量里）留给调用方按「出去了」算
+ * @param {string[]} args
+ */
+function httpHosts(args) {
+  const hosts = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (eatsNextArg(arg)) {
+      i++;
+      continue;
+    }
+    if (!arg || arg.startsWith("-") || arg.startsWith("@")) continue;
+    const url = arg.match(/^(?:https?|ftp):\/\/(\[[^\]]+\]|[^\s/?#:]+)/i);
+    if (url) {
+      hosts.push(url[1]);
+      continue;
+    }
+    if (/^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\]|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?::\d+)?(?:[/?#]|$)/i.test(arg))
+      hosts.push(arg.split(/[/?#]/)[0].replace(/:\d+$/, ""));
+  }
+  return hosts;
+}
+/** ssh 连的是哪台；只是版本、打印配置时返回空 @param {string[]} args */
+function sshHost(args) {
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+    if (token === "-V" || token === "-G") return "";
+    if (SSH_VALUE.has(token)) {
+      i++;
+      continue;
+    }
+    if (token.startsWith("-")) continue;
+    return token;
+  }
+  return "";
+}
+/** scp / sftp / rsync 的参数里有没有远端（host:path、user@host、rsync://）；Windows 盘符不算 @param {string} name @param {string[]} args */
+function remoteOperand(name, args) {
+  const words = args.filter(arg => !arg.startsWith("-"));
+  if (name === "ssh") return sshHost(args);
+  return (
+    words.find(
+      arg =>
+        !/^[A-Za-z]:[\\/]/.test(arg) &&
+        (/^(?:[^\\/:\s]+@)?[^\\/:\s]+:/.test(arg) ||
+          /^(?:rsync|ssh|scp|sftp):\/\//i.test(arg) ||
+          (name === "sftp" && /^[^\\/\s]+@[^\\/\s:]+$/.test(arg)))
+    ) || ""
+  );
+}
+/**
+ * 一条指令是不是在往外发：通过返回 null，否则返回 { kind, why }。
+ * 只认能看明白的程序与参数；脚本里现拼的追不到（见文件头注）
+ * @param {string} command
+ * @param {{ platform?: string }} [options]
+ * @returns {{ kind: string, why: string, label: string } | null}
+ */
+function egressOf(command, { platform = process.platform } = {}) {
+  const raw = String(command || "");
+  // 两遍都省：绝大多数指令没有这些程序，也没有网络共享的写法
+  if (
+    !/\b(?:git|gh|curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|ssh|scp|sftp|rsync|nc|ncat|netcat|telnet|npm|pnpm|yarn|bun|cargo|docker|dotnet|twine)\b|(?<!:)[\\/]{2}[^\\/\s]/i.test(
+      raw
+    )
+  )
+    return null;
+  const win = platform === "win32",
+    text = withoutExeDir(raw, win),
+    scanned = shellText(text, win ? "powershell" : "posix");
+  for (const call of commandInvocations(scanned)) {
+    const args = call.args.map(arg => arg.value),
+      name = call.name.toLowerCase();
+    if (HTTP_SEND_TOOLS.test(name) && httpSends(name, args)) {
+      // 目的地只从这一段自己的参数里认（主机名认方括号里的 IPv6，否则本机测服务会被当成外发）。
+      // 指向本机的（curl 127.0.0.1 测本地服务）不算；看不出地址的（放在变量里）按出去了算
+      const hosts = httpHosts(args);
+      if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
+        return { kind: "http-upload", why: "把内容发往外部地址（curl / wget 一类的上传）", label: "HTTP 上传" };
+    }
+    const git = gitInvocation([call.name, ...args]);
+    if (git) {
+      const sub = git.sub.toLowerCase();
+      if (sub === "push" && !git.args.includes("--dry-run") && !git.args.includes("-n"))
+        return { kind: "git-push", why: "把本地提交推到远端（git push）", label: "git push" };
+      if (sub === "send-email" && !git.args.includes("--dry-run"))
+        return { kind: "git-email", why: "把提交以邮件发出去（git send-email）", label: "git send-email" };
+      if (sub === "lfs" && (git.args[0] || "").toLowerCase() === "push" && !git.args.includes("--dry-run"))
+        return { kind: "git-push", why: "把 LFS 对象推到远端（git lfs push）", label: "git lfs push" };
+    }
+    if (name === "gh") {
+      // 先找命令词：gh 的全局选项 -R / --repo 会吃掉一个参数（gh -R o/r pr create），名词之后、动词之前也会夹
+      // （gh pr --repo o/r comment 5）。一律按「剥掉选项与它吃的值」之后剩下的词来找，否则 o/r 会被当成动词
+      const words = commandWords(args),
+        at = words.findIndex(word => {
+          const lower = word.toLowerCase();
+          return lower === "api" || GH_WRITE_SET.has(lower);
+        }),
+        noun = at >= 0 ? words[at].toLowerCase() : "",
+        verb = at >= 0 ? (words[at + 1] || "").toLowerCase() : "";
+      if (noun === "api") {
+        // 先看写没写死方法：-X GET 时 -f 只是查询参数，不算写；没写方法时 -f / --input 即 POST
+        let method = "";
+        for (let i = 1; i < args.length; i++) {
+          const arg = args[i];
+          if (/^(?:-X|--method)$/i.test(arg)) method = args[i + 1] || "POST";
+          else if (/^--method=/i.test(arg)) method = arg.slice(arg.indexOf("=") + 1);
+          else if (/^-X./.test(arg)) method = arg.slice(2);
+        }
+        if (method) {
+          if (isWriteMethod(method)) return { kind: "gh:gh api", why: "调 GitHub 的 API 写数据（gh api）", label: "gh api" };
+        } else if (args.some(arg => /^(?:-f|-F|--field|--raw-field|--input)(?:=|$)/.test(arg) || /^-[fF].+/.test(arg))) {
+          // graphql 端点上的 query 是读（POST 只是它的传法）；mutation 才是写。查询语句装在变量里时看不出来，按读算。
+          // 语句从文件读（-f query=@q.gql、--input body.json）时同样看不到，按写算，免得 mutation 藏在文件里混过去。
+          // 只看端点参数：payload 里出现 graphql 字样（-f title=graphql）不能给 REST 的写开脱
+          const endpoint = (words[at + 1] || "").toLowerCase(),
+            fromFile = args.some(arg => /^--input(?:=|$)/i.test(arg) || /(?:^|=)query=@/i.test(arg)),
+            query = endpoint === "graphql" && !fromFile && !args.some(arg => /mutation/i.test(arg));
+          if (!query) return { kind: "gh:gh api", why: "调 GitHub 的 API 写数据（gh api）", label: "gh api" };
+        }
+      } else if (GH_WRITE_SET.get(noun)?.has(verb)) {
+        return { kind: `gh:gh ${noun} ${verb}`, why: `在 GitHub 上做写操作（gh ${noun} ${verb}）`, label: `gh ${noun} ${verb}` };
+      }
+    }
+    if (/^(?:ssh|scp|sftp|rsync)$/.test(name)) {
+      const host = remoteOperand(name, args);
+      if (host && !args.includes("--dry-run"))
+        return { kind: `remote:${name}`, why: `在远端机器上操作或复制文件（${name} ${host}）`, label: `${name} 到远端` };
+    }
+    if (/^(?:nc|ncat|netcat|telnet)$/.test(name)) {
+      const host = args.find(arg => !arg.startsWith("-"));
+      // -l / -L / --listen 是监听、-z 只探端口不传数据、-U/--unix 是本机 socket；本机地址与路径都不算
+      if (
+        host &&
+        !LOCAL_HOST.test(host) &&
+        !/[\\/]/.test(host) &&
+        !args.some(arg => arg === "--listen" || /^-[A-Za-z]*[lLz]/.test(arg) || /^-(?:U|--unix)(?:=|$)/i.test(arg))
+      )
+        return { kind: `remote:${name}`, why: `连到外部主机传数据（${name} ${host}）`, label: `${name} 到远端` };
+    }
+    if (name === "docker" && args.includes("--push"))
+      return { kind: "publish:docker", why: "构建后把镜像推出去（docker buildx --push）", label: "docker push" };
+    const words = commandWords(args),
+      verb = (words[0] || "").toLowerCase();
+    if (args.includes("--dry-run")) continue;
+    if (/^(?:npm|pnpm|yarn|bun)$/.test(name) && /^(?:publish|unpublish|deprecate)$/.test(verb))
+      return { kind: `publish:${name}`, why: `把包发布出去（${name} ${verb}）`, label: `${name} ${verb}` };
+    if (name === "cargo" && verb === "publish")
+      return { kind: "publish:cargo", why: "把 crate 发布出去（cargo publish）", label: "cargo publish" };
+    if (name === "docker" && (verb === "push" || ((verb === "image" || verb === "compose") && (words[1] || "").toLowerCase() === "push")))
+      return { kind: "publish:docker", why: "把镜像推到镜像仓库（docker push）", label: "docker push" };
+    if (name === "dotnet" && verb === "nuget" && (words[1] || "").toLowerCase() === "push")
+      return { kind: "publish:dotnet", why: "把包推到 NuGet（dotnet nuget push）", label: "dotnet nuget push" };
+    if (name === "twine" && verb === "upload")
+      return { kind: "publish:twine", why: "把包上传到 PyPI（twine upload）", label: "twine upload" };
+  }
+  // 写到网络共享里：本地文件出了这台机器。读取（Get-Content \\host\share\x、从共享拷进来）不算：
+  // 只看判成「写」的那份文本，只读的来源已被 stripReadSources 遮掉
+  const writes = scanWrites(scanned);
+  if (writes.writing && uncShare(writes.text, win)) return { kind: "share", why: "往网络共享里写（\\\\主机\\共享）", label: "网络共享" };
+  return null;
+}
 /**
  * 筛一条指令。通过返回 null；拒绝返回一句原因（给模型看的，说清怎么改）
  * @param {string} command
@@ -2516,6 +2980,7 @@ module.exports = {
   screenCommand,
   screenLoose,
   screenAutoReview,
+  egressOf,
   screenUnreviewable,
   sandboxEnv,
   screenPath,

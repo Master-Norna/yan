@@ -256,15 +256,28 @@ async function runMcpTool(step, server, tool, args, ctx) {
     step.skipped = true;
     return { ok: false, content: prompt("assistant.declined"), display: "" };
   }
-  // 审而后行里的写操作：开了审查就交它判（见 03-review.js）；游目的浏览器只审可能把东西带出去的那几样
+  // 审而后行里的写操作：开了审查就交它判（见 03-review.js）；游目的浏览器只审可能把东西带出去的那几样。
+  // 写操作带 kind（mcp:服务:工具）：同类外发前面审准做过几回，审查据此从严（见 reviewCase）
   if (reviewOn(ctx.conversation)) {
-    const why =
-      server === STAGE_SERVER
-        ? stageReviewWhy(tool, args, ctx.conversation)
-        : !mcpReadOnly(spec) && !(config.autoApprove || []).includes(tool)
-          ? `调外部服务 ${server} 的写操作 ${tool}`
-          : "";
-    const denied = why && (await reviewGate(step, args, ctx, why));
+    const stage = server === STAGE_SERVER ? stageReviewWhy(tool, args, ctx.conversation) : "",
+      // 游目与别的路做同一件事时要记同一个 kind：跳长参网址与 fetch_page 同类，上传、跑代码各归各的
+      stageKind =
+        tool === "browser_navigate"
+          ? { kind: "http-get", label: "网址里带长参数往外发" }
+          : tool === "browser_file_upload"
+            ? { kind: "browser-upload", label: "往网页上传本机文件" }
+            : /^browser_(evaluate|run_code_unsafe|webmcp_call)$/.test(tool)
+              ? { kind: "browser-code", label: "在网页里跑代码" }
+              : null,
+      flag =
+        server === STAGE_SERVER
+          ? stage
+            ? { why: stage, ...(stageKind || { kind: "", label: "" }) }
+            : null
+          : !mcpReadOnly(spec) && !(config.autoApprove || []).includes(tool)
+            ? { why: `调外部服务 ${server} 的写操作 ${tool}`, kind: `mcp:${server}:${tool}`, label: `${server} · ${tool}` }
+            : null;
+    const denied = flag && (await reviewGate(step, args, ctx, flag));
     if (denied) return denied;
   }
   const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal).finally(
