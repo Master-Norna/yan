@@ -67,8 +67,9 @@ function macSeatbeltProfile(cwd) {
   const filters = [...allowed].map(dir => `(subpath ${SB_STRING(dir)})`).join(" ");
   return `(version 1)\n(allow default)\n(deny file-write* (require-not (require-any ${filters})))\n`;
 }
-// 桥接退出时把还在跑的指令（前台的与后台的）一并收掉，连根：各份 createShell 的 runningShells 都登记在这一处，
-// 一套钩子共用（页面一份、测试里另起的几份也算，不每份都往 process 上挂监听）
+// 桥接退出时把还在跑的指令（前台的与后台的）一并收掉，连根：各份 createShell 都登记到这一处，
+// 一套钩子共用（页面一份、测试里另起的几份也算，不每份都往 process 上挂监听）；
+// 只替有 child 在跑的那一份占位，跑空就摘掉（见 spawnShell 的 forget），旧实例不会一直留着
 const allShells = new Set();
 let exitHooksArmed = false;
 function armExitHooks() {
@@ -129,6 +130,7 @@ module.exports = function createShell({ toolEnv }) {
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     runningShells.add(child);
+    allShells.add(runningShells);
     // 外壳退了、它起的孙进程（start /b 起的服务、会常驻的工具）还攥着输出管道：close 要等它们都退才来，指令一直挂着，
     // 超时与停止也收不到（外壳已不在，killTree 无从下手）。外壳退后稍等片刻，管道还没合上就松手，按外壳的退出收尾
     child.once("exit", () => {
@@ -138,13 +140,17 @@ module.exports = function createShell({ toolEnv }) {
       }, 1500);
       child.once("close", () => clearTimeout(timer));
     });
-    child.on("close", () => runningShells.delete(child));
-    child.on("error", () => runningShells.delete(child));
+    const forget = () => {
+      runningShells.delete(child);
+      if (runningShells.size === 0) allShells.delete(runningShells);
+    };
+    child.on("close", forget);
+    child.on("error", forget);
     return child;
   }
   // 正在跑的 shell（前台与后台）：桥接退出时整棵收掉，不留在后台改文件、占端口
+  // 登记与摘除都在 spawnShell 里，跟着 child 的生灭走
   const runningShells = new Set();
-  allShells.add(runningShells);
   armExitHooks();
   function runShell(command, cwd, timeoutMs, signal = null, { boxed = false, env = {}, seatbelt = false } = {}) {
     return new Promise(resolve => {
