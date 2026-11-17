@@ -216,6 +216,7 @@ test("严档对前台、显式后台、前台转后台是同一张约束", NEED_
     }
     // 前台转后台：带 ticket 的指令跑到一半经 release 转入后台，约束不变
     pending = post("/api/work/run", { workdir: root, command: `sleep 3; ${probe("handed")}`, ticket: "t-hand", sandbox: true });
+    pending.catch(() => {}); // 先标成已处理：finally 里先关服务、再等它，拒绝可能先到
     // release 要等指令先把 ticket 挂上：轮询到真放为止，不拿固定等待当判据
     let released = {};
     for (let i = 0; i < 40 && released.released !== true; i++) {
@@ -229,11 +230,12 @@ test("严档对前台、显式后台、前台转后台是同一张约束", NEED_
     assert.equal(done.running, false);
     await seen("handed");
   } finally {
-    // 断言挂在中途时，先等那条请求落定（最坏是 sleep 3 跑完），再按 id 亲手停一遍：
-    // 只关服务、删目录的话，还在跑的指令会拖着管道，node --test 要等它结束才肯退
-    if (pending) await pending.catch(() => {});
+    // 断言挂在中途时也要收干净：先按 id 停（服务还开着，请求才发得出去），再关服务——
+    // closeAllConnections 会让还挂着的请求立刻以错误落定；最后等它、接住拒绝。
+    // 反过来先等 pending：响应若永不回来，整份文件会一直挂着，node --test 的超时也救不了
     if (report && report.id) await post("/api/work/check", { id: report.id, key: report.key, stop: true }).catch(() => {});
     await close().catch(() => {});
+    if (pending) await pending.catch(() => {});
     dropRoot(root);
     dropOutside();
   }
