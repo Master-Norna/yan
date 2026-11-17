@@ -163,6 +163,53 @@ test("不到上限的整份 JSON：分块到达也照旧整份读进来，摆成
   assert.ok(res.text.endsWith("data: [DONE]\n\n"));
 });
 
+test("整份 JSON 的 BOM 与多字节字符各自跨字节分块：读完仍能解码并转成事件流", async () => {
+  const content = "中文😀答复",
+    bytes = new TextEncoder().encode("\uFEFF" + JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
+  let at = 0;
+  answer(
+    new ReadableStream({
+      pull(controller) {
+        if (at === bytes.length) return controller.close();
+        controller.enqueue(bytes.subarray(at, ++at));
+      }
+    }),
+    "application/json"
+  );
+  const res = await ask();
+  assert.equal(res.status, 200);
+  assert.match(res.text, /"content":"中文😀答复"/);
+  assert.ok(res.text.endsWith("data: [DONE]\n\n"));
+});
+
+test("预读的第一大块已超过上限：仍报 415、取消原上游，不把余下正文读完", async () => {
+  const head = '{"message":"大块正文"}',
+    first = new TextEncoder().encode(head + "x".repeat(LIMIT));
+  let pulled = 0,
+    cancelled = false;
+  answer(
+    new ReadableStream(
+      {
+        pull(controller) {
+          if (pulled === 4) return controller.close();
+          controller.enqueue(pulled++ === 0 ? first : new Uint8Array(MiB));
+        },
+        cancel() {
+          cancelled = true;
+        }
+      },
+      { highWaterMark: 0 }
+    ),
+    "application/json"
+  );
+  const res = await ask();
+  assert.equal(res.status, 415);
+  assert.match(res.json.error, /超过 8 MB/);
+  assert.ok(res.json.error.endsWith(head + "x".repeat(200 - head.length)), "仍带原文前 200 字");
+  assert.ok(cancelled, "回放流的取消要传到原上游");
+  assert.ok(pulled <= 2, `回放最多预取一块，不应拉走 ${pulled} 块`);
+});
+
 test("正文正好 8 MiB 的整份 JSON 不算超：上限是「超过」才停", { timeout: 15000 }, async () => {
   // 一份不多不少正好到上限的整份答复：差一字节的判定（> 还是 >=）只有这条看得出
   const head = '{"choices":[{"message":{"role":"assistant","content":"',

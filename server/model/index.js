@@ -11,6 +11,7 @@
 const { Readable } = require("node:stream");
 const { finished } = require("node:stream/promises");
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
+const { readLimitedBytes } = require("../web.js");
 const fetchUpstream = require("./upstream.js");
 const openai = require("./openai.js");
 const anthropic = require("./anthropic.js");
@@ -94,37 +95,6 @@ function replayBody(chunks, reader) {
     }
   });
 }
-/**
- * @param {Uint8Array[]} chunks
- * @param {ReadableStreamDefaultReader<Uint8Array>} reader
- * @param {number} [limit] 读到这么多字节就停：非事件流要整份读进来才判得出是不是 JSON，给个上限，
- * 配错的地址、失控的中转不至于让常驻桥接一直吃到内存天花板
- * @returns {Promise<{ text: string, truncated: boolean }>}
- */
-async function collectText(chunks, reader, limit = Infinity) {
-  const decoder = new TextDecoder();
-  let text = "",
-    read = 0;
-  const stop = async () => {
-    await reader.cancel().catch(() => {});
-    return { text, truncated: true };
-  };
-  for (const chunk of chunks) {
-    text += decoder.decode(chunk, { stream: true });
-    read += chunk.byteLength;
-  }
-  if (read > limit) return stop();
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (value) {
-      text += decoder.decode(value, { stream: true });
-      read += value.byteLength;
-      if (read > limit) return stop();
-    }
-    if (done) return { text: text + decoder.decode(), truncated: false };
-  }
-}
-
 // 上游回了 200，交给页面的只有事件流：页面只有一种读法，各家、各中转的样子到此为止。
 // 判定途中就断了：页面这头还没写头，补不了「连接中断」那条事件，按连不上算、可重试（502）。
 // 整份回来的：OpenAI 兼容那路摆成一块事件流；要重译的两路译不了，说清不是事件流，带上原文前 200 字（415，等一等也不会好，不重试）。
@@ -142,7 +112,8 @@ async function eventBody(response, provider) {
   };
   const lead = await peekLead(response.body).catch(cut);
   if (!lead.first || EVENT_MARKS.has(lead.first)) return replayBody(lead.chunks, lead.reader);
-  const { text: raw, truncated } = await collectText(lead.chunks, lead.reader, SNIFF_LIMIT).catch(cut);
+  const { buffer, truncated } = await readLimitedBytes({ body: replayBody(lead.chunks, lead.reader) }, SNIFF_LIMIT).catch(cut);
+  const raw = new TextDecoder().decode(buffer);
   const type = String(response.headers.get("content-type") || "").toLowerCase(),
     snippet = raw.trim().slice(0, 200);
   // 判定只看开头，整份 JSON 的答复才要整份；超过上限仍不是事件流的，不再往下读，也不当整份
