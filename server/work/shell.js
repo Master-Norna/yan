@@ -69,12 +69,14 @@ function macSeatbeltProfile(cwd) {
 }
 // 桥接退出时把还在跑的指令（前台的与后台的）一并收掉，连根：各份 createShell 都登记到这一处，
 // 一套钩子共用（页面一份、测试里另起的几份也算，不每份都往 process 上挂监听）；
-// 只替有 child 在跑的那一份占位，跑空就摘掉（见 spawnShell 的 forget），旧实例不会一直留着
-const allShells = new Set();
-let exitHooksArmed = false;
+// 只替有 child 在跑的那一份占位，跑空就摘掉（见 spawnShell 的 forget），旧实例不会一直留着。
+// 登记表与「钩子只挂一套」按 Symbol.for 放进 globalThis：同一进程里载入两份本模块时（实验分支把
+// server/work/ 各段按原样再载）也共用一套，下面 listenerCount 的判据才数得对
+const HOOKS = (globalThis[Symbol.for("yan.work.shellExitHooks")] ||= { armed: false, shells: new Set() });
+const allShells = HOOKS.shells;
 function armExitHooks() {
-  if (exitHooksArmed) return;
-  exitHooksArmed = true;
+  if (HOOKS.armed) return;
+  HOOKS.armed = true;
   const reap = () => {
     for (const shells of allShells) for (const child of shells) killTreeSync(child);
   };
