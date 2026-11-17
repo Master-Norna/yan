@@ -42,7 +42,14 @@ async function reviewFlag(step, args, ctx) {
     const why = egressWhy(step.name, args, conversation);
     if (!why) return null;
     // 带内容 POST 与网址里带长参数不是一回事：同类计数分开，别让一次上传给后来的长参数 GET 记账
-    const upload = step.name === "http_request" && !["GET", "HEAD"].includes(String(args.method || "GET").toUpperCase()) && !!args.body;
+    const upload =
+      step.name === "http_request" &&
+      !["GET", "HEAD"].includes(
+        String(args.method || "GET")
+          .trim()
+          .toUpperCase()
+      ) &&
+      !!args.body;
     return {
       why,
       kind: upload ? "http-upload" : "http-get",
@@ -248,13 +255,12 @@ function reviewCase(step, args, conversation, why, kind = "", label = "") {
     earlier = at < 0 ? lines.filter(word => word.at < turn) : lines.filter(word => word.at < turn),
     list = items => (items.length ? items.map((word, i) => `${i + 1}. ${word.text}`).join("\n") : "（无）"),
     // 同一类外发在「这一答」开始之前审准过几回；这一答里的重复动作共用这一答的授权，不计。没有 kind 的也不计
-    done =
-      kind && turn > 0
-        ? conversation.messages
-            .slice(0, turn)
-            .flatMap(allSteps)
-            .filter(other => other.reviewed?.ok === true && other.reviewed.kind === kind).length
-        : 0;
+    done = kind
+      ? conversation.messages
+          .slice(0, turn)
+          .flatMap(allSteps)
+          .filter(other => other.reviewed?.ok === true && other.reviewed.kind === kind).length
+      : 0;
   // 这一步过了哪条守的关口，那条守在这一步上已由人照过：写明了，审查不再拿它看不见的「给人看过没有」去对
   const held = intents.get(conversation.id)?.intent,
     gated = Array.isArray(step.granted) ? step.granted : [],

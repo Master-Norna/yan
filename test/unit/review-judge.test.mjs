@@ -64,7 +64,7 @@ test("授权按这一答算：更早的原话只作背景，同类外发做过�
             {
               name: "mcp__github__pull_request_review_write",
               status: "done",
-              reviewed: { ok: true, kind: "mcp:pull_request_review_write" }
+              reviewed: { ok: true, kind: "mcp:GitHub:pull_request_review_write" }
             }
           ]
         },
@@ -73,7 +73,7 @@ test("授权按这一答算：更早的原话只作背景，同类外发做过�
           role: "assistant",
           steps: [
             // 这一答里先前也审准过一次同类外发：与这一步共用这一答的授权，不写进「已做过」的计数
-            { name: "mcp__github__add_comment", status: "done", reviewed: { ok: true, kind: "mcp:pull_request_review_write" } },
+            { name: "mcp__github__add_comment", status: "done", reviewed: { ok: true, kind: "mcp:GitHub:pull_request_review_write" } },
             now
           ]
         }
@@ -84,7 +84,7 @@ test("授权按这一答算：更早的原话只作背景，同类外发做过�
     { title: "second" },
     chat,
     "调外部服务的写操作",
-    "mcp:pull_request_review_write",
+    "mcp:GitHub:pull_request_review_write",
     "GitHub · pull_request_review_write"
   );
   // 这一答只放「他又推了几个，看一下」；前一答的授权另作一节，不再混在同一条清单里
@@ -120,6 +120,25 @@ test("回报叫醒的答仍以最近一次任务原话为准：这一答没有�
   assert.match(text, /^1\. 把 PR 迭代到 CI 绿，绿了就推/);
   assert.doesNotMatch(text, /\|done:/);
   assert.doesNotMatch(text, /后台 bg1 已结束/);
+});
+
+test("同一答跨多则消息：done 只数这一答开始之前的", () => {
+  const now = { name: "run_command" },
+    chat = {
+      id: "c",
+      messages: [
+        { role: "user", content: "改完推上去，迭代到 CI 绿" },
+        { role: "assistant", steps: [{ name: "run_command", status: "done", reviewed: { ok: true, kind: "git-push" } }] },
+        { role: "user", content: "顺便把 README 也改一下" },
+        // 这一答里先前也审准过一次：与这一步共用这一答的授权，不计
+        { role: "assistant", steps: [{ name: "run_command", status: "done", reviewed: { ok: true, kind: "git-push" } }] },
+        { role: "user", content: "［后台 bg1 已结束］", relay: [{ step: "s1", title: "bg1", ok: true }] },
+        { role: "assistant", steps: [now] }
+      ]
+    };
+  const text = f.reviewCase(now, {}, chat, "缘由", "git-push", "git push");
+  assert.match(text, /\n\n\|done:1:git push/);
+  assert.doesNotMatch(text, /\|done:2:/);
 });
 
 test("找不到这一步（旁注、合成步骤）：仍从最近一条用户主动说的话算起", () => {

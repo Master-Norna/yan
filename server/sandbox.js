@@ -2586,7 +2586,7 @@ function egressOf(command, { platform = process.platform } = {}) {
       const hosts = [...text.matchAll(/https?:\/\/(\[[^\]]+\]|[^\s/"'`:]+)(?::\d+)?/gi)].map(match => match[1]);
       // 指向本机的（curl 127.0.0.1 测本地服务）不算；看不出地址的（放在变量里）按出去了算
       if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
-        return { kind: "http", why: "把内容发往外部地址（curl / wget 一类的上传）", label: "HTTP 上传" };
+        return { kind: "http-upload", why: "把内容发往外部地址（curl / wget 一类的上传）", label: "HTTP 上传" };
     }
     const git = gitInvocation([call.name, ...args]);
     if (git) {
