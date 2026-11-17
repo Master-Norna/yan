@@ -164,8 +164,7 @@ function takeComposer(input, key = draftKey(), snapshot = composerSnapshot(input
  * @param {Profile} profile
  */
 async function startTurn(c, user, profile, { follow = true } = {}) {
-  /** @type {Message} */
-  const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
+  const assistant = newAssistant(profile);
   c.messages.push(user, assistant);
   c.updatedAt = now();
   c.profileId = profile.id;

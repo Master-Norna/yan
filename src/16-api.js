@@ -100,7 +100,7 @@ async function flushUsage(leaving = false) {
     items = [...sent].map(([key, amount]) => ({ day: key.split("|")[0], kind: key.split("|")[1], amount }));
   usagePending = new Map();
   if (leaving) {
-    fetch(`${apiBase}/api/usage/add`, {
+    fetch(`/api/usage/add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items }),
@@ -320,7 +320,7 @@ function profileForRequest(profile) {
 }
 // 接口类型：设置里选的为准；旧配置没写的按地址认（anthropic.com）。桥接照它挑这一家的登记，不再自己认。
 // 硅基流动说的是 OpenAI 兼容的话，单列一档只为在设置里标出名字、填好地址
-/** @param {Endpoint} profile @returns {"openai"|"anthropic"|"chatgpt"|"siliconflow"} */
+/** @param {Endpoint} profile @returns {ApiKind} */
 function profileApi(profile) {
   const api = String(profile?.api || "").toLowerCase();
   if (api === "anthropic" || api === "chatgpt" || api === "siliconflow") return api;

@@ -25,6 +25,10 @@
 /** @typedef {{ path: string, name: string, size: number, root?: string }} Deliverable 成品：path 是卷宗里的路；root 有值时是那个目录里的路（行的工作目录，或答复里写的绝对路所在的那层） */
 /** @typedef {{ prompt_tokens: number, completion_tokens: number, total_tokens: number, cached_tokens?: number }} Usage cached_tokens：提示里读自缓存的部分 */
 /** @typedef {"ask"|"review"|"auto"} CommandPolicy 问而后行 / 审而后行 / 径行 */
+/** @typedef {"streaming"|"complete"|"stopped"|"error"|"interrupted"} ReplyStatus 主答、旁注与帮手共用的作答状态；步骤另用 StepStatus */
+/** @typedef {{ thinking?: string, signature?: string, redacted?: string }} ThinkingBlock Anthropic 回传的思考块 */
+/** @typedef {{ steps: number, broken?: number, gone?: number, text: string }} TrailDigest 行迹摘要缓存：steps / broken / gone 是定格时的计数，见 settledDigest */
+/** @typedef {"openai"|"anthropic"|"chatgpt"|"siliconflow"} ApiKind 模型配置与专司共用的接口类型 */
 /** @typedef {"running"|"pending"|"done"|"error"|"skipped"|"interrupted"} StepStatus interrupted 只给差遣：帮手断着，等人续（见 holdHelper） */
 /** @typedef {{ question: string, header: string, multi: boolean, options: { label: string, description: string }[] }} AskQuestion */
 /**
@@ -36,18 +40,18 @@
  * @property {string} content
  * @property {string} reasoning
  * @property {Step[]} steps
- * @property {"streaming"|"complete"|"stopped"|"error"|"interrupted"} status interrupted：断着等人续
+ * @property {ReplyStatus} status interrupted：断着等人续
  * @property {Usage|null} usage
  * @property {Usage|null} [billed] 断过又续上的：断前已记进那一答的那份，那一答收尾时只算其后新耗的
  * @property {boolean} [charged] 用量已记进派它的那一答（帮手收工时自己记、或那一答收尾时并入），另一边不再记
  * @property {string} [effort] 这一趟的思考档位（模型实际认的那一档）；没有即不带字段、由接口定
- * @property {{ thinking?: string, signature?: string, redacted?: string }[]|null} [thinkingBlocks]
+ * @property {ThinkingBlock[]|null} [thinkingBlocks]
  * @property {string} [report] 最后一轮说的话，即交回主模型的回报
  * @property {number} [durationMs]
  * @property {number} [startedAt] 正在做时的起始时刻（毫秒），题头据此走用时；收工即删
  * @property {boolean} [waiting] 交过进展、睡着等自己挂的后台指令（醒来即删）
  * @property {Break[]} [breaks]
- * @property {{ steps: number, broken?: number, gone?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数，gone 是那时随桥接重启而止的后台）
+ * @property {TrailDigest} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数，gone 是那时随桥接重启而止的后台）
  * @property {ToolCall[]|null} [toolCalls]
  */
 /** @typedef {{ oldStart: number, newStart: number, oldCount: number, newCount: number }} DiffHunk 覆盖写摘出的一块：两侧各从第几行起、各有几行（新侧按号从这一步的参数里切出） */
@@ -127,21 +131,21 @@
  * @property {Relay[]} [relay] 帮手的回报（或候到了：后台指令结束、时刻到）另起的一问：谁回来了（内容是回报原文，只送给模型）
  * @property {string} content
  * @property {string} timestamp
- * @property {"streaming"|"complete"|"stopped"|"error"|"interrupted"} [status]
+ * @property {ReplyStatus} [status]
  * @property {string} [modelName]
  * @property {Attachment[]} [attachments]
  * @property {Quote} [quote]
  * @property {string} [reasoning]
  * @property {Step[]} [steps]
  * @property {ToolCall[]|null} [toolCalls] 只在流式期间用
- * @property {{ thinking?: string, signature?: string, redacted?: string }[]|null} [thinkingBlocks] 这一轮的思考块（Anthropic 带工具调用时要回传），只在流式期间用
+ * @property {ThinkingBlock[]|null} [thinkingBlocks] 这一轮的思考块（Anthropic 带工具调用时要回传），只在流式期间用
  * @property {Usage|null} [usage]
  * @property {number} [tokenCount] 这一答耗的墨
  * @property {boolean} [tokenEstimated]
  * @property {string} [error]
  * @property {string} [interruptedAt]
  * @property {Break[]} [breaks]
- * @property {{ steps: number, broken?: number, gone?: number, text: string }} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数，gone 是那时随桥接重启而止的后台）
+ * @property {TrailDigest} [trailDigest] 行迹摘要头一回送出时定格的样子（见 settledDigest；broken 是那时已停、已断的步数，gone 是那时随桥接重启而止的后台）
  * @property {number} [durationMs]
  * @property {number} [startedAt] 正在作答时的起始时刻（毫秒），行迹题头据此走用时；收尾即删
  * @property {Deliverable[]} [deliverables] 这一答交给人看的成品（答复里链到的本机文件，见 replyDeliverables）
@@ -189,7 +193,7 @@
  * @property {string} model
  * @property {string} [baseUrl]
  * @property {string} [apiKey]
- * @property {"openai"|"anthropic"|"chatgpt"|"siliconflow"} [api] 接口类型；没写按地址认（anthropic.com）；chatgpt 是在浏览器里登录的 ChatGPT 订阅；siliconflow 即 OpenAI 兼容、地址填好
+ * @property {ApiKind} [api] 接口类型；没写按地址认（anthropic.com）；chatgpt 是在浏览器里登录的 ChatGPT 订阅；siliconflow 即 OpenAI 兼容、地址填好
  * @property {number} [temperature] 留空即不传，由接口定
  * @property {number} [maxTokens] 只对 Anthropic 有意义（Messages API 必填）；OpenAI 兼容接口不传，由服务端定
  * @property {string} quota 用量上限，如 "100k"；空则不限
@@ -212,7 +216,7 @@
  * @property {CommandPolicy|""} policy 选它时的指令权限；空则照设置里的默认
  */
 /** @typedef {Pick<Profile, "baseUrl"|"apiKey"|"model"|"api">} Endpoint 发一次请求要的那几样：模型配置与专司里另配的一份都够 */
-/** @typedef {{ on: boolean, api: "openai"|"anthropic"|"siliconflow"|"chatgpt", baseUrl: string, apiKey: string, model: string, modelList: string[] }} Duty 专司里另配的一份（审查、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
+/** @typedef {Required<Endpoint> & { on: boolean, modelList: string[] }} Duty 专司里另配的一份（审查、生图各一）：与模型配置同形，只认接口、地址、Key、模型；on 是开没开 */
 /** @typedef {{ id: string, category: string, text: string, updatedAt: string }} MemoryItem 记忆的一类：类名与全文 */
 /** @typedef {{ text: string, attachments: Attachment[], quote?: Quote|null, updatedAt?: string }} Draft */
 /**

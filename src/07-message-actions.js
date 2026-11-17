@@ -116,8 +116,7 @@ async function regenerateAt({ c, index }) {
   if (quotaBlocked(profile)) return toast(t("余墨已尽，请调高上限或更换模型"));
   if (!(await preparing(() => prepareTurn(c)))) return;
   forkTail(c, userIndex + 1);
-  /** @type {Message} */
-  const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
+  const assistant = newAssistant(profile);
   c.messages.push(assistant);
   saveStore();
   renderConversation(true);
@@ -150,8 +149,7 @@ async function saveEditedMessage(conversation, index, value) {
     conversation.titled = false;
   }
   editingMessageId = null;
-  /** @type {Message} */
-  const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
+  const assistant = newAssistant(profile);
   conversation.messages.push(assistant);
   saveStore();
   render(true);

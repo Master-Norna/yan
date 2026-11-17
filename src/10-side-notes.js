@@ -487,8 +487,7 @@ async function sendSide() {
     if (!text) return;
     /** @type {Message} */
     const user = { id: uid(), role: "user", content: text, timestamp: now() };
-    /** @type {Message} */
-    const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
+    const assistant = newAssistant(profile);
     thread.messages.push(user, assistant);
     thread.updatedAt = now();
     input.value = "";
@@ -526,8 +525,7 @@ async function askSideAgain(c, thread, from, edit = null) {
       edit.message.timestamp = now();
       editingMessageId = null;
     }
-    /** @type {Message} */
-    const assistant = { id: uid(), role: "assistant", content: "", timestamp: now(), status: "streaming", modelName: profile.name };
+    const assistant = newAssistant(profile);
     thread.messages = [...thread.messages.slice(0, from), assistant];
     thread.updatedAt = now();
     saveStore();
