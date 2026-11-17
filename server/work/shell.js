@@ -80,18 +80,22 @@ function armExitHooks() {
   };
   process.on("exit", reap);
   // POSIX 的信号终止不走 exit 事件：Ctrl+C、被 kill、终端断开也要先收指令再照旧死，
-  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。once 起监听器：
+  // 不然 sleep、开发服务器变孤儿挂在后台改文件、占端口。用 on 而非 once：常驻宿主可能收到
+  // 多次信号，每发一次都要把此刻在跑的指令收干净（reap 幂等，已结束的由 alive() 挡住）；
+  // 只认第一发的话，宿主收完信号继续跑、重起的指令就没人管了。
   // 信号一到先收指令（有意取舍——桥接不知道宿主会不会退，先收更安全；宿主若不退出，指令也不恢复），
   // 宿主自己还听着这个信号就交还它定去留（重发会让常驻监听多吃一次）；
-  // 没人接才退场，但走 process.exit：exit 事件上挂的收口（MCP、无头浏览器）才能跟着跑完。
-  // listenerCount 分不清「没有宿主」与「宿主的 once 监听已消费」：once 型宿主按无宿主对待
+  // 只剩自己一个监听才退场，但走 process.exit：exit 事件上挂的收口（MCP、无头浏览器）才能跟着跑完。
+  // 判据的已知盲区：分不清「没有宿主」与「宿主的 once 监听已消费」——once 型宿主先注册时，
+  // 它那一发被消费后我们就当无宿主退场，抢在它的异步收尾前。
   if (process.platform !== "win32")
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
-      process.once(signal, () => {
+      process.on(signal, () => {
         try {
           reap();
         } finally {
-          if (process.listenerCount(signal) === 0) process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
+          // 减掉自己这一个：还有别的监听就算有人接
+          if (process.listenerCount(signal) === 1) process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
         }
       });
 }
