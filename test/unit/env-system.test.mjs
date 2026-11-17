@@ -65,7 +65,21 @@ test("macOS：status 报系统探测、toolPath 退回系统、apply 把 brew �
     // apply：brew 存在的 bin 目录排在原 PATH 前，窄 PATH 也能直接用
     const applied = env.apply({ PATH: "/usr/bin:/bin" });
     const expected = ["/opt/homebrew/bin", "/usr/local/bin"].filter(dir => fs.existsSync(dir));
-    assert.equal(applied.PATH, [...expected, "/usr/bin:/bin"].join(":"));
+    assert.deepEqual(
+      applied.PATH.split(":")
+        .filter(dir => expected.includes(dir))
+        .sort(),
+      [...expected].sort(),
+      "brew 两处的 bin 都该接进 PATH（brew 里别的工具照旧找得着）"
+    );
+    assert.ok(applied.PATH.endsWith("/usr/bin:/bin"), "原 PATH 殿后");
+    // 探测与实际执行同一份：敲名字命中的，得就是 status 报的那一件——某处那份坏了、探测跳到别处时，
+    // PATH 若还按目录先后排，敲 python3 仍先撞上坏的，状态卡报的版本与实际跑的不是同一件
+    for (const tool of Object.values(status.system)) {
+      const name = path.basename(tool.path),
+        hit = execFileSync("/bin/sh", ["-c", `command -v ${name}`], { env: { PATH: applied.PATH }, encoding: "utf8" }).trim();
+      assert.equal(hit, tool.path, `${name}：PATH 与探测得同果，敲名字该命中探测报的那一份`);
+    }
   } finally {
     await close().catch(() => {});
     fs.rmSync(root, { recursive: true, force: true });

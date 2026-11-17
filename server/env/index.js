@@ -95,9 +95,9 @@ module.exports = function createEnv({ envHome }) {
   // Windows 上环境变量名不分大小写，PATH 常写作 Path：照原来的键名接，不另起一个
   function apply(base) {
     // macOS 不备环境包：把 brew 的 bin 目录接进 PATH，指令里直接用 ffmpeg、python3 也能找着
-    // （与探测同序：先 brew 两处 prefix，原 PATH 殿后）
+    // （与探测同序：探测认下来的那处先，其余 brew 目录殿后，原 PATH 最后）
     if (process.platform === "darwin") {
-      const extra = SYSTEM_DIRS.filter(dir => fs.existsSync(dir)),
+      const extra = systemDirs(systemTools()),
         key = Object.keys(base).find(name => name.toUpperCase() === "PATH") || "PATH";
       return extra.length ? { ...base, [key]: [...extra, base[key]].filter(Boolean).join(path.delimiter) } : base;
     }
@@ -372,6 +372,15 @@ module.exports = function createEnv({ envHome }) {
 };
 
 const unique = names => [...new Set(names.map(name => String(name).trim()).filter(Boolean))];
+// PATH 前缀该放哪几处：探测认下来的那处（只在 brew 两处之内）先，其余 brew 目录殿后，各去重、只留真有的。
+// 探测按「跑得通」选（坏的那份跳过），PATH 却按目录先后找——选定的是 /usr/local/bin 那份而不提前，
+// 指令里敲 python3 照样先撞上 /opt/homebrew/bin 里坏的那份，状态卡报的版本与实际跑的不是同一件。
+// 边界：坏副本在 brew 之外（如 /usr/bin 那份坏了、探测退到 PATH 更后面）时这里排不过来——那种情形
+// 原 PATH 里的先后本就是探测的顺序，敲名字也会撞上坏的同一个；brew 之外的顺序一律不动（别把 /usr/bin 提到 brew 前）
+function systemDirs(found) {
+  const hit = unique(SYSTEM_TOOLS.map(tool => path.dirname(found?.[tool.id]?.path || "")).filter(dir => SYSTEM_DIRS.includes(dir)));
+  return unique([...hit, ...SYSTEM_DIRS]).filter(dir => fs.existsSync(dir));
+}
 // 按 SYSTEM_TOOLS 逐个探：brew 两处 prefix → PATH，逐处试着跑一下，认第一个跑得通的那一份。
 // 只「存在且可执行」不算——brew 里那份可能缺库、架构不对，跑起来就错；停在坏的上面，
 // 别处好的就用不上了（ffmpeg 尤其：预览视频换壳据此取壳），所以探不通就跳过、接着往下试
