@@ -2193,7 +2193,8 @@ function commandInvocations(scanned) {
             // 双引号正文已被外层 Shell 解码过一轮（\$ \" \\ \` 与换行续行），
             // 内层要扫的是解码后的文本，原样截取会二次解释这些转义
             const raw = scanned.text.slice(bodyAt + 1, quoteEnd),
-              body = scanned.text[bodyAt] === "'" ? raw : raw.replace(/\\([$`"\\\n])/g, "$1"),
+              // \<换行> 是续行：两个字符一起删掉拼接两侧，不是留下换行
+              body = scanned.text[bodyAt] === "'" ? raw : raw.replace(/\\\n/g, "").replace(/\\([$`"\\])/g, "$1"),
               inner = shellText(body, bodyShell);
             for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
           }
@@ -2327,17 +2328,21 @@ const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|
 // 同一份扫描同时给出写标记与路径文本；-o 的实际参数只拆一次，不因写动词表或参数引号而漏过。
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
-  const offsets = new Set();
+  const offsets = new Set(),
+    innerPaths = [];
   // 只有可能用到下面两张表时才切这一回：-o 连写的输出文件，或构建/包管理器那几件
   const calls = /-o/i.test(scanned.text) || TOOL_WRITE_HINT.test(scanned.text) ? commandInvocations(scanned) : [];
   if (/-o/i.test(scanned.text))
     for (const call of calls) {
+      if (!ATTACHED_OUTPUT_TOOL.test(call.name)) continue;
       // 内层视图补扫出来的调用记了 scan，它们的偏移属于内层文本，
-      // 不能在外层 chars 上插标记；引号里的路径文本本来就留在外层原文里
-      if (call.scan || !ATTACHED_OUTPUT_TOOL.test(call.name)) continue;
+      // 不能在外层 chars 上插标记；紧贴选项后的路径值直接取出来查
       for (const arg of call.args) {
         if (arg.value === "--") break;
-        if (/^-o.+/i.test(arg.value)) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
+        if (/^-o.+/i.test(arg.value)) {
+          if (call.scan) innerPaths.push(arg.value.slice(2));
+          else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
+        }
       }
     }
   // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」。
@@ -2368,7 +2373,10 @@ function scanWrites(scanned) {
             target.add(next);
             i++;
           }
-        } else if (glued && !call.scan) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
+        } else if (glued) {
+          if (call.scan) innerPaths.push(value.slice(glued.length));
+          else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
+        }
       }
       // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
       for (const arg of call.args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
@@ -2378,7 +2386,8 @@ function scanWrites(scanned) {
   const chars = stripReadSources(scanned).split("");
   for (const at of offsets) chars[at] = " " + chars[at];
   for (const arg of toolReads) for (let i = arg.start; i < arg.end; i++) chars[i] = " ";
-  return { writing, text: chars.join("") };
+  // 内层紧贴式输出路径不占外层坐标：单独并进文本，越界与 .. 照常检查
+  return { writing, text: chars.join("") + (innerPaths.length ? ` ${innerPaths.join(" ")}` : "") };
 }
 /**
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，
