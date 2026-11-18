@@ -1618,11 +1618,40 @@ const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
 // 在 syntax 里同是 \x01 占位（一位可能是被转义的任意字母，也可能是整个删掉的续行），
 // 只有 text 里的原字符能分辨。所以先按原始文本解码成真实命令词与参数，再做各自的选项/谓词判定——
 // 避开占位的双解，也就没有组合回溯。
-// decodePosix：词内 \<换行> 整对删除，\x 还原成 x；引号内 syntax 不标 \x01，\ 保持字面
-const decodePosix = (/** @type {ReturnType<typeof shellText>} */ scanned, /** @type {number} */ start, /** @type {number} */ end) => {
-  const { text, syntax } = scanned;
+// shellWord：一个词按 Shell 词规则解码成真实值——引号段剥掉外层引号后原样并入
+// （引号内 syntax 不标 \x01，\ 保持字面），引号外 \x 还原成 x、\<换行> 整对删除；
+// 同一词内引号与非引号片段相邻时自然拼成一个值
+const shellWord = (/** @type {ReturnType<typeof shellText>} */ scanned, /** @type {number} */ start, /** @type {number} */ end) => {
+  const { text, syntax, quotes } = scanned;
   let out = "";
   for (let i = start; i < end; i++) {
+    if (quotes.has(i)) {
+      const qe = Math.min(quotes.get(i), end - 1);
+      const inner = text.slice(i + 1, qe);
+      if (text[i] === '"') {
+        // 双引号内 \ 仍转义 $"`\\ 与换行（续行整对删除），其余 \x 保留字面
+        for (let j = 0; j < inner.length; j++) {
+          if (inner[j] === "\\" && j + 1 < inner.length) {
+            if (/[\r\n]/.test(inner[j + 1])) {
+              j++;
+              if (inner[j] === "\r" && inner[j + 1] === "\n") j++;
+              continue;
+            }
+            if (/[$"`\\]/.test(inner[j + 1])) {
+              out += inner[j + 1];
+              j++;
+              continue;
+            }
+          }
+          out += inner[j];
+        }
+      } else {
+        // 单引号内全部字面
+        out += inner;
+      }
+      i = qe;
+      continue;
+    }
     if (syntax[i] === "\\" && syntax[i + 1] === "\x01") {
       if (!/[\r\n]/.test(text[i + 1])) out += text[i + 1];
       i++;
@@ -1688,22 +1717,17 @@ const macArgs = (scanned, start, end) => {
     for (; i < end && !/[\s;&|()<>{}]/.test(syntax[i]); i++) {
       if (scanned.quotes.has(i)) i = Math.min(scanned.quotes.get(i), end - 1);
     }
-    const word = decodePosix(scanned, from, i);
-    tokens.push({
-      start: from,
-      end: i,
-      value: word.length > 1 && '"'.includes(word[0]) && word[0] === word[word.length - 1] ? word.slice(1, -1) : word
-    });
+    tokens.push({ start: from, end: i, value: shellWord(scanned, from, i) });
   }
   return tokens;
 };
 // 三条规则共用这一条：拿到解码后的真实命令词与参数后各自判定，返回拦截原因或 undefined
+const MAC_NAME = /^(?:socketfilterfw|sysadminctl|dscl)$/i;
 const macBuiltinWhy = scanned => {
   for (const call of commandInvocations(scanned)) {
-    const raw = decodePosix(scanned, call.nameStart, call.nameEnd);
-    const name = (raw.length > 1 && (raw[0] === '"' || raw[0] === "'") && raw[0] === raw[raw.length - 1] ? raw.slice(1, -1) : raw)
-      .split("/")
-      .pop();
+    // 先判程序名：重定向目标词也会被枚举成调用，不对号就不解析参数，普通命令不会被反复重扫
+    const name = shellWord(scanned, call.nameStart, call.nameEnd).split("/").pop();
+    if (!MAC_NAME.test(name)) continue;
     const args = macArgs(scanned, call.nameEnd, scanned.syntax.length).map(t => t.value);
     if (/^socketfilterfw$/i.test(name)) {
       // getopt_long 的唯一前缀缩写同样生效：反过来只放行已知的查询选项

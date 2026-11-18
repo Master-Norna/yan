@@ -1189,6 +1189,10 @@ const TABLE = [
     'sysadminctl -screenLock "status"',
     'sysadminctl "-autologin" status',
     'sysadminctl "-screenLock" status',
+    // 引号片段拼接出的查询选项/操作同样放行
+    "socketfilterfw '--get'g",
+    "sysadminctl '-autologin' status",
+    "sysadminctl \"-auto\"'login' status",
     "socketfilterfw --getglobalstate --listapps",
     "socketfilterfw --getappblocked /a.app",
     "socketfilterfw --getg",
@@ -1442,6 +1446,14 @@ const TABLE = [
     '"DSCL"',
     "DSCL . -create /x",
     '"/usr/bin/DSCL"',
+    // 单引号与相邻引号片段拼出的写选项同样拦
+    "socketfilterfw '--setg'",
+    "socketfilterfw '--'setg on",
+    "socketfilterfw -'-s'etg on",
+    "sysadminctl '-addUser' x",
+    "sysadminctl \"-add\"'User' x",
+    "dscl '-'create /x",
+    "dscl -''create /x",
     // 强制覆盖重定向 >| 仍是重定向
     "socketfilterfw >|out --setglobalstate on",
     "sysadminctl >|o -addUser x",
