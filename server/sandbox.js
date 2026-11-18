@@ -2335,24 +2335,29 @@ const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|
 function scanWrites(scanned) {
   const offsets = new Set(),
     innerPaths = [];
-  // 只有可能用到下面两张表时才切这一回：-o 连写的输出文件，或构建/包管理器那几件
-  const calls = /-o/i.test(scanned.text) || TOOL_WRITE_HINT.test(scanned.text) ? commandInvocations(scanned) : [];
-  if (/-o/i.test(scanned.text))
-    for (const call of calls) {
-      if (!ATTACHED_OUTPUT_TOOL.test(call.name)) continue;
-      // 内层视图补扫出来的调用记了 scan，它们的偏移属于内层文本，
-      // 不能在外层 chars 上插标记；紧贴选项后的路径值直接取出来查
-      for (const arg of call.args) {
-        // 内层调用记了 scan：arg.value 可能还是引号片段与转义未拼的原文，
-        // 按内层 Shell 词规则解码出完整参数值再提路径
-        const value = call.scan ? shellWord(call.scan, arg.start, arg.end) : arg.value;
-        if (value === "--") break;
-        if (/^-o.+/i.test(value)) {
-          if (call.scan) innerPaths.push(value.slice(2));
-          else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
-        }
+  // 枚举是线性的，不做原文预筛：引号拼接与转义能把 g'c'c、-''o 藏出字面匹配
+  const calls = commandInvocations(scanned);
+  for (const call of calls) {
+    // 名字与参数一律按词规则解码：引号片段（g'c'c）与转义（-\o）
+    // 都会改变原文写法，预筛与参数判定只认解码后的真实词
+    const scan = call.scan ?? scanned,
+      name = shellWord(scan, call.nameStart, call.nameEnd)
+        .split("/")
+        .pop()
+        .replace(/\.exe$/i, "");
+    if (!ATTACHED_OUTPUT_TOOL.test(name)) continue;
+    // 内层视图补扫出来的调用记了 scan，它们的偏移属于内层文本，
+    // 不能在外层 chars 上插标记；紧贴选项后的路径值直接取出来查
+    for (const arg of call.args) {
+      const value = shellWord(scan, arg.start, arg.end);
+      if (value === "--") break;
+      if (/^-o.+/i.test(value)) {
+        // 原文与解码值不同的参数，位置标记落不到真实路径起点：按值查
+        if (call.scan || value !== arg.value) innerPaths.push(value.slice(2));
+        else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
       }
     }
+  }
   // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」。
   // 但同一条指令里别的参数多是读的来源——`pip install --target ./vendor /opt/packages/a.whl` 里那个已打好的 whl、
   // `cmake -B build .` 里那个源码目录——一笔算进来就把来源也锁进了工作目录。所以只让输出参数的值受约束，
@@ -2360,38 +2365,45 @@ function scanWrites(scanned) {
   // 好让下面的路径识别看见那段值
   let toolWrite = false;
   const toolReads = [];
-  if (TOOL_WRITE_HINT.test(scanned.text))
-    for (const call of calls) {
-      // 内层调用记了 scan：arg.value 可能还是引号片段与转义未拼的原文，
-      // 整份参数按内层 Shell 词规则解码后再走参数判定与路径提取
-      const args = call.scan ? call.args.map(arg => ({ ...arg, value: shellWord(call.scan, arg.start, arg.end) })) : call.args,
-        params = outputArgsOf({ name: call.name.toLowerCase(), args });
-      if (!params?.length) continue;
-      const target = new Set();
-      for (let i = 0; i < args.length; i++) {
-        const arg = args[i],
-          value = arg.value,
-          exact = params.find(param => value === param),
-          assigned = params.find(param => value.startsWith(`${param}=`)),
-          glued =
-            !exact && !assigned && params.find(param => /^-[^-]/.test(param) && value.startsWith(param) && value.length > param.length);
-        if (!exact && !assigned && !glued) continue;
-        toolWrite = true;
-        target.add(arg);
-        if (exact) {
-          const next = args[i + 1];
-          if (next) {
-            target.add(next);
-            i++;
-          }
-        } else if (glued) {
-          if (call.scan) innerPaths.push(value.slice(glued.length));
-          else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
+  for (const call of calls) {
+    const scan = call.scan ?? scanned,
+      name = shellWord(scan, call.nameStart, call.nameEnd)
+        .split("/")
+        .pop()
+        .replace(/\.exe$/i, ""),
+      // arg.value 是原文：引号片段与转义未拼，一律解码出真实参数值再判定
+      args = call.args.map(arg => ({ ...arg, raw: arg.value, value: shellWord(scan, arg.start, arg.end) })),
+      params = outputArgsOf({ name: name.toLowerCase(), args });
+    if (!params?.length) continue;
+    const target = new Set();
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i],
+        value = arg.value,
+        exact = params.find(param => value === param),
+        assigned = params.find(param => value.startsWith(`${param}=`)),
+        glued = !exact && !assigned && params.find(param => /^-[^-]/.test(param) && value.startsWith(param) && value.length > param.length);
+      if (!exact && !assigned && !glued) continue;
+      toolWrite = true;
+      target.add(arg);
+      if (exact) {
+        const next = args[i + 1];
+        if (next) {
+          target.add(next);
+          // 分离式输出路径：下一个参数就是目标值；内层调用或原文被
+          // 引号/转义伪装过的参数，位置插不进标记，直接按值查
+          if (call.scan || next.value !== next.raw) innerPaths.push(next.value);
+          i++;
         }
+      } else if (glued || assigned) {
+        // assigned（--param=path）与 glued 一样能藏越界目标；原文与
+        // 解码值不同的参数位置标记落不到真实路径起点，按值查
+        if (call.scan || value !== arg.raw) innerPaths.push(value.slice((glued ?? assigned).length + (assigned ? 1 : 0)));
+        else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + (glued ? glued.length : assigned.length + 1));
       }
-      // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
-      for (const arg of args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
     }
+    // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
+    for (const arg of args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
+  }
   const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite || innerPaths.length > 0;
   if (!writing) return { writing, text: "" };
   const chars = stripReadSources(scanned).split("");
