@@ -2347,12 +2347,21 @@ function scanWrites(scanned) {
     if (!ATTACHED_OUTPUT_TOOL.test(name)) continue;
     // 内层视图补扫出来的调用记了 scan，它们的偏移属于内层文本，
     // 不能在外层 chars 上插标记；紧贴选项后的路径值直接取出来查
-    for (const arg of call.args) {
-      const value = shellWord(scan, arg.start, arg.end);
+    for (let i = 0; i < call.args.length; i++) {
+      const arg = call.args[i],
+        value = shellWord(scan, arg.start, arg.end);
       if (value === "--") break;
       // 已识别的输出目标统一按完整值校验：整段引号、引号拼接与转义
       // 都可能在原文里改变路径的写法，位置标记靠不住
       if (/^-o.+/i.test(value)) innerPaths.push(value.slice(2));
+      else if (/^-o$/i.test(value)) {
+        // 分离式 -o：下一个参数就是输出目标
+        const next = call.args[i + 1];
+        if (next) {
+          innerPaths.push(shellWord(scan, next.start, next.end));
+          i++;
+        }
+      }
     }
   }
   // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」。
