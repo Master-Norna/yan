@@ -1726,9 +1726,10 @@ const MAC_NAME = /^(?:socketfilterfw|sysadminctl|dscl)$/i;
 const macBuiltinWhy = scanned => {
   for (const call of commandInvocations(scanned)) {
     // 先判程序名：重定向目标词也会被枚举成调用，不对号就不解析参数，普通命令不会被反复重扫
-    const name = shellWord(scanned, call.nameStart, call.nameEnd).split("/").pop();
+    const scan = call.scan ?? scanned;
+    const name = shellWord(scan, call.nameStart, call.nameEnd).split("/").pop();
     if (!MAC_NAME.test(name)) continue;
-    const args = macArgs(scanned, call.nameEnd, call.argEnd ?? scanned.syntax.length).map(t => t.value);
+    const args = macArgs(scan, call.nameEnd, call.argEnd ?? scan.syntax.length).map(t => t.value);
     if (/^socketfilterfw$/i.test(name)) {
       // getopt_long 的唯一前缀缩写同样生效：反过来只放行已知的查询选项
       // （get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
@@ -2109,6 +2110,29 @@ function argumentsAt(scanned, start, end = scanned.text.length) {
 // 命令与参数共用 shellText 的执行范围、引号跨度和 argumentsAt；普通字符串不再另切一次词。
 // 前缀、赋值与套壳复用现有定义。带引号的执行正文由 shellText 给出范围，未加引号的 /c、-Command 在此展开。
 const INVOCATION_LEAD = new RegExp(String.raw`^${INLINE_SPACE}*${PREFIX}(?:${PS_ASSIGN}${INLINE_SPACE}*${PREFIX})*`, "i");
+// 命令名起点：前缀（赋值/env/nice 等）与重定向可交错出现在命令名之前，
+// fd 号紧贴 < > 的整段按重定向跳过；主调用与影子调用共用同一段解析
+const resolveNameStart = (scanned, at, end) => {
+  for (;;) {
+    const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, end));
+    at += lead[0].length;
+    const ch = scanned.syntax[at];
+    if (ch === "<" || ch === ">") {
+      at = redirEnd(scanned, at, end);
+      continue;
+    }
+    if (/\d/.test(ch)) {
+      let j = at;
+      while (j < end && /\d/.test(scanned.syntax[j])) j++;
+      if (scanned.syntax[j] === "<" || scanned.syntax[j] === ">") {
+        at = redirEnd(scanned, j, end);
+        continue;
+      }
+    }
+    break;
+  }
+  return at;
+};
 /** @param {ReturnType<typeof shellText>} scanned */
 function commandInvocations(scanned) {
   const calls = [],
@@ -2138,27 +2162,8 @@ function commandInvocations(scanned) {
           continue;
         }
       }
-      const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));
-      at += lead[0].length;
       // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
-      for (;;) {
-        const lead2 = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));
-        at += lead2[0].length;
-        const ch = scanned.syntax[at];
-        if (ch === "<" || ch === ">") {
-          at = redirEnd(scanned, at, range.end);
-          continue;
-        }
-        if (/\d/.test(ch)) {
-          let j = at;
-          while (j < range.end && /\d/.test(scanned.syntax[j])) j++;
-          if (scanned.syntax[j] === "<" || scanned.syntax[j] === ">") {
-            at = redirEnd(scanned, j, range.end);
-            continue;
-          }
-        }
-        break;
-      }
+      at = resolveNameStart(scanned, at, range.end);
       const tokens = argumentsAt(scanned, at, range.end);
       if (!tokens.length) {
         at++;
@@ -2180,9 +2185,14 @@ function commandInvocations(scanned) {
         const bodyShell = CMD_SCRIPT.test(script[0]) ? "cmd" : POSIX_SCRIPT.test(script[0]) ? "posix" : "powershell";
         if (scanned.quotes.has(bodyAt)) {
           // 引号正文多半已由 shellText 扫成独立执行段；&> 夹带进来时正文没被
-          // 扫描器认出，补一个段覆盖引号内部
+          // 扫描器认出，对正文按内层 Shell 重扫——正文里的 ; 与换行在外层
+          // syntax 里是占位符，外层视图分不出多条命令。内部调用的偏移属于
+          // 内层视图，记 scan 让调用方按它取词与扫参数
           const quoteEnd = Math.min(scanned.quotes.get(bodyAt), argEnd - 1);
-          if (!starts.get(bodyAt + 1) && bodyAt + 1 <= quoteEnd) ranges.push({ start: bodyAt + 1, end: quoteEnd, shell: bodyShell });
+          if (!starts.get(bodyAt + 1) && bodyAt + 1 <= quoteEnd) {
+            const inner = shellText(scanned.text.slice(bodyAt + 1, quoteEnd), bodyShell);
+            for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
+          }
           return;
         }
         if (bodyAt < argEnd) ranges.push({ start: bodyAt, end: argEnd, shell: bodyShell });
@@ -2205,7 +2215,9 @@ function commandInvocations(scanned) {
           if (ch === "&" && scanned.syntax[at + 1] === ">") {
             if (pendingShadow) pendingShadow.argsTo = at;
             at = redirEnd(scanned, at + 1, range.end);
-            while (at < range.end && /[^\S\r\n]/.test(scanned.syntax[at])) at++;
+            // 影子调用也走与主调用相同的命令起点解析：赋值/套壳前缀、
+            // 交错与 fd 重定向都可能是 dash 视角下一条命令的合法前缀
+            at = resolveNameStart(scanned, at, range.end);
             const nameStart = at;
             for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
               if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
