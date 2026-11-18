@@ -1664,6 +1664,32 @@ const RULES = [
     "不直接读取或导出钥匙串密码与密钥",
     "严"
   ],
+  // Mac 实测过：`--set*`、`--add`/`--remove` 与 `--(un)blockapp` 改防火墙，`--get*`、`--listapps` 只是查
+  [cmd("socketfilterfw", String.raw`--(?:set\w+|(?:un)?blockapp|add|remove)\b`), "不动网络与防火墙配置", EVERY],
+  // Mac 实测过：账号动词拦；带 on|off|status 的几条只拦 status 以外的取值
+  [
+    cmd(
+      "sysadminctl",
+      String.raw`-(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|-(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)\s+(?!status\b)`
+    ),
+    "不动用户、账户与共享",
+    EVERY
+  ],
+  // Mac 实测过：dscl 的写动词拦（与 -read 同段也算写，故单列一条）
+  [
+    cmd("dscl", String.raw`(?:\S+\s+)*?-(?:create|delete|append|merge|change|passwd|mcxset|mcxedit|mcxdelete|mcxexport|mcximport)\w*\b`),
+    "不动用户、账户与共享",
+    EVERY
+  ],
+  // dscl 不带子命令进交互模式，stdin 可灌写命令——与 crontab 同款白名单形态，只放行查询动词
+  [
+    new RegExp(
+      String.raw`${cmd("dscl").source}(?![^;|&\n]*\s-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
+      "im"
+    ),
+    "不动用户、账户与共享",
+    EVERY
+  ],
 
   [cmd("reg", String.raw`(?:add|delete|import|restore|load|unload|copy|save)\b`), "不动注册表", EVERY],
   // 注册表：查看放行（启动项、已装软件、驱动版本都在里头，是电脑检查的常规去处），改则拒绝

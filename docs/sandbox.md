@@ -52,6 +52,9 @@
 | `networksetup` | `-set*`，创建、删除、增减、重命名、复制、排序网络服务、切换位置、探测新硬件与连接或断开 PPPoE | `-get*`、`-list*`、`-show*` 等查询 |
 | `diskutil` | `erase*`、`partitionDisk`、`reformat`、`zeroDisk`、`secureErase`、`repairVolume`、`repairDisk`；`apfs deleteVolume` / `deleteContainer` / `addVolume` / `resizeContainer` | `list`、`info`、`verifyVolume`、`mount`、`unmount`、`eject` |
 | `security` | `-i` 交互模式、`-p` 提示符、`add-*`、`delete-*`、`set-*`、`create-*`、`remove-*`、`import`、锁定或解锁钥匙串、安装 MDS、导入信任设置、显式修改钥匙串列表与默认项、用户信任开关、写或删授权策略、提权执行 | 列表、默认项查询、`show-keychain-info`、不带 `-w` / `-g` 的密码项查找 |
+| `socketfilterfw` | `--set*`、`--add`、`--remove`、`--blockapp`、`--unblockapp` | `--get*`、`--listapps` |
+| `sysadminctl` | `-addUser`、`-deleteUser`、`-newPassword`、`-resetPasswordFor`、`-secureTokenOn`、`-secureTokenOff`；`-autologin`、`-guestAccount`、`-afpGuestAccess`、`-smbGuestAccess`、`-automaticTime`、`-use12HourClockForLoginWindow` 与 `-screenLock` 的 `status` 以外取值 | 各 `status` 查询与 `-secureTokenStatus`、`-filesystem status` |
+| `dscl` | `-create*`、`-delete*`、`-append`、`-merge`、`-change*`、`-passwd`、`-mcxset`、`-mcxedit`、`-mcxdelete*`、`-mcxexport`、`-mcximport`；不带子命令的交互模式同样拦 | 只放行 `-read*`、`-list`、`-diff`、`-search`、`-mcxread`、`-mcxhelp`、`-auth`、`-authonly` |
 
 严档拦下后转用户请示；宽档在径行或审查关闭、连不上时回绝，审而后行开着审查时仍可交审查模型批准。`security find-generic-password` / `find-internet-password` 带 `-w` 或 `-g`（含 `-gw`）、`security export`，以及 `security dump-keychain -d`（含 `-dg`）导出明文内容，只在严档转请示，宽档与审档放行。`osascript` 在严档整条转用户请示；宽档与审档只拒 AppleScript 的 `with administrator privileges` 与 JXA 的 `administratorPrivileges: true`。`sudo` 先线性剥去单双引号里的内容（识别转义），余下文字只要有空白或 `; & | ( )` 等分隔符围住的整词 sudo，严宽审都拦；因此 `echo sudo x`、`ssh -t host sudo reboot` 也拦，`sudoers`、`visudo`、`rg 'sudo' src` 不算。单层 `bash -c "sudo id"` 和带引号的程序路径 `"/usr/bin/sudo"` 仍由指令位规则拦下；sudo 本身不归不可审档。
 
@@ -59,4 +62,4 @@
 
 目录约束的写动词补有 `chmod`、`chown`、`chflags`、`ln`、`rsync`、`ditto`、`sed -i`（含 `-Ei`、`-ni`）。sed 的脚本参数不当路径；`rsync`、`ditto` 找来源时跨过带值选项，`--exclude .git/` 这样的过滤模式也不当写入路径。复制、同步与链接的第一个来源路径可在目录外，如 `cp -r /Users/a/src ./backup/`、`rsync -a --exclude node_modules /Users/a/source/ ./backup/`、`ditto -V /Users/a/file.zip ./file.zip`、`ln -s /opt/homebrew/bin/node ./node`；只豁免当次来源参数，目标以及日志、临时目录等写入参数仍受目录约束，`rsync --remove-source-files` 会删来源，不豁免。
 
-未列出的子命令不因这张表而拦（`crontab` 仅放行上述 `-l` 查询）；本次不另列 `csrutil`、`pmset`、`nvram`、`spctl` 全局开关，也未列尚待 Mac 实测的防火墙、账户等命令。显式提权仍由共用规则拦下。静态筛查不解析完整 Shell 语法，也不跟踪符号链接或脚本内部的操作；多层嵌套的 `bash -c "bash -c 'sudo rm -rf /'"` 仍可能放行。
+未列出的子命令不因这张表而拦（`crontab` 仅放行 `-l` 查询，`dscl` 仅放行表内列的查询动词）；本次不另列 `csrutil`、`pmset`、`nvram`、`spctl` 全局开关。显式提权仍由共用规则拦下。静态筛查不解析完整 Shell 语法，也不跟踪符号链接或脚本内部的操作；多层嵌套的 `bash -c "bash -c 'sudo rm -rf /'"` 仍可能放行。
