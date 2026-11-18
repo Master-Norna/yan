@@ -1443,6 +1443,9 @@ const TABLE = [
     "sysadminctl>o -addUser x",
     "sysadminctl>o -screenLock off"
   ].map(command => [command, "x", "x", "x", "o"]),
+  // 空目标重定向：-read 是 > 的目标，dscl 实际收到 /x 仍进交互模式
+  ["dscl > -read /x", "x", "x", "x", "o"],
+  ["dscl > -read", "x", "x", "x", "o"],
   [String.raw`env FOO=1 /usr/bin/sudo x`, "x", "x", "x", "o"],
   [String.raw`nohup /bin/launchctl load x`, "x", "x", "x", "o"],
   [String.raw`echo x | xargs -n1 /bin/launchctl load x`, "x", "x", "x", "o"],
