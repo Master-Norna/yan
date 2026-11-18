@@ -2334,8 +2334,7 @@ const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
   const offsets = new Set(),
-    innerPaths = [],
-    unquote = value => value.replace(/^(['"])([\s\S]*)\1$/s, "$2");
+    innerPaths = [];
   // 只有可能用到下面两张表时才切这一回：-o 连写的输出文件，或构建/包管理器那几件
   const calls = /-o/i.test(scanned.text) || TOOL_WRITE_HINT.test(scanned.text) ? commandInvocations(scanned) : [];
   if (/-o/i.test(scanned.text))
@@ -2344,9 +2343,12 @@ function scanWrites(scanned) {
       // 内层视图补扫出来的调用记了 scan，它们的偏移属于内层文本，
       // 不能在外层 chars 上插标记；紧贴选项后的路径值直接取出来查
       for (const arg of call.args) {
-        if (arg.value === "--") break;
-        if (/^-o.+/i.test(arg.value)) {
-          if (call.scan) innerPaths.push(unquote(arg.value.slice(2)));
+        // 内层调用记了 scan：arg.value 可能还是引号片段与转义未拼的原文，
+        // 按内层 Shell 词规则解码出完整参数值再提路径
+        const value = call.scan ? shellWord(call.scan, arg.start, arg.end) : arg.value;
+        if (value === "--") break;
+        if (/^-o.+/i.test(value)) {
+          if (call.scan) innerPaths.push(value.slice(2));
           else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
         }
       }
@@ -2360,11 +2362,14 @@ function scanWrites(scanned) {
   const toolReads = [];
   if (TOOL_WRITE_HINT.test(scanned.text))
     for (const call of calls) {
-      const params = outputArgsOf({ name: call.name.toLowerCase(), args: call.args });
+      // 内层调用记了 scan：arg.value 可能还是引号片段与转义未拼的原文，
+      // 整份参数按内层 Shell 词规则解码后再走参数判定与路径提取
+      const args = call.scan ? call.args.map(arg => ({ ...arg, value: shellWord(call.scan, arg.start, arg.end) })) : call.args,
+        params = outputArgsOf({ name: call.name.toLowerCase(), args });
       if (!params?.length) continue;
       const target = new Set();
-      for (let i = 0; i < call.args.length; i++) {
-        const arg = call.args[i],
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i],
           value = arg.value,
           exact = params.find(param => value === param),
           assigned = params.find(param => value.startsWith(`${param}=`)),
@@ -2374,18 +2379,18 @@ function scanWrites(scanned) {
         toolWrite = true;
         target.add(arg);
         if (exact) {
-          const next = call.args[i + 1];
+          const next = args[i + 1];
           if (next) {
             target.add(next);
             i++;
           }
         } else if (glued) {
-          if (call.scan) innerPaths.push(unquote(value.slice(glued.length)));
+          if (call.scan) innerPaths.push(value.slice(glued.length));
           else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
         }
       }
       // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
-      for (const arg of call.args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
+      for (const arg of args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
     }
   const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite || innerPaths.length > 0;
   if (!writing) return { writing, text: "" };
