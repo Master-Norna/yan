@@ -42,7 +42,8 @@ const PROBES = {
 async function runOne(name, command, sandbox) {
   const wd = fs.mkdtempSync(path.join(root, `${name.replaceAll("/", "_")}-`));
   const result = await post("/api/work/run", { workdir: wd, command, sandbox, timeoutMs: 60000 });
-  const stderr = result.stderr || "", stdout = result.stdout || "";
+  const stderr = result.stderr || "",
+    stdout = result.stdout || "";
   const denied = /deny\(1\)|denied|sandbox/i.test(stderr) || /denied/.test(stdout);
   console.log(`\n===== ${name} sandbox=${sandbox} exit=${result.exitCode} signal=${result.signalCode}`);
   console.log("stdout:", stdout.slice(0, 1200));
@@ -55,7 +56,10 @@ const names = wanted.length ? wanted : Object.keys(PROBES);
 const summary = [];
 for (const name of names) {
   const command = PROBES[name];
-  if (!command) { console.log("未知探测:", name); continue; }
+  if (!command) {
+    console.log("未知探测:", name);
+    continue;
+  }
   // 对照组先跑（证实这台机器上命令本身通），严档后跑
   const loose = null;
   const strict = await runOne(name + "/严档", command, true);
