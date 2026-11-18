@@ -77,7 +77,7 @@ jobs:
       - run: npm run unit
       - run: node test/run.mjs
         env:
-          # runner 上 Edge 和 Chrome 都有，不指定时 run.mjs 会先选 Edge。这里固定用 Chrome，是因为 macOS 上的验证（包括看台连跑）都是在 Chrome 上做的，也免得镜像变动时悄悄换了浏览器；macOS 上的 Edge 还没验证过
+          # runner 上 Edge 和 Chrome 都有，不指定时 run.mjs 会先选 Edge。这里固定用 Chrome，是因为 macOS 上的验证（包括看台连跑）都是在 Chrome 上做的，也免得镜像变动时悄悄换了浏览器；macOS 上的 Edge headless 已验证不可用（产不出渲染帧，依赖 rAF/ResizeObserver 的用例全停）
           YAN_TEST_BROWSER: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
       - if: ${{ failure() }}
         uses: actions/upload-artifact@v4
