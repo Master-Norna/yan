@@ -108,24 +108,38 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("不是言的对话文件");
     return { id: String(conversation.id), savedAt: Number(data.savedAt) || 0, file: name, conversation };
   }
-  // 目录里这段对话现在那份的时间戳（没有就是 0）。只读文件头：写出的文件 savedAt 排在对话内容前面，不必为比一个数解析整段长对话
+  // 写出的文件 savedAt 排在对话内容前面，不必为比一个数解析整段长对话。
+  function conversationHead(file) {
+    const head = Buffer.alloc(256),
+      fd = fs.openSync(file, "r");
+    try {
+      return head.toString("utf8", 0, fs.readSync(fd, head, 0, head.length, 0));
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+  // 目录里这段对话现在那份的时间戳（没有就是 0）。
   function savedAtOf(home, id) {
     let latest = 0;
     for (const name of filesFor(home, id))
       try {
-        const file = path.join(home, name),
-          fd = fs.openSync(file, "r"),
-          head = Buffer.alloc(256);
-        let read = 0;
-        try {
-          read = fs.readSync(fd, head, 0, head.length, 0);
-        } finally {
-          fs.closeSync(fd);
-        }
-        const match = /^\uFEFF?\{"言":"对话","version":\d+,"savedAt":(\d+)/.exec(head.toString("utf8", 0, read));
+        const match = /^\uFEFF?\{"言":"对话","version":\d+,"savedAt":(\d+)/.exec(conversationHead(path.join(home, name)));
         latest = Math.max(latest, match ? Number(match[1]) : readConversationFile(home, name).savedAt);
       } catch {}
     return latest;
+  }
+  function matchesKnown(file, id, stamp) {
+    if (!Number.isSafeInteger(stamp) || stamp <= 0) return false;
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size > FILE_LIMIT) return false;
+      // 不只认文件名：标准文件头必须能同时确认版本和对话 id。字段换了顺序、文件头不全等，都走原来的整读。
+      const prefix = `{"言":"对话","version":1,"savedAt":${stamp},"conversation":{"id":${JSON.stringify(id)}`,
+        head = conversationHead(file);
+      return head.startsWith(prefix) && [",", "}"].includes(head[prefix.length]);
+    } catch {
+      return false;
+    }
   }
   // 整个目录读回来（给了 ids 就只读那几段：别处正在作答的，这边跟着看进度）。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
   async function handleLoad(req, res) {
@@ -135,11 +149,30 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
       home = ensureDir(body.root);
       const items = [],
         seen = new Map(),
-        wanted = Array.isArray(body.ids) ? body.ids.map(id => `·${codeOf(id)}.json`) : null;
+        wanted = Array.isArray(body.ids) ? new Map(body.ids.map(id => [`·${codeOf(id)}.json`, String(id)])) : null,
+        // 仅定向读可略过正文；全量还要收墓碑、并重名与清行迹。
+        known = wanted && body.known && typeof body.known === "object" ? body.known : null,
+        suffixOf = name => name.slice(name.lastIndexOf("·")),
+        names = fs.readdirSync(home).filter(name => name.endsWith(".json") && name !== META_FILE && name !== TOMBSTONE_FILE),
+        counts = new Map(),
+        unchanged = new Set();
+      if (known)
+        for (const name of names) {
+          const suffix = suffixOf(name);
+          if (wanted.has(suffix)) counts.set(suffix, (counts.get(suffix) || 0) + 1);
+        }
       let skipped = 0;
-      for (const name of fs.readdirSync(home)) {
-        if (!name.endsWith(".json") || name === META_FILE || name === TOMBSTONE_FILE) continue;
-        if (wanted && !wanted.some(suffix => name.endsWith(suffix))) continue;
+      for (const name of names) {
+        if (wanted) {
+          const suffix = suffixOf(name),
+            id = wanted.get(suffix);
+          if (id === undefined) continue;
+          // 重复文件仍逐份比、照旧清；不把没有读过的文件当成已见的版本。
+          if (known && counts.get(suffix) === 1 && Object.hasOwn(known, id) && matchesKnown(path.join(home, name), id, known[id])) {
+            unchanged.add(id);
+            continue;
+          }
+        }
         try {
           const item = readConversationFile(home, name),
             // 名字是言自己起的样子（标题·码.json）：改名时旧的没删成留下的，可以清。用户自己复制的（「… - 副本.json」）不动，
@@ -168,7 +201,8 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
           skipped += 1;
         }
       }
-      for (const item of seen.values()) items.push(item);
+      // 短路的标准文件也参与按正文 id 去重，不能让别的目标短码下放错的副本取代它。
+      for (const item of seen.values()) if (!unchanged.has(item.id)) items.push(item);
       if (!wanted) sweepTrails(home, items, skipped);
       sendJson(res, 200, { dir: home, items, skipped, deleted: readTombstones(home) });
     } catch (error) {

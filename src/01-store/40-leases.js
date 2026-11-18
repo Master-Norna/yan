@@ -107,7 +107,15 @@ function releaseLeases() {
 /** 别处正作答（或刚松手）的几段：磁盘上的更新就换进来；刚松手的若仍停在「生成中」，那边是没写完就走了，按中断收束 */
 async function followConversations(ids, released, finishRelease = _id => true) {
   const root = chatsDir(),
-    data = await bridge("/api/chats/load", { root, ids }, AbortSignal.timeout(20000));
+    // 领终稿必须看完整结果（包括读坏的文件）；到点补读也不走短路，只跳过仍由别页持有的旧快照。
+    query = released.length
+      ? { root, ids }
+      : chatLoadQuery(
+          root,
+          ids,
+          ids.filter(id => remoteBusy.has(id))
+        ),
+    data = await bridge("/api/chats/load", query, AbortSignal.timeout(20000));
   if (chatsDir() !== root || !Array.isArray(data?.items)) return;
   let current = false;
   for (const item of data.items) {
