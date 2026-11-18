@@ -1173,6 +1173,10 @@ const TABLE = [
     "dscl -u admin -P p . -list /x",
     "dscl . -list /x; dscl . -read /y",
     '"dscl" . -read /x',
+    '"/usr/sbin/dscl" . -read /x',
+    "/usr/sbin/dscl . -read /x",
+    "dscl 2>&1 . -read /x",
+    "socketfilterfw --getg 2>&1 --listapps",
     // dscl 的段界在 ; 前止步：下一条命令的参数不误当 dscl 的动词
     "dscl . -read /x;echo -create",
     "sysadminctl -adminUser root -secureTokenStatus x",
@@ -1423,6 +1427,16 @@ const TABLE = [
     '"dscl" .',
     "'dscl'",
     '"dscl" . -create /x',
+    // 带引号/不带引号的路径前缀，基名仍是同一个程序
+    '"/usr/sbin/dscl"',
+    '"/usr/sbin/dscl" . -create /x',
+    "/usr/sbin/dscl",
+    "/usr/sbin/dscl . -create /x",
+    '"/usr/sbin/sysadminctl" -addUser x',
+    // fd 复制与 &> 里的 & 不是命令分隔符
+    "socketfilterfw 2>&1 --setglobalstate on",
+    "socketfilterfw &>log --setg on",
+    "sysadminctl 2>&1 -addUser x",
     // 重定向紧贴命令名：后面的选项照样传给程序
     "socketfilterfw>log --setglobalstate on",
     "socketfilterfw>x --add /a.app",
