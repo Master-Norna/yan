@@ -2083,7 +2083,7 @@ const RSYNC_VALUES = new Set(
 const RSYNC_READ_VALUES = new Set(
   "exclude include filter exclude-from include-from files-from link-dest compare-dest copy-dest rsh rsync-path address".split(" ")
 );
-function argumentsAt(scanned, start, end = scanned.text.length) {
+function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix") {
   const text = scanned.text;
   const tokens = [];
   for (let i = start; i < end; ) {
@@ -2100,6 +2100,12 @@ function argumentsAt(scanned, start, end = scanned.text.length) {
       // 重定向夹在参数之间仍属本次调用（POSIX 允许交错）：
       // gcc -o >log /etc/x 里 /etc/x 是 -o 的目标，整段跳过继续收词
       i = redirEnd(scanned, i, end);
+      continue;
+    }
+    // &> / &>> 按当前执行范围的方言：bash/zsh 是合并重定向，整段跳过；
+    // dash 与 cmd.exe 里 & 是语句分隔，照常断
+    if (scanned.syntax[i] === "&" && shell === "posix" && scanned.syntax[i + 1] === ">") {
+      i = redirEnd(scanned, i + 1, end);
       continue;
     }
     if (";&|(){}\n".includes(scanned.syntax[i])) break;
@@ -2175,7 +2181,7 @@ function commandInvocations(scanned) {
       }
       // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
       at = resolveNameStart(scanned, at, range.end);
-      const tokens = argumentsAt(scanned, at, range.end);
+      const tokens = argumentsAt(scanned, at, range.end, range.shell);
       if (!tokens.length) {
         at++;
         continue;
@@ -2219,20 +2225,22 @@ function commandInvocations(scanned) {
         if (bodyAt < argEnd) ranges.push({ start: bodyAt, end: argEnd, shell: bodyShell });
       };
       at = tokens.at(-1).end;
+      // argumentsAt 在 posix 下把 &> 当重定向跳过了：游标已过语句边界，
+      // dash 视角的影子调用会丢。退回第一个 & 让尾循环重扫影子；
+      // 引号内部在 syntax 里是 \x01，不会假命中
+      if (range.shell === "posix") {
+        for (let p = tokens[0].end; p < at; p++)
+          if (scanned.syntax[p] === "&" && scanned.syntax[p + 1] === ">") {
+            at = p;
+            break;
+          }
+      }
       // 把本次调用剩余的参数与重定向消费完：参数不另起调用（否则参数词会被误当
       // 新程序名，重复扫描同一条命令），遇到 ; & | ( ) { } 换行 才是语句结束。
       // &> / &>> 是 bash/zsh 的合并重定向：本次调用吃到段尾、argEnd 随之延伸；
       // dash 里 & 先断句、>目标 后的词是下一条命令——另发影子调用，参数界按 dash 的
       // 语句尾，两个方言的语义都兜住，每个调用的参数扫描各自有界，不构成平方级。
-      const shadows = [],
-        rest = [],
-        restSeen = new Set(),
-        pushRest = tok => {
-          if (!restSeen.has(tok.start)) {
-            restSeen.add(tok.start);
-            rest.push(tok);
-          }
-        };
+      const shadows = [];
       let pendingShadow = null;
       for (; at < range.end; ) {
         const ch = scanned.syntax[at];
@@ -2244,11 +2252,6 @@ function commandInvocations(scanned) {
           if (ch === "&" && scanned.syntax[at + 1] === ">") {
             if (pendingShadow) pendingShadow.argsTo = at;
             at = redirEnd(scanned, at + 1, range.end);
-            // bash/zsh 视角：&> 之后的词全是本次调用的参数——包括 dash 视角
-            // 会被当作下条命令名与前缀的那些，一次收齐再去重；
-            // cmd.exe 里 & 是语句分隔符，这些词不归主调用——按当前执行
-            // 范围的方言判，不拿外层壳（win32 也能套 bash 正文）
-            if (range.shell === "posix") for (const tok of argumentsAt(scanned, at, range.end)) pushRest(tok);
             // 影子调用也走与主调用相同的命令起点解析：赋值/套壳前缀、
             // 交错与 fd 重定向都可能是 dash 视角下一条命令的合法前缀
             at = resolveNameStart(scanned, at, range.end);
@@ -2267,20 +2270,14 @@ function commandInvocations(scanned) {
           at++;
           continue;
         }
-        const from = at;
         for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
           if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
         }
-        // &> 之后的词在 bash/zsh 视角下仍是本次调用的参数，收进词表；
-        // cmd.exe 里 & 后的词属于下条语句——按当前执行范围的方言判
-        const raw = scanned.text.slice(from, at),
-          value = /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
-        if (range.shell === "posix") pushRest({ start: from, end: at, value });
       }
       if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
-      emit(tokens.concat(rest), at);
+      emit(tokens, at);
       for (const s of shadows) {
-        const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd));
+        const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd), range.shell);
         if (toks.length) emit(toks, s.argsTo);
       }
     }
