@@ -2298,7 +2298,16 @@ function stripReadSources(scanned, sources = true) {
   }
   for (const match of syntax.matchAll(POSIX_ARGUMENTS)) {
     const tool = match[1].toLowerCase(),
-      tokens = argumentsAt(scanned, Number(match.index) + match[0].length, scanned.text.length, scanned.shell),
+      // 豁免扫描按宁断勿合：此处的词未必是 bash——posix 大伞下的 dash、
+      // 或命令行里夹着的 cmd 段都把 & 当语句分隔。传非 posix 方言让
+      // argumentsAt 在 & 处停：bash 下只是少豁免几个参数（更严），
+      // dash/cmd 下则不会把下一条命令的路径误作只读来源擦出检查文本
+      tokens = argumentsAt(
+        scanned,
+        Number(match.index) + match[0].length,
+        scanned.text.length,
+        scanned.shell === "posix" ? "dash" : scanned.shell
+      ),
       removeSource = tool === "rsync" && tokens.some(t => t.value === "--remove-source-files");
     let operand = false,
       options = true,
