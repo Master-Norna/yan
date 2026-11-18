@@ -11,6 +11,32 @@ const wd = "E:\\项目\\言",
 
 const mac = command => screenCommand(command, "/Users/a/proj", { platform: "darwin" });
 
+test("Homebrew 安装只在 macOS 严档转单条出沙箱请示", () => {
+  const darwin = { platform: "darwin" };
+  for (const command of [
+    "brew install hello",
+    '"/opt/homebrew/bin/brew" install hello',
+    "/usr/local/bin/brew reinstall hello",
+    'HOMEBREW_NO_AUTO_UPDATE=1 brew "install" hello',
+    'sh -c "brew install hello"'
+  ]) {
+    assert.match(mac(command), /^沙箱拒绝：Homebrew 安装/, command);
+    assert.equal(screenLoose(command, darwin), null, command);
+    assert.equal(screenAutoReview(command, darwin), null, command);
+    assert.equal(screen(command), null, command);
+  }
+  for (const command of [
+    "brew --prefix",
+    "brew list",
+    "brew info install",
+    "echo 'brew install hello'",
+    "rg 'brew install' docs",
+    "echo > brew install hello",
+    "cat <<EOF\nbrew install hello\nEOF"
+  ])
+    assert.equal(mac(command), null, command);
+});
+
 test("注释与空行：两种平台的四档筛查各自 200ms 内返回", () => {
   // 先把各档的正则跑热：首次使用要付一次性的编译开销，200ms 量的是筛查耗时而不是 JIT
   for (const platform of ["win32", "darwin"]) {

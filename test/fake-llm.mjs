@@ -2219,10 +2219,12 @@ http
                   function: {
                     name: "run_command",
                     arguments: JSON.stringify({
-                      command: shellCommand(
-                        "Set-Content ../escalate-probe.txt ok; Write-Output wrote",
-                        "printf ok > ../escalate-probe.txt; printf wrote"
-                      )
+                      command: lastUser.includes("ESCALATE-BREW")
+                        ? "./yan-test-brew/brew install hello"
+                        : shellCommand(
+                            "Set-Content ../escalate-probe.txt ok; Write-Output wrote",
+                            "printf ok > ../escalate-probe.txt; printf wrote"
+                          )
                     })
                   }
                 }
