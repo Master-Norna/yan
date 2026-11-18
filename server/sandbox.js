@@ -2224,7 +2224,8 @@ function commandInvocations(scanned) {
       // &> / &>> 是 bash/zsh 的合并重定向：本次调用吃到段尾、argEnd 随之延伸；
       // dash 里 & 先断句、>目标 后的词是下一条命令——另发影子调用，参数界按 dash 的
       // 语句尾，两个方言的语义都兜住，每个调用的参数扫描各自有界，不构成平方级。
-      const shadows = [];
+      const shadows = [],
+        rest = [];
       let pendingShadow = null;
       for (; at < range.end; ) {
         const ch = scanned.syntax[at];
@@ -2254,12 +2255,17 @@ function commandInvocations(scanned) {
           at++;
           continue;
         }
+        const from = at;
         for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
           if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
         }
+        // &> 之后的词在 bash/zsh 视角下仍是本次调用的参数，收进词表
+        const raw = scanned.text.slice(from, at),
+          value = /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
+        rest.push({ start: from, end: at, value });
       }
       if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
-      emit(tokens, at);
+      emit(tokens.concat(rest), at);
       for (const s of shadows) {
         const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd));
         if (toks.length) emit(toks, s.argsTo);
