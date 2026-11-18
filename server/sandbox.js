@@ -2129,8 +2129,23 @@ function commandInvocations(scanned) {
         at = scanned.syntax[at] === "<" || scanned.syntax[at] === ">" ? redirEnd(scanned, at, range.end) : at + 1;
         continue;
       }
+      // fd 号紧贴重定向（2>err）：整个是重定向段，不是命令
+      if (/\d/.test(scanned.syntax[at])) {
+        let j = at;
+        while (j < range.end && /\d/.test(scanned.syntax[j])) j++;
+        if (scanned.syntax[j] === "<" || scanned.syntax[j] === ">") {
+          at = redirEnd(scanned, j, range.end);
+          continue;
+        }
+      }
       const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));
       at += lead[0].length;
+      // 重定向与前缀可交错出现在命令名之前（x=1 >f cmd）：整段消费再取词
+      for (;;) {
+        while (at < range.end && /[^\S\r\n]/.test(scanned.syntax[at])) at++;
+        if (at < range.end && (scanned.syntax[at] === "<" || scanned.syntax[at] === ">")) at = redirEnd(scanned, at, range.end);
+        else break;
+      }
       const tokens = argumentsAt(scanned, at, range.end);
       if (!tokens.length) {
         at++;
@@ -2138,6 +2153,29 @@ function commandInvocations(scanned) {
       }
       const first = tokens[0];
       at = tokens.at(-1).end;
+      // 把本次调用剩余的参数与重定向消费完：参数不另起调用（否则参数词会被误当
+      // 新程序名，重复扫描同一条命令），遇到 ; & | ( ) { } 换行 才是语句结束
+      for (; at < range.end; ) {
+        const ch = scanned.syntax[at];
+        if (/[;&|()<>{}\n]/.test(ch)) {
+          if (ch === "<" || ch === ">") {
+            at = redirEnd(scanned, at, range.end);
+            continue;
+          }
+          if (ch === "&" && (scanned.syntax[at + 1] === "<" || scanned.syntax[at + 1] === ">")) {
+            at = redirEnd(scanned, at + 1, range.end);
+            continue;
+          }
+          break;
+        }
+        if (/\s/.test(ch)) {
+          at++;
+          continue;
+        }
+        for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
+          if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+        }
+      }
       if (seen.has(first.start)) continue;
       seen.add(first.start);
       const name = first.value
