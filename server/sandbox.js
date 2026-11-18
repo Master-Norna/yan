@@ -2190,7 +2190,11 @@ function commandInvocations(scanned) {
           // 内层视图，记 scan 让调用方按它取词与扫参数
           const quoteEnd = Math.min(scanned.quotes.get(bodyAt), argEnd - 1);
           if (!starts.get(bodyAt + 1) && bodyAt + 1 <= quoteEnd) {
-            const inner = shellText(scanned.text.slice(bodyAt + 1, quoteEnd), bodyShell);
+            // 双引号正文已被外层 Shell 解码过一轮（\$ \" \\ \` 与换行续行），
+            // 内层要扫的是解码后的文本，原样截取会二次解释这些转义
+            const raw = scanned.text.slice(bodyAt + 1, quoteEnd),
+              body = scanned.text[bodyAt] === "'" ? raw : raw.replace(/\\([$`"\\\n])/g, "$1"),
+              inner = shellText(body, bodyShell);
             for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
           }
           return;
@@ -2328,7 +2332,9 @@ function scanWrites(scanned) {
   const calls = /-o/i.test(scanned.text) || TOOL_WRITE_HINT.test(scanned.text) ? commandInvocations(scanned) : [];
   if (/-o/i.test(scanned.text))
     for (const call of calls) {
-      if (!ATTACHED_OUTPUT_TOOL.test(call.name)) continue;
+      // 内层视图补扫出来的调用记了 scan，它们的偏移属于内层文本，
+      // 不能在外层 chars 上插标记；引号里的路径文本本来就留在外层原文里
+      if (call.scan || !ATTACHED_OUTPUT_TOOL.test(call.name)) continue;
       for (const arg of call.args) {
         if (arg.value === "--") break;
         if (/^-o.+/i.test(arg.value)) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
@@ -2362,9 +2368,10 @@ function scanWrites(scanned) {
             target.add(next);
             i++;
           }
-        } else if (glued) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
+        } else if (glued && !call.scan) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
       }
-      for (const arg of call.args) if (!target.has(arg)) toolReads.push(arg);
+      // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
+      for (const arg of call.args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
     }
   const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite;
   if (!writing) return { writing, text: "" };
