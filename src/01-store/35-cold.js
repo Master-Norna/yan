@@ -163,15 +163,18 @@ async function warmTrails(c, messages) {
   const pieces = await Promise.all(keys.map(key => warming.get(address(key)))),
     byKey = new Map(keys.map((key, index) => [key, pieces[index]]));
   if (chatsDir() !== root) return 0;
-  let applied = 0;
+  let ready = 0;
   for (const { m, key } of cold) {
     const piece = byKey.get(key);
-    if (!piece || m.cold?.key !== key || warmMessages.has(m)) continue;
-    applyColdPiece(m, piece);
-    warmMessages.add(m);
-    applied += 1;
+    if (!piece || m.cold?.key !== key) continue;
+    // 共用读取的另一方可能已接上；只写一次，但这次等待也已就绪。
+    if (!warmMessages.has(m)) {
+      applyColdPiece(m, piece);
+      warmMessages.add(m);
+    }
+    ready += 1;
   }
-  return applied;
+  return ready;
 }
 // 目录里的新份换下了手上这段（见 catchUpConversation）：同一份另存的几答，手上已接回的那几样搬过去，不必再取
 /** @param {Conversation} prev @param {Conversation} next */
@@ -196,8 +199,8 @@ function warmInView(c) {
   void warmTrails(
     c,
     everyMessage(c).filter(m => !unreadThought(m) || m.reasoningOpen)
-  ).then(applied => {
-    if (!applied) return;
+  ).then(ready => {
+    if (!ready) return;
     // 旧版可能把帮手仍在执行的后台指令另存了：接回后补上入口与监听。
     rewatchBackground();
     renderClepsydra();
