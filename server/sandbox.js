@@ -2083,7 +2083,7 @@ const RSYNC_VALUES = new Set(
 const RSYNC_READ_VALUES = new Set(
   "exclude include filter exclude-from include-from files-from link-dest compare-dest copy-dest rsh rsync-path address".split(" ")
 );
-function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix") {
+function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix", mergeAt = null) {
   const text = scanned.text;
   const tokens = [];
   for (let i = start; i < end; ) {
@@ -2103,8 +2103,10 @@ function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix")
       continue;
     }
     // &> / &>> 按当前执行范围的方言：bash/zsh 是合并重定向，整段跳过；
-    // dash 与 cmd.exe 里 & 是语句分隔，照常断
+    // dash 与 cmd.exe 里 & 是语句分隔，照常断。跳过的位置记给调用方，
+    // 让它知道游标曾越过语句边界
     if (scanned.syntax[i] === "&" && shell === "posix" && scanned.syntax[i + 1] === ">") {
+      mergeAt?.push(i);
       i = redirEnd(scanned, i + 1, end);
       continue;
     }
@@ -2181,7 +2183,8 @@ function commandInvocations(scanned) {
       }
       // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
       at = resolveNameStart(scanned, at, range.end);
-      const tokens = argumentsAt(scanned, at, range.end, range.shell);
+      const mergeAt = [],
+        tokens = argumentsAt(scanned, at, range.end, range.shell, mergeAt);
       if (!tokens.length) {
         at++;
         continue;
@@ -2301,7 +2304,7 @@ function stripReadSources(scanned, sources = true) {
   }
   for (const match of syntax.matchAll(POSIX_ARGUMENTS)) {
     const tool = match[1].toLowerCase(),
-      tokens = argumentsAt(scanned, Number(match.index) + match[0].length),
+      tokens = argumentsAt(scanned, Number(match.index) + match[0].length, scanned.text.length, scanned.shell),
       removeSource = tool === "rsync" && tokens.some(t => t.value === "--remove-source-files");
     let operand = false,
       options = true,
