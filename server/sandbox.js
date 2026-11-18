@@ -2225,7 +2225,10 @@ function commandInvocations(scanned) {
       // dash 里 & 先断句、>目标 后的词是下一条命令——另发影子调用，参数界按 dash 的
       // 语句尾，两个方言的语义都兜住，每个调用的参数扫描各自有界，不构成平方级。
       const shadows = [],
-        rest = [];
+        rest = [],
+        pushRest = tok => {
+          if (!rest.some(r => r.start === tok.start)) rest.push(tok);
+        };
       let pendingShadow = null;
       for (; at < range.end; ) {
         const ch = scanned.syntax[at];
@@ -2237,6 +2240,10 @@ function commandInvocations(scanned) {
           if (ch === "&" && scanned.syntax[at + 1] === ">") {
             if (pendingShadow) pendingShadow.argsTo = at;
             at = redirEnd(scanned, at + 1, range.end);
+            // bash/zsh 视角：&> 之后的词全是本次调用的参数——包括 dash 视角
+            // 会被当作下条命令名与前缀的那些，一次收齐再去重；
+            // cmd.exe 里 & 是语句分隔符，这些词不归主调用
+            if (scanned.shell === "posix") for (const tok of argumentsAt(scanned, at, range.end)) pushRest(tok);
             // 影子调用也走与主调用相同的命令起点解析：赋值/套壳前缀、
             // 交错与 fd 重定向都可能是 dash 视角下一条命令的合法前缀
             at = resolveNameStart(scanned, at, range.end);
@@ -2259,10 +2266,11 @@ function commandInvocations(scanned) {
         for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
           if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
         }
-        // &> 之后的词在 bash/zsh 视角下仍是本次调用的参数，收进词表
+        // &> 之后的词在 bash/zsh 视角下仍是本次调用的参数，收进词表；
+        // cmd.exe 里 & 后的词属于下条语句
         const raw = scanned.text.slice(from, at),
           value = /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
-        rest.push({ start: from, end: at, value });
+        if (scanned.shell === "posix") pushRest({ start: from, end: at, value });
       }
       if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
       emit(tokens.concat(rest), at);
