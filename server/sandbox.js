@@ -2228,16 +2228,10 @@ function commandInvocations(scanned) {
         if (bodyAt < argEnd) ranges.push({ start: bodyAt, end: argEnd, shell: bodyShell });
       };
       at = tokens.at(-1).end;
-      // argumentsAt 在 posix 下把 &> 当重定向跳过了：游标已过语句边界，
-      // dash 视角的影子调用会丢。退回第一个 & 让尾循环重扫影子；
-      // 引号内部在 syntax 里是 \x01，不会假命中
-      if (range.shell === "posix") {
-        for (let p = tokens[0].end; p < at; p++)
-          if (scanned.syntax[p] === "&" && scanned.syntax[p + 1] === ">") {
-            at = p;
-            break;
-          }
-      }
+      // argumentsAt 在 posix 下把 &> 当重定向跳过：游标已过语句边界，
+      // dash 视角的影子调用会丢。回到实际跳过的第一个 &> 让尾循环
+      // 重扫影子；命令替换内部的 &> 属于内层执行范围，不会误回退
+      if (mergeAt.length) at = mergeAt[0];
       // 把本次调用剩余的参数与重定向消费完：参数不另起调用（否则参数词会被误当
       // 新程序名，重复扫描同一条命令），遇到 ; & | ( ) { } 换行 才是语句结束。
       // &> / &>> 是 bash/zsh 的合并重定向：本次调用吃到段尾、argEnd 随之延伸；
