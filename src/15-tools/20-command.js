@@ -322,7 +322,7 @@ function isReadOnlyCommand(command) {
 /** @param {Step} step */
 function sandboxWhyHtml(step) {
   return step.sandboxWhy
-    ? `<div class="approval-sandbox">${t`沙箱会拦下：${escapeHtml(step.sandboxWhy.replace(/^沙箱拒绝：/, ""))}。运行即在沙箱外执行这一条。`}</div>`
+    ? `<div class="approval-sandbox">${t`沙箱会拦下：${escapeHtml(t(step.sandboxWhy.replace(/^沙箱拒绝：/, "")))}。运行即在沙箱外执行这一条。`}</div>`
     : "";
 }
 /** @param {Step} step */

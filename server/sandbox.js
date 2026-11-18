@@ -2845,6 +2845,7 @@ function egressOf(command, { platform = process.platform } = {}) {
   if (writes.writing && uncShare(writes.text, win)) return { kind: "share", why: "往网络共享里写（\\\\主机\\共享）", label: "网络共享" };
   return null;
 }
+const BREW_INSTALL = cmd(String.raw`(?:[^\s"';&|()<>{}]+/)?brew`, String.raw`(?<q>["']?)(?:install|reinstall)\k<q>(?=[\s;|&<>()}]|$)`);
 /**
  * 筛一条指令。通过返回 null；拒绝返回一句原因（给模型看的，说清怎么改）
  * @param {string} command
@@ -2876,6 +2877,9 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
       return "沙箱拒绝：不直接外联（只放行指向本机 127.0.0.1 / localhost 的）；装依赖走 npm / pip 等包管理器，查资料用 search_web / fetch_page";
   }
+  // Homebrew 安装写的是自己的安装目录和日志，而不只是项目目录。交给原有的逐条出沙箱请示，不给安装目录加白名单。
+  if (platform === "darwin" && /\bbrew\b/i.test(text) && BREW_INSTALL.test(scanned.syntax))
+    return "沙箱拒绝：Homebrew 安装需要写入沙箱外的安装目录和日志";
   return null;
 }
 /**

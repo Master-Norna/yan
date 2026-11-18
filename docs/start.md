@@ -21,7 +21,7 @@ npm start
 
 `start.cmd` 打开的 CMD 窗口即本机桥接进程，必须保持开启；关闭后已加载的页面暂时仍在，但刷新、模型转发、联网与执事都会停止。浏览器开了、页面却报「本机桥接已停止」时，先看这个窗口：桥接退出会停在那里并打出原因（端口被占、缺 node 等），不会一闪而过。
 
-macOS 上双击 `start.command`（头一回若被拦，在访达里右键选「打开」）。「环境」工具包只备了 Windows 版（设置里标注「仅 Windows」，「准备环境」仍可点、由桥接报错；请用系统里的 Python 与 Node，可经 Homebrew 安装）；问而后行的严档沙箱在 macOS 上另由系统的 sandbox-exec 把写盘收进工作目录与临时、缓存目录，审而后行与径行仍只过规则筛查。
+macOS 上双击 `start.command`（头一回若被拦，在访达里右键选「打开」）。「环境」工具包只备了 Windows 版；macOS 的「设置 → 环境」会探测系统里已装的 Python、Node 和 ffmpeg（含 Homebrew 安装的版本），不会安装工具。问而后行的严档沙箱由 macOS 的 `sandbox-exec` 把写盘限制在工作目录、临时目录与缓存目录；`brew install` / `brew reinstall` 要写入这些目录之外，请示时会说明，点「运行」只让这条指令在沙箱外执行。审而后行与径行仍只过规则筛查。
 
 ## Windows 便携包
 

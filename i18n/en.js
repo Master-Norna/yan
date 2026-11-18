@@ -1317,6 +1317,7 @@ var YAN_EN = {
   " · 只读免确认": " · read-only, no approval",
   "此对话没有可用的目录（本机桥接不在线）": "This chat has no folder available (local bridge offline)",
   "沙箱会拦下：{0}。运行即在沙箱外执行这一条。": "The sandbox would block this: {0}. Running it executes this command outside the sandbox.",
+  "Homebrew 安装需要写入沙箱外的安装目录和日志": "Homebrew needs to write to its installation directory and logs outside the sandbox",
   执事请示: "Agent asks",
   本机请示: "Approval needed",
   "· 运行此指令": "· run this command",

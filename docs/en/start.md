@@ -20,7 +20,7 @@ Switch the interface language in **Settings → General → Language** (中文 /
 
 The CMD window opened by `start.cmd` is the local bridge process and must stay open. If you close it, pages already loaded stay for a while, but reloading, model forwarding, web access and the agent all stop. If the browser is open but the page says the local bridge has stopped, look at that window first: when the bridge exits it stays open and prints the reason (port in use, node missing and so on) instead of flashing away.
 
-On macOS, double-click `start.command` (if it's blocked the first time, right-click it in Finder and choose **Open**). The **Environment** toolkit is Windows-only (Settings marks it **Windows only** — **Set up environment** stays clickable and the bridge reports the error; use the system Python and Node, e.g. via Homebrew). Under **Ask first**, the strict sandbox additionally wraps writes with macOS `sandbox-exec`, confined to the working folder plus temp and caches; **Auto-review** and **Full auto** still rely on rule screening only.
+On macOS, double-click `start.command` (if it's blocked the first time, right-click it in Finder and choose **Open**). The bundled toolkit is Windows-only. On macOS, **Settings → Environment** detects installed Python, Node, and ffmpeg, including Homebrew installations; it doesn't install tools. Under **Ask first**, macOS `sandbox-exec` restricts writes to the working folder, temp folders, and caches. `brew install` and `brew reinstall` need to write outside those folders, so the approval prompt explains why. Clicking **Run** lets only that command run outside the sandbox. **Auto-review** and **Full auto** still rely on rule screening only.
 
 ## Windows portable package
 
