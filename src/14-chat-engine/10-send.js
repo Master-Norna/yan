@@ -314,10 +314,11 @@ function settleSupplements(conversation, assistant, job, profile) {
   const unsent = new Set(reports.map(item => item.note?.id).filter(Boolean));
   if (unsent.size) assistant.steps = (assistant.steps || []).filter(step => !unsent.has(step.id));
   for (const item of reports) delete item.note;
-  // 收尾前才到、没来得及递的帮手回报：照没在作答时寄（见 mailReport）。补言若另起一问，回报就并进那一答——
-  // 所以先排补言的那一问、后寄回报。用户按了停的，帮手一并停了，已到的回报也不再另起一答
+  // 收尾前才到的回报照没在作答时寄。补言若另起一问，回报就并进那一答，故先排补言、后寄回报。
+  // 用户按了「止」，不再用未递的帮手回报叫醒主答；后台与定时是候，照常寄。
   const mail = () => {
-    if (assistant.status !== "stopped") reports.forEach(item => mailReport(conversation, item));
+    const stopped = assistant.status === "stopped" || job.controller?.signal.aborted;
+    for (const item of reports) if (!stopped || item.relay?.kind === "bg" || item.relay?.kind === "timer") mailReport(conversation, item);
     return mailbags.has(conversation.id);
   };
   if (!queue.length) return mail();

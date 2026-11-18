@@ -63,7 +63,8 @@ module.exports = function createVideo({ cacheHome, ffmpeg }) {
       const stat = fs.statSync(file),
         key = crypto
           .createHash("sha1")
-          .update(`${path.resolve(file).toLowerCase()}|${stat.size}|${stat.mtimeMs}`)
+          // 大小写可能区分两件原件。换一版键，免得全小写路径仍命中修复前串件的缓存。
+          .update(`2|${path.resolve(file)}|${stat.size}|${stat.mtimeMs}`)
           .digest("hex")
           .slice(0, 20),
         out = path.join(cacheHome(), `${key}.mp4`);

@@ -96,27 +96,35 @@ async function chatgptLogout() {
   await bridge("/api/chatgpt/logout", {}).catch(() => null);
   await refreshChatgptAccount();
 }
-// 登录：桥接开回调口、用系统浏览器打开授权页；这边每隔一会儿问一回，登上了就顺手按下这张卡的「获取列表」
+// 登录：桥接用系统浏览器打开授权页；这边每隔一会儿问一回，登上了就顺手为原配置取列表。
 /** @param {HTMLElement} card */
 async function chatgptLogin(card) {
-  const again = card.dataset.profileCard ? `[data-profile-card="${card.dataset.profileCard}"]` : `[data-duty="${card.dataset.duty}"]`,
-    status = card.querySelector(".profile-status");
+  const { endpoint, unchanged, current } = endpointCardRequest(card),
+    scope = bootstrap.store,
+    // 授权是全局的；只有仍在原处的那份配置可以接续取列表或收到卡内提示。
+    activeCard = () => (scope === bootstrap.store && unchanged() && (!("on" in endpoint) || endpoint.on) ? current() : null);
+  if (profileApi(endpoint) !== "chatgpt" || activeCard() !== card) return;
   try {
-    const { url } = await bridge("/api/chatgpt/login", {});
-    status.innerHTML = `${t(`授权页已在浏览器中打开 ·`)} <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${t(`手动打开`)}</a>`;
+    const { url } = await bridge("/api/chatgpt/login", {}),
+      status = activeCard()?.querySelector(".profile-status");
+    if (status)
+      status.innerHTML = `${t(`授权页已在浏览器中打开 ·`)} <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${t(`手动打开`)}</a>`;
     await refreshChatgptAccount();
     for (let i = 0; i < 400; i++) {
       await new Promise(resolve => setTimeout(resolve, 1500));
       const a = await refreshChatgptAccount();
       if (a?.signedIn || !a?.pending) break;
     }
-    const now = document.querySelector(again);
+    const now = activeCard();
     if (!now) return;
+    // 走取列表的同一路，不点可能还绑着旧对象的按钮。
     if (chatgptAccount?.signedIn)
-      /** @type {HTMLElement|null} */ (now.querySelector('[data-profile-action="models"], [data-duty-action="models"]'))?.click();
-    else now.querySelector(".profile-status").textContent = chatgptAccount?.error || t("未登录");
+      return "id" in endpoint ? handleProfileAction(endpoint, "models", now) : handleEndpointAction(endpoint, "models", now);
+    const failed = now.querySelector(".profile-status");
+    if (failed) failed.textContent = chatgptAccount?.error || t("未登录");
   } catch (error) {
-    status.textContent = friendlyError(error.message);
+    const status = activeCard()?.querySelector(".profile-status");
+    if (status) status.textContent = friendlyError(error.message);
   }
 }
 /** @param {Profile} p */
@@ -196,17 +204,25 @@ async function handleProfileAction(profile, action, card) {
     if (result.card) void reportReasoningProbe(profile, result.card, action === "test");
   }
 }
-// 两种卡共用取列表与测试连接；只接回同一活配置的结果，重画后只写此刻还在的节点。
-/** @param {Profile|Duty} endpoint @param {"models"|"test"} action @param {Element} card @param {"image"} [kind] */
-async function handleEndpointAction(endpoint, action, card, kind) {
+// 卡片可以重画；异步操作仍只归发起时的配置对象和请求字段。
+/** @param {Element} card @param {Profile|Duty} [endpoint] */
+function endpointCardRequest(card, endpoint) {
   const profileId = card.dataset.profileCard,
     dutyId = /** @type {DutyId} */ (card.dataset.duty),
     selector = profileId ? `[data-profile-card="${profileId}"]` : `[data-duty="${dutyId}"]`,
-    identity = JSON.stringify(profileForRequest(endpoint)),
-    unchanged = () =>
-      (profileId ? profiles().find(p => p.id === profileId) : dutyOf(dutyId)) === endpoint &&
-      JSON.stringify(profileForRequest(endpoint)) === identity,
-    current = () => document.querySelector(selector),
+    live = () => (profileId ? profiles().find(p => p.id === profileId) : dutyOf(dutyId));
+  endpoint ??= live();
+  const identity = endpoint && JSON.stringify(profileForRequest(endpoint));
+  return {
+    endpoint,
+    unchanged: () => !!endpoint && live() === endpoint && JSON.stringify(profileForRequest(endpoint)) === identity,
+    current: () => document.querySelector(selector)
+  };
+}
+// 两种卡共用取列表与测试连接；只接回同一活配置的结果，重画后只写此刻还在的节点。
+/** @param {Profile|Duty} endpoint @param {"models"|"test"} action @param {Element} card @param {"image"} [kind] */
+async function handleEndpointAction(endpoint, action, card, kind) {
+  const { unchanged, current } = endpointCardRequest(card, endpoint),
     report = text => {
       const status = current()?.querySelector(".profile-status");
       if (status) status.textContent = text;

@@ -55,7 +55,7 @@ test("回报另起一答：先认领，别处正作答就不起", async () => {
     "wakeWithReports",
     "remoteBusy",
     `setup: (claim, started) => {
-      const c = { id: "c1", messages: [] };
+      const c = { id: "c1", messages: [{ id: "a1", role: "assistant", status: "complete", steps: [{ id: "s1" }] }] };
       store.conversations = [c];
       claimConversation = claim;
       requestJob = () => null;

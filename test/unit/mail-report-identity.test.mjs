@@ -64,9 +64,9 @@ test("回报另起一答：对象已被换掉时仍能开工，写进 store 当�
   ]);
   f.install();
   // 上一答断在报错上：回报先记在这段对话上，等下一答开工时递上
-  const current = { id: "A", messages: [{ id: "a1", role: "assistant", content: "", status: "error" }] };
+  const current = { id: "A", messages: [{ id: "a1", role: "assistant", content: "", status: "error", steps: [{ id: "s1" }] }] };
   f.store.conversations = [current];
-  const stale = { id: "A", messages: [{ id: "a1", role: "assistant", content: "", status: "error" }] };
+  const stale = structuredClone(current);
   const item = { report: "到点", step: { id: "s1", title: "候「十分钟」到点" }, relay: { step: "s1", title: "十分钟", ok: true } };
   await f.wakeWithReports(stale, [item]);
   assert.ok(current.heldReports, "回报记在 store 当前那份上，没静默丢掉");
