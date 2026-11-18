@@ -171,16 +171,16 @@ test("远端松手但终稿还没读回：不认领、不从旧副本接候", as
       rewatchBackground=()=>{if (!remoteBusy.has('remote')) watched.push(store.conversations[0].title);};
     }`
   ]);
-  let loads = 0;
+  const loads = [];
   f.setup(async (route, body) => {
     if (route === "/api/chats/lease") return invoke(body);
-    if (++loads === 1) {
+    if (loads.push(body) === 1) {
       entered.resolve();
       await gate.promise;
       return { items: [] };
     }
-    if (loads === 2) return {}; // 200 但正文没收全，不是空目录的确认
-    if (loads === 3) return { items: [], skipped: 1 };
+    if (loads.length === 2) return {}; // 200 但正文没收全，不是空目录的确认
+    if (loads.length === 3) return { items: [], skipped: 1 };
     return { items: [{ id: "remote", savedAt: 10, conversation: { id: "remote", title: "终稿", messages: [] } }] };
   }, watched);
   const first = f.syncLeases();
@@ -205,6 +205,11 @@ test("远端松手但终稿还没读回：不认领、不从旧副本接候", as
   await f.syncLeases();
   assert.equal(f.runningElsewhere("remote"), false);
   assert.deepEqual(watched, ["终稿"]);
+  assert.deepEqual(loads[0].known, { remote: 1 }, "在途只带已见过的磁盘戳，不拿本页暂存时间冒充");
+  assert.ok(
+    loads.slice(1).every(body => body.known === undefined),
+    "松手后的读回仍要取完整结果"
+  );
   assert.equal(await f.claimConversation("remote"), true);
 });
 

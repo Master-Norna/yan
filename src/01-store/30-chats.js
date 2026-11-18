@@ -306,11 +306,16 @@ function mergeConversation(c, theirs, base = null) {
   merged.updatedAt = c.updatedAt > theirs.updatedAt ? c.updatedAt : theirs.updatedAt;
   return merged;
 }
+// 定向读只带已经见过的磁盘版本；本页暂存的时间不算。
+function chatLoadQuery(root, ids, knownIds = ids) {
+  const known = Object.fromEntries(knownIds.filter(id => chatDiskStamps.get(id) > 0).map(id => [id, chatDiskStamps.get(id)]));
+  return Object.keys(known).length ? { root, ids, known } : { root, ids };
+}
 // 跟上目录里的这几段：页面切回前台时看的那段。只读这几个文件，便宜
 async function catchUpFromDisk(ids) {
   if (!chatsOnline() || !ids.length) return;
   try {
-    const data = await bridge("/api/chats/load", { root: chatsDir(), ids }, AbortSignal.timeout(8000));
+    const data = await bridge("/api/chats/load", chatLoadQuery(chatsDir(), ids), AbortSignal.timeout(8000));
     for (const item of data.items || [])
       if (item.savedAt > (chatDiskStamps.get(item.id) || 0) && !runningElsewhere(item.id) && !deletedChatIds.has(item.id))
         catchUpConversation(item);

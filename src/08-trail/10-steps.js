@@ -376,14 +376,38 @@ function bindTrailEvents() {
       return setProcessDetails(details, nextOpen);
     }
     const id = details.closest("[data-message]")?.dataset.message,
-      side = !!details.closest("#sideMessages");
-    const message = (side ? currentThread()?.messages : currentConversation()?.messages)?.find(item => item.id === id);
+      side = !!details.closest("#sideMessages"),
+      c = currentConversation(),
+      messages = () => (side ? currentThread()?.messages : currentConversation()?.messages),
+      message = messages()?.find(item => item.id === id);
     if (!message) return setProcessDetails(details, nextOpen);
-    const reasoning = details.classList.contains("reasoning");
+    const reasoning = details.classList.contains("reasoning"),
+      unread = reasoning && details.hasAttribute("data-cold-reasoning");
     message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
     message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
     saveStoreSoon();
-    setProcessDetails(details, nextOpen);
+    setProcessDetails(details, nextOpen, !unread);
+    if (!unread || !nextOpen || !c) return;
+    details.setAttribute("aria-busy", "true");
+    void warmTrails(c, [message]).then(() => {
+      details.removeAttribute("aria-busy");
+      // 回来时可能已切页、翻版本或换旁注。只重画仍在眼前的那份，不替用户重新摊开已收起的块。
+      const showing = view === "chat" && currentConversation() === c && messages()?.includes(message);
+      if (unreadThought(message)) {
+        if (!message.reasoningOpen || !store.conversations.includes(c)) return;
+        message.reasoningOpen = false;
+        saveStoreSoon();
+        if (showing) {
+          const host = side ? "#sideMessages" : "#messages";
+          setProcessDetails($(`${host} [data-message="${CSS.escape(id)}"] .reasoning[data-cold-reasoning]`), false, false);
+          toast(t`${t("思绪")} 读取失败`);
+        }
+        return;
+      }
+      if (!showing) return;
+      if (side) renderSidePanel();
+      else renderConversation(false);
+    });
   };
   for (const pane of panes) pane.addEventListener("click", onProcessToggle);
 }

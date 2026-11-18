@@ -69,6 +69,7 @@ async function fixture(t) {
       "hydrateStore",
       "flushOnUnload",
       "syncChatsWithDisk",
+      "catchUpFromDisk",
       "remoteBusy",
       `install: db => {
         stateDb = db;
@@ -88,7 +89,7 @@ async function fixture(t) {
       }
     };
   };
-  return { post, page, records };
+  return { post, page, records, chats };
 }
 
 const conversation = title => ({
@@ -148,4 +149,82 @@ test("合并结果仍只是暂存版时，等另一页松手再落盘，不提�
   await reopened.sync();
   assert.equal((await post("chats/load")).items[0].conversation.title, "还没落盘的新题");
   assert.equal(records.size, 0);
+});
+
+test("定向读只短路已见、同版本且唯一的标准文件；取消条件时仍取全份", async t => {
+  const { post, page, chats } = await fixture(t);
+  const c = conversation("看旧对话"),
+    savedAt = Date.now() - 3000,
+    { file } = await post("chats/save", { conversation: c, savedAt }),
+    target = path.join(chats, file),
+    query = { ids: [c.id], known: { [c.id]: savedAt } };
+  const a = page();
+  await a.sync();
+  const readFile = fs.readFileSync;
+  let reads = 0;
+  t.mock.method(fs, "readFileSync", (name, ...args) => {
+    if (name === target) reads += 1;
+    return readFile(name, ...args);
+  });
+
+  await a.catchUpFromDisk([c.id]);
+  assert.equal(reads, 0, "回前台读旧对话，不重读磁盘正文");
+  assert.deepEqual((await post("chats/load", query)).items, []);
+  assert.equal(reads, 0);
+  assert.equal((await post("chats/load", { ids: query.ids })).items[0].savedAt, savedAt);
+  assert.equal((await post("chats/load", { known: query.known })).items[0].savedAt, savedAt, "启动与重连全量不条件读");
+  assert.equal(reads, 2);
+
+  // 同名短码还可能有改名前留下的文件；平时的去重不能被「已见到一份」吞掉。
+  const newer = { ...c, title: "已经换题" },
+    duplicate = path.join(chats, file.replace(c.title, newer.title));
+  fs.writeFileSync(duplicate, JSON.stringify({ 言: "对话", version: 1, savedAt: savedAt + 1, conversation: newer }));
+  assert.equal((await post("chats/load", query)).items[0].conversation.title, newer.title);
+  assert.equal(reads, 3);
+  assert.equal(fs.existsSync(target), false, "仍清理较旧文件");
+  await a.catchUpFromDisk([c.id]);
+  assert.equal(a.store.conversations[0].title, newer.title, "真正更新照旧跟上");
+});
+
+test("定向读不能仅凭文件名或 savedAt 省正文", async t => {
+  const { post, chats } = await fixture(t);
+  const c = conversation("旧版或手动整理"),
+    savedAt = Date.now() - 3000,
+    { file } = await post("chats/save", { conversation: c, savedAt }),
+    target = path.join(chats, file),
+    query = { ids: [c.id], known: { [c.id]: savedAt } };
+  for (const doc of [
+    { version: 1, savedAt, conversation: c },
+    { 言: "对话", version: 1, savedAt: savedAt + 0.5, conversation: c },
+    { 言: "对话", version: 1, savedAt, conversation: { ...c, id: "不是这一段" } },
+    { 言: "对话", version: 1, savedAt, conversation: { title: c.title, ...c } }
+  ]) {
+    fs.writeFileSync(target, JSON.stringify(doc));
+    const { items } = await post("chats/load", query);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].savedAt, doc.savedAt);
+    assert.deepEqual(items[0].conversation, doc.conversation);
+  }
+  fs.writeFileSync(target, `{"言":"对话","version":1,"savedAt":${savedAt},"conversation":`);
+  assert.equal((await post("chats/load", query)).skipped, 1);
+});
+
+test("批量跟读短路的标准文件仍压过别的短码下放错的副本", async t => {
+  const { post, chats } = await fixture(t);
+  const a = conversation("标准文件"),
+    b = { ...conversation("错放副本的位置"), id: "c2" },
+    savedAt = Date.now() - 3000;
+  await post("chats/save", { conversation: a, savedAt });
+  const { file } = await post("chats/save", { conversation: b, savedAt });
+  fs.writeFileSync(
+    path.join(chats, file),
+    JSON.stringify({ 言: "对话", version: 1, savedAt: savedAt + 1, conversation: { ...a, title: "误放的副本" } })
+  );
+  const ids = [a.id, b.id];
+  assert.deepEqual(
+    (await post("chats/load", { ids })).items.map(item => item.conversation.title),
+    [a.title]
+  );
+  assert.deepEqual((await post("chats/load", { ids, known: { [a.id]: savedAt, [b.id]: savedAt } })).items, []);
+  assert.ok(fs.existsSync(path.join(chats, file)), "用户的错名副本仍不删");
 });

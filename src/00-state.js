@@ -156,7 +156,7 @@
  * @property {string} [summary] 压缩分隔上的摘要
  * @property {number} [compacted] 压进摘要的条数
  * @property {boolean} [compacting]
- * @property {{ key: string, files?: { id: string, size: number }[] }} [cold] 收了尾，思绪与帮手的经过另存在对话目录的 行迹/ 里（见 01-store/35-cold.js）；files 是挪走的步骤里带的附件
+ * @property {{ key: string, files?: { id: string, size: number }[], reasoningOnly?: boolean }} [cold] 收了尾，思绪与帮手的经过另存在对话目录的 行迹/ 里；files 是挪走的附件，reasoningOnly 表明无步骤、只另存了思绪
  * @property {{ root: string, at: string, files: number }} [checkpoint] 这一答头一回动手改文件前记下的目录（见 14-chat-engine/80-checkpoint.js）
  * @property {{ at: string, restored: number, removed: number }[]} [rewound] 人把目录退回到这一答开工前的几回
  */

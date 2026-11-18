@@ -1,6 +1,7 @@
 // 行迹另存：收了尾的一答，思绪与帮手的经过挪出对话文件（src/01-store/35-cold.js、server/chats.js 的 行迹/）
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { resolveObjectURL } from "node:buffer";
 import http from "node:http";
 import { mkdtempSync, readdirSync, existsSync, utimesSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -154,6 +155,88 @@ test("目录里的新份换下手上这段：并起来不丢接回的那几样�
   assert.equal(replaced.messages[1].reasoning, "主答的思绪");
   assert.equal(replaced.messages[1].steps[0].sub.steps.length, 1);
   assert.equal(warmMessages.has(replaced.messages[1]), true);
+});
+
+test("单答与全量取回并发：共用正在读的 key，补读其余，也接得上替换后的对象", async () => {
+  const calls = [],
+    releases = [];
+  const f = load(["warmTrails", "warmConversation", `install: read => { chatsDir = () => 'test-chats'; bridge = read; }`]);
+  f.install((_, { keys }) => {
+    calls.push(keys);
+    return new Promise(resolve => releases.push(() => resolve({ pieces: Object.fromEntries(keys.map(key => [key, { reasoning: key }])) })));
+  });
+  const thought = key => ({ cold: { key, reasoningOnly: true } }),
+    a = thought("a"),
+    b = thought("b"),
+    c = { id: "c1", messages: [a], forks: [{ messages: [b] }] },
+    replacement = structuredClone(c);
+  const single = f.warmTrails(c, [a]),
+    full = f.warmConversation(replacement);
+  assert.deepEqual(calls, [["a"], ["b"]]);
+  releases[1]();
+  releases[0]();
+  assert.equal(await single, 1);
+  assert.equal(await full, 2);
+  assert.equal(a.reasoning, "a");
+  assert.equal(b.reasoning, undefined, "单答读不把同对话的另一份接进来");
+  assert.equal(replacement.messages[0].reasoning, "a");
+  assert.equal(replacement.forks[0].messages[0].reasoning, "b");
+});
+
+test("备份先读同一份冷行迹：视图共用读取，接回后仍重画并续接后台监听", async () => {
+  const calls = [],
+    painted = [];
+  let releaseTrail, releaseWatch, backup;
+  const f = load([
+    "chatJson",
+    "coldPiece",
+    "exportData",
+    "warmInView",
+    "store",
+    "bgWatches",
+    `open: id => { currentId = id; }`,
+    `install: (read, paint, download) => {
+      chatsDir = () => 'test-chats'; bridge = read; downloadHref = download;
+      toast = holdAwake = renderClepsydra = () => {};
+      renderConversation = () => paint('chat'); renderHelperPanel = () => paint('helper');
+      sidePanelOpen = () => true; renderSidePanel = () => paint('side');
+    }`
+  ]);
+  const c = conversation(),
+    message = c.messages[1];
+  message.steps[0].sub.steps[0].bg = { id: "bg1", key: "k1", state: "running" };
+  const piece = f.coldPiece(message);
+  message.cold = { key: "old-trail" };
+  const disk = JSON.parse(f.chatJson(c));
+  f.store.conversations = [disk];
+  f.install(
+    (route, payload) => {
+      calls.push([route, payload]);
+      if (route === "/api/chats/trail/get") return new Promise(resolve => (releaseTrail = resolve));
+      assert.equal(route, "/api/work/watch");
+      return new Promise(resolve => (releaseWatch = resolve));
+    },
+    part => painted.push(part),
+    href => {
+      backup = resolveObjectURL(href);
+      URL.revokeObjectURL(href);
+    }
+  );
+  const exporting = f.exportData(false);
+  f.open(disk.id);
+  f.warmInView(disk);
+  assert.deepEqual(calls, [["/api/chats/trail/get", { root: "test-chats", id: disk.id, keys: ["old-trail"] }]]);
+  assert.deepEqual(painted, [], "读取未完成时不提前重画");
+  releaseTrail({ pieces: { "old-trail": piece } });
+  await exporting;
+  assert.equal(JSON.parse(await backup.text()).conversations[0].messages[1].reasoning, piece.reasoning, "备份带回了思绪");
+  try {
+    assert.deepEqual(painted, ["chat", "helper", "side"], "视图也须收到就绪通知");
+    assert.deepEqual(calls.slice(1), [["/api/work/watch", { id: "bg1", key: "k1" }]], "共读一次，旧后台重新监听一次");
+    assert.equal(f.bgWatches.has("s1"), true);
+  } finally {
+    releaseWatch?.({ superseded: true });
+  }
 });
 
 test("挪走的步骤里带的附件仍算在用", () => {
