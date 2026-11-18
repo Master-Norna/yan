@@ -2333,8 +2333,7 @@ const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|
 // 同一份扫描同时给出写标记与路径文本；-o 的实际参数只拆一次，不因写动词表或参数引号而漏过。
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
-  const offsets = new Set(),
-    innerPaths = [];
+  const innerPaths = [];
   // 枚举是线性的，不做原文预筛：引号拼接与转义能把 g'c'c、-''o 藏出字面匹配
   const calls = commandInvocations(scanned);
   for (const call of calls) {
@@ -2342,7 +2341,7 @@ function scanWrites(scanned) {
     // 都会改变原文写法，预筛与参数判定只认解码后的真实词
     const scan = call.scan ?? scanned,
       name = shellWord(scan, call.nameStart, call.nameEnd)
-        .split("/")
+        .split(/[\\/]/)
         .pop()
         .replace(/\.exe$/i, "");
     if (!ATTACHED_OUTPUT_TOOL.test(name)) continue;
@@ -2351,11 +2350,9 @@ function scanWrites(scanned) {
     for (const arg of call.args) {
       const value = shellWord(scan, arg.start, arg.end);
       if (value === "--") break;
-      if (/^-o.+/i.test(value)) {
-        // 原文与解码值不同的参数，位置标记落不到真实路径起点：按值查
-        if (call.scan || value !== arg.value) innerPaths.push(value.slice(2));
-        else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
-      }
+      // 已识别的输出目标统一按完整值校验：整段引号、引号拼接与转义
+      // 都可能在原文里改变路径的写法，位置标记靠不住
+      if (/^-o.+/i.test(value)) innerPaths.push(value.slice(2));
     }
   }
   // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」。
@@ -2368,11 +2365,11 @@ function scanWrites(scanned) {
   for (const call of calls) {
     const scan = call.scan ?? scanned,
       name = shellWord(scan, call.nameStart, call.nameEnd)
-        .split("/")
+        .split(/[\\/]/)
         .pop()
         .replace(/\.exe$/i, ""),
       // arg.value 是原文：引号片段与转义未拼，一律解码出真实参数值再判定
-      args = call.args.map(arg => ({ ...arg, raw: arg.value, value: shellWord(scan, arg.start, arg.end) })),
+      args = call.args.map(arg => ({ ...arg, value: shellWord(scan, arg.start, arg.end) })),
       params = outputArgsOf({ name: name.toLowerCase(), args });
     if (!params?.length) continue;
     const target = new Set();
@@ -2389,25 +2386,21 @@ function scanWrites(scanned) {
         const next = args[i + 1];
         if (next) {
           target.add(next);
-          // 分离式输出路径：下一个参数就是目标值；内层调用或原文被
-          // 引号/转义伪装过的参数，位置插不进标记，直接按值查
-          if (call.scan || next.value !== next.raw) innerPaths.push(next.value);
+          // 分离式输出路径：下一个参数就是目标值，按解码值校验
+          innerPaths.push(next.value);
           i++;
         }
       } else if (glued || assigned) {
-        // assigned（--param=path）与 glued 一样能藏越界目标；原文与
-        // 解码值不同的参数位置标记落不到真实路径起点，按值查
-        if (call.scan || value !== arg.raw) innerPaths.push(value.slice((glued ?? assigned).length + (assigned ? 1 : 0)));
-        else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + (glued ? glued.length : assigned.length + 1));
+        // assigned（--param=path）与 glued 一样按解码值切出路径校验
+        innerPaths.push(value.slice((glued ?? assigned).length + (assigned ? 1 : 0)));
       }
     }
     // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
     for (const arg of args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
   }
-  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite || innerPaths.length > 0;
+  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || toolWrite || innerPaths.length > 0;
   if (!writing) return { writing, text: "" };
   const chars = stripReadSources(scanned).split("");
-  for (const at of offsets) chars[at] = " " + chars[at];
   for (const arg of toolReads) for (let i = arg.start; i < arg.end; i++) chars[i] = " ";
   // 内层紧贴式输出路径不占外层坐标：作为完整路径值返回，由调用方逐条做目录
   // 边界校验——拼回文本会被按空白截断，带空格的路径会只验到前半段
