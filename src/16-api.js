@@ -433,7 +433,7 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
   // 与 vLLM 拆 DeepSeek 的规矩一样：这一轮正文里先出现一个裸的 </think>、前面没有 <think>，它之前的都是思考（bare）。
   // 挪走的思考不进历史，免得下一轮模型照着正文里的思考接着往正文里想
   const roundStart = assistant.content.length;
-  const think = { mode: "probe", held: "", last: "", bare: true, scan: roundStart };
+  const think = { mode: "probe", held: "", last: "", bare: true, tail: "", beforeTail: assistant.content[roundStart - 1] || "" };
   const ingest = text => {
     // 刚收住思考：结束标签后的空行可能分几块到，正文从头一个字起
     if (think.mode === "gap") {
@@ -443,7 +443,7 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
     }
     if (think.mode === "body") {
       assistant.content += text;
-      takeBareThink(false);
+      takeBareThink(text);
       return;
     }
     if (think.mode === "probe") {
@@ -488,20 +488,25 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
     return true;
   };
   // 这一轮正文里找裸的 </think>：找到就把这一轮它之前的正文挪进思绪（接在思考字段之后，空一行），余下的照常是正文。一轮只认一次
-  const takeBareThink = final => {
-    while (think.bare) {
-      const from = think.scan,
-        at = thinkCloser(assistant.content.slice(from), assistant.content[from - 1] || "", final);
+  const takeBareThink = (text, final = false) => {
+    if (!think.bare) return;
+    // 只扫上一块留下的尾巴和新字。每块从 assistant.content 切尾巴会让 V8 反复摊平整答，连前几轮也重复制
+    const tail = think.tail + text,
+      start = assistant.content.length - tail.length;
+    for (let from = 0; ; ) {
+      const at = thinkCloser(tail.slice(from), from ? tail[from - 1] : think.beforeTail, final);
       if (at < 0) {
-        // 末尾留一截再看：可能是切开的标签，或整个标签还等下一个字
-        think.scan = Math.max(think.scan, assistant.content.length - 8);
+        // 末尾最多留 8 字（整个标签可能还等着看下一个字），另记前一字供引号判断
+        const keepFrom = Math.max(from, tail.length - 8);
+        if (keepFrom) think.beforeTail = tail[keepFrom - 1];
+        think.tail = tail.slice(keepFrom);
         return;
       }
-      const end = from + at,
+      const end = start + from + at,
         said = assistant.content.slice(roundStart, end);
       // 写着的是一段带标签的代码（围栏还开着）：跳过这一个接着找
       if (inOpenFence(said)) {
-        think.scan = end + 8;
+        from += at + 8;
         continue;
       }
       think.bare = false;
@@ -519,10 +524,14 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
   };
   const flushThink = () => {
     if (think.mode === "think" && closeThink(true)) return;
-    if (think.held && think.mode === "think") assistant.reasoning = (assistant.reasoning || "") + think.held;
-    else if (think.held) assistant.content += think.held;
+    const held = think.held;
     think.held = "";
-    if (think.mode !== "think") takeBareThink(true);
+    if (think.mode === "think") {
+      if (held) assistant.reasoning = (assistant.reasoning || "") + held;
+    } else {
+      if (held) assistant.content += held;
+      takeBareThink(held, true);
+    }
     think.mode = "body";
   };
   // 流静默太久（桥接那头 Node 自带五分钟的读超时）：五分钟一个字节都没有就当断了，按中断处理、可续写
