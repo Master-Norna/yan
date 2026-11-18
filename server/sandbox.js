@@ -1618,7 +1618,10 @@ const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
 // （/usr/sbin/dscl、"/usr/sbin/dscl"）都是同一个程序；边界把紧贴的重定向也算进去——
 // name>out / name<in 之后 Shell 照样把后面的选项传给程序，不能只认空白与 ; } 结尾
 const MAC_CMD = (/** @type {string} */ names) =>
-  String.raw`${CMD}(?:(?<=["'])(?:[^"'\n]*\/)?${names}["']|(?:[^\s"';|&<>]*\/)?${names})(?=[\s;}&|<>]|$)`;
+  String.raw`${CMD}(?:(?<=["'])(?:[^"'\n]*\/)?${names}["']|(?:[^\s"';|&<>]*\/)?${names})(?=[\s;}&|<>)]|$)`;
+// 反斜杠续行在 Shell 里被删掉、两侧拼成同一参数：-add\<换行>User 仍是 -addUser。
+// 把词里每个字母后允许夹 \\x01 占位（syntax 把转义字符标成 \x01），写成可选序列
+const CONT = (/** @type {string} */ word) => word.replace(/./g, String.raw`$&(?:\\\x01)*`);
 // 参数段扫描：& 只在 fd 复制（2>&1、>&）与 &> 里跨过，其余 & 仍是分句符；
 // 三个分支按位置互斥（类里不含 &，& 的两个变体看前后文），不会指数回溯
 const ARG_SPAN = String.raw`(?:(?<=[<>])&(?![<>]{1,2})|&(?=[<>]{1,2})|>\|?|[^;|&\n>])*?`;
@@ -1677,11 +1680,15 @@ const RULES = [
   ],
   // Mac 实测过：socketfilterfw 用 getopt_long，写选项的唯一前缀缩写（--setg、--b、--unbl）同样生效，
   // 于是反过来只放行已知的查询选项（get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
-  [new RegExp(String.raw`${MAC_CMD("socketfilterfw")}${ARG_SPAN}--(?!get|l|h)\w`, "im"), "不动网络与防火墙配置", EVERY],
+  [
+    new RegExp(String.raw`${MAC_CMD("socketfilterfw")}${ARG_SPAN}-(?:\\\x01)*-(?:\\\x01)*(?!${CONT("get")}|l|h)\w`, "im"),
+    "不动网络与防火墙配置",
+    EVERY
+  ],
   // Mac 实测过：账号动词拦（全局选项在前也拦）；带 on|off|status 的几条只拦 status 以外的取值
   [
     new RegExp(
-      String.raw`${MAC_CMD("sysadminctl")}${ARG_SPAN}-(?:(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)["']?\s+(?!status\b|"status"|'status'))`,
+      String.raw`${MAC_CMD("sysadminctl")}${ARG_SPAN}-(?:\\\x01)*(?:(?:${CONT("addUser")}|${CONT("deleteUser")}|${CONT("newPassword")}|${CONT("resetPasswordFor")}|${CONT("secureTokenOn")}|${CONT("secureTokenOff")})\b|(?:${CONT("autologin")}|${CONT("guestAccount")}|${CONT("afpGuestAccess")}|${CONT("smbGuestAccess")}|${CONT("automaticTime")}|${CONT("use12HourClockForLoginWindow")}|${CONT("screenLock")})["']?\s+(?!status\b|"status"|'status'))`,
       "im"
     ),
     "不动用户、账户与共享",

@@ -1178,6 +1178,10 @@ const TABLE = [
     "DSCL . -read /x",
     "dscl >|x . -read",
     "dscl 2>&1 . -read /x",
+    "(dscl . -read /x)",
+    // get* 查询参数夹续行仍是查询
+    "socketfilterfw --get\\\nappblocked x",
+    "sysadminctl -autologin status",
     "socketfilterfw --getg 2>&1 --listapps",
     // dscl 的段界在 ; 前止步：下一条命令的参数不误当 dscl 的动词
     "dscl . -read /x;echo -create",
@@ -1441,6 +1445,15 @@ const TABLE = [
     // 强制覆盖重定向 >| 仍是重定向
     "socketfilterfw >|out --setglobalstate on",
     "sysadminctl >|o -addUser x",
+    // 分组/命令替换里的裸 dscl 仍进交互模式
+    "(dscl)",
+    "$(dscl)",
+    // 反斜杠续行两侧拼成同一参数，写选项不能被换行拆开
+    "socketfilterfw --\\\nsetg on",
+    "socketfilterfw -\\\n-setg on",
+    "sysadminctl -add\\\nUser x",
+    "sysadminctl -\\\naddUser x",
+    "sysadminctl -auto\\\nlogin off",
     '"/usr/sbin/sysadminctl" -addUser x',
     // fd 复制与 &> 里的 & 不是命令分隔符
     "socketfilterfw 2>&1 --setglobalstate on",
