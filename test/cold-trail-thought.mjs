@@ -59,8 +59,16 @@ const open = async id => {
   await waitFor(`!!document.querySelector('[data-conversation="${id}"] .history-open')`);
   await evalJs(`document.querySelector('[data-conversation="${id}"] .history-open').click(); true`);
 };
+// 单独的浏览器源：本例有意挂住行迹响应，不能与后续用例共享浏览器的同源连接。
+const app = PAGE.replace("127.0.0.1", "localhost");
+const navigate = async (suffix = "") => {
+  const url = app + suffix;
+  await send("Page.navigate", { url });
+  await waitFor(`location.href === ${JSON.stringify(url)} && typeof document.querySelector('#openLibrary')?.onclick === 'function'`);
+};
+let trailInterceptor;
 try {
-  await send("Page.navigate", { url: PAGE });
+  await navigate();
   await open(id);
   await evalJs(`${mine}.pinned = true; __yanSave(); true`);
   const code = createHash("sha1").update(id).digest("hex").slice(0, 10);
@@ -82,7 +90,7 @@ try {
     side = disk.threads[0].messages[0].cold.key;
   // 去掉其中一片，守住读不成也会收口。其余沿用桥接、浏览器实际读取。
   rmSync(`${CHATS}/行迹/${code}/${lost}.json`);
-  await send("Page.addScriptToEvaluateOnNewDocument", {
+  const { identifier } = await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `(() => {
       if (location.search !== '?thoughts-on-demand') return;
       window.trailReads = [];
@@ -98,7 +106,8 @@ try {
       };
     })()`
   });
-  await send("Page.navigate", { url: PAGE + "?thoughts-on-demand" });
+  trailInterceptor = identifier;
+  await navigate("?thoughts-on-demand");
   await open(id);
   await waitFor(`${msg("opened")}.reasoning?.length === ${reasoning.length} && ${msg("legacy")}.reasoning?.length === ${reasoning.length}`);
   const eager = (await evalJs("trailReads")).flat();
@@ -202,5 +211,9 @@ try {
     (await evalJs("trailReads")).flat().filter(key => key === backup).length === 1
   );
 } finally {
+  // 测试器复用同一个浏览器目标；这一用例的 CDP 注入和挂起的读回不能带到下一页。
+  if (trailInterceptor) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: trailInterceptor }).catch(() => {});
+  await send("Page.navigate", { url: "about:blank" }).catch(() => {});
+  await send("Storage.clearDataForOrigin", { origin: new URL(app).origin, storageTypes: "all" }).catch(() => {});
   close();
 }
