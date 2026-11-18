@@ -2140,11 +2140,23 @@ function commandInvocations(scanned) {
       }
       const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));
       at += lead[0].length;
-      // 重定向与前缀可交错出现在命令名之前（x=1 >f cmd）：整段消费再取词
+      // 重定向与前缀可交错出现在命令名之前（x=1 >f cmd、x=1 2>f cmd）：整段消费再取词
       for (;;) {
         while (at < range.end && /[^\S\r\n]/.test(scanned.syntax[at])) at++;
-        if (at < range.end && (scanned.syntax[at] === "<" || scanned.syntax[at] === ">")) at = redirEnd(scanned, at, range.end);
-        else break;
+        const ch = scanned.syntax[at];
+        if (ch === "<" || ch === ">") {
+          at = redirEnd(scanned, at, range.end);
+          continue;
+        }
+        if (/\d/.test(ch)) {
+          let j = at;
+          while (j < range.end && /\d/.test(scanned.syntax[j])) j++;
+          if (scanned.syntax[j] === "<" || scanned.syntax[j] === ">") {
+            at = redirEnd(scanned, j, range.end);
+            continue;
+          }
+        }
+        break;
       }
       const tokens = argumentsAt(scanned, at, range.end);
       if (!tokens.length) {
@@ -2162,7 +2174,8 @@ function commandInvocations(scanned) {
             at = redirEnd(scanned, at, range.end);
             continue;
           }
-          if (ch === "&" && (scanned.syntax[at + 1] === "<" || scanned.syntax[at + 1] === ">")) {
+          // &> / &>> 是合并重定向；&< 不是——& 是后台分隔符，< 属于下一条命令
+          if (ch === "&" && scanned.syntax[at + 1] === ">") {
             at = redirEnd(scanned, at + 1, range.end);
             continue;
           }

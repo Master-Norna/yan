@@ -1210,6 +1210,9 @@ const TABLE = [
       "security add-certificates x"
     ].map(s => `echo "${s}"`)
   ].map(command => [command, "o", "o", "o", "o"]),
+  // &> 把后一个词收成参数（严档拦 cmd 本身），& 后台分隔符后的读命令照放
+  ["cmd &>log dscl . -read /x", "x", "o", "o", "o", { win32: "oooo" }],
+  ["echo x & dscl . -read /y", "o", "o", "o", "o"],
   // 钥匙串密码
   ...[
     "security find-generic-password -s x -w",
@@ -1466,6 +1469,9 @@ const TABLE = [
     "socketfilterfw &>log --setg on",
     "sysadminctl 2>&1 -addUser x",
     // 重定向紧贴命令名：后面的选项照样传给程序
+    "x=1 2>f socketfilterfw --setg",
+    "x=1 >f dscl . -create /x",
+    "cmd &<in dscl . -create /x",
     ">out socketfilterfw --setglobalstate on",
     "> out sysadminctl -addUser x",
     "2>err socketfilterfw --setg",
