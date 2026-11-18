@@ -1728,7 +1728,7 @@ const macBuiltinWhy = scanned => {
     // 先判程序名：重定向目标词也会被枚举成调用，不对号就不解析参数，普通命令不会被反复重扫
     const name = shellWord(scanned, call.nameStart, call.nameEnd).split("/").pop();
     if (!MAC_NAME.test(name)) continue;
-    const args = macArgs(scanned, call.nameEnd, scanned.syntax.length).map(t => t.value);
+    const args = macArgs(scanned, call.nameEnd, call.argEnd ?? scanned.syntax.length).map(t => t.value);
     if (/^socketfilterfw$/i.test(name)) {
       // getopt_long 的唯一前缀缩写同样生效：反过来只放行已知的查询选项
       // （get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
@@ -2164,10 +2164,37 @@ function commandInvocations(scanned) {
         at++;
         continue;
       }
-      const first = tokens[0];
+      const emit = (toks, argEnd) => {
+        const first = toks[0];
+        if (seen.has(first.start)) return;
+        seen.add(first.start);
+        const name = first.value
+          .split(/[\\/]/)
+          .pop()
+          .replace(/\.exe$/i, "");
+        calls.push({ name, args: toks.slice(1), shell: range.shell, nameStart: first.start, nameEnd: first.end, argEnd });
+        if (!/^(?:cmd|powershell|pwsh|sh|bash|zsh|dash|ksh)$/i.test(name)) return;
+        const script = SCRIPT_PREFIX.exec(scanned.text.slice(first.start, argEnd));
+        if (!script) return;
+        const bodyAt = first.start + script[0].length;
+        const bodyShell = CMD_SCRIPT.test(script[0]) ? "cmd" : POSIX_SCRIPT.test(script[0]) ? "posix" : "powershell";
+        if (scanned.quotes.has(bodyAt)) {
+          // 引号正文多半已由 shellText 扫成独立执行段；&> 夹带进来时正文没被
+          // 扫描器认出，补一个段覆盖引号内部
+          const quoteEnd = Math.min(scanned.quotes.get(bodyAt), argEnd - 1);
+          if (!starts.get(bodyAt + 1) && bodyAt + 1 <= quoteEnd) ranges.push({ start: bodyAt + 1, end: quoteEnd, shell: bodyShell });
+          return;
+        }
+        if (bodyAt < argEnd) ranges.push({ start: bodyAt, end: argEnd, shell: bodyShell });
+      };
       at = tokens.at(-1).end;
       // 把本次调用剩余的参数与重定向消费完：参数不另起调用（否则参数词会被误当
-      // 新程序名，重复扫描同一条命令），遇到 ; & | ( ) { } 换行 才是语句结束
+      // 新程序名，重复扫描同一条命令），遇到 ; & | ( ) { } 换行 才是语句结束。
+      // &> / &>> 是 bash/zsh 的合并重定向：本次调用吃到段尾、argEnd 随之延伸；
+      // dash 里 & 先断句、>目标 后的词是下一条命令——另发影子调用，参数界按 dash 的
+      // 语句尾，两个方言的语义都兜住，每个调用的参数扫描各自有界，不构成平方级。
+      const shadows = [];
+      let pendingShadow = null;
       for (; at < range.end; ) {
         const ch = scanned.syntax[at];
         if (/[;&|()<>{}\n]/.test(ch)) {
@@ -2175,8 +2202,19 @@ function commandInvocations(scanned) {
             at = redirEnd(scanned, at, range.end);
             continue;
           }
-          // & 一律按后台分隔符收尾：&> 只是 bash/zsh 的合并重定向，
-          // dash 里 & 先断句、> 属下一条命令，分不出方言就按严的来
+          if (ch === "&" && scanned.syntax[at + 1] === ">") {
+            if (pendingShadow) pendingShadow.argsTo = at;
+            at = redirEnd(scanned, at + 1, range.end);
+            while (at < range.end && /[^\S\r\n]/.test(scanned.syntax[at])) at++;
+            const nameStart = at;
+            for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
+              if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+            }
+            pendingShadow = nameStart < at ? { nameStart, nameEnd: at, argsTo: range.end } : null;
+            if (pendingShadow) shadows.push(pendingShadow);
+            continue;
+          }
+          if (pendingShadow) pendingShadow.argsTo = at;
           break;
         }
         if (/\s/.test(ch)) {
@@ -2187,24 +2225,12 @@ function commandInvocations(scanned) {
           if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
         }
       }
-      if (seen.has(first.start)) continue;
-      seen.add(first.start);
-      const name = first.value
-        .split(/[\\/]/)
-        .pop()
-        .replace(/\.exe$/i, "");
-      calls.push({ name, args: tokens.slice(1), shell: range.shell, nameStart: first.start, nameEnd: first.end });
-      if (!/^(?:cmd|powershell|pwsh|sh|bash|zsh|dash|ksh)$/i.test(name)) continue;
-      const script = SCRIPT_PREFIX.exec(scanned.text.slice(first.start, at));
-      if (!script) continue;
-      const bodyAt = first.start + script[0].length;
-      // 引号正文已由 shellText 扫过；其余参数中的引号只是参数，不能拿来当脚本。
-      if (!scanned.quotes.has(bodyAt) && bodyAt < at)
-        ranges.push({
-          start: bodyAt,
-          end: at,
-          shell: CMD_SCRIPT.test(script[0]) ? "cmd" : POSIX_SCRIPT.test(script[0]) ? "posix" : "powershell"
-        });
+      if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
+      emit(tokens, at);
+      for (const s of shadows) {
+        const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd));
+        if (toks.length) emit(toks, s.argsTo);
+      }
     }
   }
   return calls;

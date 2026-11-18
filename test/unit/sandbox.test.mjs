@@ -1213,6 +1213,8 @@ const TABLE = [
   // &> 把后一个词收成参数（严档拦 cmd 本身），& 后台分隔符后的读命令照放
   ["cmd &>log dscl . -read /x", "x", "o", "o", "o", { win32: "oooo" }],
   ["echo x & dscl . -read /y", "o", "o", "o", "o"],
+  // &> 夹带后 sh -c 的引号正文也要展开（bash 视角是参数，dash 视角是命令）
+  ["cmd &>log sh -c 'dscl . -create /x'", "x", "x", "x", "o"],
   // 钥匙串密码
   ...[
     "security find-generic-password -s x -w",
@@ -1473,6 +1475,7 @@ const TABLE = [
     "x=1 >f y=2 socketfilterfw --setg",
     "x=1 >f dscl . -create /x",
     "cmd &<in dscl . -create /x",
+    "cmd &>log dscl . -create /x",
     ">out socketfilterfw --setglobalstate on",
     "> out sysadminctl -addUser x",
     "2>err socketfilterfw --setg",
