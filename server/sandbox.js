@@ -1617,11 +1617,19 @@ const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
 // 与 cmd() 同款的命令词，但取的是程序基名：名字两侧引号、以及引号内外的路径前缀
 // （/usr/sbin/dscl、"/usr/sbin/dscl"）都是同一个程序；边界把紧贴的重定向也算进去——
 // name>out / name<in 之后 Shell 照样把后面的选项传给程序，不能只认空白与 ; } 结尾
-const MAC_CMD = (/** @type {string} */ names) =>
-  String.raw`${CMD}(?:(?<=["'])(?:[^"'\n]*\/)?${names}["']|(?:[^\s"';|&<>]*\/)?${names})(?=[\s;}&|<>)]|$)`;
-// 反斜杠续行在 Shell 里被删掉、两侧拼成同一参数：-add\<换行>User 仍是 -addUser。
-// 把词里每个字母后允许夹 \\x01 占位（syntax 把转义字符标成 \x01），写成可选序列
-const CONT = (/** @type {string} */ word) => word.replace(/./g, String.raw`$&(?:\\\x01)*`);
+// 未加引号的文本按 POSIX 转义逐位匹配：\x 与 \<换行> 在 syntax 里同是 \\x01 占位——
+// 任一位都可能是被转义的字母（真实值已不可见），位间与词尾也允许夹占位（续行整个删掉）。
+// ci 时字母额外大小写不敏感（macOS 默认文件系统对程序名不区分大小写）
+const ESC = (/** @type {string} */ word, /** @type {boolean} */ ci) => {
+  const gap = String.raw`(?:\\\x01)*`;
+  return (
+    gap +
+    [...word].map(ch => (ci ? String.raw`(?:[${ch.toLowerCase()}${ch.toUpperCase()}]|\\\x01)` : String.raw`(?:${ch}|\\\x01)`)).join(gap) +
+    gap
+  );
+};
+const MAC_CMD = (/** @type {string} */ name, /** @type {boolean} */ ci) =>
+  String.raw`${CMD}(?:(?<=["'])(?:[^"'\n]*\/)?${ESC(name, ci)}["']|(?:[^\s"';|&<>]*\/)?${ESC(name, ci)})(?=[\s;}&|<>)]|$)`;
 // 参数段扫描：& 只在 fd 复制（2>&1、>&）与 &> 里跨过，其余 & 仍是分句符；
 // 三个分支按位置互斥（类里不含 &，& 的两个变体看前后文），不会指数回溯
 const ARG_SPAN = String.raw`(?:(?<=[<>])&(?![<>]{1,2})|&(?=[<>]{1,2})|>\|?|[^;|&\n>])*?`;
@@ -1681,14 +1689,14 @@ const RULES = [
   // Mac 实测过：socketfilterfw 用 getopt_long，写选项的唯一前缀缩写（--setg、--b、--unbl）同样生效，
   // 于是反过来只放行已知的查询选项（get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
   [
-    new RegExp(String.raw`${MAC_CMD("socketfilterfw")}${ARG_SPAN}-(?:\\\x01)*-(?:\\\x01)*(?!${CONT("get")}|l|h)\w`, "im"),
+    new RegExp(String.raw`${MAC_CMD("socketfilterfw", true)}${ARG_SPAN}-(?:\\\x01)*-(?:\\\x01)*(?!${ESC("get", false)}|l|h)\w`, "im"),
     "不动网络与防火墙配置",
     EVERY
   ],
   // Mac 实测过：账号动词拦（全局选项在前也拦）；带 on|off|status 的几条只拦 status 以外的取值
   [
     new RegExp(
-      String.raw`${MAC_CMD("sysadminctl")}${ARG_SPAN}-(?:\\\x01)*(?:(?:${CONT("addUser")}|${CONT("deleteUser")}|${CONT("newPassword")}|${CONT("resetPasswordFor")}|${CONT("secureTokenOn")}|${CONT("secureTokenOff")})\b|(?:${CONT("autologin")}|${CONT("guestAccount")}|${CONT("afpGuestAccess")}|${CONT("smbGuestAccess")}|${CONT("automaticTime")}|${CONT("use12HourClockForLoginWindow")}|${CONT("screenLock")})["']?\s+(?!status\b|"status"|'status'))`,
+      String.raw`${MAC_CMD("sysadminctl", true)}${ARG_SPAN}-(?:\\\x01)*(?:(?:${ESC("addUser")}|${ESC("deleteUser")}|${ESC("newPassword")}|${ESC("resetPasswordFor")}|${ESC("secureTokenOn")}|${ESC("secureTokenOff")})\b|(?:${ESC("autologin")}|${ESC("guestAccount")}|${ESC("afpGuestAccess")}|${ESC("smbGuestAccess")}|${ESC("automaticTime")}|${ESC("use12HourClockForLoginWindow")}|${ESC("screenLock")})["']?\s+(?!status\b|"status"|'status'))`,
       "im"
     ),
     "不动用户、账户与共享",
@@ -1700,7 +1708,7 @@ const RULES = [
   // 选项大小写敏感（带值的 -P 不能当无参的 -p），这条不用 i 旗标；命令名按 macOS 文件系统惯例大小写不敏感
   [
     new RegExp(
-      String.raw`${MAC_CMD("[dD][sS][cC][lL]")}(?!${INLINE_SPACE}+(?:(?:${REDIR}|-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&<>]+)${INLINE_SPACE}+)*(?:[^\s"';|&<>-][^\s"';|&<>]*(?:${INLINE_SPACE}+${REDIR})*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
+      String.raw`${MAC_CMD("dscl", true)}(?!${INLINE_SPACE}+(?:(?:${REDIR}|-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&<>]+)${INLINE_SPACE}+)*(?:[^\s"';|&<>-][^\s"';|&<>]*(?:${INLINE_SPACE}+${REDIR})*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
       "m"
     ),
     "不动用户、账户与共享",

@@ -1448,12 +1448,6 @@ const TABLE = [
     // 分组/命令替换里的裸 dscl 仍进交互模式
     "(dscl)",
     "$(dscl)",
-    // 反斜杠续行两侧拼成同一参数，写选项不能被换行拆开
-    "socketfilterfw --\\\nsetg on",
-    "socketfilterfw -\\\n-setg on",
-    "sysadminctl -add\\\nUser x",
-    "sysadminctl -\\\naddUser x",
-    "sysadminctl -auto\\\nlogin off",
     '"/usr/sbin/sysadminctl" -addUser x',
     // fd 复制与 &> 里的 & 不是命令分隔符
     "socketfilterfw 2>&1 --setglobalstate on",
@@ -1465,6 +1459,18 @@ const TABLE = [
     "sysadminctl>o -addUser x",
     "sysadminctl>o -screenLock off"
   ].map(command => [command, "x", "x", "x", "o"]),
+  // POSIX 的 \<换行> 与 \x 转义：两侧拼成同一参数/程序名，写选项与 dscl 都不能靠换行拆开。
+  // PowerShell 没有这种续行，win32 下这些串本是别的命令，断言只挂 darwin；
+  // 双引号内的续行占位两平台同一标记，照样拦
+  ["socketfilterfw --\\\nsetg on", "o", "o", "o", "o", { darwin: "xxxo" }],
+  ["socketfilterfw -\\\n-setg on", "o", "o", "o", "o", { darwin: "xxxo" }],
+  ["sysadminctl -add\\\nUser x", "o", "o", "o", "o", { darwin: "xxxo" }],
+  ["sysadminctl -\\\naddUser x", "o", "o", "o", "o", { darwin: "xxxo" }],
+  ["sysadminctl -auto\\\nlogin off", "o", "o", "o", "o", { darwin: "xxxo" }],
+  ["ds\\\ncl . -create /x", "o", "o", "o", "o", { darwin: "xxxo" }],
+  ["d\\\nscl . -create /x", "o", "o", "o", "o", { darwin: "xxxo" }],
+  ['"ds\\\ncl" . -create /x', "x", "x", "x", "o"],
+  ["dscl\\\n . -create /x", "o", "o", "o", "o", { darwin: "xxxo" }],
   // 空目标重定向：-read 是 > 的目标，dscl 实际收到 /x 仍进交互模式
   ["dscl > -read /x", "x", "x", "x", "o"],
   ["dscl > -read", "x", "x", "x", "o"],
