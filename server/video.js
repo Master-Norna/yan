@@ -63,7 +63,8 @@ module.exports = function createVideo({ cacheHome, ffmpeg }) {
       const stat = fs.statSync(file),
         key = crypto
           .createHash("sha1")
-          .update(`${path.resolve(file).toLowerCase()}|${stat.size}|${stat.mtimeMs}`)
+          // 大小写可能区分两件原件；不能把不同文件并到同一份换壳结果里。
+          .update(`${path.resolve(file)}|${stat.size}|${stat.mtimeMs}`)
           .digest("hex")
           .slice(0, 20),
         out = path.join(cacheHome(), `${key}.mp4`);
