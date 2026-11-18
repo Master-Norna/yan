@@ -1175,6 +1175,8 @@ const TABLE = [
     '"dscl" . -read /x',
     '"/usr/sbin/dscl" . -read /x',
     "/usr/sbin/dscl . -read /x",
+    "DSCL . -read /x",
+    "dscl >|x . -read",
     "dscl 2>&1 . -read /x",
     "socketfilterfw --getg 2>&1 --listapps",
     // dscl 的段界在 ; 前止步：下一条命令的参数不误当 dscl 的动词
@@ -1432,6 +1434,13 @@ const TABLE = [
     '"/usr/sbin/dscl" . -create /x',
     "/usr/sbin/dscl",
     "/usr/sbin/dscl . -create /x",
+    // macOS 文件系统大小写不敏感，DSCL 是同一个程序
+    '"DSCL"',
+    "DSCL . -create /x",
+    '"/usr/bin/DSCL"',
+    // 强制覆盖重定向 >| 仍是重定向
+    "socketfilterfw >|out --setglobalstate on",
+    "sysadminctl >|o -addUser x",
     '"/usr/sbin/sysadminctl" -addUser x',
     // fd 复制与 &> 里的 & 不是命令分隔符
     "socketfilterfw 2>&1 --setglobalstate on",

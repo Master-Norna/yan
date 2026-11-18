@@ -1621,10 +1621,10 @@ const MAC_CMD = (/** @type {string} */ names) =>
   String.raw`${CMD}(?:(?<=["'])(?:[^"'\n]*\/)?${names}["']|(?:[^\s"';|&<>]*\/)?${names})(?=[\s;}&|<>]|$)`;
 // 参数段扫描：& 只在 fd 复制（2>&1、>&）与 &> 里跨过，其余 & 仍是分句符；
 // 三个分支按位置互斥（类里不含 &，& 的两个变体看前后文），不会指数回溯
-const ARG_SPAN = String.raw`(?:(?<=[<>])&(?![<>]{1,2})|&(?=[<>]{1,2})|[^;|&\n])*?`;
-// 一条重定向：可带 fd 号，目标必须完整消费——紧贴（>out、2>&1）或隔空白（> out），
+const ARG_SPAN = String.raw`(?:(?<=[<>])&(?![<>]{1,2})|&(?=[<>]{1,2})|>\|?|[^;|&\n>])*?`;
+// 一条重定向：可带 fd 号与强制覆盖的 >|，目标必须完整消费——紧贴（>out、2>&1）或隔空白（> out），
 // 不允许空目标，免得 > -read 把后面的词错当选项；三个目标分支按首字符互斥（&fd / &其他 / 空白）
-const REDIR = String.raw`\d*[<>]{1,2}(?:&[\d-]+|&?(?![\d-])[^\s"';|&<>]+|${INLINE_SPACE}+[^\s"';|&<>]+)`;
+const REDIR = String.raw`\d*[<>]{1,2}\|?(?:&[\d-]+|&?(?![\d-])[^\s"';|&<>]+|${INLINE_SPACE}+[^\s"';|&<>]+)`;
 /** @type {[{ test(text: string): boolean }, string, string][]} */
 const RULES = [
   [
@@ -1690,10 +1690,10 @@ const RULES = [
   // dscl 不带子命令进交互模式，stdin 可灌写命令——白名单按「全局选项 → 数据源 → 子命令位」解析，
   // 查询字样只是选项值的不算查询（数据源位不收 - 开头的词，防把选项当数据源、选项值当动词）；
   // 参数分隔只认行内空白（未续行的换行是下一条命令）；dscl>x / dscl<x 紧贴重定向也算裸调，一并拦；
-  // 选项大小写敏感（带值的 -P 不能当无参的 -p），这条不用 i 旗标
+  // 选项大小写敏感（带值的 -P 不能当无参的 -p），这条不用 i 旗标；命令名按 macOS 文件系统惯例大小写不敏感
   [
     new RegExp(
-      String.raw`${MAC_CMD("dscl")}(?!${INLINE_SPACE}+(?:(?:${REDIR}|-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&<>]+)${INLINE_SPACE}+)*(?:[^\s"';|&<>-][^\s"';|&<>]*(?:${INLINE_SPACE}+${REDIR})*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
+      String.raw`${MAC_CMD("[dD][sS][cC][lL]")}(?!${INLINE_SPACE}+(?:(?:${REDIR}|-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&<>]+)${INLINE_SPACE}+)*(?:[^\s"';|&<>-][^\s"';|&<>]*(?:${INLINE_SPACE}+${REDIR})*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
       "m"
     ),
     "不动用户、账户与共享",
