@@ -2096,10 +2096,21 @@ function argumentsAt(scanned, start, end = scanned.text.length) {
       i++;
       continue;
     }
-    if (";&|()<>{}\n".includes(scanned.syntax[i])) break;
+    if (scanned.syntax[i] === "<" || scanned.syntax[i] === ">") {
+      // 重定向夹在参数之间仍属本次调用（POSIX 允许交错）：
+      // gcc -o >log /etc/x 里 /etc/x 是 -o 的目标，整段跳过继续收词
+      i = redirEnd(scanned, i, end);
+      continue;
+    }
+    if (";&|(){}\n".includes(scanned.syntax[i])) break;
     const from = i;
     for (; i < end && !/[\s;&|()<>{}]/.test(scanned.syntax[i]); i++) {
       if (scanned.quotes.has(i)) i = Math.min(scanned.quotes.get(i), end - 1);
+    }
+    // fd 号紧贴重定向（2>err）整段是重定向：从词首跳过，词本身不算参数
+    if (/^\d+$/.test(text.slice(from, i)) && (scanned.syntax[i] === "<" || scanned.syntax[i] === ">")) {
+      i = redirEnd(scanned, i, end);
+      continue;
     }
     const raw = text.slice(from, i),
       value = /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
