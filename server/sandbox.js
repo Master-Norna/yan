@@ -2124,7 +2124,9 @@ function commandInvocations(scanned) {
         continue;
       }
       if (/[\s;&|()<>{}]/.test(scanned.syntax[at])) {
-        at++;
+        // 重定向整段消费（>| >> << <>、&fd/&词、空白+目标）：目标是文件名不是命令，
+        // 前置重定向后才是真实程序名，目标词也不能被枚举成一次调用
+        at = scanned.syntax[at] === "<" || scanned.syntax[at] === ">" ? redirEnd(scanned, at, range.end) : at + 1;
         continue;
       }
       const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));

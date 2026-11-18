@@ -1466,6 +1466,10 @@ const TABLE = [
     "socketfilterfw &>log --setg on",
     "sysadminctl 2>&1 -addUser x",
     // 重定向紧贴命令名：后面的选项照样传给程序
+    ">out socketfilterfw --setglobalstate on",
+    "> out sysadminctl -addUser x",
+    "2>err socketfilterfw --setg",
+    ">log sudo id",
     "socketfilterfw>log --setglobalstate on",
     "socketfilterfw>x --add /a.app",
     "sysadminctl>o -addUser x",
