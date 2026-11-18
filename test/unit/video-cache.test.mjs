@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +32,11 @@ test("视频换壳：只在同一原件间共用缓存，不混淆大小写不�
   fs.writeFileSync(lowerSource, "source-B");
   const stamp = new Date("2026-01-01T00:00:00Z");
   for (const file of [upper, lowerSource]) fs.utimesSync(file, stamp, stamp);
+  // 上个版本可能已把 Clip 的转换存成 clip 的键；升级后也不能再读到这份旧缓存。
+  const stat = fs.statSync(lower),
+    oldKey = crypto.createHash("sha1").update(`${lower.toLowerCase()}|${stat.size}|${stat.mtimeMs}`).digest("hex").slice(0, 20);
+  fs.mkdirSync(cache);
+  fs.writeFileSync(path.join(cache, `${oldKey}.mp4`), "source-A");
   const get = file => video.playable({ method: "GET" }, file, path.basename(file));
   const a = await get(upper);
   assert.notEqual(a, upper);
