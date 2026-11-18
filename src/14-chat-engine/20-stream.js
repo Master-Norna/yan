@@ -91,8 +91,9 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     };
     await Promise.all([loadLedger(conversation, job.controller.signal), loadIntent(conversation, job.controller.signal)]);
     history = await buildHead();
-    const watch = intentWatch(conversation);
-    // 上一答断着时回来的回报（见 wakeWithReports）：开工即递上，模型续写时就知道帮手怎样了
+    const headLength = history.length,
+      watch = intentWatch(conversation);
+    // 上一答断着时回来的回报开工即递上。它们是本轮新收到的，重装前文时不能被盖掉。
     held = takeHeldReports(conversation, job);
     if (held.length) await deliverSupplements(job, history, budget, assistant);
     // 先把这一答预计的用量记到预留里（提示 + 最大输出），别的对话同时开工时看得见；收尾时换成实际用量
@@ -105,7 +106,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       systemPrompt: systemPrompt(conversation, tools, { memory }),
       tools,
       reasoning: conversation.reasoning || "",
-      head: history.length,
+      head: headLength,
       // 撮要那一步由 keepInWindow 记进行迹（见 60-context.js 的 foldMark），这里只管重画与作业条上的一句
       onFold: busy => {
         setJobLabel(conversation, job, busy ? t("正删繁就简") : "");
@@ -156,7 +157,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     if (!assistant.deliverables.length) delete assistant.deliverables;
   } catch (error) {
     // 一个字没等到就又断了：模型没读到那几份回报，原样还回去等下一答
-    if (!tally.opened) returnHeldReports(conversation, assistant, held);
+    if (!tally.opened) returnHeldReports(conversation, assistant, held, job);
     settleSteps(assistant, error.name === "AbortError" ? "已止" : "已中断");
     if (error.name === "AbortError") assistant.status = "stopped";
     else if (assistant.content || assistant.reasoning || assistant.steps?.length) {

@@ -105,8 +105,9 @@ test("回报另起一答也看退回：相交的目录正退回时等它退完�
   ]);
   f.install(started);
   const report = () => [{ report: "到点", step: { id: "s1" }, relay: { step: "s1", title: "t", ok: true } }];
-  const near = { id: "near", workdir: "E:\\工作\\项目\\子", messages: [] },
-    far = { id: "far", workdir: "E:\\别处", messages: [] };
+  const source = () => [{ id: "a1", role: "assistant", status: "complete", steps: [{ id: "s1" }] }];
+  const near = { id: "near", workdir: "E:\\工作\\项目\\子", messages: source() },
+    far = { id: "far", workdir: "E:\\别处", messages: source() };
   f.store.conversations = [{ id: "A", workdir: "e:/工作/项目", messages: [] }, near, far];
   f.rewinding.add("A");
   await f.wakeWithReports(near, report());

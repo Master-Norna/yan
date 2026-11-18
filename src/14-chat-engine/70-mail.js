@@ -117,6 +117,9 @@ async function wakeWithReports(conversation, items) {
   const live = store.conversations.find(c => c.id === conversation.id);
   if (!live) return;
   conversation = live;
+  // 等认领时也能切版本：逐份重验来源，共用前文里挂的候仍照常递。
+  items = items.filter(item => stepInPath(conversation, item.step));
+  if (!items.length) return;
   // 攒着的这一会儿里有人开了一答（用户发了话、上一答收尾时补言另起了一问）：交给它
   const job = requestJob(conversation.id);
   if (job) return void items.forEach(item => deliverInline(conversation, job, item));
@@ -168,8 +171,11 @@ function takeHeldReports(conversation, job) {
     });
 }
 /** @param {Conversation} conversation @param {Message} host */
-function returnHeldReports(conversation, host, taken) {
+function returnHeldReports(conversation, host, taken, job) {
   if (!taken.length) return;
+  // 若递送途中被止，这几份还在收件口；已还到暂存处的不能在收尾时再寄一遍。
+  const restored = new Set(taken);
+  job.queue = job.queue.filter(item => !restored.has(item));
   const notes = new Set(taken.map(item => item.note?.id));
   host.steps = (host.steps || []).filter(step => !notes.has(step.id));
   if (!host.steps.length) delete host.steps;
