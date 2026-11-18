@@ -1172,6 +1172,7 @@ const TABLE = [
     "dscl -read /x",
     "dscl -u admin -P p . -list /x",
     "dscl . -list /x; dscl . -read /y",
+    '"dscl" . -read /x',
     // dscl 的段界在 ; 前止步：下一条命令的参数不误当 dscl 的动词
     "dscl . -read /x;echo -create",
     "sysadminctl -adminUser root -secureTokenStatus x",
@@ -1416,7 +1417,17 @@ const TABLE = [
     "dscl\nfoo -read /x",
     "dscl>x",
     "dscl>x;echo y",
-    "dscl<in"
+    "dscl<in",
+    // 命令名带引号仍是同一个程序
+    '"dscl"',
+    '"dscl" .',
+    "'dscl'",
+    '"dscl" . -create /x',
+    // 重定向紧贴命令名：后面的选项照样传给程序
+    "socketfilterfw>log --setglobalstate on",
+    "socketfilterfw>x --add /a.app",
+    "sysadminctl>o -addUser x",
+    "sysadminctl>o -screenLock off"
   ].map(command => [command, "x", "x", "x", "o"]),
   [String.raw`env FOO=1 /usr/bin/sudo x`, "x", "x", "x", "o"],
   [String.raw`nohup /bin/launchctl load x`, "x", "x", "x", "o"],

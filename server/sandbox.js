@@ -1614,6 +1614,9 @@ const withoutExeDir = (/** @type {string} */ text, win = process.platform === "w
 const EVERY = "严宽审",
   WIDE = "宽审";
 const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
+// 与 cmd() 同款的命令词（名字两侧引号算同一个程序），但边界把紧贴的重定向也算进去——
+// name>out / name<in 之后 Shell 照样把后面的选项传给程序，不能只认空白与 ; } 结尾
+const MAC_CMD = (/** @type {string} */ names) => String.raw`${CMD}(?:(?<=["'])${names}["']|${names})(?=[\s;}&|<>]|$)`;
 /** @type {[{ test(text: string): boolean }, string, string][]} */
 const RULES = [
   [
@@ -1666,12 +1669,12 @@ const RULES = [
   ],
   // Mac 实测过：socketfilterfw 用 getopt_long，写选项的唯一前缀缩写（--setg、--b、--unbl）同样生效，
   // 于是反过来只放行已知的查询选项（get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
-  [cmd("socketfilterfw", String.raw`[^;|&\n]*?--(?!get|l|h)\w`), "不动网络与防火墙配置", EVERY],
+  [new RegExp(String.raw`${MAC_CMD("socketfilterfw")}[^;|&\n]*?--(?!get|l|h)\w`, "im"), "不动网络与防火墙配置", EVERY],
   // Mac 实测过：账号动词拦（全局选项在前也拦）；带 on|off|status 的几条只拦 status 以外的取值
   [
-    cmd(
-      "sysadminctl",
-      String.raw`[^;|&\n]*?-(?:(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)["']?\s+(?!status\b|"status"|'status'))`
+    new RegExp(
+      String.raw`${MAC_CMD("sysadminctl")}[^;|&\n]*?-(?:(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)["']?\s+(?!status\b|"status"|'status'))`,
+      "im"
     ),
     "不动用户、账户与共享",
     EVERY
@@ -1681,7 +1684,7 @@ const RULES = [
   // 参数分隔只认行内空白（未续行的换行是下一条命令）；dscl>x / dscl<x 紧贴重定向也算裸调，一并拦
   [
     new RegExp(
-      String.raw`${CMD}dscl(?=[\s;}&|<>]|$)(?!${INLINE_SPACE}+(?:(?:-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&]+)${INLINE_SPACE}+)*(?:[^\s"';|&-][^\s"';|&]*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
+      String.raw`${MAC_CMD("dscl")}(?!${INLINE_SPACE}+(?:(?:-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&]+)${INLINE_SPACE}+)*(?:[^\s"';|&-][^\s"';|&]*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
       "im"
     ),
     "不动用户、账户与共享",
