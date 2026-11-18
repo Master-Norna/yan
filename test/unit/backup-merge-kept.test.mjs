@@ -18,6 +18,7 @@ function setup(settled) {
   return load([
     "importData",
     "STORE_VERSION",
+    "pendingChatDeletes",
     `setup: data => {
       store = {
         conversations: [],
@@ -58,4 +59,14 @@ test("附件写不成、配置确实落了盘：这才说「留着了」", async
   await f.importData({ size: 10 });
   assert.match(String(f.said()), /已并入的部分留着了/);
   assert.doesNotMatch(String(f.said()), /留在本页了/);
+});
+
+test("在等删除裁定的同 ID 对话不计入本轮导入", async () => {
+  const f = setup("true"),
+    data = { ...backup(f.STORE_VERSION), attachments: [] };
+  f.setup(data);
+  f.pendingChatDeletes.set("c1", Date.now());
+  await f.importData({ size: 10 });
+  assert.deepEqual(f.current().conversations, []);
+  assert.match(String(f.said()), /已导入 0 段对话.*1 段对话尚在等删除确认，未导入/);
 });

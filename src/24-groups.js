@@ -178,7 +178,7 @@ async function removeWorkdirGroup(dir) {
     render();
     return toast(t("这一组已没有对话"));
   }
-  for (const c of removing) purgeConversation(c);
+  void deleteStoredConversations(removing.map(detachConversation));
   // 组散尽了，自起的名字也就没处可挂；还有对话绑着就留着
   if (!store.conversations.some(c => isWork(c) && c.workdir === dir)) delete (store.settings.workdirNames || {})[dir];
   saveStore();

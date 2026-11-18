@@ -4,7 +4,7 @@ const CHAT_DISK_INTERVAL = 1200, // 静止时同一段对话连续落盘的最�
   CHAT_STREAM_DISK_INTERVAL = 3000; // 流式生成时少改几遍整份 JSON；收尾会恢复上面的短间隔
 // 对话的存取状态：目录是否可用、正在合、指纹与时间戳、待写与在写、没删成的（见 01-store/10-state-db.js 开头的说明）
 let chatsBroken = false,
-  chatsSyncing = false,
+  chatsSyncing = null,
   // 这一回开页后对话已从目录读全过：之后才敢按「没人用」清附件原件
   chatsLoaded = false,
   // 目录里有对话文件读不出（坏了、被同步盘或杀软占着）：它引用的附件不在留用单上，这时不清原件
@@ -28,7 +28,10 @@ const dirtyChatIds = new Set(),
   chatDiskWrites = new Map(),
   // 待补删的对话：id → 删它的时刻。断着的时候删的，接上后要带着那一刻去补删——
   // 桥接按这个时刻落墓碑，断的这段里别处写过、保存过的那份才不会被补删一并抹掉（见 server/chats.js 的 handleDelete）
-  pendingChatDeletes = new Map();
+  pendingChatDeletes = new Map(),
+  pendingChatDeleteDirs = new Map(),
+  // 磁盘已裁定；只等浏览器事务提交，不再补删磁盘。关页前清不成，重开也不读回旧暂存。
+  discardedChatSpills = new Map();
 let saveTimer = null;
 // 对话目录可用：桥接报了目录、上次读它没出错
 function chatsOnline() {
@@ -36,6 +39,62 @@ function chatsOnline() {
 }
 function chatsDir() {
   return bootstrap.work?.chats || "";
+}
+function chatDeletePending(id) {
+  const dir = pendingChatDeleteDirs.get(id);
+  return pendingChatDeletes.has(id) && (!dir || dir === chatsDir());
+}
+const CHAT_DELETE_KEY = "yan-chat-delete:";
+function hasChatDeleteMarker(id) {
+  try {
+    return !!localStorage.getItem(CHAT_DELETE_KEY + id);
+  } catch {
+    return false;
+  }
+}
+function saveChatDeleteMarker(id) {
+  const key = CHAT_DELETE_KEY + id;
+  try {
+    if (pendingChatDeletes.has(id))
+      localStorage.setItem(key, JSON.stringify({ at: pendingChatDeletes.get(id), dir: pendingChatDeleteDirs.get(id) }));
+    else if (discardedChatSpills.has(id)) localStorage.setItem(key, JSON.stringify(discardedChatSpills.get(id)));
+    else localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+// 每段单记，另一页保存设置不会把这页的标记盖掉。
+function readChatDeleteMarkers(legacy) {
+  for (const item of legacy) {
+    const [id, at] = Array.isArray(item) ? item : [item, 0];
+    if (id) {
+      const key = String(id);
+      pendingChatDeletes.set(key, Number(at) || 0);
+      if (!hasChatDeleteMarker(key)) saveChatDeleteMarker(key);
+    }
+  }
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(CHAT_DELETE_KEY)) continue;
+      const id = key.slice(CHAT_DELETE_KEY.length);
+      try {
+        const marker = JSON.parse(localStorage.getItem(key));
+        if (Number.isFinite(marker?.through) && marker.through > 0) {
+          discardedChatSpills.set(id, marker);
+          pendingChatDeletes.delete(id);
+        } else if (Number.isFinite(marker?.at)) {
+          pendingChatDeletes.set(id, marker.at);
+          if (marker.dir) pendingChatDeleteDirs.set(id, marker.dir);
+        }
+      } catch {}
+    }
+  } catch {}
+}
+function setChatDeleteDir(id, dir) {
+  pendingChatDeleteDirs.set(id, dir);
+  saveChatDeleteMarker(id);
 }
 // 标记这段对话有改动（改名、置顶、后台一答收尾这些不在「当前对话」上的改动要亲手标；当前这段与正在生成的自动算在内）
 function markDirty(id) {
@@ -69,7 +128,7 @@ function nextChatStamp(id) {
 function flushConversations(ids, { force = false } = {}) {
   for (const id of ids) {
     // 别处正作答的不写：磁盘上那份由它写，这边只跟着看
-    if (deletedChatIds.has(id) || runningElsewhere(id) || !store.conversations.some(item => item.id === id)) continue;
+    if (chatDeletePending(id) || runningElsewhere(id) || !store.conversations.some(item => item.id === id)) continue;
     const queued = pendingChatWrites.get(id);
     pendingChatWrites.set(id, { force: force || !!queued?.force });
   }
@@ -77,21 +136,21 @@ function flushConversations(ids, { force = false } = {}) {
 }
 function drainChatWrites() {
   for (const id of pendingChatWrites.keys()) {
-    if (deletedChatIds.has(id) || chatWritePromises.has(id)) continue;
+    if (chatDeletePending(id) || chatWritePromises.has(id)) continue;
     const task = writeConversation(id).finally(() => {
       if (chatWritePromises.get(id) === task) chatWritePromises.delete(id);
-      if (pendingChatWrites.has(id) && !deletedChatIds.has(id)) drainChatWrites();
+      if (pendingChatWrites.has(id) && !chatDeletePending(id)) drainChatWrites();
     });
     chatWritePromises.set(id, task);
   }
 }
 async function writeConversation(id) {
-  while (pendingChatWrites.has(id) && !deletedChatIds.has(id)) {
+  while (pendingChatWrites.has(id) && !chatDeletePending(id)) {
     // 先等、后 stringify。生成中三秒一份，收尾与普通编辑最多等一秒多；离页另有同步入 IndexedDB 的兜底，不靠这里抢时间。
     const interval = busyHere(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
       wait = unloading ? 0 : interval - (performance.now() - (chatDiskWrites.get(id) || -interval));
     if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
-    if (deletedChatIds.has(id)) break;
+    if (chatDeletePending(id)) break;
     const queued = pendingChatWrites.get(id);
     pendingChatWrites.delete(id);
     let conversation = store.conversations.find(item => item.id === id);
@@ -99,14 +158,14 @@ async function writeConversation(id) {
     await coldify(conversation);
     // 另存的那一会儿里可能被删、被并进来的新份换掉
     conversation = store.conversations.find(item => item.id === id);
-    if (!conversation || deletedChatIds.has(id)) continue;
+    if (!conversation || chatDeletePending(id)) continue;
     const json = chatJson(conversation),
       hash = hashText(json);
     if (!queued?.force && chatHashes.get(id) === hash) {
       if (!pendingChatWrites.has(id)) dirtyChatIds.delete(id);
       continue;
     }
-    const pending = { json, hash, savedAt: nextChatStamp(id), title: conversation.title };
+    const pending = { json, hash, savedAt: nextChatStamp(id), title: conversation.title, dir: chatsDir() };
     activeChatWrites.set(id, pending);
     chatDiskWrites.set(id, performance.now());
     // 目录在线：先落盘；写成了表里的暂存就没用了。落盘不成（桥接刚停了）就暂存进表里，接上后再推
@@ -116,13 +175,13 @@ async function writeConversation(id) {
       try {
         await bridgeJson(
           "/api/chats/save",
-          `{"root":${JSON.stringify(chatsDir())},"savedAt":${pending.savedAt},"base":${chatDiskStamps.get(id) || 0},"conversation":${pending.json}}`,
+          `{"root":${JSON.stringify(pending.dir)},"savedAt":${pending.savedAt},"base":${chatDiskStamps.get(id) || 0},"conversation":${pending.json}}`,
           AbortSignal.timeout(60000)
         );
         chatDiskStamps.set(id, pending.savedAt);
         chatBases.set(id, pending.json);
         chatSaveWarned = false;
-        if (!deletedChatIds.has(id)) {
+        if (!chatDeletePending(id)) {
           persisted = true;
           // pagehide 已把最新状态写进表时，旧的在途请求即使成功也不能把那份离页兜底删掉。
           if (!unloading && !pendingChatWrites.has(id))
@@ -130,7 +189,7 @@ async function writeConversation(id) {
         }
       } catch (error) {
         // 目录里那份比这边上次见过的新（别处写过）：两份并起来，下一轮带着新的时间戳再写
-        if (error.status === 409 && error.data?.item && !deletedChatIds.has(id)) {
+        if (error.status === 409 && error.data?.item && !chatDeletePending(id)) {
           activeChatWrites.delete(id);
           catchUpConversation(error.data.item);
           continue;
@@ -152,10 +211,10 @@ async function writeConversation(id) {
           toast(t`对话未能落盘，先暂存在浏览器里：${String(error.message || error).slice(0, 60)}`);
         }
       }
-    if (spilled && !deletedChatIds.has(id))
+    if (spilled && !chatDeletePending(id))
       try {
         await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db =>
-          db.put({ id, savedAt: pending.savedAt, json: pending.json, baseJson: chatBases.get(id) })
+          db.put({ id, savedAt: pending.savedAt, json: pending.json, baseJson: chatBases.get(id), dir: pending.dir })
         );
         persisted = true;
         if (!chatsOnline()) chatSaveWarned = false;
@@ -167,47 +226,152 @@ async function writeConversation(id) {
       }
     if (activeChatWrites.get(id) === pending) activeChatWrites.delete(id);
     // 桥接在线却没写进盘（文件被占着之类）：浏览器里暂存着，但脏标记留着，下回保存再往盘上写
-    if (persisted && !deletedChatIds.has(id) && !(spilled && chatsOnline())) {
+    if (persisted && !chatDeletePending(id) && !(spilled && chatsOnline())) {
       chatHashes.set(id, hash);
       if (!pendingChatWrites.has(id)) dirtyChatIds.delete(id);
     }
   }
 }
-// 删一段：先立墓碑并等已经发出的保存收尾，再删文件，保证「旧保存」绝不可能排在删除之后把它复活。
-// 墓碑先写进配置；哪怕这时桥接已断，下次接上也会先补删，不会从目录把它捡回来。
+// 磁盘与本机暂存分别收尾。删暂存只动这一回之前的旧份；另一页后来存的不能连带清掉。
+async function clearDiscardedChatSpills() {
+  const work = bootstrap.work,
+    dir = chatsDir(),
+    discarded = [...discardedChatSpills].filter(([, marker]) => !marker.dir || marker.dir === dir),
+    newer = [],
+    unresolved = new Set();
+  if (!discarded.length) return true;
+  try {
+    await dbBatch(await openStateDb(), CHATS_STORE_NAME, table => {
+      for (const [id, marker] of discarded) {
+        const request = table.get(id);
+        request.onsuccess = () => {
+          const row = request.result;
+          if (!row || (row.dir && row.dir !== dir)) return;
+          if ((Number(row.savedAt) || 0) <= marker.through) table.delete(id);
+          else newer.push(row);
+        };
+      }
+    });
+    if (bootstrap.work !== work) return false;
+    let complete = true;
+    for (const row of newer) {
+      const current = store.conversations.find(c => c.id === row.id);
+      // 可能已经在读浏览器暂存的同时开工；不能用旧对象覆盖，留给重开读回。
+      if (!current || chatDeletePending(row.id) || busyHere(row.id)) {
+        unresolved.add(row.id);
+        complete = false;
+        continue;
+      }
+      try {
+        const saved = normalizeConversation(JSON.parse(row.json)),
+          base = row.baseJson ? JSON.parse(row.baseJson) : null,
+          currentJson = chatJson(current),
+          clean = chatHashes.get(row.id) === hashText(currentJson),
+          merged = clean && base ? mergeConversation(saved, current, base) : mergeConversation(current, saved, base);
+        if (currentJson === chatJson(merged)) continue;
+        carryWarm(current, merged);
+        store.conversations[store.conversations.indexOf(current)] = merged;
+        chatStamps.set(row.id, Math.max(chatStamps.get(row.id) || 0, Number(row.savedAt) || 0));
+        markDirty(row.id);
+        flushConversations([row.id]);
+        renderHistory();
+        if (currentId === row.id && view === "chat") renderConversation(false);
+      } catch {
+        unresolved.add(row.id);
+        complete = false;
+      }
+    }
+    for (const [id, marker] of discarded) {
+      if (discardedChatSpills.get(id) !== marker || unresolved.has(id)) continue;
+      discardedChatSpills.delete(id);
+      // 别页可能已对同一段发起新删除；只撤自己写下的这一份。
+      const key = CHAT_DELETE_KEY + id;
+      try {
+        if (localStorage.getItem(key) === JSON.stringify(marker)) localStorage.removeItem(key);
+      } catch {}
+    }
+    return complete;
+  } catch {
+    // 事务没提交，保留记号；不能因此挡住磁盘上的对话，但也不能假定浏览器里没有新版引用。
+    return false;
+  }
+}
+function deleteConfirmed(answer) {
+  return Number.isSafeInteger(answer?.removed) && answer.removed >= 0 && (answer.kept === undefined || answer.kept === true);
+}
+function settleChatDelete(id, at) {
+  pendingChatDeletes.delete(id);
+  pendingChatDeleteDirs.delete(id);
+  discardedChatSpills.set(id, { through: at || Date.now(), dir: chatsDir() });
+  saveChatDeleteMarker(id);
+}
+// 删一段：先记下删除时刻并等已经发出的保存收尾，再删文件，保证「旧保存」不会排在删除之后把它复活。
+// 先记入浏览器配置：哪怕这时断了或关闭页面，下次也不会捡回旧暂存。
 async function deleteConversationStorage(id) {
+  const at = Date.now(),
+    root = chatsDir(),
+    scope = bootstrap.store;
   deletedChatIds.add(id);
-  pendingChatDeletes.set(id, Date.now());
+  pendingChatDeletes.set(id, at);
+  setChatDeleteDir(id, root);
   pendingChatWrites.delete(id);
   dirtyChatIds.delete(id);
   writeMeta();
+  let kept = false;
   try {
     await chatWritePromises.get(id)?.catch(() => {});
-    pendingChatWrites.delete(id);
-    activeChatWrites.delete(id);
-    await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
-    if (!chatsOnline()) return;
-    try {
-      await bridge("/api/chats/delete", { root: chatsDir(), id }, AbortSignal.timeout(20000));
-      pendingChatDeletes.delete(id);
-      writeMeta();
-    } catch {}
+    if (bootstrap.store !== scope || chatsDir() !== root || !chatsOnline()) return;
+    const answer = await bridge("/api/chats/delete", { root, id, at }, AbortSignal.timeout(20000));
+    if (bootstrap.store !== scope || chatsDir() !== root || pendingChatDeletes.get(id) !== at) return;
+    if (!deleteConfirmed(answer)) return;
+    kept = answer.kept === true;
+    if (!kept) {
+      settleChatDelete(id, at);
+      writeMeta({ disk: false });
+      return true;
+    }
+  } catch {
+    // 没收到明确裁定，重连后补删。
   } finally {
-    chatHashes.delete(id);
-    chatStamps.delete(id);
-    chatDiskStamps.delete(id);
-    chatBases.delete(id);
+    if (bootstrap.store === scope && chatsDir() === root) {
+      clearChatSaveState(id);
+      activeChatWrites.delete(id);
+    }
     deletedChatIds.delete(id);
   }
+  if (kept) await syncChatsWithDisk();
 }
-// 别处删掉的一段：这边只从内存与暂存表里拿掉，目录那头已经删过了（附件原件那边也删过了）
-function forgetConversation(id) {
+function hasPendingChatDeletes() {
+  for (const id of pendingChatDeletes.keys()) if (chatDeletePending(id)) return true;
+  return false;
+}
+function hasDiscardedChatSpills() {
+  return [...discardedChatSpills.values()].some(marker => !marker.dir || marker.dir === chatsDir());
+}
+// 只有对话确认删成、引用单也齐全，才立即清该段的附件。保留或未知时交给对齐后的清扫。
+async function deleteStoredConversations(entries) {
+  const work = bootstrap.work;
+  const files = await Promise.all(
+    entries.map(async ([id, ids, afterDelete]) => {
+      if (!(await deleteConversationStorage(id))) return [];
+      if (bootstrap.work === work) void afterDelete?.();
+      return ids;
+    })
+  );
+  if (bootstrap.work !== work) return;
+  if ((await clearDiscardedChatSpills()) && bootstrap.work === work && canCleanAttachments()) await deleteAttachments(files.flat());
+}
+function clearChatSaveState(id) {
   pendingChatWrites.delete(id);
   dirtyChatIds.delete(id);
   chatHashes.delete(id);
   chatStamps.delete(id);
   chatDiskStamps.delete(id);
   chatBases.delete(id);
+}
+// 别处删掉的一段：这边只从内存与暂存表里拿掉，目录那头已经删过了（附件原件那边也删过了）
+function forgetConversation(id) {
+  clearChatSaveState(id);
   delete store.drafts?.[id];
   void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
 }
@@ -317,7 +481,7 @@ async function catchUpFromDisk(ids) {
   try {
     const data = await bridge("/api/chats/load", chatLoadQuery(chatsDir(), ids), AbortSignal.timeout(8000));
     for (const item of data.items || [])
-      if (item.savedAt > (chatDiskStamps.get(item.id) || 0) && !runningElsewhere(item.id) && !deletedChatIds.has(item.id))
+      if (item.savedAt > (chatDiskStamps.get(item.id) || 0) && !runningElsewhere(item.id) && !chatDeletePending(item.id))
         catchUpConversation(item);
     drainChatWrites();
   } catch {}
@@ -349,12 +513,18 @@ function flushOnUnload() {
   if (!db) return;
   const records = [];
   for (const conversation of store.conversations) {
-    if (deletedChatIds.has(conversation.id)) continue;
+    if (chatDeletePending(conversation.id)) continue;
     const json = chatJson(conversation),
       hash = hashText(json);
     if (!pendingChatWrites.has(conversation.id) && !activeChatWrites.has(conversation.id) && chatHashes.get(conversation.id) === hash)
       continue;
-    records.push({ id: conversation.id, savedAt: nextChatStamp(conversation.id), json, baseJson: chatBases.get(conversation.id) });
+    records.push({
+      id: conversation.id,
+      savedAt: nextChatStamp(conversation.id),
+      json,
+      baseJson: chatBases.get(conversation.id),
+      dir: chatsDir()
+    });
   }
   if (!records.length) return;
   try {
@@ -390,11 +560,9 @@ async function hydrateStore() {
   const local = readLocalStoreRecord();
   freshBrowser = !local;
   localSeeded = !!local && !local.managed;
-  // 旧版存的是纯 id 的名单（没有时刻）：按「不知道」补齐，补删时桥接退回按此刻落墓碑
-  for (const item of local?.pendingDeletes || []) {
-    const [id, at] = Array.isArray(item) ? item : [item, 0];
-    if (id) pendingChatDeletes.set(String(id), Number(at) || 0);
-  }
+  // 老记录有纯 id 的，也有 [id, 删除时刻]；第一次接到目录时补记它的来源。
+  readChatDeleteMarkers(local?.pendingDeletes || []);
+  store.conversations = store.conversations.filter(c => !chatDeletePending(c.id));
   // 开页时的配置就是 localStorage 里那份：记下指纹，没改动时不去写 配置.json
   metaHash = hashText(JSON.stringify(metaOf()));
   let db = null;
@@ -425,6 +593,7 @@ async function hydrateStore() {
       try {
         await dbBatch(db, CHATS_STORE_NAME, s => {
           s.clear();
+          store.conversations = store.conversations.filter(c => !chatDeletePending(c.id));
           for (const c of store.conversations) {
             const json = chatJson(c);
             chatStamps.set(c.id, stamp);
@@ -444,6 +613,13 @@ async function hydrateStore() {
     } catch {}
     const known = new Set(store.conversations.map(c => c.id));
     for (const record of records) {
+      const marker = discardedChatSpills.get(record.id);
+      if (
+        (record.dir && chatsDir() && record.dir !== chatsDir()) ||
+        chatDeletePending(record.id) ||
+        (marker && (!marker.dir || marker.dir === chatsDir()) && (Number(record.savedAt) || 0) <= marker.through)
+      )
+        continue;
       const c = adoptRecord(record);
       if (c && !known.has(c.id)) store.conversations.push(c);
     }
@@ -462,37 +638,63 @@ function resyncWithDisk() {
 // 与对话目录合一次：开页接上桥接时、桥接中途断了又接上时都来一遍。
 // 目录里没有的推过去，目录里更新的换进来（正在生成的、改了还没存的不换），两边一样的把表里的暂存清掉；先前没删成的补删
 async function syncChatsWithDisk() {
-  if (!chatsDir() || chatsSyncing) return;
-  chatsSyncing = true;
+  const root = chatsDir(),
+    scope = bootstrap.store,
+    work = bootstrap.work;
+  if (!root || chatsSyncing === work) return;
+  chatsSyncing = work;
+  const sameRoot = () => bootstrap.store === scope && bootstrap.work === work && chatsDir() === root;
   try {
-    const data = await bridge("/api/chats/load", { root: chatsDir() }, AbortSignal.timeout(120000));
+    const data = await bridge("/api/chats/load", { root }, AbortSignal.timeout(120000));
+    if (!sameRoot()) return;
+    if (!Array.isArray(data?.items)) throw Error("对话目录未读全");
+    // 快照是补删前的。名单上的段只认补删裁定；保留的也要重读，因为新版可能是在取快照之后才写成的。
+    const deleting = new Map([...pendingChatDeletes].filter(([id]) => chatDeletePending(id))),
+      decisions = new Map();
+    for (const [id, at] of deleting) {
+      if (!pendingChatDeleteDirs.get(id)) setChatDeleteDir(id, root);
+      // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删。
+      if (deletedChatIds.has(id)) continue;
+      try {
+        const answer = await bridge("/api/chats/delete", { root, id, at: at || undefined }, AbortSignal.timeout(20000));
+        if (!sameRoot()) return;
+        if (!deleteConfirmed(answer)) continue;
+        if (!answer.kept) {
+          decisions.set(id, null);
+          continue;
+        }
+        const fresh = await bridge("/api/chats/load", { root, ids: [id] }, AbortSignal.timeout(20000));
+        if (!sameRoot()) return;
+        const item =
+          Array.isArray(fresh?.items) && fresh.items.find(item => item?.id === id && item.conversation?.id === id && item.savedAt > at);
+        if (item && !fresh.skipped) decisions.set(id, item);
+      } catch {
+        if (!sameRoot()) return;
+      }
+    }
     chatsBroken = false;
     chatsLoaded = true;
     chatsSkipped = Number(data.skipped) || 0;
-    // 这一轮要补删的：data 是补删之前取的快照，过滤它得用补删前的名单——删成功的已从 pendingChatDeletes 里拿掉了，
-    // 若照改小之后的集合过滤，刚删掉的那份会从旧快照里漏过去，又被当成「目录里多出来的」捡回来
-    const deleting = new Set(pendingChatDeletes.keys());
-    for (const id of deleting) {
-      // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删；这里抢先删会留下 save-after-delete 的窗口。
-      if (deletedChatIds.has(id)) continue;
-      try {
-        const answer = await bridge(
-          "/api/chats/delete",
-          { root: chatsDir(), id, at: pendingChatDeletes.get(id) || undefined },
-          AbortSignal.timeout(20000)
-        );
-        pendingChatDeletes.delete(id);
-        // 断着时删的那段，接上后发现别处在这段里写过更晚的一份：桥接按「删了以后又存，删除作废」留着没删
-        // （见 server/chats.js 的 handleDelete）。不说一声的话，用户以为删掉了，下一轮同步它又回来
-        if (answer?.kept) toast(t`这段在别处又有新的，没删`);
-      } catch {}
-    }
     const disk = new Map();
-    for (const item of data.items || []) if (item?.id && !deleting.has(item.id)) disk.set(item.id, item);
+    for (const item of data.items) if (item?.id && !deleting.has(item.id) && !chatDeletePending(item.id)) disk.set(item.id, item);
+    // 隔开本页旧暂存和磁盘裁定：即便本机暂存库坏了，也能当场恢复桥接明确保留的那份。
+    const before = store.conversations.length;
+    store.conversations = store.conversations.filter(c => !deleting.has(c.id) && !chatDeletePending(c.id));
+    for (const id of deleting.keys()) {
+      if (deletedChatIds.has(id)) continue;
+      clearChatSaveState(id);
+      if (pendingChatDeletes.get(id) !== deleting.get(id) || !decisions.has(id)) continue;
+      const item = decisions.get(id);
+      settleChatDelete(id, deleting.get(id));
+      if (item) {
+        disk.set(id, item);
+        toast(t`这段在别处又有新的，没删`);
+      }
+    }
     const push = new Set(),
       settled = new Set(),
       gone = data.deleted && typeof data.deleted === "object" ? data.deleted : {};
-    let changed = false,
+    let changed = store.conversations.length !== before,
       currentReplaced = false,
       dropped = 0;
     store.conversations = store.conversations
@@ -545,10 +747,25 @@ async function syncChatsWithDisk() {
         chatBases.set(c.id, json);
         chatHashes.set(c.id, hashText(json));
         store.conversations.push(c);
-        settled.add(c.id);
+        if (!discardedChatSpills.has(c.id)) settled.add(c.id);
         changed = true;
+        if (c.id === currentId) currentReplaced = true;
       }
-    for (const id of settled) void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+    for (const id of settled)
+      if (!discardedChatSpills.has(id)) {
+        const written = chatBases.get(id);
+        // 「页面和磁盘一致」不表示别页刚写进浏览器的暂存也一致。
+        void openStateDb()
+          .then(db =>
+            dbBatch(db, CHATS_STORE_NAME, table => {
+              const request = table.get(id);
+              request.onsuccess = () => {
+                if (request.result?.json === written && (!request.result.dir || request.result.dir === root)) table.delete(id);
+              };
+            })
+          )
+          .catch(() => {});
+      }
     if (push.size) flushConversations(push, { force: true });
     writeMeta({ disk: false });
     if (changed) {
@@ -560,13 +777,14 @@ async function syncChatsWithDisk() {
         render();
       }
     }
-    // 对话读全了：浏览器里暂存的附件原件推进目录，没人用的清掉
-    void settleAttachmentStore();
+    // 显示磁盘正版不等 IndexedDB；清扫则等这批可能有新引用的暂存查完。
+    void settleAttachmentStore(clearDiscardedChatSpills());
   } catch (error) {
+    if (!sameRoot()) return;
     // 巡检里重试也没读成的不再说一遍
     if (!chatsBroken) toast(t`对话目录不可用，先存在浏览器里：${String(error.message || error).slice(0, 60)}`);
     chatsBroken = true;
   } finally {
-    chatsSyncing = false;
+    if (chatsSyncing === work) chatsSyncing = null;
   }
 }

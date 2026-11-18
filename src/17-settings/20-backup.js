@@ -140,9 +140,14 @@ async function importData(file) {
     let conversations = 0,
       added = 0,
       drafts = 0,
-      files = 0;
+      files = 0,
+      deleting = 0;
     for (const c of incoming.conversations)
       if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) {
+        if (chatDeletePending(c.id)) {
+          deleting += 1;
+          continue;
+        }
         store.conversations.push(c);
         markDirty(c.id);
         conversations += 1;
@@ -203,8 +208,9 @@ async function importData(file) {
     render();
     renderSettings();
     const summary = t`已导入 ${conversations} 段对话、${added} 个模型${groups ? t`、${groups} 个分组` : ""}${presets ? t`、${presets} 个预设` : ""}${servers ? t`、${servers} 个 MCP 服务（密钥需重填）` : ""}${drafts ? t`、${drafts} 份草稿` : ""}${memories ? t`、${memories} 类记忆` : ""}${files ? t`，恢复 ${files} 件附件原件` : ""}${data.attachments ? "" : t("；备份不含附件原件，旧附件将显示为不可用")}`;
+    const report = summary + (deleting ? t`；${deleting} 段对话尚在等删除确认，未导入` : "");
     // 备份本身就断了：不能拿完整导入的提示盖过去，要说清只恢复了读到时的那一截
-    toast(incomplete ? t`备份文件不完整，只恢复了能读到的部分：${summary}` : summary, incomplete ? 8000 : undefined);
+    toast(incomplete ? t`备份文件不完整，只恢复了能读到的部分：${report}` : report, incomplete ? 8000 : undefined);
   } catch (error) {
     const why = String(error.message || error).slice(0, 80);
     // 并入到一半出的错（附件读坏、配额满）：内存里并进去的那一截留着，脏标记本来也会把它们写进目录。

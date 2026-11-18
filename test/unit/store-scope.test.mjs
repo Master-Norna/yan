@@ -10,7 +10,8 @@ import { load } from "./harness.mjs";
 
 const require = createRequire(import.meta.url),
   createStore = require("../../server/store.js"),
-  createTimers = require("../../server/timers.js");
+  createTimers = require("../../server/timers.js"),
+  createFiles = require("../../server/files.js");
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => {
@@ -79,7 +80,8 @@ async function fixture(run) {
   timers = createTimers({ home: () => path.join(store.paths().root, "候"), known: () => true, route: store.scopedRoute });
   const incoming = deferred(),
     waitingEntered = deferred();
-  const routes = { ...store.routes, ...timers.routes };
+  const files = createFiles({ filesHome: () => store.paths().files, route: store.scopedRoute });
+  const routes = { ...store.routes, ...timers.routes, ...files.routes };
   const server = http
     .createServer((req, res) => {
       if (req.url === "/api/store/config/save") incoming.resolve();
@@ -207,3 +209,26 @@ for (const result of ["success", "conflict", "failure"])
       f.doc().querySelector = query;
     }
   });
+
+test("旧页的附件清扫与逐件删除都不能写进新根", async () =>
+  fixture(async ({ a, b, store, post }) => {
+    const moved = await post("/api/store/move", { root: a, parent: b });
+    assert.equal(moved.status, 200);
+    assert.equal(store.paths().root, b);
+    const dir = store.paths().files,
+      raw = path.join(dir, "used.txt"),
+      old = (Date.now() - 48 * 3600 * 1000) / 1000;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(raw, "新根附件");
+    fs.utimesSync(raw, old, old);
+    for (const [endpoint, args] of [
+      ["clean", { keep: [] }],
+      ["delete", { ids: ["used"] }]
+    ]) {
+      const response = await post(`/api/files/${endpoint}`, { root: a, ...args });
+      assert.match(response.data.error, /存储位置已变化/);
+      assert.ok(fs.existsSync(raw), `被挡住的 ${endpoint} 不动新根附件`);
+    }
+    assert.equal((await post("/api/files/clean", { root: b, keep: [] })).status, 200);
+    assert.ok(!fs.existsSync(raw), "当前根可以正常清扫");
+  }));

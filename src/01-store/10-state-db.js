@@ -101,15 +101,16 @@ function writeMeta({ disk = true } = {}) {
     metaHash = hash;
     nextMetaRevision();
   }
-  const deletes = [...pendingChatDeletes],
-    localKey = `${hash}|${deletes.join(",")}`;
+  // 老页面读懂的兜底：仅当独立记号没有写成时才留在配置缓存里。
+  const pendingDeletes = [...pendingChatDeletes].filter(([id]) => !hasChatDeleteMarker(id)),
+    localKey = `${hash}|${JSON.stringify(pendingDeletes)}`;
   if (localKey !== metaLocalKey)
     try {
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
           ...metaOf(),
-          [STORAGE_META_KEY]: { revision: metaRevision || nextMetaRevision(), split: true, pendingDeletes: deletes }
+          [STORAGE_META_KEY]: { revision: metaRevision || nextMetaRevision(), split: true, pendingDeletes }
         })
       );
       metaLocalKey = localKey;
