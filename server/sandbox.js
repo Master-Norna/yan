@@ -2334,7 +2334,8 @@ const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
   const offsets = new Set(),
-    innerPaths = [];
+    innerPaths = [],
+    unquote = value => value.replace(/^(['"])([\s\S]*)\1$/s, "$2");
   // 只有可能用到下面两张表时才切这一回：-o 连写的输出文件，或构建/包管理器那几件
   const calls = /-o/i.test(scanned.text) || TOOL_WRITE_HINT.test(scanned.text) ? commandInvocations(scanned) : [];
   if (/-o/i.test(scanned.text))
@@ -2345,7 +2346,7 @@ function scanWrites(scanned) {
       for (const arg of call.args) {
         if (arg.value === "--") break;
         if (/^-o.+/i.test(arg.value)) {
-          if (call.scan) innerPaths.push(arg.value.slice(2));
+          if (call.scan) innerPaths.push(unquote(arg.value.slice(2)));
           else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
         }
       }
@@ -2379,7 +2380,7 @@ function scanWrites(scanned) {
             i++;
           }
         } else if (glued) {
-          if (call.scan) innerPaths.push(value.slice(glued.length));
+          if (call.scan) innerPaths.push(unquote(value.slice(glued.length)));
           else offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
         }
       }
@@ -2391,8 +2392,9 @@ function scanWrites(scanned) {
   const chars = stripReadSources(scanned).split("");
   for (const at of offsets) chars[at] = " " + chars[at];
   for (const arg of toolReads) for (let i = arg.start; i < arg.end; i++) chars[i] = " ";
-  // 内层紧贴式输出路径不占外层坐标：单独并进文本，越界与 .. 照常检查
-  return { writing, text: chars.join("") + (innerPaths.length ? ` ${innerPaths.join(" ")}` : "") };
+  // 内层紧贴式输出路径不占外层坐标：作为完整路径值返回，由调用方逐条做目录
+  // 边界校验——拼回文本会被按空白截断，带空格的路径会只验到前半段
+  return { writing, text: chars.join(""), paths: innerPaths };
 }
 /**
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，
@@ -2411,6 +2413,22 @@ function screenWritePaths(writeText, workdir, win, prefix) {
     const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
     if (!pathIsInside(root, candidate))
       return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
+  }
+  return null;
+}
+// 内层视图解出的输出路径是完整的路径值：直接对值做同一套边界检查，
+// 不走按空白切词的 absolutePathsIn——带空格的路径才不会被截成前半段
+function innerPathWhy(paths, workdir, win, prefix) {
+  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  for (const raw of paths || []) {
+    if (HOME_SYSTEM_PATH.test(raw)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
+    if (/(^|[\\/:])\.\.([\\/]|$)/.test(raw)) return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
+    if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
+    if (path.isAbsolute(raw) || (win && /^[a-z]:[\\/]/i.test(raw))) {
+      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
+      if (!pathIsInside(root, candidate))
+        return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
+    }
   }
   return null;
 }
@@ -3134,7 +3152,8 @@ function egressOf(command, { platform = process.platform } = {}) {
   // 写到网络共享里：本地文件出了这台机器。读取（Get-Content \\host\share\x、从共享拷进来）不算：
   // 只看判成「写」的那份文本，只读的来源已被 stripReadSources 遮掉
   const writes = scanWrites(scanned);
-  if (writes.writing && uncShare(writes.text, win)) return { kind: "share", why: "往网络共享里写（\\\\主机\\共享）", label: "网络共享" };
+  if (writes.writing && (uncShare(writes.text, win) || (writes.paths ?? []).some(p => uncShare(p, win))))
+    return { kind: "share", why: "往网络共享里写（\\\\主机\\共享）", label: "网络共享" };
   return null;
 }
 const BREW_INSTALL = cmd(String.raw`(?:[^\s"';&|()<>{}]+/)?brew`, String.raw`(?<q>["']?)(?:install|reinstall)\k<q>(?=[\s;|&<>()}]|$)`);
@@ -3156,7 +3175,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const writes = scanWrites(scanned);
   if (writes.writing) {
     if (GIT_INTERNAL_PATH.test(stripReadSources(scanned, false))) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
-    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝");
+    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝") || innerPathWhy(writes.paths, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
   // git 把仓库指到别处：`git -C .. checkout -- f`、`cd ..; git reset --hard` 里都没有一个「改动路径」，
@@ -3193,7 +3212,7 @@ function screenAutoReview(command, { platform = process.platform, workdir = "" }
   const deleted = recursiveDeleteWhy(scanned, workdir, win);
   if (deleted) return deleted;
   const writes = scanWrites(scanned);
-  if (writes.writing && REVIEW_SYSTEM_PATH.test(writes.text))
+  if (writes.writing && (REVIEW_SYSTEM_PATH.test(writes.text) || (writes.paths ?? []).some(p => REVIEW_SYSTEM_PATH.test(p))))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
@@ -3212,7 +3231,7 @@ function screenLoose(command, { platform = process.platform } = {}) {
     forbidden = forbiddenWhy(scanned, "宽");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
   const writes = scanWrites(scanned);
-  if (writes.writing && REVIEW_SYSTEM_PATH.test(writes.text))
+  if (writes.writing && (REVIEW_SYSTEM_PATH.test(writes.text) || (writes.paths ?? []).some(p => REVIEW_SYSTEM_PATH.test(p))))
     return "沙箱拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
