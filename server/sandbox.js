@@ -1614,29 +1614,158 @@ const withoutExeDir = (/** @type {string} */ text, win = process.platform === "w
 const EVERY = "严宽审",
   WIDE = "宽审";
 const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
-// 与 cmd() 同款的命令词，但取的是程序基名：名字两侧引号、以及引号内外的路径前缀
-// （/usr/sbin/dscl、"/usr/sbin/dscl"）都是同一个程序；边界把紧贴的重定向也算进去——
-// name>out / name<in 之后 Shell 照样把后面的选项传给程序，不能只认空白与 ; } 结尾
-// 未加引号的文本按 POSIX 转义逐位匹配：\x 与 \<换行> 在 syntax 里同是 \\x01 占位——
-// 任一位都可能是被转义的字母（真实值已不可见），位间与词尾也允许夹占位（续行整个删掉）。
-// ci 时字母额外大小写不敏感（macOS 默认文件系统对程序名不区分大小写）
-const ESC = (/** @type {string} */ word, /** @type {boolean} */ ci) => {
-  const gap = String.raw`(?:\\\x01)*`;
-  return (
-    gap +
-    [...word].map(ch => (ci ? String.raw`(?:[${ch.toLowerCase()}${ch.toUpperCase()}]|\\\x01)` : String.raw`(?:${ch}|\\\x01)`)).join(gap) +
-    gap
-  );
+// socketfilterfw / sysadminctl / dscl 这类 macOS 原生工具不用正则猜参数：\x 与 \<换行>
+// 在 syntax 里同是 \x01 占位（一位可能是被转义的任意字母，也可能是整个删掉的续行），
+// 只有 text 里的原字符能分辨。所以先按原始文本解码成真实命令词与参数，再做各自的选项/谓词判定——
+// 避开占位的双解，也就没有组合回溯。
+// decodePosix：词内 \<换行> 整对删除，\x 还原成 x；引号内 syntax 不标 \x01，\ 保持字面
+const decodePosix = (/** @type {ReturnType<typeof shellText>} */ scanned, /** @type {number} */ start, /** @type {number} */ end) => {
+  const { text, syntax } = scanned;
+  let out = "";
+  for (let i = start; i < end; i++) {
+    if (syntax[i] === "\\" && syntax[i + 1] === "\x01") {
+      if (!/[\r\n]/.test(text[i + 1])) out += text[i + 1];
+      i++;
+      continue;
+    }
+    out += text[i];
+  }
+  return out;
 };
-const MAC_CMD = (/** @type {string} */ name, /** @type {boolean} */ ci) =>
-  String.raw`${CMD}(?:(?<=["'])(?:[^"'\n]*\/)?${ESC(name, ci)}["']|(?:[^\s"';|&<>]*\/)?${ESC(name, ci)})(?=[\s;}&|<>)]|$)`;
-// 参数段扫描：& 只在 fd 复制（2>&1、>&）与 &> 里跨过，其余 & 仍是分句符；
-// 三个分支按位置互斥（类里不含 &，& 的两个变体看前后文），不会指数回溯
-const ARG_SPAN = String.raw`(?:(?<=[<>])&(?![<>]{1,2})|&(?=[<>]{1,2})|>\|?|[^;|&\n>])*?`;
-// 一条重定向：可带 fd 号与强制覆盖的 >|，目标必须完整消费——紧贴（>out、2>&1）或隔空白（> out），
-// 不允许空目标，免得 > -read 把后面的词错当选项；三个目标分支按首字符互斥（&fd / &其他 / 空白）
-const REDIR = String.raw`\d*[<>]{1,2}\|?(?:&[\d-]+|&?(?![\d-])[^\s"';|&<>]+|${INLINE_SPACE}+[^\s"';|&<>]+)`;
-/** @type {[{ test(text: string): boolean }, string, string][]} */
+// 跳过一个重定向段（起点是 syntax 里的 < 或 >）：可带强制 >|、第二个 <>（>> <<），
+// 目标是 &fd、&词、空白+词 之一。返回段的下一位置
+const redirEnd = (scanned, i, end) => {
+  const { syntax } = scanned;
+  i++;
+  if (syntax[i] === "<" || syntax[i] === ">" || syntax[i] === "|") i++;
+  if (syntax[i] === "&") {
+    i++;
+    const digits = i;
+    while (i < end && /[\d-]/.test(syntax[i])) i++;
+    if (i > digits) return i;
+  }
+  while (i < end && /[^\S\r\n]/.test(syntax[i])) i++;
+  while (i < end && !/[\s;&|()<>{}]/.test(syntax[i])) {
+    if (scanned.quotes.has(i)) i = Math.min(scanned.quotes.get(i), end - 1);
+    else i++;
+  }
+  return i;
+};
+// 与 argumentsAt 同款的取词，但 fd 复制与重定向整段跳过（2>&1、&>log、>out、> out 不占参数位），
+// 续行/空行不占词；引号作参数时整段算进词里。value 已按 decodePosix 还原并剥掉外层引号
+const macArgs = (scanned, start, end) => {
+  const { text, syntax } = scanned;
+  const tokens = [];
+  for (let i = start; i < end; ) {
+    if (syntax[i] === "\\" && syntax[i + 1] === "\x01" && /[\r\n]/.test(text[i + 1])) {
+      i += text[i + 1] === "\r" && text[i + 2] === "\n" ? 3 : 2;
+      continue;
+    }
+    const ch = syntax[i];
+    if (/[^\S\r\n]/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (ch === "&" && (syntax[i + 1] === ">" || syntax[i + 1] === "<")) {
+      i = redirEnd(scanned, i + 1, end);
+      continue;
+    }
+    if (ch === "<" || ch === ">") {
+      i = redirEnd(scanned, i, end);
+      continue;
+    }
+    if (/\d/.test(ch)) {
+      // fd 号紧贴重定向：2>err、10>err 整段跳过
+      let j = i;
+      while (j < end && /\d/.test(syntax[j])) j++;
+      if (syntax[j] === "<" || syntax[j] === ">") {
+        i = redirEnd(scanned, j, end);
+        continue;
+      }
+    }
+    if (/[\s;&|()<>{}\n]/.test(ch)) break;
+    const from = i;
+    for (; i < end && !/[\s;&|()<>{}]/.test(syntax[i]); i++) {
+      if (scanned.quotes.has(i)) i = Math.min(scanned.quotes.get(i), end - 1);
+    }
+    const word = decodePosix(scanned, from, i);
+    tokens.push({
+      start: from,
+      end: i,
+      value: word.length > 1 && '"'.includes(word[0]) && word[0] === word[word.length - 1] ? word.slice(1, -1) : word
+    });
+  }
+  return tokens;
+};
+// 三条规则共用这一条：拿到解码后的真实命令词与参数后各自判定，返回拦截原因或 undefined
+const macBuiltinWhy = scanned => {
+  for (const call of commandInvocations(scanned)) {
+    const raw = decodePosix(scanned, call.nameStart, call.nameEnd);
+    const name = (raw.length > 1 && (raw[0] === '"' || raw[0] === "'") && raw[0] === raw[raw.length - 1] ? raw.slice(1, -1) : raw)
+      .split("/")
+      .pop();
+    const args = macArgs(scanned, call.nameEnd, scanned.syntax.length).map(t => t.value);
+    if (/^socketfilterfw$/i.test(name)) {
+      // getopt_long 的唯一前缀缩写同样生效：反过来只放行已知的查询选项
+      // （get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
+      if (args.some(a => /^--\w/.test(a) && !/^[glh]/.test(a.slice(2)))) return "不动网络与防火墙配置";
+      continue;
+    }
+    if (/^sysadminctl$/i.test(name)) {
+      const WRITES = new Set(["-addUser", "-deleteUser", "-newPassword", "-resetPasswordFor", "-secureTokenOn", "-secureTokenOff"]);
+      const TOGGLES = new Set([
+        "-autologin",
+        "-guestAccount",
+        "-afpGuestAccess",
+        "-smbGuestAccess",
+        "-automaticTime",
+        "-use12HourClockForLoginWindow",
+        "-screenLock"
+      ]);
+      for (let i = 0; i < args.length; i++) {
+        if (WRITES.has(args[i])) return "不动用户、账户与共享";
+        if (TOGGLES.has(args[i]) && args[i + 1] !== "status") return "不动用户、账户与共享";
+      }
+      continue;
+    }
+    if (/^dscl$/i.test(name)) {
+      // 白名单：全局选项（p/q/r/v/n 无值，u/P/f/t/a 带值）→ 数据源 → 查询动词。
+      // 缺数据源或缺动词都会进交互模式（stdin 喂写命令），一律拦；选项/动词大小写敏感
+      const NO_VALUE = new Set(["-p", "-q", "-r", "-v", "-n"]);
+      const VALUE = new Set(["-u", "-P", "-f", "-t", "-a"]);
+      const READS = new Set([
+        "-read",
+        "-readall",
+        "-readpl",
+        "-readpli",
+        "-list",
+        "-diff",
+        "-search",
+        "-mcxread",
+        "-mcxhelp",
+        "-auth",
+        "-authonly"
+      ]);
+      let i = 0;
+      for (; i < args.length; i++) {
+        const a = args[i];
+        if (NO_VALUE.has(a)) continue;
+        if (VALUE.has(a)) {
+          if (i + 1 >= args.length) return "不动用户、账户与共享";
+          i++;
+          continue;
+        }
+        if (a.startsWith("-") && !READS.has(a)) return "不动用户、账户与共享";
+        break;
+      }
+      if (i < args.length && READS.has(args[i])) continue;
+      if (i >= args.length) return "不动用户、账户与共享";
+      const source = args[i];
+      if (source.startsWith("-") || i + 1 >= args.length || !READS.has(args[i + 1])) return "不动用户、账户与共享";
+    }
+  }
+};
+/** @type {[{ test(text: string): boolean } | ((scanned: any) => string | true | undefined), string, string][]} */
 const RULES = [
   [
     cmd(
@@ -1686,34 +1815,7 @@ const RULES = [
     "不直接读取或导出钥匙串密码与密钥",
     "严"
   ],
-  // Mac 实测过：socketfilterfw 用 getopt_long，写选项的唯一前缀缩写（--setg、--b、--unbl）同样生效，
-  // 于是反过来只放行已知的查询选项（get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
-  [
-    new RegExp(String.raw`${MAC_CMD("socketfilterfw", true)}${ARG_SPAN}-(?:\\\x01)*-(?:\\\x01)*(?!${ESC("get", false)}|l|h)\w`, "im"),
-    "不动网络与防火墙配置",
-    EVERY
-  ],
-  // Mac 实测过：账号动词拦（全局选项在前也拦）；带 on|off|status 的几条只拦 status 以外的取值
-  [
-    new RegExp(
-      String.raw`${MAC_CMD("sysadminctl", true)}${ARG_SPAN}-(?:\\\x01)*(?:(?:${ESC("addUser")}|${ESC("deleteUser")}|${ESC("newPassword")}|${ESC("resetPasswordFor")}|${ESC("secureTokenOn")}|${ESC("secureTokenOff")})\b|(?:${ESC("autologin")}|${ESC("guestAccount")}|${ESC("afpGuestAccess")}|${ESC("smbGuestAccess")}|${ESC("automaticTime")}|${ESC("use12HourClockForLoginWindow")}|${ESC("screenLock")})["']?\s+(?!status\b|"status"|'status'))`,
-      "im"
-    ),
-    "不动用户、账户与共享",
-    EVERY
-  ],
-  // dscl 不带子命令进交互模式，stdin 可灌写命令——白名单按「全局选项 → 数据源 → 子命令位」解析，
-  // 查询字样只是选项值的不算查询（数据源位不收 - 开头的词，防把选项当数据源、选项值当动词）；
-  // 参数分隔只认行内空白（未续行的换行是下一条命令）；dscl>x / dscl<x 紧贴重定向也算裸调，一并拦；
-  // 选项大小写敏感（带值的 -P 不能当无参的 -p），这条不用 i 旗标；命令名按 macOS 文件系统惯例大小写不敏感
-  [
-    new RegExp(
-      String.raw`${MAC_CMD("dscl", true)}(?!${INLINE_SPACE}+(?:(?:${REDIR}|-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&<>]+)${INLINE_SPACE}+)*(?:[^\s"';|&<>-][^\s"';|&<>]*(?:${INLINE_SPACE}+${REDIR})*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
-      "m"
-    ),
-    "不动用户、账户与共享",
-    EVERY
-  ],
+  [scanned => macBuiltinWhy(scanned), "不动网络与防火墙配置/用户账户与共享", EVERY],
 
   [cmd("reg", String.raw`(?:add|delete|import|restore|load|unload|copy|save)\b`), "不动注册表", EVERY],
   // 注册表：查看放行（启动项、已装软件、驱动版本都在里头，是电脑检查的常规去处），改则拒绝
@@ -1764,15 +1866,21 @@ const RULES = [
 ];
 /** 这一档里命中的第一条的原因，没有返回 undefined */
 const forbiddenWhy = (scanned, tier) => {
-  return RULES.find(
-    ([pattern, , tiers]) =>
-      tiers.includes(tier) &&
-      (pattern === HIDDEN
-        ? hasHiddenCommand(scanned) || pipesToShell(scanned.syntax)
-        : pattern === ALIASING
-          ? ALIASING.test(scanned.syntax) || aliasByProvider(scanned)
-          : pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax))
-  )?.[1];
+  for (const [pattern, reason, tiers] of RULES) {
+    if (!tiers.includes(tier)) continue;
+    if (typeof pattern === "function") {
+      // 谓词可以返回具体原因（比如解码后判出的那类操作），true 时用表里的兜底文案
+      const why = pattern(scanned);
+      if (why) return why === true ? reason : why;
+      continue;
+    }
+    if (
+      (pattern === HIDDEN && (hasHiddenCommand(scanned) || pipesToShell(scanned.syntax))) ||
+      (pattern === ALIASING && (ALIASING.test(scanned.syntax) || aliasByProvider(scanned))) ||
+      (pattern !== HIDDEN && pattern !== ALIASING && pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax))
+    )
+      return reason;
+  }
 };
 // 环境变量的两种写法（$env:X、${env:X} 与 %X%）从同一份名单生成，补一个名字两边都有
 const envVars = (/** @type {string} */ names) => String.raw`\$\{?env:(?:${names})\b|%(?:${names})%`;
@@ -1953,7 +2061,7 @@ const RSYNC_READ_VALUES = new Set(
 function argumentsAt(scanned, start, end = scanned.text.length) {
   const text = scanned.text;
   const tokens = [];
-  for (let i = start; i < end;) {
+  for (let i = start; i < end; ) {
     // 共用扫描已标出的续行不占一个参数；例如 7z x a.zip `\n-oC:\x。
     if (scanned.syntax[i + 1] === "\x01" && /[\r\n]/.test(text[i + 1])) {
       i += text[i + 1] === "\r" && text[i + 2] === "\n" ? 3 : 2;
@@ -1984,7 +2092,7 @@ function commandInvocations(scanned) {
     ranges = [...scanned.executions],
     starts = new Map(ranges.map(range => [range.start, range.end]));
   for (const range of ranges) {
-    for (let at = range.start; at < range.end;) {
+    for (let at = range.start; at < range.end; ) {
       // 命令替换另有自己的执行范围；外层不重复扫描它，深层嵌套也保持线性遍历。
       const nested = at !== range.start && starts.get(at);
       if (nested) {
@@ -2010,7 +2118,7 @@ function commandInvocations(scanned) {
         .split(/[\\/]/)
         .pop()
         .replace(/\.exe$/i, "");
-      calls.push({ name, args: tokens.slice(1), shell: range.shell });
+      calls.push({ name, args: tokens.slice(1), shell: range.shell, nameStart: first.start, nameEnd: first.end });
       if (!/^(?:cmd|powershell|pwsh|sh|bash|zsh|dash|ksh)$/i.test(name)) continue;
       const script = SCRIPT_PREFIX.exec(scanned.text.slice(first.start, at));
       if (!script) continue;
