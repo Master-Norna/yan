@@ -493,6 +493,7 @@ async function syncChatsWithDisk() {
     store.conversations = store.conversations
       .map(c => {
         const item = disk.get(c.id),
+          diskStamp = chatDiskStamps.get(c.id),
           stamp = chatStamps.get(c.id) || 0,
           hash = hashText(chatJson(c)),
           unsaved = chatHashes.get(c.id) !== hash,
@@ -508,10 +509,13 @@ async function syncChatsWithDisk() {
           push.add(c.id);
           return c;
         }
-        // 目录里的更新：这边没动过的换上，动过的并起来（见 catchUpConversation）
-        if (item.savedAt > stamp) {
+        // 全量快照可能晚于更新的定向跟读返回；不能往回改磁盘基准。
+        if (diskStamp !== undefined && item.savedAt < diskStamp) return c;
+        // 刚读回的暂存版有共同起点时，按起点合并；离页时刻并不是它见过的磁盘版本。
+        if (diskStamp === undefined ? item.savedAt > stamp || chatBases.has(c.id) : item.savedAt > diskStamp) {
           const next = catchUpConversation(item, { quiet: true });
-          (chatHashes.get(c.id) === hashText(chatJson(next)) ? settled : push).add(c.id);
+          // 指纹也可能只是暂存版的；只有合并结果已在磁盘上才能清暂存。
+          (chatBases.get(c.id) === chatJson(next) ? settled : push).add(c.id);
           changed = true;
           if (c.id === currentId) currentReplaced = true;
           return next;
