@@ -1664,23 +1664,24 @@ const RULES = [
     "不直接读取或导出钥匙串密码与密钥",
     "严"
   ],
-  // Mac 实测过：一条调用里的选项按序生效，写选项在全段里找；`--get*`、`--listapps` 只是查
-  [cmd("socketfilterfw", String.raw`[^;|&\n]*?--(?:set\w+|(?:un)?blockapp|add|remove)\b`), "不动网络与防火墙配置", EVERY],
+  // Mac 实测过：socketfilterfw 用 getopt_long，写选项的唯一前缀缩写（--setg、--b、--unbl）同样生效，
+  // 于是反过来只放行已知的查询选项（get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
+  [cmd("socketfilterfw", String.raw`[^;|&\n]*?--(?!get|l|h)\w`), "不动网络与防火墙配置", EVERY],
   // Mac 实测过：账号动词拦（全局选项在前也拦）；带 on|off|status 的几条只拦 status 以外的取值
   [
     cmd(
       "sysadminctl",
-      String.raw`[^;|&\n]*?-(?:(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)\s+(?!status\b|"status"|'status'))`
+      String.raw`[^;|&\n]*?-(?:(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)["']?\s+(?!status\b|"status"|'status'))`
     ),
     "不动用户、账户与共享",
     EVERY
   ],
   // dscl 不带子命令进交互模式，stdin 可灌写命令——白名单按「全局选项 → 数据源 → 子命令位」解析，
   // 查询字样只是选项值的不算查询（数据源位不收 - 开头的词，防把选项当数据源、选项值当动词）；
-  // crontab 同款负向断言，表内动词以外一律拦（含无 - 的写法）
+  // 参数分隔只认行内空白（未续行的换行是下一条命令）；dscl>x / dscl<x 紧贴重定向也算裸调，一并拦
   [
     new RegExp(
-      String.raw`${cmd("dscl").source}(?!\s+(?:(?:-(?:p|q|r|v|n)|-(?:u|P|f|t|a)\s+[^\s"';|&]+)\s+)*(?:[^\s"';|&-][^\s"';|&]*\s+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
+      String.raw`${CMD}dscl(?=[\s;}&|<>]|$)(?!${INLINE_SPACE}+(?:(?:-(?:p|q|r|v|n)|-(?:u|P|f|t|a)${INLINE_SPACE}+[^\s"';|&]+)${INLINE_SPACE}+)*(?:[^\s"';|&-][^\s"';|&]*${INLINE_SPACE}+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
       "im"
     ),
     "不动用户、账户与共享",

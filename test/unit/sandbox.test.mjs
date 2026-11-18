@@ -1176,7 +1176,11 @@ const TABLE = [
     "dscl . -read /x;echo -create",
     "sysadminctl -adminUser root -secureTokenStatus x",
     'sysadminctl -screenLock "status"',
+    'sysadminctl "-autologin" status',
+    'sysadminctl "-screenLock" status',
     "socketfilterfw --getglobalstate --listapps",
+    "socketfilterfw --getappblocked /a.app",
+    "socketfilterfw --getg",
     "launchctl unknown x",
     "defaults unknown x",
     "networksetup -unknown x",
@@ -1366,6 +1370,13 @@ const TABLE = [
     // 写选项不在首位也拦：socketfilterfw 同一条调用按序处理多个选项
     "socketfilterfw --getglobalstate --setglobalstate on",
     "socketfilterfw --listapps --blockapp /a.app",
+    // getopt_long 的唯一前缀缩写同样生效：非 get*/l*/h* 开头的选项一律拦
+    "socketfilterfw --setg on",
+    "socketfilterfw --setblock on",
+    "socketfilterfw --b /a.app",
+    "socketfilterfw --unbl /a.app",
+    "socketfilterfw --a /a.app",
+    "socketfilterfw --rem /a.app",
     ..."addUser deleteUser newPassword resetPasswordFor secureTokenOn secureTokenOff".split(" ").map(verb => `sysadminctl -${verb} x`),
     "sysadminctl -autologin set -userName x",
     "sysadminctl -autologin off",
@@ -1379,6 +1390,10 @@ const TABLE = [
     "sysadminctl -screenLock off -password p",
     // 全局选项在先也拦
     "sysadminctl -adminUser root -adminPassword p -addUser x",
+    // 操作名带引号照拦（Shell 会剥掉引号）
+    'sysadminctl "-addUser" x',
+    'sysadminctl "-autologin" off',
+    'sysadminctl "-screenLock" immediate -password p',
     ..."create createpl delete deletepl append merge change changei passwd mcxset mcxedit mcxdelete mcxdeleteall mcxexport mcximport"
       .split(" ")
       .map(verb => `dscl . -${verb} /x`),
@@ -1396,7 +1411,12 @@ const TABLE = [
     "dscl -u admin",
     "echo x | dscl .",
     "dscl . -create /x -read /y",
-    "dscl . -list /x; dscl"
+    "dscl . -list /x; dscl",
+    // 未续行的换行是下一条命令；紧贴重定向也是裸调
+    "dscl\nfoo -read /x",
+    "dscl>x",
+    "dscl>x;echo y",
+    "dscl<in"
   ].map(command => [command, "x", "x", "x", "o"]),
   [String.raw`env FOO=1 /usr/bin/sudo x`, "x", "x", "x", "o"],
   [String.raw`nohup /bin/launchctl load x`, "x", "x", "x", "o"],

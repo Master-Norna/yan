@@ -52,7 +52,7 @@
 | `networksetup` | `-set*`，创建、删除、增减、重命名、复制、排序网络服务、切换位置、探测新硬件与连接或断开 PPPoE | `-get*`、`-list*`、`-show*` 等查询 |
 | `diskutil` | `erase*`、`partitionDisk`、`reformat`、`zeroDisk`、`secureErase`、`repairVolume`、`repairDisk`；`apfs deleteVolume` / `deleteContainer` / `addVolume` / `resizeContainer` | `list`、`info`、`verifyVolume`、`mount`、`unmount`、`eject` |
 | `security` | `-i` 交互模式、`-p` 提示符、`add-*`、`delete-*`、`set-*`、`create-*`、`remove-*`、`import`、锁定或解锁钥匙串、安装 MDS、导入信任设置、显式修改钥匙串列表与默认项、用户信任开关、写或删授权策略、提权执行 | 列表、默认项查询、`show-keychain-info`、不带 `-w` / `-g` 的密码项查找 |
-| `socketfilterfw` | `--set*`、`--add`、`--remove`、`--blockapp`、`--unblockapp` | `--get*`、`--listapps` |
+| `socketfilterfw` | `--set*`、`--add`、`--remove`、`--blockapp`、`--unblockapp` 及其唯一前缀缩写（`--setg`、`--b` 等） | `--get*`、`--listapps` 及 `get`、`l`、`h` 开头的缩写 |
 | `sysadminctl` | `-addUser`、`-deleteUser`、`-newPassword`、`-resetPasswordFor`、`-secureTokenOn`、`-secureTokenOff`；`-autologin`、`-guestAccount`、`-afpGuestAccess`、`-smbGuestAccess`、`-automaticTime`、`-use12HourClockForLoginWindow` 与 `-screenLock` 的 `status` 以外取值 | 各 `status` 查询与 `-secureTokenStatus`、`-filesystem status` |
 | `dscl` | `-create*`、`-delete*`、`-append`、`-merge`、`-change*`、`-passwd`、`-mcxset`、`-mcxedit`、`-mcxdelete*`、`-mcxexport`、`-mcximport`；不带子命令的交互模式同样拦 | 只放行 `-read*`、`-list`、`-diff`、`-search`、`-mcxread`、`-mcxhelp`、`-auth`、`-authonly` |
 
