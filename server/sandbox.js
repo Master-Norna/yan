@@ -2140,9 +2140,10 @@ function commandInvocations(scanned) {
       }
       const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));
       at += lead[0].length;
-      // 重定向与前缀可交错出现在命令名之前（x=1 >f cmd、x=1 2>f cmd）：整段消费再取词
+      // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
       for (;;) {
-        while (at < range.end && /[^\S\r\n]/.test(scanned.syntax[at])) at++;
+        const lead2 = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));
+        at += lead2[0].length;
         const ch = scanned.syntax[at];
         if (ch === "<" || ch === ">") {
           at = redirEnd(scanned, at, range.end);
@@ -2174,11 +2175,8 @@ function commandInvocations(scanned) {
             at = redirEnd(scanned, at, range.end);
             continue;
           }
-          // &> / &>> 是合并重定向；&< 不是——& 是后台分隔符，< 属于下一条命令
-          if (ch === "&" && scanned.syntax[at + 1] === ">") {
-            at = redirEnd(scanned, at + 1, range.end);
-            continue;
-          }
+          // & 一律按后台分隔符收尾：&> 只是 bash/zsh 的合并重定向，
+          // dash 里 & 先断句、> 属下一条命令，分不出方言就按严的来
           break;
         }
         if (/\s/.test(ch)) {

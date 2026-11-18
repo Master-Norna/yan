@@ -1470,6 +1470,7 @@ const TABLE = [
     "sysadminctl 2>&1 -addUser x",
     // 重定向紧贴命令名：后面的选项照样传给程序
     "x=1 2>f socketfilterfw --setg",
+    "x=1 >f y=2 socketfilterfw --setg",
     "x=1 >f dscl . -create /x",
     "cmd &<in dscl . -create /x",
     ">out socketfilterfw --setglobalstate on",
