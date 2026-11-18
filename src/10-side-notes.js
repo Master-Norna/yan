@@ -104,6 +104,8 @@ function decorateNoteAnchors(article) {
   if (!threads.length || (!bodies.length && !parts.length)) return; // 整条回复的旁注没有落点，靠元信息行的「注」标进入
   threads.forEach((thread, index) => {
     const part = parts[thread.anchor.part ?? -1];
+    // 思绪尚未取回：空壳占住原来的编号，不把思绪上的旁注误落到正文的同一句上。
+    if (part?.parentElement?.hasAttribute("data-cold-reasoning")) return;
     if (!(part && markAnchor(part, thread, index + 1))) bodies.some(body => markAnchor(body, thread, index + 1));
   });
 }

@@ -134,7 +134,8 @@ function paintBlock(block, message, o) {
     const tail = reasoning.slice(trailReasoningBase(message), rcut);
     if (!streaming && tail.trim()) parts.push(thoughtPart("tail-thought", tail, false, message));
   } else {
-    if (reasoning.trim()) parts.push(thoughtPart("reasoning", reasoning, reasoningLive({ ...source, content: visible }), message));
+    if (reasoning.trim() || unreadThought(message))
+      parts.push(thoughtPart("reasoning", reasoning, reasoningLive({ ...source, content: visible }), message));
     if (stack) parts.push(stack);
   }
   // 正文：执事生成中，最后一步之后的话还在行迹里「进行中」那组（见 paintTimeline），写完才落到这里
@@ -217,14 +218,18 @@ function draftingLabel(source) {
 // 思绪块（正文区里的那一块）：开合记在消息上——用户亲手开合过的就不替他动；写完了收起（收尾时不看读者在不在看）
 /** @param {Message} message */
 function thoughtPart(key, text, live, message) {
-  const streaming = message.status === "streaming";
+  const streaming = message.status === "streaming",
+    unread = unreadThought(message);
   return {
     key,
-    sig: `${streaming}|${live}|${text}`,
+    sig: `${streaming}|${live}|${unread}|${text}`,
     enter: true,
     html: () =>
       `<details class="reasoning"${(message.reasoningTouched ? message.reasoningOpen : live) ? " open" : ""} data-state="${live ? "live" : "done"}"><summary>${t(`思绪`)}</summary><div class="reasoning-body"></div></details>`,
-    paint: el => paintThought(el, text, live, { touched: !!message.reasoningTouched, force: !streaming })
+    paint: el => {
+      el.toggleAttribute("data-cold-reasoning", unread);
+      paintThought(el, text, live, { touched: !!message.reasoningTouched, force: !streaming });
+    }
   };
 }
 // 思绪写进块里：接着上回画到的地方追加（思绪可能已有几十万字，每帧整块替换会卡住输入）；进行中摊开，写完就收

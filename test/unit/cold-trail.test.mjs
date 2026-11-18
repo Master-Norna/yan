@@ -156,6 +156,32 @@ test("目录里的新份换下手上这段：并起来不丢接回的那几样�
   assert.equal(warmMessages.has(replaced.messages[1]), true);
 });
 
+test("单答与全量取回并发：共用正在读的 key，补读其余，也接得上替换后的对象", async () => {
+  const calls = [],
+    releases = [];
+  const f = load(["warmTrails", "warmConversation", `install: read => { chatsDir = () => 'test-chats'; bridge = read; }`]);
+  f.install((_, { keys }) => {
+    calls.push(keys);
+    return new Promise(resolve => releases.push(() => resolve({ pieces: Object.fromEntries(keys.map(key => [key, { reasoning: key }])) })));
+  });
+  const thought = key => ({ cold: { key, reasoningOnly: true } }),
+    a = thought("a"),
+    b = thought("b"),
+    c = { id: "c1", messages: [a], forks: [{ messages: [b] }] },
+    replacement = structuredClone(c);
+  const single = f.warmTrails(c, [a]),
+    full = f.warmConversation(replacement);
+  assert.deepEqual(calls, [["a"], ["b"]]);
+  releases[1]();
+  releases[0]();
+  assert.equal(await single, 1);
+  assert.equal(await full, 2);
+  assert.equal(a.reasoning, "a");
+  assert.equal(b.reasoning, undefined, "单答读不把同对话的另一份接进来");
+  assert.equal(replacement.messages[0].reasoning, "a");
+  assert.equal(replacement.forks[0].messages[0].reasoning, "b");
+});
+
 test("挪走的步骤里带的附件仍算在用", () => {
   const { attachmentKeepIds, store } = load(["attachmentKeepIds", "store"]);
   const c = conversation();
