@@ -2193,8 +2193,13 @@ function commandInvocations(scanned) {
             // 双引号正文已被外层 Shell 解码过一轮（\$ \" \\ \` 与换行续行），
             // 内层要扫的是解码后的文本，原样截取会二次解释这些转义
             const raw = scanned.text.slice(bodyAt + 1, quoteEnd),
-              // \<换行> 是续行：两个字符一起删掉拼接两侧，不是留下换行
-              body = scanned.text[bodyAt] === "'" ? raw : raw.replace(/\\\n/g, "").replace(/\\([$`"\\])/g, "$1"),
+              // 双引号内按外层 Shell 的顺序从左到右解码一遍：\\ → \，
+              // \$ \" \` 还原，\<换行> 两个字符一起删掉（POSIX 续行）；
+              // 分遍替换会让已配对的 \\ 后半再吃掉换行，顺序换不得
+              body =
+                scanned.text[bodyAt] === "'"
+                  ? raw
+                  : raw.replace(/\\\\|\\([$`"])|\\\n/g, m => (m === "\\\\" ? "\\" : m[1] === "\n" ? "" : m[1])),
               inner = shellText(body, bodyShell);
             for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
           }
@@ -2381,7 +2386,7 @@ function scanWrites(scanned) {
       // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
       for (const arg of call.args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
     }
-  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite;
+  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite || innerPaths.length > 0;
   if (!writing) return { writing, text: "" };
   const chars = stripReadSources(scanned).split("");
   for (const at of offsets) chars[at] = " " + chars[at];
