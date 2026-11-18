@@ -1169,7 +1169,14 @@ const TABLE = [
     "dscl localhost -read /x",
     "dscl -q . -read /x",
     "dscl -u admin . -read /x",
+    "dscl -read /x",
+    "dscl -u admin -P p . -list /x",
     "dscl . -list /x; dscl . -read /y",
+    // dscl 的段界在 ; 前止步：下一条命令的参数不误当 dscl 的动词
+    "dscl . -read /x;echo -create",
+    "sysadminctl -adminUser root -secureTokenStatus x",
+    'sysadminctl -screenLock "status"',
+    "socketfilterfw --getglobalstate --listapps",
     "launchctl unknown x",
     "defaults unknown x",
     "networksetup -unknown x",
@@ -1356,6 +1363,9 @@ const TABLE = [
     "socketfilterfw --blockapp /a.app",
     "socketfilterfw --unblockapp /a.app",
     "/usr/libexec/ApplicationFirewall/socketfilterfw --setblockall on",
+    // 写选项不在首位也拦：socketfilterfw 同一条调用按序处理多个选项
+    "socketfilterfw --getglobalstate --setglobalstate on",
+    "socketfilterfw --listapps --blockapp /a.app",
     ..."addUser deleteUser newPassword resetPasswordFor secureTokenOn secureTokenOff".split(" ").map(verb => `sysadminctl -${verb} x`),
     "sysadminctl -autologin set -userName x",
     "sysadminctl -autologin off",
@@ -1367,11 +1377,18 @@ const TABLE = [
     "sysadminctl -screenLock immediate -password p",
     "sysadminctl -screenLock 30 -password p",
     "sysadminctl -screenLock off -password p",
+    // 全局选项在先也拦
+    "sysadminctl -adminUser root -adminPassword p -addUser x",
     ..."create createpl delete deletepl append merge change changei passwd mcxset mcxedit mcxdelete mcxdeleteall mcxexport mcximport"
       .split(" ")
       .map(verb => `dscl . -${verb} /x`),
     "dscl localhost -create /x",
     "dscl -u admin . -passwd /x p",
+    // 查询字样只当选项值的不算查询；不带 - 的写法与陌生动词同样拦
+    "dscl -u -read . -create /x",
+    "dscl . read /x",
+    "dscl . -unknownverb /x",
+    "dscl -q . -create /x",
     "dscl",
     "dscl .",
     "dscl localhost",

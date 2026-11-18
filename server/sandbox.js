@@ -1664,27 +1664,23 @@ const RULES = [
     "不直接读取或导出钥匙串密码与密钥",
     "严"
   ],
-  // Mac 实测过：`--set*`、`--add`/`--remove` 与 `--(un)blockapp` 改防火墙，`--get*`、`--listapps` 只是查
-  [cmd("socketfilterfw", String.raw`--(?:set\w+|(?:un)?blockapp|add|remove)\b`), "不动网络与防火墙配置", EVERY],
-  // Mac 实测过：账号动词拦；带 on|off|status 的几条只拦 status 以外的取值
+  // Mac 实测过：一条调用里的选项按序生效，写选项在全段里找；`--get*`、`--listapps` 只是查
+  [cmd("socketfilterfw", String.raw`[^;|&\n]*?--(?:set\w+|(?:un)?blockapp|add|remove)\b`), "不动网络与防火墙配置", EVERY],
+  // Mac 实测过：账号动词拦（全局选项在前也拦）；带 on|off|status 的几条只拦 status 以外的取值
   [
     cmd(
       "sysadminctl",
-      String.raw`-(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|-(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)\s+(?!status\b)`
+      String.raw`[^;|&\n]*?-(?:(?:deleteUser|newPassword|resetPasswordFor|addUser|secureTokenOn|secureTokenOff)\b|(?:autologin|guestAccount|afpGuestAccess|smbGuestAccess|automaticTime|use12HourClockForLoginWindow|screenLock)\s+(?!status\b|"status"|'status'))`
     ),
     "不动用户、账户与共享",
     EVERY
   ],
-  // Mac 实测过：dscl 的写动词拦（与 -read 同段也算写，故单列一条）
-  [
-    cmd("dscl", String.raw`(?:\S+\s+)*?-(?:create|delete|append|merge|change|passwd|mcxset|mcxedit|mcxdelete|mcxexport|mcximport)\w*\b`),
-    "不动用户、账户与共享",
-    EVERY
-  ],
-  // dscl 不带子命令进交互模式，stdin 可灌写命令——与 crontab 同款白名单形态，只放行查询动词
+  // dscl 不带子命令进交互模式，stdin 可灌写命令——白名单按「全局选项 → 数据源 → 子命令位」解析，
+  // 查询字样只是选项值的不算查询（数据源位不收 - 开头的词，防把选项当数据源、选项值当动词）；
+  // crontab 同款负向断言，表内动词以外一律拦（含无 - 的写法）
   [
     new RegExp(
-      String.raw`${cmd("dscl").source}(?![^;|&\n]*\s-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
+      String.raw`${cmd("dscl").source}(?!\s+(?:(?:-(?:p|q|r|v|n)|-(?:u|P|f|t|a)\s+[^\s"';|&]+)\s+)*(?:[^\s"';|&-][^\s"';|&]*\s+)?-(?:read|readall|readpl|readpli|list|diff|search|mcxread|mcxhelp|auth|authonly)\b)`,
       "im"
     ),
     "不动用户、账户与共享",
@@ -1929,7 +1925,7 @@ const RSYNC_READ_VALUES = new Set(
 function argumentsAt(scanned, start, end = scanned.text.length) {
   const text = scanned.text;
   const tokens = [];
-  for (let i = start; i < end; ) {
+  for (let i = start; i < end;) {
     // 共用扫描已标出的续行不占一个参数；例如 7z x a.zip `\n-oC:\x。
     if (scanned.syntax[i + 1] === "\x01" && /[\r\n]/.test(text[i + 1])) {
       i += text[i + 1] === "\r" && text[i + 2] === "\n" ? 3 : 2;
@@ -1960,7 +1956,7 @@ function commandInvocations(scanned) {
     ranges = [...scanned.executions],
     starts = new Map(ranges.map(range => [range.start, range.end]));
   for (const range of ranges) {
-    for (let at = range.start; at < range.end; ) {
+    for (let at = range.start; at < range.end;) {
       // 命令替换另有自己的执行范围；外层不重复扫描它，深层嵌套也保持线性遍历。
       const nested = at !== range.start && starts.get(at);
       if (nested) {
