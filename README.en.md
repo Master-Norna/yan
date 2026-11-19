@@ -58,6 +58,8 @@ Files and outputs (decks, spreadsheets and PDFs previewed in place), interactive
 
 **Windows**: download `yan-<version>-win-x64.zip` from [Releases](https://github.com/Master-Norna/yan/releases/latest), unzip it and double-click `言.exe`. `言.exe` is unsigned, so the first time Windows may say "Windows protected your PC"; click **More info → Run anyway**.
 
+**macOS (Apple silicon)**: download `yan-<version>-mac-arm64.zip` from [Releases](https://github.com/Master-Norna/yan/releases/latest), unzip it and double-click `start.command` inside the `言` folder. Node is bundled. If macOS blocks the first launch, see [Getting started](docs/en/start.md#macos-portable-package).
+
 **From source**: install Node.js 22 or later, then double-click `start.cmd` (`start.command` on macOS), or run:
 
 ```powershell

@@ -1,8 +1,8 @@
 // 便携包冒烟：解开 dist 里这一版的 zip，用包里自带的那份 Node 起一次桥接，问一句 /api/bootstrap 与首页。
-// 验的是「发出去的包真能启动」——解压、Node 在、启动器在、桥接起得来、报的版本是这一版。源码测试全绿也证明不了这些。
+// 验 ZIP 解压、关键文件和桥接版本；Mac 走 start.command，但不代替下载后从访达打开的手工验收。
 // 用法：npm run pack:smoke（打包 + 冒烟），或先 npm run pack 再 node pack/smoke.mjs。
 // 不碰真实存储根（YAN_HOME 指临时目录）、不开页面、不装任何东西；跑完把临时目录与进程一起收掉。
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -10,15 +10,22 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
+const MAC = process.platform === "darwin" && process.arch === "arm64";
+const WIN = process.platform === "win32" && process.arch === "x64";
+if (!MAC && !WIN) throw Error("便携包冒烟须在 Windows x64 或 Apple 芯片 Mac 上运行");
+const TARGET = MAC ? "mac-arm64" : "win-x64";
+const LAUNCHER = MAC ? "start.command" : "言.exe";
+const NODE_BIN = MAC ? "node/bin/node" : "node/node.exe";
+const MAC_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(ROOT, "dist");
 const SYSTEM = process.env.SystemRoot || "C:\\Windows";
 const TASKKILL = path.join(SYSTEM, "System32", "taskkill.exe");
 const version = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
 // 抽查这几件：启动器、桥接、包清单、页面源码、随包 Node——任何一件缺了，用户双击都起不来
-const NEED = ["言.exe", "server.js", "package.json", "src/00-state.js", "web/index.html", "node/node.exe"];
+const NEED = [LAUNCHER, "server.js", "package.json", "src/00-state.js", "web/index.html", NODE_BIN];
 
-// 自己解 zip，不借系统 tar：发布物就是这个 zip，能不能解、解得对不对该由它自己证明。
+// Windows 自己解 zip，不借系统 tar。macOS 走系统 ditto，以保留权限与软链。
 // （CI 的 tar 在我们写的中文条目名上报「filename 读不出」，同一个包本机却能解——各版本宽严不一，索性不用它；
 //   顺带按中央目录的 CRC 与大小核对每一件，比 tar 走一遍更严。）
 function unzip(zipFile, dest) {
@@ -62,7 +69,8 @@ let temp = "",
 function cleanup() {
   if (child && child.exitCode === null) {
     try {
-      spawnSync(TASKKILL, ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      if (MAC) child.kill();
+      else spawnSync(TASKKILL, ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
     } catch {
       /* 已经退了 */
     }
@@ -87,12 +95,13 @@ const freePort = () =>
     });
   });
 
-const zip = path.join(DIST, `yan-${version}-win-x64.zip`);
+const zip = path.join(DIST, `yan-${version}-${TARGET}.zip`);
 if (!fs.existsSync(zip)) fail(`没有 ${path.relative(ROOT, zip)}：先跑 npm run pack`);
 
 temp = fs.mkdtempSync(path.join(os.tmpdir(), "yan-pack-smoke-"));
 try {
-  unzip(zip, temp);
+  if (MAC) execFileSync("/usr/bin/ditto", ["-x", "-k", zip, temp], { stdio: "inherit" });
+  else unzip(zip, temp);
 } catch (error) {
   fail(`解不开 ${path.basename(zip)}：${error.message}`);
 }
@@ -105,11 +114,30 @@ say(`抽查的 ${NEED.length} 件都在`);
 const packed = JSON.parse(fs.readFileSync(path.join(home, "package.json"), "utf8"));
 if (packed.version !== version) fail(`包里是 ${packed.version}，仓库已是 ${version}：重新 npm run pack`);
 
+if (MAC) {
+  try {
+    for (const relative of [LAUNCHER, NODE_BIN, "node/bin/npm", "node/bin/npx"])
+      fs.accessSync(path.join(home, relative), fs.constants.X_OK);
+    // npm/npx 是官方 Node tar 里的相对软链；让解出来的 npm 以包内 Node 实际跑一次。
+    execFileSync(path.join(home, "node/bin/npm"), ["--version"], {
+      env: { ...process.env, PATH: `${path.join(home, "node/bin")}:${MAC_SYSTEM_PATH}`, HOME: temp },
+      stdio: "pipe"
+    });
+  } catch (error) {
+    fail(`解压后启动文件或包内 npm 不能执行：${error.message}`);
+  }
+}
+
 const port = await freePort();
 let log = "";
-child = spawn(path.join(home, "node", "node.exe"), ["server.js"], {
-  cwd: home,
-  env: { ...process.env, YAN_HOME: path.join(temp, ".yan"), YAN_PORT: String(port) },
+child = spawn(path.join(home, MAC ? LAUNCHER : NODE_BIN), [MAC ? "--no-open" : "server.js"], {
+  cwd: MAC ? temp : home,
+  env: {
+    ...process.env,
+    ...(MAC && { PATH: MAC_SYSTEM_PATH }), // 模拟访达只给系统 PATH，不能靠 runner 的 Node 起桥接
+    YAN_HOME: path.join(temp, ".yan"),
+    YAN_PORT: String(port)
+  },
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true
 });

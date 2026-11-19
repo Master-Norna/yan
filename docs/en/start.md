@@ -2,7 +2,7 @@
 
 [← Docs](README.md) · [中文](../start.md)
 
-Zero dependencies: Yan needs only Node.js 22 or later. No npm packages to install; every front-end library ships with the project and nothing loads from the web.
+Running from source requires only Node.js 22 or later; portable packages bundle Node. No npm packages to install; every front-end library ships with the project and nothing loads from the web.
 
 ## Quick start
 
@@ -20,7 +20,7 @@ Switch the interface language in **Settings → General → Language** (中文 /
 
 The CMD window opened by `start.cmd` is the local bridge process and must stay open. If you close it, pages already loaded stay for a while, but reloading, model forwarding, web access and the agent all stop. If the browser is open but the page says the local bridge has stopped, look at that window first: when the bridge exits it stays open and prints the reason (port in use, node missing and so on) instead of flashing away.
 
-On macOS, double-click `start.command` (if it's blocked the first time, right-click it in Finder and choose **Open**). The script must first find Node 22 or later on the PATH it inherits. **Settings → Environment** checks Homebrew and other locations only after the bridge starts, so it cannot help `start.command` find Node. On macOS, **Environment** detects installed Python, Node, and ffmpeg; it does not install tool packs. Under **Ask first**, macOS `sandbox-exec` restricts writes to the working folder, temp folders, and caches. `brew install` and `brew reinstall` need to write outside those folders, so the approval prompt explains why. Clicking **Run** lets only that command run outside the sandbox. **Auto-review** and **Full auto** still rely on rule screening only.
+On macOS, double-click `start.command` and keep its Terminal window open while you use Yan. When running from source, the script must first find Node 22 or later on the PATH it inherits. **Settings → Environment** checks Homebrew and other locations only after the bridge starts, so it cannot help the source launcher find Node. On macOS, **Environment** detects installed tools; it does not install tool packs. Under **Ask first**, macOS `sandbox-exec` restricts writes to the working folder, temp folders, and caches. `brew install` and `brew reinstall` need to write outside those folders, so the approval prompt explains why. Clicking **Run** lets only that command run outside the sandbox. **Auto-review** and **Full auto** still rely on rule screening only.
 
 ## Windows portable package
 
@@ -28,7 +28,17 @@ If you'd rather not install Node first, use the portable package: it unzips to a
 
 `言.exe` is not code-signed. The first time you double-click it, Windows may say "Windows protected your PC"; click **More info → Run anyway**.
 
-Packaging: run `npm run pack` in the repository to get `dist/yan-<version>-win-x64.zip` (older packages are removed; released ones are on GitHub Releases). It uses the system's `curl.exe`, `tar.exe` and the .NET Framework 4 `csc.exe` (all present on Windows 10 / 11). The Node version is set at the top of `pack/pack.mjs`; the archive is used only after it matches the nodejs.org checksum. After changing the version, run the whole test suite with the bundled Node (`dist\言\node\node.exe test/run.mjs`). The launcher's source is `pack/launcher.cs`; the icon `pack/icon.ico` is drawn from `web/icon.svg`.
+## macOS portable package
+
+Download `yan-<version>-mac-arm64.zip` from [Releases](https://github.com/Master-Norna/yan/releases/latest), unzip it and double-click `start.command` inside the `言` folder. The bridge uses the bundled official Node (including npm). The bundled Node's directory is appended to PATH for commands, so existing system tools still take precedence. Python and ffmpeg aren't bundled; install them separately if needed and **Settings → Environment** can detect them. There is no Intel portable package. Chats, Files and settings still use the current storage location.
+
+Yan does not add signing or notarization to this package. If a recent macOS version blocks the first launch, and you're sure the file came from the official Releases page and hasn't been tampered with, go to **System Settings → Privacy & Security → Open Anyway**, then confirm. This makes an exception for this file; leave system protections on. See [Apple's instructions](https://support.apple.com/en-us/102445).
+
+## Packaging
+
+Run `npm run pack` in the repository. It builds `dist/yan-<version>-win-x64.zip` or `dist/yan-<version>-mac-arm64.zip` for the host automatically. Windows uses the system's `curl.exe`, `tar.exe` and .NET Framework 4 `csc.exe`; the launcher source is `pack/launcher.cs` and its icon `pack/icon.ico` is drawn from `web/icon.svg`. macOS uses the system's `ditto` to make the ZIP and preserve executable permissions and symlinks.
+
+The Node version is set in `pack/pack.mjs`; the Node archive is used only after it matches the nodejs.org checksum. After changing Node versions, run the whole test suite with the bundled Node. See [Additional validation](development.md#additional-validation) for the smoke tests and the separate Finder launch check.
 
 ## Use inside VS Code
 

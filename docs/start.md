@@ -2,7 +2,7 @@
 
 [← 文档目录](README.md) · [English](en/start.md)
 
-零依赖：仅需 Node.js 22 或更高版本，无需安装 npm 包，所有前端库随项目本地分发，不加载在线资源
+从源码运行只需 Node.js 22 或更高版本，便携包已自带 Node。无需安装 npm 包，所有前端库随项目本地分发，不加载在线资源。
 
 ## 快速开始
 
@@ -21,7 +21,7 @@ npm start
 
 `start.cmd` 打开的 CMD 窗口即本机桥接进程，必须保持开启；关闭后已加载的页面暂时仍在，但刷新、模型转发、联网与执事都会停止。浏览器开了、页面却报「本机桥接已停止」时，先看这个窗口：桥接退出会停在那里并打出原因（端口被占、缺 node 等），不会一闪而过。
 
-macOS 上双击 `start.command`（头一回若被拦，在访达里右键选「打开」）。启动脚本须先从继承的 PATH 找到 Node 22 或更高版本；「设置 → 环境」对 Homebrew 等位置的探测是桥接启动后才做的，不能帮 `start.command` 找到 Node。macOS 的「环境」只探测系统里已装的 Python、Node 和 ffmpeg，不安装工具包。问而后行的严档沙箱由 macOS 的 `sandbox-exec` 把写盘限制在工作目录、临时目录与缓存目录；`brew install` / `brew reinstall` 要写入这些目录之外，请示时会说明，点「运行」只让这条指令在沙箱外执行。审而后行与径行仍只过规则筛查。
+macOS 上双击 `start.command`，用时保持它打开的终端窗口。从源码启动时，脚本须先从继承的 PATH 找到 Node 22 或更高版本；「设置 → 环境」对 Homebrew 等位置的探测是桥接启动后才做的，不能帮源码的启动脚本找到 Node。macOS 的「环境」只探测已装工具，不安装工具包。问而后行的严档沙箱由 macOS 的 `sandbox-exec` 把写盘限制在工作目录、临时目录与缓存目录；`brew install` / `brew reinstall` 要写入这些目录之外，请示时会说明，点「运行」只让这条指令在沙箱外执行。审而后行与径行仍只过规则筛查。
 
 ## Windows 便携包
 
@@ -29,7 +29,17 @@ macOS 上双击 `start.command`（头一回若被拦，在访达里右键选「�
 
 `言.exe` 没有代码签名，头一回双击 Windows 可能提示「已保护你的电脑」，点「更多信息 → 仍要运行」即可。
 
-打包：在仓库里运行 `npm run pack`，得 `dist/yan-<版本>-win-x64.zip`（旧版本的包随之删去，发过的在 GitHub Release 上）。要用到系统自带的 `curl.exe`、`tar.exe` 与 .NET Framework 4 的 `csc.exe`（Windows 10 / 11 都有）；Node 的版本写在 `pack/pack.mjs` 开头，压缩包按 nodejs.org 的校验和验过才用，换版本后整套测试用包里的 Node 跑一遍（`dist\言\node\node.exe test/run.mjs`）。启动器的源码是 `pack/launcher.cs`，图标 `pack/icon.ico` 由 `web/icon.svg` 画成。
+## macOS 便携包
+
+在 [Releases](https://github.com/Master-Norna/yan/releases/latest) 下载 `yan-<版本>-mac-arm64.zip`，解压得到「言」文件夹，双击里面的 `start.command`。桥接用包内的官方 Node（含 npm），并把自带 Node 的目录接在 PATH 末尾，供指令使用，不抢系统已有的工具。包里不带 Python 或 ffmpeg；有需要可另装，由「设置 → 环境」探测。没有 Intel 版便携包。对话、卷宗与配置也沿用当前存储位置。
+
+这个包未另做签名或公证。较新的 macOS 若在首次双击时拦下，确认文件来自官方 Releases 且未被篡改后，可到「系统设置 → 隐私与安全性」点「仍要打开」（Open Anyway），再确认打开。只为这个文件放行，不必关闭系统防护。见 [Apple 的说明](https://support.apple.com/zh-cn/102445)。
+
+## 打包
+
+在仓库里运行 `npm run pack`，按宿主自动生成 `dist/yan-<版本>-win-x64.zip` 或 `dist/yan-<版本>-mac-arm64.zip`。Windows 用系统的 `curl.exe`、`tar.exe` 与 .NET Framework 4 的 `csc.exe`；启动器源码是 `pack/launcher.cs`，图标 `pack/icon.ico` 由 `web/icon.svg` 画成。macOS 用系统的 `ditto` 打 ZIP，保留执行位和符号链接。
+
+Node 的版本写在 `pack/pack.mjs`，压缩包按 nodejs.org 的校验和验过才用。换 Node 版本后用随包的 Node 跑一遍整套测试。冒烟与另行检查 Finder 首启，见[按需验证](development.md#按需验证)。
 
 ## 在 VS Code 内使用
 
