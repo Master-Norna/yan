@@ -1,8 +1,10 @@
 // 言 · 读的时候：右下角的上下文计数（点开可压缩）、右侧的问题导航条
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 
-// ---------- 上下文计数：下一问会送出多少（估算），随输入、流式生成实时变 ----------
-// 与真正发送时的拼法同源（系统提示 + 工具定义 + 上次撮要以来的往来 + 行迹摘要 + 草稿 + 案上待发的附件与引文），附件按入库时记下的字数估
+// ---------- 上下文计数：下一问会送出多少（估算），随输入、流式生成实时变；作答中改显本答这一轮的请求 ----------
+// 与真正发送时的拼法同源（系统提示 + 工具定义 + 上次撮要以来的往来 + 行迹摘要 + 草稿 + 案上待发的附件与引文），附件按入库时记下的字数估。
+// 作答中接口每回一轮就报一次实际的提示用量，那时显示它；一答之内撮要压掉往来，下一问的估算看不出来，本答的请求才看得出来。
+// 撮要刚做完、下一轮还没报数时，先按折叠后的估算显示（见 60-context.js 的 onSize），免得数字要等一轮才动
 /** @param {Conversation} c */
 function contextEstimate(c, draft = "", pending = null) {
   if (!c) return 0;
@@ -57,26 +59,39 @@ function contextEstimate(c, draft = "", pending = null) {
   return Math.round(n);
 }
 let gaugeTimer = null;
+// 作答中显示本答这一轮请求的大小：接口报来的实际用量（见 30-rounds.js），撮要刚做完则先按折叠后的估算（见 60-context.js 的 onSize）。
+// 一答之内撮要压掉较早的往来后，这个数会明显回落。空闲时仍估下一问——被撮掉的工具往来本就不随下一问重装，
+// 那个估算撮要前后不动（见 60-context.js 的 foldByModel），撮要有没有用只有看本答的请求才看得出
 function updateContextGauge() {
   const gauge = $("#contextGauge");
   if (!gauge) return;
   const c = currentConversation();
   if (!c || view !== "chat") return gauge.classList.add("hidden");
   const draft = $("#chatInput").value,
-    n = contextEstimate(
-      c,
-      draft,
-      draft || pendingAttachments.length || pendingQuote ? { text: draft, attachments: pendingAttachments, quote: pendingQuote } : null
-    ),
-    window = Number(activeProfile()?.contextWindow) || 0,
-    heavy = window ? n >= window * 0.75 : n >= CONTEXT_HEAVY;
+    job = requestJob(c.id),
+    live = Number(job?.promptTokens) || 0,
+    n =
+      live ||
+      contextEstimate(
+        c,
+        draft,
+        draft || pendingAttachments.length || pendingQuote ? { text: draft, attachments: pendingAttachments, quote: pendingQuote } : null
+      ),
+    // 作答中这一轮的量是那段作业按开工时的模型算的，窗口也照它：中途在菜单里换了模型，不至于拿另一家的窗口去比。
+    // 空闲时的估算才用眼前这段挑的模型
+    window = Number(((live && job?.profile) || activeProfile(c))?.contextWindow) || 0,
+    heavy = window ? n >= window * 0.75 : n >= CONTEXT_HEAVY,
+    share = window ? t`，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : "",
+    tail = heavy ? t("\n上下文已重，可撮要前文") : t("\n撮要前文");
   gauge.classList.remove("hidden");
   gauge.classList.toggle("heavy", heavy);
   gauge.classList.toggle("has-window", !!window);
   gauge.style.setProperty("--ratio", window ? `${Math.min(100, Math.round((n / window) * 100))}%` : "0%");
   rollText(gauge.querySelector(".context-gauge-value"), formatTokens(n));
   gauge.querySelector(".context-gauge-window").textContent = window ? `/ ${formatTokens(window)}` : "";
-  gauge.title = t`下一问约送出 ${formatTokens(n)} token${window ? t`，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : ""}（估算，含系统提示、工具定义与上次撮要以来的往来）${window ? t("；过七成半自动撮要") : t("；放不下时自动撮要")}${heavy ? t("\n上下文已重，可撮要前文") : t("\n撮要前文")}`;
+  gauge.title = live
+    ? t`本答这一轮送出约 ${formatTokens(n)} token${share}（含系统提示、工具定义、历史与本答的往来）${window ? t("；过七成半自动撮要") : t("；放不下时自动撮要")}${tail}`
+    : t`下一问约送出 ${formatTokens(n)} token${share}（估算，含系统提示、工具定义与上次撮要以来的往来）${window ? t("；过七成半自动撮要") : t("；放不下时自动撮要")}${tail}`;
 }
 function scheduleContextGauge(delay = 160) {
   clearTimeout(gaugeTimer);

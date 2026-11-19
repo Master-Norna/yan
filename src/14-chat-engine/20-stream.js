@@ -7,7 +7,7 @@
  */
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
   // queue 是这一答的收件口：用户的补言（user）与帮手、后台指令及定时的回报（report）
-  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user?: Message, step: Step, report?: string }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number }} */
+  /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user?: Message, step: Step, report?: string }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number, promptTokens: number }} */
   const job = {
     controller: new AbortController(),
     assistantId: assistant.id,
@@ -17,7 +17,10 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     round: null,
     reading: false,
     roundStart: 0,
-    steerTimer: 0
+    steerTimer: 0,
+    // 本答眼下的请求有多大（token）：接口每回一轮报实际用量（见 30-rounds.js），撮要刚做完时先由折叠后的估算顶上
+    // （见 60-context.js 的 onSize）。作答中右下角的计数显示它——撮要压掉往来后这个数随之回落（见 18-outline.js）
+    promptTokens: 0
   };
   requestJobs.set(conversation.id, job);
   renderSendButtons();
@@ -111,6 +114,11 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       onFold: busy => {
         setJobLabel(conversation, job, busy ? t("正删繁就简") : "");
         refreshSteps(assistant);
+      },
+      // 撮要换了这一答的往来：本答的请求大小随之变了，右下角的计数立即按折叠后的估算更新（见 18-outline.js），
+      // 不必等下一轮接口报来实际用量（见 30-rounds.js）
+      onSize: n => {
+        job.promptTokens = Number(n) || 0;
       },
       // 放不下的是这一问之前的对话：压成摘要落成分隔（下一问也用得上）；只重装 history 的旧前缀，后面已递上的回报与本答往来仍保留
       compactHead: async signal => {
