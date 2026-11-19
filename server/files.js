@@ -18,7 +18,7 @@ const {
 const fs = require("node:fs");
 const path = require("node:path");
 
-module.exports = function createFiles({ filesHome, playable }) {
+module.exports = function createFiles({ filesHome, playable, route = jsonRoute }) {
   const ID = /^[A-Za-z0-9_-]{1,80}$/,
     // 页面那头单件上限 256 MB（见 src/13-files/00-ingest.js），与收入卷宗同
     PUT_LIMIT = 256 * 1024 * 1024,
@@ -153,7 +153,7 @@ module.exports = function createFiles({ filesHome, playable }) {
     },
     error => errorText(error, 200)
   );
-  const handleDelete = jsonRoute(
+  const handleDelete = route(
     async body => {
       const dir = home();
       let removed = 0;
@@ -172,7 +172,7 @@ module.exports = function createFiles({ filesHome, playable }) {
     error => `附件未能删除：${errorText(error, 200)}`
   );
   // 清掉没人引用的：页面报来仍在用的 id（对话、旁注、补言、草稿、浏览器内卷宗），其余放了一天以上的删去
-  const handleClean = jsonRoute(
+  const handleClean = route(
     async body => {
       if (!Array.isArray(body.keep)) throw Error("缺少仍在用的附件清单");
       const keep = new Set(body.keep.map(String)),

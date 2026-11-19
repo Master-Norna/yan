@@ -239,13 +239,16 @@ function bindGeneralSettings() {
     )
       return;
     stopAllGenerations();
-    const conversationIds = new Set(store.conversations.map(c => c.id)),
-      draftFiles = Object.entries(store.drafts || {})
-        .filter(([key]) => conversationIds.has(key))
-        .flatMap(([, draft]) => (Array.isArray(draft?.attachments) ? draft.attachments.map(file => file.id) : []));
-    const currentDraftFiles = currentId ? pendingAttachments.map(file => file.id) : [];
-    void deleteAttachments([...attachmentIds(store.conversations.flatMap(everyMessage)), ...draftFiles, ...currentDraftFiles]);
-    for (const c of store.conversations) void deleteConversationStorage(c.id);
+    void deleteStoredConversations(
+      store.conversations.map(c => [
+        c.id,
+        [
+          ...attachmentIds(everyMessage(c)),
+          ...draftRecord(c.id).attachments.map(file => file.id),
+          ...(c.id === currentId ? pendingAttachments.map(file => file.id) : [])
+        ]
+      ])
+    );
     store.conversations = [];
     store.drafts = store.drafts?.[NEW_DRAFT_ID] ? { [NEW_DRAFT_ID]: store.drafts[NEW_DRAFT_ID] } : {};
     scrollPositions.clear();

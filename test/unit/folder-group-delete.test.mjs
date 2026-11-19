@@ -34,14 +34,19 @@ function setup(conversations) {
       clearDraft = () => {};
       cleanScratch = async () => {};
       deleteAttachments = async ids => { files.push(...ids); };
-      deleteConversationStorage = async id => { deleted.push(id); };
+      deleteConversationStorage = async id => { deleted.push(id); return true; };
+      canCleanAttachments = () => true;
+      let cleanup;
+      const remove = deleteStoredConversations;
+      deleteStoredConversations = entries => (cleanup = remove(entries));
+      return () => cleanup;
     }`
   ]);
   f.store.conversations = conversations;
   f.store.settings.groups = [{ id: "g1", name: "诗书" }];
   f.store.settings.workdirNames = { [dir]: "言记" };
-  f.install(() => new Promise(resolve => (approve = resolve)), deleted, files, notices);
-  return { f, deleted, files, notices, approve: () => approve(true) };
+  const settleDeletes = f.install(() => new Promise(resolve => (approve = resolve)), deleted, files, notices);
+  return { f, deleted, files, notices, settleDeletes, approve: () => approve(true) };
 }
 
 test("删目录组确认后重查占用和归属，不带走新加入或已离组的对话", async () => {
@@ -72,12 +77,13 @@ test("删目录组确认后重查占用和归属，不带走新加入或已离�
 
 for (const kind of ["目录组", "单条"]) {
   test(`${kind}删除使用确认后按 id 读回的新版记录清理附件`, async () => {
-    const { f, deleted, files, approve } = setup([conversation("c1")]);
+    const { f, deleted, files, approve, settleDeletes } = setup([conversation("c1")]);
     const pending = kind === "目录组" ? f.removeWorkdirGroup(dir) : f.deleteConversation("c1");
     f.store.conversations = [conversation("c1", { messages: [{ id: "m1", role: "user", attachments: [{ id: "new-file" }] }] })];
     approve();
     await pending;
     assert.deepEqual(deleted, ["c1"]);
+    await settleDeletes();
     assert.deepEqual(files, ["new-file"]);
     assert.deepEqual(f.store.conversations, []);
   });

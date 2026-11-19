@@ -195,7 +195,7 @@ const TIMERS = require("./server/timers.js")({
   known: CHATS.exists,
   route: STORE.scopedRoute
 });
-const FILES = require("./server/files.js")({ filesHome: () => STORE.paths().files, playable: VIDEO.playable });
+const FILES = require("./server/files.js")({ filesHome: () => STORE.paths().files, playable: VIDEO.playable, route: STORE.scopedRoute });
 const STAGE_LIB = require("./server/stage.js");
 // 检索与翻网页用的无头浏览器（直接请求被拦、网页要跑脚本时才起，见 server/headless.js）：配置目录只是 Cookie 与缓存，不算用户的东西，
 // 放系统临时目录、不进存储根（也不进 环境/：清空环境时它若开着，删到一半就卡住）；按端口各一份，测试的桥接不与常开的那个共用

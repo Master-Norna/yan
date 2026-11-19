@@ -80,32 +80,30 @@ async function deleteConversation(id) {
   const current = store.conversations.find(c => c.id === id);
   if (!current) return;
   if (runningElsewhere(id)) return toast(t("此对话正在另一页面作答，暂不能删除"));
-  purgeConversation(current);
+  void deleteStoredConversations([detachConversation(current)]);
   saveStore();
   render();
   toast(t("对话已删除"));
 }
-// 把一段对话从存储与侧栏里抹去：主答、旁注、后台的帮手一并停下，附件、草稿、检查点一并清。
-// 不确认、不存盘、不重画——单条删除与整组删除同走这一条，各自决定问法与收尾
-/** @param {Conversation} c */
-function purgeConversation(c) {
+// 从本页移去一段：停下作答、旁注、帮手，记住要清的附件。调用方成批交给存储层裁定。
+/** @param {Conversation} c @returns {[string, string[], () => Promise<void>]} */
+function detachConversation(c) {
   haltConversation(c.id, { removing: true });
   if (currentId === c.id) closeSidePanel();
   const draftFiles = draftRecord(c.id).attachments.map(file => file.id);
   clearDraft(c.id);
-  void cleanScratch(c);
-  void deleteAttachments([...attachmentIds(everyMessage(c)), ...draftFiles]);
+  const files = [...attachmentIds(everyMessage(c)), ...draftFiles];
   // 它所在的组记下它的时刻：删了组里最新的一段，组仍停在原处，不随余下几段的时刻往下挪；组删空了一并忘掉
   const key = historyKey(c),
     held = (store.settings.groupAt ||= {});
   store.conversations = store.conversations.filter(item => item.id !== c.id);
   if (key && !store.conversations.some(item => historyKey(item) === key)) delete held[key];
   else if (key && !(held[key] >= c.updatedAt)) held[key] = c.updatedAt;
-  void deleteConversationStorage(c.id);
   if (currentId === c.id) {
     currentId = null;
     pendingAttachments = [];
   }
+  return [c.id, files, () => cleanScratch(c)];
 }
 // 一段对话在侧栏落在哪一组：分组是 group:组 id，目录组是目录（置顶的不进目录组），散着的没有；与 renderHistory 的归法、collapsedRepos 的键一致
 /** @param {Conversation} c */

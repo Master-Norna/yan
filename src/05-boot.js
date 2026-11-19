@@ -74,8 +74,9 @@ async function boot() {
   // 低频巡检：哪段改了没标到也兜得住——前台轮着巡，页面藏起来时整份巡一趟（手机切走常常就不回来了）
   setInterval(() => {
     sweepSomeConversations();
-    // 开页时对话目录没读成（桥接闪断、目录大到超时）：巡检时再试，不然整个会话都只存进浏览器
+    // 目录读取或补删还没收定：巡检时重试，不必等下一次桥接闪断。
     if (chatsBroken) resyncWithDisk();
+    else if (hasPendingChatDeletes() || hasDiscardedChatSpills()) void syncChatsWithDisk();
   }, 45000);
   // 报到：这边在作答什么、别处在作答什么（作答的一处三秒存一次盘，跟着看的一处也三秒读一次）
   setInterval(() => void syncLeases(), 3000);

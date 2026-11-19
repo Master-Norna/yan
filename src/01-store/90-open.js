@@ -18,10 +18,14 @@ async function storeBridge(path, payload, signal = undefined) {
 async function switchStoreRoot(data) {
   // 新处的各条路径整份换上（技能目录审查要认，见 insideSkills），只去掉这一回迁移本身的结果
   const { moved: _moved, adopted: _adopted, previous: _previous, busy: _busy, busyCount: _busyCount, ...where } = data;
+  const previousChats = chatsDir();
   resetConfigSync();
   bootstrap.store = { ...where, fresh: false };
   bootstrap.work = { ...bootstrap.work, chats: data.chats, archive: data.archive, files: data.files };
+  // 唯有拷贝迁移才转交删除意图；沿用另一套已有数据时，不向它重放旧根的删除。
+  if (!data.adopted) for (const [id, dir] of pendingChatDeleteDirs) if (dir === previousChats) setChatDeleteDir(id, data.chats);
   chatsBroken = false;
+  chatsLoaded = false;
   chatHashes.clear();
   chatStamps.clear();
   chatDiskStamps.clear();

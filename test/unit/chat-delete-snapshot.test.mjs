@@ -26,7 +26,7 @@ function setup({ items, failing = [] }) {
         routes.push({ route, id: payload.id || "", ...(payload.at === undefined ? {} : { at: payload.at }) });
         if (route !== "/api/chats/delete") return { items, deleted: {} };
         if (failing.includes(payload.id)) throw Error("补删没成");
-        return { deleted: true };
+        return { removed: 1 };
       };
       flushConversations = () => {};
       writeMeta = () => {};

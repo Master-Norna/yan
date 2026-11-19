@@ -106,7 +106,7 @@ function deleteAttachment(id) {
   uncacheAttachment(id);
   if (!id) return Promise.resolve();
   return Promise.all([
-    bridge("/api/files/delete", { ids: [id] }, AbortSignal.timeout(20000)).catch(() => {}),
+    storeBridge("/api/files/delete", { ids: [id] }, AbortSignal.timeout(20000)).catch(() => {}),
     fileStoreRequest("readwrite", db => db.delete(id)).catch(() => {})
   ]);
 }
@@ -179,21 +179,30 @@ async function deleteAttachments(ids) {
 }
 // 对话从目录读全之后（见 syncChatsWithDisk）才来这一趟：先把浏览器里暂存的原件推进目录、表里的清掉，再请桥接清掉目录里没人用的。
 // 对话没读全时绝不清——那时内存里只有没落盘的几段，照它判「没人用」会把别的对话的附件一并删掉
-let attachmentsSettling = false;
-async function settleAttachmentStore() {
-  if (!chatsLoaded || attachmentsSettling) return;
-  attachmentsSettling = true;
+function canCleanAttachments() {
+  return chatsLoaded && !chatsBroken && !chatsSkipped && !chatsSyncing && !hasPendingChatDeletes();
+}
+let attachmentsSettling = null;
+async function settleAttachmentStore(spillsReady = Promise.resolve(true)) {
+  const scope = bootstrap.store,
+    work = bootstrap.work;
+  if (!chatsLoaded || attachmentsSettling === work) return;
+  attachmentsSettling = work;
+  const sameRoot = () => bootstrap.store === scope && bootstrap.work === work;
   try {
     let keys = [];
     try {
       keys = await fileStoreRequest("readonly", db => db.getAllKeys());
     } catch {}
+    if (!sameRoot()) return;
     if (keys.length) {
       const { has = [] } = await bridge("/api/files/has", { ids: keys.map(String) }, AbortSignal.timeout(20000));
       const onDisk = new Set(has);
       for (const id of keys) {
+        if (!sameRoot()) return;
         if (!onDisk.has(String(id))) {
           const record = await fileStoreRequest("readonly", db => db.get(id)).catch(() => null);
+          if (!sameRoot()) return;
           if (!record) continue;
           // 推不上去就留在表里，下回再推；推上去了才删表里的
           const pushed = await uploadAttachment(record).then(
@@ -202,13 +211,14 @@ async function settleAttachmentStore() {
           );
           if (!pushed) continue;
         }
+        if (!sameRoot()) return;
         await fileStoreRequest("readwrite", db => db.delete(id)).catch(() => {});
       }
     }
-    if (chatsLoaded && !chatsSkipped)
-      await bridge("/api/files/clean", { keep: [...attachmentKeepIds()] }, AbortSignal.timeout(60000)).catch(() => {});
+    if ((await spillsReady) && sameRoot() && canCleanAttachments())
+      await storeBridge("/api/files/clean", { keep: [...attachmentKeepIds()] }, AbortSignal.timeout(60000));
   } catch {
   } finally {
-    attachmentsSettling = false;
+    if (attachmentsSettling === work) attachmentsSettling = null;
   }
 }
