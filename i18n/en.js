@@ -935,6 +935,8 @@ var YAN_EN = {
   "\n撮要前文": "\nSummarize earlier messages",
   "下一问约送出 {0} token{1}（估算，含系统提示、工具定义与上次撮要以来的往来）{2}{3}":
     "The next message sends about {0} {0|token|tokens}{1} (estimate: system prompt, tool definitions and messages since the last summary){2}{3}",
+  "本答这一轮送出约 {0} token{1}（含系统提示、工具定义、历史与本答的往来）{2}{3}":
+    "This answer's current request sends about {0} {0|token|tokens}{1} (system prompt, tool definitions, history and this answer's transcript included){2}{3}",
   "作答中，稍后再撮": "Still replying, summarize later",
   "对话还短，不必撮要": "The chat is short; no need to summarize",
   "撮要前文？": "Summarize earlier messages?",
@@ -1775,8 +1777,8 @@ var YAN_EN = {
     "The ink stroke at the top right is usage: with no limit it counts what's been spent; with a limit it shows tokens left, shrinking as you go, and hovering shows the number. The half-shaded circle to its left switches light and dark. With the browser on, a hanging scroll drops from the top of the page; while music plays, an ink thread with a small circle hangs down: that's Listen. When the network is shaky and a request is retried, or the context is nearly full and gets tidied, the status bar above the input box says so.",
   "页面提示桥接未接通，多是桥接已退出（start.cmd 的窗口关了，或言.exe 起的桥接出错退了）。重新打开，下一回寄出时页面自会接上。":
     "If the page says the bridge isn't connected, the bridge has most likely exited (the start.cmd window was closed, or the bridge started by 言.exe hit an error). Start it again and the page reconnects on the next send.",
-  "右下角「上下文」是下一问约送出多少 token，点之可撮要前文：此前的问答由模型撮要成一份（目标、事实、决定、改过的文件、待办），此后每一问只带这份撮要与其后的消息，页面上的记录仍在，只是折起。模型设置里填了上下文窗口，过七成半便自动撮要；没填则等接口回说放不下时再撮，想早些撮、省些墨，填小一点即可。":
-    "“Context” at the bottom right estimates how many tokens the next message will send; click it to summarize what came before. The model condenses the earlier exchange into one summary (goals, facts, decisions, changed files, to-dos), and from then on each message carries only that summary and what follows. The record on the page stays, just folded. If the model's context window is set, this happens automatically past 75%; if not, it waits until the API says the context won't fit. To summarize earlier and spend fewer tokens, set a smaller window.",
+  "右下角「上下文」在作答中显示本答这一轮请求送出多少 token（接口每回一轮报的用量；一答之内撮要之后先按折叠后的估算更新，下一轮再校正），空闲时估下一问约送出多少，点之可撮要前文：此前的问答由模型撮要成一份（目标、事实、决定、改过的文件、待办），此后每一问只带这份撮要与其后的消息，页面上的记录仍在，只是折起。模型设置里填了上下文窗口，过七成半便自动撮要；没填则等接口回说放不下时再撮，想早些撮、省些墨，填小一点即可。":
+    "“Context” at the bottom right shows how many tokens this answer's current request sends while a reply is streaming (as reported by the API each round; after the model folds earlier rounds it updates at once from the folded estimate, then corrects itself on the next round), and otherwise estimates how many the next message will send. Click it to summarize what came before. The model condenses the earlier exchange into one summary (goals, facts, decisions, changed files, to-dos), and from then on each message carries only that summary and what follows. The record on the page stays, just folded. If the model's context window is set, this happens automatically past 75%; if not, it waits until the API says the context won't fit. To summarize earlier and spend fewer tokens, set a smaller window.",
   "首问之后模型自动拟题，略耗额度；手改过的标题不再覆盖。设置 → 通用可关。":
     "After the first question the model writes a title, which costs a little quota; a title you've edited by hand is never overwritten. Turn this off in Settings → General.",
   "接口、余墨与思考": "APIs, token limits and thinking",

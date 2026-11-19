@@ -141,6 +141,9 @@ async function runRounds(target, history, run) {
     }
     resumed = 0; // 接续的次数按轮算：长活跑上几百轮，前面断过两回不该让后面再断就没得接
     if (target.usage) {
+      // 这一轮请求实际送出多少提示：右下角的「上下文」在作答中显示它（见 18-outline.js）；撮要压掉较早的往来后，
+      // 下一轮回来就会小下去。接口不报提示用量的，这里留 0，那边退回估算
+      if (inbox && Number(target.usage.prompt_tokens) > 0) inbox.promptTokens = Number(target.usage.prompt_tokens);
       tally.usageKnown = true;
       tally.roundOpen = false;
       for (const key of Object.keys(tally.usage)) tally.usage[key] += Number(target.usage[key] || 0);

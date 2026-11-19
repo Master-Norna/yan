@@ -85,7 +85,42 @@ await evalJs(
   `__yanState().profiles[0].contextWindow = 0; (w => { document.querySelector("#newChat").click(); __yanState().settings.pendingWorkdir = w; })(__yanState().settings.pendingWorkdir); true`
 );
 await sleep(400);
-const self = await run("LONGSELF 读几个文件，读完一段自己撮要", "LONGSELF done");
+// 右下角的计数：作答中显示本答这一轮的请求大小。每隔一小段主动刷一次、记下读数——撮要压掉较早的往来后，计数应随之回落
+// （假接口按请求里大文件还在不在报 45k / 15k）
+await evalJs(
+  `window.__gaugeTrail = []; window.__gaugeSampler = setInterval(() => { const g = document.querySelector("#contextGauge"); if (g) window.__gaugeTrail.push([g.querySelector(".context-gauge-value").textContent, g.title]); }, 80); true`
+);
+const selfAnswered = run("LONGSELF 读几个文件，读完一段自己撮要", "LONGSELF done");
+// 撮要刚落成、下一轮还没回包的当口：计数应当已经按折叠后的估算回落，而不是等接口报数。
+// 计数由作答中的一只 600ms 的钟刷新（见 20-stream.js），等过一拍再读
+await waitFor(
+  `(() => { const c = __yanState().conversations.find(c => c.messages[0]?.content.startsWith("LONGSELF")); return !!c?.messages.at(-1)?.steps?.some(s => s.name === "fold" && s.status === "done"); })()`,
+  20000
+);
+await sleep(700);
+const atFold = await evalJs(
+  `(() => { const g = document.querySelector("#contextGauge"), v = g.querySelector(".context-gauge-value").textContent, m = v.match(/^([\\d.]+)([kme])?$/); return { value: v, n: m ? Number(m[1]) * ({ k: 1000, m: 1000000, e: 100000000 }[m[2]] || 1) : 0, title: g.title }; })()`
+);
+const self = await selfAnswered;
+check(
+  "the gauge drops as soon as the model folds, before the next request reports back",
+  atFold.title.includes("本答这一轮送出约") && atFold.n > 0 && atFold.n < 20000,
+  JSON.stringify(atFold)
+);
+const gaugeTrail = await evalJs(`(clearInterval(window.__gaugeSampler), window.__gaugeTrail)`);
+const live = gaugeTrail
+  .filter(([, title]) => String(title).includes("本答这一轮送出约"))
+  .map(([value]) => {
+    const m = String(value).match(/^([\d.]+)([kme])?$/);
+    return m ? Number(m[1]) * ({ k: 1000, m: 1000000, e: 100000000 }[m[2]] || 1) : 0;
+  });
+const peak = Math.max(0, ...live),
+  peakAt = live.indexOf(peak);
+check(
+  "the gauge follows this answer's request size and drops after the model folds",
+  live.length >= 3 && peak >= 40000 && live.slice(peakAt + 1).some(v => v > 0 && v * 2.5 <= peak),
+  JSON.stringify({ n: live.length, peak, tail: live.slice(-6) })
+);
 check(
   "the model folded on its own: note in, old rounds out, the read in the same batch kept, its fold call gone",
   self.status === "complete" && self.content.includes("LONGSELF done|offered:yes|old:no|kept:yes|call:no|folded:yes"),

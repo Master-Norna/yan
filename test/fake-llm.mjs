@@ -470,7 +470,9 @@ http
           delta({}, { usage: { total_tokens: 9 } })
         ]);
       }
-      // 自己撮要（LONGSELF）：读两个文件后调 fold，同一批里再读一个；之后照实写见到了什么
+      // 自己撮要（LONGSELF）：读两个文件后调 fold，同一批里再读一个；之后照实写见到了什么。
+      // 每轮报一个随请求大小走的提示用量：读过大文件的内容还在就报大数，被撮掉之后回落——用例据此看右下角的「上下文」。
+      // 每轮缓半拍，好让用例在那一段读得到计数
       if (firstUser.includes("LONGSELF") && !firstUser.includes("LONGRUN")) {
         const noted = msgs.some(m => m.role === "assistant" && String(m.content || "").startsWith("［工作笔记］\nSELFNOTE")),
           call = (index, name, args) => ({
@@ -478,24 +480,36 @@ http
             id: `call_self_${name}_${index}_${toolResults.length}`,
             type: "function",
             function: { name, arguments: JSON.stringify(args) }
-          });
+          }),
+          size = msgs
+            .map(m => String(m.content || ""))
+            .join("\n")
+            .includes("file 0")
+            ? 45000
+            : 15000,
+          usage = { prompt_tokens: size, completion_tokens: 5, total_tokens: size + 5 },
+          slow = (chunks, ms = 500) => setTimeout(() => sse(res, chunks), ms);
         if (!noted && toolResults.length < 2)
-          return sse(res, [
-            delta({ tool_calls: [call(0, "read_file", { path: `big${toolResults.length}.txt` })] }),
-            delta({}, { usage: { total_tokens: 5 } })
-          ]);
+          return slow([delta({ tool_calls: [call(0, "read_file", { path: `big${toolResults.length}.txt` })] }), delta({}, { usage })]);
         if (!noted)
-          return sse(res, [
+          return slow([
             delta({ content: "两个读完了，记一笔。" }),
             delta({ tool_calls: [call(0, "fold", { note: "SELFNOTE 已读 big0、big1" }), call(1, "read_file", { path: "big2.txt" })] }),
-            delta({}, { usage: { total_tokens: 5 } })
+            delta({}, { usage })
           ]);
+        // 折后接着读两回：折后的实测有地方落下来，用例才读得到回落。折后第一轮缓一秒半，
+        // 好让用例在本轮还没有回包时就读到计数——那时若已回落，只能是撮要后立即按估算更新的（onSize），不是接口报的
+        if (toolResults.length < 5)
+          return slow(
+            [delta({ tool_calls: [call(0, "read_file", { path: `big${toolResults.length}.txt` })] }), delta({}, { usage })],
+            noted && toolResults.length === 3 ? 1500 : 500
+          );
         const said = msgs.map(m => String(m.content || "")).join("\n");
-        return sse(res, [
+        return slow([
           delta({
             content: `LONGSELF done|offered:${(payload.tools || []).some(t => t.function?.name === "fold") ? "yes" : "no"}|old:${said.includes("file 0") ? "yes" : "no"}|kept:${said.includes("file 2") ? "yes" : "no"}|call:${msgs.some(m => m.tool_calls?.some(c => c.function?.name === "fold")) ? "yes" : "no"}|folded:${said.includes("原文不再保留") ? "yes" : "no"}`
           }),
-          delta({}, { usage: { total_tokens: 5 } })
+          delta({}, { usage })
         ]);
       }
       if (longKey) {
