@@ -1736,8 +1736,17 @@ const macBuiltinWhy = scanned => {
     const args = macArgs(scan, call.nameEnd, call.argEnd ?? scan.syntax.length).map(t => t.value);
     if (/^socketfilterfw$/i.test(name)) {
       // getopt_long 的唯一前缀缩写同样生效：反过来只放行已知的查询选项
-      // （get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余带 -- 的一律拦
-      if (args.some(a => /^--\w/.test(a) && !/^[glh]/.test(a.slice(2)))) return "不动网络与防火墙配置";
+      // （get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余长选项一律拦。
+      // 单横线的长选项（-setglobalstate）一并按长选项判：写选项抄错横线也拦得住；
+      // -h/-d/-l/-k 这几个单字母短选项不在此列，照旧放行
+      const longName = a => (/^--\w/.test(a) ? a.slice(2) : /^-[^-]\w/.test(a) ? a.slice(1) : "");
+      if (
+        args.some(a => {
+          const name = longName(a);
+          return name !== "" && !/^[glh]/.test(name);
+        })
+      )
+        return "不动网络与防火墙配置";
       continue;
     }
     if (/^sysadminctl$/i.test(name)) {
@@ -1749,19 +1758,25 @@ const macBuiltinWhy = scanned => {
         "-smbGuestAccess",
         "-automaticTime",
         "-use12HourClockForLoginWindow",
-        "-screenLock"
+        "-screenLock",
+        "-filesystem"
       ]);
       for (let i = 0; i < args.length; i++) {
-        if (WRITES.has(args[i])) return "不动用户、账户与共享";
-        if (TOGGLES.has(args[i]) && args[i + 1] !== "status") return "不动用户、账户与共享";
+        // 单双横线同义：-addUser 与 --addUser 都按写动词判，抄错横线不收
+        const flag = args[i].replace(/^--+/, "-");
+        if (WRITES.has(flag)) return "不动用户、账户与共享";
+        if (TOGGLES.has(flag) && args[i + 1] !== "status") return "不动用户、账户与共享";
       }
       continue;
     }
     if (/^dscl$/i.test(name)) {
-      // 白名单：全局选项（p/q/r/v/n 无值，u/P/f/t/a 带值）→ 数据源 → 查询动词。
-      // 缺数据源或缺动词都会进交互模式（stdin 喂写命令），一律拦；选项/动词大小写敏感
-      const NO_VALUE = new Set(["-p", "-q", "-r", "-v", "-n"]);
-      const VALUE = new Set(["-u", "-P", "-f", "-t", "-a"]);
+      // 白名单：全局选项（p/q/raw/plist/url 无值，u/P/f 带值）→ 数据源 → 查询动词。
+      // 既无数据源又无动词（dscl、dscl .）会进交互模式，stdin 可喂写命令，一律拦；
+      // 选项与动词大小写敏感。man page 明说前导横线可省（"Leading dashes are optional
+      // for all commands"），故 read/readall/… 与带横线的一并认；cat 与 . 是 read 的
+      // 别名、ls 是 list 的别名，只在动词位认——数据源本身可以就是一个 "."
+      const NO_VALUE = new Set(["-p", "-q", "-raw", "-plist", "-url"]);
+      const VALUE = new Set(["-u", "-P", "-f"]);
       const READS = new Set([
         "-read",
         "-readall",
@@ -1775,6 +1790,27 @@ const macBuiltinWhy = scanned => {
         "-auth",
         "-authonly"
       ]);
+      // 数据源之后的动词位：横线可省（man page），cat 与 . 同 read、ls 同 list。
+      // 只在数据源之后认——「命令在前」时 dscl 把首个非选项参数当数据源，
+      // dscl read、dscl ls 不是查询而是数据源名，不能拿它开豁免
+      const PLAIN_READS = new Set([
+        "read",
+        "readall",
+        "readpl",
+        "readpli",
+        "list",
+        "diff",
+        "search",
+        "mcxread",
+        "mcxhelp",
+        "auth",
+        "authonly",
+        "cat",
+        ".",
+        "ls",
+        "-cat",
+        "-ls"
+      ]);
       let i = 0;
       for (; i < args.length; i++) {
         const a = args[i];
@@ -1787,10 +1823,13 @@ const macBuiltinWhy = scanned => {
         if (a.startsWith("-") && !READS.has(a)) return "不动用户、账户与共享";
         break;
       }
+      // 动词在前（dscl -read /x）只认带横线的白名单动词
       if (i < args.length && READS.has(args[i])) continue;
       if (i >= args.length) return "不动用户、账户与共享";
       const source = args[i];
-      if (source.startsWith("-") || i + 1 >= args.length || !READS.has(args[i + 1])) return "不动用户、账户与共享";
+      // 数据源在前：动词位另认无横线与别名（dscl . read /x、dscl . ls /Users）
+      if (source.startsWith("-") || i + 1 >= args.length || (!READS.has(args[i + 1]) && !PLAIN_READS.has(args[i + 1])))
+        return "不动用户、账户与共享";
     }
   }
 };

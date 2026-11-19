@@ -1171,6 +1171,16 @@ const TABLE = [
     "dscl -u admin . -read /x",
     "dscl -read /x",
     "dscl -u admin -P p . -list /x",
+    // 全局选项只管输出格式；man page：数据源之后的动词横线可省，cat 与 . 同 read、ls 同 list
+    "dscl -raw . -read /x",
+    "dscl -plist . -read /Users/a",
+    "dscl -url . -list /Users",
+    "dscl . read /x",
+    "dscl . readall /Users",
+    "dscl . cat /x",
+    "dscl . ls /Users",
+    "dscl . -cat /x",
+    "dscl . -ls /Users",
     "dscl . -list /x; dscl . -read /y",
     '"dscl" . -read /x',
     '"/usr/sbin/dscl" . -read /x',
@@ -1183,6 +1193,10 @@ const TABLE = [
     "socketfilterfw --get\\\nappblocked x",
     "sysadminctl -autologin status",
     "socketfilterfw --getg 2>&1 --listapps",
+    // 单双横线同义：查询的长选项抄成单横线与短选项照旧放行
+    "socketfilterfw -getglobalstate",
+    "socketfilterfw -k",
+    "sysadminctl --secureTokenStatus x",
     // dscl 的段界在 ; 前止步：下一条命令的参数不误当 dscl 的动词
     "dscl . -read /x;echo -create",
     "sysadminctl -adminUser root -secureTokenStatus x",
@@ -1397,6 +1411,13 @@ const TABLE = [
     "socketfilterfw --unbl /a.app",
     "socketfilterfw --a /a.app",
     "socketfilterfw --rem /a.app",
+    // 单横线的长选项（抄错横线）同样按写判；-h/-d/-l/-k 这几个短选项不在此列
+    "socketfilterfw -setglobalstate off",
+    "socketfilterfw -setg on",
+    "sysadminctl --addUser x",
+    "sysadminctl --screenLock off",
+    // -filesystem 只认 status，其余取值按写拦
+    "sysadminctl -filesystem on",
     ..."addUser deleteUser newPassword resetPasswordFor secureTokenOn secureTokenOff".split(" ").map(verb => `sysadminctl -${verb} x`),
     "sysadminctl -autologin set -userName x",
     "sysadminctl -autologin off",
@@ -1419,9 +1440,14 @@ const TABLE = [
       .map(verb => `dscl . -${verb} /x`),
     "dscl localhost -create /x",
     "dscl -u admin . -passwd /x p",
-    // 查询字样只当选项值的不算查询；不带 - 的写法与陌生动词同样拦
+    // 查询字样只当选项值的不算查询；写动词省掉前导横线、用别名同样拦
     "dscl -u -read . -create /x",
-    "dscl . read /x",
+    // 命令在前时首个非选项参数是数据源：dscl read 会进交互模式，不能当查询
+    "dscl read /x",
+    "dscl . create /x",
+    "dscl . mk /x",
+    "dscl . rm /x",
+    "dscl -raw . -create /x",
     "dscl . -unknownverb /x",
     "dscl -q . -create /x",
     "dscl",
