@@ -1,6 +1,6 @@
-# 便携包冒烟：解开打好的 zip、用包里自带的 Node 起一次桥接、问一句 /api/bootstrap 与首页（pack/smoke.mjs）。
+# 在 Windows x64 和 Apple 芯片 Mac 上各打包一次，解开 zip、起桥接、核对 /api/bootstrap 与首页。
 # 只在 PR 改到下列路径或手动触发时跑，推 main 不触发；不进分支保护的必过项。
-# 发版前另在本地跑一遍 npm run pack:smoke（见 docs/development.md「按需验证」）。
+# 只上传构建产物，不发 Release；Finder 首启另验（见 docs/development.md「按需验证」）。
 name: 便携包
 
 on:
@@ -8,8 +8,10 @@ on:
   pull_request:
     paths:
       - "pack/**"
+      - "package.json"
       - "server.js"
       - "start.cmd"
+      - "start.command"
       - ".github/workflows/pack.yml"
 
 concurrency:
@@ -21,8 +23,17 @@ permissions:
 
 jobs:
   smoke:
-    name: 打包 · 冒烟
-    runs-on: windows-latest
+    name: 打包 · 冒烟（${{ matrix.target }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: win-x64
+          # GitHub 托管的 macos-15 是 arm64；Intel 对应 macos-15-intel。
+          - runner: macos-15
+            target: mac-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -31,3 +42,9 @@ jobs:
           node-version: 24
       - run: npm run pack
       - run: node pack/smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yan-${{ matrix.target }}
+          path: dist/yan-*-${{ matrix.target }}.zip
+          if-no-files-found: error
+          compression-level: 0

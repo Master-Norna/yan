@@ -1,9 +1,6 @@
-// 言 · 打 Windows 便携包：node pack/pack.mjs → dist/yan-<版本>-win-x64.zip，解开是一个「言」文件夹，双击里面的 言.exe 即用。
-// 包里是：仓库里跟踪着的运行所需文件（不带测试、文档、设计稿）+ 官方 Node 原样一份（node\，带 npm）+ 启动器 言.exe。
-// 言自己的代码一字不改：Node 仍是真的 Node、npm 就在旁边，桥接照旧从磁盘现拼页面——只是不用用户先装 Node。
-// 启动器由系统自带的 .NET Framework csc 编出（pack/launcher.cs），图标 pack/icon.ico 由 web/icon.svg 画成。
-// Node 的压缩包按 nodejs.org 的 SHASUMS256.txt 验过才用，下过的留在 dist/.cache 里，再打不必重下。
-// 成功打包后清理 dist 下旧版 Windows x64 zip 和旧 Node 缓存；本版解压目录与其他产物不在这一步清理
+// 言 · 打本机便携包：运行文件 + 经官方校验和验证的 Node（含 npm）+ 平台启动入口。
+// Windows x64 用系统 csc 编 言.exe；Apple 芯片 Mac 用 start.command 与原生归档工具。
+// Node 下载留在 dist/.cache；成功后只清理本平台的旧版 ZIP。
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -15,6 +12,12 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const { fasterSide } = require("../server/mirror.js");
 
+const MAC = process.platform === "darwin" && process.arch === "arm64";
+const WIN = process.platform === "win32" && process.arch === "x64";
+if (!MAC && !WIN) throw Error("仅支持在 Windows x64 或 Apple 芯片 Mac 上打本机便携包（Mac 请用原生 arm64 Node）");
+const TARGET = MAC ? "mac-arm64" : "win-x64";
+const NODE_TARGET = MAC ? "darwin-arm64" : "win-x64";
+const NODE_BIN = MAC ? "bin/node" : "node.exe";
 const NODE = "v24.22.0"; // 当时的 LTS（Krypton）；换版本后整套测试用它跑一遍再发
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(ROOT, "dist"),
@@ -24,7 +27,7 @@ const DIST = path.join(ROOT, "dist"),
 const KEEP = [
   "server.js",
   "package.json",
-  "start.cmd",
+  MAC ? "start.command" : "start.cmd",
   "README.md",
   "README.en.md",
   "LICENSE",
@@ -37,12 +40,13 @@ const KEEP = [
   "i18n/",
   "vendor/"
 ];
-const SYSTEM_TAR = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+const SYSTEM_TAR = MAC ? "/usr/bin/tar" : path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
 const CSC = path.join(process.env.SystemRoot || "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
 
 const say = text => console.log(`· ${text}`);
 const sha256 = file => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-const curl = (url, out) => execFileSync("curl.exe", ["-fsSL", "--retry", "2", "-o", out, url], { stdio: "inherit" });
+const curl = (url, out) =>
+  execFileSync(MAC ? "/usr/bin/curl" : "curl.exe", ["-fsSL", "--retry", "2", "-o", out, url], { stdio: "inherit" });
 
 function copyTracked() {
   const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" }).trim();
@@ -55,38 +59,43 @@ function copyTracked() {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.copyFileSync(path.join(ROOT, file), to);
   }
+  // copyFile 不可代替发布物的执行位契约；start.command 解压后须能从访达启动。
+  if (MAC) fs.chmodSync(path.join(OUT, "start.command"), 0o755);
   say(`言的文件 ${files.length} 件`);
 }
 
 async function fetchNode() {
-  const name = `node-${NODE}-win-x64`,
-    zip = path.join(CACHE, `${name}.zip`);
+  const name = `node-${NODE}-${NODE_TARGET}`,
+    archiveName = `${name}.${MAC ? "tar.gz" : "zip"}`,
+    archive = path.join(CACHE, archiveName);
   fs.mkdirSync(CACHE, { recursive: true });
   const sums = path.join(CACHE, `SHASUMS256-${NODE}.txt`);
   if (!fs.existsSync(sums)) curl(`https://nodejs.org/dist/${NODE}/SHASUMS256.txt`, sums);
   const expected = fs
     .readFileSync(sums, "utf8")
     .split("\n")
-    .find(line => line.endsWith(`  ${name}.zip`))
+    .find(line => line.trimEnd().endsWith(`  ${archiveName}`))
     ?.split(/\s+/)[0];
-  if (!expected) throw Error(`SHASUMS256.txt 里没有 ${name}.zip`);
-  if (!fs.existsSync(zip) || sha256(zip) !== expected) {
-    const official = `https://nodejs.org/dist/${NODE}/${name}.zip`,
-      mirror = `https://registry.npmmirror.com/-/binary/node/${NODE}/${name}.zip`;
+  if (!expected) throw Error(`SHASUMS256.txt 里没有 ${archiveName}`);
+  if (!fs.existsSync(archive) || sha256(archive) !== expected) {
+    const official = `https://nodejs.org/dist/${NODE}/${archiveName}`,
+      mirror = `https://registry.npmmirror.com/-/binary/node/${NODE}/${archiveName}`;
     const { side } = await fasterSide(mirror, official);
     say(`下 Node ${NODE}（${side === "china" ? "国内镜像" : "官方"}）`);
-    curl(side === "china" ? mirror : official, zip);
-    if (sha256(zip) !== expected) throw Error("Node 压缩包与官方校验和对不上，不用它");
+    curl(side === "china" ? mirror : official, archive);
+    if (sha256(archive) !== expected) throw Error("Node 压缩包与官方校验和对不上，不用它");
   }
   say(`Node ${NODE} 校验和对上了`);
   const temp = path.join(DIST, ".node");
   fs.rmSync(temp, { recursive: true, force: true });
   fs.mkdirSync(temp, { recursive: true });
-  execFileSync(SYSTEM_TAR, ["-xf", zip, "-C", temp]);
+  execFileSync(SYSTEM_TAR, ["-xf", archive, "-C", temp]);
   fs.renameSync(path.join(temp, name), path.join(OUT, "node"));
   fs.rmSync(temp, { recursive: true, force: true });
-  const version = execFileSync(path.join(OUT, "node", "node.exe"), ["-v"], { encoding: "utf8" }).trim();
+  const version = execFileSync(path.join(OUT, "node", NODE_BIN), ["-v"], { encoding: "utf8" }).trim();
   if (version !== NODE) throw Error(`包里的 Node 报 ${version}，应是 ${NODE}`);
+  if (MAC && execFileSync(path.join(OUT, "node", NODE_BIN), ["-p", "process.arch"], { encoding: "utf8" }).trim() !== "arm64")
+    throw Error("包里的 macOS Node 不是 arm64");
 }
 
 function buildLauncher() {
@@ -192,10 +201,18 @@ fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 copyTracked();
 await fetchNode();
-buildLauncher();
-const zipFile = path.join(DIST, `yan-${version}-win-x64.zip`);
-const { count, bytes } = writeZip(OUT, zipFile, "言");
-say(`${path.relative(ROOT, zipFile)}：${count} 件，${(bytes / 1048576).toFixed(1)} MB`);
+const zipFile = path.join(DIST, `yan-${version}-${TARGET}.zip`);
+if (MAC) {
+  // 原生 ZIP 保留执行位与 npm/npx 的相对软链，也让系统自带的归档实用工具能解开。
+  fs.rmSync(zipFile, { force: true });
+  execFileSync("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--keepParent", OUT, zipFile], { stdio: "inherit" });
+  say(`${path.relative(ROOT, zipFile)}：${(fs.statSync(zipFile).size / 1048576).toFixed(1)} MB`);
+} else {
+  buildLauncher();
+  const { count, bytes } = writeZip(OUT, zipFile, "言");
+  say(`${path.relative(ROOT, zipFile)}：${count} 件，${(bytes / 1048576).toFixed(1)} MB`);
+}
 for (const name of fs.readdirSync(DIST))
-  if (/^yan-.+-win-x64\.zip$/.test(name) && name !== path.basename(zipFile)) fs.rmSync(path.join(DIST, name), { force: true });
+  if (name.startsWith("yan-") && name.endsWith(`-${TARGET}.zip`) && name !== path.basename(zipFile))
+    fs.rmSync(path.join(DIST, name), { force: true });
 for (const name of fs.readdirSync(CACHE)) if (!name.includes(NODE)) fs.rmSync(path.join(CACHE, name), { force: true });
