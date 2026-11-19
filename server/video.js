@@ -1,6 +1,6 @@
 // 言 · 视频换壳：扩展名是 mp4、里头却是 MPEG-TS 这类封装的视频（录屏、下载器常这样存），资源管理器里的播放器照放，
-// 浏览器的播放器却只认 MP4 / WebM 的壳。预览时用环境里的 ffmpeg 原样换进 MP4 的壳（-c copy，不重新编码，大文件也只要十几秒），
-// 换好的放在 环境/cache/视频/，只留最近几件；没装「音视频」工具包、或换不成的，照原样送，由页面给出以本机程序打开
+// 预览时，指定扩展名的视频若未识别出常见封装，就用环境入口或 macOS 探到的 ffmpeg 尝试换成 MP4。
+// 只复制第一条视频流和第一条音频流，不重新编码。换好的放在 环境/cache/视频/；缺工具或换不成则仍送原件。
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
@@ -8,7 +8,7 @@ const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 
 const KEEP = 3;
-// 浏览器认得的壳：MP4 / MOV（ISO 盒子，第 4–8 字节是盒名）、WebM / MKV（EBML 头）
+// 只看文件头识别 ISO 盒子或 EBML，避免不必要的换壳；这不是对编解码器能否播放的判断
 const BOXES = new Set(["ftyp", "moov", "mdat", "free", "skip", "wide", "pnot"]);
 function browserReadable(head) {
   if (head.length < 8) return true;
@@ -34,7 +34,7 @@ module.exports = function createVideo({ cacheHome, ffmpeg }) {
       throw error;
     });
     fs.renameSync(part, out);
-    // 只留最近几件；正被播放器读着的删不掉（Windows 上开着的文件），留到下回
+    // 每次换壳成功后按缓存文件修改时间清旧件；命中会更新时间，删不掉的留到下次尝试
     const kept = fs
       .readdirSync(path.dirname(out))
       .filter(name => name.endsWith(".mp4"))
@@ -45,8 +45,8 @@ module.exports = function createVideo({ cacheHome, ffmpeg }) {
         fs.rmSync(stale, { force: true });
       } catch {}
   }
-  /** 播放器来取（GET、非下载）的视频：浏览器认得的壳原样给；认不得的换好壳给换好的那份，换不成仍给原件。
-   * name 是显示的文件名（附件在盘上的名字不带扩展名）
+  /** 调用方只把非下载请求交来。GET 且显示名为 .mp4、.m4v 或 .mov 时才检查是否需要换壳。
+   * name 是显示名，不按盘上的附件名判断。
    * @param {{ method?: string }} req @param {string} file @param {string} name @returns {Promise<string>} */
   async function playable(req, file, name) {
     if (req.method !== "GET" || !/\.(mp4|m4v|mov)$/i.test(name)) return file;

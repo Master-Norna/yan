@@ -27,7 +27,7 @@ const dirtyChatIds = new Set(),
   deletedChatIds = new Set(),
   chatDiskWrites = new Map(),
   // 待补删的对话：id → 删它的时刻。断着的时候删的，接上后要带着那一刻去补删——
-  // 桥接按这个时刻落墓碑，断的这段里别处写过、保存过的那份才不会被补删一并抹掉（见 server/chats.js 的 handleDelete）
+  // 桥接用这个时刻比较磁盘版本：新版保留，其余按这个时刻记删除（见 server/chats.js 的 handleDelete）。
   pendingChatDeletes = new Map(),
   pendingChatDeleteDirs = new Map(),
   // 磁盘已裁定；只等浏览器事务提交，不再补删磁盘。关页前清不成，重开也不读回旧暂存。
@@ -178,7 +178,7 @@ async function writeConversation(id) {
     const pending = { json, hash, savedAt: nextChatStamp(id), title: conversation.title, dir: chatsDir() };
     activeChatWrites.set(id, pending);
     chatDiskWrites.set(id, performance.now());
-    // 目录在线：先落盘；写成了表里的暂存就没用了。落盘不成（桥接刚停了）就暂存进表里，接上后再推
+    // 目录在线先落盘；离线或落盘不成就暂存。导入用返回值区分已落盘、浏览器事务已提交、仍只在本页。
     let spilled = !chatsOnline(),
       diskError = null;
     result = "page";
@@ -320,7 +320,7 @@ function settleChatDelete(id, at) {
   saveChatDeleteMarker(id);
 }
 // 删一段：先记下删除时刻并等已经发出的保存收尾，再删文件，保证「旧保存」不会排在删除之后把它复活。
-// 先记入浏览器配置：哪怕这时断了或关闭页面，下次也不会捡回旧暂存。
+// 先写此段自己的浏览器删除记号，写不成则尝试用配置缓存兜底；读回时凭记号略过旧暂存。
 async function deleteConversationStorage(id) {
   const at = Date.now(),
     root = chatsDir(),
@@ -383,7 +383,7 @@ function clearChatSaveState(id) {
   chatDiskStamps.delete(id);
   chatBases.delete(id);
 }
-// 别处删掉的一段：这边只从内存与暂存表里拿掉，目录那头已经删过了（附件原件那边也删过了）
+// 磁盘已判这段被删：调用方移出对话，这里清本页保存状态、草稿与浏览器暂存；不在这里清原件。
 function forgetConversation(id) {
   clearChatSaveState(id);
   delete store.drafts?.[id];
@@ -489,7 +489,7 @@ function chatLoadQuery(root, ids, knownIds = ids) {
   const known = Object.fromEntries(knownIds.filter(id => chatDiskStamps.get(id) > 0).map(id => [id, chatDiskStamps.get(id)]));
   return Object.keys(known).length ? { root, ids, known } : { root, ids };
 }
-// 跟上目录里的这几段：页面切回前台时看的那段。只读这几个文件，便宜
+// 跟上目录里的这几段：页面切回前台时看的那段。只查指定对话，磁盘版本未变时可不传正文。
 async function catchUpFromDisk(ids) {
   if (!chatsOnline() || !ids.length) return;
   try {
@@ -500,7 +500,7 @@ async function catchUpFromDisk(ids) {
     drainChatWrites();
   } catch {}
 }
-// 全量巡检：每段都算一遍指纹，变了的写下去。低频跑（定时、页面要关时），哪处改了没标脏也兜得住
+// 全量巡检：每段都算一遍指纹，变了的写下去。页面转入后台时跑，哪处改了没标脏也兜得住
 function sweepConversations() {
   flushConversations(store.conversations.map(c => c.id));
 }
@@ -514,7 +514,7 @@ function sweepSomeConversations() {
   for (const id of ids) idle(() => flushConversations([id]), { timeout: 5000 });
 }
 // 页面要关了：不再新发普通 fetch（卸载时它不可靠），而是在一个同步开启的 IndexedDB 事务里把所有未落稳的最新状态兜住；
-// 包括已经从待写表拿走、正在 fetch 的那份。下次开页若它比目录新，会自动推回目录。
+// 包括已经从待写表拿走、正在 fetch 的那份。暂存带上最近见到的磁盘基准，重开时据此合并，不凭离页时刻判胜。
 function flushOnUnload() {
   if (unloading) return;
   unloading = true;
@@ -650,7 +650,8 @@ function resyncWithDisk() {
   void syncConfigWithDisk().then(syncChatsWithDisk);
 }
 // 与对话目录合一次：开页接上桥接时、桥接中途断了又接上时都来一遍。
-// 目录里没有的推过去，目录里更新的换进来（正在生成的、改了还没存的不换），两边一样的把表里的暂存清掉；先前没删成的补删
+// 先处理待补删：明确删除的移去，明确保留的重读磁盘新版，未裁定的不采用旧快照。
+// 其余对话按磁盘基准合并；本机独有的或合并后有差的推回，只清已和磁盘对齐的暂存及裁定范围内的旧暂存。
 async function syncChatsWithDisk() {
   const root = chatsDir(),
     scope = bootstrap.store,

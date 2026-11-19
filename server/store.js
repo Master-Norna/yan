@@ -5,9 +5,9 @@
 //   技能/      言自己认的技能，一份一个目录、内有 SKILL.md（见 server/skills.js）
 //   配置.json  设置、模型配置（含 API Key）、记忆与草稿——几个浏览器共用这一份，不再各存一套
 //   用量.json  按日记的各类用量（见 server/usage.js）
-// 在设置里换了位置，整份拷到新处；macOS 写 ~/Library/Application Support/言/位置.json，其余平台沿用 %APPDATA%\言\位置.json（未设 APPDATA 时 ~/AppData/Roaming），写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
+// 在设置里换了位置：目标已有配置时直接接用，否则复制旧根（不含环境）；macOS 写 ~/Library/Application Support/言/位置.json，其余平台沿用 %APPDATA%\言\位置.json（未设 APPDATA 时 ~/AppData/Roaming），写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
 // 条子不放在 ~/.yan 里：旧处是叫人自行删去的，条子若在里头，删了旧数据也就删了条子，下次开又回到默认处。
-// 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
+// YAN_HOME 指定启动时的根，不读位置条子；这一进程中仍可换根，但不写位置条子
 // 由 server.js 装配：working 报各页正作答的有几段，background 报有没有后台指令在跑，environment 报环境是否正在准备或清空。
 // 这几样都占着根，换位置要等它们松手。
 "use strict";
@@ -26,7 +26,7 @@ module.exports = function createStore({ working = () => 0, background = () => fa
       ? path.join(os.homedir(), "Library", "Application Support")
       : process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"),
     POINTER = path.join(POINTER_DIR, "言", "位置.json"),
-    // 早前 macOS 版沿用了 Windows 的 %APPDATA% 写法：搬家后旧条子只读一次，写新条子时尽力清掉
+    // 早前 macOS 版沿用了 Windows 的 %APPDATA% 写法：新条子读不到时才读旧条子，写新条子时尽力清掉旧条子
     LEGACY_POINTER = MAC ? path.join(os.homedir(), "AppData", "Roaming", "言", "位置.json") : "",
     CONFIG_FILE = "配置.json";
   // 把现存祖先的链接也算进去，避免选到旧根内部的 junction 后递归拷贝自身。
@@ -49,7 +49,7 @@ module.exports = function createStore({ working = () => 0, background = () => fa
     return typeof pointed === "string" && path.isAbsolute(pointed) ? path.resolve(pointed) : "";
   }
   // 新条子写入是搬家的提交点：写成了才算搬完，写失败 handleMove 把根退回去，两边仍一致。
-  // 早前 macOS 版 %APPDATA% 落位的旧条子只是兼容性残留，读取时 POINTER 优先于它；清理尽力而为——
+  // 早前 macOS 版落在 ~/AppData/Roaming 的旧条子只是兼容性残留，读取时 POINTER 优先于它；清理尽力而为——
   // 删不掉（比如父目录只读）不翻搬家的结果，残留条子也会被新条子盖住
   function dropLegacyPointer() {
     if (!LEGACY_POINTER) return;
@@ -120,7 +120,7 @@ module.exports = function createStore({ working = () => 0, background = () => fa
       .sort();
     for (const name of backups.slice(0, -168)) fs.unlinkSync(path.join(dir, name));
   }
-  // 给 bootstrap：页面据此知道对话与卷宗在哪、这是不是一个还没立起来的新根（这台浏览器上回若用的是别处，页面会说一声）
+  // 给 bootstrap：页面据此知道对话与卷宗在哪、当前根有没有配置文件（这台浏览器上回若用的是别处，页面会说一声）
   function describe() {
     const p = paths();
     return { ...p, parent: path.dirname(root), fresh: !fs.existsSync(p.config) };
@@ -188,8 +188,8 @@ module.exports = function createStore({ working = () => 0, background = () => fa
     walk(from, to, true);
     return { count, busy };
   }
-  // 换位置：parent 下的 .yan 就是新根。那里已有言的数据（另一台机器拷来的、先前搬过去的）就直接用它；
-  // 否则把整份拷过去。旧处原样留着（可自行删去），位置条子记下新根，桥接重启后也认得。
+  // 换位置：parent 本身是 .yan 就用它，否则取其下的 .yan。有配置文件就接用，不合并旧根；
+  // 否则复制旧根，已有同名文件不覆盖。旧处留着（可自行删去）；未设 YAN_HOME 时用位置条子记住新根。
   // 从忙态检查到换好根全程同步，环境作业不能插进来。
   const handleMove = scopedRoute(
     body => {
@@ -209,7 +209,7 @@ module.exports = function createStore({ working = () => 0, background = () => fa
       let locked = [];
       if (!existing) {
         fs.mkdirSync(next, { recursive: true });
-        // 环境不拷：虚拟环境里记着绝对路径，搬过去就坏了；到新处重新准备一遍（有缓存时很快）
+        // 环境不拷：虚拟环境里记着绝对路径，搬过去就坏了；到新处重新准备
         ({ busy: locked } = copyInto(root, next, new Set(["位置.json", "环境"])));
       }
       const previous = root;
@@ -219,7 +219,7 @@ module.exports = function createStore({ working = () => 0, background = () => fa
         if (!process.env.YAN_HOME) writePointer(root);
       } catch (error) {
         // 建目录或写位置条子失败：把根退回去，这一段会话里配置、对话、卷宗才不会一个在新处一个在旧处。
-        // 新处已拷进去的那份留着（重试时判成「那里已有言的数据，直接沿用」正是想要的）
+        // 新处已拷进去的那份留着；若配置已拷到，重试时会直接接用
         root = previous;
         throw error;
       }

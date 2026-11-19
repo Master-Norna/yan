@@ -1,5 +1,5 @@
 // 言 · 桥接 · 与操作系统打交道的几件事：用默认浏览器开网页、用默认程序开文件、在文件管理器里显出、收掉整棵进程树、找本机浏览器。
-// 碰系统的都走这里，别处不再各写一遍 rundll32、explorer、taskkill。以 Windows 为准；macOS 只求能用、不另配沙箱规则与工具包，不做 Linux
+// 这些操作从这里走，别处不再各写一遍 rundll32、explorer、taskkill。macOS 的严档隔离与系统工具探测分别见 work/shell.js、env/index.js
 "use strict";
 const fs = require("node:fs");
 const os = require("node:os");

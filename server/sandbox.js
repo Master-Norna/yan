@@ -1,13 +1,13 @@
 // 言 · 沙箱：给执事与卷宗的指令、文件工具划一道界。守三样：
 //   目录——改动不出工作目录（写、删、搬与重定向：相对路径不上溯，绝对路径只认目录之内，不往用户目录与系统目录里写）；
 //         查看则可及整台机器——给电脑做检查本就要翻系统目录、注册表与进程，锁住读等于把这件事堵死。
-//         机密文件（.env、密钥、凭据）与 .git 内部另有专条，读写都不放行；文件工具这一路仍是整个目录内，不认「全盘」；
+//         机密文件另有读写限制；.git 内部限制直接改动。严档的结构化文件工具仍只及工作目录内；
 //   环境——指令看不到机密环境变量（名字里带 KEY / TOKEN / SECRET / PASSWORD 之类的一律不传；页面配置里的 API Key 本就不进桥接进程）；
 //   指令——动系统的（注册表、服务、计划任务、防火墙、账户、磁盘、关机、提权、执行策略）、藏字的（编码指令、Invoke-Expression、拼出来的命令名）、
 //         直接外联的（curl / iwr / wget 之类，指向本机的除外）一律拒绝，装依赖走包管理器。
 // 以上是严的一档（screenCommand），给「问而后行」：拦下的由页面转给用户请示，批了这一条就出沙箱跑。
 // 「审而后行」「径行」用宽的一档（screenLoose），只守系统本身，见其说明。
-// 这是静态筛查，不是进程隔离：脚本里的代码仍以用户的权限跑。筛出来的每一条都带一句原因回给模型，它改一改就能过。
+// 此模块做静态筛查并返回命中原因；macOS 严档在启动 shell 时另加写盘隔离（见 work/shell.js）。
 // 纯函数，不碰文件系统；由 server/work/index.js 装配，test/unit 直接测
 "use strict";
 const path = require("node:path");
@@ -2105,7 +2105,7 @@ function scanWrites(scanned) {
 /**
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，
  * 整条都按「写」处理，它顺带读的那些路径也一并受约束——静态看不出哪个参数是源、哪个是目标，
- * 只有 READ_SOURCES 认得出的那几种来源例外。沙箱与审而后行共用，只差开头的称呼。通过返回 null。
+ * 识别出的只读来源等已由 scanWrites 从该路径视图排除。这里给严档用；宽档与审档另检查高风险目标。通过返回 null。
  * @param {string} writeText @param {string} workdir @param {boolean} win @param {string} prefix
  */
 function screenWritePaths(writeText, workdir, win, prefix) {
@@ -2735,7 +2735,7 @@ function remoteOperand(name, args) {
   );
 }
 /**
- * 一条指令是不是在往外发：通过返回 null，否则返回 { kind, why }。
+ * 判断是否命中外发形状：未命中返回 null，命中返回类别、缘由与标签。
  * 只认能看明白的程序与参数；脚本里现拼的追不到（见文件头注）
  * @param {string} command
  * @param {{ platform?: string }} [options]
@@ -2884,7 +2884,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
 }
 /**
  * 「审而后行」这一档的筛查，不向用户请示。通过返回 null；明确高风险返回拒绝原因。
- * 规则刻意比沙箱宽得多：目录、机密文件、.git 内部、Git 回退都不管，只看会不会伤到系统本身。
+ * 不套严档的通用目录规则，主要检查系统级动作、系统目录写入和高风险删除。外发标记另由 egressOf 处理。
  * @param {string} command
  */
 function screenAutoReview(command, { platform = process.platform, workdir = "" } = {}) {

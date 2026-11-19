@@ -1,8 +1,7 @@
 // 言 · 桥接 · 检索与翻网页用的无头浏览器：直接请求被搜索引擎认作脚本（回答非所问的十条）、网页要跑脚本才出内容、站点拒了直接请求时，
-// 交给它像人一样开一页再取。用本机的 Edge / Chrome（server/platform.js 找），配置目录在系统临时目录（server.js 定），Cookie 留着、像常客。
-// 按需才起，闲三分钟即关；与游目的浏览器无关（那个归 Playwright 起、归执事用）。
-// 每一页的请求都经 Fetch 拦一道：图、媒体、字体不取（只要字），其余照地址门禁逐个查——跳转、页里脚本发的请求都算，打不到本机与内网。
-// WebSocket 不经 Fetch，这一路拦不住；页面的脚本只能盲发、读不到回话，且本机桥接与游目的调试口都只认自己的来源，不在此另设一道
+// 用本机已找到的浏览器开页，先找 Edge，再找 Chrome；不会因 Edge 启动或取页失败换 Chrome，也不借游目的自带内核。
+// 配置目录在系统临时目录（server.js 定）；按需启动，无任务三分钟后关闭，配置目录留作下回使用。
+// CDP Fetch 跳过图、媒体与字体，并检查所拦到的请求；浏览器另经本机代理，代理建连时使用已校验的地址（headless-proxy.js）。
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
@@ -84,7 +83,7 @@ function connect(endpoint) {
   });
 }
 
-// 上回桥接没收拾就退了的浏览器还占着这个配置目录：新起的会把参数转交给它、自己退出。先照它留下的 DevToolsActivePort 接回去
+// 按 DevToolsActivePort 试连仍占着配置目录的旧实例，只为在启动新实例前关掉它
 async function adopt(dir) {
   try {
     const [port, route] = fs.readFileSync(path.join(dir, "DevToolsActivePort"), "utf8").trim().split(/\r?\n/);
@@ -196,8 +195,8 @@ function release() {
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-// 开一页、等它出内容、取回整页 HTML。gate 是地址门禁（web.js 的 assertPublicUrl），不过的请求一律不发。
-// waitFor：等这个选择器出现（检索结果页，不必等整页载完）；不给就等载完、再等正文字数停住不涨（要跑脚本才出内容的页）
+// 开一页并取回至多 HTML_LIMIT 个字符。gate 由调用方传入，供 CDP Fetch 拦到的请求检查。
+// waitFor 给选择器时轮询它，到期限仍会取页；否则限时等 load，再等正文字数稳定或用完余下时间。
 /** @param {string} url @param {{ gate?: (url: URL) => Promise<unknown>, waitFor?: string, timeout?: number }} [options] */
 async function render(url, { gate, waitFor = "", timeout = 20000 } = {}) {
   const deadline = Date.now() + timeout;

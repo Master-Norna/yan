@@ -9,7 +9,7 @@
 ## 自查 · Checklist
 
 - [ ] `npm run unit` 与 `npm run check` 通过 · pass
-- [ ] 跑过 `npm run format` · ran
+- [ ] `npx --yes prettier@3.3.3 --check .` 通过（与 CI 一致）· formatting check passes (same as CI)
 - [ ] 新加的界面文字已补 `i18n/en.js`（没有可勾）· new UI strings added to `i18n/en.js` (or none)
 - [ ] 文档中英两份同步改了（没涉及可勾）· docs updated in both languages (or not needed)
 - [ ] 改了界面的附了截图（没改可勾）· screenshots attached for UI changes (or none)

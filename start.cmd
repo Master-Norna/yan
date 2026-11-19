@@ -2,7 +2,7 @@
 chcp 65001 >nul
 title 言 · 本机桥接 - 请保持开启
 cd /d "%~dp0"
-rem 便携包里带着 node 文件夹：用它，并接在 PATH 末尾（模型跑的 node、npx 找得到；系统已装的仍然优先），与 言.exe 同一个做法。
+rem 便携包里带着 node 文件夹：用它，并接在 PATH 末尾（供子进程按 PATH 找 node、npx；原 PATH 条目仍在前面），与 言.exe 同一个做法。
 rem 不写进括号块：PATH 里的 Program Files (x86) 会把块截断
 if not exist "%~dp0node\node.exe" goto system
 set "PATH=%PATH%;%~dp0node"

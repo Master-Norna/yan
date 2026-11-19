@@ -1,5 +1,5 @@
-// 英文界面：译文表载入、html 标了 en；欢迎页、对话、模型菜单、卷宗页与设置各栏上看得见的字里没有漏翻的中文
-// （印章、路径、模型写的正文、语言选项「中文」除外）。界面添了字却没进 i18n/en.js 的，这里会列出来
+// 英文界面：检查译文表、页面语言、步骤文字，以及欢迎页、对话、模型菜单、卷宗和下列九个设置栏的漏翻。
+// 漏翻按可见文本及界面属性筛查，正文、路径、印章等不计；末尾另验切回中文和新浏览器沿用磁盘语言。
 import { connect, check, sleep, PAGE } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });

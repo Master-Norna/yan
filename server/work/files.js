@@ -46,7 +46,7 @@ module.exports = function createFiles(work) {
         previousText = prior?.text ?? "",
         previousLines = previousText ? countLines(previousText) : 0;
       // 覆盖时照原文件的样子写：带 BOM 的还带、UTF-16 的还是 UTF-16，原文多半是 CRLF 而写来的只有 LF 的换成 CRLF。
-      // GBK 编不回去，存成 UTF-8（读的那头会说）
+      // GBK 编不回去，存成 UTF-8
       const crlf = (previousText.match(/\r\n/g) || []).length,
         lf = (previousText.match(/\n/g) || []).length,
         text = crlf && crlf * 2 >= lf && !content.includes("\r\n") ? content.replace(/\n/g, "\r\n") : content,
@@ -175,7 +175,7 @@ module.exports = function createFiles(work) {
       release();
     }
   }, failed);
-  // ---- download_file：把网上的文件存进工作目录。地址门禁与 http_request 同一套（本机回环放行，内网拒）；path 给目录或省略时按网址里的文件名存，
+  // ---- download_file：把网上的文件存到文件工具允许的落点，缺省是工作目录。地址门禁与 http_request 同一套（本机回环放行，内网拒）；path 给目录或省略时按网址里的文件名存，
   // 已有同名文件就加 (2)；最多 64 MB
   const DOWNLOAD_LIMIT = 64 * 1024 * 1024;
   const handleWorkDownload = jsonRoute(async (body, req, res) => {

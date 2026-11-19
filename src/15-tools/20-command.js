@@ -147,7 +147,7 @@ function releaseForeground(conversationId, scope) {
 
 // ---------- 后台指令结束即叫醒 ----------
 // 桥接那头等它结束再回话（/api/work/watch，走总线不占连接），结果照帮手回报的路子寄给这段对话（mailReport）：
-// 正作答就在回合边界递上，没在作答就另起一答。模型挂上就能收尾去睡，不必轮询；要过一阵再做的，挂一条先等待的后台指令即是定时。
+// 正作答就在回合边界递上，没在作答就另起一答。模型挂上就能收尾去睡，不必轮询；只等时刻则用 set_timer（见 23-timer.js）。
 // 页面刷新后重新等上（rewatchBackground）；桥接那头只报一回，几处页面同等着也不会叫醒两次
 /** @param {Conversation} conversation @param {Message} assistant @param {Step} step */
 function watchBackground(conversation, assistant, step) {
@@ -266,7 +266,7 @@ function rewatchBackground() {
       for (const step of allSteps(message)) if (step.bg?.state === "running") watchBackground(conversation, message, step);
   }
 }
-// 候随它所属的那几答收口——重答改问、删对话都经这里，不各写一份：挂它的那一步没了，到时也无处可报，
+// 候随它所属的那几答收口——重答改问、切版本、删对话都经这里，不各写一份：挂它的那一步没了，到时也无处可报，
 // 后台指令连进程收掉（不然成了占着端口的孤儿，新的一版再起同一个服务就撞上），约好的时刻取消。按「止」不经这里（见 haltConversation）
 /** @param {Conversation} conversation @param {Message[]} messages */
 /** @param {Conversation} conversation @param {Message[]} messages @returns {number} 收掉了几条（后台与定时合计） */

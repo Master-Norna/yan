@@ -1,5 +1,5 @@
 #!/bin/bash
-# 言 · macOS 的启动入口：双击即开（头一回系统若拦，在访达里右键此文件选「打开」）。与 start.cmd 同义
+# 言 · macOS 的启动入口：双击即开（头一回系统若拦，在访达里右键此文件选「打开」）。启动时只从继承的 PATH 找 Node；系统工具探测由桥接启动后做
 cd "$(dirname "$0")" || exit 1
 printf ']0;言 · 本机桥接 - 请保持开启'
 if ! command -v node >/dev/null 2>&1; then

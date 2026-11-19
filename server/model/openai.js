@@ -1,6 +1,6 @@
 "use strict";
-// 言 · OpenAI 兼容接口：页面说的本就是它的话，请求原样转发，只理三处——别家才要的思考块去掉、经中转用 Claude 时标上缓存、
-// DashScope 与硅基流动的思考档位换成它认的预算（登记的样子见 index.js 开头）。硅基流动在设置里单列一档，登记就是这一份
+// 言 · OpenAI 兼容接口：沿用 chat.completions 格式，按接口与型号整理思考块、缓存标记、附件、输出上限和思考档位。
+// 硅基流动在设置里单列一档，仍走这一份适配（登记见 index.js）。
 const { claudeModel, markOpenAiCache, stripCacheMarks } = require("./anthropic.js");
 
 // DashScope（通义）兼容模式不认 reasoning_effort，认 enable_thinking + thinking_budget；档位没有可探的枚举，按通用四档列
@@ -24,8 +24,7 @@ function modelsUrl(baseUrl) {
   return url;
 }
 
-// 没抽出文字的附件原件：PDF 照 OpenAI 的写法补上 data: 前缀；别的格式（压缩包、音视频、扫描件之外的二进制）兼容接口一概不收，
-// 原样送去整问被拒，换成一句说明（与 anthropic.js、chatgpt.js 同一个办法）
+// file 内容段有 PDF 数据才补 data: 前缀发原件；其余 file 段换成说明文字。图片等其他类型不走这里。
 function filePart(part) {
   if (part?.type !== "file") return part;
   const name = String(part.file?.filename || "");

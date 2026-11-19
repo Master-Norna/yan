@@ -8,7 +8,7 @@ Thanks for helping build Yan. Please take a few minutes to read this page — PR
 
 1. Small fixes (typos, obvious bugs) can go straight to a PR. For new features or larger changes, open an issue first describing what and why, so we can agree on direction before you write the code.
 2. Fork the repo, branch off `main`, and open a PR against `main`.
-3. The CI jobs "单测 · 类型 · 格式" (unit · types · format) and "端到端" (end-to-end) must pass. The macOS test job is informational for now.
+3. The CI jobs "单测 · 类型 · 格式" (unit · types · format) and "端到端" (end-to-end) must pass. The macOS test job and Windows Node 22 unit tests are informational.
 4. A maintainer reviews before merging. PRs are squash-merged, so each PR lands as one commit on `main`.
 
 ## Running locally
@@ -20,10 +20,10 @@ npm start          # start the local bridge and open the browser (http://127.0.0
 npm run unit       # unit tests, a few seconds
 npm run check      # type check (tsc --checkJs, installed into an untracked node_modules)
 npm run format     # format with Prettier; run it before opening a PR
-npm test           # unit + end-to-end; e2e needs Edge or Chrome and is written for Windows
+npm test           # unit + end-to-end; e2e needs Edge or Chrome; Windows is the reference, and macOS is also tested
 ```
 
-There is no build step: the bridge concatenates `prompts/`, `src/` and `styles/` in path order on each request, so a refresh picks up your edit. For the directory layout and concatenation rules, see [Code structure and development](docs/en/development.md).
+There is no build step: the bridge concatenates `prompts/`, `src/` and `styles/` in path order on each request, so a refresh picks up edits to those directories. Restart the bridge after editing its code. For the directory layout and concatenation rules, see [Code structure and development](docs/en/development.md).
 
 ## Project trade-offs
 
@@ -37,7 +37,7 @@ There is no build step: the bridge concatenates `prompts/`, `src/` and `styles/`
 - **New features start from a registry.** Tools, model providers, settings tabs, file kinds, embeds… every extension point in Yan is a table, and adding something means adding one entry. If no table fits, create the table first, then add the first entry. See [Code structure and development](docs/en/development.md) for where each table lives.
 - **One writer per conversation at a time.** When several pages are open, leases decide which one writes; the others only watch. Multi-page write issues are solved within this rule, not by merging after the fact. State lives in the page; the bridge only arbitrates and relays, it doesn't host conversations.
 - **Prompts say only what's necessary.** The test is "would the model fail without this sentence?" No personality lectures, no reminders for things the structure already handles. Read [`prompts/README.md`](prompts/README.md) before editing `prompts/`.
-- **UI text in two languages.** User-facing strings are written as `t("中文原文")` with the Chinese as the key; add the English to `i18n/en.js` (`test/i18n.mjs` lists missing ones). Prompts for the model are not translated.
+- **UI text in two languages.** User-facing strings are written as `t("中文原文")` with the Chinese as the key; add the English to `i18n/en.js` (`test/unit/i18n.test.mjs` checks for missing translations). Prompts for the model are not translated.
 - **UI copy reads like a product, not a tutorial.** The Chinese mixes classical and plain register. Buttons use full words; no "click here to…" hints. Explanations of how things work go in Settings → Docs. One name per thing — where a literary name exists, use it.
 - **Docs in two languages.** Update `docs/` and `docs/en/`, `README.md` and `README.en.md` together.
 - **Keep the visual language consistent.** Yan has an ink-on-paper style; please attach before/after screenshots to PRs that change the UI. Each area gets exactly one signature element of its own (the ensō in Listen, the single vermilion stroke in Browser); everything else uses the shared vocabulary — don't spread one motif across the whole area.

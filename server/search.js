@@ -108,8 +108,8 @@ const SOURCES = [
   { label: "DuckDuckGo", run: searchDuckDuckGo }
 ];
 
-// 答非所问：查询有两个词以上，而没有哪一条（题与摘要）对得上其中过半（至少两个）。
-// 只认被拦时那种「只剩第一个词」的样子，宁松勿紧：汉字词对上其中任意两字即算，同义改写、繁简都不苛求
+// 答非所问：查询有两个词以上，而没有哪一条（题与摘要）对得上至少半数（且至少两个）。
+// 只认被拦时那种「只剩第一个词」的样子，宁松勿紧：汉字词对上其中任意一对连续字也算；不另做同义或繁简转换
 function offTopic(query, results) {
   const terms = [
     ...new Set(
@@ -151,7 +151,7 @@ const handleSearch = jsonRoute(async body => {
       errors.push(`${source.label}：${error.message}`);
     }
   }
-  // 各家都答非所问：交回头一家的，标明对不上，由模型掂量（万一只是判得严了，结果也还在）
+  // 没有切题的结果时，若有答非所问的结果，保留最先拿到的一份并标记，由模型掂量
   if (stray) return stray;
   // 一家零条（被拦时回的是验证页，也是零条）、另一家连不上：说不准是真没有，按报错交回，模型才不当「查无此事」
   if (errors.length) throw Error(`搜索引擎暂时不可用：${errors.join("；")}`);

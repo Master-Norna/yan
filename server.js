@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
-// 拼接规则（server/build.js）改了就重新载入：页面脚本本是即时拼的，不该因为拼法变了就得重启桥接
+// 拼接规则（server/build.js）的修改时间变了就重新载入：页面脚本本是即时拼的，改拼法也不必重启桥接
 const BUILD_FILE = require.resolve("./server/build.js");
 let bundler = require(BUILD_FILE),
   bundlerStamp = fs.statSync(BUILD_FILE).mtimeMs;
@@ -69,7 +69,7 @@ function requestPath(req) {
 }
 
 function securityHeaders(req, res) {
-  // 比的是解码后、不分大小写的路径：文件系统本就不分大小写，/PREVIEW.HTML 与 /%70review.html 交付的也是那一件
+  // 安全头按解码后的路径判定，且不分大小写，兼顾大小写不敏感文件系统上的预览页写法
   const isPreview = (requestPath(req) || "").toLowerCase() === "/preview.html";
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
@@ -162,9 +162,9 @@ const STORE = require("./server/store.js")({
     TIMERS.sync();
   }
 });
-// 沙箱环境：存储根里的 环境/，桥接起的进程（指令、MCP 服务）都接上它
+// Windows 接存储根里的 环境/；macOS 接探到的系统工具目录。两路都给指令与本机 MCP 进程用
 const ENV = require("./server/env/index.js")({ envHome: () => STORE.paths().env, route: STORE.scopedRoute });
-// 视频换壳：浏览器认不得的封装（如扩展名写作 mp4 的 MPEG-TS），预览时借环境里的 ffmpeg 原样换进 MP4（见 server/video.js）
+// 视频换壳：浏览器认不得的封装（如扩展名写作 mp4 的 MPEG-TS），预览时借环境入口或 macOS 探到的 ffmpeg 换进 MP4（见 server/video.js）
 const VIDEO = require("./server/video.js")({
   cacheHome: () => path.join(STORE.paths().env, "cache", "视频"),
   ffmpeg: () => ENV.toolPath("ffmpeg")
@@ -236,7 +236,7 @@ const MODEL = require("./server/model/index.js")({ home: () => STORE.paths().roo
 const USAGE = require("./server/usage.js")({ file: () => path.join(STORE.paths().root, "用量.json") });
 
 // 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件、模型转发，以及能打本机的 http_request），
-// 只受理本站页面与本机脚本；另一半（引导、检索、翻网页，都只上公网）凡是本机桥接认得的来源都可调
+// 只受理本站页面与本机脚本；另一半是引导、总线与只取公网内容的检索、翻页。总线转交的请求仍由分发器照原门禁处理
 const OPEN_ROUTES = {
     "GET /api/bootstrap": handleBootstrap,
     ...WEB.openRoutes,
@@ -278,7 +278,7 @@ function publicStaticTarget(requested) {
     normalized = path.posix.normalize(webPath);
   if (normalized !== webPath || normalized.startsWith("../") || path.posix.isAbsolute(normalized)) return null;
   const shared = normalized.startsWith("vendor/") || normalized.startsWith("i18n/");
-  // 围栏按各自的白名单目录算，不按仓库根：web/ 里出现指向别处的链接，也带不出 web/ 之外。
+  // web/ 的真实路径须仍在 web/ 内；vendor/ 与 i18n/ 则按仓库根解析并检查。
   const base = shared ? REAL_ROOT : REAL_PAGE_DIR;
   const candidate = path.resolve(base, ...normalized.split("/"));
   if (!fs.existsSync(candidate)) return null;
@@ -325,7 +325,7 @@ function serveStatic(req, res) {
     return sendNotFound(res);
   }
   const { file, stat } = target;
-  // 带上 ETag / Last-Modified：no-cache 只要求重新验证，有了校验值浏览器才会真正拿到改动后的文件，而不是沿用旧缓存
+  // no-cache 要求重新验证；带上 ETag 与 Last-Modified，这里按 If-None-Match 命中才回 304
   const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
   const headers = {
     "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream",

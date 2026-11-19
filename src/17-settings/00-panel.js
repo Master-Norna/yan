@@ -33,7 +33,7 @@ function closeSettings() {
   hideWithFade($("#settingsModal"));
   if (settingsReturnFocus?.isConnected) settingsReturnFocus.focus();
   settingsReturnFocus = null;
-  // 「手记一条」后没写字就关了窗：那条空的不留（文本框随窗撤掉时未必触发 blur）
+  // 「另起一类」后没写正文就关了窗：那一空类不留（文本框随窗撤掉时未必触发 blur）
   const kept = store.memory.items.filter(item => String(item.text || "").trim());
   if (kept.length !== store.memory.items.length) {
     store.memory.items = kept;
@@ -179,7 +179,8 @@ function bindGeneralSettings() {
     store.settings.name = e.target.value || t("访客");
     saveStoreSoon();
   });
-  // 存储位置：桥接把整份拷到新处（那里已有言的数据就直接用），页面换上新路径后把对话与配置对一遍、卷宗重翻；旧处不删
+  // 换位置由桥接裁定：有作答、后台指令或环境作业未结束时不搬；旧处不删，环境不随拷贝。
+  // 成功后换用新处的路径，重新对齐对话与配置、查询环境、翻卷宗。
   const storeInput = $("#settingStore");
   let storeTimer = null;
   const commitStore = value => {

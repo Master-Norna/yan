@@ -18,7 +18,7 @@ async function fileStoreRequest(mode, action) {
 }
 // ---------- 附件原件 ----------
 // 落在存储根的 附件/（与对话、卷宗、配置同在一处，几个浏览器共用，复制即备份；见 server/files.js）；
-// 落盘不成（桥接中途断了）时暂存进这台浏览器的 IndexedDB，接上后推到目录里去、表里的清掉（见 settleAttachmentStore）。
+// 落盘不成时暂存进这台浏览器的 IndexedDB；确认目录已有原件或补传成功后才清表（见 settleAttachmentStore）。
 // 读的时候先问目录，目录里没有再翻表——迁过去之前的旧件也读得到
 const attachmentCache = new Map();
 let attachmentCacheSize = 0;
@@ -41,7 +41,8 @@ function uncacheAttachment(id) {
   attachmentCache.delete(id);
   attachmentCacheSize -= String(record.data || "").length + String(record.extractedText || "").length;
 }
-// body：原件（置入的 File）；没给的照 record.data 现做——文本附件的 data 是正文，别的是 data: URL。桥接不在时暂存进浏览器，那时才读成 data
+// body：原件（置入的 File）；没给的照 record.data 现做——文本附件的 data 是正文，别的是 data: URL。
+// 上传不成而改存浏览器时才把 File 读成 data；导入若碰到换根则中止，不转作浏览器暂存。
 /** @param {Record<string, any>} record @param {Blob|null} [body] @param {string} [files] 预期附件目录（导入使用） */
 async function putAttachment(record, body = null, files = "") {
   uncacheAttachment(record?.id);
@@ -183,8 +184,8 @@ async function deleteAttachments(ids) {
   const keep = attachmentKeepIds();
   await Promise.all([...new Set(ids)].filter(id => id && !keep.has(id)).map(deleteAttachment));
 }
-// 对话从目录读全之后（见 syncChatsWithDisk）才来这一趟：先把浏览器里暂存的原件推进目录、表里的清掉，再请桥接清掉目录里没人用的。
-// 对话没读全时绝不清——那时内存里只有没落盘的几段，照它判「没人用」会把别的对话的附件一并删掉
+// 按引用清原件要等对话目录已读全、对齐已结束且没有待裁定的补删；补传 IndexedDB 里的原件不必等这些条件。
+// 清扫前还会等补删留下的对话暂存清理或合并，并核对仍是同一存储位置（见 settleAttachmentStore）。
 function canCleanAttachments() {
   return chatsLoaded && !chatsBroken && !chatsSkipped && !chatsSyncing && !hasPendingChatDeletes();
 }

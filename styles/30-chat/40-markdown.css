@@ -153,7 +153,7 @@
   text-decoration: none;
   border-bottom: 1px solid var(--accent-soft);
 }
-/* 指向本地文件的链接没有 href（点击去卷宗里找同名的那件），样子上仍是一条链接 */
+/* 指向本地文件的链接没有 href（点击时由页面查找并预览文件），样子上仍是一条链接 */
 :is(.markdown, .trail-note, .sub-report) a[data-file] {
   cursor: pointer;
 }

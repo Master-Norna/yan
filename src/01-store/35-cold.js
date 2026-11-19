@@ -2,7 +2,7 @@
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // 长活的对话一段十几二十 MB，九成是收了尾的帮手经过（sub.steps、sub.reasoning）与思绪（reasoning）。整份存、整份读，
 // 开页要把它们全读进来，作答中三秒一存要在主线程上序列化、算指纹、传一遍。收了尾的一答此后不再变（续写只认停了、断了、出错的，
-// 断着的帮手也不算收尾），挪出去写一次就够：对话文件里那一答记 cold: { key, files }，files 是挪走的步骤里带的附件，清原件时照样算在用。
+// 断着的帮手也不算收尾），挪出去写一次就够：对话文件里那一答记 cold：key 指向另存内容，files 记挪走的步骤所带的附件，确知只另存思绪时另记 reasoningOnly。
 // 开着看的那段先接回行迹，只有确知是纯思绪、又收着的一答等摊开才取；跑工具、续派帮手和导出备份前仍取整段。
 // 没取回的那几答在内存里就缺着那几样；存的时候只看记号，照样写记号（chatJson），不会把缺着的当成删了
 const COLD_MIN_CHARS = 16 * 1024; // 挪走的部分不到这么长就不挪：一答一个小文件不划算
@@ -83,7 +83,7 @@ function chatSpillJson(c) {
     return key === "cold" && warmMessages.has(this) ? undefined : value;
   });
 }
-// 落盘前：新收了尾、够长的几答把那几样另存出去，记上记号；记号在却又动起来了的（见 coldMessageView），记号拿掉
+// 落盘前：新收了尾、够长的几答把那几样另存出去，记上记号；又动起来且另存内容已接回的，才拿掉旧记号（见 coldMessageView）
 /** @param {Conversation} c */
 async function coldify(c) {
   if (!chatsOnline()) return;
@@ -200,7 +200,7 @@ function carryWarm(prev, next) {
     warmMessages.add(m);
   }
 }
-// 开着看的这段：没接回的取回来，接上了就重画（正文、开着的差遣面板与旁注）
+// 开着看的这段：除收起的纯思绪外，没接回的先取回来；接上再重画（正文、开着的差遣面板与旁注）。
 /** @param {Conversation} c */
 function warmInView(c) {
   void warmTrails(

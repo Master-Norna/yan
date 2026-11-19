@@ -26,7 +26,7 @@ class McpClient {
     try {
       await this.open(createTransport(this.config, this.toolEnv));
     } catch (error) {
-      // 只写了 url、没说 type 的：可流式 HTTP 握手被拒（多是 4xx），退回旧式 SSE 再试一次
+      // 只写了 url、没说 type 的：可流式 HTTP 握手收到 4xx，退回旧式 SSE 再试一次
       if (!this.config.url || this.config.type || !(error.status >= 400 && error.status < 500)) throw error;
       this.transport.close();
       await this.open(new SseTransport(this.config));

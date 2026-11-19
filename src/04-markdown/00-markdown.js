@@ -94,7 +94,7 @@ function setupMarkdown() {
   });
   if (window.DOMPurify) {
     // 模型写「下载《x.docx》」时常把链接指向 sandbox:/、file:/// 或一个裸文件名——页面上没有这样的路。
-    // 把文件名记在 data-file、原路记在 data-path 上，去掉 href；点击时按原路在这段对话的落脚处取那件来下载，取不到再到卷宗里找同名的（见 10-archive.js）
+    // 把文件名记在 data-file、原路记在 data-path 上，去掉 href；点击时先按原路取件，取不到再按这段对话的落脚处找同名件；找到即打开预览（见 13-files/15-refs.js）。
     DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
       if (!(node.tagName === "A" && data.attrName === "href")) return;
       // 链接不要求扩展名也说不出个所以然的留着原样（页内锚点、邮件、网址）
@@ -105,7 +105,7 @@ function setupMarkdown() {
       data.keepAttr = false;
     });
     // 正文里的一幅图，从不交给浏览器自己去取：模型写的路（相对、Windows 绝对、sandbox:/、认不出名字的）都记下来，由页面按这段对话的落脚处认，
-    // 取不到就留说明文字（见 drawRefImage）。只有三样例外：data: 本身就是数据；http(s) 外链另记 data-remote，人点了才经桥接取（见 renderRemoteShots）。
+    // 取不到就留说明文字（见 drawRefImage）。两类另处置：data: 本身就是数据；http(s) 外链另记 data-remote，人点了才经桥接取（见 renderRemoteShots）。
     // 这一步落在 beforeSanitizeAttributes，比逐属性那道钩子早：marked 会把带反斜杠的路编成 C:%5C…，DOMPurify 见协议不合法就把 src 整个丢掉，
     // 逐属性那道钩子根本收不到，Windows 绝对路径的图便只剩一个没有 src 的 img。srcset 也一样——浏览器会从它去取，一并收下
     DOMPurify.addHook("beforeSanitizeAttributes", node => {

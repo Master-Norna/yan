@@ -98,7 +98,7 @@ function renderConversation(shouldScroll = false) {
   scrollHost.classList.remove("converge");
   refreshNoteCounts(c);
   const { added } = syncMessages(c, converged);
-  // 另存出去的几答（见 01-store/35-cold.js）取回来，接上了再重画
+  // 按需接回另存的行迹再重画；已收起的纯思绪等人摊开才取（见 01-store/35-cold.js）。
   warmInView(c);
   if (converged) {
     const articles = scrollHost.querySelectorAll("#messages .message");

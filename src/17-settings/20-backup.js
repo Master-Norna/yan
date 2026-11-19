@@ -56,9 +56,9 @@ function attachmentNameOf(id) {
     for (const attachment of message.attachments || []) if (attachment.id === id) return attachment.name || id;
   return id;
 }
-// 大备份里附件数组的读法：从 `,"attachments":[` 之后逐字节走，括号配平了才交出一件，内存里只过一件。
+// 大备份里附件数组的读法：从 `,"attachments":[` 之后逐字节走，花括号配平了才解码并交出一件。
 // 走到末尾还要核对确实收了口：数组的 `]`、顶层的 `}` 都在，其后只有空白。复制、下载断在中途的备份不能当完整的，
-// 否则尾部原件悄悄没了、提示还是「已导入」（见 importData 的 incomplete）
+// 否则尾部原件会悄悄不见；importData 单独报告未能读完，已读到的部分仍各按实际保存结果报告。
 /** @param {Uint8Array} bytes @param {number} from 数组内容的起点 */
 function attachmentReader(bytes, from) {
   const decoder = new TextDecoder(),

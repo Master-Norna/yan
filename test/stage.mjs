@@ -1,4 +1,4 @@
-// 看台：言的页面直连浏览器调试口（这里借测试用的这个 Edge 充当模型所用的浏览器）——
+// 游目：言的页面直连模型浏览器的调试口；运行器另起一个同内核、不同配置目录的实例来扮演模型浏览器。
 // 调试口从服务的 --config 文件里读、找到浏览器挂出入口、标签照抄、画面送到、点按与打字（含输入法那一路）递进网页、
 // 模型换页跟过去、网页的提示框画在画面上、前后按历史走、旁注开着时让位且停收画面、收起后入口回来、拖宽窄有界
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -25,7 +25,7 @@ writeFileSync(
     }
   })
 );
-// 调试口写在 --config 那份文件里：先写一个没人听的口，开页时找不到浏览器；之后改成测试 Edge 的口再去找
+// 调试口写在 --config 那份文件里：先写一个没人听的口，开页时找不到浏览器；之后改成模型浏览器的测试端口再去找。
 const CONFIG = `${TMP}/stage.json`;
 const writeConfig = port =>
   writeFileSync(CONFIG, JSON.stringify({ browser: { launchOptions: { args: [`--remote-debugging-port=${port}`] } } }));

@@ -112,7 +112,7 @@ async function receiveUpload(req, limit, place) {
     throw error;
   }
 }
-// 临时文件换成正本。Windows 上目标文件被索引器或杀毒程序短暂打开时，替换可能报 EPERM / EBUSY：
+// 临时文件换成正本。Windows 上目标文件被索引器或杀毒程序短暂打开时，替换遇 EPERM / EACCES / EBUSY 时：
 // 等几个很短的间隔再试同一份临时文件；永久错误仍原样交给调用方
 function replaceFile(temp, file) {
   const wait = new Int32Array(new SharedArrayBuffer(4));
@@ -129,7 +129,7 @@ function replaceFile(temp, file) {
 function uniqueStamp() {
   return `${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
-// 先写临时文件再改名：写到一半断电、进程被杀，正本也不会只剩半截
+// 先写临时文件再改名：写临时文件时中断，不会把正本截成半截；这里不保证断电后的持久性
 function writeAtomic(file, data) {
   const temp = `${file}.${uniqueStamp()}.tmp`;
   try {
@@ -228,7 +228,7 @@ async function sendFile(req, res, file, { name, download = false }) {
     .pipe(res);
 }
 
-// 交给 Windows 的默认程序打开一件文件（预览认不得、或只抽得出结构时，看原样）。
+// 交给系统的默认程序打开一件文件（预览认不得、或只抽得出结构时，看原样）。
 // 可执行的一类不开：对它们「打开」就是运行，而文件常是模型写的或随手拖进来的。
 // 解释器脚本也算：Windows 上 .py / .pyw / .pyc / .pyo / .pyz / .pyzw 的默认打开就是 py.exe / pyw.exe，
 // 装了 Node 并登记了关联的机器上 .mjs / .cjs 同样点开即运行；.msc 走 mmc，.application 是 ClickOnce 安装清单

@@ -1,10 +1,10 @@
-// 言 · 下载源自适应：国内镜像与官方各取开头 2 MB 比一比，挑快的。环境（server/env/）与游目（server/stage.js）共用，页面不再让人选。
+// 言 · 下载源自适应：国内镜像与官方各请求开头 2 MiB 比速度。环境（server/env/）、游目（server/stage.js）与 Windows 打包共用，页面不再让人选。
 // 哪边快因人而异：没开代理时官方常慢；开着代理时国内镜像也被绕出去，反倒慢（实测几十 KB/s 对几百 KB/s）；
-// 镜像对冷门或刚出的文件还要现去源站拉。经 curl 取，随系统的代理变量走，与之后真下载时一样
+// 镜像对冷门或刚出的文件还要现去源站拉。测速用 Windows 的 curl.exe，走 curl 自己的代理设置，不一定与实际下载器一致
 "use strict";
 const { execFile } = require("node:child_process");
 
-/** 取 url 开头 2 MB 的速度（字节/秒），6 秒为限；取不到算 0 @param {string} url @returns {Promise<number>} */
+/** 请求 url 开头 2 MiB，取 curl 在 6 秒内量出的速度（字节/秒）；没读数算 0 @param {string} url @returns {Promise<number>} */
 function speedOf(url) {
   return new Promise(resolve =>
     execFile(

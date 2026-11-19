@@ -351,7 +351,7 @@ function mergeConfig3(base, mine, theirs, unsettled = null, keepMemory = null) {
     drafts: keyed(base.drafts, mine.drafts, theirs.drafts)
   };
 }
-// 磁盘上的一份配置换进来：设置、模型、卷宗、记忆、草稿；这台浏览器自己的对话目录暂存与墓碑不动。
+// 磁盘上的一份配置换进来：设置、模型、记忆、草稿；不动对话暂存和浏览器里的删除记号。
 // base：记作基准的那一份（默认就是换进来的这份；合并时是对方那份，自己改的仍算「改过」，写下去之前丢不了）
 function adoptConfig(config, savedAt, base = "") {
   const meta = normalizeStoreData({ ...config, conversations: [] });
@@ -384,7 +384,7 @@ function adoptConfig(config, savedAt, base = "") {
     toast(t`${names}在别处也改过，这里留着你正在改的那一份`);
   }
 }
-// 这台浏览器头一回碰上这个存储根、两边又各有一套：并起来——同一 id 的以磁盘上的为准，这边独有的模型、记忆、卷宗、草稿补进去
+// 这台浏览器头一回碰上这个存储根、两边又各有一套：并起来——同一 id 的以磁盘上的为准，这边独有的模型、分组、预设、MCP 服务、记忆和草稿补进去
 function mergeConfig(config) {
   const disk = normalizeStoreData({ ...config, conversations: [] }),
     union = (theirs, mine) => [...theirs, ...mine.filter(item => !theirs.some(other => other.id === item.id))];

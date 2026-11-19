@@ -1,6 +1,6 @@
 // 补删带的是当初点删除的那一刻（at）。断的这段里别处写过、保存过的那份，savedAt 比它晚，那是「删了以后又存」：
 // 保存侧认这种情况为真要它、删除记录作废（见 server/chats.js 的 handleSave），删除侧也得同一口径——
-// 否则墓碑虽然后于它、允许之后重建，那份本身却已经被这一下删掉了
+// 否则补删会先擦掉本该保留的新版；反过来，删除较新时，较早的迟到保存也不能把它复活。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";

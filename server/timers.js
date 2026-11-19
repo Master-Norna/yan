@@ -1,5 +1,5 @@
 // 言 · 桥接的候 · 等时刻：模型约好几点叫醒自己（set_timer），桥接记着，到点把那一回落进 存储根/候/到点/ 再交给页面——
-// 页面关着、桥接重启都不丢。由 server.js 装配：require("./server/timers.js")({ home, known })
+// 无人领取的到点记录和未到点的约定都写盘，供关页后读回及桥接重启后续排。由 server.js 装配：require("./server/timers.js")({ home, known })
 //   约.json         约好的时刻：几点叫、叫哪段对话的哪一步、附什么话、隔多久再叫。启动时读回，错过的当场补叫并记下迟了多久
 //   到点/<编号>.json 到了点、还没被页面取走的那一回；页面经 /api/timer/wait 等着、/api/timer/take 认领（改名即认领，几页同等也只一页拿到）
 // 定时放在桥接而不交系统的计划任务：到点的那一回本就要经桥接送进页面，桥接不在，到点也送不到
@@ -158,7 +158,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     arm();
     return timer;
   });
-  // 取消：到点前叫停；没有的（已叫过、已取消）回 found: false
+  // 取消簿上还排着的约定（包括周期约的下一回），不撤已经落盘的到点记录
   const handleCancel = route(body => {
     sync();
     const id = String(body.id || ""),

@@ -1,5 +1,5 @@
-// 言 · 设置 → 环境：给模型备一套自带的开发环境（桥接那头在 server/env/），装在存储位置的「环境」目录里，不依赖、也不改动系统。
-// 一组工具一张卡，勾上的在「准备环境」时装好；模型的指令与 MCP 服务都接着这套环境，缺的库它自己 pip / npm 装进来
+// 言 · 设置 → 环境：Windows 在存储位置的「环境」目录里备工具包；勾选的工具与另填的包在准备时安装。
+// macOS 不备工具包，改为探测系统工具。桥接侧的准备、清空与换根仲裁见 server/env/ 与 server/store.js。
 /** @type {{ home: string, supported?: boolean, system?: Record<string, { path: string, version: string }>|null, state: Record<string, any>|null, packs: Array<Record<string, any>>, job: Record<string, any>|null }|null} */
 let envStatus = null,
   envPoll = 0;
@@ -18,7 +18,7 @@ function updateEnvStatus(status) {
   clearTimeout(envPoll);
   envPoll = envStatus?.job?.running ? setTimeout(refreshEnv, 1200) : 0;
 }
-// 问桥接要一次环境的状态；正在准备就隔一会儿再问，直到装完。
+// 问桥接要一次环境的状态；环境作业仍在运行就隔一会儿再问，直到结束；换根后不再回填旧处的状态。
 function refreshEnv() {
   return requestEnv(bootstrap.store, "status", {}, AbortSignal.timeout(8000));
 }
@@ -46,7 +46,7 @@ function envSettingsHtml() {
   const managed = envStatus ? !envStatus.system : bootstrap.work?.platform !== "darwin";
   return `<div id="envPage"><h2>${t(`环境`)}</h2><div id="envStatus">${envStatusHtml()}</div><div id="envManaged"${managed ? "" : ' class="hidden"'}><h3 class="settings-sub">${t(`工具包`)}</h3><div id="envPacks" class="card-list">${envPacksHtml()}</div><div class="setting-row"><div class="setting-copy"><strong>${t(`另装`)}</strong><small>${t(`包名以空格分隔`)}</small></div><div class="setting-actions env-extra"><label class="setting-inline">Python<input id="envPip" class="field" spellcheck="false" placeholder="${t(`如 sympy jieba`)}" value="${escapeHtml(s.pip)}"></label><label class="setting-inline">Node<input id="envNpm" class="field" spellcheck="false" placeholder="${t(`如 pnpm`)}" value="${escapeHtml(s.npm)}"></label></div></div></div></div>`;
 }
-// macOS 没环境包：状态卡里列系统里探到的 Python、Node 与 ffmpeg（版本与路径），「准备」即重探一遍
+// macOS 没环境包：状态卡里列系统里探到的 Python、Node 与 ffmpeg（版本与路径），「重新探测」以这时的工具为准
 function envSystemHtml(job, running) {
   const tools = envStatus?.system || {},
     // 点「重新探测」要看得见明细：探完（成功也是）就把逐件的日志列出来，不必等到出错

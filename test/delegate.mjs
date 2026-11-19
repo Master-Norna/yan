@@ -1,4 +1,4 @@
-// 差遣（子 Agent）：主模型把子任务交给帮手，帮手用同样的工具另起一段跑完并回报；步骤嵌在差遣卡片里，改动计入本答，主模型没读过的文件仍不能直接改
+// 差遣（子 Agent）：主模型交活，帮手另起轮次跑完并回报；从行迹的差遣签打开面板看它的步骤。帮手的改动计入本答，帮手读过不等于主模型读过。
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { connect, check, usageOf, sleep, PAGE, WORK } from "./lib.mjs";
@@ -273,7 +273,7 @@ check(
 await evalJs(`document.querySelector("#helperClose").click(); true`);
 check("second helper's file exists", readFileSync(WORK + "/src/b.js", "utf8").includes("export const b = 2;"));
 // 等收尾那一答生成出来。两份回报若在某一答说着「等回报。」时就都递上了，收尾那段落在这半句之后，
-// 不以此开头（见 #37），故与第 77 行一样按「含」判
+// 不一定以收尾那段开头（见 #37），所以只查是否包含那一段。
 await waitFor(
   `typeof __yanState === "function" && __yanState().conversations[0]?.messages.at(-1)?.content?.includes("DELEGATE done｜")`,
   15000

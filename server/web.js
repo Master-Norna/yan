@@ -1,5 +1,5 @@
 // 言 · 桥接的联网：地址门禁（公网才放行，http_request / download_file 另放本机回环）、按量读正文、翻网页、调接口（检索在 server/search.js）
-// 地址门禁与读正文是纯函数，server/work/ 的 download_file 与 CLIXML 还原直接 require；routes 由 server.js 装进接口表
+// 地址门禁会解析域名；download_file 复用联网与限量读流，CLIXML 还原复用实体解码。接口由 server.js 登记
 "use strict";
 const dns = require("node:dns").promises;
 const net = require("node:net");
@@ -197,7 +197,7 @@ function pinnedFetch(url, options, addresses) {
     request.end(options.body || undefined);
   });
 }
-// 桥接自己发出的请求都带这个头；桥接收到带它的 /api/ 请求一律拒绝。http_request / download_file 能打本机，
+// 走受管转发的请求带这个头；桥接收到带它的 /api/ 请求一律拒绝。http_request / download_file 能打本机，
 // 不设这一道，模型就能借它们调桥接自己的执事接口，绕过请示与沙箱在沙箱外跑指令（无 Origin、Host 也对得上）
 const OUTBOUND_MARK = "x-yan-outbound";
 // 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读
@@ -270,7 +270,7 @@ async function readLimitedBytes(response, limit) {
 const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]),
   HTTP_BODY_LIMIT = 1024 * 1024,
   HTTP_TEXT_CHARS = 60000;
-// http_request：调公网接口，回状态码、响应头与正文；正文是文本或 JSON 的给原文（截到 6 万字），二进制的只给类型与大小
+// http_request：调公网或本机回环接口，回状态码、过滤后的响应头与截取的文本。二进制不交正文；bytes 是实际读到的字节数
 const handleHttp = jsonRoute(async body => {
   let url;
   try {
@@ -353,7 +353,7 @@ function decodeText(buffer, charset = "utf-8") {
     return buffer.toString("utf8");
   }
 }
-// 正文最多只收 3 MB（见 readLimitedBytes：边读边计，对方回 500 MB 也只占 3 MB）；字符集先看响应头，没写再看页头的 <meta>
+// 正文限量读取（见 readLimitedBytes），不先攒整份响应；字符集先看响应头，没写再看页头的 <meta>
 async function readLimitedText(response, limit = FETCH_TEXT_LIMIT) {
   const type = response.headers.get("content-type") || "";
   if (!/text\/|application\/(xhtml|json|xml)/i.test(type)) {
@@ -442,9 +442,9 @@ const handleFetch = jsonRoute(async body => {
 });
 
 module.exports = {
-  // 引导、翻网页：本机桥接认得的来源都可调（检索在 server/search.js）
+  // 翻网页：本机桥接认得的来源都可调（引导在 server.js，检索在 server/search.js）
   openRoutes: { "POST /api/fetch": handleFetch },
-  // http_request 能打本机的服务，只给受信的页面
+  // 调接口（允许本机回环）与取外链图都列为受信路由
   routes: { "POST /api/http": handleHttp, "POST /api/remote-image": handleImage },
   OUTBOUND_MARK,
   decodeEntities,
