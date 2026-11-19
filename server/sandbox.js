@@ -1725,12 +1725,17 @@ const macArgs = (scanned, start, end) => {
   }
   return tokens;
 };
+// 内嵌执行段可以沿用外层扫描的坐标，但词义须按实际执行的 Shell 解码。
+const invocationWordScan = (scanned, call) => {
+  const scan = call.scan ?? scanned;
+  return scan.shell === call.shell ? scan : { ...scan, shell: call.shell };
+};
 // 三条规则共用这一条：拿到解码后的真实命令词与参数后各自判定，返回拦截原因或 undefined
 const MAC_NAME = /^(?:socketfilterfw|sysadminctl|dscl)$/i;
 const macBuiltinWhy = scanned => {
   for (const call of commandInvocations(scanned)) {
     // 先判程序名：重定向目标词也会被枚举成调用，不对号就不解析参数，普通命令不会被反复重扫
-    const scan = call.scan ?? scanned;
+    const scan = invocationWordScan(scanned, call);
     const name = shellWord(scan, call.nameStart, call.nameEnd).split("/").pop();
     if (!MAC_NAME.test(name)) continue;
     const args = macArgs(scan, call.nameEnd, call.argEnd ?? scan.syntax.length).map(t => t.value);
@@ -2427,7 +2432,7 @@ function scanWrites(scanned) {
   for (const call of calls) {
     // 名字与参数一律按词规则解码：引号片段（g'c'c）与转义（-\o）
     // 都会改变原文写法，预筛与参数判定只认解码后的真实词
-    const scan = call.scan ?? scanned,
+    const scan = invocationWordScan(scanned, call),
       name = shellWord(scan, call.nameStart, call.nameEnd)
         .split(/[\\/]/)
         .pop()
@@ -2460,7 +2465,7 @@ function scanWrites(scanned) {
   let toolWrite = false;
   const toolReads = [];
   for (const call of calls) {
-    const scan = call.scan ?? scanned,
+    const scan = invocationWordScan(scanned, call),
       name = shellWord(scan, call.nameStart, call.nameEnd)
         .split(/[\\/]/)
         .pop()
