@@ -1595,6 +1595,8 @@ var YAN_EN = {
     "Tool packs are Windows-only. On macOS, use the system Python and Node (e.g. via Homebrew)",
   "环境工具包只备了 Windows 版；在这套系统上请用系统里的 Python 与 Node":
     "Tool packs are Windows-only; on this system, use the system Python and Node",
+  "有环境作业还在跑，等它结束再换": "An environment job is running. Wait for it to finish before moving storage",
+  "环境正在清空，稍候再试": "The environment is being cleared. Try again in a moment",
   "环境正在准备，稍候再清": "The environment is being set up; clear it later",
   "没能删干净（可能有进程正用着环境里的程序）：{0}": "Could not delete everything (a process may be using it): {0}",
   "{0} 下载失败（HTTP {1}）": "{0} download failed (HTTP {1})",

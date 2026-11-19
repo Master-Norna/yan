@@ -31,6 +31,7 @@ async function switchStoreRoot(data) {
   chatDiskStamps.clear();
   chatBases.clear();
   chatDiskWrites.clear();
+  resetEnvStatus();
   // 搬到一个已有言数据的地方：那边的配置为准；拷过去的：这边的就是那边的
   if (data.adopted) {
     const disk = await storeBridge("/api/store/config/load", {}, AbortSignal.timeout(20000)).catch(() => null);

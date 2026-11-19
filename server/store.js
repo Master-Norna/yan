@@ -8,8 +8,8 @@
 // 在设置里换了位置，整份拷到新处；macOS 写 ~/Library/Application Support/言/位置.json，其余平台沿用 %APPDATA%\言\位置.json（未设 APPDATA 时 ~/AppData/Roaming），写明搬去了哪（旧数据原样留着，确认无误后可自行删去）。
 // 条子不放在 ~/.yan 里：旧处是叫人自行删去的，条子若在里头，删了旧数据也就删了条子，下次开又回到默认处。
 // 测试用 YAN_HOME 直接指定根目录，不读也不写位置条子
-// 由 server.js 装配：working 报各页正作答的有几段（见 server/chats.js），background 报有没有后台指令在跑（见 server/work/shell.js）
-// 两样都占着根：作答中的对话正往旧处写，后台指令的工作目录也多半在根里，换位置要等它们松手
+// 由 server.js 装配：working 报各页正作答的有几段，background 报有没有后台指令在跑，environment 报环境是否正在准备或清空。
+// 这几样都占着根，换位置要等它们松手。
 "use strict";
 const { sendJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
 const fs = require("node:fs");
@@ -19,8 +19,8 @@ const { expandHome, pathIsInside } = require("./work/paths.js");
 
 const MAC = process.platform === "darwin";
 
-/** @param {{ working?: () => number, background?: () => boolean, onMove?: () => void }} [options] */
-module.exports = function createStore({ working = () => 0, background = () => false, onMove = () => {} } = {}) {
+/** @param {{ working?: () => number, background?: () => boolean, environment?: () => boolean, onMove?: () => void }} [options] */
+module.exports = function createStore({ working = () => 0, background = () => false, environment = () => false, onMove = () => {} } = {}) {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
     POINTER_DIR = MAC
       ? path.join(os.homedir(), "Library", "Application Support")
@@ -189,9 +189,10 @@ module.exports = function createStore({ working = () => 0, background = () => fa
     return { count, busy };
   }
   // 换位置：parent 下的 .yan 就是新根。那里已有言的数据（另一台机器拷来的、先前搬过去的）就直接用它；
-  // 否则把整份拷过去。旧处原样留着（可自行删去），位置条子记下新根，桥接重启后也认得
+  // 否则把整份拷过去。旧处原样留着（可自行删去），位置条子记下新根，桥接重启后也认得。
+  // 从忙态检查到换好根全程同步，环境作业不能插进来。
   const handleMove = scopedRoute(
-    async body => {
+    body => {
       const parent = path.resolve(expandHome(body.parent));
       if (!body.parent || !path.isAbsolute(expandHome(body.parent))) throw Error("存储位置需填写完整的绝对路径");
       const next = path.basename(parent).toLowerCase() === ".yan" ? parent : path.join(parent, ".yan");
@@ -203,6 +204,7 @@ module.exports = function createStore({ working = () => 0, background = () => fa
       // 后台指令还在跑也一样：它的工作目录多半就在存储根里（没绑目录时是 工作/），拷完照旧往旧处写；
       // 而旧处是叫人自行删去的，删了它就没处落笔了。等它结束再换（见 server/work/shell.js 的 backgroundRunning）
       if (background()) throw Error("有后台指令还在跑，等它结束再换");
+      if (environment()) throw Error("有环境作业还在跑，等它结束再换");
       const existing = fs.existsSync(path.join(next, CONFIG_FILE));
       let locked = [];
       if (!existing) {
