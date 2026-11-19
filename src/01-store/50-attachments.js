@@ -14,14 +14,7 @@ function openFileDb() {
   return fileDbPromise;
 }
 async function fileStoreRequest(mode, action) {
-  const db = await openFileDb();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(FILE_STORE_NAME, mode),
-      request = action(transaction.objectStore(FILE_STORE_NAME));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || Error(t("附件存储失败")));
-    transaction.onabort = () => reject(transaction.error || Error(t("附件存储已中止")));
-  });
+  return dbRequest(await openFileDb(), FILE_STORE_NAME, mode, action);
 }
 // ---------- 附件原件 ----------
 // 落在存储根的 附件/（与对话、卷宗、配置同在一处，几个浏览器共用，复制即备份；见 server/files.js）；
@@ -49,20 +42,28 @@ function uncacheAttachment(id) {
   attachmentCacheSize -= String(record.data || "").length + String(record.extractedText || "").length;
 }
 // body：原件（置入的 File）；没给的照 record.data 现做——文本附件的 data 是正文，别的是 data: URL。桥接不在时暂存进浏览器，那时才读成 data
-/** @param {Record<string, any>} record @param {Blob|null} [body] */
-async function putAttachment(record, body = null) {
+/** @param {Record<string, any>} record @param {Blob|null} [body] @param {string} [files] 预期附件目录（导入使用） */
+async function putAttachment(record, body = null, files = "") {
   uncacheAttachment(record?.id);
   try {
-    await uploadAttachment(record, body);
-    return;
-  } catch {}
+    await uploadAttachment(record, body, files);
+    return "disk";
+  } catch (error) {
+    if (files && attachmentStoreMoved(error)) throw error;
+  }
   const data = record.data ?? (body ? await readFile(body, record.kind === "text" ? "text" : "data") : undefined);
-  return fileStoreRequest("readwrite", db => db.put({ ...record, data }));
+  await fileStoreRequest("readwrite", db => db.put({ ...record, data }));
+  return "browser";
 }
-/** @param {Record<string, any>} record @param {Blob|null} [body] */
-function uploadAttachment(record, body = null) {
+/** @param {Record<string, any>} record @param {Blob|null} [body] @param {string} [files] */
+function uploadAttachment(record, body = null, files = "") {
   const { data: _data, ...meta } = record;
-  return bridgeUpload("/api/files/put", { record: meta }, body || attachmentBlob(record), AbortSignal.timeout(120000));
+  return bridgeUpload(
+    "/api/files/put",
+    { record: meta, ...(files ? { files } : {}) },
+    body || attachmentBlob(record),
+    AbortSignal.timeout(120000)
+  );
 }
 // 记录里的原件换成 Blob：文本附件的 data 是正文，别的是 data: URL
 /** @param {Record<string, any>} record */
@@ -80,13 +81,18 @@ async function attachmentBody(id) {
   const record = await getAttachment(id);
   return record ? attachmentBlob(record) : null;
 }
-async function getAttachment(id) {
+function attachmentStoreMoved(error) {
+  return /存储位置已变化/.test(String(error?.message || error));
+}
+async function getAttachment(id, { scoped = false } = {}) {
   if (!id) return null;
   if (attachmentCache.has(id)) return attachmentCache.get(id);
   let record = null;
   try {
-    record = (await bridge("/api/files/get", { id }, AbortSignal.timeout(60000))).record || null;
-  } catch {}
+    record = (await (scoped ? storeBridge : bridge)("/api/files/get", { id }, AbortSignal.timeout(60000))).record || null;
+  } catch (error) {
+    if (scoped && attachmentStoreMoved(error)) throw error;
+  }
   if (!record) record = (await fileStoreRequest("readonly", db => db.get(id)).catch(() => null)) || null;
   cacheAttachment(record);
   return record;

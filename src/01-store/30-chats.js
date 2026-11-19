@@ -126,13 +126,21 @@ function nextChatStamp(id) {
 // 把这几段排进写队列。这里故意不 stringify：流式期间 saveStore 每 300ms 会来一次，真正到落盘间隔时才复制整段，
 // 这样长对话不会为了最后几个字反复序列化；同一段正在写时也只留一个「再看一次最新状态」的记号。
 function flushConversations(ids, { force = false } = {}) {
+  const queuedIds = [];
   for (const id of ids) {
     // 别处正作答的不写：磁盘上那份由它写，这边只跟着看
     if (chatDeletePending(id) || runningElsewhere(id) || !store.conversations.some(item => item.id === id)) continue;
     const queued = pendingChatWrites.get(id);
     pendingChatWrites.set(id, { force: force || !!queued?.force });
+    queuedIds.push(id);
   }
   void drainChatWrites();
+  return queuedIds;
+}
+// 导入只等本批 ID，不等别段作答。强制过一轮写队列：同指纹可能来自磁盘，也可能只来自暂存。
+async function flushImportedConversations(ids) {
+  const queued = new Set(flushConversations(ids, { force: true }));
+  return Promise.all(ids.map(id => (queued.has(id) ? chatWritePromises.get(id)?.catch(() => null) : null)));
 }
 function drainChatWrites() {
   for (const id of pendingChatWrites.keys()) {
@@ -145,6 +153,8 @@ function drainChatWrites() {
   }
 }
 async function writeConversation(id) {
+  /** @type {"disk"|"browser"|"page"|null} */
+  let result = null;
   while (pendingChatWrites.has(id) && !chatDeletePending(id)) {
     // 先等、后 stringify。生成中三秒一份，收尾与普通编辑最多等一秒多；离页另有同步入 IndexedDB 的兜底，不靠这里抢时间。
     const interval = busyHere(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
@@ -170,7 +180,8 @@ async function writeConversation(id) {
     chatDiskWrites.set(id, performance.now());
     // 目录在线：先落盘；写成了表里的暂存就没用了。落盘不成（桥接刚停了）就暂存进表里，接上后再推
     let spilled = !chatsOnline(),
-      persisted = false;
+      diskError = null;
+    result = "page";
     if (!spilled)
       try {
         await bridgeJson(
@@ -182,7 +193,7 @@ async function writeConversation(id) {
         chatBases.set(id, pending.json);
         chatSaveWarned = false;
         if (!chatDeletePending(id)) {
-          persisted = true;
+          result = "disk";
           // pagehide 已把最新状态写进表时，旧的在途请求即使成功也不能把那份离页兜底删掉。
           if (!unloading && !pendingChatWrites.has(id))
             await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
@@ -191,7 +202,8 @@ async function writeConversation(id) {
         // 目录里那份比这边上次见过的新（别处写过）：两份并起来，下一轮带着新的时间戳再写
         if (error.status === 409 && error.data?.item && !chatDeletePending(id)) {
           activeChatWrites.delete(id);
-          catchUpConversation(error.data.item);
+          const merged = catchUpConversation(error.data.item);
+          if (merged && chatJson(merged) === chatBases.get(id)) result = "disk";
           continue;
         }
         // 迟到的旧保存撞上了别处的删除：不暂存、不复活，这边也跟着拿掉
@@ -206,18 +218,19 @@ async function writeConversation(id) {
           return;
         }
         spilled = true;
-        if (!chatSaveWarned) {
-          chatSaveWarned = true;
-          toast(t`对话未能落盘，先暂存在浏览器里：${String(error.message || error).slice(0, 60)}`);
-        }
+        diskError = error;
       }
     if (spilled && !chatDeletePending(id))
       try {
         await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db =>
-          db.put({ id, savedAt: pending.savedAt, json: pending.json, baseJson: chatBases.get(id), dir: pending.dir })
+          db.put({ id, savedAt: pending.savedAt, json: chatSpillJson(conversation), baseJson: chatBases.get(id), dir: pending.dir })
         );
-        persisted = true;
+        result = "browser";
         if (!chatsOnline()) chatSaveWarned = false;
+        else if (diskError && !chatSaveWarned) {
+          chatSaveWarned = true;
+          toast(t`对话未能落盘，先暂存在浏览器里：${String(diskError.message || diskError).slice(0, 60)}`);
+        }
       } catch {
         if (!chatSaveWarned) {
           chatSaveWarned = true;
@@ -226,11 +239,12 @@ async function writeConversation(id) {
       }
     if (activeChatWrites.get(id) === pending) activeChatWrites.delete(id);
     // 桥接在线却没写进盘（文件被占着之类）：浏览器里暂存着，但脏标记留着，下回保存再往盘上写
-    if (persisted && !chatDeletePending(id) && !(spilled && chatsOnline())) {
+    if ((result === "disk" || (result === "browser" && !chatsOnline())) && !chatDeletePending(id)) {
       chatHashes.set(id, hash);
       if (!pendingChatWrites.has(id)) dirtyChatIds.delete(id);
     }
   }
+  return chatDeletePending(id) ? null : result;
 }
 // 磁盘与本机暂存分别收尾。删暂存只动这一回之前的旧份；另一页后来存的不能连带清掉。
 async function clearDiscardedChatSpills() {
@@ -521,7 +535,7 @@ function flushOnUnload() {
     records.push({
       id: conversation.id,
       savedAt: nextChatStamp(conversation.id),
-      json,
+      json: chatSpillJson(conversation),
       baseJson: chatBases.get(conversation.id),
       dir: chatsDir()
     });
