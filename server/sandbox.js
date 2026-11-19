@@ -1622,14 +1622,18 @@ const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
 // （引号内 syntax 不标 \x01，\ 保持字面），引号外 \x 还原成 x、\<换行> 整对删除；
 // 同一词内引号与非引号片段相邻时自然拼成一个值
 const shellWord = (/** @type {ReturnType<typeof shellText>} */ scanned, /** @type {number} */ start, /** @type {number} */ end) => {
-  const { text, syntax, quotes } = scanned;
+  const { text, syntax, quotes, shell } = scanned;
   let out = "";
   for (let i = start; i < end; i++) {
     if (quotes.has(i)) {
       const qe = Math.min(quotes.get(i), end - 1);
       const inner = text.slice(i + 1, qe);
       if (text[i] === '"') {
-        // 双引号内 \ 仍转义 $"`\\ 与换行（续行整对删除），其余 \x 保留字面
+        // 双引号内 \ 转义 $"`\\ 与换行（续行整对删除），其余 \x 保留字面。
+        // 反斜杠续行照旧两平台同一个删法（拆开的写法仍拼回来看）；其余转义只属 POSIX——
+        // PowerShell 与 cmd 的双引号里 \ 是普通字符，照 POSIX 折一次会把
+        // \\host\share 折成 \host\share（Codex 评审 11-18）
+        const posix = shell === "posix";
         for (let j = 0; j < inner.length; j++) {
           if (inner[j] === "\\" && j + 1 < inner.length) {
             if (/[\r\n]/.test(inner[j + 1])) {
@@ -1637,7 +1641,7 @@ const shellWord = (/** @type {ReturnType<typeof shellText>} */ scanned, /** @typ
               if (inner[j] === "\r" && inner[j + 1] === "\n") j++;
               continue;
             }
-            if (/[$"`\\]/.test(inner[j + 1])) {
+            if (posix && /[$"`\\]/.test(inner[j + 1])) {
               out += inner[j + 1];
               j++;
               continue;
@@ -2189,15 +2193,19 @@ function commandInvocations(scanned) {
         at++;
         continue;
       }
-      const emit = (toks, argEnd) => {
+      const emit = (toks, argEnd, bounded = false) => {
         const first = toks[0];
-        if (seen.has(first.start)) return;
-        seen.add(first.start);
+        // 同一起点按视角去重：&> 处 bash 与 dash 是两条命令，各自发出的调用参数界不同
+        const key = `${first.start}:${bounded ? "dash" : "posix"}`;
+        if (seen.has(key)) return;
+        seen.add(key);
         const name = first.value
           .split(/[\\/]/)
           .pop()
           .replace(/\.exe$/i, "");
         calls.push({ name, args: toks.slice(1), shell: range.shell, nameStart: first.start, nameEnd: first.end, argEnd });
+        // dash 视角只作一条调用本身，套壳正文由正视角展开过，不重复扫
+        if (bounded) return;
         if (!/^(?:cmd|powershell|pwsh|sh|bash|zsh|dash|ksh)$/i.test(name)) return;
         const script = SCRIPT_PREFIX.exec(scanned.text.slice(first.start, argEnd));
         if (!script) return;
@@ -2273,6 +2281,14 @@ function commandInvocations(scanned) {
       }
       if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
       emit(tokens, at);
+      // dash 视角：& 先断句，>log 是下一条命令的重定向，主调用到 & 为止。两种方言各发一条
+      // 才不漏判——bash 视角里 &> 之后的词是本次调用的参数（带 --dry-run 就判成干跑），
+      // dash 视角里它们属于下一条命令，真调用没有那个参数（Codex 评审 11-18）
+      if (mergeAt.length) {
+        const cut = mergeAt[0],
+          bounded = tokens.filter(tok => tok.end <= cut);
+        if (bounded.length && bounded.length < tokens.length) emit(bounded, cut, true);
+      }
       for (const s of shadows) {
         const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd), range.shell);
         if (toks.length) emit(toks, s.argsTo);

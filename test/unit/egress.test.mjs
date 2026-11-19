@@ -76,6 +76,11 @@ test("推远端：push 与 send-email 算，dry-run 与查看不算；包在 pow
   assert.equal(kind("git send-email --dry-run HEAD~2"), "");
   assert.equal(kind("git lfs push --dry-run origin"), "");
   assert.equal(kind('powershell -Command "git push origin main"'), "git-push");
+  // &> 在 dash 里是「& 断句 + >log 重定向」：后面那些词属于下一条命令，
+  // push 本身照样是推送；bash 视角里它们才是 push 的参数（Codex 评审 11-18）
+  assert.equal(kind(String.raw`dash -c 'git push &>log echo --dry-run'`, mac), "git-push");
+  // 外壳不明时两种方言各判一次：dash 视角下 --dry-run 不归 push，宁可信其有
+  assert.equal(kind("git push &>log --dry-run"), "git-push");
 });
 
 test("gh 的写操作：评论、评审、建 PR、API 写算，view 与 list 不算", () => {
@@ -174,4 +179,9 @@ test("写网络共享算外发，读不算；两套平台都认", () => {
   assert.equal(kind("Out-File -FilePath .\\a.txt -InputObject '//cdn.example.com/x.js'"), "");
   assert.equal(kind("rsync -av ./ /mnt/share/x", mac), "");
   assert.equal(kind("scp a.txt user@host:/tmp/", mac), "remote:scp");
+  // PowerShell 的双引号里 \ 是普通字符，引号里的 UNC 不能先按 POSIX 折一次：
+  // curl 紧贴 -o 的目标按解码值查，折过就认不出共享了（Codex 评审 11-18）
+  assert.equal(kind(String.raw`curl.exe "-o\\host\share\out" http://127.0.0.1:9000/`, win), "share");
+  // POSIX 的双引号里 \\ 折成一个 \，那就不是共享路径
+  assert.equal(kind(String.raw`curl -o"\\host\share\out" http://127.0.0.1:9000/`, mac), "");
 });
