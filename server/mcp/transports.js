@@ -27,7 +27,7 @@ class StdioTransport {
     this.onclose = () => {};
   }
   start() {
-    // 先接上沙箱环境（环境里的 Python、uvx、npm 装的工具都找得到），配置里写的 env 最后盖上；
+    // 先接桥接的工具环境（Windows 自备包，macOS 系统工具目录），配置里的 env 最后盖上；
     // Python 写的服务在中文 Windows 上默认按 GBK 写 stdout：统一成 UTF-8，且不缓冲
     const env = { PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", ...this.toolEnv(process.env), ...this.env },
       { file, args, shell } = resolveCommand(this.command, this.args, env);
@@ -90,7 +90,7 @@ class StdioTransport {
     killTree(child, "SIGTERM");
   }
 }
-// Windows 上 npx、uvx 这类是 .cmd：得经 cmd 才起得来。先按 PATH 与 PATHEXT 找到真身，是 .cmd / .bat 就交给 shell（参数逐个加引号）
+// Windows 上 npx 等工具可能是 .cmd：先按 PATH 与 PATHEXT 找真身，是 .cmd / .bat 才交给 shell（参数逐个加引号）
 function resolveCommand(command, args, env) {
   if (process.platform !== "win32") return { file: command, args, shell: false };
   const found = findOnPath(command, env);

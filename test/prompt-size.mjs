@@ -1,6 +1,6 @@
-// 提示词体量：用页面同一份代码（src/ 照单元测试的拼法拼起来）拼出各模式下模型实际读到的系统提示 + 工具定义，粗估 token
-// （中日韩字符按 1，其余按 4 字符 1）。设置取默认档：沙箱开、问而后行、记忆开（12 条）。
-// 用法：node test/prompt-size.mjs [--dump 打印全文] [--tools 逐件列出] [--save 更新基准]
+// 提示词体量：用页面同一份代码生成四档系统提示与工具定义，按字符粗估 token（中日韩等指定码段每字 1，其余 0.28）。
+// 用固定的 Windows 桥接夹具，沙箱与权限用默认档，开启记忆并预置 12 项。
+// 用法：node test/prompt-size.mjs [--dump 打印系统提示及工具名称与说明] [--tools 逐件列出估算量] [--save 更新基准]
 // 默认与 test/prompt-size.json 里记的上一次比，只报差值——不判红、不设上限。改过 prompts/ 后跑一下，
 // 增量明显时复核「这句非写不可吗」；确认这组数合理再 --save，基准随提交走，往后每次都能看出涨了还是降了。
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";

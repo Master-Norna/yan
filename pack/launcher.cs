@@ -1,7 +1,7 @@
 // 言 · 便携包的启动器（言.exe）：用旁边 node\ 里自带的 Node 起本机桥接（server.js --open --exit-with-page），没带就用系统装的。
 // 自带的 Node 接在 PATH 末尾：模型跑的 node、npx 与环境里 npm 装的工具找得到它，系统已装的仍然优先。
 // 不开窗口：桥接跑在一个看不见的控制台里（CreateNoWindow），它再起的 powershell、git、npm 都沿用这个控制台，不会一条指令弹一个黑窗；
-// 最后一页关了桥接自己退（见 server.js 的 --exit-with-page）。输出记进旁边的 桥接.log，每次启动重写；异常退出时弹框给出末几行。
+// 最后一页断开后，桥接留出重连时间，后台指令跑完才退出。日志能打开时重写 桥接.log；非零退出时弹框给出末几行。
 // 要看着终端调试，用 start.cmd。由 pack/pack.mjs 用系统自带的 csc 编出（C# 5，/target:winexe，不另装 SDK）
 using System;
 using System.Collections.Generic;
@@ -32,7 +32,7 @@ class Launcher
             string path = Environment.GetEnvironmentVariable("PATH") ?? "";
             start.EnvironmentVariables["PATH"] = path.TrimEnd(';') + ";" + bundled;
         }
-        // 日志被占着＝已有一个桥接在跑：这一回的桥接只会打开页面就退，不必记
+        // 日志遇 I/O 错误仍可启动；比如另一实例还占着日志时，这一回仍在内存留末几行
         StreamWriter log = null;
         try
         {

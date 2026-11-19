@@ -2,7 +2,7 @@
 // 言 · ChatGPT 订阅：走 OpenAI 给开源与本机应用开的「Sign in with ChatGPT」——在浏览器里授权，额度记在用户的 ChatGPT 订阅上，
 // 请求直发公开的 Responses API（api.openai.com/v1/responses），带言自己的提示与工具，不经 Codex 那一层。
 // 与 Anthropic 适配一个路数：页面照旧送 OpenAI 格式，这里把请求换成 Responses 的，事件流再换回 chat.completions 的分块（登记的样子见 index.js 开头）。
-// 凭证只在桥接里：存储根下的「ChatGPT 登录.json」，不进页面、不进备份
+// 凭证由桥接保存于存储根下的「ChatGPT 登录.json」，不交给页面、不进页面导出
 const http = require("node:http");
 const path = require("node:path");
 const { createHash, randomBytes, randomUUID } = require("node:crypto");
@@ -166,7 +166,7 @@ module.exports = function createChatgpt({ home }) {
     lastError = null;
     const target = file(),
       auth = load();
-    // 本机标识：每台机器一个，头一回登录前定下，此后一直用它
+    // 本机标识：这一份登录记录首次发起授权前生成，之后沿用保存下的值
     // 须写成 urn:uuid:…，裸的 UUID 授权端不认（invalid ext_agent_host_id）；先前存下的裸 UUID 补上前缀，仍是同一台机器
     if (!auth.hostId?.startsWith("urn:uuid:")) {
       auth.hostId = `urn:uuid:${auth.hostId || randomUUID()}`;
@@ -244,7 +244,7 @@ module.exports = function createChatgpt({ home }) {
       error: login?.error || (auth.tokens?.refresh_token ? "" : failure(file()))
     };
   }
-  // 退出：向授权端吊销刷新令牌（吊销不成也照样在本机清掉），登记的 client_id 与本机标识留着，下回登录同一个账号还用它们
+  // 退出：先清本机令牌，再尝试向授权端吊销刷新令牌；登记的 client_id 与本机标识留着
   async function logout() {
     stopPending();
     lastError = null;
@@ -371,7 +371,7 @@ function responsesRequest(payload) {
     store: false,
     stream: true
   };
-  // 缓存键：同一段对话里固定不变（取开头那条用户消息），前文走缓存
+  // 缓存键由型号与第一条送往上游的用户内容决定；任一变化时重新计算
   const opening = input.find(item => item.role === "user");
   if (opening)
     body.prompt_cache_key = createHash("sha256")

@@ -278,7 +278,7 @@ html[data-sidebar="collapsed"] .sidebar .wide {
 .history-repo-group.collapsed .repo-caret {
   transform: none;
 }
-/* 组首右端的「＋」（集组还有「⋯」）悬停时浮出、箭头隐去让位：按钮不占位，工组与集组的箭头才在同一处 */
+/* 组首右端的「＋」与「⋯」在指针指着组首或焦点在组首内时浮出、箭头隐去让位：按钮不占位，工组与集组的箭头才在同一处 */
 .repo-new {
   position: absolute;
   top: 50%;
@@ -868,7 +868,7 @@ html[data-sidebar="collapsed"] .sidebar .wide {
 .quota.dry .quota-tip b {
   color: var(--danger);
 }
-/* 书眉的漏：挂着后台指令时才有（画法与取舍见 src/08-trail/30-clepsydra.js、设计稿/75）。
+/* 书眉的漏：有进行中的后台指令或待到点的定时才显示（画法与取舍见 src/08-trail/30-clepsydra.js、设计稿/75）。
    靠近不浮字，只像明暗那一笔一样动一点：那一滴往下落一截、浮箭往上浮一点 */
 .clepsydra {
   position: relative;

@@ -1814,17 +1814,17 @@ var YAN_EN = {
   "指令在你的机器上、以你的权限执行，逐条可见。何时须经你首肯，由三档权限而定；沙箱在桥接一侧守护系统。":
     "Commands run on your machine with your permissions, and each one is visible. Which ones need your approval depends on the permission level; the sandbox guards the system from the bridge side.",
   三档权限: "Three permission levels",
-  "**问而后行**：凡会改动的指令逐条请示，只读者径行。**审而后行**：由桥接代审，寻常改动放行，只拦伤及系统、难以恢复者。**径行**：不再审查。输入框旁随时可换。":
-    "**Ask first**: every command that changes something asks you first; read-only ones just run. **Auto-review**: the bridge reviews them, letting routine changes through and stopping only what would harm the system or be hard to undo. **Full auto**: no review. Switch any time beside the input box.",
+  "**问而后行**：明确只读的指令径行，其余逐条请示。**审而后行**：由桥接代审，寻常改动放行，只拦伤及系统、难以恢复者。**径行**：不再审查。输入框旁随时可换。":
+    "**Ask first**: recognized read-only commands run without asking; other commands require individual approval. **Auto-review**: the bridge reviews them, letting routine changes through and stopping only what would harm the system or be hard to undo. **Full auto**: no review. Switch any time beside the input box.",
   "问而后行下从严：改动不出工作目录，机密文件不碰，动系统或直接外联的指令拦下，转请你定夺；机密的环境变量也不交给指令。审而后行与径行只守系统本身。总开关在设置 → 工具。":
     "Ask first is strict: changes stay inside the working folder, secret files are off limits, and commands that touch the system or connect out directly are stopped and passed to you; secret environment variables aren't given to commands either. Auto-review and Full auto only protect the system itself. The master switch is in Settings → Tools.",
-  "沙箱是静态筛查，并非进程隔离：脚本里的代码仍以你的权限运行；MCP 服务亦不受其约束。":
-    "The sandbox is a static check, not process isolation: code inside scripts still runs with your permissions, and MCP servers aren't bound by it.",
+  "指令规则是静态筛查。macOS 的问而后行在沙箱开启、系统支持时另限写盘；MCP 服务不受这层指令沙箱约束。":
+    "Command rules are static checks. On macOS, Ask first also restricts filesystem writes when the sandbox is enabled and the system supports it. MCP servers are not covered by this command sandbox.",
   可及范围与轮次: "Reach and tool rounds",
   "未开沙箱时，文件工具能否越出目录由设置 → 工具的「可及范围」定：**全盘**可指向任何绝对路径，**目录内**一律不出；指令不受此限。「工具轮次上限」限一答（帮手另计）最多调几轮工具，同一轮并发的几次只算一轮，到顶即收回工具请模型收尾。":
     "With the sandbox off, whether file tools may leave the folder is set by “File tool reach” in Settings → Tools: **Anywhere** allows any absolute path, **Folder only** never leaves it; commands aren't limited by this. “Tool round limit” caps how many rounds of tool calls one reply may make (subagents count separately); parallel calls in the same round count once. At the cap the tools are withdrawn and the model is asked to wrap up.",
-  "作答时寄出键化为「止」，按下即停；正在执行的指令连同其子进程一并收束。":
-    "While the model answers, the send button becomes Stop; pressing it stops at once, and running commands are ended along with their child processes.",
+  "作答时寄出键化为「止」：停下生成，桥接收束前台指令的进程树。已经挂上的后台指令与定时候照常。":
+    "While the model answers, the send button becomes Stop. It stops generation and the bridge cleans up foreground command process trees. Already queued background commands and timers continue.",
   卷宗附件: "Files and attachments",
   "附件的来路，成品的归处": "Where attachments come from, where outputs go",
   "附件随一问送出；卷宗是跨对话的书架，常用文件收存于此。":
@@ -1988,16 +1988,16 @@ var YAN_EN = {
   "执事测页面时常把视口定死，画面上下留白；开着「适应页面」，待执事歇手便放开，关着则由你点「放开」。":
     "When testing pages the agent often fixes the viewport size, leaving blank space around the view. With Fit page on, it's released once the agent pauses; with it off, click “Release” yourself.",
   为模型备一套开发环境: "A development environment for the model",
-  "独立的 Python 与常用工具链，装于存储位置的 `环境/`，不改动系统。":
-    "A standalone Python and common toolchains, installed in `环境/` in your storage location without touching the system.",
+  "Windows 把独立的 Python 与常用工具链装在存储位置的 `环境/`；macOS 使用已安装的系统工具，可在这里重新探测。":
+    "On Windows, a standalone Python and common toolchains are installed in `环境/` under your storage location. On macOS, Yan uses tools already installed on the system; you can detect them again here.",
   勾选: "Choosing",
-  "设置 → 环境：一组工具一张卡，名称居左、状态居右——空框未选，框中一粒朱待装，一笔勾已装。可选数据处理、办公文档、图像、音视频，以及 C / C++、Go、Rust、Java 数套工具链；卡外的包写在「另装」一行。":
-    "Settings → Environment: one card per set of tools, name on the left and status on the right: an empty box is unselected, a red dot in the box is waiting to install, a tick is installed. Choose data processing, office documents, images, audio and video, and toolchains for C / C++, Go, Rust and Java; packages not on any card go on the “Extra packages” line.",
+  "Windows 上，设置 → 环境：一组工具一张卡，名称居左、状态居右——空框未选，框中一粒朱待装，一笔勾已装。可选数据处理、办公文档、图像、音视频，以及 C / C++、Go、Rust、Java 数套工具链；卡外的包写在「另装」一行。":
+    "On Windows, Settings → Environment shows one card per set of tools, name on the left and status on the right: an empty box is unselected, a red dot in the box is waiting to install, a tick is installed. Choose data processing, office documents, images, audio and video, and toolchains for C / C++, Go, Rust and Java; packages not on any card go on the “Extra packages” line.",
   准备: "Setting up",
   "点「准备环境」，环境即与勾选对齐：勾上者装，取消者卸。首回需下载数十至数百 MB。下载源不必选：准备时国内镜像（清华、中科大、npmmirror 等）与官方各取一截比快慢，挑快的走，模型往后自装的包也走这一路；工具链体量较大，卡上注明约数。":
     "Click “Set up environment” and it's brought in line with your ticks: ticked items are installed, unticked ones removed. The first run downloads tens to hundreds of MB. There's no mirror to pick: during setup, Chinese mirrors (Tsinghua, USTC, npmmirror and others) and the official sources each download a sample, the fastest wins, and packages the model installs later go the same way. Toolchains are large; cards show the rough size.",
-  "模型的指令与 MCP 服务皆接此环境；所缺之库，模型自行装入即可。":
-    "The model's commands and MCP servers both use this environment; the model can install any missing libraries itself.",
+  "Windows 上，模型的指令与 MCP 服务接此环境。macOS 上可重新探测 Python、Node.js 与 ffmpeg，不会安装工具。":
+    "On Windows, model commands and MCP servers use this environment. On macOS, you can detect Python, Node.js and ffmpeg again without installing anything.",
   "何者当记，何时可忘": "What to remember, and when to forget",
   "录是一份跨对话的记忆：你的偏好、身份与约定，此后不必重述。只存于本机。":
     "Memory carries across conversations: your preferences, who you are and what's been agreed, so you needn't repeat them. It's stored only on this machine.",
@@ -2014,10 +2014,11 @@ var YAN_EN = {
   迁移: "Moving",
   "设置 → 通用 → 存储位置，填一目录，整份拷至其下，旧处原样保留；那里已有言的数据则直接用它。":
     "Settings → General → Storage location: enter a folder and everything is copied there, leaving the old location as it was; if the folder already has Yan data, that data is used.",
-  "环境不随之迁移，至新处重新准备一遍即可。": "The environment doesn't move with it; just set it up again in the new location.",
+  "作答、后台指令或环境准备、清空未结束时不能换位置。Windows 的环境不随迁移，到新处可重新准备。":
+    "Wait for replies, background commands and environment setup or clearing to finish before moving. The managed Windows environment isn't copied; you can set it up again in the new location.",
   备份与导出: "Backup and export",
-  "设置 → 通用中导出备份（可含附件原件）；导入时按 id 合并，已有者略过。单段对话可在「⋯」里导出，存成 Markdown 落入卷宗。":
-    "Export a backup in Settings → General (optionally with original attachments); importing merges by id and skips what's already there. A single conversation can be exported from “⋯” as Markdown saved to Files.",
+  "设置 → 通用可导出备份（可含附件原件）。导入会合并数据，完成后说明哪些已写入存储目录、暂存在此浏览器或只留在本页。单段对话可在「⋯」里导出，存成 Markdown 落入卷宗。":
+    "Export a backup in Settings → General (optionally with original attachments). Import merges data and reports what was saved to the storage folder, saved temporarily in this browser, or left only on this page. Use “⋯” to export a conversation as Markdown to Files.",
   "备份不含 API Key；MCP 的密钥导入后需重填。": "Backups don't include API Keys; MCP secrets need re-entering after import.",
   键与手势: "Keys and gestures",
   寻常操作的捷径: "Shortcuts for everyday actions",

@@ -2,7 +2,7 @@
 // 由 server.js 装配：require("./server/chats.js")({ chatsHome, onDelete })——onDelete 在一段对话删去后叫（检查点跟着清）
 // 目录在存储根里（chatsHome()，默认 ~/.yan/对话，见 server/store.js）。文件名带标题便于翻看，末尾缀上按对话 id 算的短码来认身份：
 // 「关于滚动条·3f9a2c1b0e.json」；标题改了文件跟着改名，删对话就删文件。配置不在这里，在存储根的 配置.json
-// 收了尾的一答，思绪与帮手的经过另存在 行迹/<短码>/ 里，一答一份、写下就不再改；对话文件里那一答只留 cold 记号（见 src/01-store/35-cold.js）
+// 收了尾的一答，思绪与帮手的经过可另存在 行迹/<短码>/ 里，以 cold.key 引用；对话文件仍保存正文等其余字段（见 src/01-store/35-cold.js）
 "use strict";
 const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
 const fs = require("node:fs");
@@ -15,7 +15,7 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
   const META_FILE = "设置.json",
     FILE_LIMIT = 256 * 1024 * 1024,
     // 删除记录：哪段对话在何时删的。几个浏览器共用一个目录，那边删了的，这边内存里还留着一份——没有这份记录，
-    // 这边一对目录发现「目录里没有」，就又把它推回去了。记三十天，久了的清掉
+    // 这边一对目录发现「目录里没有」，就又把它推回去了。每次重写记录时只保留近三十天的条目
     TOMBSTONE_FILE = "删除记录.json",
     TOMBSTONE_DAYS = 30,
     TRAIL_DIR = "行迹",
@@ -190,7 +190,7 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
               continue;
             }
           }
-          // 同一段对话若留了两个文件（改名时旧的没删成），以较新的为准，旧的顺手清掉
+          // 两份都是言命名的文件时，以保存时刻较晚的为准，只清这类重复件
           if (prior && prior.savedAt >= item.savedAt) {
             fs.rmSync(path.join(home, name), { force: true });
             continue;
@@ -232,7 +232,7 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
           .sort((a, b) => b.savedAt - a.savedAt)[0];
         if (current) return sendJson(res, 409, { error: "这段对话已在别处更新", item: current });
       }
-      // 删了以后又存：比删除晚的是真要它（接着在里头说话、从备份导回来），删除记录作废；比删除早的是迟到的旧保存，不写
+      // 删了以后又存：保存时刻晚于墓碑才撤墓碑；不晚于墓碑的是迟到的旧保存，不写
       const tombstones = readTombstones(home);
       if (tombstones[id]) {
         if (savedAt <= Number(tombstones[id])) return sendJson(res, 410, { error: "这段对话已在别处删除", deleted: true });
@@ -251,10 +251,8 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
       const id = String(body.id || "");
       if (!id) throw Error("缺少对话 id");
       const home = ensureDir(body.root);
-      // 补删带的是当初点删除的那一刻（at）：断的这段里别处写过、保存过的，savedAt 比它晚，
-      // 那是「删了以后又存」，保存侧（见 handleSave 的墓碑那段）认这种情况为真要它、删除记录作废。
-      // 这里也得同一口径：墓碑虽然后于它、允许之后重建，可它本身已经被这一下删掉了——
-      // 页面 A 断着时删、页面 B 在这段里写了，A 接上补删，删掉的正是 B 刚写的那份
+      // 补删按原删除时刻（at）裁定：磁盘版本若更晚就原样保留，不动文件、行迹、墓碑，也不触发检查点清理。
+      // 与 handleSave 一样，只把晚于删除的保存认作新版本。
       const at = Math.min(Number(body.at) || Date.now(), Date.now());
       if (savedAtOf(home, id) > at) return { removed: 0, kept: true };
       let removed = 0;

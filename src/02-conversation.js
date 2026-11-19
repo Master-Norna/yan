@@ -71,9 +71,8 @@ function switchBranch(c, index, step) {
     parentId = c.messages[index - 1]?.id ?? null;
   // 眼前这一版的帮手还在做：切走了它的回报会落进别的版本里
   if (crewOf(c, tail).length) return toast(t("这一版派出的帮手还在做，做完再切"));
-  // 挂在这一版上的后台与定时一并收口（与重答换下旧答同一套，见 releaseBackground）：留着它们跑完，
-  // 结果会按对话寄给换上的这一版（见 14-chat-engine/70-mail.js 的 mailReport）。收掉几条要说一声：
-  // 否则候悄悄没了，用户与模型都不知道
+  // 只收换下的这几答上的后台与定时（与重答同走 releaseBackground）；共用前文的候继续等。
+  // 已排队的回报在递上前还会核对来源是否在当前版本（见 wakeWithReports）；收过候则提示用户。
   const released = releaseBackground(c, tail);
   const anchor = document.querySelector(`#messages [data-message="${CSS.escape(c.messages[index].id)}"]`),
     host = $("#chatScroll"),

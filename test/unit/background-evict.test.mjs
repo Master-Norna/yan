@@ -1,6 +1,5 @@
-// 后台指令结束、结果还没报过时，不被后起的指令挤出记录：页面关着时结束的，再开页要凭它把结果补报上去
-// （rewatchBackground）。被挤出去，页面只会拿到 lost，按「随桥接重启而止」处理——结果丢了，原因也说错了。
-// 报过的旧账照旧可以清，表不会无限长（见 server/work/shell.js 的 enlist）。
+// 后台在页面关着时结束：尚未回报的结果超出普通记录容量仍可补报；报过的旧账则可清。
+// 本例只测普通容量这条线，不测未报结果超出留存宽限后返回 evicted（见 server/work/shell.js 的 enlist）。
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

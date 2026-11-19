@@ -12,7 +12,7 @@ let metaRevision = 0,
 // 记录分两半。「配置」（设置、模型含 API Key、记忆、草稿）小而常改：正本在存储根的 配置.json（默认 ~/.yan，
 // 几个浏览器共用这一份，见 syncConfigWithDisk），localStorage 里那份是缓存，记着与磁盘对齐时的基准。
 // 「对话」各自一份：落在存储根的 对话/（bootstrap.work.chats；一段一个 JSON 文件，复制即备份）；
-// 落盘不成（桥接中途断了）与离页那一刻，暂存进 IndexedDB 的 conversations 表，接上后推到目录里去、表里的清掉——目录是正本。
+// 落盘不成或离页时，最新状态暂存进 IndexedDB 的 conversations 表；接上后和磁盘正本对齐，不凭暂存时间覆盖磁盘。
 // 保存只写改过的那几段（当前这段、正在生成的、明确标过脏的，且内容的哈希与上次写的不同）；另有一趟低频的全量巡检兜底，
 // 谁改了哪段没标到也逃不过。旧版把整份记录（含所有对话）塞在 localStorage / IndexedDB 的一条记录里，启动时拆开迁走。
 function openStateDb() {

@@ -6,7 +6,7 @@
  * @param {Profile} profile
  */
 async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
-  // queue 是这一答的收件口：用户的补言（user）与后台帮手的回报（report）
+  // queue 是这一答的收件口：用户的补言（user）与帮手、后台指令及定时的回报（report）
   /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user?: Message, step: Step, report?: string }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number }} */
   const job = {
     controller: new AbortController(),
@@ -112,7 +112,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         setJobLabel(conversation, job, busy ? t("正删繁就简") : "");
         refreshSteps(assistant);
       },
-      // 放不下的是这一问之前的对话：压成摘要落成分隔（下一问也用得上），换掉 history 里这一问之前的那截
+      // 放不下的是这一问之前的对话：压成摘要落成分隔（下一问也用得上）；只重装 history 的旧前缀，后面已递上的回报与本答往来仍保留
       compactHead: async signal => {
         const user = conversation.messages.find(m => m.id === lastUserId);
         if (!user || !(await compactContext(conversation, { auto: true, before: user, profile, signal }))) return false;

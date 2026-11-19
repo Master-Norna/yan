@@ -1,7 +1,7 @@
-// 言 · 对话引擎 · 信：帮手的回报、后台指令结束的消息，寄给该醒的那一个——正作答就进它的收件口、在回合边界递上，
-// 没在作答就另起一答，帮手睡着就叫醒它，主答断着就先记在对话上、续上时递。帮手与后台指令都只管寄（mailReport）
+// 言 · 对话引擎 · 信：帮手的回报、后台指令结束和定时到点的消息，寄给该醒的那一个——正作答就进它的收件口、在回合边界递上，
+// 没在作答就另起一答，帮手睡着就叫醒它，主答断着就先记在对话上、续上时递。帮手与候共用 mailReport 寄送
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
-// 帮手的回报（后台指令结束也走这里，见 20-command.js）：这段对话正在作答（模型布置完还在干别的），就进那一答的收件口，
+// 帮手的回报（后台指令结束与定时到点也走这里）：这段对话正在作答（模型布置完还在干别的），就进那一答的收件口，
 // 在回合边界递上，行迹里它到达的那一刻落一小步「回报」（与补言同样大小，递到打勾）；
 // 没在作答（主答只剩等待时已收尾），同一刻到的几份攒成一问另起一答——回报作这一问，两答之间是一道细线（见 relayHtml），不是用户的话。
 // relay 是那一项的画法（谁回来了），不给就按帮手画
@@ -66,7 +66,7 @@ function postRelayNote(owner, item) {
   return note;
 }
 // 作答途中到的：行迹里落一步「回报」，递上后打勾（deliverSupplements 按 note 打勾）；这一答没来得及递就收尾了，
-// settleSupplements 把这一步撤下、回报另起一答
+// settleSupplements 撤下这一步再寄；按「止」时未递的帮手回报不再唤醒主答，后台与定时照常寄。
 /** @param {Conversation} conversation */
 function deliverInline(conversation, job, item) {
   const host = conversation.messages.find(message => message.id === job.assistantId);
@@ -126,7 +126,7 @@ async function wakeWithReports(conversation, items) {
   const profile = profiles().find(p => p.id === items[0].profile?.id) || activeProfile(conversation),
     ready = profile && !quotaBlocked(profile);
   // 上一答断着（断网中断、报错）：另起一答会在断处底下留一截，续上那一答时它就成了残留，主线也从此分成两头。
-  // 回报先记在这段对话上，下一答开工时递上（见 takeHeldReports）；中断的那一答就此续上，还断着就原样记着，等下一回
+  // 回报先记在这段对话上（见 takeHeldReports）；中断且模型可用时直接续写，报错或不可用时留给下次开工。
   const last = conversation.messages.at(-1);
   if (last?.role === "assistant" && (last.status === "interrupted" || last.status === "error")) {
     (conversation.heldReports ||= []).push(...items.map(item => ({ report: item.report, relay: relayOf(item) })));

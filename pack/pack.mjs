@@ -3,7 +3,7 @@
 // 言自己的代码一字不改：Node 仍是真的 Node、npm 就在旁边，桥接照旧从磁盘现拼页面——只是不用用户先装 Node。
 // 启动器由系统自带的 .NET Framework csc 编出（pack/launcher.cs），图标 pack/icon.ico 由 web/icon.svg 画成。
 // Node 的压缩包按 nodejs.org 的 SHASUMS256.txt 验过才用，下过的留在 dist/.cache 里，再打不必重下。
-// dist 里只留这一版的包与这一版 Node 的缓存：发过的版本在 GitHub Release 上，旧包留在本机只占地方
+// 成功打包后清理 dist 下旧版 Windows x64 zip 和旧 Node 缓存；本版解压目录与其他产物不在这一步清理
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";

@@ -19,7 +19,7 @@ const {
 
 module.exports = function createArchive({ archiveHome, playable, lockFile = createLocks().lockFile }) {
   const failed = error => errorText(error, 300);
-  // ---- 卷宗目录：页面上的卷宗即这一目录的视图。列出全部文件与子目录（页面逐层看、查找时平铺），收入 / 取出 / 挪动 / 移出都限定在目录内 ----
+  // ---- 卷宗目录：页面上的卷宗即这一目录的视图。列出可见文件与子目录（跳过隐藏项、链接和 WORK_SKIP，受文件条目上限约束），收入 / 取出 / 挪动 / 移出都限定在目录内 ----
   const ARCHIVE_LIST_LIMIT = 3000,
     ARCHIVE_FILE_LIMIT = 256 * 1024 * 1024;
   // 卷宗根：请求里带 root 就用它（须是完整限定的绝对路径，与工作目录同一套规矩），否则默认位置。
@@ -212,7 +212,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       name = renaming ? cleanName(body.name) : path.basename(from);
     const wanted = path.join(dir, name);
     if (wanted === from) return describeItem(root, from);
-    // Windows 上只改大小写仍是同一个文件；其他系统的大小写不同可以是两件文件。
+    // 只在 Windows 走仅改大小写的特例；其他平台仍走一般同名检查。
     const sameFile = process.platform === "win32" && wanted.toLowerCase() === from.toLowerCase();
     const to = await placeFree(
       dir,
@@ -237,7 +237,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     });
     return { removed: relPath(root, target) };
   }, failed);
-  // 新建夹：落在 dir 那一层；同名已有就另取「新建夹 (2)」
+  // 新建夹：落在 dir 那一层；同名已有就给所选名字加序号
   const handleArchiveMkdir = jsonRoute(async body => {
     const root = await archiveRoot(body.root, { create: true }),
       target = await placeFree(await archiveDirOf(root, body.dir), cleanName(body.name || "新建夹"), to => fs.promises.mkdir(to)).catch(

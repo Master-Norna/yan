@@ -1,5 +1,5 @@
 // 言 · 桥接的检查点：一答头一回动手改本地文件之前，把它的目录此刻的样子记下来，日后可整个退回到那一刻。
-// 由 server.js 装配：require("./server/checkpoints.js")({ home, skip })。不靠 git（目录不必是仓库，本机也不必装 git），自己存：
+// 由 server.js 装配：require("./server/checkpoints.js")({ home, skip, deleted })。不靠 git（目录不必是仓库，本机也不必装 git），自己存：
 //   检查点/<目录短码>/对象/ab/cdef…   文件内容按 SHA-1 存一份（同样的内容只存一回），目录也是一件对象：按名排好的 [类, 名, 哈希, 大小]
 //   检查点/<目录短码>/册/<对话>~<答>.json  一答一张：目录与那一刻的根对象。没变的子目录哈希不变、对象共用，一张册只几十字节
 //   检查点/<目录短码>/索引.json         上回见过的 路径 → [大小, 修改时刻, 哈希]：大小、时刻都没变的不重读，第二回起只读变了的
@@ -7,7 +7,7 @@
 // 存储根本身（工作目录把它包在里面时）；.git/info/exclude 与 .gitignore 同样认。读不了的文件（被占着）记一笔「不明」，退回时不动它——不能因为没读到就当它不该在。
 // 忽略的也记一笔「不明」：这一答可能改了忽略规则，那一刻忽略的（.env、数据集）此刻露了出来，它们没进快照也恢复不了，不能当这一答新加的删掉。
 // 只一件例外：.yan/ 里的意（见 work/paths.js 的 INTENT_PATH）。仓库的 .gitignore 多写着 .yan/，可意是任务状态，
-// 退回代码时它得跟着退（10-31 定）；.yan/ 下别的照旧忽略，日志、探针、目录记忆不往快照里搬
+// 退回代码时它得跟着退（10-31 定）；若 .yan/ 整棵被忽略，只下去收意，其他内容不进快照
 // 只管目录里的文件：指令写到目录之外的、MCP 改的远端，都退不了
 "use strict";
 const fs = require("node:fs");
@@ -157,7 +157,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   }
   // 走一遍目录：每件文件交给 visit（拿到相对路径与 stat），返回这一层的条目；跳过的与读不了的照上面的规矩。
   // .yan/ 常被仓库的 .gitignore 整棵忽略（目录记忆与运行数据不随仓库提交），可意是任务状态：退回代码时它得跟着退。
-  // 所以意这一件不进「忽略」那一类——.yan 单为它进得去，其下别的照旧记「不明」、不下钻，日志、探针、记忆不会被拷进快照
+  // 所以即使 .yan 整棵被忽略，也为意进去一趟：其余内容照旧跳过，不下钻
   const INTENT_DIR = INTENT_PATH.slice(0, INTENT_PATH.lastIndexOf("/"));
   async function walk(root, visit) {
     const skipped = skip().map(dir => path.resolve(dir));
@@ -428,8 +428,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     if (!fs.existsSync(home())) return;
     for (const code of fs.readdirSync(home())) {
       const store = storeAt(path.join(home(), code));
-      // 册的名单要在同一个目录队列里取：首拍还没写册时账上先没有它，in-flight 的那张稍后写完，
-      // 这一回就得等它先落定再看一眼——不然删完才写出册来，那幅快照从此没人引用、也不会被回收
+      // 在途拍摄已标作废，由拍摄那边丢弃并回收；已落册的在同一目录队列中删册、回收，不和拍摄并发改对象。
       await serial(store, async () => {
         const pages = fs.existsSync(store.book) ? fs.readdirSync(store.book).filter(name => name.startsWith(prefix)) : [];
         if (!pages.length) return;

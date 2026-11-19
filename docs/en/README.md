@@ -18,6 +18,6 @@ The details of Yan live here, one topic per page. In-app usage notes are under *
 | [MCP](mcp.md) | Connecting external MCP servers, how they're handed to the model, secrets |
 | [Skills](skills.md) | `SKILL.md` in the Claude Code format: where it goes, how to write one, how the model reads it |
 | [Browser panel](stage.md) | The model's browser, docked in a panel on the right: setup, usage, how it works |
-| [Sandbox environment](env.md) | A bundled Python and toolchains for the model, download mirrors |
-| [Memory](memory.md) | How memory is brought into chats, recorded, optimized and edited |
+| [Sandbox environment](env.md) | Managed toolchains and mirrors on Windows, system tool detection on macOS |
+| [Memory](memory.md) | How memory is brought into chats, recorded and edited, and how folder memory differs |
 | [Code structure and development](development.md) | How the code is split, concatenation, tests, formatting and type checks |

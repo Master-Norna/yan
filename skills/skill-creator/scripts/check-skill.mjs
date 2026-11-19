@@ -1,5 +1,5 @@
 // 检查一份技能：node check-skill.mjs <技能文件夹>
-// 只读不改，零依赖（言自带 Node 即可跑）。错——言认不出或会用错——退出码 1；提醒——未必错、值得看一眼——退出码 0
+// 只读不改，零依赖（用运行言的 Node 即可跑）。错——言认不出或会用错——退出码 1；提醒——未必错、值得看一眼——退出码 0
 import fs from "node:fs";
 import path from "node:path";
 
@@ -17,7 +17,7 @@ if (!fs.existsSync(main)) {
 }
 const text = fs.readFileSync(main, "utf8").replace(/^﻿/, "");
 
-// 头部：只认用得着的几种写法——key: 值、引号里的值、| 与 > 的块、缩进续行（与言的桥接同一套认法）
+// 头部：只认用得着的几种写法——key: 值、引号里的值、| 与 > 的块、缩进续行。用于检查常见写法，不是桥接解析器的完整复刻
 const head = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
 const meta = {};
 if (!head) errors.push("开头没有 --- 包起的头部（name、description）");

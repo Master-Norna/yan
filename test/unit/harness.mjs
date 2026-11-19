@@ -1,6 +1,5 @@
-// 纯函数的单元测试用：把 src/*.js（除启动那段）拼进一个函数里，在 Node 里跑起来，把要测的函数交出来。
-// 页面的源码是无模块的普通脚本，靠拼接共享一个闭包，所以这里也照原样拼——只是把 window / document / localStorage
-// 这些顶层会碰到的东西换成够用的桩。DOM 相关的函数不在这里测，那是 e2e 的事（见 test/run.mjs）
+// 页面代码的单元测试夹具：按桥接清单拼接源码（不执行自动启动），在 Node 里导出测试指定的函数与常量。
+// window / document / localStorage 等由桩代替，可测页面逻辑和事件入口；真实浏览器的排版与交互另见 test/run.mjs。
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";

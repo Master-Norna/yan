@@ -7,7 +7,7 @@ const remoteBusy = new Set(),
 // 两个浏览器、VS Code 与浏览器同开同一个存储时，各页只知道自己在跑什么：那边正作答的一段，这边刷新后读到的是磁盘上「生成中」的快照，
 // 从前会当成页面刷新而中断、写回磁盘，两边轮流互盖，这边再点「继续生成」就成了两处同写一条回复。
 // 现在每隔几秒向桥接报到一次：报的是这边正作答的（以及作答完、最后一次存盘还没落地的）对话，回来的是别处正作答的。
-// 别处正作答的那几段，这边只看不动：不当成中断、不存盘、不让发问与改动，每次报到顺带从磁盘读回最新进度；
+// 别处正作答的那几段，这边只看不动：不当成中断、不存盘、不让发问与改动，报到成功后另行跟读磁盘进度，不占下一次心跳；
 // 别处松了手（写完，或页面关了、崩了，十五秒没来报到），再读一回：还停在「生成中」的，才按中断处理
 // 别处松手后，终稿未读回的仍算 remoteBusy。凭每次松手的标记认这次读回，免得旧读回盖过新的领还。
 const leaseReleased = new Map();
@@ -71,7 +71,7 @@ function claimConversation(id) {
   if (!chatsOnline()) return Promise.resolve(true);
   if (leaseClaims.has(id)) return leaseClaims.get(id);
   // 旧报到先落定，再认领；不同对话的认领也依次送出，避免迟到的旧清单撤回后来的持有项。
-  // 只等租约回话，不等随后读回别处的对话；慢读取不拖住发送。
+  // 只等租约回话，不等随后读回别处的对话；若要认领的是刚松手的那一段，仍须等终稿。
   const before = [...leaseClaims.values(), leasePosting];
   const claiming = (async () => {
     await Promise.all(before);
@@ -107,7 +107,7 @@ function releaseLeases() {
 /** 别处正作答（或刚松手）的几段：磁盘上的更新就换进来；刚松手的若仍停在「生成中」，那边是没写完就走了，按中断收束 */
 async function followConversations(ids, released, finishRelease = _id => true) {
   const root = chatsDir(),
-    // 领终稿必须看完整结果（包括读坏的文件）；到点补读也不走短路，只跳过仍由别页持有的旧快照。
+    // 领终稿不带已知版本；到点补读的对话没有别页持有，也不带已知版本。只有在途跟读可按版本略过正文。
     query = released.length
       ? { root, ids }
       : chatLoadQuery(

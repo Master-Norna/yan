@@ -204,8 +204,7 @@ module.exports = function createShell({ toolEnv }) {
   // ---- 后台指令：开发服务器、监听构建这类不会自己结束的，放到后台跑，先回头几秒的输出与一个编号，之后用 check_command 取新输出或结束它。
   // 桥接退出时一并收掉。只记最近的若干个，跑完且报过的旧账先清
   const BACKGROUND_KEEP = 24,
-    // 还没报过结果的不清：页面关着时结束的，再开页要凭它把结果补报上去（rewatchBackground）；被挤出表，页面就只拿到 lost，
-    // 结果与真实原因都没了。这一档只是防长期无人回来时无限长，真超了也把话说明白（watch 回 evicted，不谎称桥接重启）
+    // 没报过的结果另留宽限，供关页后重接（rewatchBackground）；超过宽限也会淘汰，并暂留 evicted 记号。
     BACKGROUND_UNREPORTED_KEEP = 64,
     backgroundJobs = new Map(),
     evictedJobs = new Set();
@@ -261,8 +260,8 @@ module.exports = function createShell({ toolEnv }) {
     job.key = `${BOOT}-${backgroundSeq}`;
     for (const [id, old] of backgroundJobs)
       if (backgroundJobs.size >= BACKGROUND_KEEP && old.exitCode !== null && old.reported) backgroundJobs.delete(id);
-    // 没报过结果的也不能无限攒：超了丢最早结束的那几条——留下越新的越可能还用得上（Map 按插入序走，
-    // 从前往后删即从头删）。丢掉的记下编号，watch/check 问到时说得清是「结束得久、结果没留住」
+    // 登记新任务时清理旧表：没报过且已结束的若超限，按登记先后丢最早登记的几条，不按结束时刻排。
+    // 近期淘汰编号另记，watch/check 问到时能说明结果没留住。
     const ended = [...backgroundJobs].filter(([, old]) => old.exitCode !== null && !old.reported);
     for (const [id] of ended.slice(0, Math.max(0, ended.length - BACKGROUND_UNREPORTED_KEEP))) {
       backgroundJobs.delete(id);
@@ -363,7 +362,7 @@ module.exports = function createShell({ toolEnv }) {
   }
   // 等后台指令结束再回话：页面据此叫醒模型，模型挂上就能收尾去睡，不必轮询。结束只报一回——
   // 几处页面都在等、或刷新后重新等上的，后来的接手，先前的作罢（superseded）；报过的不再报（reported）；
-  // 桥接重启过，旧编号已不在（lost）
+  // 记录不存在或 key 对不上时回 lost；若仍记得该编号曾被淘汰，也带 evicted
   // 模型自己用 check_command 看到它结束了的，也算报过（reported，带上退出码，页面只把签改成已结束）
   async function watchBackground(id, key, signal) {
     const job = backgroundJobs.get(String(id || ""));

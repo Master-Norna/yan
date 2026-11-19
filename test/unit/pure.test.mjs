@@ -1,5 +1,5 @@
 // 纯函数：工具参数救治、流式分段、diff 计数、汉字数字、余墨、思考档位、只读指令、输出裁行……
-// 用法：node --test test/unit/    （npm test 会先跑这里，再跑 e2e）
+// 只跑本文件：node --test test/unit/pure.test.mjs；全量单测用 npm run unit，npm test 还会跑端到端。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -32,7 +32,7 @@ When something in a reply isn't clear, select it and a small conversation attach
 
 ### Intent: long jobs that know what "done" means
 
-For a job spanning several replies, the model keeps an **Intent** in the folder: which conclusions the job must establish, what each rests on, and which files or command outputs back it. When that evidence changes, whether by this reply, another conversation or your own hand, the item turns to needs recheck and everything depending on it lights up. When the model tries to finish, it's held once and asked to judge against your original question whether it's really done. Another conversation in the same folder picks up the same Intent; working practice and pitfalls go in a separate ledger. [More](docs/en/work.md#intent)
+For a job spanning several replies, the model keeps an **Intent** in the folder: which conclusions the job must establish, what each rests on, and which files or command outputs back it. When that evidence changes, whether by this reply, another conversation or your own hand, the item turns to needs recheck and everything depending on it lights up. When the model tries to finish, it's held once and asked to judge against your original question whether it's really done. Another conversation in the same folder picks up the same Intent; working practice and pitfalls go in a separate folder memory file. [More](docs/en/work.md#intent)
 
 ### Waits: leave it running, get woken when it's time
 
@@ -52,7 +52,7 @@ It isn't a skin. Usage is ink running down; a year of usage is a page of ink dot
 
 ## Also
 
-Files and outputs (decks, spreadsheets and PDFs previewed in place), interactive charts in replies, subagents splitting up work, rolling a folder back to how it was before a reply, presets and groups, MCP and Skills, memory across conversations. Commands run under three permission levels with a sandbox on top, and a review model can judge the steps the rules aren't sure about against what you actually said. APIs: SiliconFlow, OpenAI compatible, Anthropic and ChatGPT subscription. Yan has no server of its own and your data stays on your machine; it needs only Node.js 22 and installs no dependencies. English and Chinese interfaces.
+Files and outputs (decks, spreadsheets and PDFs previewed in place), interactive charts in replies, subagents splitting up work, rolling a folder back to how it was before a reply, presets and groups, MCP and Skills, memory across conversations. Commands run under three permission levels with a sandbox on top, and a review model can judge the steps the rules aren't sure about against what you actually said. APIs: SiliconFlow, OpenAI compatible, Anthropic and ChatGPT subscription. Yan has no hosted server. Chats and settings are stored locally; content sent to a model or external tool is processed by that service. Running from source only requires Node.js 22 or later and no runtime dependencies. English and Chinese interfaces.
 
 ## Get started
 

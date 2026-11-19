@@ -1,7 +1,7 @@
 // 言 · 看台：模型所用的那个浏览器（playwright 等以 --remote-debugging-port 起的 Edge / Chrome），页面直接连它的调试口看画面、递点按。
-// 桥接只替页面问一句它的地址：连浏览器的那条 WebSocket 须带上浏览器的 id，而调试口的 /json 不给跨源读。
+// 看画面时，桥接代问调试地址并给出首个页面目标；调试口的 /json 不给页面跨源读。
 // 调试口与配置目录不另设：从那个 MCP 服务的参数里读——直接写在参数里的（--cdp-endpoint、--user-data-dir），或写在 --config 那份文件里的。
-// 标签页、画面、输入都在页面里（src/26-stage/），不过桥接，这里也不记任何东西。
+// 标签页、画面、输入由页面（src/26-stage/）直连处理；本模块还负责补接法、管理自带依赖与读收藏。
 // 另读一份收藏：看台只转网页，浏览器自己的收藏栏看不到；收藏存在浏览器配置目录的 Default/Bookmarks 里。
 // 纸签的「用系统浏览器打开」：交给系统默认的浏览器（经 url.dll，不经 cmd——网址里的 & 会被当成命令分隔）；游目显示不了的本机文件交给本机程序
 // 下载签的「打开所在文件夹」：在资源管理器里显出那个文件；没记着路径的按名字找，再找不着开那个服务存下载的目录（Playwright 默认是工作目录下的 .playwright-mcp）
@@ -46,7 +46,7 @@ function browserOf(raw, cwd = "") {
 }
 // ---------- 接法由言补齐 ----------
 // 游目要那个浏览器开着调试口、放行言的页面（与调试口自己——开发者工具的前端由它供出）、窗口挪到屏幕外。先前要人自己写一份 stage.json 挂在 --config 上，
-// 漏一项就有一样不灵。言本就是起这个 MCP 服务的那一方：起它时把这几项补进去——在人原有的 --config 上合并（人写了的照人的），
+// 漏一项就有一样不灵。言本就是起这个 MCP 服务的那一方：起它时把这几项补进去——在人原有的 --config 上合并（保留既有选项，并补游目必需的项），
 // 合并好的写到存储根的「游目」目录里，参数里的 --config 换成它。认得的只有 Playwright 的 MCP；别的服务原样起
 const PLAYWRIGHT = /@playwright[\\/]mcp|playwright-mcp|mcp-server-playwright/i;
 /** @param {{ command?: string, args?: unknown[] }} config */
@@ -107,7 +107,7 @@ function prepareBrowser(config, where) {
     if (!fs.existsSync(out) || fs.readFileSync(out, "utf8") !== text) fs.writeFileSync(out, text);
   } catch (error) {
     // 接法写不成时不能退回人写的那一份：它没有 blockedOrigins，模型的浏览器就能打开言、改权限、关审查（11-03 那次），
-    // 而页面看不出任何差别。宁可这个服务起不来，让 /api/mcp 把原因报出来（盘满、根在只读位置、游目被同名文件占着）
+    // 而页面看不出任何差别。宁可这个服务起不来，让 /api/mcp/list 把原因报出来（盘满、根在只读位置、游目被同名文件占着）
     throw Error(
       `游目的浏览器接法写不进 ${dir}（${error.message}）：缺了它，模型能在浏览器里打开言改设置，故不降级启动；腾出位置或改存储根后重试`
     );
@@ -123,9 +123,9 @@ const bookmarksFile = dir => path.join(dir, "Default", "Bookmarks");
 // 浏览器不再要人去 MCP 里接：设置 → 游目里开着，言自己起一个 Playwright 的 MCP 服务（名叫「游目」）。家当都在存储根的「游目」目录：
 //   依赖/  @playwright/mcp 装在这里（npm install，一键）
 //   浏览器/  登录状态、收藏（--user-data-dir）
-//   下载/  下载落在这里（--output-dir）。Playwright 自己起名的过程文件（页面快照、控制台记录、没给名的截图）也只能落这里，放过一天就清（见 sweepOutputs）
+//   下载/  下载落在这里（--output-dir）。Playwright 自己起名的过程文件（页面快照、控制台记录、没给名的截图）也可落这里；符合过程文件命名且修改已超过一天的，在指定入口顺手清（见 sweepOutputs）
 //   工作/  服务的工作目录：模型给了名字的截图、存下的页面落在这里，不与言自己的家当混着
-//   内核/  本机没有 Edge / Chrome 时，Playwright 自带的那个浏览器装在这里（PLAYWRIGHT_BROWSERS_PATH）
+//   内核/  选「自带内核」用的 Chromium 装在这里（PLAYWRIGHT_BROWSERS_PATH），不是 Edge / Chrome 启动失败后的兜底
 //   playwright-*.json  接法（prepareBrowser 写的，按内容取名）
 const BROWSERS = ["msedge", "chrome", "chromium"];
 /** @param {string} root 存储根 */
@@ -141,8 +141,8 @@ function stageHome(root) {
     cli: path.join(home, "依赖", "node_modules", "@playwright", "mcp", "cli.js")
   };
 }
-// Playwright 自己起名的过程文件：「前缀-ISO 时刻.扩展名」（时刻里的 : 与 . 换成 -）。只给模型这一答翻看，放过一天就没用了。
-// download- 打头的不算：那是没带文件名的下载
+// 自带服务准备接法、或显出下载目录的兜底分支才扫：只按顶层名字和修改时间认过程文件，不查来源或引用。
+// 名字形如「前缀-ISO 时刻.扩展名」（时刻里的 : 与 . 换成 -）；download- 打头的不算。
 const AUTO_OUTPUT = /^(?!download-)[a-z]+(?:-[a-z]+)*-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.[a-z0-9]+$/,
   OUTPUT_GRACE_MS = 24 * 60 * 60 * 1000;
 /** @param {string} dir 存下载的目录 */
@@ -403,7 +403,7 @@ module.exports = function createStage({ root = () => "" } = {}) {
       fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(1500) }).then(r => /** @type {any} */ (r.json()));
     try {
       const [version, list] = await Promise.all([get("/json/version"), get("/json/list")]);
-      // /json/list 按最近活动排，头一个页面即浏览器前台的那一页——多半就是模型正在用的
+      // 借 /json/list 的首个 page 作为页面选项的提示，不另查浏览器实际前台
       sendJson(res, 200, {
         ws: version.webSocketDebuggerUrl || "",
         front: list.find(t => t.type === "page")?.id || "",
@@ -447,7 +447,7 @@ module.exports = function createStage({ root = () => "" } = {}) {
   const installing = {};
   /** 内核下到几成（页面装着时隔一会儿问一次） @type {Record<string, number>} */
   const progress = {};
-  // 装依赖（@playwright/mcp）或自带内核：跑完才回，一两分钟
+  // 装依赖（@playwright/mcp）或自带内核：等安装结束再回
   async function install(req, res) {
     const body = await readJson(req),
       what = body.what === "chromium" ? "chromium" : "deps";

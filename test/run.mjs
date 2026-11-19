@@ -1,5 +1,6 @@
-// 端到端测试运行器（零依赖）：起一个假模型接口、一个测试桥接、一个无头 Edge / Chrome（stage 用例另起一个模型浏览器），逐个跑 test/ 下的用例，按 PASS / FAIL 行统计
-// 用法：node test/run.mjs [用例名…]      例：node test/run.mjs memory side-notes
+// 端到端测试运行器（无 npm 依赖）：浏览器用例共用假模型、测试桥接和无头浏览器，游目另起模型浏览器；桥接安全用例用独立桥接。
+// 按 PASS / FAIL 行统计，非零退出或被信号终止但没写 FAIL 的子进程也算一败。
+// 用法：node test/run.mjs [文件名片段…]      例：node test/run.mjs memory side-notes
 import { spawn, spawnSync } from "node:child_process";
 import { connect, STAGE_DEBUG_PORT, PAGE } from "./lib.mjs";
 import { existsSync, mkdirSync, rmSync, readdirSync } from "node:fs";
@@ -199,7 +200,7 @@ try {
     await runSpec("bridge-security.mjs", { YAN_PORT: String(SECURITY_PORT) });
   }
   // 排除的不是用例：run.mjs / lib.mjs 是骨架，fake-llm、fake-mcp 是假服务，bridge-security 单起一个端口。
-  // sandbox-replay 是改沙箱规则后手工跑的回放，要有真实对话可捞，CI 上没有，不当用例。
+  // sandbox-replay 要有真实对话，另行手跑。prompt-size 随套件运行，但只报数字，不按差值判 PASS / FAIL。
   const specs = readdirSync(HERE)
     .filter(
       f =>
@@ -252,7 +253,7 @@ try {
       } catch {}
       tryRm(path.join(TMP, "work"));
       // 存储根整个清掉（对话、卷宗、配置）：上一个用例落盘的不能混进下一个。旧页面离开时补写的那一笔可能正落在桥接手里，
-      // 删的时候文件还占着或刚写出来；删不干净就等等再删，直到目录真的没了
+      // 删的时候文件还占着或刚写出来；有限次重试，最后再补删一次。
       for (let i = 0; i < 20 && existsSync(path.join(TMP, ".yan")); i++) {
         tryRm(path.join(TMP, ".yan"));
         if (existsSync(path.join(TMP, ".yan"))) await sleep(150);

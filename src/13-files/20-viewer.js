@@ -412,7 +412,7 @@ function bindViewerEvents() {
     if (e.target === $("#fileViewer") || e.target === $("#fileViewerStage")) closeFileViewer();
   });
   // 媒体的 error 不冒泡，在捕获阶段接：浏览器放不了这种编码，就别留一个转不动的播放器。
-  // 封装认不得的（扩展名写作 mp4 的 TS 之类），桥接已借环境里的 ffmpeg 换过壳（见 server/video.js）；到这里的是编码本身放不了，或没装「音视频」
+  // 桥接能用 ffmpeg 时会尝试给不兼容的封装换壳（见 server/video.js）；仍播不了可能是编码不兼容，或工具不可用、转封装未成。
   $("#fileViewerStage").addEventListener(
     "error",
     e => {

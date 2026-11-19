@@ -1,4 +1,4 @@
-/* 游目（看台）：对话右侧一栏，拖左缘调宽窄；「阔」铺满整页。见 src/26-stage/、src/27-stage-ink.js 与 设计稿/24–25、31–32、47 */
+/* 游目（看台）：对话右侧一栏，拖左缘调宽窄；「阔」铺满整页。见 src/26-stage/（圈点在 50-ink.js）与 设计稿/24–25、31–32、47 */
 .stage-panel {
   position: relative;
   flex: none;

@@ -1,6 +1,6 @@
 # 便携包冒烟：解开打好的 zip、用包里自带的 Node 起一次桥接、问一句 /api/bootstrap 与首页（pack/smoke.mjs）。
-# 只在 pack/ 与启动相关的文件变动时跑，或手动触发；不进分支保护的必过项——打包要下 Node、编启动器，每个 PR 都跑不值。
-# 发版前另在本地跑一遍 npm run pack:smoke（见 docs/development.md 的发版一节）。
+# 只在 PR 改到下列路径或手动触发时跑，推 main 不触发；不进分支保护的必过项。
+# 发版前另在本地跑一遍 npm run pack:smoke（见 docs/development.md「按需验证」）。
 name: 便携包
 
 on:

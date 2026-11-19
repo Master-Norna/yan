@@ -1,4 +1,4 @@
-// 往外发（server/sandbox.js 的 egressOf）：审而后行里这条线交审查判，问档本就每条都问、径行不问。
+// 往外发（server/sandbox.js 的 egressOf）：本组守的是静态识别；审而后行只在审查启用时因外发送审。
 // 只认写得明白的几种形状：HTTP 上传、推远端、gh 的写、远程复制、发布包、写网络共享
 import { test } from "node:test";
 import assert from "node:assert/strict";

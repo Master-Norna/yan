@@ -29,7 +29,7 @@ function recoverConversation(conversation) {
       }
   return changed;
 }
-// 开页时收束一遍；别处正作答的不算（见 syncLeases）。还在等的后台指令重新等上
+// 开页时收束一遍；别处正持有或仍等终稿的不算（见 syncLeases）。后台指令由随后调用的 rewatchBackground 重新监听。
 function recoverInterruptedMessages() {
   let changed = false;
   for (const conversation of store.conversations)
@@ -78,7 +78,7 @@ async function boot() {
     if (chatsBroken) resyncWithDisk();
     else if (hasPendingChatDeletes() || hasDiscardedChatSpills()) void syncChatsWithDisk();
   }, 45000);
-  // 报到：这边在作答什么、别处在作答什么（作答的一处三秒存一次盘，跟着看的一处也三秒读一次）
+  // 每三秒报到：这边持有哪些对话、别处持有哪些。跟读另行等磁盘，不拖住下一次报到。
   setInterval(() => void syncLeases(), 3000);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) sweepConversations();

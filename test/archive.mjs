@@ -46,7 +46,7 @@ check(
     `!document.querySelector('[data-approve]') && [...document.querySelectorAll(".tool-step")].every(s => s.dataset.status === "done")`
   )
 );
-// 成品卡：这一答在卷宗里新出的文件挂在答末
+// 成品卡：答复里链到的那份卷宗文件挂在答末。
 await waitFor(`!!document.querySelector(".message.assistant .deliver-bar")`, 5000);
 await shot("archive-deliver.png");
 check(
@@ -140,7 +140,7 @@ check(
     `[...document.querySelectorAll(".tool-step")].some(s => s.querySelector(".tool-label")?.textContent === "翻阅文档" && s.querySelector(".tool-title")?.textContent === "报表.csv")`
   )
 );
-// 技能：放进存储根/技能的一份，下一问就列在 read_document 的说明里，凭技能名翻得到 SKILL.md（去了头，注明目录）
+// 技能：放进存储根/技能的一份，下一问列在系统提示里；凭技能名读 SKILL.md 时，去掉前置信息并注明目录。
 mkdirSync(`${HOME}/技能/写信`, { recursive: true });
 writeFileSync(`${HOME}/技能/写信/SKILL.md`, "---\nname: 写信\ndescription: 照格式写信\n---\n\n先写称谓，再写正文。");
 await evalJs(
@@ -254,7 +254,7 @@ const text2 = await evalJs(`document.querySelectorAll(".message.assistant")[4].q
 check("after binding the prompt is the 执事 one and history is intact", /work:yes\|archive:no\|n:10/.test(text2), text2);
 check("stored conversation carries the workdir", await evalJs(`__yanState().conversations[0].workdir.toLowerCase().endsWith("work")`));
 
-// ---- 作答中不许换目录：写了一半的落在旧目录，中途换了余下的就写进新目录
+// ---- 作答中侧栏菜单禁用换目录；这一答写完才可再换。
 await evalJs(
   `document.querySelector("#chatInput").value = "SLOWTHINK 换目录"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
