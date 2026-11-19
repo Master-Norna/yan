@@ -91,6 +91,25 @@ await evalJs(
   `window.__gaugeTrail = []; window.__gaugeSampler = setInterval(() => { const g = document.querySelector("#contextGauge"); if (g) window.__gaugeTrail.push([g.querySelector(".context-gauge-value").textContent, g.title]); }, 80); true`
 );
 const selfAnswered = run("LONGSELF 读几个文件，读完一段自己撮要", "LONGSELF done");
+// 作答中在菜单里另挑一个模型：这一段用的仍是开工时那个（没填窗口），计数里的窗口也得照它，
+// 不能拿此刻挑的那家的窗口去比——否则一段 45k 的请求会被另一家的 5k 窗口量成 900%
+{
+  const selfConv = `__yanState().conversations.find(c => c.messages[0]?.content.startsWith("LONGSELF"))`;
+  await waitFor(`document.querySelector("#contextGauge")?.title.includes("本答这一轮送出约")`, 20000);
+  await evalJs(
+    `(() => { const c = ${selfConv}; __yanState().profiles.push({ id: "p2", source: "custom", name: "小窗口", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "", usedTokens: 0, systemPrompt: "", contextWindow: 5000 }); c.profileId = "p2"; return true; })()`
+  );
+  await sleep(800);
+  const swapped = await evalJs(
+    `(() => { const g = document.querySelector("#contextGauge"), c = ${selfConv}; return { win: g.querySelector(".context-gauge-window").textContent, title: g.title, picked: c.profileId, status: c.messages.at(-1).status }; })()`
+  );
+  check(
+    "the gauge keeps the running model's window after another is picked mid-answer",
+    swapped.picked === "p2" && swapped.status !== "complete" && swapped.win === "" && !swapped.title.includes("占此模型窗口"),
+    JSON.stringify(swapped)
+  );
+  await evalJs(`(() => { const c = ${selfConv}; c.profileId = "p1"; return true; })()`);
+}
 // 撮要刚落成、下一轮还没回包的当口：计数应当已经按折叠后的估算回落，而不是等接口报数。
 // 计数由作答中的一只 600ms 的钟刷新（见 20-stream.js），等过一拍再读
 await waitFor(

@@ -68,7 +68,8 @@ function updateContextGauge() {
   const c = currentConversation();
   if (!c || view !== "chat") return gauge.classList.add("hidden");
   const draft = $("#chatInput").value,
-    live = Number(requestJob(c.id)?.promptTokens) || 0,
+    job = requestJob(c.id),
+    live = Number(job?.promptTokens) || 0,
     n =
       live ||
       contextEstimate(
@@ -76,7 +77,9 @@ function updateContextGauge() {
         draft,
         draft || pendingAttachments.length || pendingQuote ? { text: draft, attachments: pendingAttachments, quote: pendingQuote } : null
       ),
-    window = Number(activeProfile()?.contextWindow) || 0,
+    // 作答中这一轮的量是那段作业按开工时的模型算的，窗口也照它：中途在菜单里换了模型，不至于拿另一家的窗口去比。
+    // 空闲时的估算才用眼前这段挑的模型
+    window = Number(((live && job?.profile) || activeProfile(c))?.contextWindow) || 0,
     heavy = window ? n >= window * 0.75 : n >= CONTEXT_HEAVY,
     share = window ? t`，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : "",
     tail = heavy ? t("\n上下文已重，可撮要前文") : t("\n撮要前文");
