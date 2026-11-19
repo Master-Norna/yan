@@ -6,16 +6,38 @@ let envStatus = null,
 function envSettings() {
   return store.settings.env;
 }
-// 问桥接要一次环境的状态；正在准备就隔一会儿再问，直到装完
-async function refreshEnv() {
-  const root = bootstrap.store?.root;
-  const status = await bridge("/api/env/status", {}, AbortSignal.timeout(8000)).catch(() => null);
-  // 换存储位置期间，旧根的慢响应不能再画到新根的环境页上。
-  if (root !== bootstrap.store?.root) return;
+function resetEnvStatus() {
+  envStatus = null;
+  clearTimeout(envPoll);
+  envPoll = 0;
+  renderEnvStatus();
+}
+function updateEnvStatus(status) {
   if (status) envStatus = status;
   renderEnvStatus();
   clearTimeout(envPoll);
-  if (envStatus?.job?.running) envPoll = setTimeout(refreshEnv, 1200);
+  envPoll = envStatus?.job?.running ? setTimeout(refreshEnv, 1200) : 0;
+}
+// 问桥接要一次环境的状态；正在准备就隔一会儿再问，直到装完。
+function refreshEnv() {
+  return requestEnv(bootstrap.store, "status", {}, AbortSignal.timeout(8000));
+}
+async function requestEnv(scope, action, payload, signal = undefined) {
+  // 确认框也归打开时的根：即使来回换过、路径看起来相同，也不是同一回。
+  if (bootstrap.store !== scope) return;
+  try {
+    const status = await storeBridge(`/api/env/${action}`, payload, signal);
+    if (bootstrap.store === scope) updateEnvStatus(status);
+  } catch (error) {
+    if (bootstrap.store !== scope) return;
+    const message = String(error.message || error);
+    // 别页换了根：不再轮询旧处的进度，也不把旧环境写进系统提示。
+    if (message === "存储位置已变化，请刷新页面后重试") {
+      resetEnvStatus();
+      toast(message);
+    } else if (action === "status") updateEnvStatus(null);
+    else toast(message);
+  }
 }
 function envSettingsHtml() {
   const s = envSettings();
@@ -83,7 +105,7 @@ function envPacksHtml() {
 function renderEnvStatus() {
   if (settingsTab !== "env" || $("#settingsModal").classList.contains("hidden")) return;
   $("#envStatus").innerHTML = envStatusHtml();
-  $("#envManaged").classList.toggle("hidden", !!envStatus?.system);
+  $("#envManaged").classList.toggle("hidden", envStatus ? !!envStatus.system : bootstrap.work?.platform === "darwin");
   $("#envPacks").innerHTML = envPacksHtml();
   const log = $("#envStatus .env-log");
   if (log) log.scrollTop = log.scrollHeight;
@@ -112,6 +134,7 @@ function bindEnvEvents() {
       saveStore();
       return renderEnvStatus();
     }
+    const scope = bootstrap.store;
     if (button.id === "envPrepare") {
       const s = envSettings();
       const removed = (envStatus?.state?.packs || []).filter(
@@ -128,15 +151,7 @@ function bindEnvEvents() {
         )
           return;
       }
-      envStatus = await bridge("/api/env/prepare", {
-        packs: s.packs,
-        pip: splitNames(s.pip),
-        npm: splitNames(s.npm)
-      }).catch(error => {
-        toast(String(error.message || error));
-        return envStatus;
-      });
-      return refreshEnv();
+      return requestEnv(scope, "prepare", { packs: s.packs, pip: splitNames(s.pip), npm: splitNames(s.npm) });
     }
     if (button.id === "envClear") {
       if (
@@ -147,11 +162,7 @@ function bindEnvEvents() {
         }))
       )
         return;
-      envStatus = await bridge("/api/env/clear", {}).catch(error => {
-        toast(String(error.message || error));
-        return envStatus;
-      });
-      renderEnvStatus();
+      return requestEnv(scope, "clear", {});
     }
   });
 }

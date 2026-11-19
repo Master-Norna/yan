@@ -151,15 +151,19 @@ function handleBootstrap(req, res) {
     }
   });
 }
-// 存储根（默认 ~/.yan）：对话、卷宗、配置都在里面，换位置后下面两处跟着走；有对话正作答、有后台指令在跑时不换
-// （background 是惰性的：WORK 要用 STORE 的路径才能建，只能等换位置那一下再问它）
+// 存储根（默认 ~/.yan）：对话正作答、后台指令在跑、环境正准备或清空时不换
+// （这些模块要用 STORE 的路径才能建，等换位置那一下再问它们）
 const STORE = require("./server/store.js")({
   working: () => CHATS.working(),
   background: () => WORK.backgroundRunning(),
-  onMove: () => TIMERS.sync()
+  environment: () => ENV.busy(),
+  onMove: () => {
+    ENV.resetJob();
+    TIMERS.sync();
+  }
 });
 // 沙箱环境：存储根里的 环境/，桥接起的进程（指令、MCP 服务）都接上它
-const ENV = require("./server/env/index.js")({ envHome: () => STORE.paths().env });
+const ENV = require("./server/env/index.js")({ envHome: () => STORE.paths().env, route: STORE.scopedRoute });
 // 视频换壳：浏览器认不得的封装（如扩展名写作 mp4 的 MPEG-TS），预览时借环境里的 ffmpeg 原样换进 MP4（见 server/video.js）
 const VIDEO = require("./server/video.js")({
   cacheHome: () => path.join(STORE.paths().env, "cache", "视频"),

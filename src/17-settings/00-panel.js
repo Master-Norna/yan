@@ -198,8 +198,6 @@ function bindGeneralSettings() {
       }
       if (!data.moved) return;
       await switchStoreRoot(data);
-      envStatus = null;
-      clearTimeout(envPoll);
       void refreshEnv();
       archiveEntries = null;
       await refreshArchive();
