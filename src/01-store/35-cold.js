@@ -76,6 +76,13 @@ function coldView(c) {
 function chatJson(c) {
   return JSON.stringify(coldView(c));
 }
+// 浏览器的兜底不依赖本次另存的磁盘行迹；未知正文仍留原指针，不把它当成空答。
+/** @param {Conversation} c */
+function chatSpillJson(c) {
+  return JSON.stringify(c, function (key, value) {
+    return key === "cold" && warmMessages.has(this) ? undefined : value;
+  });
+}
 // 落盘前：新收了尾、够长的几答把那几样另存出去，记上记号；记号在却又动起来了的（见 coldMessageView），记号拿掉
 /** @param {Conversation} c */
 async function coldify(c) {

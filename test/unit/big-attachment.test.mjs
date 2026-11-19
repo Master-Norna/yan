@@ -101,6 +101,21 @@ test("桥接：原件直传——说明之后的字节边收边写，正本与�
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+test("指定旧附件目录的导入原件不能写进新目录", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-upload-root-"));
+  const { post, upload, close } = await serveFiles(root);
+  try {
+    const record = { id: "restored", kind: "text", name: "原件.txt" };
+    const refused = await upload({ files: path.join(root, "另一目录"), record }, Buffer.from("旧根"));
+    assert.match(refused.error, /存储位置已变化/);
+    assert.deepEqual(fs.readdirSync(root), []);
+    assert.equal((await upload({ files: root, record }, Buffer.from("本根"))).id, record.id);
+    assert.equal((await post("/api/files/get", { id: record.id })).record.data, "本根");
+  } finally {
+    await close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 // 一个只挂附件接口的小桥接：post 发 JSON，upload 照页面的 bridgeUpload 发「说明 + 原件」
 async function serveFiles(root) {
   const { routes } = createFiles({ filesHome: () => root });

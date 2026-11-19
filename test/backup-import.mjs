@@ -40,7 +40,17 @@ await evalJs(`(() => {
   input.dispatchEvent(new Event("change"));
   return true;
 })()`);
-await waitFor(`__yanState().conversations.some(c => c.id === "c-old")`, 8000);
+await waitFor(`document.querySelector("#toast").textContent.includes("已写入存储目录：1 段对话、配置")`, 8000);
+const disk = await evalJs(`(async () => {
+  const load = (url, data) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json());
+  const [chats, config] = await Promise.all([load("/api/chats/load", { ids: ["c-old"] }), load("/api/store/config/load", {})]);
+  return { chat: chats.items?.some(item => item.id === "c-old"), group: config.config?.settings?.groups?.some(group => group.id === "g-old") };
+})()`);
+check(
+  "the import reports disk only after both the chat and its configuration are readable there",
+  disk.chat && disk.group,
+  JSON.stringify(disk)
+);
 const state = await evalJs(`(() => {
   const s = __yanState().settings, c = __yanState().conversations.find(c => c.id === "c-old");
   return {

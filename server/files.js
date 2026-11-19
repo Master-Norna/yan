@@ -55,6 +55,8 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
         kind = "file",
         file = "";
       const { file: temp, bytes } = await receiveUpload(req, PUT_LIMIT, head => {
+        if (head?.files && (path.relative(dir, String(head.files)) || path.relative(dir, filesHome())))
+          throw Error("存储位置已变化，请刷新页面后重试");
         record = head?.record;
         if (!record || typeof record !== "object") throw Error("缺少附件内容");
         id = checkId(record.id);
@@ -64,6 +66,10 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
         file = `${id}${extension === ".json" ? ".raw" : ""}${extension}`;
         return path.join(dir, `${file}.${uniqueStamp()}.tmp`);
       });
+      if (path.relative(dir, filesHome())) {
+        fs.rmSync(temp, { force: true });
+        throw Error("存储位置已变化，请刷新页面后重试");
+      }
       // 同一 id 换了扩展名（极少见）：旧的原件不留
       const previous = rawFileOf(dir, id, readMeta(dir, id)),
         { data: _data, ...rest } = record;
@@ -81,7 +87,7 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
     }
   }
   // meta：只要元数据与抽出的正文（文本附件的正文就是原件，照给）——发问时翻历史里的文档只用得着这些，不必把整份原件编成 base64 取回
-  const handleGet = jsonRoute(
+  const handleGet = route(
     async (body, req, res) => {
       const id = checkId(body.id),
         dir = home(),

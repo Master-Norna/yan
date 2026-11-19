@@ -52,7 +52,9 @@ function dbRequest(db, storeName, mode, action) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, mode),
       request = action(transaction.objectStore(storeName));
-    request.onsuccess = () => resolve(request.result);
+    // 单次 put/delete 成功时事务还可能中止；写入要等事务提交才算存住。
+    if (mode === "readwrite") transaction.oncomplete = () => resolve(request.result);
+    else request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || Error(t("对话存储失败")));
     transaction.onabort = () => reject(transaction.error || Error(t("对话存储已中止")));
   });
@@ -122,4 +124,5 @@ function writeMeta({ disk = true } = {}) {
       }
     }
   if (disk && changed) scheduleConfigSave();
+  return localKey === metaLocalKey;
 }

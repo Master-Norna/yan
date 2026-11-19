@@ -127,107 +127,149 @@ async function readBackup(file) {
 // 导入采用合并策略：按 id 跳过已存在的对话 / 模型 / 分组 / 预设，MCP 服务按名字跳过，附件原件只在本机缺失时写入。
 // 分组与预设要随对话一起回来：对话里记着 groupId、presetId，定义不在，组织方式与提示词就丢了
 async function importData(file) {
-  // 并进去的东西从哪一刻起已在内存里：中途出错（附件读到半截、配额满）要照实说「已并入的部分留着」，
-  // 不能让提示还是「导入失败」，脏标记却把这些写进目录（见下面的 catch）
-  let merged = false;
+  const scope = bootstrap.store,
+    filesHome = bootstrap.work?.files || "";
+  let backup, incoming;
   try {
-    const { data, attachments } = await readBackup(file);
+    backup = await readBackup(file);
+    const { data } = backup;
     if (!data || !Number.isInteger(data.version) || data.version < 1 || data.version > STORE_VERSION || !Array.isArray(data.conversations))
       throw Error(t("不是言的备份文件，或版本不兼容"));
-    // 旧版备份先按启动时同一套迁移与规整过一遍（workAuto → commandPolicy、去掉半成品的压缩分隔……），别等下次刷新才对
-    const incoming = normalizeStoreData(data);
-    const known = new Set(store.conversations.map(c => c.id));
-    let conversations = 0,
-      added = 0,
-      drafts = 0,
-      files = 0,
-      deleting = 0;
-    for (const c of incoming.conversations)
-      if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) {
-        if (chatDeletePending(c.id)) {
-          deleting += 1;
-          continue;
-        }
-        store.conversations.push(c);
-        markDirty(c.id);
-        conversations += 1;
-      }
-    const profileIds = new Set(profiles().map(p => p.id));
-    for (const p of incoming.profiles)
-      if (p?.id && !profileIds.has(p.id)) {
-        store.profiles.push({ ...p, apiKey: p.apiKey || "" });
-        added += 1;
-      }
-    const groupIds = new Set(store.settings.groups.map(g => g.id)),
-      presetIds = new Set(store.settings.presets.map(p => p.id));
-    let groups = 0,
-      presets = 0,
-      servers = 0;
-    for (const g of incoming.settings.groups)
-      if (g?.id && !groupIds.has(g.id)) {
-        store.settings.groups.push(g);
-        groups += 1;
-      }
-    for (const p of incoming.settings.presets)
-      if (p?.id && !presetIds.has(p.id)) {
-        store.settings.presets.push(p);
-        presets += 1;
-      }
-    // 备份里的 MCP 服务不带环境变量与请求头（令牌多在那里），导入后要用到密钥的需自己补上
-    for (const [name, config] of Object.entries(incoming.settings.mcpServers || {}))
-      if (!store.settings.mcpServers[name] && config && typeof config === "object") {
-        store.settings.mcpServers[name] = config;
-        servers += 1;
-      }
-    for (const [key, draft] of Object.entries(incoming.drafts))
-      if (!store.drafts[key] && (draft.text || draft.attachments.length || draft.quote)) {
-        store.drafts[key] = draft;
-        drafts += 1;
-      }
-    // 大备份的附件一件一件读：读到半截时（复制、下载断在中途）前面几件已经写下，照实说只恢复了这些
-    let incomplete = false;
-    // 到此为止，对话、模型、分组、预设、MCP、草稿都已经并进内存：从这里再出错，那一截是要留着的
-    merged = true;
-    try {
-      for await (const record of attachments)
-        if (record?.id && record.data !== undefined && !(await getAttachment(record.id))) {
-          await putAttachment(record);
-          uncacheAttachment(record.id);
-          files += 1;
-        }
-    } catch (error) {
-      if (error?.code !== "truncated") throw error;
-      incomplete = true;
-    }
-    // 记忆一类一项：同名一类的全文接上去（一字不差的行不重接，见 normalizeMemory），没有的类添上
-    const memoryWas = new Map(store.memory.items.map(item => [item.category, item.text]));
-    store.memory = normalizeMemory({ ...store.memory, items: [...store.memory.items, ...incoming.memory.items] });
-    const memories = store.memory.items.filter(item => memoryWas.get(item.category) !== item.text).length;
-    if (!profiles().some(p => p.id === store.settings.activeProfileId)) store.settings.activeProfileId = profiles()[0]?.id || "";
-    saveStore();
-    render();
-    renderSettings();
-    const summary = t`已导入 ${conversations} 段对话、${added} 个模型${groups ? t`、${groups} 个分组` : ""}${presets ? t`、${presets} 个预设` : ""}${servers ? t`、${servers} 个 MCP 服务（密钥需重填）` : ""}${drafts ? t`、${drafts} 份草稿` : ""}${memories ? t`、${memories} 类记忆` : ""}${files ? t`，恢复 ${files} 件附件原件` : ""}${data.attachments ? "" : t("；备份不含附件原件，旧附件将显示为不可用")}`;
-    const report = summary + (deleting ? t`；${deleting} 段对话尚在等删除确认，未导入` : "");
-    // 备份本身就断了：不能拿完整导入的提示盖过去，要说清只恢复了读到时的那一截
-    toast(incomplete ? t`备份文件不完整，只恢复了能读到的部分：${report}` : report, incomplete ? 8000 : undefined);
+    // 与开页共用迁移和规整，不把半成品压缩分隔等旧数据留到下一次刷新。
+    incoming = normalizeStoreData(data);
   } catch (error) {
-    const why = String(error.message || error).slice(0, 80);
-    // 并入到一半出的错（附件读坏、配额满）：内存里并进去的那一截留着，脏标记本来也会把它们写进目录。
-    // 先把它们存下来，再照实说——不能让人以为一点没进，也不能让「导入失败」与盘上多出来的东西对不上
-    if (merged) {
-      saveStore();
-      render();
-      if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
-      // 「留着了」要说准：并进来的是内存里那一截，真写进存储目录还得等这一趟落盘。
-      // 附件那一半常常正是「配额满、目录写不进」坏的，这时说「留着了」会让人以为已经存住
-      const settled = await flushConfig().catch(() => false);
-      toast(
-        settled
-          ? t`导入未能做完：${why}；已并入的部分留着了`
-          : t`导入未能做完：${why}；已并入的部分留在本页了，还没能写进存储目录（会自动重试）`,
-        8000
-      );
-    } else toast(t`导入失败：${why}`);
+    toast(t`导入失败：${String(error.message || error).slice(0, 80)}`);
+    return;
   }
+  const rootChanged = () => toast(t("导入期间存储位置已变化，请检查已保存的内容"), 8000);
+  const sameRoot = () => {
+    if (bootstrap.store === scope) return true;
+    rootChanged();
+    return false;
+  };
+  if (!sameRoot()) return;
+  const known = new Set(store.conversations.map(c => c.id));
+  const conversations = [];
+  let added = 0,
+    drafts = 0,
+    deleting = 0;
+  for (const c of incoming.conversations)
+    if (c?.id && !known.has(c.id) && Array.isArray(c.messages)) {
+      if (chatDeletePending(c.id)) {
+        deleting += 1;
+        continue;
+      }
+      store.conversations.push(c);
+      markDirty(c.id);
+      conversations.push(c.id);
+      known.add(c.id);
+    }
+  const profileIds = new Set(profiles().map(p => p.id));
+  for (const p of incoming.profiles)
+    if (p?.id && !profileIds.has(p.id)) {
+      store.profiles.push({ ...p, apiKey: p.apiKey || "" });
+      added += 1;
+    }
+  const groupIds = new Set(store.settings.groups.map(g => g.id)),
+    presetIds = new Set(store.settings.presets.map(p => p.id));
+  let groups = 0,
+    presets = 0,
+    servers = 0;
+  for (const g of incoming.settings.groups)
+    if (g?.id && !groupIds.has(g.id)) {
+      store.settings.groups.push(g);
+      groups += 1;
+    }
+  for (const p of incoming.settings.presets)
+    if (p?.id && !presetIds.has(p.id)) {
+      store.settings.presets.push(p);
+      presets += 1;
+    }
+  // 备份里的 MCP 服务不带环境变量与请求头（令牌多在那里），导入后要用到密钥的需自己补上
+  for (const [name, config] of Object.entries(incoming.settings.mcpServers || {}))
+    if (!store.settings.mcpServers[name] && config && typeof config === "object") {
+      store.settings.mcpServers[name] = config;
+      servers += 1;
+    }
+  for (const [key, draft] of Object.entries(incoming.drafts))
+    if (!store.drafts[key] && (draft.text || draft.attachments.length || draft.quote)) {
+      store.drafts[key] = draft;
+      drafts += 1;
+    }
+  // 记忆一类一项：同名一类的全文接上去（一字不差的行不重接，见 normalizeMemory），没有的类添上。
+  const memoryWas = new Map(store.memory.items.map(item => [item.category, item.text]));
+  store.memory = normalizeMemory({ ...store.memory, items: [...store.memory.items, ...incoming.memory.items] });
+  const memories = store.memory.items.filter(item => memoryWas.get(item.category) !== item.text);
+  const activeBefore = store.settings.activeProfileId;
+  if (!profiles().some(p => p.id === activeBefore)) store.settings.activeProfileId = profiles()[0]?.id || "";
+  const otherConfig = !!(added || groups || presets || servers || drafts || activeBefore !== store.settings.activeProfileId),
+    configChanged = otherConfig || !!memories.length;
+
+  // 大备份一件一件读。无法写入的原件不计成已恢复，也不挡住后面的原件。
+  const files = [];
+  let attachmentError = "",
+    unreadable = "",
+    failed = 0;
+  try {
+    for await (const record of backup.attachments) {
+      if (!sameRoot()) return;
+      try {
+        if (!record?.id || record.data == null) throw Error(t("缺少附件内容"));
+        if (await getAttachment(record.id, { scoped: true })) continue;
+        if (!sameRoot()) return;
+        files.push(await putAttachment(record, null, filesHome));
+      } catch (error) {
+        if (attachmentStoreMoved(error)) return rootChanged();
+        failed += 1;
+        attachmentError ||= String(error.message || error).slice(0, 80);
+      }
+    }
+  } catch (error) {
+    unreadable = String(error.message || error).slice(0, 80);
+  }
+  if (!sameRoot()) return;
+
+  // 配置和对话分开确认；排入写队列不算写成。只等本批对话，别把无关的长答也算进来。
+  if (configChanged) writeMeta();
+  const [diskConfig, chats] = await Promise.all([
+    configChanged && flushConfig().catch(() => false),
+    flushImportedConversations(conversations)
+  ]);
+  if (!sameRoot()) return;
+  // 同类记忆落盘冲突仍以磁盘为准；不能把被合并舍弃的备份正文计入成功。
+  const memoryNow = new Map(store.memory.items.map(item => [item.category, item.text])),
+    lostMemories = memories.filter(item => memoryNow.get(item.category) !== item.text).length,
+    configKept = otherConfig || memories.length > lostMemories,
+    browserConfig = configKept && !diskConfig && writeMeta();
+  render();
+  if (!$("#settingsModal").classList.contains("hidden")) renderSettings();
+  const parts = [];
+  const present = new Set(store.conversations.map(c => c.id)),
+    chatReceipts = chats.map((where, i) => (present.has(conversations[i]) ? where || "page" : null));
+  for (const where of ["disk", "browser", "page"]) {
+    const n = chatReceipts.filter(item => item === where).length,
+      m = files.filter(item => item === where).length,
+      config = (diskConfig ? "disk" : browserConfig ? "browser" : "page") === where && configKept;
+    const items = [n ? t`${n} 段对话` : "", m ? t`${m} 件附件原件` : "", config ? t("配置（含模型、分组、预设、草稿等）") : ""].filter(
+      Boolean
+    );
+    if (!items.length) continue;
+    const names = items.join(t("、"));
+    parts.push(
+      where === "disk"
+        ? t`已写入存储目录：${names}`
+        : where === "browser"
+          ? t`已在此浏览器暂存：${names}`
+          : t`只留在本页：${names}。请先别关闭页面`
+    );
+  }
+  const removed = chatReceipts.filter(where => !where).length;
+  if (removed) parts.push(t`${removed} 段对话已不在本页，未能确认保存`);
+  if (lostMemories) parts.push(t`${lostMemories} 类记忆与存储目录里的版本冲突，未并入`);
+  if (deleting) parts.push(t`${deleting} 段对话尚在等删除确认，未导入`);
+  if (failed) parts.push(t`${failed} 件附件原件未能恢复：${attachmentError}`);
+  if (unreadable) parts.push(t`未能读完备份：${unreadable}；已读到的部分按上述结果保存`);
+  if (!backup.data.attachments && conversations.length) parts.push(t("备份不含附件原件，缺失的旧附件会显示为不可用"));
+  if (servers) parts.push(t("MCP 服务的密钥需重填"));
+  toast(parts.length ? parts.join(t("；")) : t("备份中没有需要并入的新内容"), 8000);
 }
