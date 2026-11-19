@@ -1614,7 +1614,231 @@ const withoutExeDir = (/** @type {string} */ text, win = process.platform === "w
 const EVERY = "严宽审",
   WIDE = "宽审";
 const SECURITY_COMMAND = String.raw`(?:-[lqv]+\s+)*`;
-/** @type {[{ test(text: string): boolean }, string, string][]} */
+// socketfilterfw / sysadminctl / dscl 这类 macOS 原生工具不用正则猜参数：\x 与 \<换行>
+// 在 syntax 里同是 \x01 占位（一位可能是被转义的任意字母，也可能是整个删掉的续行），
+// 只有 text 里的原字符能分辨。所以先按原始文本解码成真实命令词与参数，再做各自的选项/谓词判定——
+// 避开占位的双解，也就没有组合回溯。
+// shellWord：一个词按 Shell 词规则解码成真实值——引号段剥掉外层引号后原样并入
+// （引号内 syntax 不标 \x01，\ 保持字面），引号外 \x 还原成 x、\<换行> 整对删除；
+// 同一词内引号与非引号片段相邻时自然拼成一个值
+const shellWord = (/** @type {ReturnType<typeof shellText>} */ scanned, /** @type {number} */ start, /** @type {number} */ end) => {
+  const { text, syntax, quotes, shell } = scanned;
+  let out = "";
+  for (let i = start; i < end; i++) {
+    if (quotes.has(i)) {
+      const qe = Math.min(quotes.get(i), end - 1);
+      const inner = text.slice(i + 1, qe);
+      if (text[i] === '"') {
+        // 双引号内 \ 转义 $"`\\ 与换行（续行整对删除），其余 \x 保留字面。
+        // 反斜杠续行照旧两平台同一个删法（拆开的写法仍拼回来看）；其余转义只属 POSIX——
+        // PowerShell 与 cmd 的双引号里 \ 是普通字符，照 POSIX 折一次会把
+        // \\host\share 折成 \host\share（Codex 评审 11-18）
+        const posix = shell === "posix";
+        for (let j = 0; j < inner.length; j++) {
+          if (inner[j] === "\\" && j + 1 < inner.length) {
+            if (/[\r\n]/.test(inner[j + 1])) {
+              j++;
+              if (inner[j] === "\r" && inner[j + 1] === "\n") j++;
+              continue;
+            }
+            if (posix && /[$"`\\]/.test(inner[j + 1])) {
+              out += inner[j + 1];
+              j++;
+              continue;
+            }
+          }
+          out += inner[j];
+        }
+      } else {
+        // 单引号内全部字面
+        out += inner;
+      }
+      i = qe;
+      continue;
+    }
+    if (syntax[i] === "\\" && syntax[i + 1] === "\x01") {
+      if (!/[\r\n]/.test(text[i + 1])) out += text[i + 1];
+      i++;
+      continue;
+    }
+    out += text[i];
+  }
+  return out;
+};
+// 跳过一个重定向段（起点是 syntax 里的 < 或 >）：可带强制 >|、第二个 <>（>> <<），
+// 目标是 &fd、&词、空白+词 之一。返回段的下一位置
+const redirEnd = (scanned, i, end) => {
+  const { syntax } = scanned;
+  i++;
+  if (syntax[i] === "<" || syntax[i] === ">" || syntax[i] === "|") i++;
+  if (syntax[i] === "&") {
+    i++;
+    const digits = i;
+    while (i < end && /[\d-]/.test(syntax[i])) i++;
+    if (i > digits) return i;
+  }
+  while (i < end && /[^\S\r\n]/.test(syntax[i])) i++;
+  while (i < end && !/[\s;&|()<>{}]/.test(syntax[i])) {
+    if (scanned.quotes.has(i)) i = Math.min(scanned.quotes.get(i), end - 1);
+    else i++;
+  }
+  return i;
+};
+// 与 argumentsAt 同款的取词，但 fd 复制与重定向整段跳过（2>&1、&>log、>out、> out 不占参数位），
+// 续行/空行不占词；引号作参数时整段算进词里。value 已按 decodePosix 还原并剥掉外层引号
+const macArgs = (scanned, start, end) => {
+  const { text, syntax } = scanned;
+  const tokens = [];
+  for (let i = start; i < end; ) {
+    if (syntax[i] === "\\" && syntax[i + 1] === "\x01" && /[\r\n]/.test(text[i + 1])) {
+      i += text[i + 1] === "\r" && text[i + 2] === "\n" ? 3 : 2;
+      continue;
+    }
+    const ch = syntax[i];
+    if (/[^\S\r\n]/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (ch === "&" && (syntax[i + 1] === ">" || syntax[i + 1] === "<")) {
+      i = redirEnd(scanned, i + 1, end);
+      continue;
+    }
+    if (ch === "<" || ch === ">") {
+      i = redirEnd(scanned, i, end);
+      continue;
+    }
+    if (/\d/.test(ch)) {
+      // fd 号紧贴重定向：2>err、10>err 整段跳过
+      let j = i;
+      while (j < end && /\d/.test(syntax[j])) j++;
+      if (syntax[j] === "<" || syntax[j] === ">") {
+        i = redirEnd(scanned, j, end);
+        continue;
+      }
+    }
+    if (/[\s;&|()<>{}\n]/.test(ch)) break;
+    const from = i;
+    for (; i < end && !/[\s;&|()<>{}]/.test(syntax[i]); i++) {
+      if (scanned.quotes.has(i)) i = Math.min(scanned.quotes.get(i), end - 1);
+    }
+    tokens.push({ start: from, end: i, value: shellWord(scanned, from, i) });
+  }
+  return tokens;
+};
+// 内嵌执行段可以沿用外层扫描的坐标，但词义须按实际执行的 Shell 解码。
+const invocationWordScan = (scanned, call) => {
+  const scan = call.scan ?? scanned;
+  return scan.shell === call.shell ? scan : { ...scan, shell: call.shell };
+};
+// 三条规则共用这一条：拿到解码后的真实命令词与参数后各自判定，返回拦截原因或 undefined
+const MAC_NAME = /^(?:socketfilterfw|sysadminctl|dscl)$/i;
+const macBuiltinWhy = scanned => {
+  for (const call of commandInvocations(scanned)) {
+    // 先判程序名：重定向目标词也会被枚举成调用，不对号就不解析参数，普通命令不会被反复重扫
+    const scan = invocationWordScan(scanned, call);
+    const name = shellWord(scan, call.nameStart, call.nameEnd).split("/").pop();
+    if (!MAC_NAME.test(name)) continue;
+    const args = macArgs(scan, call.nameEnd, call.argEnd ?? scan.syntax.length).map(t => t.value);
+    if (/^socketfilterfw$/i.test(name)) {
+      // getopt_long 的唯一前缀缩写同样生效：反过来只放行已知的查询选项
+      // （get* 与 listapps/help 的缩写，选项名以 g/l/h 开头），其余长选项一律拦。
+      // 单横线的长选项（-setglobalstate）一并按长选项判：写选项抄错横线也拦得住；
+      // -h/-d/-l/-k 这几个单字母短选项不在此列，照旧放行
+      const longName = a => (/^--\w/.test(a) ? a.slice(2) : /^-[^-]\w/.test(a) ? a.slice(1) : "");
+      if (
+        args.some(a => {
+          const name = longName(a);
+          return name !== "" && !/^[glh]/.test(name);
+        })
+      )
+        return "不动网络与防火墙配置";
+      continue;
+    }
+    if (/^sysadminctl$/i.test(name)) {
+      const WRITES = new Set(["-addUser", "-deleteUser", "-newPassword", "-resetPasswordFor", "-secureTokenOn", "-secureTokenOff"]);
+      const TOGGLES = new Set([
+        "-autologin",
+        "-guestAccount",
+        "-afpGuestAccess",
+        "-smbGuestAccess",
+        "-automaticTime",
+        "-use12HourClockForLoginWindow",
+        "-screenLock",
+        "-filesystem"
+      ]);
+      for (let i = 0; i < args.length; i++) {
+        // 单双横线同义：-addUser 与 --addUser 都按写动词判，抄错横线不收
+        const flag = args[i].replace(/^--+/, "-");
+        if (WRITES.has(flag)) return "不动用户、账户与共享";
+        if (TOGGLES.has(flag) && args[i + 1] !== "status") return "不动用户、账户与共享";
+      }
+      continue;
+    }
+    if (/^dscl$/i.test(name)) {
+      // 白名单：全局选项（p/q/raw/plist/url 无值，u/P/f 带值）→ 数据源 → 查询动词。
+      // 既无数据源又无动词（dscl、dscl .）会进交互模式，stdin 可喂写命令，一律拦；
+      // 选项与动词大小写敏感。man page 明说前导横线可省（"Leading dashes are optional
+      // for all commands"），故 read/readall/… 与带横线的一并认；cat 与 . 是 read 的
+      // 别名、ls 是 list 的别名，只在动词位认——数据源本身可以就是一个 "."
+      const NO_VALUE = new Set(["-p", "-q", "-raw", "-plist", "-url"]);
+      const VALUE = new Set(["-u", "-P", "-f"]);
+      const READS = new Set([
+        "-read",
+        "-readall",
+        "-readpl",
+        "-readpli",
+        "-list",
+        "-diff",
+        "-search",
+        "-mcxread",
+        "-mcxhelp",
+        "-auth",
+        "-authonly"
+      ]);
+      // 数据源之后的动词位：横线可省（man page），cat 与 . 同 read、ls 同 list。
+      // 只在数据源之后认——「命令在前」时 dscl 把首个非选项参数当数据源，
+      // dscl read、dscl ls 不是查询而是数据源名，不能拿它开豁免
+      const PLAIN_READS = new Set([
+        "read",
+        "readall",
+        "readpl",
+        "readpli",
+        "list",
+        "diff",
+        "search",
+        "mcxread",
+        "mcxhelp",
+        "auth",
+        "authonly",
+        "cat",
+        ".",
+        "ls",
+        "-cat",
+        "-ls"
+      ]);
+      let i = 0;
+      for (; i < args.length; i++) {
+        const a = args[i];
+        if (NO_VALUE.has(a)) continue;
+        if (VALUE.has(a)) {
+          if (i + 1 >= args.length) return "不动用户、账户与共享";
+          i++;
+          continue;
+        }
+        if (a.startsWith("-") && !READS.has(a)) return "不动用户、账户与共享";
+        break;
+      }
+      // 动词在前（dscl -read /x）只认带横线的白名单动词
+      if (i < args.length && READS.has(args[i])) continue;
+      if (i >= args.length) return "不动用户、账户与共享";
+      const source = args[i];
+      // 数据源在前：动词位另认无横线与别名（dscl . read /x、dscl . ls /Users）
+      if (source.startsWith("-") || i + 1 >= args.length || (!READS.has(args[i + 1]) && !PLAIN_READS.has(args[i + 1])))
+        return "不动用户、账户与共享";
+    }
+  }
+};
+/** @type {[{ test(text: string): boolean } | ((scanned: any) => string | true | undefined), string, string][]} */
 const RULES = [
   [
     cmd(
@@ -1664,6 +1888,7 @@ const RULES = [
     "不直接读取或导出钥匙串密码与密钥",
     "严"
   ],
+  [scanned => macBuiltinWhy(scanned), "不动网络与防火墙配置/用户账户与共享", EVERY],
 
   [cmd("reg", String.raw`(?:add|delete|import|restore|load|unload|copy|save)\b`), "不动注册表", EVERY],
   // 注册表：查看放行（启动项、已装软件、驱动版本都在里头，是电脑检查的常规去处），改则拒绝
@@ -1714,15 +1939,21 @@ const RULES = [
 ];
 /** 这一档里命中的第一条的原因，没有返回 undefined */
 const forbiddenWhy = (scanned, tier) => {
-  return RULES.find(
-    ([pattern, , tiers]) =>
-      tiers.includes(tier) &&
-      (pattern === HIDDEN
-        ? hasHiddenCommand(scanned) || pipesToShell(scanned.syntax)
-        : pattern === ALIASING
-          ? ALIASING.test(scanned.syntax) || aliasByProvider(scanned)
-          : pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax))
-  )?.[1];
+  for (const [pattern, reason, tiers] of RULES) {
+    if (!tiers.includes(tier)) continue;
+    if (typeof pattern === "function") {
+      // 谓词可以返回具体原因（比如解码后判出的那类操作），true 时用表里的兜底文案
+      const why = pattern(scanned);
+      if (why) return why === true ? reason : why;
+      continue;
+    }
+    if (
+      (pattern === HIDDEN && (hasHiddenCommand(scanned) || pipesToShell(scanned.syntax))) ||
+      (pattern === ALIASING && (ALIASING.test(scanned.syntax) || aliasByProvider(scanned))) ||
+      (pattern !== HIDDEN && pattern !== ALIASING && pattern.test(pattern === SUDO_WORD ? scanned.unquoted : scanned.syntax))
+    )
+      return reason;
+  }
 };
 // 环境变量的两种写法（$env:X、${env:X} 与 %X%）从同一份名单生成，补一个名字两边都有
 const envVars = (/** @type {string} */ names) => String.raw`\$\{?env:(?:${names})\b|%(?:${names})%`;
@@ -1900,7 +2131,7 @@ const RSYNC_VALUES = new Set(
 const RSYNC_READ_VALUES = new Set(
   "exclude include filter exclude-from include-from files-from link-dest compare-dest copy-dest rsh rsync-path address".split(" ")
 );
-function argumentsAt(scanned, start, end = scanned.text.length) {
+function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix", mergeAt = null) {
   const text = scanned.text;
   const tokens = [];
   for (let i = start; i < end; ) {
@@ -1913,10 +2144,29 @@ function argumentsAt(scanned, start, end = scanned.text.length) {
       i++;
       continue;
     }
-    if (";&|()<>{}\n".includes(scanned.syntax[i])) break;
+    if (scanned.syntax[i] === "<" || scanned.syntax[i] === ">") {
+      // 重定向夹在参数之间仍属本次调用（POSIX 允许交错）：
+      // gcc -o >log /etc/x 里 /etc/x 是 -o 的目标，整段跳过继续收词
+      i = redirEnd(scanned, i, end);
+      continue;
+    }
+    // &> / &>> 按当前执行范围的方言：bash/zsh 是合并重定向，整段跳过；
+    // dash 与 cmd.exe 里 & 是语句分隔，照常断。跳过的位置记给调用方，
+    // 让它知道游标曾越过语句边界
+    if (scanned.syntax[i] === "&" && shell === "posix" && scanned.syntax[i + 1] === ">") {
+      mergeAt?.push(i);
+      i = redirEnd(scanned, i + 1, end);
+      continue;
+    }
+    if (";&|(){}\n".includes(scanned.syntax[i])) break;
     const from = i;
     for (; i < end && !/[\s;&|()<>{}]/.test(scanned.syntax[i]); i++) {
       if (scanned.quotes.has(i)) i = Math.min(scanned.quotes.get(i), end - 1);
+    }
+    // fd 号紧贴重定向（2>err）整段是重定向：从词首跳过，词本身不算参数
+    if (/^\d+$/.test(text.slice(from, i)) && (scanned.syntax[i] === "<" || scanned.syntax[i] === ">")) {
+      i = redirEnd(scanned, i, end);
+      continue;
     }
     const raw = text.slice(from, i),
       value = /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
@@ -1927,6 +2177,29 @@ function argumentsAt(scanned, start, end = scanned.text.length) {
 // 命令与参数共用 shellText 的执行范围、引号跨度和 argumentsAt；普通字符串不再另切一次词。
 // 前缀、赋值与套壳复用现有定义。带引号的执行正文由 shellText 给出范围，未加引号的 /c、-Command 在此展开。
 const INVOCATION_LEAD = new RegExp(String.raw`^${INLINE_SPACE}*${PREFIX}(?:${PS_ASSIGN}${INLINE_SPACE}*${PREFIX})*`, "i");
+// 命令名起点：前缀（赋值/env/nice 等）与重定向可交错出现在命令名之前，
+// fd 号紧贴 < > 的整段按重定向跳过；主调用与影子调用共用同一段解析
+const resolveNameStart = (scanned, at, end) => {
+  for (;;) {
+    const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, end));
+    at += lead[0].length;
+    const ch = scanned.syntax[at];
+    if (ch === "<" || ch === ">") {
+      at = redirEnd(scanned, at, end);
+      continue;
+    }
+    if (/\d/.test(ch)) {
+      let j = at;
+      while (j < end && /\d/.test(scanned.syntax[j])) j++;
+      if (scanned.syntax[j] === "<" || scanned.syntax[j] === ">") {
+        at = redirEnd(scanned, j, end);
+        continue;
+      }
+    }
+    break;
+  }
+  return at;
+};
 /** @param {ReturnType<typeof shellText>} scanned */
 function commandInvocations(scanned) {
   const calls = [],
@@ -1942,36 +2215,128 @@ function commandInvocations(scanned) {
         continue;
       }
       if (/[\s;&|()<>{}]/.test(scanned.syntax[at])) {
-        at++;
+        // 重定向整段消费（>| >> << <>、&fd/&词、空白+目标）：目标是文件名不是命令，
+        // 前置重定向后才是真实程序名，目标词也不能被枚举成一次调用
+        at = scanned.syntax[at] === "<" || scanned.syntax[at] === ">" ? redirEnd(scanned, at, range.end) : at + 1;
         continue;
       }
-      const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, range.end));
-      at += lead[0].length;
-      const tokens = argumentsAt(scanned, at, range.end);
+      // fd 号紧贴重定向（2>err）：整个是重定向段，不是命令
+      if (/\d/.test(scanned.syntax[at])) {
+        let j = at;
+        while (j < range.end && /\d/.test(scanned.syntax[j])) j++;
+        if (scanned.syntax[j] === "<" || scanned.syntax[j] === ">") {
+          at = redirEnd(scanned, j, range.end);
+          continue;
+        }
+      }
+      // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
+      at = resolveNameStart(scanned, at, range.end);
+      const mergeAt = [],
+        tokens = argumentsAt(scanned, at, range.end, range.shell, mergeAt);
       if (!tokens.length) {
         at++;
         continue;
       }
-      const first = tokens[0];
+      const emit = (toks, argEnd, bounded = false) => {
+        const first = toks[0];
+        // 同一起点按视角去重：&> 处 bash 与 dash 是两条命令，各自发出的调用参数界不同
+        const key = `${first.start}:${bounded ? "dash" : "posix"}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const name = first.value
+          .split(/[\\/]/)
+          .pop()
+          .replace(/\.exe$/i, "");
+        calls.push({ name, args: toks.slice(1), shell: range.shell, nameStart: first.start, nameEnd: first.end, argEnd });
+        // dash 视角只作一条调用本身，套壳正文由正视角展开过，不重复扫
+        if (bounded) return;
+        if (!/^(?:cmd|powershell|pwsh|sh|bash|zsh|dash|ksh)$/i.test(name)) return;
+        const script = SCRIPT_PREFIX.exec(scanned.text.slice(first.start, argEnd));
+        if (!script) return;
+        const bodyAt = first.start + script[0].length;
+        const bodyShell = CMD_SCRIPT.test(script[0]) ? "cmd" : POSIX_SCRIPT.test(script[0]) ? "posix" : "powershell";
+        if (scanned.quotes.has(bodyAt)) {
+          // 引号正文多半已由 shellText 扫成独立执行段；&> 夹带进来时正文没被
+          // 扫描器认出，对正文按内层 Shell 重扫——正文里的 ; 与换行在外层
+          // syntax 里是占位符，外层视图分不出多条命令。内部调用的偏移属于
+          // 内层视图，记 scan 让调用方按它取词与扫参数
+          const quoteEnd = Math.min(scanned.quotes.get(bodyAt), argEnd - 1);
+          if (!starts.get(bodyAt + 1) && bodyAt + 1 <= quoteEnd) {
+            // 双引号正文已被外层 Shell 解码过一轮（\$ \" \\ \` 与换行续行），
+            // 内层要扫的是解码后的文本，原样截取会二次解释这些转义
+            const raw = scanned.text.slice(bodyAt + 1, quoteEnd),
+              // 双引号内按外层 Shell 的顺序从左到右解码一遍：\\ → \，
+              // \$ \" \` 还原，\<换行> 两个字符一起删掉（POSIX 续行）；
+              // 分遍替换会让已配对的 \\ 后半再吃掉换行，顺序换不得
+              body =
+                scanned.text[bodyAt] === "'"
+                  ? raw
+                  : raw.replace(/\\\\|\\([$`"])|\\\n/g, m => (m === "\\\\" ? "\\" : m[1] === "\n" ? "" : m[1])),
+              inner = shellText(body, bodyShell);
+            for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
+          }
+          return;
+        }
+        if (bodyAt < argEnd) ranges.push({ start: bodyAt, end: argEnd, shell: bodyShell });
+      };
       at = tokens.at(-1).end;
-      if (seen.has(first.start)) continue;
-      seen.add(first.start);
-      const name = first.value
-        .split(/[\\/]/)
-        .pop()
-        .replace(/\.exe$/i, "");
-      calls.push({ name, args: tokens.slice(1), shell: range.shell });
-      if (!/^(?:cmd|powershell|pwsh|sh|bash|zsh|dash|ksh)$/i.test(name)) continue;
-      const script = SCRIPT_PREFIX.exec(scanned.text.slice(first.start, at));
-      if (!script) continue;
-      const bodyAt = first.start + script[0].length;
-      // 引号正文已由 shellText 扫过；其余参数中的引号只是参数，不能拿来当脚本。
-      if (!scanned.quotes.has(bodyAt) && bodyAt < at)
-        ranges.push({
-          start: bodyAt,
-          end: at,
-          shell: CMD_SCRIPT.test(script[0]) ? "cmd" : POSIX_SCRIPT.test(script[0]) ? "posix" : "powershell"
-        });
+      // argumentsAt 在 posix 下把 &> 当重定向跳过：游标已过语句边界，
+      // dash 视角的影子调用会丢。回到实际跳过的第一个 &> 让尾循环
+      // 重扫影子；命令替换内部的 &> 属于内层执行范围，不会误回退
+      if (mergeAt.length) at = mergeAt[0];
+      // 把本次调用剩余的参数与重定向消费完：参数不另起调用（否则参数词会被误当
+      // 新程序名，重复扫描同一条命令），遇到 ; & | ( ) { } 换行 才是语句结束。
+      // &> / &>> 是 bash/zsh 的合并重定向：本次调用吃到段尾、argEnd 随之延伸；
+      // dash 里 & 先断句、>目标 后的词是下一条命令——另发影子调用，参数界按 dash 的
+      // 语句尾，两个方言的语义都兜住，每个调用的参数扫描各自有界，不构成平方级。
+      const shadows = [];
+      let pendingShadow = null;
+      for (; at < range.end; ) {
+        const ch = scanned.syntax[at];
+        if (/[;&|()<>{}\n]/.test(ch)) {
+          if (ch === "<" || ch === ">") {
+            at = redirEnd(scanned, at, range.end);
+            continue;
+          }
+          if (ch === "&" && scanned.syntax[at + 1] === ">") {
+            if (pendingShadow) pendingShadow.argsTo = at;
+            at = redirEnd(scanned, at + 1, range.end);
+            // 影子调用也走与主调用相同的命令起点解析：赋值/套壳前缀、
+            // 交错与 fd 重定向都可能是 dash 视角下一条命令的合法前缀
+            at = resolveNameStart(scanned, at, range.end);
+            const nameStart = at;
+            for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
+              if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+            }
+            pendingShadow = nameStart < at ? { nameStart, nameEnd: at, argsTo: range.end } : null;
+            if (pendingShadow) shadows.push(pendingShadow);
+            continue;
+          }
+          if (pendingShadow) pendingShadow.argsTo = at;
+          break;
+        }
+        if (/\s/.test(ch)) {
+          at++;
+          continue;
+        }
+        for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
+          if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+        }
+      }
+      if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
+      emit(tokens, at);
+      // dash 视角：& 先断句，>log 是下一条命令的重定向，主调用到 & 为止。两种方言各发一条
+      // 才不漏判——bash 视角里 &> 之后的词是本次调用的参数（带 --dry-run 就判成干跑），
+      // dash 视角里它们属于下一条命令，真调用没有那个参数（Codex 评审 11-18）
+      if (mergeAt.length) {
+        const cut = mergeAt[0],
+          bounded = tokens.filter(tok => tok.end <= cut);
+        if (bounded.length && bounded.length < tokens.length) emit(bounded, cut, true);
+      }
+      for (const s of shadows) {
+        const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd), range.shell);
+        if (toks.length) emit(toks, s.argsTo);
+      }
     }
   }
   return calls;
@@ -1993,7 +2358,16 @@ function stripReadSources(scanned, sources = true) {
   }
   for (const match of syntax.matchAll(POSIX_ARGUMENTS)) {
     const tool = match[1].toLowerCase(),
-      tokens = argumentsAt(scanned, Number(match.index) + match[0].length),
+      // 豁免扫描按宁断勿合：此处的词未必是 bash——posix 大伞下的 dash、
+      // 或命令行里夹着的 cmd 段都把 & 当语句分隔。传非 posix 方言让
+      // argumentsAt 在 & 处停：bash 下只是少豁免几个参数（更严），
+      // dash/cmd 下则不会把下一条命令的路径误作只读来源擦出检查文本
+      tokens = argumentsAt(
+        scanned,
+        Number(match.index) + match[0].length,
+        scanned.text.length,
+        scanned.shell === "posix" ? "dash" : scanned.shell
+      ),
       removeSource = tool === "rsync" && tokens.some(t => t.value === "--remove-source-files");
     let operand = false,
       options = true,
@@ -2052,17 +2426,37 @@ const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|
 // 同一份扫描同时给出写标记与路径文本；-o 的实际参数只拆一次，不因写动词表或参数引号而漏过。
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
-  const offsets = new Set();
-  // 只有可能用到下面两张表时才切这一回：-o 连写的输出文件，或构建/包管理器那几件
-  const calls = /-o/i.test(scanned.text) || TOOL_WRITE_HINT.test(scanned.text) ? commandInvocations(scanned) : [];
-  if (/-o/i.test(scanned.text))
-    for (const call of calls) {
-      if (!ATTACHED_OUTPUT_TOOL.test(call.name)) continue;
-      for (const arg of call.args) {
-        if (arg.value === "--") break;
-        if (/^-o.+/i.test(arg.value)) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + 2);
+  const innerPaths = [];
+  // 枚举是线性的，不做原文预筛：引号拼接与转义能把 g'c'c、-''o 藏出字面匹配
+  const calls = commandInvocations(scanned);
+  for (const call of calls) {
+    // 名字与参数一律按词规则解码：引号片段（g'c'c）与转义（-\o）
+    // 都会改变原文写法，预筛与参数判定只认解码后的真实词
+    const scan = invocationWordScan(scanned, call),
+      name = shellWord(scan, call.nameStart, call.nameEnd)
+        .split(/[\\/]/)
+        .pop()
+        .replace(/\.exe$/i, "");
+    if (!ATTACHED_OUTPUT_TOOL.test(name)) continue;
+    // 内层视图补扫出来的调用记了 scan，它们的偏移属于内层文本，
+    // 不能在外层 chars 上插标记；紧贴选项后的路径值直接取出来查
+    for (let i = 0; i < call.args.length; i++) {
+      const arg = call.args[i],
+        value = shellWord(scan, arg.start, arg.end);
+      if (value === "--") break;
+      // 已识别的输出目标统一按完整值校验：整段引号、引号拼接与转义
+      // 都可能在原文里改变路径的写法，位置标记靠不住
+      if (/^-o.+/i.test(value)) innerPaths.push(value.slice(2));
+      else if (/^-o$/i.test(value)) {
+        // 分离式 -o：下一个参数就是输出目标
+        const next = call.args[i + 1];
+        if (next) {
+          innerPaths.push(shellWord(scan, next.start, next.end));
+          i++;
+        }
       }
     }
+  }
   // 构建与包管理器的输出目录参数：认得出的程序 + 表里那一个参数，同时算「这条在写」。
   // 但同一条指令里别的参数多是读的来源——`pip install --target ./vendor /opt/packages/a.whl` 里那个已打好的 whl、
   // `cmake -B build .` 里那个源码目录——一笔算进来就把来源也锁进了工作目录。所以只让输出参数的值受约束，
@@ -2070,37 +2464,49 @@ function scanWrites(scanned) {
   // 好让下面的路径识别看见那段值
   let toolWrite = false;
   const toolReads = [];
-  if (TOOL_WRITE_HINT.test(scanned.text))
-    for (const call of calls) {
-      const params = outputArgsOf({ name: call.name.toLowerCase(), args: call.args });
-      if (!params?.length) continue;
-      const target = new Set();
-      for (let i = 0; i < call.args.length; i++) {
-        const arg = call.args[i],
-          value = arg.value,
-          exact = params.find(param => value === param),
-          assigned = params.find(param => value.startsWith(`${param}=`)),
-          glued =
-            !exact && !assigned && params.find(param => /^-[^-]/.test(param) && value.startsWith(param) && value.length > param.length);
-        if (!exact && !assigned && !glued) continue;
-        toolWrite = true;
-        target.add(arg);
-        if (exact) {
-          const next = call.args[i + 1];
-          if (next) {
-            target.add(next);
-            i++;
-          }
-        } else if (glued) offsets.add(arg.start + (/^["']/.test(scanned.text[arg.start]) ? 1 : 0) + glued.length);
+  for (const call of calls) {
+    const scan = invocationWordScan(scanned, call),
+      name = shellWord(scan, call.nameStart, call.nameEnd)
+        .split(/[\\/]/)
+        .pop()
+        .replace(/\.exe$/i, ""),
+      // arg.value 是原文：引号片段与转义未拼，一律解码出真实参数值再判定
+      args = call.args.map(arg => ({ ...arg, value: shellWord(scan, arg.start, arg.end) })),
+      params = outputArgsOf({ name: name.toLowerCase(), args });
+    if (!params?.length) continue;
+    const target = new Set();
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i],
+        value = arg.value,
+        exact = params.find(param => value === param),
+        assigned = params.find(param => value.startsWith(`${param}=`)),
+        glued = !exact && !assigned && params.find(param => /^-[^-]/.test(param) && value.startsWith(param) && value.length > param.length);
+      if (!exact && !assigned && !glued) continue;
+      toolWrite = true;
+      target.add(arg);
+      if (exact) {
+        const next = args[i + 1];
+        if (next) {
+          target.add(next);
+          // 分离式输出路径：下一个参数就是目标值，按解码值校验
+          innerPaths.push(next.value);
+          i++;
+        }
+      } else if (glued || assigned) {
+        // assigned（--param=path）与 glued 一样按解码值切出路径校验
+        innerPaths.push(value.slice((glued ?? assigned).length + (assigned ? 1 : 0)));
       }
-      for (const arg of call.args) if (!target.has(arg)) toolReads.push(arg);
     }
-  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || offsets.size > 0 || toolWrite;
+    // 内层调用的参数偏移同样只在内层成立，工具读来源的留白只做在外层坐标上
+    for (const arg of args) if (!target.has(arg) && !call.scan) toolReads.push(arg);
+  }
+  const writing = DIRECT_FILE_MUTATION.test(scanned.syntax) || toolWrite || innerPaths.length > 0;
   if (!writing) return { writing, text: "" };
   const chars = stripReadSources(scanned).split("");
-  for (const at of offsets) chars[at] = " " + chars[at];
   for (const arg of toolReads) for (let i = arg.start; i < arg.end; i++) chars[i] = " ";
-  return { writing, text: chars.join("") };
+  // 内层紧贴式输出路径不占外层坐标：作为完整路径值返回，由调用方逐条做目录
+  // 边界校验——拼回文本会被按空白截断，带空格的路径会只验到前半段
+  return { writing, text: chars.join(""), paths: innerPaths };
 }
 /**
  * 会改动东西的指令，它碰的路径必须都在工作目录之内。判定从严：一条指令里只要出现写、删、搬或重定向，
@@ -2119,6 +2525,22 @@ function screenWritePaths(writeText, workdir, win, prefix) {
     const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
     if (!pathIsInside(root, candidate))
       return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
+  }
+  return null;
+}
+// 内层视图解出的输出路径是完整的路径值：直接对值做同一套边界检查，
+// 不走按空白切词的 absolutePathsIn——带空格的路径才不会被截成前半段
+function innerPathWhy(paths, workdir, win, prefix) {
+  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  for (const raw of paths || []) {
+    if (HOME_SYSTEM_PATH.test(raw)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
+    if (/(^|[\\/:])\.\.([\\/]|$)/.test(raw)) return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
+    if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
+    if (path.isAbsolute(raw) || (win && /^[a-z]:[\\/]/i.test(raw))) {
+      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
+      if (!pathIsInside(root, candidate))
+        return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
+    }
   }
   return null;
 }
@@ -2842,7 +3264,8 @@ function egressOf(command, { platform = process.platform } = {}) {
   // 写到网络共享里：本地文件出了这台机器。读取（Get-Content \\host\share\x、从共享拷进来）不算：
   // 只看判成「写」的那份文本，只读的来源已被 stripReadSources 遮掉
   const writes = scanWrites(scanned);
-  if (writes.writing && uncShare(writes.text, win)) return { kind: "share", why: "往网络共享里写（\\\\主机\\共享）", label: "网络共享" };
+  if (writes.writing && (uncShare(writes.text, win) || (writes.paths ?? []).some(p => uncShare(p, win))))
+    return { kind: "share", why: "往网络共享里写（\\\\主机\\共享）", label: "网络共享" };
   return null;
 }
 const BREW_INSTALL = cmd(String.raw`(?:[^\s"';&|()<>{}]+/)?brew`, String.raw`(?<q>["']?)(?:install|reinstall)\k<q>(?=[\s;|&<>()}]|$)`);
@@ -2864,7 +3287,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const writes = scanWrites(scanned);
   if (writes.writing) {
     if (GIT_INTERNAL_PATH.test(stripReadSources(scanned, false))) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
-    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝");
+    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝") || innerPathWhy(writes.paths, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
   // git 把仓库指到别处：`git -C .. checkout -- f`、`cd ..; git reset --hard` 里都没有一个「改动路径」，
@@ -2901,7 +3324,7 @@ function screenAutoReview(command, { platform = process.platform, workdir = "" }
   const deleted = recursiveDeleteWhy(scanned, workdir, win);
   if (deleted) return deleted;
   const writes = scanWrites(scanned);
-  if (writes.writing && REVIEW_SYSTEM_PATH.test(writes.text))
+  if (writes.writing && (REVIEW_SYSTEM_PATH.test(writes.text) || (writes.paths ?? []).some(p => REVIEW_SYSTEM_PATH.test(p))))
     return "审查拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
@@ -2920,7 +3343,7 @@ function screenLoose(command, { platform = process.platform } = {}) {
     forbidden = forbiddenWhy(scanned, "宽");
   if (forbidden) return `沙箱拒绝：${forbidden}`;
   const writes = scanWrites(scanned);
-  if (writes.writing && REVIEW_SYSTEM_PATH.test(writes.text))
+  if (writes.writing && (REVIEW_SYSTEM_PATH.test(writes.text) || (writes.paths ?? []).some(p => REVIEW_SYSTEM_PATH.test(p))))
     return "沙箱拒绝：不往 Windows、Program Files、/usr、/System 这类系统目录里写";
   return null;
 }
