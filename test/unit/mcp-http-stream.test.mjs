@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { createTransport, readEvents } = require("../../server/mcp/transports.js");
+const { OUTBOUND_MARK } = require("../../server/web.js");
 
 // 一个回事件流的假服务：流先不结束，由测试决定何时出错
 function fakeStream() {
@@ -77,4 +78,30 @@ test("自己 close() 掐的流不当作出错", async t => {
   await tick();
   await tick();
   assert.deepEqual(got, []);
+});
+
+test("出站请求都带标记：MCP 服务借跳转盲打桥接受信接口的路堵上", async t => {
+  // 服务把回应 307 到 127.0.0.1 的受信接口时，Node 的 fetch 会跟着跳、保留方法与正文，
+  // 且不带 Origin——桥接自己分不出来，只认这个标记。三种出口（http 的 POST 与 DELETE、sse 的两处）
+  // 一个漏了就等于没有。
+  const seen = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    seen.push({ url: String(url), headers: init?.headers || {} });
+    if (String(url).endsWith("/sse")) {
+      return new Response([Buffer.from("event: endpoint\ndata: /messages\n\n")], {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      });
+    }
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "s1" } });
+  });
+  const http = createTransport({ url: "http://127.0.0.1:1/mcp" });
+  await http.send({ jsonrpc: "2.0", id: 1, method: "initialize" });
+  http.close();
+  const sse = createTransport({ url: "http://127.0.0.1:1/sse", type: "sse" });
+  sse.onclose = () => {};
+  await sse.start();
+  await sse.send({ jsonrpc: "2.0", id: 2, method: "initialize" });
+  assert.ok(seen.length >= 4, `出口没走全：${seen.map(item => item.url).join(" ")}`);
+  for (const item of seen) assert.equal(item.headers[OUTBOUND_MARK], "1", `${item.url} 漏了标记`);
 });
