@@ -7,6 +7,9 @@ const fetchUpstream = require("./upstream.js");
 
 const SILICONFLOW = config => config.api === "siliconflow" || /siliconflow/i.test(config.baseUrl);
 const IMAGE_LIMIT = 40 * 1024 * 1024;
+// 整份回话的上限：图以 b64 交回时本就不小（一张 40 MB 的原件编码后约 54 MB），但也不能不设上限——
+// 接口源源不断地回，整份进内存就能把桥接撑死（与模型列表、MCP 消息同一个理由）
+const RESULT_LIMIT = 64 * 1024 * 1024;
 
 function imagesUrl(baseUrl) {
   const url = new URL(String(baseUrl || "").trim());
@@ -73,7 +76,9 @@ module.exports = function createImage({ resolveProfile, upstreamError }) {
         throw Object.assign(Error(`连不上生图接口：${error.cause?.code || error.cause?.message || error.message}`), { status: 502 });
       });
       if (!response.ok) throw Object.assign(Error(await upstreamError(response)), { status: response.status });
-      const data = /** @type {any} */ (await response.json()),
+      const { buffer, truncated } = await readLimitedBytes(response, RESULT_LIMIT);
+      if (truncated) throw Object.assign(Error(`生图接口的回话过大（超过 ${RESULT_LIMIT / 1024 / 1024} MB），不再往下读`), { status: 502 });
+      const data = /** @type {any} */ (JSON.parse(new TextDecoder().decode(buffer))),
         items = Array.isArray(data.images) ? data.images : Array.isArray(data.data) ? data.data : [];
       const images = await Promise.all(
         items.map(async item => ({

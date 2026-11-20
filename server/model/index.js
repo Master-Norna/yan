@@ -21,6 +21,8 @@ const { wholeReplyEvents } = require("./sse.js");
 
 // 工具定义一次最多带多少件：超过不再静默截掉后面的，明确报错，接入更多工具时一眼能看出来
 const TOOLS_LIMIT = 128;
+// 列模型回的那份 JSON 的上限：正常只有几十上百个名字，超过这个数多半是接口出了毛病或根本没打算收尾
+const LIST_LIMIT = 4 * 1024 * 1024;
 
 // 上游没接下请求时回的那句话。OpenAI 系 { error: { message } }、有的中转站 { error: "…" }、旧版 vLLM { message }、
 // FastAPI 写的自建服务 { detail }（参数校验错是一串对象，整串交出去，思考档位的报错才读得出它认哪几档）；
@@ -169,7 +171,10 @@ module.exports = function createModel({ home }) {
       signal: AbortSignal.timeout(20000)
     });
     if (!response.ok) throw Error(await upstreamError(response));
-    const data = /** @type {any} */ (await response.json());
+    // 模型列表按上限读：接口回一份超大（或源源不断）的 JSON，整份进内存一样能撑死桥接
+    const { buffer, truncated } = await readLimitedBytes(response, LIST_LIMIT);
+    if (truncated) throw Error(`模型列表过大（超过 ${LIST_LIMIT / 1024 / 1024} MB），不再往下读`);
+    const data = /** @type {any} */ (JSON.parse(new TextDecoder().decode(buffer)));
     const list = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : null;
     return list && list.map(item => (typeof item === "string" ? item : item?.id || item?.name)).filter(Boolean);
   }

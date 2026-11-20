@@ -41,9 +41,21 @@ class StdioTransport {
     });
     this.child.stdout.setEncoding("utf8");
     this.child.stderr.setEncoding("utf8");
-    let buffer = "";
+    let buffer = "",
+      broken = false;
     this.child.stdout.on("data", chunk => {
+      if (broken) return;
       buffer += chunk;
+      // 攒到上限还没见到换行：这一行本身就是一整段（服务在灌日志，或回了一条超大的结果）
+      if (buffer.length > MESSAGE_LIMIT) {
+        broken = true;
+        buffer = "";
+        const error = Error(`服务回的消息过大（一行超过 ${MESSAGE_LIMIT / 1024 / 1024} MB）`);
+        this.note(error.message);
+        this.onclose(error);
+        killTree(this.child, "SIGTERM");
+        return;
+      }
       let index;
       while ((index = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, index).trim();
@@ -114,6 +126,20 @@ function resolveCommand(command, args, env) {
   });
   return { file: [quote(found), ...encoded].join(" "), args: [], shell: true };
 }
+// 一条消息的体量上限：桥接是单进程，服务往 stdout 里灌一段没有换行的超长文本、或回一条超大的结果，
+// 整份攒在内存里就能把它撑死（所有对话、后台指令一起断）。正常的结果远小于这个数
+const MESSAGE_LIMIT = 16 * 1024 * 1024;
+// 整份回来的（不是事件流）：按上限读，超了当场说清，别拿一个残缺的 JSON 去解析
+async function readLimitedText(response, limit = MESSAGE_LIMIT) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.length;
+    if (size > limit) throw Error(`回的消息过大（超过 ${limit / 1024 / 1024} MB），不再往下读`);
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 function findOnPath(command, env) {
   if (path.isAbsolute(command) || /[\\/]/.test(command)) return command;
   const exts = path.extname(command) ? [""] : (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";"),
@@ -126,8 +152,9 @@ function findOnPath(command, env) {
   return command;
 }
 
-// 事件流逐条读出：每条事件交给 onEvent(event, data)
-async function readEvents(response, onEvent) {
+// 事件流逐条读出：每条事件交给 onEvent(event, data)。一道上限：攒过 limit 还没见到事件结尾（空行）就作罢——
+// 一条事件大得离谱时整份留在 buffer 里，桥接一样会被撑死
+async function readEvents(response, onEvent, limit = MESSAGE_LIMIT) {
   const decoder = new TextDecoder();
   let buffer = "",
     carry = "";
@@ -150,6 +177,7 @@ async function readEvents(response, onEvent) {
     const text = carry + decoder.decode(chunk, { stream: true });
     carry = text.endsWith("\r") ? "\r" : "";
     buffer += (carry ? text.slice(0, -1) : text).replace(/\r\n?/g, "\n");
+    if (buffer.length > limit) throw Error(`事件过大（超过 ${limit / 1024 / 1024} MB），不再往下读`);
     drain();
   }
   if (carry) {
@@ -218,7 +246,7 @@ class HttpTransport {
               this.onmessage({ jsonrpc: "2.0", id: message.id, error: { message: `事件流中断：${error?.message || error}` } });
           })
           .finally(() => this.aborts.delete(abort));
-      } else this.deliver(await response.text());
+      } else this.deliver(await readLimitedText(response));
     } finally {
       if (!streaming) this.aborts.delete(abort);
     }
@@ -286,4 +314,4 @@ function createTransport(config, toolEnv) {
   throw Error("配置里既没有 command 也没有 url");
 }
 
-module.exports = { createTransport, SseTransport, readEvents };
+module.exports = { createTransport, SseTransport, readEvents, readLimitedText };
