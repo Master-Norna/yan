@@ -37,5 +37,5 @@ Windows 另跑 Node 22 的轻量单测，核对 `engines` 下限，先作参考�
 
 - `node test/prompt-size.mjs`：看四档提示词体量，与 `test/prompt-size.json` 的基准比差值；确认数值合理后加 `--save` 更新基准。
 - `node test/sandbox-replay.mjs --diff`：拿存储根里真实用过的指令回放沙箱规则，含历史版本、旁注与另存的帮手行迹；改 `server/sandbox.js` 后必跑。
-- `npm run pack:smoke`：按宿主打包，再解压冒烟；也可分开跑 `npm run pack` 和 `node pack/smoke.mjs`。两边都用包内 Node 起桥接、核对 `/api/bootstrap` 的版本与首页，不打开浏览器；macOS 经解出的 `start.command` 启动。发版前两个目标都跑。`.github/workflows/pack.yml` 在打包、启动相关的 PR 中按路径触发，也可手动运行；Windows x64 与 macOS arm64 各跑一遍，通过后各自上传 ZIP，不发 Release，不挡合并。
+- `npm run pack:smoke`：按宿主打包，再解压冒烟；也可分开跑 `npm run pack` 和 `node pack/smoke.mjs`。Windows 跑解出的 `言.exe`，也验已有只读 `桥接.log` 不挡启动；macOS 跑解出的 `start.command`。两边都用包内 Node 起桥接、核对 `/api/bootstrap` 的版本与首页，不打开浏览器。发版前两个目标都跑。`.github/workflows/pack.yml` 在打包、启动相关的 PR 中按路径触发，也可手动运行；Windows x64 与 macOS arm64 各跑一遍，通过后各自上传 ZIP，不发 Release，不挡合并。
 - **Finder 首启另验**：CI 冒烟不覆盖访达。另在 Apple 芯片 Mac 上用访达解开下载的 ZIP，双击 `start.command`，核对首次安全提示、终端与浏览器。

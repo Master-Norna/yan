@@ -44,6 +44,7 @@ const SEARCH = require("./server/search.js");
 const ROOT = __dirname;
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.YAN_PORT || 8787);
+const OPEN_PAGE = process.argv.includes("--open") && !process.argv.includes("--no-open");
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -386,18 +387,25 @@ async function dispatch(req, res) {
 const server = http.createServer(dispatch);
 server.on("error", async (/** @type {NodeJS.ErrnoException} */ error) => {
   if (error.code === "EADDRINUSE") {
-    // 占着端口的就是言自己（又双击了一次言.exe）：不再起一个，打开页面即可
+    const address = `http://${HOST}:${PORT}`;
+    // 只有同版才可接用。异版仍留在原端口，不替用户结束它的任务，也不开旧页面。
     const running = /** @type {any} */ (
-      await fetch(`http://${HOST}:${PORT}/api/bootstrap`)
-        .then(r => r.json())
+      await fetch(`${address}/api/bootstrap`, { redirect: "error", signal: AbortSignal.timeout(2000) })
+        .then(r => (r.ok ? r.json() : null))
         .catch(() => null)
     );
     if (running?.work) {
-      console.log(`言已在运行：http://${HOST}:${PORT}`);
-      if (process.argv.includes("--open")) openUrl(`http://${HOST}:${PORT}`);
-      process.exit(0);
-    }
-    console.error(`端口 ${PORT} 已被占用，可设置 YAN_PORT 后重试。`);
+      const version = typeof running.version === "string" ? running.version : "";
+      if (version && version === APP_VERSION) {
+        console.log(`言已在运行：${address}`);
+        if (OPEN_PAGE) openUrl(address);
+        process.exit(0);
+      }
+      console.error(
+        `端口 ${PORT} 上已有言的桥接（${version || "版本未知"}），与本次启动的版本（${APP_VERSION || "未知"}）不符。请先退出正在运行的桥接，再重试。\n` +
+          `The Yan bridge on port ${PORT} (${version || "unknown version"}) does not match this launch (${APP_VERSION || "unknown version"}). Quit the running bridge before retrying.`
+      );
+    } else console.error(`端口 ${PORT} 已被占用，可设置 YAN_PORT 后重试。`);
   } else console.error(error);
   process.exit(1);
 });
@@ -422,5 +430,5 @@ server.listen(PORT, HOST, () => {
   );
   console.log("  请保持此窗口开启；关闭后页面刷新、模型转发、联网与执事都会停止。按 Ctrl+C 退出。");
   console.log("  此窗口不会显示 API Key。\n");
-  if (process.argv.includes("--open")) openUrl(address);
+  if (OPEN_PAGE) openUrl(address);
 });

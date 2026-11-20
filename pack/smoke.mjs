@@ -1,5 +1,5 @@
-// 便携包冒烟：解开 dist 里这一版的 zip，用包里自带的那份 Node 起一次桥接，问一句 /api/bootstrap 与首页。
-// 验 ZIP 解压、关键文件和桥接版本；Mac 走 start.command，但不代替下载后从访达打开的手工验收。
+// 便携包冒烟：解开 dist 里这一版的 zip，经解出的启动器用包内 Node 起桥接，问一句 /api/bootstrap 与首页。
+// Windows 真跑言.exe，并以只读文件验可选日志的降级；Mac 走 start.command，不代替下载后从访达打开的手工验收。
 // 用法：npm run pack:smoke（打包 + 冒烟），或先 npm run pack 再 node pack/smoke.mjs。
 // 不碰真实存储根（YAN_HOME 指临时目录）、不开页面、不装任何东西；跑完把临时目录与进程一起收掉。
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -67,7 +67,7 @@ let temp = "",
   child = null;
 
 function cleanup() {
-  if (child && child.exitCode === null) {
+  if (child?.pid && child.exitCode === null && child.signalCode === null) {
     try {
       if (MAC) child.kill();
       else spawnSync(TASKKILL, ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
@@ -128,14 +128,21 @@ if (MAC) {
   }
 }
 
+const logFile = path.join(home, "桥接.log");
+const logMarker = "冒烟：原有的只读日志\n";
+if (WIN) {
+  fs.writeFileSync(logFile, logMarker);
+  fs.chmodSync(logFile, 0o444);
+}
 const port = await freePort();
+const store = path.join(temp, ".yan");
 let log = "";
-child = spawn(path.join(home, MAC ? LAUNCHER : NODE_BIN), [MAC ? "--no-open" : "server.js"], {
+child = spawn(path.join(home, LAUNCHER), ["--no-open"], {
   cwd: MAC ? temp : home,
   env: {
     ...process.env,
     ...(MAC && { PATH: MAC_SYSTEM_PATH }), // 模拟访达只给系统 PATH，不能靠 runner 的 Node 起桥接
-    YAN_HOME: path.join(temp, ".yan"),
+    YAN_HOME: store,
     YAN_PORT: String(port)
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -149,10 +156,11 @@ child.on("error", error => fail(`起不来：${error.message}`));
 
 const base = `http://127.0.0.1:${port}`;
 let info = null;
-for (let i = 0; i < 60 && !info; i++) {
+const deadline = Date.now() + 30000;
+while (!info && Date.now() < deadline) {
   if (child.exitCode !== null) fail(`桥接退了（退出码 ${child.exitCode}）\n${log.trim()}`);
   try {
-    const res = await fetch(`${base}/api/bootstrap`);
+    const res = await fetch(`${base}/api/bootstrap`, { signal: AbortSignal.timeout(1000) });
     if (res.ok) info = await res.json();
   } catch {
     /* 还没听上 */
@@ -161,9 +169,14 @@ for (let i = 0; i < 60 && !info; i++) {
 }
 if (!info) fail(`30 秒内 /api/bootstrap 没有应答\n${log.trim()}`);
 if (info.version !== version) fail(`桥接报的版本是 ${info.version}，包是 ${version}：APP_VERSION 与 package.json 不同步`);
-say(`桥接起得来：/api/bootstrap 报 ${info.version}`);
+if (info.store?.root !== store) fail("应答的桥接没有使用冒烟的临时存储根");
+say(`经 ${LAUNCHER} 启动：/api/bootstrap 报 ${info.version}`);
+if (WIN) {
+  if (fs.readFileSync(logFile, "utf8") !== logMarker || fs.statSync(logFile).mode & 0o222) fail("原有的只读日志被改动");
+  say("已有只读日志未改动，桥接照常启动");
+}
 
-const page = await fetch(`${base}/`);
+const page = await fetch(`${base}/`, { signal: AbortSignal.timeout(5000) }).catch(error => fail(`首页取不到：${error.message}`));
 if (!page.ok) fail(`首页回 ${page.status}`);
 const html = await page.text();
 if (!html.includes("support.js")) fail("首页没引 support.js：页面源码没随包走对");
