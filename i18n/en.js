@@ -301,6 +301,9 @@ var YAN_EN = {
   完成: "Done",
   运行: "Run",
   跳过: "Skip",
+  这件工具已不在了: "This tool is gone",
+  "服务可能刚被停用，这一步无从执行；跳过它，把结果交回模型。":
+    "Its service was probably just turned off, so this step cannot run. Skip it and hand the result back to the model.",
   "径行：此对话中后续指令不再询问": "Full auto: don't ask again in this chat",
   "展开全部 · −{0} +{1} 行": "Show all · −{0} +{1} {1|line|lines}",
   展开输出: "Show output",

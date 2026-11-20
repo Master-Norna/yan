@@ -63,10 +63,23 @@ function renderApprovalBar() {
   if (bar.dataset.stepId !== entry.step.id) {
     bar.dataset.stepId = entry.step.id;
     bar.dataset.page = "0";
-    bar.innerHTML = entry.step.gate ? keepApprovalHtml(entry.step) : TOOLS.get(entry.step.name).approval(entry.step);
+    bar.innerHTML = approvalBarHtml(entry.step);
     formPage(bar);
   }
   if (bar.classList.contains("hidden") || bar.classList.contains("leaving")) showNow(bar);
+}
+// 条上画什么：守的关口，或那件工具自己的请示表。这件工具已不在表里（接了 MCP 服务、后来在设置里停用或改了配置，
+// 带 mcp 标记的工具整批摘掉）时给一张只剩「跳过」的条——原来这里直接取 TOOLS.get(…).approval，
+// 取不到就抛 TypeError，整页 render 停在那一句上，请示条与它后面的几处一并画不出来，那一步还顶着等
+/** @param {Step} step */
+function approvalBarHtml(step) {
+  if (step.gate) return keepApprovalHtml(step);
+  const tool = TOOLS.get(step.name);
+  return tool?.approval ? tool.approval(step) : missingToolApprovalHtml(step);
+}
+/** @param {Step} step */
+function missingToolApprovalHtml(step) {
+  return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">${t(`失`)}</span><span class="approval-title">${t(`这件工具已不在了`)} · ${escapeHtml(toolLabel(step.name))}</span></div><div class="approval-sandbox">${escapeHtml(t("服务可能刚被停用，这一步无从执行；跳过它，把结果交回模型。"))}</div><div class="approval-actions"><button type="button" data-approve="skip">${t(`跳过`)}</button></div>`;
 }
 // 守的关口（意里标了 ask 的守，见 19-intent/10-store.js 的 keepHook）：不论哪件工具都是这一张——守的原话领起，下面是将要做的；
 // 只有准许与跳过，没有「径行」：关口不随档位放宽
