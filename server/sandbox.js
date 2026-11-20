@@ -3104,6 +3104,22 @@ function eatsNextArg(arg) {
   return /^-[A-Za-z]+$/.test(arg) && HTTP_VALUE_SHORT.includes(arg[arg.length - 1]);
 }
 /**
+ * 从 URL 的 authority（`//` 之后、路径之前那一段）里取真正的主机：剥掉 userinfo 与端口。
+ * `http://127.0.0.1:3000@evil.example/` 的主机是 evil.example，127.0.0.1 只是用户名——
+ * 不剥就会把「发到外网」看成「发给本机」，外发审查与严档的外联判据都放它过去。
+ * 反过来 `http://user:pass@127.0.0.1:3000/` 也才认得出是本机。
+ * @param {string} authority
+ */
+function hostOfAuthority(authority) {
+  const at = authority.lastIndexOf("@"),
+    hostPort = (at >= 0 ? authority.slice(at + 1) : authority).split(/[/?#]/)[0];
+  if (hostPort.startsWith("[")) {
+    const end = hostPort.indexOf("]");
+    return end > 0 ? hostPort.slice(0, end + 1) : "";
+  }
+  return hostPort.replace(/:\d+$/, "");
+}
+/**
  * 这一段 HTTP 工具自己写明白的目的地。只看这一段的参数：
  * 整条指令里别处出现的 localhost（payload 里、别的命令里）不能给这次上传开脱
  * 认带协议头的地址、带路径或端口的主机、裸主机名与 IP；认不出的（装在变量里）留给调用方按「出去了」算
@@ -3118,9 +3134,9 @@ function httpHosts(args) {
       continue;
     }
     if (!arg || arg.startsWith("-") || arg.startsWith("@")) continue;
-    const url = arg.match(/^(?:https?|ftp):\/\/(\[[^\]]+\]|[^\s/?#:]+)/i);
+    const url = arg.match(/^(?:https?|ftp):\/\/([^\s/?#]+)/i);
     if (url) {
-      hosts.push(url[1]);
+      hosts.push(hostOfAuthority(url[1]));
       continue;
     }
     if (/^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\]|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?::\d+)?(?:[/?#]|$)/i.test(arg))
@@ -3296,7 +3312,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const gitWhy = gitEscapeWhy(text, workdir, win);
   if (gitWhy) return gitWhy;
   if (NET_TOOLS.test(text)) {
-    const hosts = [...text.matchAll(/https?:\/\/([^\s/"'`:]+)(?::\d+)?/gi)].map(m => m[1]);
+    const hosts = [...text.matchAll(/https?:\/\/[^\s/"'`]+/gi)].map(m => hostOfAuthority(m[0].slice(m[0].indexOf("//") + 2)));
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
       return "沙箱拒绝：不直接外联（只放行指向本机 127.0.0.1 / localhost 的）；装依赖走 npm / pip 等包管理器，查资料用 search_web / fetch_page";
   }
