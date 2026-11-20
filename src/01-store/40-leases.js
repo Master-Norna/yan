@@ -20,6 +20,13 @@ function noteRemoteLeases(busy) {
   }
   if (currentId && remoteBusy.has(currentId)) renderSendButtons();
 }
+function resetChatLeases() {
+  remoteBusy.clear();
+  leaseHold.clear();
+  leaseClaims.clear();
+  leaseReleased.clear();
+  leasePosting = leaseFollowing = null;
+}
 function syncLeases() {
   if (!chatsOnline()) return Promise.resolve();
   // 认领本身会报上全部持有的对话；它回话前还没有生成任务，不能以「没在跑」把这段报没了。
@@ -29,9 +36,10 @@ function syncLeases() {
   const running = new Set([...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys()].filter(Boolean));
   for (const id of running) leaseHold.add(id);
   for (const id of [...leaseHold]) if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) leaseHold.delete(id);
-  leasePosting = bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold] }, AbortSignal.timeout(5000))
+  const scope = bootstrap.store;
+  leasePosting = bridge("/api/chats/lease", { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold] }, AbortSignal.timeout(5000))
     .then(({ busy } = {}) => {
-      if (!Array.isArray(busy)) return false;
+      if (bootstrap.store !== scope || !Array.isArray(busy)) return false;
       const held = new Set(busy),
         known = new Set(store.conversations.map(c => c.id));
       for (const id of remoteBusy)
@@ -45,8 +53,11 @@ function syncLeases() {
       return true;
     })
     .catch(() => false)
-    .finally(() => (leasePosting = null));
+    .finally(() => {
+      if (bootstrap.store === scope) leasePosting = null;
+    });
   return leasePosting.then(posted => {
+    if (bootstrap.store !== scope) return;
     if (!posted || leaseFollowing) return leaseFollowing;
     // 跟读可以比租约还慢；不占住下一次报到。期间松手的对话，留给下一次成功的报到续读。
     const follow = [...remoteBusy].filter(id => store.conversations.some(c => c.id === id)),
@@ -60,7 +71,9 @@ function syncLeases() {
       return true;
     })
       .catch(() => {})
-      .finally(() => (leaseFollowing = null));
+      .finally(() => {
+        if (bootstrap.store === scope) leaseFollowing = null;
+      });
     return leaseFollowing;
   });
 }
@@ -72,14 +85,20 @@ function claimConversation(id) {
   if (leaseClaims.has(id)) return leaseClaims.get(id);
   // 旧报到先落定，再认领；不同对话的认领也依次送出，避免迟到的旧清单撤回后来的持有项。
   // 只等租约回话，不等随后读回别处的对话；若要认领的是刚松手的那一段，仍须等终稿。
-  const before = [...leaseClaims.values(), leasePosting];
+  const scope = bootstrap.store,
+    before = [...leaseClaims.values(), leasePosting];
   const claiming = (async () => {
     await Promise.all(before);
-    if (leaseReleased.has(id)) return false;
+    if (bootstrap.store !== scope || leaseReleased.has(id)) return false;
     const held = leaseHold.has(id);
     leaseHold.add(id);
     try {
-      const { busy = [] } = await bridge("/api/chats/lease", { owner: PAGE_ID, ids: [...leaseHold], claim: id }, AbortSignal.timeout(3000));
+      const { busy = [] } = await bridge(
+        "/api/chats/lease",
+        { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold], claim: id },
+        AbortSignal.timeout(3000)
+      );
+      if (bootstrap.store !== scope) return false;
       // 认领别段时也会收到远端持有的正项：作废那些段尚在途的松手跟读。不从这里推断谁已松手。
       if (!Array.isArray(busy)) return true;
       noteRemoteLeases(busy);
@@ -87,9 +106,11 @@ function claimConversation(id) {
       if (!held) leaseHold.delete(id);
       return false;
     } catch {
-      return true;
+      return bootstrap.store === scope;
     }
-  })().finally(() => leaseClaims.delete(id));
+  })().finally(() => {
+    if (bootstrap.store === scope) leaseClaims.delete(id);
+  });
   leaseClaims.set(id, claiming);
   return claiming;
 }
@@ -100,23 +121,24 @@ function releaseLeases() {
   fetch(`/api/chats/lease`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ owner: PAGE_ID, ids: [] }),
+    body: JSON.stringify({ storeRoot: bootstrap.store?.root, owner: PAGE_ID, ids: [] }),
     keepalive: true
   }).catch(() => {});
 }
 /** 别处正作答（或刚松手）的几段：磁盘上的更新就换进来；刚松手的若仍停在「生成中」，那边是没写完就走了，按中断收束 */
 async function followConversations(ids, released, finishRelease = _id => true) {
   const root = chatsDir(),
+    scope = bootstrap.store,
     // 领终稿不带已知版本；到点补读的对话没有别页持有，也不带已知版本。只有在途跟读可按版本略过正文。
     query = released.length
-      ? { root, ids }
+      ? { root, storeRoot: scope?.root, ids }
       : chatLoadQuery(
           root,
           ids,
           ids.filter(id => remoteBusy.has(id))
         ),
     data = await bridge("/api/chats/load", query, AbortSignal.timeout(20000));
-  if (chatsDir() !== root || !Array.isArray(data?.items)) return;
+  if (bootstrap.store !== scope || chatsDir() !== root || !Array.isArray(data?.items)) return;
   let current = false;
   for (const item of data.items) {
     if (

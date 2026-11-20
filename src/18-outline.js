@@ -3,13 +3,11 @@
 
 // ---------- 上下文计数：下一问会送出多少（估算），随输入、流式生成实时变；作答中改显本答这一轮的请求 ----------
 // 与真正发送时的拼法同源（系统提示 + 工具定义 + 上次撮要以来的往来 + 行迹摘要 + 草稿 + 案上待发的附件与引文），附件按入库时记下的字数估。
-// 作答中接口每回一轮就报一次实际的提示用量，那时显示它；一答之内撮要压掉往来，下一问的估算看不出来，本答的请求才看得出来。
-// 撮要刚做完、下一轮还没报数时，先按折叠后的估算显示（见 60-context.js 的 onSize），免得数字要等一轮才动
+// 作答中每轮先估这一轮送出的请求，接口有报提示用量再校正。一答之内撮要压掉往来，下一问的估算看不出来，本答的请求才看得出来。
 /** @param {Conversation} c */
-function contextEstimate(c, draft = "", pending = null) {
+function contextEstimate(c, draft = "", pending = null, profile = activeProfile(c)) {
   if (!c) return 0;
-  const profile = activeProfile(),
-    budget = inlineTextBudget(profile);
+  const budget = inlineTextBudget(profile);
   let n = 0;
   if (profile) {
     const tools = profile.tools !== false ? toolDefinitions(c, { profile }) : null;
@@ -59,7 +57,7 @@ function contextEstimate(c, draft = "", pending = null) {
   return Math.round(n);
 }
 let gaugeTimer = null;
-// 作答中显示本答这一轮请求的大小：接口报来的实际用量（见 30-rounds.js），撮要刚做完则先按折叠后的估算（见 60-context.js 的 onSize）。
+// 作答中每轮发送前先按装好的请求估算，随后有实测才校正（见 30-rounds.js）；撮要后的回落也不必等接口报数。
 // 一答之内撮要压掉较早的往来后，这个数会明显回落。空闲时仍估下一问——被撮掉的工具往来本就不随下一问重装，
 // 那个估算撮要前后不动（见 60-context.js 的 foldByModel），撮要有没有用只有看本答的请求才看得出
 function updateContextGauge() {
@@ -69,17 +67,18 @@ function updateContextGauge() {
   if (!c || view !== "chat") return gauge.classList.add("hidden");
   const draft = $("#chatInput").value,
     job = requestJob(c.id),
+    // 作答中沿用开工时的模型窗口；空闲时才按眼前所选的模型估下一问。
+    profile = job?.profile || activeProfile(c),
     live = Number(job?.promptTokens) || 0,
     n =
       live ||
       contextEstimate(
         c,
         draft,
-        draft || pendingAttachments.length || pendingQuote ? { text: draft, attachments: pendingAttachments, quote: pendingQuote } : null
+        draft || pendingAttachments.length || pendingQuote ? { text: draft, attachments: pendingAttachments, quote: pendingQuote } : null,
+        profile
       ),
-    // 作答中这一轮的量是那段作业按开工时的模型算的，窗口也照它：中途在菜单里换了模型，不至于拿另一家的窗口去比。
-    // 空闲时的估算才用眼前这段挑的模型
-    window = Number(((live && job?.profile) || activeProfile(c))?.contextWindow) || 0,
+    window = Number(profile?.contextWindow) || 0,
     heavy = window ? n >= window * 0.75 : n >= CONTEXT_HEAVY,
     share = window ? t`，占此模型窗口 ${formatTokens(window)} 的 ${Math.round((n / window) * 100)}%` : "",
     tail = heavy ? t("\n上下文已重，可撮要前文") : t("\n撮要前文");

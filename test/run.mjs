@@ -3,6 +3,7 @@
 // 用法：node test/run.mjs [文件名片段…]      例：node test/run.mjs memory side-notes
 import { spawn, spawnSync } from "node:child_process";
 import { connect, STAGE_DEBUG_PORT, PAGE } from "./lib.mjs";
+import { probeTestPort } from "./helpers/test-ports.mjs";
 import { existsSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -167,14 +168,16 @@ const runSpec = (file, env = {}) =>
     });
   });
 
-// 端口若已被别的进程占着（上次没退干净的假模型、手动起的桥接），用例会悄悄连到那个旧进程上，结果不可信：先查一遍
+// 端口若已被别的进程占着，用例可能悄悄连到旧进程。先试绑定，不用 HTTP 响应猜占用。
 for (const port of [BRIDGE_PORT, SECURITY_PORT, 8798, DEBUG_PORT, STAGE_DEBUG_PORT]) {
-  const busy = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1000) }).then(
-    () => true,
-    () => false
-  );
-  if (busy) {
-    console.error(`端口 ${port} 已被占用，请先关掉占着它的进程（上次的假模型 / 桥接 / 浏览器）再跑测试`);
+  try {
+    await probeTestPort(port);
+  } catch (error) {
+    if (error.code === "EADDRINUSE") {
+      console.error(`端口 ${port} 已被占用，请先关掉占着它的进程（上次的假模型 / 桥接 / 浏览器）再跑测试`);
+    } else {
+      console.error(`端口 ${port} 无法监听：${error.message}`);
+    }
     process.exit(2);
   }
 }

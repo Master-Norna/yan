@@ -4,13 +4,13 @@
 // 「关于滚动条·3f9a2c1b0e.json」；标题改了文件跟着改名，删对话就删文件。配置不在这里，在存储根的 配置.json
 // 收了尾的一答，思绪与帮手的经过可另存在 行迹/<短码>/ 里，以 cold.key 引用；对话文件仍保存正文等其余字段（见 src/01-store/35-cold.js）
 "use strict";
-const { sendJson, readJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
+const { sendJson, jsonRoute, errorText, writeAtomic, parseJsonText, readJsonFile } = require("./http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { expandHome, describeFsError: describe } = require("./work/paths.js");
 
-module.exports = function createChats({ chatsHome, onDelete = (/** @type {string} */ _id) => {} }) {
+module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete = (/** @type {string} */ _id) => {} }) {
   // 旧版的设置镜像：迁进来的目录里可能还躺着一份，读目录时跳过它
   const META_FILE = "设置.json",
     FILE_LIMIT = 256 * 1024 * 1024,
@@ -142,10 +142,9 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     }
   }
   // 整个目录读回来（给了 ids 就只读那几段：别处正在作答的，这边跟着看进度）。读不出的文件（别的东西、损坏了）跳过并报个数，不让一个坏文件拖垮整次启动
-  async function handleLoad(req, res) {
+  const handleLoad = route((body, _req, res) => {
     let home = chatsHome();
     try {
-      const body = await readJson(req);
       home = ensureDir(body.root);
       const items = [],
         seen = new Map(),
@@ -208,8 +207,8 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     } catch (error) {
       sendJson(res, 500, { error: `对话目录不可用：${describe(error, home)}` });
     }
-  }
-  const handleSave = jsonRoute(
+  });
+  const handleSave = route(
     async (body, req, res) => {
       const conversation = body.conversation;
       if (!conversation || typeof conversation !== "object" || !conversation.id) throw Error("缺少对话内容");
@@ -235,7 +234,8 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
       // 删了以后又存：保存时刻晚于墓碑才撤墓碑；不晚于墓碑的是迟到的旧保存，不写
       const tombstones = readTombstones(home);
       if (tombstones[id]) {
-        if (savedAt <= Number(tombstones[id])) return sendJson(res, 410, { error: "这段对话已在别处删除", deleted: true });
+        if (savedAt <= Number(tombstones[id]))
+          return sendJson(res, 410, { error: "这段对话已在别处删除", deleted: true, at: Number(tombstones[id]) });
         delete tombstones[id];
         writeTombstones(home, tombstones);
       }
@@ -246,7 +246,7 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     },
     error => `对话未能落盘：${describe(error)}`
   );
-  const handleDelete = jsonRoute(
+  const handleDelete = route(
     async body => {
       const id = String(body.id || "");
       if (!id) throw Error("缺少对话 id");
@@ -272,7 +272,7 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     error => `对话未能删除：${describe(error)}`
   );
   // 另存一答的行迹。同一份内容同一个 key，重写也一样；已删的对话不收（迟到的另存不该替它留个夹）
-  const handleTrailPut = jsonRoute(
+  const handleTrailPut = route(
     async body => {
       const home = ensureDir(body.root),
         id = String(body.id || ""),
@@ -287,7 +287,7 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
     error => `行迹未能另存：${describe(error)}`
   );
   // 取回几答的行迹；不在的不给（页面照旧缺着）
-  const handleTrailGet = jsonRoute(
+  const handleTrailGet = route(
     async body => {
       const home = ensureDir(body.root),
         dir = trailDir(home, String(body.id || "")),
@@ -305,7 +305,7 @@ module.exports = function createChats({ chatsHome, onDelete = (/** @type {string
   // 只记在内存里：桥接重启，作答的请求也断了，没什么可记；十五秒没来报到的（页面关了、崩了）就算松手
   const LEASE_MS = 15000,
     leases = new Map();
-  const handleLease = jsonRoute(
+  const handleLease = route(
     async body => {
       const owner = String(body.owner || "").slice(0, 80),
         ids = (Array.isArray(body.ids) ? body.ids : []).map(String).slice(0, 200),

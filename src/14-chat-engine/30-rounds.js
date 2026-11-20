@@ -72,7 +72,6 @@ async function runRounds(target, history, run) {
     // 开工前等着的那几步（装历史、起 MCP、断线稍候）里已按了停：中止在先，后面挂上的监听再也等不到，当场作罢
     signal.throwIfAborted();
     target.toolCalls = null;
-    target.usage = null;
     const roundStart = (tally.roundStart = target.content.length),
       thoughtStart = String(target.reasoning || "").length;
     if (!resumed) tally.replyStart = roundStart;
@@ -141,9 +140,6 @@ async function runRounds(target, history, run) {
     }
     resumed = 0; // 接续的次数按轮算：长活跑上几百轮，前面断过两回不该让后面再断就没得接
     if (target.usage) {
-      // 这一轮请求实际送出多少提示：右下角的「上下文」在作答中显示它（见 18-outline.js）；撮要压掉较早的往来后，
-      // 下一轮回来就会小下去。接口不报提示用量的，这里留 0，那边退回估算
-      if (inbox && Number(target.usage.prompt_tokens) > 0) inbox.promptTokens = Number(target.usage.prompt_tokens);
       tally.usageKnown = true;
       tally.roundOpen = false;
       for (const key of Object.keys(tally.usage)) tally.usage[key] += Number(target.usage[key] || 0);
@@ -331,10 +327,13 @@ function trimReply(target) {
  */
 async function readReply(profile, history, signal, overrides, target, retried = false, onOpen = null, onFrame = null) {
   target.thinkingBlocks = null;
+  target.usage = null;
   // 长活：这一答的工具往来快撑满窗口了，先压掉较早的几轮再发（见 14-chat-engine/60-context.js 的 keepInWindow）
   if (!retried) await keepInWindow(profile, history, signal, overrides, { target });
   if (blindProfiles.has(profile.id)) stripImages(history);
   dropStaleThoughts(history, profile);
+  // 每次发送前公布这份请求的估算，不沿用上一轮显示的实测。
+  overrides.onSize?.(requestSize(history, overrides));
   const response = await requestPatiently(profile, history, signal, overrides);
   if (!response.ok) {
     const message = await describeResponseError(response);
@@ -370,7 +369,10 @@ async function readReply(profile, history, signal, overrides, target, retried = 
   const sentAt = history.length,
     wrote = target.content.length,
     note = () => {
-      if (Number(target.usage?.prompt_tokens) > 0) overrides.seen = { at: sentAt, tokens: Number(target.usage.prompt_tokens) };
+      const tokens = Number(target.usage?.prompt_tokens);
+      if (!(tokens > 0) || !Number.isFinite(tokens)) return;
+      overrides.seen = { at: sentAt, tokens };
+      overrides.onSize?.(tokens);
     };
   return readSse(response, sink, { onFrame }).then(note, async error => {
     if (error.name === "AbortError") throw error;

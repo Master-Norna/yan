@@ -87,6 +87,8 @@ function chatSpillJson(c) {
 /** @param {Conversation} c */
 async function coldify(c) {
   if (!chatsOnline()) return;
+  const scope = bootstrap.store,
+    root = chatsDir();
   for (const m of everyMessage(c)) {
     if (m.cold) {
       if (!settledMessage(m) && warmMessages.has(m)) delete m.cold;
@@ -109,10 +111,10 @@ async function coldify(c) {
     try {
       const done = await bridgeJson(
         "/api/chats/trail/put",
-        `{"root":${JSON.stringify(chatsDir())},"id":${JSON.stringify(c.id)},"key":"${key}","piece":${json}}`,
+        `{"root":${JSON.stringify(root)},"storeRoot":${JSON.stringify(scope?.root || "")},"id":${JSON.stringify(c.id)},"key":"${key}","piece":${json}}`,
         AbortSignal.timeout(60000)
       );
-      if (done.skipped) return;
+      if (done.skipped || bootstrap.store !== scope || chatsDir() !== root) return;
     } catch {
       return;
     }
@@ -140,7 +142,8 @@ function warmConversation(c) {
 // 批量与单答共用一个读口；并发只共用交集里的 key，不漏掉后来另要的，也能接到读期间换上的消息对象。
 /** @param {Conversation} c @param {Message[]} messages */
 async function warmTrails(c, messages) {
-  const root = chatsDir();
+  const root = chatsDir(),
+    scope = bootstrap.store;
   if (!root) return 0;
   const address = key => JSON.stringify([root, c.id, key]),
     cold = messages.flatMap(m => {
@@ -151,7 +154,7 @@ async function warmTrails(c, messages) {
     missing = keys.filter(key => !warming.has(address(key)));
   if (!keys.length) return 0;
   if (missing.length) {
-    const read = bridge("/api/chats/trail/get", { root, id: c.id, keys: missing }, AbortSignal.timeout(60000));
+    const read = bridge("/api/chats/trail/get", { root, storeRoot: scope?.root, id: c.id, keys: missing }, AbortSignal.timeout(60000));
     for (const key of missing) {
       const slot = address(key);
       warming.set(
@@ -159,17 +162,19 @@ async function warmTrails(c, messages) {
         read
           .then(({ pieces }) => {
             const piece = pieces?.[key];
-            if (!piece) lostTrails.add(slot);
+            if (!piece && bootstrap.store === scope) lostTrails.add(slot);
             return piece;
           })
           .catch(() => undefined)
-          .finally(() => warming.delete(slot))
+          .finally(() => {
+            if (bootstrap.store === scope) warming.delete(slot);
+          })
       );
     }
   }
   const pieces = await Promise.all(keys.map(key => warming.get(address(key)))),
     byKey = new Map(keys.map((key, index) => [key, pieces[index]]));
-  if (chatsDir() !== root) return 0;
+  if (bootstrap.store !== scope || chatsDir() !== root) return 0;
   let ready = 0;
   for (const { m, key } of cold) {
     const piece = byKey.get(key);
@@ -200,22 +205,47 @@ function carryWarm(prev, next) {
     warmMessages.add(m);
   }
 }
-// 开着看的这段：除收起的纯思绪外，没接回的先取回来；接上再重画（正文、开着的差遣面板与旁注）。
-/** @param {Conversation} c */
-function warmInView(c) {
-  void warmTrails(
-    c,
-    everyMessage(c).filter(m => !unreadThought(m) || m.reasoningOpen)
-  ).then(ready => {
-    if (!ready) return;
+// 开着看的这段按批接回另存内容；收起的纯思绪等手动摊开时单独取。两路共用思绪的展示收口。
+/** @param {Conversation} c @param {Message|null} [thought] 手动展开的一答 */
+async function warmInView(c, thought = null) {
+  const scope = bootstrap.store,
+    root = chatsDir(),
+    messages = thought ? [thought] : everyMessage(c).filter(m => !unreadThought(m) || m.reasoningOpen),
+    thoughts = (thought ? [thought] : messages.filter(unreadThought)).map(m => ({ m, key: m.cold?.key }));
+  for (const { m } of thoughts) coldThoughtDetails(c, m)?.setAttribute("aria-busy", "true");
+  const ready = await warmTrails(c, messages);
+  if (bootstrap.store !== scope || chatsDir() !== root || !store.conversations.includes(c)) return;
+  let failed = false,
+    warn = false,
+    shown = false;
+  const stillHere = thoughts.length ? new Set(everyMessage(c)) : null;
+  for (const { m, key } of thoughts) {
+    // 可能已换根、跟读到新对象或收起；可以把旧答接回内存，不能改另一份答复的开合。
+    if (m.cold?.key !== key || !stillHere.has(m)) continue;
+    const details = coldThoughtDetails(c, m);
+    details?.removeAttribute("aria-busy");
+    if (!unreadThought(m)) shown ||= !!details;
+    else if (m.reasoningOpen) {
+      m.reasoningOpen = false;
+      failed = true;
+      if (details) {
+        setProcessDetails(details, false, false);
+        warn = true;
+      }
+    }
+  }
+  if (failed) saveStoreSoon();
+  if (warn) toast(t`${t("思绪")} 读取失败`);
+  if (!thought && ready) {
     // 旧版可能把帮手仍在执行的后台指令另存了：接回后补上入口与监听。
     rewatchBackground();
     renderClepsydra();
-    if (currentConversation() !== c || view !== "chat") return;
-    renderConversation(false);
-    renderHelperPanel();
-    if (sidePanelOpen()) renderSidePanel();
-  });
+  }
+  // 备份可能早已把正文接回，但画面仍是冷思绪壳；手动展开也要重画。
+  if (!(thought ? shown : ready) || currentConversation() !== c || view !== "chat") return;
+  if (!thought || c.messages.includes(thought)) renderConversation(false);
+  if (!thought) renderHelperPanel();
+  if (sidePanelOpen() && (!thought || currentThread()?.messages.includes(thought))) renderSidePanel();
 }
 // 帮手步骤的开合记在挪走的那一份里：动了就拿掉记号，下回存时这一答整份写回、再另存一份
 /** @param {Step} step */

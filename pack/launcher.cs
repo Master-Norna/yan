@@ -13,8 +13,33 @@ using System.Windows.Forms;
 
 class Launcher
 {
+    static bool CloseLog(StreamWriter log)
+    {
+        if (log == null) return false;
+        try { log.Dispose(); return true; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    static void Report(string message, MessageBoxIcon icon, bool noOpen)
+    {
+        // 冒烟用同一个入口，不开浏览器也不让错误弹框挡住退出码。
+        if (noOpen)
+        {
+            // 重定向的 stderr 也用 UTF-8，不随 Windows 的控制台代码页走。
+            try
+            {
+                using (StreamWriter stderr = new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)))
+                    stderr.WriteLine(message);
+            }
+            catch (IOException) { }
+        }
+        else MessageBox.Show(message, "言", MessageBoxButtons.OK, icon);
+    }
+
     static int Main(string[] args)
     {
+        bool noOpen = Array.IndexOf(args, "--no-open") >= 0;
         string root = AppDomain.CurrentDomain.BaseDirectory;
         string bundled = Path.Combine(root, "node");
         bool own = File.Exists(Path.Combine(bundled, "node.exe"));
@@ -32,46 +57,57 @@ class Launcher
             string path = Environment.GetEnvironmentVariable("PATH") ?? "";
             start.EnvironmentVariables["PATH"] = path.TrimEnd(';') + ";" + bundled;
         }
-        // 日志遇 I/O 错误仍可启动；比如另一实例还占着日志时，这一回仍在内存留末几行
+        // 文件日志可选。占用、只读、运行中写盘失败都不能打断桥接或内存尾行。
+        string logPath = Path.Combine(root, "桥接.log");
         StreamWriter log = null;
         try
         {
-            log = new StreamWriter(Path.Combine(root, "桥接.log"), false, new UTF8Encoding(false));
+            log = new StreamWriter(logPath, false, new UTF8Encoding(false));
             log.AutoFlush = true;
         }
-        catch (IOException) { }
+        catch (IOException) { CloseLog(log); log = null; }
+        catch (UnauthorizedAccessException) { CloseLog(log); log = null; }
         Queue<string> tail = new Queue<string>();
         DataReceivedEventHandler keep = delegate (object sender, DataReceivedEventArgs e)
         {
             if (e.Data == null) return;
             lock (tail)
             {
-                if (log != null) log.WriteLine(e.Data);
                 tail.Enqueue(e.Data);
                 if (tail.Count > 12) tail.Dequeue();
+                if (log != null)
+                {
+                    try { log.WriteLine(e.Data); }
+                    catch (IOException) { CloseLog(log); log = null; }
+                    catch (UnauthorizedAccessException) { CloseLog(log); log = null; }
+                }
             }
         };
         int code;
+        bool logComplete;
         try
         {
-            Process bridge = Process.Start(start);
-            bridge.OutputDataReceived += keep;
-            bridge.ErrorDataReceived += keep;
-            bridge.BeginOutputReadLine();
-            bridge.BeginErrorReadLine();
-            bridge.WaitForExit();
-            code = bridge.ExitCode;
+            using (Process bridge = Process.Start(start))
+            {
+                bridge.OutputDataReceived += keep;
+                bridge.ErrorDataReceived += keep;
+                bridge.BeginOutputReadLine();
+                bridge.BeginErrorReadLine();
+                bridge.WaitForExit(); // 无超时的重载会一并等两个输出回调收完。
+                code = bridge.ExitCode;
+            }
         }
         catch (Win32Exception)
         {
-            MessageBox.Show("未找到 node：包里的 node 文件夹不见了，系统也没装 Node.js。请重新解压言的便携包，或装 Node.js 22 以上（https://nodejs.org）。", "言", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Report("未能启动 Node.js。请重新解压言的便携包，或确认系统已装 Node.js 22 以上（https://nodejs.org）。", MessageBoxIcon.Error, noOpen);
             return 1;
         }
+        finally { logComplete = CloseLog(log); }
         if (code != 0)
         {
-            string text;
-            lock (tail) text = string.Join("\n", tail.ToArray());
-            MessageBox.Show("桥接意外退出（退出码 " + code + "），页面此时已连不上桥接。最后的输出：\n\n" + text + "\n\n全文见 " + Path.Combine(root, "桥接.log"), "言", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            string text = string.Join("\n", tail.ToArray());
+            Report("桥接未能启动或意外退出（退出码 " + code + "）。最后的输出：\n\n" + text +
+                (logComplete ? "\n\n全文见 " + logPath : ""), MessageBoxIcon.Warning, noOpen);
         }
         return code;
     }

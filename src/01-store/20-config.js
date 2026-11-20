@@ -353,13 +353,13 @@ function mergeConfig3(base, mine, theirs, unsettled = null, keepMemory = null) {
 }
 // 磁盘上的一份配置换进来：设置、模型、记忆、草稿；不动对话暂存和浏览器里的删除记号。
 // base：记作基准的那一份（默认就是换进来的这份；合并时是对方那份，自己改的仍算「改过」，写下去之前丢不了）
-function adoptConfig(config, savedAt, base = "") {
+function adoptConfig(config, savedAt, base = "", { preserveEditor = true } = {}) {
   const meta = normalizeStoreData({ ...config, conversations: [] });
   // 设置页里正编着哪一类记忆：编辑框的 input 监听攥着换配置前 store.memory 里的那个对象，
   // 而换进来的是解析出来的副本（同一类、另一份）。换完得把活的这个接回去，否则接着打的字
   // 落在脱了队的对象上、下一次存盘又抹掉。`!changed` 直接换进来与两边都改过三方合并，两条路都经过这里，
   // 所以接在这一处，不只补合并那条分支
-  const editing = editingMemoryCategory(),
+  const editing = preserveEditor ? editingMemoryCategory() : null,
     live = editing ? store.memory?.items?.find(item => item.category === editing) : null;
   store.settings = meta.settings;
   store.profiles = meta.profiles;

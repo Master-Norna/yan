@@ -196,7 +196,8 @@ test("备份先读同一份冷行迹：视图共用读取，接回后仍重画�
     "bgWatches",
     `open: id => { currentId = id; }`,
     `install: (read, paint, download) => {
-      chatsDir = () => 'test-chats'; bridge = read; downloadHref = download;
+      chatsDir = () => 'test-chats'; bootstrap.store = { root: 'test-store' };
+      bridge = read; downloadHref = download;
       toast = holdAwake = renderClepsydra = () => {};
       renderConversation = () => paint('chat'); renderHelperPanel = () => paint('helper');
       sidePanelOpen = () => true; renderSidePanel = () => paint('side');
@@ -225,7 +226,7 @@ test("备份先读同一份冷行迹：视图共用读取，接回后仍重画�
   const exporting = f.exportData(false);
   f.open(disk.id);
   f.warmInView(disk);
-  assert.deepEqual(calls, [["/api/chats/trail/get", { root: "test-chats", id: disk.id, keys: ["old-trail"] }]]);
+  assert.deepEqual(calls, [["/api/chats/trail/get", { root: "test-chats", storeRoot: "test-store", id: disk.id, keys: ["old-trail"] }]]);
   assert.deepEqual(painted, [], "读取未完成时不提前重画");
   releaseTrail({ pieces: { "old-trail": piece } });
   await exporting;
@@ -237,6 +238,104 @@ test("备份先读同一份冷行迹：视图共用读取，接回后仍重画�
   } finally {
     releaseWatch?.({ superseded: true });
   }
+});
+
+function thoughtView() {
+  const f = load([
+    "warmInView",
+    "warmConversation",
+    "store",
+    `install: (read, find, record) => {
+      chatsDir = () => 'test-chats'; bridge = read;
+      const query = document.querySelector;
+      document.querySelector = selector => selector.includes('[data-cold-reasoning]') ? find(selector) : query(selector);
+      saveStoreSoon = () => record('save'); toast = text => record(text);
+      renderConversation = () => record('chat'); renderSidePanel = () => record('side');
+      renderHelperPanel = rewatchBackground = renderClepsydra = () => {};
+      setProcessDetails = (details, open) => { details.open = open; };
+      return () => { document.querySelector = query; };
+    }`,
+    `open: id => { currentId = id; view = 'chat'; }`,
+    `switchRoot: root => { bootstrap.store = { root }; }`,
+    `side: id => { sideThreadId = id; sidePanelOpen = () => !!id; }`
+  ]);
+  const c = conversation(),
+    m = c.messages[1];
+  delete m.reasoning;
+  delete m.steps;
+  m.cold = { key: "thought", reasoningOnly: true };
+  m.reasoningOpen = m.reasoningTouched = true;
+  f.store.conversations = [c];
+  f.open(c.id);
+  const attrs = new Set(),
+    box = { open: true, setAttribute: key => attrs.add(key), removeAttribute: key => attrs.delete(key) },
+    events = [],
+    selectors = [],
+    calls = [];
+  let release;
+  const reset = f.install(
+    (_route, { keys }) => {
+      calls.push(keys);
+      return new Promise(resolve => (release = pieces => resolve({ pieces })));
+    },
+    selector => {
+      selectors.push(selector);
+      return box;
+    },
+    event => events.push(event)
+  );
+  return { f, c, m, attrs, box, events, calls, selectors, reset, release: pieces => release(pieces) };
+}
+
+for (const manual of [false, true])
+  test(`${manual ? "手动" : "自动"}展开冷思绪：缺分片即清忙态、收起并提示`, async t => {
+    const { f, c, m, attrs, box, events, release, reset, selectors } = thoughtView();
+    t.after(reset);
+    if (manual) {
+      // 手动从旁注入口取回，同一套收口，但不能去正文找同编号的块。
+      c.messages = c.messages.filter(item => item !== m);
+      c.threads.push({ id: "side", anchor: { messageId: "u1" }, messages: [m] });
+      f.side("side");
+    }
+    const loading = f.warmInView(c, manual ? m : null);
+    assert.ok(attrs.has("aria-busy"));
+    release({});
+    await loading;
+    assert.equal(m.reasoningOpen, false);
+    assert.equal(box.open, false);
+    assert.equal(attrs.has("aria-busy"), false);
+    assert.deepEqual(events, ["save", "思绪 读取失败"]);
+    assert.ok(selectors.every(selector => selector.startsWith(manual ? "#sideMessages " : "#messages ")));
+  });
+
+for (const change of ["收起", "换消息", "换对话", "换存储根"])
+  test(`回报迟到：${change}后不提示或重画另一份思绪`, async t => {
+    const { f, c, m, attrs, box, events, release, reset } = thoughtView();
+    t.after(reset);
+    f.switchRoot("first");
+    const loading = f.warmInView(c);
+    if (change === "收起") m.reasoningOpen = box.open = false;
+    if (change === "换消息") c.messages[1] = { ...m };
+    if (change === "换对话") f.open("another-c");
+    if (change === "换存储根") f.switchRoot("second"); // 聊天目录恰好共用，同样不接旧回报。
+    release({});
+    await loading;
+    assert.deepEqual(events, change === "换对话" ? ["save"] : []);
+    if (change === "收起") assert.equal(attrs.has("aria-busy"), false);
+    if (change === "换消息" || change === "换存储根") assert.equal(c.messages[1].reasoningOpen, true);
+  });
+
+test("备份已经接回思绪时，手动展开只重画，不再读取分片", async t => {
+  const { f, c, m, attrs, events, calls, release, reset } = thoughtView();
+  t.after(reset);
+  const backup = f.warmConversation(c);
+  release({ thought: { reasoning: "确已接回" } });
+  await backup;
+  await f.warmInView(c, m);
+  assert.equal(m.reasoning, "确已接回");
+  assert.equal(attrs.has("aria-busy"), false);
+  assert.deepEqual(calls, [["thought"]]);
+  assert.deepEqual(events, ["chat"]);
 });
 
 test("挪走的步骤里带的附件仍算在用", () => {

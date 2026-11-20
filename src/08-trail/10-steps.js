@@ -271,6 +271,13 @@ function stepInView(id) {
     null
   );
 }
+// 用活消息对象认眼前的思绪壳，编号相同的另一版本或已切走的旁注不算。
+/** @param {Conversation} c @param {Message} m */
+function coldThoughtDetails(c, m) {
+  if (view !== "chat" || currentConversation() !== c) return null;
+  const host = c.messages.includes(m) ? "#messages" : sidePanelOpen() && currentThread()?.messages.includes(m) ? "#sideMessages" : "";
+  return host ? $(`${host} [data-message="${CSS.escape(m.id)}"] .reasoning[data-cold-reasoning]`) : null;
+}
 // 行迹：步骤的开合与看全、思绪跟随滚动、改动摘要、思绪与行迹的开合——正文、旁注、差遣面板三处画的是同一种卡，点法也同一套
 function bindTrailEvents() {
   const panes = ["#messages", "#sideMessages", "#helperPanelBody"].map(selector => $(selector));
@@ -378,8 +385,7 @@ function bindTrailEvents() {
     const id = details.closest("[data-message]")?.dataset.message,
       side = !!details.closest("#sideMessages"),
       c = currentConversation(),
-      messages = () => (side ? currentThread()?.messages : currentConversation()?.messages),
-      message = messages()?.find(item => item.id === id);
+      message = (side ? currentThread()?.messages : c?.messages)?.find(item => item.id === id);
     if (!message) return setProcessDetails(details, nextOpen);
     const reasoning = details.classList.contains("reasoning"),
       unread = reasoning && details.hasAttribute("data-cold-reasoning");
@@ -387,27 +393,7 @@ function bindTrailEvents() {
     message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
     saveStoreSoon();
     setProcessDetails(details, nextOpen, !unread);
-    if (!unread || !nextOpen || !c) return;
-    details.setAttribute("aria-busy", "true");
-    void warmTrails(c, [message]).then(() => {
-      details.removeAttribute("aria-busy");
-      // 回来时可能已切页、翻版本或换旁注。只重画仍在眼前的那份，不替用户重新摊开已收起的块。
-      const showing = view === "chat" && currentConversation() === c && messages()?.includes(message);
-      if (unreadThought(message)) {
-        if (!message.reasoningOpen || !store.conversations.includes(c)) return;
-        message.reasoningOpen = false;
-        saveStoreSoon();
-        if (showing) {
-          const host = side ? "#sideMessages" : "#messages";
-          setProcessDetails($(`${host} [data-message="${CSS.escape(id)}"] .reasoning[data-cold-reasoning]`), false, false);
-          toast(t`${t("思绪")} 读取失败`);
-        }
-        return;
-      }
-      if (!showing) return;
-      if (side) renderSidePanel();
-      else renderConversation(false);
-    });
+    if (unread && nextOpen && c) void warmInView(c, message);
   };
   for (const pane of panes) pane.addEventListener("click", onProcessToggle);
 }

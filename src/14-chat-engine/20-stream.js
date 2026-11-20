@@ -18,8 +18,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
     reading: false,
     roundStart: 0,
     steerTimer: 0,
-    // 本答眼下的请求有多大（token）：接口每回一轮报实际用量（见 30-rounds.js），撮要刚做完时先由折叠后的估算顶上
-    // （见 60-context.js 的 onSize）。作答中右下角的计数显示它——撮要压掉往来后这个数随之回落（见 18-outline.js）
+    // 作答中的上下文计数：每轮先估算，接口报了提示用量再校正（见 30-rounds.js 与 18-outline.js）。
     promptTokens: 0
   };
   requestJobs.set(conversation.id, job);
@@ -27,7 +26,6 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
   renderHistory();
   const started = performance.now(),
     spentBefore = resume ? Number(assistant.durationMs) || 0 : 0;
-  const gaugeTicker = conversation.id === currentId ? setInterval(updateContextGauge, 600) : null;
   // 行迹题头的用时边做边走：长指令跑着时没有新字进来、不会重画，另起一只每秒一跳的钟。续写接着此前的用时走，不从零起。
   // 已用的时长跟着钟一并记下、随存盘落下：页面半途崩了，续写时接的是崩前的数，而不是上一截收尾时的旧数
   assistant.startedAt = Date.now() - spentBefore;
@@ -115,10 +113,11 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
         setJobLabel(conversation, job, busy ? t("正删繁就简") : "");
         refreshSteps(assistant);
       },
-      // 撮要换了这一答的往来：本答的请求大小随之变了，右下角的计数立即按折叠后的估算更新（见 18-outline.js），
-      // 不必等下一轮接口报来实际用量（见 30-rounds.js）
+      // 装好一轮、收到实测或撮要改了往来时，都更新同一个作答中读数。
       onSize: n => {
-        job.promptTokens = Number(n) || 0;
+        if (job.promptTokens === n) return;
+        job.promptTokens = n;
+        if (view === "chat" && currentId === conversation.id && requestJob(conversation.id) === job) updateContextGauge();
       },
       // 放不下的是这一问之前的对话：压成摘要落成分隔（下一问也用得上）；只重装 history 的旧前缀，后面已递上的回报与本答往来仍保留
       compactHead: async signal => {
@@ -178,7 +177,6 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       assistant.error = bridgeErrorText(error.message);
     }
   } finally {
-    if (gaugeTicker) clearInterval(gaugeTicker);
     if (clock) clearInterval(clock);
     assistant.durationMs = spentBefore + Math.round(performance.now() - started);
     delete assistant.startedAt;

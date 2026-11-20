@@ -40,20 +40,90 @@ function chatsOnline() {
 function chatsDir() {
   return bootstrap.work?.chats || "";
 }
+// 两个根可以有同一个 id。新暂存用 IndexedDB 的复合键，不覆盖旧版字符串键。
+const LEGACY_CHAT_DIR_KEY = "yan-chat-legacy-dir";
+let legacyChatDir;
+function rememberLegacyChatDir() {
+  if (legacyChatDir !== undefined) return;
+  legacyChatDir = chatsDir();
+  try {
+    const known = localStorage.getItem(LEGACY_CHAT_DIR_KEY),
+      oldRoot = localStorage.getItem(STORE_ROOT_KEY);
+    if (known !== null) legacyChatDir = known;
+    else {
+      if (oldRoot && oldRoot !== bootstrap.store?.root)
+        legacyChatDir = oldRoot.replace(/[\\/]$/, "") + (oldRoot.includes("\\") ? "\\" : "/") + "对话";
+      localStorage.setItem(LEGACY_CHAT_DIR_KEY, legacyChatDir);
+    }
+  } catch {}
+}
+const chatSpillKey = (dir, id) => (dir ? [dir, id] : id);
+const spillChatId = row => (Array.isArray(row.id) ? row.id[1] : row.id);
+const spillBelongs = (row, dir) => (row.dir || legacyChatDir || "") === dir;
+// 均在读写事务里看当前行，而不是拿发请求时见过的缓存或时间戳猜。
+function visitChatSpills(table, dir, id, visit) {
+  const keys = dir ? [chatSpillKey(dir, id), id] : [id];
+  for (const key of keys) {
+    const request = table.get(key);
+    request.onsuccess = () => {
+      const row = request.result;
+      if (row && spillBelongs(row, dir)) visit(row, key);
+    };
+  }
+}
+function clearSavedChatSpills(dir, written) {
+  if (!written.size) return Promise.resolve();
+  rememberLegacyChatDir();
+  return openStateDb()
+    .then(db =>
+      dbBatch(db, CHATS_STORE_NAME, table => {
+        for (const [id, json] of written)
+          visitChatSpills(table, dir, id, (row, key) => {
+            // 冷正文完整的暂存不等同于磁盘上只有 cold.key 的版本。
+            if (row.json === json || spillCoveredBy(row, json)) table.delete(key);
+          });
+      })
+    )
+    .catch(() => {});
+}
+// 合并结果可能还有别页的改动，不一定字节相等。只认有共同起点、且暂存的改动已被这份正本吸收的情形。
+function spillCoveredBy(row, json) {
+  if (!row.baseJson || !json) return false;
+  try {
+    const spill = normalizeConversation(JSON.parse(row.json)),
+      disk = normalizeConversation(JSON.parse(json));
+    const cold = new Set(
+      everyMessage(disk)
+        .filter(m => m.cold)
+        .map(m => m.id)
+    );
+    if (
+      everyMessage(spill).some(
+        m => cold.has(m.id) && (m.reasoning || m.steps?.some(step => step.sub?.reasoning || step.sub?.steps?.length))
+      )
+    )
+      return false;
+    const merged = mergeConversation(spill, disk, JSON.parse(row.baseJson), false);
+    return JSON.stringify(merged) === JSON.stringify(disk);
+  } catch {
+    return false;
+  }
+}
 function chatDeletePending(id) {
   const dir = pendingChatDeleteDirs.get(id);
   return pendingChatDeletes.has(id) && (!dir || dir === chatsDir());
 }
 const CHAT_DELETE_KEY = "yan-chat-delete:";
+const chatDeleteKey = (id, dir = chatsDir()) => CHAT_DELETE_KEY + JSON.stringify([dir, id]);
 function hasChatDeleteMarker(id) {
   try {
-    return !!localStorage.getItem(CHAT_DELETE_KEY + id);
+    return !!localStorage.getItem(chatDeleteKey(id));
   } catch {
     return false;
   }
 }
 function saveChatDeleteMarker(id) {
-  const key = CHAT_DELETE_KEY + id;
+  const key = chatDeleteKey(id);
   try {
     if (pendingChatDeletes.has(id))
       localStorage.setItem(key, JSON.stringify({ at: pendingChatDeletes.get(id), dir: pendingChatDeleteDirs.get(id) }));
@@ -81,13 +151,19 @@ function readChatDeleteMarkers(legacy) {
       const id = key.slice(CHAT_DELETE_KEY.length);
       try {
         const marker = JSON.parse(localStorage.getItem(key));
+        const scoped = id.startsWith("[") ? JSON.parse(id) : null;
+        if (scoped ? scoped[0] !== chatsDir() : (marker?.dir || legacyChatDir) !== chatsDir()) continue;
+        const chatId = scoped ? scoped[1] : id;
+        if (!scoped && hasChatDeleteMarker(chatId)) continue;
         if (Number.isFinite(marker?.through) && marker.through > 0) {
-          discardedChatSpills.set(id, marker);
-          pendingChatDeletes.delete(id);
+          discardedChatSpills.set(chatId, { ...marker, dir: chatsDir() });
+          pendingChatDeletes.delete(chatId);
+          pendingChatDeleteDirs.delete(chatId);
         } else if (Number.isFinite(marker?.at)) {
-          pendingChatDeletes.set(id, marker.at);
-          if (marker.dir) pendingChatDeleteDirs.set(id, marker.dir);
-        }
+          pendingChatDeletes.set(chatId, marker.at);
+          pendingChatDeleteDirs.set(chatId, chatsDir());
+        } else continue;
+        if (!scoped && saveChatDeleteMarker(chatId)) localStorage.removeItem(key), i--;
       } catch {}
     }
   } catch {}
@@ -146,7 +222,8 @@ function drainChatWrites() {
   for (const id of pendingChatWrites.keys()) {
     if (chatDeletePending(id) || chatWritePromises.has(id)) continue;
     const task = writeConversation(id).finally(() => {
-      if (chatWritePromises.get(id) === task) chatWritePromises.delete(id);
+      if (chatWritePromises.get(id) !== task) return;
+      chatWritePromises.delete(id);
       if (pendingChatWrites.has(id) && !chatDeletePending(id)) drainChatWrites();
     });
     chatWritePromises.set(id, task);
@@ -155,17 +232,21 @@ function drainChatWrites() {
 async function writeConversation(id) {
   /** @type {"disk"|"browser"|"page"|null} */
   let result = null;
-  while (pendingChatWrites.has(id) && !chatDeletePending(id)) {
+  const scope = bootstrap.store,
+    dir = chatsDir(),
+    sameRoot = () => bootstrap.store === scope && chatsDir() === dir;
+  while (sameRoot() && pendingChatWrites.has(id) && !chatDeletePending(id)) {
     // 先等、后 stringify。生成中三秒一份，收尾与普通编辑最多等一秒多；离页另有同步入 IndexedDB 的兜底，不靠这里抢时间。
     const interval = busyHere(id) ? CHAT_STREAM_DISK_INTERVAL : CHAT_DISK_INTERVAL,
       wait = unloading ? 0 : interval - (performance.now() - (chatDiskWrites.get(id) || -interval));
     if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
-    if (chatDeletePending(id)) break;
+    if (!sameRoot() || chatDeletePending(id)) break;
     const queued = pendingChatWrites.get(id);
     pendingChatWrites.delete(id);
     let conversation = store.conversations.find(item => item.id === id);
     if (!conversation) continue;
     await coldify(conversation);
+    if (!sameRoot()) return null;
     // 另存的那一会儿里可能被删、被并进来的新份换掉
     conversation = store.conversations.find(item => item.id === id);
     if (!conversation || chatDeletePending(id)) continue;
@@ -175,7 +256,7 @@ async function writeConversation(id) {
       if (!pendingChatWrites.has(id)) dirtyChatIds.delete(id);
       continue;
     }
-    const pending = { json, hash, savedAt: nextChatStamp(id), title: conversation.title, dir: chatsDir() };
+    const pending = { json, hash, savedAt: nextChatStamp(id), title: conversation.title, dir };
     activeChatWrites.set(id, pending);
     chatDiskWrites.set(id, performance.now());
     // 目录在线先落盘；离线或落盘不成就暂存。导入用返回值区分已落盘、浏览器事务已提交、仍只在本页。
@@ -186,19 +267,21 @@ async function writeConversation(id) {
       try {
         await bridgeJson(
           "/api/chats/save",
-          `{"root":${JSON.stringify(pending.dir)},"savedAt":${pending.savedAt},"base":${chatDiskStamps.get(id) || 0},"conversation":${pending.json}}`,
+          `{"root":${JSON.stringify(pending.dir)},"storeRoot":${JSON.stringify(scope?.root || "")},"savedAt":${pending.savedAt},"base":${chatDiskStamps.get(id) || 0},"conversation":${pending.json}}`,
           AbortSignal.timeout(60000)
         );
+        if (!sameRoot()) return null;
         chatDiskStamps.set(id, pending.savedAt);
         chatBases.set(id, pending.json);
         chatSaveWarned = false;
         if (!chatDeletePending(id)) {
           result = "disk";
           // pagehide 已把最新状态写进表时，旧的在途请求即使成功也不能把那份离页兜底删掉。
-          if (!unloading && !pendingChatWrites.has(id))
-            await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+          if (!unloading && !pendingChatWrites.has(id)) await clearSavedChatSpills(dir, new Map([[id, pending.json]]));
+          if (!sameRoot()) return null;
         }
       } catch (error) {
+        if (!sameRoot()) return null;
         // 目录里那份比这边上次见过的新（别处写过）：两份并起来，下一轮带着新的时间戳再写
         if (error.status === 409 && error.data?.item && !chatDeletePending(id)) {
           activeChatWrites.delete(id);
@@ -210,7 +293,7 @@ async function writeConversation(id) {
         if (/已在别处删除/.test(String(error.message))) {
           activeChatWrites.delete(id);
           store.conversations = store.conversations.filter(item => item.id !== id);
-          forgetConversation(id);
+          forgetConversation(id, Number(error.data?.at) || pending.savedAt);
           if (currentId === id) {
             currentId = null;
             render();
@@ -222,9 +305,15 @@ async function writeConversation(id) {
       }
     if (spilled && !chatDeletePending(id))
       try {
-        await stateStoreRequest(CHATS_STORE_NAME, "readwrite", db =>
-          db.put({ id, savedAt: pending.savedAt, json: chatSpillJson(conversation), baseJson: chatBases.get(id), dir: pending.dir })
-        );
+        const record = {
+          id: chatSpillKey(dir, id),
+          savedAt: pending.savedAt,
+          json: chatSpillJson(conversation),
+          baseJson: chatBases.get(id),
+          dir
+        };
+        await keepChatSpills([record]);
+        if (!sameRoot()) return null;
         result = "browser";
         if (!chatsOnline()) chatSaveWarned = false;
         else if (diskError && !chatSaveWarned) {
@@ -232,6 +321,7 @@ async function writeConversation(id) {
           toast(t`对话未能落盘，先暂存在浏览器里：${String(diskError.message || diskError).slice(0, 60)}`);
         }
       } catch {
+        if (!sameRoot()) return null;
         if (!chatSaveWarned) {
           chatSaveWarned = true;
           toast(t("本机对话存储失败，请先导出备份"));
@@ -244,7 +334,7 @@ async function writeConversation(id) {
       if (!pendingChatWrites.has(id)) dirtyChatIds.delete(id);
     }
   }
-  return chatDeletePending(id) ? null : result;
+  return !sameRoot() || chatDeletePending(id) ? null : result;
 }
 // 磁盘与本机暂存分别收尾。删暂存只动这一回之前的旧份；另一页后来存的不能连带清掉。
 async function clearDiscardedChatSpills() {
@@ -254,25 +344,23 @@ async function clearDiscardedChatSpills() {
     newer = [],
     unresolved = new Set();
   if (!discarded.length) return true;
+  rememberLegacyChatDir();
   try {
     await dbBatch(await openStateDb(), CHATS_STORE_NAME, table => {
-      for (const [id, marker] of discarded) {
-        const request = table.get(id);
-        request.onsuccess = () => {
-          const row = request.result;
-          if (!row || (row.dir && row.dir !== dir)) return;
-          if ((Number(row.savedAt) || 0) <= marker.through) table.delete(id);
+      for (const [id, marker] of discarded)
+        visitChatSpills(table, dir, id, (row, key) => {
+          if ((Number(row.savedAt) || 0) <= marker.through) table.delete(key);
           else newer.push(row);
-        };
-      }
+        });
     });
     if (bootstrap.work !== work) return false;
     let complete = true;
     for (const row of newer) {
-      const current = store.conversations.find(c => c.id === row.id);
+      const id = spillChatId(row),
+        current = store.conversations.find(c => c.id === id);
       // 可能已经在读浏览器暂存的同时开工；不能用旧对象覆盖，留给重开读回。
-      if (!current || chatDeletePending(row.id) || busyHere(row.id)) {
-        unresolved.add(row.id);
+      if (!current || chatDeletePending(id) || busyHere(id)) {
+        unresolved.add(id);
         complete = false;
         continue;
       }
@@ -280,18 +368,18 @@ async function clearDiscardedChatSpills() {
         const saved = normalizeConversation(JSON.parse(row.json)),
           base = row.baseJson ? JSON.parse(row.baseJson) : null,
           currentJson = chatJson(current),
-          clean = chatHashes.get(row.id) === hashText(currentJson),
+          clean = chatHashes.get(id) === hashText(currentJson),
           merged = clean && base ? mergeConversation(saved, current, base) : mergeConversation(current, saved, base);
         if (currentJson === chatJson(merged)) continue;
         carryWarm(current, merged);
         store.conversations[store.conversations.indexOf(current)] = merged;
-        chatStamps.set(row.id, Math.max(chatStamps.get(row.id) || 0, Number(row.savedAt) || 0));
-        markDirty(row.id);
-        flushConversations([row.id]);
+        chatStamps.set(id, Math.max(chatStamps.get(id) || 0, Number(row.savedAt) || 0));
+        markDirty(id);
+        flushConversations([id]);
         renderHistory();
-        if (currentId === row.id && view === "chat") renderConversation(false);
+        if (currentId === id && view === "chat") renderConversation(false);
       } catch {
-        unresolved.add(row.id);
+        unresolved.add(id);
         complete = false;
       }
     }
@@ -299,7 +387,7 @@ async function clearDiscardedChatSpills() {
       if (discardedChatSpills.get(id) !== marker || unresolved.has(id)) continue;
       discardedChatSpills.delete(id);
       // 别页可能已对同一段发起新删除；只撤自己写下的这一份。
-      const key = CHAT_DELETE_KEY + id;
+      const key = chatDeleteKey(id);
       try {
         if (localStorage.getItem(key) === JSON.stringify(marker)) localStorage.removeItem(key);
       } catch {}
@@ -335,7 +423,7 @@ async function deleteConversationStorage(id) {
   try {
     await chatWritePromises.get(id)?.catch(() => {});
     if (bootstrap.store !== scope || chatsDir() !== root || !chatsOnline()) return;
-    const answer = await bridge("/api/chats/delete", { root, id, at }, AbortSignal.timeout(20000));
+    const answer = await bridge("/api/chats/delete", { root, storeRoot: scope?.root, id, at }, AbortSignal.timeout(20000));
     if (bootstrap.store !== scope || chatsDir() !== root || pendingChatDeletes.get(id) !== at) return;
     if (!deleteConfirmed(answer)) return;
     kept = answer.kept === true;
@@ -348,10 +436,10 @@ async function deleteConversationStorage(id) {
     // 没收到明确裁定，重连后补删。
   } finally {
     if (bootstrap.store === scope && chatsDir() === root) {
+      deletedChatIds.delete(id);
       clearChatSaveState(id);
       activeChatWrites.delete(id);
     }
-    deletedChatIds.delete(id);
   }
   if (kept) await syncChatsWithDisk();
 }
@@ -384,10 +472,20 @@ function clearChatSaveState(id) {
   chatBases.delete(id);
 }
 // 磁盘已判这段被删：调用方移出对话，这里清本页保存状态、草稿与浏览器暂存；不在这里清原件。
-function forgetConversation(id) {
+function forgetConversation(id, through) {
   clearChatSaveState(id);
   delete store.drafts?.[id];
-  void stateStoreRequest(CHATS_STORE_NAME, "readwrite", db => db.delete(id)).catch(() => {});
+  const dir = chatsDir();
+  rememberLegacyChatDir();
+  void openStateDb()
+    .then(db =>
+      dbBatch(db, CHATS_STORE_NAME, table =>
+        visitChatSpills(table, dir, id, (row, key) => {
+          if ((Number(row.savedAt) || 0) <= through) table.delete(key);
+        })
+      )
+    )
+    .catch(() => {});
 }
 // 目录里有一份比这边新的（别处写过）。这边手上的已落过盘、之后没再动过，直接换上；
 // 否则（这边改过、正写着、或只暂存在浏览器里）两份并起来再写回去，谁写的都不丢。返回换上的那份；quiet：调用方自己重画
@@ -429,7 +527,7 @@ function catchUpConversation(item, { quiet = false } = {}) {
 let mergeNoticed = false;
 // 共同起点上没改的字段取对方，只有一边改了的取改动；同一字段都改了时本机胜出。
 // 按 id 合并消息和分支，避免「改标题」把另一处的置顶覆盖掉。
-function mergeConversation(c, theirs, base = null) {
+function mergeConversation(c, theirs, base = null, live = busyHere(c.id)) {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const merge = (ours, other, old) => {
     if (same(ours, other)) return ours;
@@ -456,8 +554,7 @@ function mergeConversation(c, theirs, base = null) {
     // 旧版暂存没有共同起点：沿用「目录字段优先、本机新增条目接上」的规则。
     return base ? ours : other;
   };
-  const mine = busyHere(c.id);
-  if (mine) {
+  if (live) {
     // 作答中的消息对象要留在原位；独立改动的标题、置顶等字段仍可接收。
     if (base)
       for (const key of Object.keys(theirs))
@@ -487,13 +584,17 @@ function mergeConversation(c, theirs, base = null) {
 // 定向读只带已经见过的磁盘版本；本页暂存的时间不算。
 function chatLoadQuery(root, ids, knownIds = ids) {
   const known = Object.fromEntries(knownIds.filter(id => chatDiskStamps.get(id) > 0).map(id => [id, chatDiskStamps.get(id)]));
-  return Object.keys(known).length ? { root, ids, known } : { root, ids };
+  const query = { root, storeRoot: bootstrap.store?.root, ids };
+  return Object.keys(known).length ? { ...query, known } : query;
 }
 // 跟上目录里的这几段：页面切回前台时看的那段。只查指定对话，磁盘版本未变时可不传正文。
 async function catchUpFromDisk(ids) {
   if (!chatsOnline() || !ids.length) return;
+  const scope = bootstrap.store,
+    root = chatsDir();
   try {
-    const data = await bridge("/api/chats/load", chatLoadQuery(chatsDir(), ids), AbortSignal.timeout(8000));
+    const data = await bridge("/api/chats/load", chatLoadQuery(root, ids), AbortSignal.timeout(8000));
+    if (bootstrap.store !== scope || chatsDir() !== root) return;
     for (const item of data.items || [])
       if (item.savedAt > (chatDiskStamps.get(item.id) || 0) && !runningElsewhere(item.id) && !chatDeletePending(item.id))
         catchUpConversation(item);
@@ -511,7 +612,14 @@ function sweepSomeConversations() {
   const others = store.conversations.filter(c => c.id !== currentId),
     ids = [currentId, others.length ? others[sweepTurn++ % others.length].id : null].filter(Boolean),
     idle = window.requestIdleCallback || (fn => setTimeout(fn, 200));
-  for (const id of ids) idle(() => flushConversations([id]), { timeout: 5000 });
+  const scope = bootstrap.store;
+  for (const id of ids)
+    idle(
+      () => {
+        if (bootstrap.store === scope) flushConversations([id]);
+      },
+      { timeout: 5000 }
+    );
 }
 // 页面要关了：不再新发普通 fetch（卸载时它不可靠），而是在一个同步开启的 IndexedDB 事务里把所有未落稳的最新状态兜住；
 // 包括已经从待写表拿走、正在 fetch 的那份。暂存带上最近见到的磁盘基准，重开时据此合并，不凭离页时刻判胜。
@@ -523,28 +631,46 @@ function flushOnUnload() {
   writeMeta({ disk: false });
   if (configSaveTimer) saveConfigNow();
   keepSentConfigs();
-  const db = stateDb;
-  if (!db) return;
-  const records = [];
+  if (!stateDb) return;
+  try {
+    const records = collectChatSpills();
+    if (!records.length) return;
+    const table = stateDb.transaction(CHATS_STORE_NAME, "readwrite").objectStore(CHATS_STORE_NAME);
+    for (const record of records) putChatSpill(table, record);
+  } catch {}
+}
+function collectChatSpills() {
+  const dir = chatsDir(),
+    records = [];
   for (const conversation of store.conversations) {
-    if (chatDeletePending(conversation.id)) continue;
-    const json = chatJson(conversation),
-      hash = hashText(json);
-    if (!pendingChatWrites.has(conversation.id) && !activeChatWrites.has(conversation.id) && chatHashes.get(conversation.id) === hash)
-      continue;
+    const id = conversation.id;
+    if (chatDeletePending(id)) continue;
+    const hash = hashText(chatJson(conversation));
+    if (!pendingChatWrites.has(id) && !activeChatWrites.has(id) && chatHashes.get(id) === hash) continue;
     records.push({
-      id: conversation.id,
-      savedAt: nextChatStamp(conversation.id),
+      id: chatSpillKey(dir, id),
+      savedAt: nextChatStamp(id),
       json: chatSpillJson(conversation),
-      baseJson: chatBases.get(conversation.id),
-      dir: chatsDir()
+      baseJson: chatBases.get(id),
+      dir
     });
   }
-  if (!records.length) return;
-  try {
-    const table = db.transaction(CHATS_STORE_NAME, "readwrite").objectStore(CHATS_STORE_NAME);
-    for (const record of records) table.put(record);
-  } catch {}
+  return records;
+}
+function putChatSpill(table, record) {
+  const request = table.get(record.id);
+  request.onsuccess = () => {
+    // 较旧的失败回执可能比别页暂存更晚抵达；不能用旧快照盖掉它。
+    if (!request.result || Number(request.result.savedAt) <= record.savedAt) table.put(record);
+  };
+}
+function keepChatSpills(records) {
+  if (!records.length) return Promise.resolve();
+  return openStateDb().then(db =>
+    dbBatch(db, CHATS_STORE_NAME, table => {
+      for (const record of records) putChatSpill(table, record);
+    })
+  );
 }
 function saveStore() {
   clearTimeout(saveTimer);
@@ -575,6 +701,7 @@ async function hydrateStore() {
   freshBrowser = !local;
   localSeeded = !!local && !local.managed;
   // 老记录有纯 id 的，也有 [id, 删除时刻]；第一次接到目录时补记它的来源。
+  rememberLegacyChatDir();
   readChatDeleteMarkers(local?.pendingDeletes || []);
   store.conversations = store.conversations.filter(c => !chatDeletePending(c.id));
   // 开页时的配置就是 localStorage 里那份：记下指纹，没改动时不去写 配置.json
@@ -606,13 +733,12 @@ async function hydrateStore() {
       const stamp = (localWins ? local?.revision : Number(legacy?.revision)) || Date.now();
       try {
         await dbBatch(db, CHATS_STORE_NAME, s => {
-          s.clear();
           store.conversations = store.conversations.filter(c => !chatDeletePending(c.id));
           for (const c of store.conversations) {
             const json = chatJson(c);
             chatStamps.set(c.id, stamp);
             chatHashes.set(c.id, hashText(json));
-            s.put({ id: c.id, savedAt: stamp, json });
+            s.put({ id: chatSpillKey(chatsDir(), c.id), savedAt: stamp, json, dir: chatsDir() });
           }
         });
         await dbRequest(db, STATE_STORE_NAME, "readwrite", s => s.delete(STATE_RECORD_KEY)).catch(() => {});
@@ -620,39 +746,79 @@ async function hydrateStore() {
       writeMeta();
     }
   }
-  if (local?.split || !store.conversations.length) {
-    let records = [];
-    try {
-      records = await dbRequest(db, CHATS_STORE_NAME, "readonly", s => s.getAll());
-    } catch {}
-    const known = new Set(store.conversations.map(c => c.id));
-    for (const record of records) {
-      const marker = discardedChatSpills.get(record.id);
-      if (
-        (record.dir && chatsDir() && record.dir !== chatsDir()) ||
-        chatDeletePending(record.id) ||
-        (marker && (!marker.dir || marker.dir === chatsDir()) && (Number(record.savedAt) || 0) <= marker.through)
-      )
-        continue;
-      const c = adoptRecord(record);
-      if (c && !known.has(c.id)) store.conversations.push(c);
-    }
-  }
+  if (local?.split || !store.conversations.length) await readChatSpills();
   // 尽量让浏览器把这份本机数据视作持久存储；不支持或不准时静默退回普通 IndexedDB
   try {
     const persistence = navigator.storage?.persist?.();
     persistence?.catch?.(() => {});
   } catch {}
 }
+// 旧字符串键按已知归属收进复合键，同一事务移动。不能留下先前带 dir 的旧行，等新版被清掉后再次读回。
+function migrateChatSpillKeys(table, records, dir) {
+  if (!dir) return;
+  const scoped = new Map(records.filter(row => Array.isArray(row.id) && spillBelongs(row, dir)).map(row => [spillChatId(row), row]));
+  for (let i = 0; i < records.length; i++) {
+    const row = records[i],
+      id = row.id;
+    if (typeof id !== "string" || !spillBelongs(row, dir) || chatDeletePending(id) || discardedChatSpills.has(id)) continue;
+    const existing = scoped.get(id);
+    let migrated = { ...row, id: chatSpillKey(dir, id), dir };
+    if (existing) {
+      try {
+        const [older, newer] = Number(existing.savedAt) >= Number(row.savedAt) ? [row, existing] : [existing, row];
+        const a = normalizeConversation(JSON.parse(older.json)),
+          b = normalizeConversation(JSON.parse(newer.json));
+        const base = newer.baseJson || older.baseJson;
+        const merged = base ? mergeConversation(b, a, JSON.parse(base), false) : mergeConversation(a, b, null, false);
+        migrated = { ...migrated, savedAt: newer.savedAt, json: JSON.stringify(merged), baseJson: base };
+        Object.assign(existing, migrated);
+      } catch {
+        continue;
+      }
+    }
+    records[i] = migrated;
+    table.put(migrated);
+    table.delete(id);
+  }
+}
+// 开页与接用已有根共用：只读属于这一根的行。旧版键和新键若并存，取较晚的一份。
+async function readChatSpills() {
+  const scope = bootstrap.store,
+    dir = chatsDir();
+  try {
+    const records = await stateStoreRequest(CHATS_STORE_NAME, "readwrite", table => {
+      const request = table.getAll();
+      request.onsuccess = () => migrateChatSpillKeys(table, request.result, dir);
+      return request;
+    });
+    if (bootstrap.store !== scope || chatsDir() !== dir) return false;
+    const known = new Set(store.conversations.map(c => c.id)),
+      spills = new Map();
+    for (const record of records) {
+      const id = spillChatId(record),
+        marker = discardedChatSpills.get(id);
+      if (!spillBelongs(record, dir) || known.has(id) || chatDeletePending(id) || (marker && Number(record.savedAt) <= marker.through))
+        continue;
+      if (!spills.has(id) || Number(spills.get(id).savedAt) <= Number(record.savedAt)) spills.set(id, record);
+    }
+    for (const record of spills.values()) {
+      const c = adoptRecord(record);
+      if (c) store.conversations.push(c);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 // 桥接断了又接上（重启、闪断），或开页那一回目录没读成：配置与对话目录各再对一次。开页那一回还没对过的不算（boot 自己来）
 function resyncWithDisk() {
   if (!chatsLoaded && !chatsBroken) return;
-  void syncConfigWithDisk().then(syncChatsWithDisk);
+  void syncConfigWithDisk().then(() => syncChatsWithDisk());
 }
 // 与对话目录合一次：开页接上桥接时、桥接中途断了又接上时都来一遍。
 // 先处理待补删：明确删除的移去，明确保留的重读磁盘新版，未裁定的不采用旧快照。
 // 其余对话按磁盘基准合并；本机独有的或合并后有差的推回，只清已和磁盘对齐的暂存及裁定范围内的旧暂存。
-async function syncChatsWithDisk() {
+async function syncChatsWithDisk({ spillsReady = true } = {}) {
   const root = chatsDir(),
     scope = bootstrap.store,
     work = bootstrap.work;
@@ -660,7 +826,7 @@ async function syncChatsWithDisk() {
   chatsSyncing = work;
   const sameRoot = () => bootstrap.store === scope && bootstrap.work === work && chatsDir() === root;
   try {
-    const data = await bridge("/api/chats/load", { root }, AbortSignal.timeout(120000));
+    const data = await bridge("/api/chats/load", { root, storeRoot: scope?.root }, AbortSignal.timeout(120000));
     if (!sameRoot()) return;
     if (!Array.isArray(data?.items)) throw Error("对话目录未读全");
     // 快照是补删前的。名单上的段只认补删裁定；保留的也要重读，因为新版可能是在取快照之后才写成的。
@@ -671,14 +837,18 @@ async function syncChatsWithDisk() {
       // 当前页刚删、却还有旧保存正在收尾的，由 deleteConversationStorage 等完后亲自再删。
       if (deletedChatIds.has(id)) continue;
       try {
-        const answer = await bridge("/api/chats/delete", { root, id, at: at || undefined }, AbortSignal.timeout(20000));
+        const answer = await bridge(
+          "/api/chats/delete",
+          { root, storeRoot: scope?.root, id, at: at || undefined },
+          AbortSignal.timeout(20000)
+        );
         if (!sameRoot()) return;
         if (!deleteConfirmed(answer)) continue;
         if (!answer.kept) {
           decisions.set(id, null);
           continue;
         }
-        const fresh = await bridge("/api/chats/load", { root, ids: [id] }, AbortSignal.timeout(20000));
+        const fresh = await bridge("/api/chats/load", { root, storeRoot: scope?.root, ids: [id] }, AbortSignal.timeout(20000));
         if (!sameRoot()) return;
         const item =
           Array.isArray(fresh?.items) && fresh.items.find(item => item?.id === id && item.conversation?.id === id && item.savedAt > at);
@@ -723,7 +893,7 @@ async function syncChatsWithDisk() {
         if (!item) {
           // 别处删了、这边又没再动过：跟着删，不推回去让它复活；这边删后又说过话的，照推（桥接那头按时间认）
           if (Number(gone[c.id]) > stamp && !unsaved && !busy) {
-            forgetConversation(c.id);
+            forgetConversation(c.id, Number(gone[c.id]));
             changed = true;
             dropped += 1;
             return null;
@@ -766,21 +936,7 @@ async function syncChatsWithDisk() {
         changed = true;
         if (c.id === currentId) currentReplaced = true;
       }
-    for (const id of settled)
-      if (!discardedChatSpills.has(id)) {
-        const written = chatBases.get(id);
-        // 「页面和磁盘一致」不表示别页刚写进浏览器的暂存也一致。
-        void openStateDb()
-          .then(db =>
-            dbBatch(db, CHATS_STORE_NAME, table => {
-              const request = table.get(id);
-              request.onsuccess = () => {
-                if (request.result?.json === written && (!request.result.dir || request.result.dir === root)) table.delete(id);
-              };
-            })
-          )
-          .catch(() => {});
-      }
+    void clearSavedChatSpills(root, new Map([...settled].filter(id => !discardedChatSpills.has(id)).map(id => [id, chatBases.get(id)])));
     if (push.size) flushConversations(push, { force: true });
     writeMeta({ disk: false });
     if (changed) {
@@ -793,7 +949,7 @@ async function syncChatsWithDisk() {
       }
     }
     // 显示磁盘正版不等 IndexedDB；清扫则等这批可能有新引用的暂存查完。
-    void settleAttachmentStore(clearDiscardedChatSpills());
+    void settleAttachmentStore(clearDiscardedChatSpills().then(ready => ready && spillsReady));
   } catch (error) {
     if (!sameRoot()) return;
     // 巡检里重试也没读成的不再说一遍

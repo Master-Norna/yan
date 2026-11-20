@@ -238,12 +238,32 @@ check(
   "moving storage refreshes the environment status for the new root",
   await evalJs(`document.querySelector("#envStatus")?.textContent.includes(${JSON.stringify(MAC ? "系统工具" : "尚未准备")})`)
 );
+// 在副本中改同一 ID，再新存一段；接用原根时这两项都不能串过去。
+const copyChats = await evalJs(`(() => {
+  const c = __yanState().conversations.find(c => c.id === "stored-chat");
+  c.title = "副本中改过的同 ID";
+  __yanState().conversations.push({ ...structuredClone(c), id: "copy-only", title: "只在副本有的对话" });
+  return __yanState().conversations;
+})()`);
+for (const c of copyChats) {
+  const r = await fetch(PAGE + "api/chats/save", {
+    method: "POST",
+    body: JSON.stringify({ root: native(`${moved}/对话`), conversation: c })
+  });
+  if (!r.ok) throw Error(await r.text());
+}
 await evalJs(`document.querySelector('[data-tab="general"]').click(); true`);
 await evalJs(
   `(i => { i.value = ${JSON.stringify(native(TMP))}; i.dispatchEvent(new Event("change")); })(document.querySelector("#settingStore")); true`
 );
-// 等搬回来的那一次真正收尾（输入框是测试自己改的，不能拿它当信号）
-await waitFor(`(document.querySelector("#toast")?.textContent || "").includes("原有的数据")`, 10000).catch(() => {});
+// 等桥接和页面都换完（输入框是测试自己改的，不能拿它当信号）。
+await waitFor(`localStorage.getItem("yan-store-root") === ${JSON.stringify(native(HOME))}`, 10000);
+check(
+  "adopting the original root neither merges the copy's same-ID chat nor imports its unique chat",
+  (await evalJs(`__yanState().conversations.length === 1 && __yanState().conversations[0].title === "数据库里的长对话"`)) &&
+    files().length === 1 &&
+    filesAt(`${moved}/对话`).some(name => name.startsWith("只在副本有的对话·"))
+);
 check(
   "moving back uses the original storage and leaves the copy in place",
   !(await evalJs(`document.querySelector("#settingStore").value`)).toLowerCase().includes("elsewhere") && existsSync(`${moved}/配置.json`)
