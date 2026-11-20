@@ -59,16 +59,15 @@ const open = async id => {
   await waitFor(`!!document.querySelector('[data-conversation="${id}"] .history-open')`);
   await evalJs(`document.querySelector('[data-conversation="${id}"] .history-open').click(); true`);
 };
-// 单独的浏览器源：本例有意挂住行迹响应，不能与后续用例共享浏览器的同源连接。
-const app = PAGE.replace("127.0.0.1", "localhost");
-const navigate = async (suffix = "") => {
-  const url = app + suffix;
+// 换到独立的源从磁盘冷读，避开上一页的 IndexedDB 离页暂存，也隔开有意挂起的行迹响应。
+const coldPage = PAGE.replace("127.0.0.1", "localhost") + "?thoughts-on-demand";
+const navigate = async url => {
   await send("Page.navigate", { url });
   await waitFor(`location.href === ${JSON.stringify(url)} && typeof document.querySelector('#openLibrary')?.onclick === 'function'`);
 };
 let trailInterceptor;
 try {
-  await navigate();
+  await navigate(PAGE);
   await open(id);
   await evalJs(`${mine}.pinned = true; __yanSave(); true`);
   const code = createHash("sha1").update(id).digest("hex").slice(0, 10);
@@ -107,7 +106,7 @@ try {
     })()`
   });
   trailInterceptor = identifier;
-  await navigate("?thoughts-on-demand");
+  await navigate(coldPage);
   await open(id);
   await waitFor(`${msg("opened")}.reasoning?.length === ${reasoning.length} && ${msg("legacy")}.reasoning?.length === ${reasoning.length}`);
   const eager = (await evalJs("trailReads")).flat();
@@ -214,6 +213,6 @@ try {
   // 测试器复用同一个浏览器目标；这一用例的 CDP 注入和挂起的读回不能带到下一页。
   if (trailInterceptor) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: trailInterceptor }).catch(() => {});
   await send("Page.navigate", { url: "about:blank" }).catch(() => {});
-  await send("Storage.clearDataForOrigin", { origin: new URL(app).origin, storageTypes: "all" }).catch(() => {});
+  await send("Storage.clearDataForOrigin", { origin: new URL(coldPage).origin, storageTypes: "all" }).catch(() => {});
   close();
 }

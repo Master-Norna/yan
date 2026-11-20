@@ -65,8 +65,6 @@ const tryRm = target => {
     rmSync(target, { recursive: true, force: true, maxRetries: 2 });
   } catch {}
 };
-tryRm(TMP);
-mkdirSync(TMP, { recursive: true });
 const children = [];
 const start = (cmd, args, extra = {}) => {
   const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], ...extra });
@@ -180,6 +178,9 @@ for (const port of [BRIDGE_PORT, SECURITY_PORT, 8798, DEBUG_PORT, STAGE_DEBUG_PO
     process.exit(2);
   }
 }
+// 端口占用时须原样退出，别清掉正在跑的那一轮的浏览器资料与诊断文件。
+tryRm(TMP);
+mkdirSync(TMP, { recursive: true });
 try {
   const wants = name => !only.length || only.some(o => name.includes(o));
   // 桥接安全检查：单独一个桥接实例，不需要浏览器
