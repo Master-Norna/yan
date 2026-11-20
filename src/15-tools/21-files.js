@@ -395,14 +395,21 @@ async function loadLedger(conversation, signal, role = "main") {
 function ledgerNote(conversation, role = "main", profile = null, ledger = ledgers.get(conversation.id)) {
   if (!ledger) return "";
   const { text, lines, partial } = ledger,
-    tokens = estimateText(text),
     budget = ledgerBudget(profile);
   let shown = text;
-  if (tokens > budget) {
-    // 按 token 比例截到预算内，落在行尾
-    const at = Math.floor((text.length * budget) / tokens),
-      end = text.lastIndexOf("\n", at);
-    shown = text.slice(0, end > 0 ? end : at);
+  if (estimateText(text) > budget) {
+    // 汉英密度可以前后不同：按这段前缀自身的用量二分找截点，再退到行尾（首行放不下才行内截）。
+    let lo = 0,
+      hi = Math.min(text.length - 1, budget * 4);
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (estimateText(text.slice(0, mid)) <= budget) lo = mid;
+      else hi = mid - 1;
+    }
+    const end = text.lastIndexOf("\n", lo);
+    // 行内截取时别把表情等由两个 UTF-16 码元组成的字符截成半个。
+    const split = /[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(text.slice(lo - 1, lo + 1));
+    shown = text.slice(0, end > 0 ? end : lo - Number(split));
   }
   const shownLines = shown.split("\n").length,
     cut = partial || shown.length < text.length;
