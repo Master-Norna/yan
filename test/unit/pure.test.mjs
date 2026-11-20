@@ -221,6 +221,16 @@ test("isReadOnlyCommand：开发与系统检查免确认，只放行纯展示管
   assert.equal(f.isReadOnlyCommand("rm -rf ."), false);
   assert.equal(f.isReadOnlyCommand("cat a > b"), false);
 });
+test("isReadOnlyCommand：回车也算断句，不拿只读名头夹带第二条指令", () => {
+  // PowerShell 把单独一个 CR 当换行：`a\rb` 真跑两条。以前只挡 \n，CR 就能把删改藏在只读名下
+  assert.equal(f.isReadOnlyCommand("Get-Content a.txt\rRemove-Item -Force .\\important.txt"), false);
+  assert.equal(f.isReadOnlyCommand("Get-ChildItem\rRemove-Item -Recurse -Force .\\src"), false);
+  assert.equal(f.isReadOnlyCommand("git status\rgit checkout -- ."), false);
+  // CRLF 本来就该挡，别因为加了 CR 反而放过
+  assert.equal(f.isReadOnlyCommand("Get-Content a.txt\r\nRemove-Item .\\x"), false);
+  // 单行照旧是只读
+  assert.equal(f.isReadOnlyCommand("Get-Content a.txt"), true);
+});
 test("clampLines：默认只露前 10 行，full 时全给", () => {
   const text = Array.from({ length: 14 }, (_, i) => `l${i}`).join("\n");
   const c = f.clampLines(text, false);

@@ -310,7 +310,10 @@ const READ_ONLY_COMMAND =
     /^(?:Select-Object|Select-String|Where-Object|Sort-Object|Format-Table|Format-List|Out-String|ConvertTo-Json|Measure-Object|Group-Object|findstr|grep|head|tail|wc)\b/i;
 function isReadOnlyCommand(command) {
   const text = String(command || "").trim();
-  if (/[;&<>`\n{}]|\$\(|\|\|/.test(text) || /-(?:ComputerName|CimSession|Session|Credential)\b/i.test(text)) return false;
+  // 断句的字符都不算只读。回车与换行一样要挡：PowerShell 把单独一个 CR 也当换行
+  // （`a\rb` 是两条语句），漏了它，一条删改指令就能藏在「只读」的名头下跑——问而后行里免确认，
+  // 旁注里更是只认这个判据（旁注不请示、不转后台）。
+  if (/[;&<>`\r\n{}]|\$\(|\|\|/.test(text) || /-(?:ComputerName|CimSession|Session|Credential)\b/i.test(text)) return false;
   // git log / diff 带 --output 会写文件，--ext-diff 会跑外部程序：都不算只读
   if (/--output\b|--ext-diff\b/i.test(text)) return false;
   // 读着不放的（Get-Content -Wait、tail -f）会一直挂到超时：照样请示
