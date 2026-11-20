@@ -40,12 +40,15 @@ const CMD =
   String.raw`(?:${SHELL}${PREFIX})?`;
 // 带引号的命令名要两头都有引号（& "reg.exe" delete）：rg "start|shutdown" src 里的 |shutdown" 是搜字。
 // args 是非跟不可的参数，不写就只认命令名到此为止；后面贴着 | 或 ) 的不算，(start|shutdown) 多半是一段正则
+// 子命令同样可能被引号包住：PowerShell 与 sh 都会把 "add" 还原成 add 交给程序，
+// 而规则按原文匹配，一字不差的 reg add 拦得住、reg "add" 就漏了。引号可选，但两头要配对
+// （半拉的引号本来就跑不起来，不必替它开脱）；每个 cmd() 用一个自己的组名，拼进别的正则时才不会撞。
+let cmdQuoteSeq = 0;
 const cmd = (names, args = "") => {
   const name = String.raw`(?:${names})(?:\.exe|\.com)?`;
-  return new RegExp(
-    String.raw`${CMD}(?:(?<=["'])${name}["']|${name})${args ? String.raw`\s+(?:${args})` : String.raw`(?=[\s;}]|$)`}`,
-    "im"
-  );
+  if (!args) return new RegExp(String.raw`${CMD}(?:(?<=["'])${name}["']|${name})(?=[\s;}]|$)`, "im");
+  const quoted = `sub${++cmdQuoteSeq}`;
+  return new RegExp(String.raw`${CMD}(?:(?<=["'])${name}["']|${name})\s+(?<${quoted}>["']?)(?:${args})\k<${quoted}>`, "im");
 };
 // cmdlet 带连字符，不会是正则里的一个词，后面贴着什么都算：$(Stop-Computer)、Stop-Computer|x、powershell -c "Stop-Computer"
 const cmdlet = (/** @type {string} */ names) => new RegExp(String.raw`${CMD}(?:${names})(?=[\s;|&)}"']|$)`, "im");
