@@ -6,12 +6,24 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
-const { jsonRoute, requestSignal, writeAtomic, readJsonFile } = require("./http.js");
+const { createHash } = require("node:crypto");
+const { jsonRoute, requestSignal, writeAtomic, readJsonFile, stamp } = require("./http.js");
 
 // setTimeout 至多等这么久（约 24.8 天），再远的到时候再排一回
 const MAX_DELAY = 2 ** 31 - 1;
 // 页面的长等：这么久没有新的就空手回，页面随即再等——顺带让它重新看一眼先前跳过的（那时那段对话别处正在答）
 const WAIT_MS = 60000;
+const RETRY_MS = 5000;
+
+/** @typedef {{ id: string, to: string, step: string, note: string, due: number, every?: number, created: number }} Timer */
+/** @typedef {{ seq: number, timers: Timer[] }} Book */
+// 一约一时刻只有一个投递号；前缀与旧版的随机号区分，周期的不同次不会相撞。
+/** @param {Timer} timer */
+const firedId = ({ id, to, created, due }) =>
+  `f-${createHash("sha256")
+    .update(JSON.stringify([id, to, created, due]))
+    .digest("base64url")
+    .slice(0, 36)}`;
 
 /** @param {{ home: () => string, known: (id: string) => boolean, route?: typeof jsonRoute }} options */
 module.exports = function createTimers({ home, known, route = jsonRoute }) {
@@ -21,35 +33,75 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   const waiters = new Set();
 
   // ---------- 到点的那一回：落盘、等、认领 ----------
-  /** @param {Record<string, any>} fired */
-  function post(fired) {
-    const full = { id: `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), ...fired };
+  const firedFile = id => path.join(firedDir(), `${id}.json`);
+  function firedNames() {
+    try {
+      return fs.readdirSync(firedDir());
+    } catch {
+      return [];
+    }
+  }
+  function forgetClaim(file) {
+    try {
+      fs.rmSync(file, { force: true });
+    } catch {} // 清理不影响已认领的回报；下回读到有效约簿时可再清
+  }
+  // 约簿还排着这一回时，正本和认领凭据都能证明已投递。不能把读盘错误当成没投过。
+  /** @param {string} file @returns {{ next?: number } | null} */
+  function receipt(file) {
+    for (const saved of [file, `${file}.taken`]) {
+      try {
+        return JSON.parse(fs.readFileSync(saved, "utf8")).timer;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+    return null;
+  }
+  /** @param {Timer} timer @param {number} now */
+  function post(timer, now) {
+    const id = firedId(timer),
+      file = firedFile(id),
+      posted = receipt(file);
+    // 周期的下一回沿用已发出的时刻，不能在补写约簿时悄悄改掉页面收到的 next。
+    if (posted) return posted.next;
+    const { due, every, step, note } = timer,
+      next = every ? due + every * (1 + Math.floor((now - due) / every)) : undefined;
     fs.mkdirSync(firedDir(), { recursive: true });
-    writeAtomic(path.join(firedDir(), `${full.id}.json`), JSON.stringify(full));
+    writeAtomic(
+      file,
+      JSON.stringify({
+        id,
+        at: now,
+        to: timer.to,
+        timer: { id: timer.id, step, note, due, late: now - due, ...(every ? { every, next } : {}) }
+      })
+    );
     for (const wake of [...waiters]) wake();
+    return next;
   }
   function pending() {
-    let names = [];
-    try {
-      names = fs.readdirSync(firedDir()).filter(name => name.endsWith(".json"));
-    } catch {}
-    return names
+    return firedNames()
+      .filter(name => name.endsWith(".json"))
       .map(name => readJsonFile(path.join(firedDir(), name)))
       .filter(Boolean)
       .sort((a, b) => a.at - b.at);
   }
-  // 认领：改名成功的才算拿到，再删；几页同时认领同一回，只有一页改名得手
+  // 改名成功的才算拿到；已过了约簿这一关就可删，否则留凭据，重启也不会重新投递这一回。
   function take(ids) {
-    const taken = [];
+    sync();
+    const taken = [],
+      open = new Set(book.timers.map(firedId));
     for (const id of ids) {
       if (!/^[\w-]{1,40}$/.test(id)) continue;
-      const file = path.join(firedDir(), `${id}.json`),
-        claimed = `${file}.${process.pid}.taken`;
+      const file = firedFile(id),
+        claimed = `${file}.taken`;
       try {
+        const item = JSON.parse(fs.readFileSync(file, "utf8"));
         fs.renameSync(file, claimed);
-        taken.push(JSON.parse(fs.readFileSync(claimed, "utf8")));
+        taken.push(item);
+        if (!open.has(id)) forgetClaim(claimed);
       } catch {}
-      fs.rmSync(claimed, { force: true });
     }
     return taken;
   }
@@ -80,61 +132,96 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   const handleTake = route(body => ({ fired: take(Array.isArray(body.ids) ? body.ids.map(String) : []) }));
 
   // ---------- 约好的时刻 ----------
-  /** @type {{ seq: number, timers: Array<{ id: string, to: string, step: string, note: string, due: number, every?: number, created: number }> }} */
+  /** @type {Book} */
   let book = { seq: 0, timers: [] },
     bookAt = "";
+  /** @type {Map<string, number>} 只挪重试时刻，不改原约的 due */
+  const retryAt = new Map();
   // 约.json 随存储根：换了存储位置，读那边的一份重排，不把这边的带过去盖掉它
   function sync() {
     if (bookAt === bookFile()) return;
     bookAt = bookFile();
+    retryAt.clear();
     const saved = readJsonFile(bookAt);
     book = Array.isArray(saved?.timers) ? { seq: Number(saved.seq) || 0, timers: saved.timers } : { seq: 0, timers: [] };
+    if (Array.isArray(saved?.timers)) {
+      // 桥接也可能恰好退在约簿已写、旧凭据还没清的时候。只在确实读到了约簿时裁定。
+      const open = new Set(book.timers.map(timer => `${firedId(timer)}.json.taken`));
+      for (const name of firedNames())
+        if (/^f-[\w-]{36}\.json\.taken$/.test(name) && !open.has(name)) forgetClaim(path.join(firedDir(), name));
+    }
     arm();
     for (const wake of [...waiters]) wake();
   }
   let armed = null;
-  function save() {
+  /** @param {Book} next @param {Timer[]} retired */
+  function save(next, retired = []) {
     fs.mkdirSync(home(), { recursive: true });
-    writeAtomic(bookFile(), JSON.stringify({ 言: "候 · 约好的时刻", ...book }, null, 1));
+    writeAtomic(bookFile(), JSON.stringify({ 言: "候 · 约好的时刻", ...next }, null, 1));
+    book = next;
+    for (const timer of retired) {
+      retryAt.delete(timer.id);
+      forgetClaim(`${firedFile(firedId(timer))}.taken`);
+    }
   }
+  /** @param {Timer} timer */
+  const readyAt = timer => Math.max(timer.due, retryAt.get(timer.id) ?? timer.due);
   function arm() {
     clearTimeout(armed);
     if (!book.timers.length) return;
-    const next = Math.min(...book.timers.map(timer => timer.due));
+    const next = book.timers.reduce((at, timer) => Math.min(at, readyAt(timer)), Infinity);
     armed = setTimeout(fire, Math.min(MAX_DELAY, Math.max(0, next - Date.now())));
     armed.unref?.();
   }
-  // 到点的各落一回给那段对话；隔一阵再叫的排到此后头一个时刻（睡过去的几回不补，只记迟了多久）
+  /** @param {Timer[]} timers @param {string} reason @param {unknown} error */
+  function retry(timers, reason, error) {
+    if (timers.some(timer => !retryAt.has(timer.id))) console.warn(`[${stamp()}] 候 · ${reason}，稍后重试`, error);
+    const at = Date.now() + RETRY_MS;
+    for (const timer of timers) retryAt.set(timer.id, at);
+  }
+  // 逐约投递：一回没写成不耽误别的。周期落一回，下一次排在实际投递后（睡过去的几回不补）。
   function fire() {
-    sync();
-    const now = Date.now();
-    let changed = false;
-    for (const timer of [...book.timers]) {
-      if (timer.due > now) continue;
-      changed = true;
-      // 那段对话已删了（别处删的，这边没来得及取消）：不叫，也不再排
-      if (!known(timer.to)) {
-        book.timers = book.timers.filter(item => item !== timer);
-        continue;
-      }
-      const due = timer.due;
-      if (timer.every) timer.due += timer.every * Math.max(1, Math.ceil((now - timer.due + 1) / timer.every));
-      else book.timers = book.timers.filter(item => item !== timer);
-      // next：隔一阵再叫的下一回（页面据它改签上的时刻）
-      post({
-        to: timer.to,
-        timer: {
-          id: timer.id,
-          step: timer.step,
-          note: timer.note,
-          due,
-          late: now - due,
-          ...(timer.every ? { every: timer.every, next: timer.due } : {})
+    try {
+      sync();
+      const now = Date.now(),
+        /** @type {Timer[]} */
+        timers = [],
+        /** @type {Timer[]} */
+        retired = [];
+      for (const timer of book.timers) {
+        if (readyAt(timer) > now) {
+          timers.push(timer);
+          continue;
         }
-      });
+        try {
+          // 对话已删的不叫，也不再排。
+          const next = known(timer.to) ? post(timer, now) : undefined;
+          if (next !== undefined) timers.push({ ...timer, due: next });
+          retired.push(timer);
+        } catch (error) {
+          retry([timer], `${timer.id} 到点记录未能写成`, error);
+          timers.push(timer);
+        }
+      }
+      if (retired.length)
+        try {
+          save({ ...book, timers }, retired);
+        } catch (error) {
+          retry(retired, "约簿未能保存", error);
+        }
+    } finally {
+      arm();
     }
-    if (changed) save();
-    arm();
+  }
+  /** @param {Timer} timer */
+  function liveTimer(timer) {
+    // 簿上仍可能是旧一回，但页面已经认领并显示了 next。查询沿用已投递的凭据，不把签拨回过去。
+    if (timer.due <= Date.now() || retryAt.has(timer.id))
+      try {
+        const posted = receipt(firedFile(firedId(timer)));
+        if (posted) return posted.next === undefined ? null : { ...timer, due: posted.next };
+      } catch {} // 读不到凭据，不因此把仍在簿上的约说成已了结
+    return timer;
   }
   const handleSet = route(body => {
     sync();
@@ -143,18 +230,18 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
       every = Number(body.every) || 0;
     if (!to) throw Error("缺少对话");
     if (!Number.isFinite(due)) throw Error("时刻无效");
-    if (every && every < 1000) throw Error("every 至少 1 秒");
-    const timer = {
-      id: `t${++book.seq}`,
-      to,
-      step: String(body.step || ""),
-      note: String(body.note || "").slice(0, 2000),
-      due,
-      ...(every ? { every } : {}),
-      created: Date.now()
-    };
-    book.timers.push(timer);
-    save();
+    if (!Number.isFinite(every) || (every && every < 1000)) throw Error("every 至少 1 秒且须为有限数值");
+    const seq = book.seq + 1,
+      timer = {
+        id: `t${seq}`,
+        to,
+        step: String(body.step || ""),
+        note: String(body.note || "").slice(0, 2000),
+        due,
+        ...(every ? { every } : {}),
+        created: Date.now()
+      };
+    save({ seq, timers: [...book.timers, timer] });
     arm();
     return timer;
   });
@@ -163,15 +250,15 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     sync();
     const id = String(body.id || ""),
       timer = book.timers.find(item => item.id === id && (!body.to || item.to === body.to));
-    if (!timer) return { found: false };
-    book.timers = book.timers.filter(item => item !== timer);
-    save();
+    const live = timer && liveTimer(timer);
+    if (!live) return { found: false };
+    save({ ...book, timers: book.timers.filter(item => item !== timer) }, [timer]);
     arm();
-    return { found: true, timer };
+    return { found: true, timer: live };
   });
   const handleList = route(() => {
     sync();
-    return { timers: book.timers };
+    return { timers: book.timers.map(liveTimer).filter(Boolean) };
   });
   sync();
 
