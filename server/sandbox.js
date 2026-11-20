@@ -2090,11 +2090,22 @@ function recursiveDeleteWhy(scanned, workdir, win) {
   return "";
 }
 
-function normalizeLower(p) {
-  return path
-    .normalize(p)
+function normalizeLower(p, P = path) {
+  return P.normalize(p)
     .replace(/(?<=.)[\\/]+$/, "")
     .toLowerCase();
+}
+// 按路径的形状挑一套 path 实现：有盘符或反斜杠的按 Windows，其余按 POSIX。
+// 不能一律用宿主的 path——在 macOS 上量 Windows 路径（预检与用例都会两种都跑）会把「在根里面」
+// 判成越界，反过来也一样；沙箱的用例一直是按平台分两批发过来的。
+function pathFor(sample) {
+  const text = String(sample || "");
+  return /(^|[\\/])[a-z]:[\\/]/i.test(text) || text.includes("\\") ? path.win32 : path.posix;
+}
+// 用同一套 path 实现判「在不在里面」：paths.js 的 pathIsInside 认宿主，这里要认样本自己的写法
+function insideUnder(P, root, target) {
+  const relative = P.relative(root, target);
+  return !relative || (relative !== ".." && !relative.startsWith(`..${P.sep}`) && !P.isAbsolute(relative));
 }
 // 指令文本里所有像绝对路径的片段：盘符（C:\… 与 C:/…，光秃的 C: 也算——那是盘符相对路径）、UNC（\\server\share 与 //server/share，
 // 正斜杠的要带出第二段：//todo 多半是代码注释）；非 Windows 上再加 POSIX 根（/usr/…）。URL 里的 http: 与 key:value 这类前面贴着字母的不算
@@ -3401,14 +3412,18 @@ function globCovers(pattern, name) {
  * @param {string} raw @param {string} rootPath @param {string} workdir
  */
 function storeSecretHit(raw, rootPath, workdir) {
-  const clean = withoutDataStream(String(raw || "")).replace(/\//g, "\\");
+  const clean = withoutDataStream(String(raw || ""));
   if (!clean) return false;
-  const resolved = normalizeLower(path.resolve(workdir || "", clean)),
-    dir = path.dirname(resolved),
-    base = path.basename(resolved);
+  // 按存储根的形状选 path 实现：这一道在 macOS 上也要认得出 Windows 写法，反过来也一样
+  const P = pathFor(rootPath),
+    win = P === path.win32,
+    shape = value => String(value).replace(/[\\/]/g, win ? "\\" : "/"),
+    resolved = normalizeLower(P.resolve(shape(workdir || ""), shape(clean)), P),
+    dir = P.dirname(resolved),
+    base = P.basename(resolved);
   return STORE_SECRETS.some(name => {
-    const target = normalizeLower(path.join(rootPath, name));
-    return pathIsInside(target, resolved) || (dir === rootPath && globCovers(base, name.toLowerCase()));
+    const target = normalizeLower(P.join(rootPath, name), P);
+    return insideUnder(P, target, resolved) || (dir === normalizeLower(rootPath, P) && globCovers(base, name.toLowerCase()));
   });
 }
 /**
@@ -3417,14 +3432,17 @@ function storeSecretHit(raw, rootPath, workdir) {
  */
 function screenStoreCommand(command, root, workdir) {
   if (!root) return null;
-  const raw = String(command || "");
-  const text = raw.replace(/\//g, "\\").toLowerCase(),
-    rootPath = normalizeLower(path.resolve(root)),
-    // 对指令文本的那份换成反斜杠；比目录用原样的，不然 macOS 上两边斜杠对不上、在根下跑也认不出
-    base = rootPath.replace(/\//g, "\\"),
+  const raw = String(command || ""),
+    P = pathFor(root),
+    rootPath = normalizeLower(P.resolve(root), P),
+    // 指令文本一并换成同一种分隔符再比，两种写法都能对上
+    text = raw.replace(/[\\/]/g, P === path.win32 ? "\\" : "/").toLowerCase(),
+    base = rootPath,
     named = STORE_SECRETS.some(name => text.includes(name.toLowerCase())),
     near =
-      text.includes(base) || /\\\.yan(?:\\|["'\s]|$)/.test(text) || pathIsInside(rootPath, normalizeLower(path.resolve(workdir || "")));
+      text.includes(base) ||
+      /(^|[\\/])\.yan(?:[\\/]|["'\s]|$)/.test(text) ||
+      insideUnder(P, rootPath, normalizeLower(P.resolve(workdir || ""), P));
   if (named && near) return `拒绝：${STORE_WHY}`;
   const tokens = raw.match(/[^\s"'`;|&<>()]+/g) || [];
   return tokens.some(token => storeSecretHit(token, rootPath, workdir)) ? `拒绝：${STORE_WHY}` : null;
