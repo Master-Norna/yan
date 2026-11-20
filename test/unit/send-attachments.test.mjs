@@ -2,6 +2,36 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
 
+test("附件引用共用消息遍历；用量按原件去重，待发和发送快照只保留不计量", () => {
+  const f = load([
+    "store",
+    "everyMessage",
+    "attachmentIds",
+    "attachmentKeepIds",
+    "usedAttachmentBytes",
+    `setup: (pending, held) => { pendingAttachments = pending; holdAttachments(held); }`
+  ]);
+  const file = (id, size = 1) => ({ id, size }),
+    c = {
+      messages: [
+        {
+          attachments: [file("main"), file("shared", 100)],
+          steps: [{ attachments: [file("step")], sub: { steps: [{ attachments: [file("helper")] }] } }],
+          cold: { files: [file("cold")] }
+        }
+      ],
+      forks: [{ messages: [{ attachments: [file("fork")] }] }],
+      threads: [{ messages: [{ attachments: [file("side")] }] }]
+    },
+    messageIds = ["main", "shared", "step", "helper", "cold", "fork", "side"];
+  f.store.conversations = [c];
+  f.store.drafts = { c: { attachments: [file("draft"), file("shared", 10)] } };
+  f.setup([file("pending", 1000)], [file("held", 1000)]);
+  assert.deepEqual(f.attachmentIds(f.everyMessage(c)), messageIds);
+  assert.deepEqual(f.attachmentKeepIds(), new Set([...messageIds, "draft", "pending", "held"]));
+  assert.equal(f.usedAttachmentBytes(), 17);
+});
+
 for (const ready of [true, false])
   test(ready ? "发送准备期间摘掉附件：已点发送的那份原件留到消息接手" : "发送准备失败：等待时摘掉的附件原件仍会清掉", async () => {
     let release;

@@ -20,6 +20,7 @@ const path = require("node:path");
 
 module.exports = function createFiles({ filesHome, playable, route = jsonRoute }) {
   const ID = /^[A-Za-z0-9_-]{1,80}$/,
+    EXTENSION = /^\.[A-Za-z0-9]{1,10}$/,
     // 页面那头单件上限 256 MB（见 src/13-files/00-ingest.js），与收入卷宗同
     PUT_LIMIT = 256 * 1024 * 1024,
     // 清理只动放了一天以上的：别的标签页刚置入、草稿还没来得及写进配置的那件，不能因为「没人引用」被当场删掉
@@ -36,15 +37,35 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
   }
   // 原件的扩展名取自原名，只留字母数字，免得怪名字在目录里生事
   function extensionOf(name) {
-    const ext = path.extname(String(name || "")).slice(1);
-    return /^[A-Za-z0-9]{1,10}$/.test(ext) ? `.${ext.toLowerCase()}` : "";
+    const ext = path.extname(String(name || ""));
+    return EXTENSION.test(ext) ? ext.toLowerCase() : "";
   }
-  // 这件附件在目录里的原件：优先用元数据里的文件名，找不到才按 id 找，排除元数据本身
-  function rawFileOf(dir, id, meta) {
-    if (meta?.file && fs.existsSync(path.join(dir, meta.file))) return meta.file;
-    return fs.readdirSync(dir).find(name => name === id || (name.startsWith(`${id}.`) && name !== `${id}.json`)) || "";
+  // 只认已落定的原件名：上传和元数据写入的临时名还带有额外戳记；真正名为「<id>.tmp」的原件照认。
+  function rawFileOf(dir, id, meta, listNames = () => fs.readdirSync(dir)) {
+    const isRaw = name => {
+      if (typeof name !== "string" || !name.startsWith(id)) return false;
+      const suffix = name.slice(id.length).toLowerCase();
+      if (suffix && suffix !== ".raw.json" && (suffix === ".json" || !EXTENSION.test(suffix))) return false;
+      return fs.statSync(path.join(dir, name), { throwIfNoEntry: false })?.isFile();
+    };
+    // 元数据指向的不是普通文件时，也继续按 id 寻找可用的旧原件。
+    return isRaw(meta?.file) ? meta.file : listNames().find(isRaw) || "";
   }
-  const readMeta = (dir, id) => readJsonFile(path.join(dir, `${id}.json`));
+  function readMeta(dir, id) {
+    const meta = readJsonFile(path.join(dir, `${id}.json`));
+    return meta && typeof meta === "object" && !Array.isArray(meta) ? meta : null;
+  }
+  // 存在不等于可取：占用或权限可能挡住打开。只短暂打开检查，不读原件，也不把预览换壳算成原件。
+  function downloadableRaw(dir, id, meta, listNames) {
+    if (!meta) return "";
+    try {
+      const raw = rawFileOf(dir, id, meta, listNames);
+      if (raw) fs.closeSync(fs.openSync(path.join(dir, raw), "r"));
+      return raw;
+    } catch {
+      return "";
+    }
+  }
   // 原件直传（见 http.js 的 receiveUpload）：说明是 { record }——附件的元数据与抽出的正文，不带 data；其后是原件的字节（文本附件读回时按 UTF-8 解码）
   async function handlePut(req, res) {
     try {
@@ -131,7 +152,7 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
         id = checkId(query.get("id")),
         dir = home(),
         meta = readMeta(dir, id),
-        raw = meta && rawFileOf(dir, id, meta);
+        raw = downloadableRaw(dir, id, meta);
       if (!raw) return sendJson(res, 404, { error: "附件原件不在存储目录里" });
       const file = path.join(dir, raw),
         name = meta.name || raw,
@@ -150,12 +171,14 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
     },
     error => errorText(error, 200)
   );
-  // 只查元数据文件是否在：迁入时用，不读原件，也不核实原件是否齐全
-  const handleHas = jsonRoute(
+  // 补传与下载共用原件的判据；批量查找时需要兜底才列目录，且只列一次。
+  const handleHas = route(
     async body => {
       const dir = home(),
         ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter(id => ID.test(id));
-      return { has: ids.filter(id => fs.existsSync(path.join(dir, `${id}.json`))) };
+      let names;
+      const listNames = () => (names ??= fs.readdirSync(dir));
+      return { has: ids.filter(id => downloadableRaw(dir, id, readMeta(dir, id), listNames)) };
     },
     error => errorText(error, 200)
   );
@@ -188,16 +211,15 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
       let removed = 0,
         bytes = 0;
       for (const name of fs.readdirSync(dir)) {
-        if (name.endsWith(".tmp")) {
-          const stat = fs.statSync(path.join(dir, name));
-          if (stat.mtimeMs < cutoff) fs.rmSync(path.join(dir, name), { force: true });
-          continue;
-        }
-        const id = name.split(".")[0];
-        if (!ID.test(id) || keep.has(id)) continue;
-        const stat = fs.statSync(path.join(dir, name));
-        if (stat.mtimeMs >= cutoff) continue;
-        fs.rmSync(path.join(dir, name), { force: true });
+        const id = name.split(".")[0],
+          validId = ID.test(id),
+          temp = name.endsWith(".tmp") && (!validId || name !== `${id}.tmp`);
+        if (!temp && (!validId || keep.has(id))) continue;
+        const file = path.join(dir, name),
+          stat = fs.statSync(file, { throwIfNoEntry: false });
+        if (!stat?.isFile() || stat.mtimeMs >= cutoff) continue;
+        fs.rmSync(file, { force: true });
+        if (temp) continue;
         if (name === `${id}.json`) removed += 1;
         else bytes += stat.size;
       }
