@@ -252,6 +252,9 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
     String.raw`cmd /c "del C:\Windows\x"`,
     String.raw`Invoke-Command -ScriptBlock { Remove-Item C:\Windows\x }`,
     String.raw`curl http://127.0.0.1:3000/x -o C:\Windows\yan-probe.txt`,
+    // 短选项连写里的 -o 也是落点（-so FILE、-sLoFILE）；以前只认「-o 打头」
+    String.raw`curl -so C:\Windows\yan-probe.txt http://127.0.0.1:3000/x`,
+    String.raw`curl -sLoC:\Windows\yan-probe.txt http://127.0.0.1:3000/x`,
     String.raw`Invoke-WebRequest http://127.0.0.1:1/x -OutFile C:\Windows\x`,
     String.raw`Start-Process node -RedirectStandardOutput C:\Users\me\log.txt`,
     String.raw`[IO.File]::WriteAllText("C:\Windows\x", "y")`,
@@ -271,7 +274,10 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
     "Get-Process powershell",
     "tar -tf a.tar",
     "git clone https://github.com/a/b",
-    "gcc -o build/a.exe a.c"
+    "gcc -o build/a.exe a.c",
+    // 簇里的 o 落在目录内照常；吃值的是 d 不是 o，-d 的值不是落点
+    "curl -so out.txt http://127.0.0.1:3000/x",
+    "curl -sd status=ok http://127.0.0.1:3000/x"
   ])
     assert.equal(screen(command), null, command);
 });
