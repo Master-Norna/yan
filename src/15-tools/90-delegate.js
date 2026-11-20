@@ -197,6 +197,18 @@ function helperTrail(runs) {
     .join("\n\n");
 }
 // 差遣当即回一句「已开工」，主模型这一轮随即结束、照常往下走；帮手在后台做，做完回报寄给这段对话（见 mailReport）
+// 同一段对话里帮手是按名字寻址的（helper 的传话、叫停、续派、翻看都拿 args.helper 找那一趟）：
+// 两件同名就会递错人、叫错人。差遣时标题只截前 40 字、也不查重，而「查日志」「跑测试」这种名字撞得很自然；
+// 撞了就补个序号，模型在差遣的回执里看得到定下来的名字，往后按它寻址就只认一个
+/** @param {Conversation} conversation @param {string} base @returns {string} */
+function uniqueHelperTitle(conversation, base) {
+  const taken = new Set([...(crews.get(conversation.id) || []).map(box => box.title), ...helperRuns(conversation).map(run => run.title)]);
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const name = `${base}·${n}`;
+    if (!taken.has(name)) return name;
+  }
+}
 /**
  * @param {Step} step
  * @param {Record<string, any>} args
@@ -204,10 +216,12 @@ function helperTrail(runs) {
  */
 function delegateInBackground(step, args, ctx) {
   const task = String(args.task || "").trim();
-  step.title =
+  step.title = uniqueHelperTitle(
+    ctx.conversation,
     String(args.title || "")
       .trim()
-      .slice(0, 40) || task.slice(0, 24);
+      .slice(0, 40) || task.slice(0, 24)
+  );
   if (!task) return { ok: false, content: t("task 不能为空：请把背景、目标、边界与要回报的内容写全"), display: "任务为空" };
   launchHelper(step, args, ctx);
   return { ok: true, background: true, content: prompt("delegate.started", { title: step.title }), display: "后台进行中" };
