@@ -3376,11 +3376,19 @@ function screenPath(rel, { write = false } = {}) {
 // 开发言自己时仓库里的同名字样不受牵连。静态筛查：脚本里拼出来的路径管不到
 const STORE_SECRETS = ["配置.json", "配置备份", "ChatGPT 登录.json"];
 const STORE_WHY = "不碰言的配置与登录文件（内有 API Key 与令牌）；要改设置，请用户在设置里改";
+// Windows 的扩展长度与设备写法：\\?\C:\x、\\.\C:\x 与 \\.\UNC\\srv\sh\x 指的仍是同一个文件。
+// 只做这一层字符串规整——本模块是纯函数、不碰文件系统，路径上的链接另由 work/paths.js 的 assertReachable 拦
+function withoutExtendedPrefix(value) {
+  const text = String(value || ""),
+    lead = /^[\\/]{2}[?.][\\/](?:UNC[\\/])?/i.exec(text);
+  if (!lead) return text;
+  return (/unc/i.test(lead[0]) ? "\\\\" : "") + text.slice(lead[0].length);
+}
 /** 一个绝对路径是不是落在存储根的这几样上（或就是存储根里它们之下）。是则返回原因 @param {string} full @param {string} root */
 function screenStorePath(full, root) {
   if (!root) return null;
-  const base = normalizeLower(path.resolve(root)),
-    target = normalizeLower(path.resolve(withoutDataStream(full)));
+  const base = normalizeLower(path.resolve(withoutExtendedPrefix(root))),
+    target = normalizeLower(path.resolve(withoutExtendedPrefix(withoutDataStream(full))));
   return STORE_SECRETS.some(name => pathIsInside(normalizeLower(path.join(base, name)), target)) ? `拒绝：${STORE_WHY}` : null;
 }
 /**
