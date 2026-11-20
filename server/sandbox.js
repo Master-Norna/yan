@@ -3384,14 +3384,41 @@ function screenStorePath(full, root) {
   return STORE_SECRETS.some(name => pathIsInside(normalizeLower(path.join(base, name)), target)) ? `拒绝：${STORE_WHY}` : null;
 }
 /**
+ * 通配写法能不能盖住这个名字（大小写不敏感）：配置*、*.json、配置?json 都能盖住配置.json。
+ * 通配不跨分隔符——* 只盖同一层里的一截。 @param {string} pattern @param {string} name
+ */
+function globCovers(pattern, name) {
+  const source = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, "[^\\\\]*")
+    .replace(/\?/g, "[^\\\\]");
+  return new RegExp(`^${source}$`, "i").test(name);
+}
+/**
+ * 一段路径（可以带通配）按工作目录解析后，是不是冲着存储根顶层那几样去的：
+ * 落在它们里面（..\配置备份\x.json），或与它们同处根顶层、通配盖得住（..\*.json、..\配置*）。
+ * 原先把这张脸认成「文本里带 .yan 又有星号」，`..\*`、`配置*` 这些都不带字面名字，一个也认不出。
+ * @param {string} raw @param {string} rootPath @param {string} workdir
+ */
+function storeSecretHit(raw, rootPath, workdir) {
+  const clean = withoutDataStream(String(raw || "")).replace(/\//g, "\\");
+  if (!clean) return false;
+  const resolved = normalizeLower(path.resolve(workdir || "", clean)),
+    dir = path.dirname(resolved),
+    base = path.basename(resolved);
+  return STORE_SECRETS.some(name => {
+    const target = normalizeLower(path.join(rootPath, name));
+    return pathIsInside(target, resolved) || (dir === rootPath && globCovers(base, name.toLowerCase()));
+  });
+}
+/**
  * 指令文本里点没点到这几样：写了它们的名字，且又写了存储根（或 .yan），或就在存储根里跑（卷宗、工作都在根下，..\配置.json 即到）；
- * 对存储根顶层用通配（.yan\*）也算。 @param {string} command @param {string} root @param {string} workdir
+ * 不写字面名字、改用通配盖住根顶层的也算（..\*.json、..\配置*、.yan\*）。 @param {string} command @param {string} root @param {string} workdir
  */
 function screenStoreCommand(command, root, workdir) {
   if (!root) return null;
-  const text = String(command || "")
-      .replace(/\//g, "\\")
-      .toLowerCase(),
+  const raw = String(command || "");
+  const text = raw.replace(/\//g, "\\").toLowerCase(),
     rootPath = normalizeLower(path.resolve(root)),
     // 对指令文本的那份换成反斜杠；比目录用原样的，不然 macOS 上两边斜杠对不上、在根下跑也认不出
     base = rootPath.replace(/\//g, "\\"),
@@ -3399,8 +3426,8 @@ function screenStoreCommand(command, root, workdir) {
     near =
       text.includes(base) || /\\\.yan(?:\\|["'\s]|$)/.test(text) || pathIsInside(rootPath, normalizeLower(path.resolve(workdir || "")));
   if (named && near) return `拒绝：${STORE_WHY}`;
-  const wild = new RegExp(`(?:${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|\\\\\\.yan)\\\\\\*`);
-  return wild.test(text) ? `拒绝：${STORE_WHY}` : null;
+  const tokens = raw.match(/[^\s"'`;|&<>()]+/g) || [];
+  return tokens.some(token => storeSecretHit(token, rootPath, workdir)) ? `拒绝：${STORE_WHY}` : null;
 }
 
 module.exports = {

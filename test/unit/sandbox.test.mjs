@@ -2,9 +2,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const require = createRequire(import.meta.url);
-const { screenCommand, screenLoose, screenAutoReview, screenUnreviewable, sandboxEnv, screenPath } = require("../../server/sandbox.js");
+const {
+  screenCommand,
+  screenLoose,
+  screenAutoReview,
+  screenUnreviewable,
+  screenStoreCommand,
+  sandboxEnv,
+  screenPath
+} = require("../../server/sandbox.js");
 const wd = "E:\\项目\\言",
   win = { platform: "win32" },
   screen = command => screenCommand(command, wd, win);
@@ -1946,4 +1955,23 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
     review(atWin ? "Get-Content C:\\data\\notes.txt; Remove-Item .\\build -Recurse" : "cat /tmp/report.txt; rm -rf ./build"),
     null
   );
+});
+
+// 名字不写字面、改用通配盖住根顶层时，原先几条都不认（配置*、..\*.json、.yan\*）；这一道按路径解析后比
+test("存储根守卫：通配与相对路径也算点到了那几样", () => {
+  const root = atWin ? "E:\\store\\.yan" : "/tmp/store/.yan",
+    workdir = path.join(root, "卷宗"),
+    guard = command => screenStoreCommand(command, root, workdir);
+  // 对根顶层用通配，盖得住配置与备份
+  for (const target of [path.join(root, "*"), path.join(root, "配置*"), path.join(root, "*.json"), path.join(root, "配置备份", "*")])
+    assert.match(guard("Get-Content " + target) || "", /配置与登录/, target);
+  // 不涉及其他的照旧放行：工作目录里的通配、根顶层但不盖住它们的名字
+  for (const target of [path.join(root, "意.json"), path.join(root, "*.md"), path.join(workdir, "*.json"), path.join(workdir, "notes.md")])
+    assert.equal(guard("Get-Content " + target), null, target);
+  if (!atWin) return; // 下面的相对写法是 Windows 的分隔
+  // 工作目录在根里时，.. 就是根：不写字面名字的相对通配一样拦
+  for (const command of ["Get-Content ..\\*", "Get-Content ..\\*.json", "Get-Content ..\\配置*", "Get-Content ..\\配置备份\\*"])
+    assert.match(guard(command) || "", /配置与登录/, command);
+  for (const command of ["Get-Content ..\\意.json", "Get-ChildItem ..", "Get-ChildItem ..\\卷宗\\*.md", "Get-ChildItem src\\*.js"])
+    assert.equal(guard(command), null, command);
 });
