@@ -183,6 +183,35 @@ test("POSIX 写动词守目录，复制与链接来源只豁免当次参数，rs
   }
 });
 
+test("screenCommand：工作目录自己带空格时，引号里的路径按整段比，不截成前半截", () => {
+  // 裸扫按空白切词，`"C:\Users\Me\My Project\out.txt"` 会截成 `C:\Users\Me\My`，
+  // 工作目录里的正常写入反倒被判越界（11-20 检查）。两种写法各验一遍：这一道只看传进来的 platform。
+  const cases = [
+    {
+      platform: "win32",
+      workdir: "C:\\Users\\Me\\My Project",
+      keep: [
+        'Set-Content "C:\\Users\\Me\\My Project\\out.txt" x',
+        'Copy-Item "C:\\Users\\Me\\My Project\\a.txt" "C:\\Users\\Me\\My Project\\b.txt"',
+        'curl -o "C:\\Users\\Me\\My Project\\x.txt" http://127.0.0.1:3000/'
+      ],
+      // 从这一层就出去了：引号包着也不能放
+      out: ['Set-Content "C:\\Users\\Me\\outside.txt" x', 'Copy-Item a.txt "C:\\Users\\Me\\My Project2\\b.txt"']
+    },
+    {
+      platform: "darwin",
+      workdir: "/Users/a/My Project",
+      keep: ['Set-Content "/Users/a/My Project/out.txt" x', 'cp "/Users/a/My Project/a.txt" "/Users/a/My Project/b.txt"'],
+      out: ['Set-Content "/Users/a/outside.txt" x', 'cp a.txt "/Users/a/My Project2/b.txt"']
+    }
+  ];
+  for (const item of cases) {
+    for (const command of item.keep) assert.equal(screenCommand(command, item.workdir, { platform: item.platform }), null, command);
+    for (const command of item.out)
+      assert.match(screenCommand(command, item.workdir, { platform: item.platform }), /越出了工作目录/, command);
+  }
+});
+
 test("screenCommand：日常的开发指令放行——包管理、git、目录内的绝对路径、本机 curl、.草稿 脚本", () => {
   for (const command of [
     "npm run format",

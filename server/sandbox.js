@@ -2104,10 +2104,19 @@ function absolutePathsIn(command, win) {
     unc = /(?<![\w\\/])(\\\\[^\s\\"'`;|&<>()]+(?:\\[^\s"'`;|&<>()]*)?)/g,
     slashUnc = /(?<![\w\\/:.-])(\/\/[^\s\\/"'`;|&<>()]+\/[^\s"'`;|&<>()]*)/g,
     posix = /(?<![\w./~:-])(\/(?!\/)[^\s"'`;|&<>()]+)/g;
-  for (const match of command.matchAll(drive)) found.push(match[1]);
-  for (const match of command.matchAll(unc)) found.push(match[1]);
-  for (const match of command.matchAll(slashUnc)) found.push(match[1]);
-  if (!win) for (const match of command.matchAll(posix)) found.push(match[1]);
+  // 引号里整段就是一个路径的，按整段取。裸扫按空白切词，`"C:\Users\Me\My Project\out.txt"` 会被截成
+  // `C:\Users\Me\My`——工作目录本身带空格时，目录里的正常写入反倒判成越界（11-20 检查）。
+  // 整段不是路径的（"见 C:\x"）原样留下，仍交给裸扫，免得夹在别的话里的路径反而漏掉。
+  const looksPath = value => /^[A-Za-z]:[\\/]/.test(value) || (win ? /^\\\\[^\s\\]/.test(value) : /^\/{1,2}[^\s\\/]/.test(value));
+  const bare = String(command || "").replace(/(["'])([^"']*)\1/g, (whole, _quote, inner) => {
+    if (!looksPath(inner)) return whole;
+    found.push(inner);
+    return " ";
+  });
+  for (const match of bare.matchAll(drive)) found.push(match[1]);
+  for (const match of bare.matchAll(unc)) found.push(match[1]);
+  for (const match of bare.matchAll(slashUnc)) found.push(match[1]);
+  if (!win) for (const match of bare.matchAll(posix)) found.push(match[1]);
   return found;
 }
 // 只读来源不受目录约束，只豁免这次参数出现的位置；移动与删除来源不豁免。
