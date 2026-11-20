@@ -2528,11 +2528,16 @@ function screenWritePaths(writeText, workdir, win, prefix) {
   if (HOME_SYSTEM_PATH.test(writeText)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
   if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])/.test(writeText)) return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
-  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  // 判据按指令要跑的那个系统的规矩来（win），不按跑这份代码的宿主机：在 macOS 上验一条 Windows 指令
+  // （单测、sandbox-replay --platform）时宿主的 path 不认盘符，会把工作目录之内判成越界，反过来也一样
+  const P = win ? path.win32 : path.posix,
+    trim = value => P.normalize(value).replace(/(?<=.)[\\/]+$/, ""),
+    root = win ? trim(workdir).toLowerCase() : trim(workdir);
   for (const raw of absolutePathsIn(writeText, win)) {
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
-    const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
-    if (!pathIsInside(root, candidate))
+    const candidate = win ? trim(raw).toLowerCase() : trim(raw),
+      relative = P.relative(root, candidate);
+    if (relative === ".." || relative.startsWith(`..${P.sep}`) || P.isAbsolute(relative))
       return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
   }
   return null;
@@ -2540,14 +2545,18 @@ function screenWritePaths(writeText, workdir, win, prefix) {
 // 内层视图解出的输出路径是完整的路径值：直接对值做同一套边界检查，
 // 不走按空白切词的 absolutePathsIn——带空格的路径才不会被截成前半段
 function innerPathWhy(paths, workdir, win, prefix) {
-  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  // 与 screenWritePaths 同一套规矩：按指令要跑的那个系统的 path 实现，不按宿主
+  const P = win ? path.win32 : path.posix,
+    trim = value => P.normalize(value).replace(/(?<=.)[\\/]+$/, ""),
+    root = win ? trim(workdir).toLowerCase() : trim(workdir);
   for (const raw of paths || []) {
     if (HOME_SYSTEM_PATH.test(raw)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
     if (/(^|[\\/:])\.\.([\\/]|$)/.test(raw)) return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
-    if (path.isAbsolute(raw) || (win && /^[a-z]:[\\/]/i.test(raw))) {
-      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
-      if (!pathIsInside(root, candidate))
+    if (P.isAbsolute(raw) || (win && /^[a-z]:[\\/]/i.test(raw))) {
+      const candidate = win ? trim(raw).toLowerCase() : trim(raw),
+        relative = P.relative(root, candidate);
+      if (relative === ".." || relative.startsWith(`..${P.sep}`) || P.isAbsolute(relative))
         return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
     }
   }
