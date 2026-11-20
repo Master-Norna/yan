@@ -22,7 +22,7 @@ function page({ call = async () => null, confirm = async () => true } = {}) {
       envPoll=setTimeout(()=>{},60_000);
       bridge=call; askConfirm=confirm; toast=message=>toasts.push(message);
       renderEnvStatus=()=>{};
-      syncChatsWithDisk=async()=>{}; reconcileTimers=async()=>{}; flushConversations=()=>{};
+      syncChatsWithDisk=async()=>{}; readChatSpills=async()=>true; reconcileTimers=async()=>{}; flushConversations=()=>{}; adoptConfig=render=rewatchBackground=()=>{};
       const old=document.querySelector;
       document.querySelector=()=>({addEventListener:(name, handler)=>{
         if(name==='click') click=handler;

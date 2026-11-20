@@ -171,7 +171,7 @@ for (const result of ["success", "conflict", "failure"])
         bootstrap.store={root:'A'};store.settings.name='A';store.conversations=[];
         configSyncedAt=100;configBase=JSON.stringify(metaOf());
         writeMeta=applyAppearance=renderHeader=renderHistory=renderQuota=()=>{};
-        syncChatsWithDisk=async()=>{};flushConversations=()=>{};
+        syncChatsWithDisk=async()=>{};readChatSpills=async()=>true;render=rewatchBackground=()=>{};flushConversations=()=>{};
         bridge=async()=>({config:{version:STORE_VERSION,settings:{name:'B'},profiles:[],memory:{items:[]},drafts:{}},savedAt:200});
         document.querySelector=()=>({classList:{contains:()=>true}});
       }`,

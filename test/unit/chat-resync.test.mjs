@@ -45,7 +45,8 @@ async function fixture(t, { attachments = false, intercept = (route, options, se
     return data;
   };
   t.mock.method(globalThis, "fetch", (route, options) => intercept(route, options, () => nativeFetch(origin + route, options)));
-  const records = new Map(),
+  const keyOf = id => (Array.isArray(id) ? JSON.stringify(id) : id),
+    records = new Map(),
     shelf = new Map(),
     local = new Map(),
     storage = {
@@ -80,12 +81,12 @@ async function fixture(t, { attachments = false, intercept = (route, options, se
           name === "conversations"
             ? {
                 getAll: () => request([...records.values()]),
-                get: id => request(records.get(id)),
+                get: id => request(records.get(keyOf(id))),
                 put: record => {
-                  records.set(record.id, structuredClone(record));
+                  records.set(keyOf(record.id), structuredClone(record));
                   return request(record.id);
                 },
-                delete: id => request(faults.abort ? false : records.delete(id))
+                delete: id => request(faults.abort ? false : records.delete(keyOf(id)))
               }
             : { get: () => request(undefined) }
       };
@@ -97,6 +98,11 @@ async function fixture(t, { attachments = false, intercept = (route, options, se
     const f = load([
       "store",
       "bootstrap",
+      "switchStoreRoot",
+      "flushImportedConversations",
+      "chatJson",
+      "saveStore",
+      "writeConversation",
       "hydrateStore",
       "flushOnUnload",
       "syncChatsWithDisk",
@@ -110,18 +116,23 @@ async function fixture(t, { attachments = false, intercept = (route, options, se
         stateDb = db;
         stateDbPromise = Promise.resolve(db);
         localStorage = storage;
-        renderHeader = renderHistory = toast = () => {};
+        render = closeHelperPanel = closeSidePanel = renderHeader = renderHistory = renderQuota = applyAppearance = toast = () => {};
+        settingsInputFocused = () => true;
+        reconcileTimers = async () => {}; rewatchBackground = () => {};
         let files;
         if (attachments) {
           const settle = settleAttachmentStore;
           settleAttachmentStore = ready => (files = settle(ready));
           fileStoreRequest = async (_mode, action) => action({ getAllKeys: () => [...shelf.keys()], get: id => shelf.get(id), delete: id => shelf.delete(id) });
         } else settleAttachmentStore = async () => {};
+        const clearSaved = clearSavedChatSpills;
+        let clearingSaved;
+        clearSavedChatSpills = (...args) => (clearingSaved = clearSaved(...args));
         const clear = clearDiscardedChatSpills;
         let clearing;
         clearDiscardedChatSpills = () => (clearing = clear());
         return async () => {
-          await Promise.all([files, clearing]);
+          await Promise.all([files, clearing, clearingSaved]);
           await Promise.all([...chatWritePromises.values()]);
         };
       }`
@@ -137,7 +148,7 @@ async function fixture(t, { attachments = false, intercept = (route, options, se
       }
     };
   };
-  return { post, page, records, chats, oldFile, files, shelf, faults, local };
+  return { post, page, records, chats, oldFile, files, shelf, faults, local, keyOf };
 }
 
 const conversation = title => ({
@@ -149,7 +160,7 @@ const conversation = title => ({
 });
 
 test("离页暂存比磁盘更新晚，重新开页也不丢磁盘上的答复", async t => {
-  const { post, page, records } = await fixture(t);
+  const { post, page, records, keyOf, chats } = await fixture(t);
   const base = conversation("旧题"),
     baseAt = Date.now() - 3000,
     reply = { id: "reply", role: "assistant", content: "另一页已存的答复", status: "complete" };
@@ -163,7 +174,8 @@ test("离页暂存比磁盘更新晚，重新开页也不丢磁盘上的答复",
     savedAt: baseAt + 1000
   });
   a.flushOnUnload();
-  const record = records.get(base.id);
+  await new Promise(setImmediate);
+  const record = records.get(keyOf([chats, base.id]));
   assert.ok(record.savedAt > baseAt + 1000, "离页时间比另一页保存更晚");
   assert.equal(JSON.parse(record.baseJson).title, base.title);
 
@@ -179,7 +191,7 @@ test("离页暂存比磁盘更新晚，重新开页也不丢磁盘上的答复",
 });
 
 test("合并结果仍只是暂存版时，等另一页松手再落盘，不提前清暂存", async t => {
-  const { post, page, records } = await fixture(t);
+  const { post, page, records, keyOf, chats } = await fixture(t);
   const base = conversation("旧题");
   await post("chats/save", { conversation: base, savedAt: Date.now() - 3000 });
   const a = page();
@@ -192,7 +204,7 @@ test("合并结果仍只是暂存版时，等另一页松手再落盘，不提�
   reopened.remoteBusy.add(base.id);
   await reopened.sync();
   assert.equal((await post("chats/load")).items[0].conversation.title, base.title);
-  assert.ok(records.has(base.id), "被租约挡住的本地改动还在暂存表里");
+  assert.ok(records.has(keyOf([chats, base.id])), "被租约挡住的本地改动还在暂存表里");
   reopened.remoteBusy.delete(base.id);
   await reopened.sync();
   assert.equal((await post("chats/load")).items[0].conversation.title, "还没落盘的新题");
@@ -513,4 +525,174 @@ test("旧根已确认的删除也不能丢掉另一根同 ID 的较早暂存", a
   await b.hydrateStore();
   await b.sync();
   assert.equal((await post("chats/load", { root: nextChats })).items[0]?.conversation.title, local.title);
+});
+
+for (const receipt of [200, 409, 410, 400])
+  test(`接用已有根：旧保存的 ${receipt} 回执既不并入新对话，也不清新根的同 ID 暂存`, async t => {
+    const entered = Promise.withResolvers(),
+      release = Promise.withResolvers();
+    const requests = [];
+    let held = false;
+    const { post, page, records, chats, keyOf } = await fixture(t, {
+      intercept: async (route, options, send) => {
+        const body = JSON.parse(options.body);
+        if (route === "/api/chats/save") {
+          requests.push(body);
+          if (!held && body.root === chats && body.conversation.title === "A 待写") {
+            held = true;
+            entered.resolve();
+            await release.promise;
+            return Response.json(
+              receipt === 409
+                ? { item: { id: "c1", savedAt: Date.now(), conversation: conversation("A 冲突") } }
+                : { error: receipt === 410 ? "这段对话已在别处删除" : "临时失败" },
+              { status: receipt }
+            );
+          }
+        }
+        return send();
+      }
+    });
+    const a = page(),
+      aRoot = a.bootstrap.store.root,
+      bRoot = path.join(aRoot, "B"),
+      bDir = path.join(bRoot, "chats"),
+      now = Date.now();
+    const target = conversation("B 正本"),
+      before = conversation("A 正本");
+    await post("chats/save", { conversation: before, savedAt: now - 2000 });
+    await post("chats/save", { conversation: { ...before, id: "a-only" }, savedAt: now - 2000 });
+    await post("chats/save", { root: bDir, conversation: target, savedAt: now - 2000 });
+    const bOnly = { ...conversation("B 独有暂存"), id: "b-only" };
+    records.set(bOnly.id, { id: bOnly.id, dir: bDir, savedAt: now - 1000, json: a.chatJson(bOnly) });
+    await a.sync();
+    a.store.conversations.find(c => c.id === before.id).title = "A 待写";
+    const writing = a.flushImportedConversations([before.id]);
+    try {
+      await entered.promise;
+      a.pendingChatDeletes.set("a-only", now - 1000);
+      await a.switchStoreRoot({ adopted: true, root: bRoot, chats: bDir });
+      assert.deepEqual(a.store.conversations.map(c => c.title).sort(), ["B 正本", "B 独有暂存"].sort());
+      const staged = { ...target, title: "B 另一页新暂存" };
+      records.set(keyOf([bDir, target.id]), { id: [bDir, target.id], dir: bDir, savedAt: now + 1000, json: a.chatJson(staged) });
+    } finally {
+      release.resolve();
+      await writing;
+    }
+    assert.equal(a.store.conversations.find(c => c.id === target.id).title, target.title);
+    assert.equal(JSON.parse(records.get(keyOf([bDir, target.id])).json).title, "B 另一页新暂存");
+    assert.equal(JSON.parse(records.get(keyOf([chats, target.id])).json).title, "A 待写");
+    assert.ok(requests.filter(body => body.root === bDir).every(body => !body.conversation.title.startsWith("A")));
+    await a.switchStoreRoot({ adopted: true, root: aRoot, chats });
+    assert.equal(a.store.conversations.find(c => c.id === before.id).title, "A 待写");
+    await a.sync();
+  });
+
+for (const variant of ["different", "cold", "same", "foreign"])
+  test(`普通写回执按同根正文核对当前暂存：${variant}`, async t => {
+    const entered = Promise.withResolvers(),
+      release = Promise.withResolvers();
+    let written;
+    const { post, page, records, chats, keyOf } = await fixture(t, {
+      intercept: async (route, options, send) => {
+        if (route !== "/api/chats/save") return send();
+        written = JSON.parse(options.body).conversation;
+        const answer = await send();
+        entered.resolve();
+        await release.promise;
+        return answer;
+      }
+    });
+    const before = conversation("磁盘旧题");
+    if (variant === "cold")
+      before.messages.push({ id: "reply", role: "assistant", status: "complete", content: "正文", cold: { key: "legacy-pointer" } });
+    await post("chats/save", { conversation: before, savedAt: Date.now() - 1000 });
+    const b = page();
+    await b.sync();
+    b.store.conversations[0].pinned = true;
+    const pending = b.flushImportedConversations([before.id]);
+    let key;
+    try {
+      await entered.promise;
+      const after = structuredClone(written),
+        dir = variant === "foreign" ? chats + "-other" : chats;
+      if (variant === "different") after.title = "另一页最新改名";
+      if (variant === "cold") {
+        delete after.messages[1].cold;
+        after.messages[1].reasoning = "仅浏览器有的冷正文";
+      }
+      const id = [dir, after.id];
+      key = keyOf(id);
+      records.set(key, { id, dir, savedAt: Date.now() + 1000, baseJson: b.chatJson(before), json: b.chatJson(after) });
+    } finally {
+      release.resolve();
+      await pending;
+    }
+    assert.equal(records.has(key), variant !== "same");
+  });
+
+test("拷贝到空根仍迁递本页未落盘的内容；重新接用原根仍读回原根暂存", async t => {
+  const { post, page, records, chats, keyOf } = await fixture(t);
+  const a = page(),
+    aRoot = a.bootstrap.store.root,
+    bRoot = path.join(aRoot, "B"),
+    bDir = path.join(bRoot, "chats");
+  const before = conversation("A 正本");
+  const at = Date.now() - 1000;
+  await post("chats/save", { conversation: before, savedAt: at });
+  await post("chats/save", { root: bDir, conversation: before, savedAt: at }); // 磁盘拷贝看到的是 A 旧正本。
+  await a.sync();
+  a.store.conversations[0].title = "只在内存的改名";
+  await a.switchStoreRoot({ adopted: false, root: bRoot, chats: bDir });
+  assert.equal(JSON.parse(records.get(keyOf([chats, before.id])).json).title, "只在内存的改名");
+  await a.sync();
+  assert.equal((await post("chats/load", { root: bDir })).items[0].conversation.title, "只在内存的改名");
+  assert.equal((await post("chats/load")).items[0].conversation.title, "A 正本");
+  await a.switchStoreRoot({ adopted: true, root: aRoot, chats });
+  assert.equal(a.store.conversations[0].title, "只在内存的改名");
+  await a.sync();
+  assert.equal((await post("chats/load")).items[0].conversation.title, "只在内存的改名");
+});
+
+test("旧字符串键、无目录旧离线删除和带目录暂存只进归属根一次", async t => {
+  const { post, page, records, chats, keyOf, local } = await fixture(t);
+  const a = page(),
+    aRoot = a.bootstrap.store.root,
+    bRoot = path.join(aRoot, "B"),
+    bDir = path.join(bRoot, "chats"),
+    now = Date.now();
+  const before = conversation("A 磁盘题"),
+    edited = { ...before, title: "老带目录行改的题" };
+  await post("chats/save", { conversation: before, savedAt: now - 3000 });
+  await post("chats/save", { root: bDir, conversation: { ...before, title: "B 磁盘题" }, savedAt: now - 3000 });
+  local.set("yan-store-root", aRoot);
+  local.set("yan-chat-delete:old-deleted", JSON.stringify({ at: now - 1000 }));
+  const removed = { ...before, id: "old-deleted" };
+  await post("chats/save", { conversation: removed, savedAt: now - 2000 });
+  await post("chats/save", { root: bDir, conversation: removed, savedAt: now - 2000 });
+  records.set(before.id, { id: before.id, dir: chats, savedAt: now - 1000, baseJson: a.chatJson(before), json: a.chatJson(edited) });
+  const key = keyOf([chats, before.id]);
+  records.set(key, {
+    id: [chats, before.id],
+    dir: chats,
+    savedAt: now - 500,
+    baseJson: a.chatJson(before),
+    json: a.chatJson({ ...before, pinned: true })
+  });
+  await a.hydrateStore();
+  assert.equal(records.has(before.id), false, "升级到复合键不能留下重复行");
+  await a.sync();
+  let disk = (await post("chats/load")).items;
+  assert.equal(disk.length, 1);
+  assert.equal(disk[0].conversation.title, edited.title);
+  assert.equal(disk[0].conversation.pinned, true);
+  await a.switchStoreRoot({ adopted: true, root: bRoot, chats: bDir });
+  assert.equal(a.store.conversations.length, 2);
+  assert.equal(a.store.conversations.find(c => c.id === before.id).title, "B 磁盘题");
+  await a.switchStoreRoot({ adopted: true, root: aRoot, chats });
+  await a.sync();
+  disk = (await post("chats/load")).items;
+  assert.equal(disk.length, 1);
+  assert.equal(disk[0].conversation.title, edited.title);
+  assert.equal(records.size, 0);
 });

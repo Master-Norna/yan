@@ -193,6 +193,10 @@ function bindGeneralSettings() {
       let data;
       try {
         await settleConfig();
+        // 还没拿到磁盘回执的旧根对话先保全；接用已有根后活对象就不再属于本页。
+        await keepChatSpills(collectChatSpills()).catch(() => {
+          throw Error(t("本机对话存储失败，请先导出备份"));
+        });
         data = await storeBridge("/api/store/move", { parent: next }, AbortSignal.timeout(600000));
       } catch (error) {
         return toast(String(error.message || error).slice(0, 80));

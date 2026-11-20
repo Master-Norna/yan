@@ -81,11 +81,11 @@ module.exports = function createStore({ working = () => 0, background = () => fa
     revision = 0;
   // 归当前存储根的请求：收请求体也要等，不能等完才问「现在在哪」；往返切回同一路也已是新一回。
   // root 由页面在发起时带来，旧页尚未得知换根的也不能把内容写进新处。不带 root 的本机脚本仍可用。
-  function scopedRoute(handle, describe = errorText) {
+  function scopedRoute(handle, describe = errorText, rootKey = "root") {
     return (req, res) => {
       const at = revision;
       return jsonRoute((body, request, response) => {
-        const expected = typeof body.root === "string" && body.root ? path.resolve(body.root) : "";
+        const expected = typeof body[rootKey] === "string" && body[rootKey] ? path.resolve(body[rootKey]) : "";
         if (at !== revision || (expected && expected.toLowerCase() !== root.toLowerCase())) throw Error("存储位置已变化，请刷新页面后重试");
         return handle(body, request, response);
       }, describe)(req, res);

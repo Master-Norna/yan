@@ -26,14 +26,24 @@ function setup(t, { remote, noLocal = false, commit = () => true, attachments = 
   });
   const db = {
     transaction(name, mode) {
+      let wrote = false;
       const tx = {
         objectStore: () => ({
           put: value => request(value.id, value),
-          get: id => request(id),
+          get: id => {
+            const req = { result: saved.get(`${name}:${id}`) };
+            queueMicrotask(() => req.onsuccess?.());
+            return req;
+          },
           delete: id => request(id, null)
         })
       };
+      if (mode === "readwrite")
+        setImmediate(() => {
+          if (!wrote) tx.oncomplete?.();
+        });
       function request(id, value) {
+        wrote = true;
         const key = `${name}:${id}`,
           req = { result: mode === "readonly" ? saved.get(key) : id };
         queueMicrotask(() => {
@@ -109,7 +119,7 @@ test("配置已落盘，仍要等本批对话的在途保存失败和浏览器�
   f.transactions[0].finish(true);
   await done;
   assert.match(f.notes.at(-1), /已写入存储目录：配置.*已在此浏览器暂存：1 段对话/);
-  assert.ok(f.saved.has("conversations:c1"));
+  assert.ok(f.saved.has("conversations:test/chats,c1"));
 });
 
 test("配置落盘成功也不能盖住对话事务中止；附件恢复失败和已写成的原件分开报", async t => {
@@ -182,7 +192,7 @@ test("行迹另存成功而对话写盘失败，浏览器仍得到完整的思�
   const f = setup(t, { config: false, incomingChats: [c], remote: deny("/api/chats/save") });
   await f.run();
   assert.ok(f.requests.some(r => r.path === "/api/chats/trail/put"));
-  const saved = JSON.parse(f.saved.get("conversations:c1").json).messages[1];
+  const saved = JSON.parse(f.saved.get("conversations:test/chats,c1").json).messages[1];
   assert.equal(saved.reasoning, reasoning);
   assert.equal(saved.cold, undefined);
   assert.match(f.notes.at(-1), /^已在此浏览器暂存：1 段对话/);

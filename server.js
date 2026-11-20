@@ -184,6 +184,8 @@ const SKILLS = require("./server/skills.js")({
 });
 const CHATS = require("./server/chats.js")({
   chatsHome: () => STORE.paths().chats,
+  // 对话接口的 root 原指对话目录；页面另报存储根，旧脚本仍可显式指定目录。
+  route: (handle, describe) => STORE.scopedRoute(handle, describe, "storeRoot"),
   // 对话删了，它各答的检查点跟着删（见下）
   onDelete: id => CHECKPOINTS.dropConversation(id)
 });
