@@ -240,8 +240,16 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
         writeTombstones(home, tombstones);
       }
       writeAtomic(path.join(home, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
-      // 标题改过：旧名的文件不留
-      for (const stale of filesFor(home, id)) if (stale !== name) fs.rmSync(path.join(home, stale), { force: true });
+      // 标题改过：旧名的文件不留。删不掉（被索引器、杀软、编辑器占着，或设成了只读）只记一笔——
+      // 正本已经落盘，这一趟就算成了；为旧名回 400，页面会当成「没存住」写浏览器暂存、每 3 秒重试，盘上还留着两份同 id 的
+      for (const stale of filesFor(home, id))
+        if (stale !== name) {
+          try {
+            fs.rmSync(path.join(home, stale), { force: true });
+          } catch (error) {
+            console.warn(`⚠ 旧名的对话文件没能删掉（${stale}）：${error?.code || error?.message || error}`);
+          }
+        }
       return { file: name, savedAt };
     },
     error => `对话未能落盘：${describe(error)}`
@@ -260,7 +268,14 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
         fs.rmSync(path.join(home, name), { force: true });
         removed += 1;
       }
-      fs.rmSync(trailDir(home, id), { recursive: true, force: true });
+      // 行迹删不掉（被占着、目录坏了）不该让整次删除落空：对话文件已经删了，墓碑不写，别的页面读到的就是
+      // 「对话没了、也没有删除记录」，手上还留着的那份还能把它写回来，检查点也一直清不掉。尽力而为，留着的那份
+      // 由读目录时的清扫补删（见 sweepTrails：没人引用、放了一天以上的行迹照删）
+      try {
+        fs.rmSync(trailDir(home, id), { recursive: true, force: true });
+      } catch (error) {
+        console.warn(`⚠ 行迹没能删掉（${id}）：${error?.code || error?.message || error}`);
+      }
       // 墓碑记「什么时候删的」：补删要带当时那一刻，否则断的这段里别处写过、保存过的那份，
       // 其 savedAt 早于此刻的墓碑，就会被当成迟到的旧保存丢掉。
       // 已有的墓碑更晚（别处晚些时候也删了同一段）就留着更晚那个：补删一次旧的不该把新记号抹回去
