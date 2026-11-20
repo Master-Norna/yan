@@ -1959,10 +1959,11 @@ const forbiddenWhy = (scanned, tier) => {
 const envVars = (/** @type {string} */ names) => String.raw`\$\{?env:(?:${names})\b|%(?:${names})%`;
 const SYSTEM_VARS = String.raw`ProgramData|ProgramFiles(?:\(x86\))?|ProgramW6432|SystemRoot|windir`;
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
-const HOME_SYSTEM_PATH = new RegExp(
-  String.raw`${envVars(`USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|Public|ALLUSERSPROFILE|${SYSTEM_VARS}`)}|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)`,
-  "i"
-);
+const HOME_VARS = String.raw`USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|Public|ALLUSERSPROFILE|${SYSTEM_VARS}`;
+const HOME_SYSTEM_PATH = new RegExp(String.raw`${envVars(HOME_VARS)}|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)`, "i");
+// ${env:X} 是 PowerShell 的变量写法，可它的花括号在扫描时按语句分隔切开，参数取词到 $ 就断了——
+// 删除判据拿不到操作数，所以这种写法另外按原文认一次
+const BRACED_HOME_PATH = new RegExp(String.raw`\$\{(?:env:)?(?:${HOME_VARS})\b[^}\n]*\}`, "i");
 // 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）。
 // 带引号的只认站在指令位的（& "curl.exe" …）：rg "curl" src 是搜字。curl 的 --connect-to、-x 之类不往下追：静态筛查追不完，问而后行里这些本来就要请示
 const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
@@ -2073,6 +2074,9 @@ function recursiveDeleteCall(call) {
 /** @param {any} scanned @param {string} workdir @param {boolean} win */
 function recursiveDeleteWhy(scanned, workdir, win) {
   if (!workdir || !RECURSIVE_DELETE.test(scanned.text)) return "";
+  // ${env:USERPROFILE} 这类写法取不到操作数（见 BRACED_HOME_PATH），整段按原文判
+  const braced = BRACED_HOME_PATH.exec(scanned.text);
+  if (braced) return `审查拒绝：不代为删除工作目录之外的整个目录（${braced[0]}）`;
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
   for (const call of commandInvocations(scanned)) {
     if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call)) continue;
@@ -2081,6 +2085,10 @@ function recursiveDeleteWhy(scanned, workdir, win) {
       if (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value))) continue;
       const raw = arg.value;
       if (!raw) continue;
+      // ~ 与 $HOME / $env:USERPROFILE / %USERPROFILE% 这类是 shell 展开的：字面 resolve 会把它当成工作目录下的一个名字，
+      // 看着像「之内」，实际删的是整个家目录或系统目录（rm -rf ~ 删的就是 ~）。与严档的写路径用同一份名单，一律按出去了算——
+      // 名单以外的 $dir 仍是静态看不出来，照旧不猜
+      if (HOME_SYSTEM_PATH.test(raw)) return `审查拒绝：不代为删除工作目录之外的整个目录（${raw}）`;
       const candidate = win
         ? normalizeLower(path.resolve(workdir, raw))
         : path.normalize(path.resolve(workdir, raw)).replace(/(?<=.)[\\/]+$/, "");

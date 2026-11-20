@@ -1938,8 +1938,18 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
   assert.equal(review(atWin ? "Remove-Item sub\\dist -Recurse" : "rm -rf sub/dist"), null);
   // 原本就拦的最夸张那几种不受影响
   assert.match(review("Remove-Item . -Recurse -Force"), /整目录/);
-  // 变量里的路径静态看不出来，与本文件其余规则一样不猜；不是递归删的也不管
-  assert.equal(review("Remove-Item $env:TEMP\\build -Recurse"), null);
+  // 家目录与系统目录写成变量或 ~ 时按出去了算：~、$HOME、$env:USERPROFILE、%USERPROFILE% 展开后删的是工作目录之外的一整片
+  // （`rm -rf ~` 删的就是整个家目录）；名单以外的 $dir 静态看不出落到哪，与本文件其余规则一样不猜
+  for (const command of [
+    "rm -rf ~",
+    "rm -rf $HOME",
+    "Remove-Item ~/Documents -Recurse",
+    "Remove-Item $env:USERPROFILE -Recurse -Force",
+    "Remove-Item $env:TEMP\\build -Recurse",
+    ...(atWin ? ['cmd /c "rmdir /s /q %USERPROFILE%"', "ri ${env:HOME}\\x -r -fo"] : [])
+  ])
+    assert.match(review(command), /整个目录/, command);
+  assert.equal(review("Remove-Item $dir\\build -Recurse"), null);
   assert.equal(review("Remove-Item D:\\data\\a.txt"), null);
   // 同一条指令里别处读的路径不算删除目标（`cat /tmp/x; rm -rf ./build` 里前一段只是读）
   assert.equal(
