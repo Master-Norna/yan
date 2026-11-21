@@ -1586,7 +1586,9 @@ function hasHiddenCommand(scanned, dotComments = false) {
 // 无引号的位置复用 PREFIX / SHELL，env 等前缀与单层 sh -c 后的程序目录也统一在这里去掉。
 // 续行（反引号、反斜杠）之后的一行不是指令位，那可能正是写入目标
 const LINE_START = String.raw`(?<![${"`"}\\][ \t]*\r?\n)^`,
-  CALL_SITE = String.raw`(?:${LINE_START}|[;|({&])[ \t]*`,
+  // `{` 是语句起点（`{ rm -rf /; }`），但 `${…}` 是变量展开：把它当起点会把 `${HOME:-./x}`
+  // 里的 `HOME:-./` 当成程序目录去掉，剩下的 `${x}` 既认不出家目录，也让后面的规则看的是另一段文本
+  CALL_SITE = String.raw`(?:${LINE_START}|[;|(&]|(?<!\$)\{)[ \t]*`,
   UNQUOTED_EXE_DIR_WIN = new RegExp(
     String.raw`((?:${CALL_SITE}(?:\.[ \t]+)?|\$[\w:]+[ \t]*=[ \t]*|\bcmd(?:\.exe)?\b[^\n]*?\s/[ck][ \t]*["']?|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s[-/](?:${prefixesOf("command")})[ \t]+["']?)${PREFIX}(?:${SHELL}${PREFIX})?)[^\s"'${"`"};|&<>(){}]*[\\/](?=[^\s"'${"`"};|&<>(){}]+)`,
     "gim"
@@ -1959,10 +1961,10 @@ const forbiddenWhy = (scanned, tier) => {
 const envVars = (/** @type {string} */ names) => String.raw`\$\{?env:(?:${names})\b|%(?:${names})%`;
 const SYSTEM_VARS = String.raw`ProgramData|ProgramFiles(?:\(x86\))?|ProgramW6432|SystemRoot|windir`;
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
-const HOME_SYSTEM_PATH = new RegExp(
-  String.raw`${envVars(`USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|Public|ALLUSERSPROFILE|${SYSTEM_VARS}`)}|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)`,
-  "i"
-);
+const HOME_VARS = String.raw`USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|Public|ALLUSERSPROFILE|${SYSTEM_VARS}`;
+const HOME_SYSTEM_PATH = new RegExp(String.raw`${envVars(HOME_VARS)}|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)`, "i");
+// 单独取删除操作数时，把这些已知的花括号变量留在一个词内；引号里的参数本就完整。
+const BRACED_HOME_PATH = new RegExp(String.raw`\$\{(?:env:(?:${HOME_VARS})\}|HOME\b)`, "gi");
 // 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）。
 // 带引号的只认站在指令位的（& "curl.exe" …）：rg "curl" src 是搜字。curl 的 --connect-to、-x 之类不往下追：静态筛查追不完，问而后行里这些本来就要请示
 const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
@@ -2074,13 +2076,18 @@ function recursiveDeleteCall(call) {
 function recursiveDeleteWhy(scanned, workdir, win) {
   if (!workdir || !RECURSIVE_DELETE.test(scanned.text)) return "";
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-  for (const call of commandInvocations(scanned)) {
+  for (const call of commandInvocations(scanned, { keepHomeWords: true })) {
     if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call)) continue;
     for (const arg of call.args) {
-      // 选项跳过（-Recurse、-Force、cmd 的 /s /q）；`-Path X` 里那个 X 不是选项，照判
-      if (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value))) continue;
-      const raw = arg.value;
+      // 选项跳过；-Path X / -LiteralPath:X 的值仍是删除目标。
+      const bound = call.shell === "powershell" && /^-(?:Path|LiteralPath):(.+)$/is.exec(arg.value);
+      if (!bound && (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value)))) continue;
+      const raw = bound ? bound[1].replace(/^(["'])(.*)\1$/s, "$2") : arg.value;
       if (!raw) continue;
+      // ~ 与 $HOME / $env:USERPROFILE / %USERPROFILE% 这类是 shell 展开的：字面 resolve 会把它当成工作目录下的一个名字，
+      // 看着像「之内」，实际删的是整个家目录或系统目录（rm -rf ~ 删的就是 ~）。与严档的写路径用同一份名单，一律按出去了算——
+      // 名单以外的 $dir 仍是静态看不出来，照旧不猜
+      if (HOME_SYSTEM_PATH.test(raw)) return `审查拒绝：不代为删除工作目录之外的整个目录（${raw}）`;
       const candidate = win
         ? normalizeLower(path.resolve(workdir, raw))
         : path.normalize(path.resolve(workdir, raw)).replace(/(?<=.)[\\/]+$/, "");
@@ -2212,7 +2219,27 @@ const resolveNameStart = (scanned, at, end) => {
   return at;
 };
 /** @param {ReturnType<typeof shellText>} scanned */
-function commandInvocations(scanned) {
+function homeWordSpans(scanned) {
+  const words = new Map(scanned.quotes);
+  let end = -1;
+  for (const match of scanned.text.matchAll(BRACED_HOME_PATH)) {
+    if (match.index <= end || scanned.syntax[match.index] !== "$") continue;
+    // PowerShell 的 env: 名字已经配对；POSIX 的 HOME 展开可带修饰，用原有配对器取到词尾。
+    end = match[0].endsWith("}") ? match.index + match[0].length - 1 : findParamEnd(scanned.text, match.index + 2, scanned.text.length);
+    if (end < 0) break;
+    words.set(match.index, end);
+  }
+  return words;
+}
+/**
+ * @param {ReturnType<typeof shellText>} scanned
+ * @param {{ keepHomeWords?: boolean }} [options] 取词开关按名字给，不按位置传布尔值：
+ *   调用方各有各的意图（这里要保住花括号变量、外联分类那边要展开 xargs），合到一处时都并进这个对象。
+ */
+function commandInvocations(scanned, { keepHomeWords = false } = {}) {
+  // 只在取删除操作数时把花括号变量当一个词；另留执行范围的扫描，不抹掉内层指令。
+  const words = keepHomeWords ? homeWordSpans(scanned) : scanned.quotes,
+    argScan = words === scanned.quotes ? scanned : { ...scanned, quotes: words };
   const calls = [],
     seen = new Set(),
     ranges = [...scanned.executions],
@@ -2243,7 +2270,7 @@ function commandInvocations(scanned) {
       // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
       at = resolveNameStart(scanned, at, range.end);
       const mergeAt = [],
-        tokens = argumentsAt(scanned, at, range.end, range.shell, mergeAt);
+        tokens = argumentsAt(argScan, at, range.end, range.shell, mergeAt);
       if (!tokens.length) {
         at++;
         continue;
@@ -2284,7 +2311,7 @@ function commandInvocations(scanned) {
                   ? raw
                   : raw.replace(/\\\\|\\([$`"])|\\\n/g, m => (m === "\\\\" ? "\\" : m[1] === "\n" ? "" : m[1])),
               inner = shellText(body, bodyShell);
-            for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
+            for (const call of commandInvocations(inner, { keepHomeWords })) calls.push({ ...call, scan: inner });
           }
           return;
         }
@@ -2317,7 +2344,7 @@ function commandInvocations(scanned) {
             at = resolveNameStart(scanned, at, range.end);
             const nameStart = at;
             for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
-              if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+              if (words.has(at)) at = Math.min(words.get(at), range.end - 1);
             }
             pendingShadow = nameStart < at ? { nameStart, nameEnd: at, argsTo: range.end } : null;
             if (pendingShadow) shadows.push(pendingShadow);
@@ -2331,7 +2358,7 @@ function commandInvocations(scanned) {
           continue;
         }
         for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
-          if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+          if (words.has(at)) at = Math.min(words.get(at), range.end - 1);
         }
       }
       if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
@@ -2345,7 +2372,7 @@ function commandInvocations(scanned) {
         if (bounded.length && bounded.length < tokens.length) emit(bounded, cut, true);
       }
       for (const s of shadows) {
-        const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd), range.shell);
+        const toks = argumentsAt(argScan, s.nameStart, Math.max(s.argsTo, s.nameEnd), range.shell);
         if (toks.length) emit(toks, s.argsTo);
       }
     }
@@ -3387,11 +3414,19 @@ function screenPath(rel, { write = false } = {}) {
 // 开发言自己时仓库里的同名字样不受牵连。静态筛查：脚本里拼出来的路径管不到
 const STORE_SECRETS = ["配置.json", "配置备份", "ChatGPT 登录.json"];
 const STORE_WHY = "不碰言的配置与登录文件（内有 API Key 与令牌）；要改设置，请用户在设置里改";
+// Windows 的扩展长度与设备写法：\\?\C:\x、\\.\C:\x 与 \\.\UNC\\srv\sh\x 指的仍是同一个文件。
+// 只做这一层字符串规整——本模块是纯函数、不碰文件系统，路径上的链接另由 work/paths.js 的 assertReachable 拦
+function withoutExtendedPrefix(value) {
+  const text = String(value || ""),
+    lead = /^[\\/]{2}[?.][\\/](?:UNC[\\/])?/i.exec(text);
+  if (!lead) return text;
+  return (/unc/i.test(lead[0]) ? "\\\\" : "") + text.slice(lead[0].length);
+}
 /** 一个绝对路径是不是落在存储根的这几样上（或就是存储根里它们之下）。是则返回原因 @param {string} full @param {string} root */
 function screenStorePath(full, root) {
   if (!root) return null;
-  const base = normalizeLower(path.resolve(root)),
-    target = normalizeLower(path.resolve(withoutDataStream(full)));
+  const base = normalizeLower(path.resolve(withoutExtendedPrefix(root))),
+    target = normalizeLower(path.resolve(withoutExtendedPrefix(withoutDataStream(full))));
   return STORE_SECRETS.some(name => pathIsInside(normalizeLower(path.join(base, name)), target)) ? `拒绝：${STORE_WHY}` : null;
 }
 /**
