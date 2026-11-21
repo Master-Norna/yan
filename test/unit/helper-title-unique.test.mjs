@@ -9,8 +9,9 @@ function fixture() {
     "delegateInBackground",
     "uniqueHelperTitle",
     "crews",
+    "historyForApi",
     `setup: () => {
-      launchHelper = () => {};
+      launchHelper = step => { step.sub = { id: "h" + step.id }; };
       PROMPTS.delegate = { started: "已开工：{{title}}" };
     }`
   ]);
@@ -58,4 +59,31 @@ test("没给标题的按任务开头取名，同样不撞", () => {
     step = { id: "s9", name: "delegate" };
   f.delegateInBackground(step, { task: "整理这份周报" }, { conversation: c });
   assert.equal(step.title, "整理这份周报·2");
+});
+
+// 名字是拿来寻址的：下一答的行迹摘要（90-delegate.js 的 digest）原样写出 step.title。
+// 摘要是模型唯一还看得见的名字——两个都顶到 40 字上限的同名帮手，摘要若照旧截 40 字，
+// 「·2」就被切掉，两行又成了同一个名字，模型照摘要叫停、传话会命中原名那一位
+test("两个顶到 40 字的同名帮手：下一问的行迹摘要仍分得清两个全名", async () => {
+  const f = fixture(),
+    base = "把仓库里所有测试跑一遍并把失败的用例整理成一份报告给我看看结果如何呢还有哪些没跑的".slice(0, 40),
+    c = { id: "c", messages: [] },
+    answer = { id: "m1", role: "assistant", content: "", steps: [] },
+    first = { id: "s1", name: "delegate" },
+    second = { id: "s2", name: "delegate" };
+  assert.equal([...base].length, 40, "这一条要的正是顶到上限的标题");
+  c.messages.push(answer);
+  f.delegateInBackground(first, { title: base, task: "甲" }, { conversation: c });
+  answer.steps.push(first);
+  f.delegateInBackground(second, { title: base, task: "乙" }, { conversation: c });
+  answer.steps.push(second);
+  for (const step of [first, second]) {
+    step.status = "done";
+    step.result = "3 步 · 12 秒";
+  }
+  c.messages.push({ id: "u1", role: "user", content: "这两个各做到哪了？" });
+  const history = await f.historyForApi(c.messages, "u1"),
+    names = [...String(history.at(-1).content).matchAll(/差遣「([^」]*)」/g)].map(match => match[1]);
+  assert.deepEqual(names, [first.title, second.title], "摘要里写的要就是按它寻址的名字");
+  assert.notEqual(names[0], names[1], "两个名字不能都退回原名");
 });

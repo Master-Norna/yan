@@ -21,8 +21,11 @@ defineTool({
   html: step => delegateStepHtml(step),
   sync: syncDelegateCard,
   // 断着的写明在等人续：主模型知道它没回来、也不会自己回来
+  // 名字原样交出，不再截 40 字：step.title 是按它寻址的名字（撞名时补了 ·2，见 uniqueHelperTitle），
+  // 截一刀就把序号切掉，下一问的两行摘要成了同一个名字，模型照摘要叫停、传话会命中原名那一位。
+  // 显示要短在画的地方截（CSS 省略），别动寻址名
   digest: step =>
-    t`差遣「${String(step.title || "").slice(0, 40)}」→ ${step.status === "interrupted" ? t`中辍（${step.result || ""}），等用户续上` : step.result || step.status}${subChangedPaths(step).length ? t`，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
+    t`差遣「${String(step.title || "")}」→ ${step.status === "interrupted" ? t`中辍（${step.result || ""}），等用户续上` : step.result || step.status}${subChangedPaths(step).length ? t`，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
 });
 // 给帮手递话：正做着的，话进它的收件口，说到落点时读到（同补言，不掐断）；已收工的即续派，带着先前的经过接着做。
 // 叫停只停正做着的那一个，已做的照未完成回报；翻看只读它的经过（见 helperTrail）。这一步在行迹里也是一枚签（续派 / 传话 / 叫停 / 翻看），点开是那名帮手
