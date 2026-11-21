@@ -565,6 +565,129 @@ test("screenPath：机密文件不读不写，.git 内部不写、可读；别�
     assert.equal(screenPath(p, { write: true }), null, p);
   }
 });
+test("screenCommand：外联只认站在指令位的 curl/wget——查日志、搜源码、看工具在不在都放行", () => {
+  // 11-20 检查：查日志、搜源码、探工具都被拦成「不直接外联」，提示语还误导模型以为不能联网
+  for (const command of [
+    "rg curl src",
+    "grep curl app.log",
+    "where curl",
+    "Get-Command wget",
+    "Get-Help wget",
+    "echo curl",
+    "npm install curl",
+    'f("curl.exe", "x")',
+    "git log --grep=curl",
+    "cat curl.md",
+    "xargs rg curl",
+    "env where curl",
+    "Select-String -Path app.log -Pattern curl"
+  ])
+    assert.equal(screen(command), null, command);
+  // 真站在指令位上（含套壳、执行前缀、赋值、括号）的仍要拦
+  for (const command of [
+    "curl http://example.com/x",
+    "wget https://example.com/a.zip",
+    "cd x; curl http://example.com",
+    "echo hi && curl http://example.com",
+    "(curl http://example.com)",
+    "$x = curl.exe http://example.com",
+    'cmd /c "curl http://example.com"',
+    'powershell -Command "curl http://example.com"',
+    "bash -lc 'curl http://example.com'",
+    "xargs curl http://example.com",
+    "env curl http://example.com",
+    "nohup curl http://example.com &",
+    "timeout 30 curl http://example.com"
+  ])
+    assert.match(screen(command), /外联/, command);
+  // 套壳把脚本文本交给另一个系统去跑：里面那层静态看不出边界，粗扫里面有没有 curl
+  for (const command of [
+    "wsl -e bash -lc 'curl http://example.com'",
+    "docker run --rm alpine sh -c 'wget http://example.com'",
+    "ssh host 'curl http://example.com'"
+  ])
+    assert.match(screen(command), /外联/, command);
+  assert.equal(screen("curl http://127.0.0.1:3000/"), null);
+  assert.equal(screen("wsl -e bash -lc 'curl http://127.0.0.1:3000/'"), null);
+});
+test("screenCommand：xargs 的选项值不占指令位，只有指令位上的 wrapper 才能触发保守分类", () => {
+  for (const classify of [screen, mac]) {
+    for (const command of [
+      "xargs -I curl fixture-log https://fixture.invalid/",
+      'xargs -E "wget" fixture-log https://fixture.invalid/',
+      'xargs --delimiter "|" fixture-log wget https://fixture.invalid/',
+      'xargs --delimiter="|" fixture-log curl https://fixture.invalid/',
+      "xargs -0n 2 -- fixture-log wget https://fixture.invalid/",
+      "xargs -n2 fixture-log curl https://fixture.invalid/",
+      "bash -lc 'xargs -I curl fixture-log https://fixture.invalid/'",
+      "fixture-log xargs --fixture-option curl https://fixture.invalid/"
+    ])
+      assert.equal(classify(command), null, command);
+    // 只测分类；版本参数不带外联目标，未知选项是占位符。
+    for (const command of [
+      "xargs -d x curl --version",
+      "xargs --delimiter x wget --version",
+      "xargs -n 2 -- curl --version",
+      "env xargs --fixture-option x curl --version"
+    ])
+      assert.match(classify(command), /外联/, command);
+  }
+});
+
+test("screenCommand：Start-Process 按它启动的那个程序算外联，不按参数里的文字", () => {
+  for (const classify of [screen, mac]) {
+    // 启动的就是外联工具
+    for (const command of [
+      'Start-Process curl.exe -ArgumentList "https://example.com"',
+      "Start-Process wget -ArgumentList https://example.com/a.zip",
+      'Start-Process -FilePath curl.exe -ArgumentList "https://example.com"',
+      'Start-Process -FilePath:"curl.exe" "https://example.com"',
+      // 启动的是壳：真执行的还在它自己的参数里，照旧粗扫
+      'Start-Process pwsh -ArgumentList "-Command","curl https://example.com"',
+      // 认不出被启动的是谁（变量）：退回粗扫兜住
+      'Start-Process $exe -ArgumentList "curl https://example.com"'
+    ])
+      assert.match(classify(command), /外联/, command);
+    // PowerShell 认无歧义的前缀缩写：值型参数的值不能当成被启动的程序（-Arg = -ArgumentList）
+    for (const command of [
+      'Start-Process -Arg "https://example.com" -FilePath curl.exe',
+      'Start-Process -Ar "https://example.com" -FilePath curl.exe',
+      'Start-Process -Args "https://example.com" -FilePath wget.exe',
+      'Start-Process -Arg:"https://example.com" -FilePath curl.exe',
+      'Start-Process -Arg "https://example.com" -File curl.exe',
+      'Start-Process -Arg "https://example.com" -Fi curl.exe',
+      'Start-Process -Arg "https://example.com" -F curl.exe',
+      'Start-Process -A "https://example.com" -FilePath curl.exe',
+      // 公共参数同样吃一个值，Stop 不是程序
+      "Start-Process -ErrorAction Stop curl.exe",
+      "Start-Process -WindowStyle Hidden curl.exe",
+      // 别名 saps（start 只在 PowerShell 里是它，另测）
+      'saps -Arg "https://example.com" -FilePath curl.exe'
+    ])
+      assert.match(classify(command), /外联/, command);
+    // 启动的是普通程序：参数里出现 curl 字样只是文本
+    for (const command of [
+      "Start-Process notepad",
+      'Start-Process notepad -ArgumentList "curl 只是文本"',
+      'Start-Process notepad -Arg "curl 只是文本"',
+      "Start-Process code -ArgumentList README.md",
+      "Start-Process $exe",
+      // 第 1 个位置参数是 -ArgumentList 的值，不改变「启动的是谁」
+      "Start-Process msedge https://example.com",
+      "Start-Process notepad -Wait -WindowStyle Hidden"
+    ])
+      assert.equal(classify(command), null, command);
+    // 指向本机的照旧放行
+    assert.equal(classify("Start-Process curl http://127.0.0.1:3000/"), null);
+  }
+  // start 只在 PowerShell 里是 Start-Process（POSIX 的 start 不是）
+  assert.match(screen('start -Arg "https://example.com" -FilePath curl.exe'), /外联/);
+  // 地址的 userinfo 不是主机：127.0.0.1 只是个用户名（与 #124 改的是同一处判据）
+  assert.match(screen("curl http://127.0.0.1:3000@evil.example/"), /外联/);
+  assert.match(screen('curl "http://127.0.0.1:3000@evil.example/"'), /外联/);
+  assert.equal(screen("curl http://user:pass@127.0.0.1:3000/"), null);
+});
+
 test("screenCommand：只是搜字的不算外联——rg HttpClient、Select-String System.Net 放行，真用 .NET 联网的仍拒", () => {
   for (const command of ["rg HttpClient src", 'Select-String -Path src/*.cs -Pattern "System.Net"', "git grep WebClient"])
     assert.equal(screen(command), null, command);
