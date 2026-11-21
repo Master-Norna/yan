@@ -28,13 +28,17 @@ module.exports = function createFiles(work) {
     if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
     const release = await lockFile(file, signal);
     try {
-      const existing = await fs.promises.stat(file).catch(() => null);
+      const existing = await fs.promises.stat(file).catch(error => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
       if (existing?.isDirectory()) throw Error(`${body.path} 是目录，不能作为文件写入`);
       await fs.promises.mkdir(path.dirname(file), { recursive: true }).catch(error => {
         throw Error(describeFsError(error, path.dirname(String(body.path))));
       });
       const existed = !!existing,
-        previous = existed ? await fs.promises.readFile(file).catch(() => null) : null;
+        // 文件已经存在却读不出，绝不可把「未知」当成空文件覆盖。
+        previous = existed ? await fs.promises.readFile(file) : null;
       // 这一答（或这名帮手）没读过它就整份覆盖：先拦下，请它读了再写——最危险的整份覆盖不该比 edit_file 更不设防。空文件不拦
       if (body.unseen === true && previous?.length)
         throw Error(`${body.path} 已存在（${previous.length} 字节），整份覆盖前请先 read_file 看过；只改几处用 edit_file`);
