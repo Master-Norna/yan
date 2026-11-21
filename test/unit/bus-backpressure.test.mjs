@@ -110,7 +110,7 @@ test("总线：显式 writeHead 的事件先于数据和结束事件", async () 
   const events = await new Promise((resolve, reject) => {
     const deadline = setTimeout(() => reject(Error("等待 end 超时")), 3000);
     const check = () => {
-      const result = sse.chunks.join("").split("\\n\\n").filter(part => part.startsWith("data: ")).map(part => JSON.parse(part.slice(6)));
+      const result = sse.chunks.join("").split("\n\n").filter(part => part.startsWith("data: ")).map(part => JSON.parse(part.slice(6)));
       if (result.some(item => item.t === "end")) {
         clearTimeout(deadline);
         resolve(result);
