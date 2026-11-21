@@ -159,7 +159,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   // .yan/ 常被仓库的 .gitignore 整棵忽略（目录记忆与运行数据不随仓库提交），可意是任务状态：退回代码时它得跟着退。
   // 所以即使 .yan 整棵被忽略，也为意进去一趟：其余内容照旧跳过，不下钻
   const INTENT_DIR = INTENT_PATH.slice(0, INTENT_PATH.lastIndexOf("/"));
-  async function walk(root, visit, onUnreadable = () => {}) {
+  async function walk(root, visit, onUnreadable = (/** @type {string} */ _rel) => {}) {
     const skipped = skip().map(dir => path.resolve(dir));
     /** @param {boolean} sealed 这一层整棵被忽略、只为收意进来：除它以外一律记「不明」 */
     const down = async (abs, rel, rules, sealed) => {
