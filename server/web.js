@@ -244,6 +244,10 @@ async function fetchPublicResponse(
   }
   throw Error("跳转次数过多");
 }
+// 协议层报错正文的预算：报错只用得上开头那几句话（status、一条 message），整份读进来没有用处；
+// 网关或中转回一份没完的正文时，整份收进内存一样能把桥接撑死。读满这个数还没完就停下、掐掉正文，
+// 错误里只留状态码与一小段预览（MCP 的 HTTP 错误与模型接口的上游错误共用这一份）
+const ERROR_BODY_LIMIT = 8 * 1024;
 // 按字节收响应正文，最多 limit 字节，到量即停
 async function readLimitedBytes(response, limit) {
   const chunks = [];
@@ -453,5 +457,6 @@ module.exports = {
   assertPublicUrl,
   pinnedLookup,
   fetchPublicResponse,
-  readLimitedBytes
+  readLimitedBytes,
+  ERROR_BODY_LIMIT
 };

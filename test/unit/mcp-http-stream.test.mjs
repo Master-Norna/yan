@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { createTransport, readEvents } = require("../../server/mcp/transports.js");
+const { McpClient } = require("../../server/mcp/client.js");
 const { OUTBOUND_MARK } = require("../../server/web.js");
 
 // 一个回事件流的假服务：流先不结束，由测试决定何时出错
@@ -78,6 +79,21 @@ test("自己 close() 掐的流不当作出错", async t => {
   await tick();
   await tick();
   assert.deepEqual(got, []);
+});
+
+test("等回复的那一问超时了：传输把还在读的正文一并收掉，不挂着连接", async t => {
+  const signals = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    signals.push(init.signal);
+    return fakeStream().response;
+  });
+  const transport = createTransport({ url: "http://127.0.0.1:1/mcp" });
+  // 只测客户端与传输的交接：连接照常待着，这一条请求 20 毫秒就超时
+  const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+  client.transport = transport;
+  await assert.rejects(() => client.request("tools/call", {}, 20), /超时/);
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0].aborted, true, "超时之后要掐掉还在读的正文");
 });
 
 test("出站请求都带标记：MCP 服务借跳转盲打桥接受信接口的路堵上", async t => {

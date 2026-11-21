@@ -7,6 +7,9 @@ const fetchUpstream = require("./upstream.js");
 
 const SILICONFLOW = config => config.api === "siliconflow" || /siliconflow/i.test(config.baseUrl);
 const IMAGE_LIMIT = 40 * 1024 * 1024;
+// 整份回话的上限：图以 b64 交回时本就不小（一张 40 MB 的原件编码后约 54 MB），但也不能不设上限——
+// 接口源源不断地回，整份进内存就能把桥接撑死（与模型列表、MCP 消息同一个理由）
+const RESULT_LIMIT = 64 * 1024 * 1024;
 
 function imagesUrl(baseUrl) {
   const url = new URL(String(baseUrl || "").trim());
@@ -31,7 +34,11 @@ async function fetchImage(raw, signal, allowLoopback = false) {
   // 裸 fetch 就等于让桥接替它去取（桥接的受信接口对无标记的本机请求是放行的）。
   // 上游在本机时（用户配的本地生图服务）放行回环——它回的本机地址是正常的，与 http_request 同规矩
   const { response } = await fetchPublicResponse(url.href, { timeout: 60000, signal, allowLoopback });
-  if (!response.ok) throw Error(`取图失败：${response.status}`);
+  if (!response.ok) {
+    // 这份正文不采用：当场取消，别让连接挂着
+    await response.body?.cancel().catch(() => {});
+    throw Error(`取图失败：${response.status}`);
+  }
   // 边读边计：超过上限就停下，不先把整份收进内存再判
   const { buffer: bytes, truncated } = await readLimitedBytes(response, IMAGE_LIMIT);
   if (truncated) throw Error("图片过大");
@@ -73,7 +80,9 @@ module.exports = function createImage({ resolveProfile, upstreamError }) {
         throw Object.assign(Error(`连不上生图接口：${error.cause?.code || error.cause?.message || error.message}`), { status: 502 });
       });
       if (!response.ok) throw Object.assign(Error(await upstreamError(response)), { status: response.status });
-      const data = /** @type {any} */ (await response.json()),
+      const { buffer, truncated } = await readLimitedBytes(response, RESULT_LIMIT);
+      if (truncated) throw Object.assign(Error(`生图接口的回话过大（超过 ${RESULT_LIMIT / 1024 / 1024} MB），不再往下读`), { status: 502 });
+      const data = /** @type {any} */ (JSON.parse(new TextDecoder().decode(buffer))),
         items = Array.isArray(data.images) ? data.images : Array.isArray(data.data) ? data.data : [];
       const images = await Promise.all(
         items.map(async item => ({
