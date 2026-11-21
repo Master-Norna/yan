@@ -498,6 +498,30 @@ test("screenCommand：外联只认站在指令位的 curl/wget——查日志、
   assert.equal(screen("curl http://127.0.0.1:3000/"), null);
   assert.equal(screen("wsl -e bash -lc 'curl http://127.0.0.1:3000/'"), null);
 });
+test("screenCommand：xargs 的选项值不占指令位，只有指令位上的 wrapper 才能触发保守分类", () => {
+  for (const classify of [screen, mac]) {
+    for (const command of [
+      "xargs -I curl fixture-log https://fixture.invalid/",
+      'xargs -E "wget" fixture-log https://fixture.invalid/',
+      'xargs --delimiter "|" fixture-log wget https://fixture.invalid/',
+      'xargs --delimiter="|" fixture-log curl https://fixture.invalid/',
+      "xargs -0n 2 -- fixture-log wget https://fixture.invalid/",
+      "xargs -n2 fixture-log curl https://fixture.invalid/",
+      "bash -lc 'xargs -I curl fixture-log https://fixture.invalid/'",
+      "fixture-log xargs --fixture-option curl https://fixture.invalid/"
+    ])
+      assert.equal(classify(command), null, command);
+    // 只测分类；版本参数不带外联目标，未知选项是占位符。
+    for (const command of [
+      "xargs -d x curl --version",
+      "xargs --delimiter x wget --version",
+      "xargs -n 2 -- curl --version",
+      "env xargs --fixture-option x curl --version"
+    ])
+      assert.match(classify(command), /外联/, command);
+  }
+});
+
 test("screenCommand：只是搜字的不算外联——rg HttpClient、Select-String System.Net 放行，真用 .NET 联网的仍拒", () => {
   for (const command of ["rg HttpClient src", 'Select-String -Path src/*.cs -Pattern "System.Net"', "git grep WebClient"])
     assert.equal(screen(command), null, command);

@@ -29,7 +29,9 @@ const ENV_OPTS = String.raw`(?:${ENV_VAL_OPT}|${ENV_NOVAL_OPT})`;
 const EXEC_VAL_OPT = String.raw`-[cl]*a(?:${INLINE_SPACE}+${SHELL_WORD}|[^\s"';&|()]+)`;
 const EXEC_NOVAL_OPT = String.raw`-[cl]+`;
 const EXEC_OPTS = String.raw`exec(?:${INLINE_SPACE}+(?:${EXEC_VAL_OPT}|${EXEC_NOVAL_OPT}))*(?:${INLINE_SPACE}+--)?`;
-const PREFIX = String.raw`(?:(?:if|elif|while|until|!|then|do|else|${EXEC_OPTS}|nohup|nice(?:${INLINE_SPACE}+-n${INLINE_SPACE}*-?\d+)?|time(?:${INLINE_SPACE}+-p\b)?|timeout${INLINE_SPACE}+(?:-[kK]${INLINE_SPACE}*\d+(?:\.\d+)?[smhd]?${INLINE_SPACE}+)?\d+(?:\.\d+)?[smhd]?|command(?:${INLINE_SPACE}+-p\b)?(?:${INLINE_SPACE}+--)?(?=${INLINE_SPACE}+\S)|xargs(?:${INLINE_SPACE}+-[^\s"';&|()]+)*|env(?:${INLINE_SPACE}+${ENV_OPTS})*|[A-Za-z_]\w*=(?:${SHELL_WORD})?)${INLINE_SPACE}+)*`;
+const prefixWith = xargs =>
+  String.raw`(?:(?:if|elif|while|until|!|then|do|else|${EXEC_OPTS}|nohup|nice(?:${INLINE_SPACE}+-n${INLINE_SPACE}*-?\d+)?|time(?:${INLINE_SPACE}+-p\b)?|timeout${INLINE_SPACE}+(?:-[kK]${INLINE_SPACE}*\d+(?:\.\d+)?[smhd]?${INLINE_SPACE}+)?\d+(?:\.\d+)?[smhd]?|command(?:${INLINE_SPACE}+-p\b)?(?:${INLINE_SPACE}+--)?(?=${INLINE_SPACE}+\S)|env(?:${INLINE_SPACE}+${ENV_OPTS})*|[A-Za-z_]\w*=(?:${SHELL_WORD})?${xargs})${INLINE_SPACE}+)*`;
+const PREFIX = prefixWith(String.raw`|xargs(?:${INLINE_SPACE}+-[^\s"';&|()]+)*`);
 const SHELL_COMMAND = String.raw`(?:[^\s"';&|(){}]*/)?(?:ba|z|da|k)?sh(?:\.exe)?${INLINE_SPACE}+(?:--(?:rcfile|init-file)${INLINE_SPACE}+${SHELL_WORD}${INLINE_SPACE}+|--[\w-]+${INLINE_SPACE}+|-o${INLINE_SPACE}+\S+${INLINE_SPACE}+|-(?!o\s)[^c\s-]+${INLINE_SPACE}+)*-[a-z]*c[a-z]*${INLINE_SPACE}+(?:--${INLINE_SPACE}+)?`;
 const SHELL = String.raw`${SHELL_COMMAND}["']?`;
 const PS_ASSIGN = String.raw`\$[\w:]+${INLINE_SPACE}*=(?=${INLINE_SPACE}*[^\s"'])`;
@@ -1970,9 +1972,8 @@ const HOME_SYSTEM_PATH = new RegExp(
 // powershell -c "curl …" 里的仍然算——嵌套 shell 的执行范围本来就是分开解析的。curl 的 --connect-to、-x 之类不往下追
 const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
 const NET_TOOLS = new Set(NET_TOOL_NAMES.split("|").map(name => name.toLowerCase()));
-// 套壳把脚本文本原样交给另一个系统去跑的：wsl -e bash -lc '…'、docker run … sh -c '…'、ssh host '…'。
-// 里面那层不是本机这套 shell 的执行范围，静态看不出边界，就把这一整段按老办法粗扫一遍（这些词出现即算）
-const NET_WRAPPERS = new Set(["wsl", "docker", "podman", "ssh", "vagrant", "multipass"]);
+// 套壳把脚本文本交给别处执行，或 xargs 的参数界定不下来：只对确认是套壳的这一段沿用保守粗扫。
+const NET_WRAPPERS = new Set(["wsl", "docker", "podman", "ssh", "vagrant", "multipass", "xargs"]);
 const NET_TOOL_WORD = new RegExp(String.raw`(^|[\s"';|&()])(${NET_TOOL_NAMES})(?:\.exe)?(?=[\s"';|&()]|$)`, "i");
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
 // 桥接自己的端口：本机别的服务随便测，唯独桥接不行——它的执事接口不带请示与沙箱，指令借 curl、脚本调它就整个绕过去了。
@@ -2135,10 +2136,10 @@ const RSYNC_VALUES = new Set(
 const RSYNC_READ_VALUES = new Set(
   "exclude include filter exclude-from include-from files-from link-dest compare-dest copy-dest rsh rsync-path address".split(" ")
 );
-function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix", mergeAt = null) {
+function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix", mergeAt = null, limit = Infinity) {
   const text = scanned.text;
   const tokens = [];
-  for (let i = start; i < end; ) {
+  for (let i = start; i < end && tokens.length < limit; ) {
     // 共用扫描已标出的续行不占一个参数；例如 7z x a.zip `\n-oC:\x。
     if (scanned.syntax[i + 1] === "\x01" && /[\r\n]/.test(text[i + 1])) {
       i += text[i + 1] === "\r" && text[i + 2] === "\n" ? 3 : 2;
@@ -2180,13 +2181,46 @@ function argumentsAt(scanned, start, end = scanned.text.length, shell = "posix",
 }
 // 命令与参数共用 shellText 的执行范围、引号跨度和 argumentsAt；普通字符串不再另切一次词。
 // 前缀、赋值与套壳复用现有定义。带引号的执行正文由 shellText 给出范围，未加引号的 /c、-Command 在此展开。
-const INVOCATION_LEAD = new RegExp(String.raw`^${INLINE_SPACE}*${PREFIX}(?:${PS_ASSIGN}${INLINE_SPACE}*${PREFIX})*`, "i");
+const invocationLead = prefix => new RegExp(String.raw`^${INLINE_SPACE}*${prefix}(?:${PS_ASSIGN}${INLINE_SPACE}*${prefix})*`, "i");
+const INVOCATION_LEAD = invocationLead(PREFIX),
+  NET_INVOCATION_LEAD = invocationLead(prefixWith(""));
+const XARGS_LONG_VALUE = /^--(?:arg-file|delimiter|max-args|max-chars|max-procs|process-slot-var)(?==|$)/;
+const XARGS_LONG_SWITCH = /^--(?:null|interactive|verbose|no-run-if-empty|exit)$/;
+// 外联分类需要分清 xargs 的数据与被运行的程序。共用参数切词；看不准就保留 xargs 本身，交给外联的套壳规则。
+function xargsProgramStart(scanned, at, end) {
+  const next = () => argumentsAt(scanned, at, end, "cmd", null, 1)[0]; // 不越过有歧义的 &> 边界
+  for (let token; (token = next()); ) {
+    at = token.end;
+    const value = token.value;
+    if (value === "--") return next()?.start;
+    if (!value.startsWith("-")) return token.start;
+    if (XARGS_LONG_SWITCH.test(value) || /^-[0oprtx]+$/.test(value)) continue;
+    // 短选项区分大小写，带值的那一项之后是紧贴的值，不再拆成开关。
+    const opt = XARGS_LONG_VALUE.exec(value) || /^-[0oprtx]*[adEIJLnPRSs]/.exec(value);
+    if (!opt) return;
+    if (opt[0].length === value.length) {
+      const operand = next();
+      if (!operand) return;
+      at = operand.end;
+    }
+  }
+}
 // 命令名起点：前缀（赋值/env/nice 等）与重定向可交错出现在命令名之前，
 // fd 号紧贴 < > 的整段按重定向跳过；主调用与影子调用共用同一段解析
-const resolveNameStart = (scanned, at, end) => {
+const resolveNameStart = (scanned, at, end, parseXargs) => {
   for (;;) {
-    const lead = INVOCATION_LEAD.exec(scanned.syntax.slice(at, end));
+    const lead = (parseXargs ? NET_INVOCATION_LEAD : INVOCATION_LEAD).exec(scanned.syntax.slice(at, end));
     at += lead[0].length;
+    if (parseXargs) {
+      const xargs = /^xargs(?:\.exe)?(?=$|[\s<>])/i.exec(scanned.syntax.slice(at, end));
+      if (xargs) {
+        const program = xargsProgramStart(scanned, at + xargs[0].length, end);
+        if (program !== undefined) {
+          at = program;
+          continue;
+        }
+      }
+    }
     const ch = scanned.syntax[at];
     if (ch === "<" || ch === ">") {
       at = redirEnd(scanned, at, end);
@@ -2205,7 +2239,7 @@ const resolveNameStart = (scanned, at, end) => {
   return at;
 };
 /** @param {ReturnType<typeof shellText>} scanned */
-function commandInvocations(scanned) {
+function commandInvocations(scanned, parseXargs = false) {
   const calls = [],
     seen = new Set(),
     ranges = [...scanned.executions],
@@ -2234,7 +2268,7 @@ function commandInvocations(scanned) {
         }
       }
       // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
-      at = resolveNameStart(scanned, at, range.end);
+      at = resolveNameStart(scanned, at, range.end, parseXargs);
       const mergeAt = [],
         tokens = argumentsAt(scanned, at, range.end, range.shell, mergeAt);
       if (!tokens.length) {
@@ -2277,7 +2311,7 @@ function commandInvocations(scanned) {
                   ? raw
                   : raw.replace(/\\\\|\\([$`"])|\\\n/g, m => (m === "\\\\" ? "\\" : m[1] === "\n" ? "" : m[1])),
               inner = shellText(body, bodyShell);
-            for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
+            for (const call of commandInvocations(inner, parseXargs)) calls.push({ ...call, scan: inner });
           }
           return;
         }
@@ -2307,7 +2341,7 @@ function commandInvocations(scanned) {
             at = redirEnd(scanned, at + 1, range.end);
             // 影子调用也走与主调用相同的命令起点解析：赋值/套壳前缀、
             // 交错与 fd 重定向都可能是 dash 视角下一条命令的合法前缀
-            at = resolveNameStart(scanned, at, range.end);
+            at = resolveNameStart(scanned, at, range.end, parseXargs);
             const nameStart = at;
             for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
               if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
@@ -3300,7 +3334,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const gitWhy = gitEscapeWhy(text, workdir, win);
   if (gitWhy) return gitWhy;
   if (
-    commandInvocations(scanned).some(call => {
+    commandInvocations(scanned, true).some(call => {
       const scan = call.scan ?? scanned;
       if (NET_TOOLS.has(call.name.toLowerCase())) return true;
       if (!NET_WRAPPERS.has(call.name.toLowerCase())) return false;
