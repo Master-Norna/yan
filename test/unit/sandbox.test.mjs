@@ -1949,6 +1949,10 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
     ...(atWin ? ['cmd /c "rmdir /s /q %USERPROFILE%"', "ri ${env:HOME}\\x -r -fo"] : [])
   ])
     assert.match(review(command), /整个目录/, command);
+  assert.match(review(atWin ? 'Remove-Item "${env:HOME}\\fixture" -Recurse' : 'rm -r "${HOME}/fixture"'), /整个目录/);
+  assert.match(review(atWin ? "Remove-Item ${env:HOME}\\fixture -Recurse" : "rm -r ${HOME}/fixture"), /整个目录/);
+  assert.equal(review(atWin ? "Get-Content ${env:HOME}\\fixture.txt; Remove-Item ./build -Recurse" : "echo ${HOME}; rm -r ./build"), null);
+  assert.match(review(atWin ? 'Remove-Item -LiteralPath:"${env:HOME}\\fixture" -Recurse' : "rm -r ${HOME:-./fixture}/sample"), /整个目录/);
   assert.equal(review("Remove-Item $dir\\build -Recurse"), null);
   assert.equal(review("Remove-Item D:\\data\\a.txt"), null);
   // 同一条指令里别处读的路径不算删除目标（`cat /tmp/x; rm -rf ./build` 里前一段只是读）

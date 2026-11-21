@@ -1961,9 +1961,8 @@ const SYSTEM_VARS = String.raw`ProgramData|ProgramFiles(?:\(x86\))?|ProgramW6432
 // 用户目录与系统目录：查看放行，写入拒绝。只在判定为「写」的指令上查
 const HOME_VARS = String.raw`USERPROFILE|HOME|HOMEPATH|HOMEDRIVE|SystemDrive|APPDATA|LOCALAPPDATA|TEMP|TMP|Public|ALLUSERSPROFILE|${SYSTEM_VARS}`;
 const HOME_SYSTEM_PATH = new RegExp(String.raw`${envVars(HOME_VARS)}|\$\{?HOME\b|(^|[\s"'=])~([\\/]|$)`, "i");
-// ${env:X} 是 PowerShell 的变量写法，可它的花括号在扫描时按语句分隔切开，参数取词到 $ 就断了——
-// 删除判据拿不到操作数，所以这种写法另外按原文认一次
-const BRACED_HOME_PATH = new RegExp(String.raw`\$\{(?:env:)?(?:${HOME_VARS})\b[^}\n]*\}`, "i");
+// 单独取删除操作数时，把这些已知的花括号变量留在一个词内；引号里的参数本就完整。
+const BRACED_HOME_PATH = new RegExp(String.raw`\$\{(?:env:(?:${HOME_VARS})\}|HOME\b)`, "gi");
 // 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）。
 // 带引号的只认站在指令位的（& "curl.exe" …）：rg "curl" src 是搜字。curl 的 --connect-to、-x 之类不往下追：静态筛查追不完，问而后行里这些本来就要请示
 const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
@@ -2074,16 +2073,14 @@ function recursiveDeleteCall(call) {
 /** @param {any} scanned @param {string} workdir @param {boolean} win */
 function recursiveDeleteWhy(scanned, workdir, win) {
   if (!workdir || !RECURSIVE_DELETE.test(scanned.text)) return "";
-  // ${env:USERPROFILE} 这类写法取不到操作数（见 BRACED_HOME_PATH），整段按原文判
-  const braced = BRACED_HOME_PATH.exec(scanned.text);
-  if (braced) return `审查拒绝：不代为删除工作目录之外的整个目录（${braced[0]}）`;
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-  for (const call of commandInvocations(scanned)) {
+  for (const call of commandInvocations(scanned, true)) {
     if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call)) continue;
     for (const arg of call.args) {
-      // 选项跳过（-Recurse、-Force、cmd 的 /s /q）；`-Path X` 里那个 X 不是选项，照判
-      if (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value))) continue;
-      const raw = arg.value;
+      // 选项跳过；-Path X / -LiteralPath:X 的值仍是删除目标。
+      const bound = call.shell === "powershell" && /^-(?:Path|LiteralPath):(.+)$/is.exec(arg.value);
+      if (!bound && (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value)))) continue;
+      const raw = bound ? bound[1].replace(/^(["'])(.*)\1$/s, "$2") : arg.value;
       if (!raw) continue;
       // ~ 与 $HOME / $env:USERPROFILE / %USERPROFILE% 这类是 shell 展开的：字面 resolve 会把它当成工作目录下的一个名字，
       // 看着像「之内」，实际删的是整个家目录或系统目录（rm -rf ~ 删的就是 ~）。与严档的写路径用同一份名单，一律按出去了算——
@@ -2209,7 +2206,23 @@ const resolveNameStart = (scanned, at, end) => {
   return at;
 };
 /** @param {ReturnType<typeof shellText>} scanned */
-function commandInvocations(scanned) {
+function homeWordSpans(scanned) {
+  const words = new Map(scanned.quotes);
+  let end = -1;
+  for (const match of scanned.text.matchAll(BRACED_HOME_PATH)) {
+    if (match.index <= end || scanned.syntax[match.index] !== "$") continue;
+    // PowerShell 的 env: 名字已经配对；POSIX 的 HOME 展开可带修饰，用原有配对器取到词尾。
+    end = match[0].endsWith("}") ? match.index + match[0].length - 1 : findParamEnd(scanned.text, match.index + 2, scanned.text.length);
+    if (end < 0) break;
+    words.set(match.index, end);
+  }
+  return words;
+}
+/** @param {ReturnType<typeof shellText>} scanned */
+function commandInvocations(scanned, keepHomeWords = false) {
+  // 只在取删除操作数时把花括号变量当一个词；另留执行范围的扫描，不抹掉内层指令。
+  const words = keepHomeWords ? homeWordSpans(scanned) : scanned.quotes,
+    argScan = words === scanned.quotes ? scanned : { ...scanned, quotes: words };
   const calls = [],
     seen = new Set(),
     ranges = [...scanned.executions],
@@ -2240,7 +2253,7 @@ function commandInvocations(scanned) {
       // 重定向与前缀可交错出现在命令名之前（x=1 >f y=2 cmd、x=1 2>f cmd）：整段消费再取词
       at = resolveNameStart(scanned, at, range.end);
       const mergeAt = [],
-        tokens = argumentsAt(scanned, at, range.end, range.shell, mergeAt);
+        tokens = argumentsAt(argScan, at, range.end, range.shell, mergeAt);
       if (!tokens.length) {
         at++;
         continue;
@@ -2281,7 +2294,7 @@ function commandInvocations(scanned) {
                   ? raw
                   : raw.replace(/\\\\|\\([$`"])|\\\n/g, m => (m === "\\\\" ? "\\" : m[1] === "\n" ? "" : m[1])),
               inner = shellText(body, bodyShell);
-            for (const call of commandInvocations(inner)) calls.push({ ...call, scan: inner });
+            for (const call of commandInvocations(inner, keepHomeWords)) calls.push({ ...call, scan: inner });
           }
           return;
         }
@@ -2314,7 +2327,7 @@ function commandInvocations(scanned) {
             at = resolveNameStart(scanned, at, range.end);
             const nameStart = at;
             for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
-              if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+              if (words.has(at)) at = Math.min(words.get(at), range.end - 1);
             }
             pendingShadow = nameStart < at ? { nameStart, nameEnd: at, argsTo: range.end } : null;
             if (pendingShadow) shadows.push(pendingShadow);
@@ -2328,7 +2341,7 @@ function commandInvocations(scanned) {
           continue;
         }
         for (; at < range.end && !/[\s;&|()<>{}]/.test(scanned.syntax[at]); at++) {
-          if (scanned.quotes.has(at)) at = Math.min(scanned.quotes.get(at), range.end - 1);
+          if (words.has(at)) at = Math.min(words.get(at), range.end - 1);
         }
       }
       if (pendingShadow) pendingShadow.argsTo = Math.min(pendingShadow.argsTo, at);
@@ -2342,7 +2355,7 @@ function commandInvocations(scanned) {
         if (bounded.length && bounded.length < tokens.length) emit(bounded, cut, true);
       }
       for (const s of shadows) {
-        const toks = argumentsAt(scanned, s.nameStart, Math.max(s.argsTo, s.nameEnd), range.shell);
+        const toks = argumentsAt(argScan, s.nameStart, Math.max(s.argsTo, s.nameEnd), range.shell);
         if (toks.length) emit(toks, s.argsTo);
       }
     }
