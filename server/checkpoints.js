@@ -159,7 +159,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   // .yan/ 常被仓库的 .gitignore 整棵忽略（目录记忆与运行数据不随仓库提交），可意是任务状态：退回代码时它得跟着退。
   // 所以即使 .yan 整棵被忽略，也为意进去一趟：其余内容照旧跳过，不下钻
   const INTENT_DIR = INTENT_PATH.slice(0, INTENT_PATH.lastIndexOf("/"));
-  async function walk(root, visit) {
+  async function walk(root, visit, onUnreadable = (/** @type {string} */ _rel) => {}) {
     const skipped = skip().map(dir => path.resolve(dir));
     /** @param {boolean} sealed 这一层整棵被忽略、只为收意进来：除它以外一律记「不明」 */
     const down = async (abs, rel, rules, sealed) => {
@@ -196,6 +196,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
           try {
             inner = await down(full, sub, own, reenter);
           } catch {
+            onUnreadable(sub);
             items.push(["x", entry.name]);
             continue;
           }
@@ -285,27 +286,35 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   async function presentOf(store) {
     const index = readJsonFile(store.index, {}),
       files = new Map(),
-      dirs = new Set();
-    const tree = await walk(store.full, async (abs, rel, name) => {
-      try {
-        const stat = await fs.promises.stat(abs),
-          seen = index[rel];
-        files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await fileHash(abs));
-      } catch {
-        files.set(rel, null);
-      }
-      return ["f", name];
-    });
+      dirs = new Set(),
+      unknown = new Set();
+    const tree = await walk(
+      store.full,
+      async (abs, rel, name) => {
+        try {
+          const stat = await fs.promises.stat(abs),
+            seen = index[rel];
+          files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await fileHash(abs));
+          return ["f", name];
+        } catch {
+          // 读不到是「不明」，不能当成内容变了或文件丢了。
+          unknown.add(rel);
+          return ["x", name];
+        }
+      },
+      rel => unknown.add(rel)
+    );
     const collectDirs = (items, rel) => {
-      for (const item of items)
+      for (const item of items) {
+        const sub = rel ? `${rel}/${item[1]}` : item[1];
         if (item[0] === "d") {
-          const sub = rel ? `${rel}/${item[1]}` : item[1];
           dirs.add(sub);
           collectDirs(item[2], sub);
         }
+      }
     };
     collectDirs(tree, "");
-    return { files, dirs };
+    return { files, dirs, unknown };
   }
   // 要动哪几件：changed 改回、removed（此刻没有）补回、added（那一刻没有）删去。
   // 夹只在底下一件文件也不牵涉时才单列（路径带 /）：空夹建了或删了，文件那几行管不到它
@@ -313,9 +322,12 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     const then = snapshotOf(store, key),
       now = await presentOf(store),
       changes = [];
-    for (const [rel, hash] of then.files)
+    const unobserved = rel => [...now.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+    for (const [rel, hash] of then.files) {
+      if (unobserved(rel)) continue;
       if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash });
       else if (now.files.get(rel) !== hash) changes.push({ path: rel, kind: "changed", hash });
+    }
     // 那一刻读不了的（被占着的文件、进不去的夹）与忽略的，连同其下的，此刻有也不删
     const unclear = rel => {
       // 确实读过 .yan 这一层、意也没有单独记作不明：它的缺席是已知的，不能被父层的不明盖住。
