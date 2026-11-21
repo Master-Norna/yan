@@ -61,8 +61,7 @@ test("恢复删除的对话写盘失败时，删除墓碑仍在，旧页面不�
     const before = (await post("/api/chats/load", {})).deleted.c1;
     assert.equal(before, now - 2000);
     fs.renameSync = (src, dest) => {
-      if (String(dest).includes("·") && String(dest).endsWith(".json"))
-        throw Object.assign(Error("disk unavailable"), { code: "EACCES" });
+      if (String(dest).includes("·") && String(dest).endsWith(".json")) throw Object.assign(Error("disk unavailable"), { code: "EACCES" });
       return original(src, dest);
     };
     const saved = await post("/api/chats/save", { savedAt: now, conversation: conversation("c1", "新") });
