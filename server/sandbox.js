@@ -2461,6 +2461,24 @@ function stripReadSources(scanned, sources = true) {
 // 会带输出路径、且路径能紧贴在 -o 后面的程序：7z 的 -o{dir}、curl 的 -ofile、gcc 的 -oout.exe。
 // 紧贴写法只在它们后面才算路径；别处的 -o 只是某段文字里的一段（Write-Output "-oC:\x"、正则里的 -o）
 const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|clang\+\+|ld|dotnet)(?:\.exe)?$/i;
+// 短选项簇里的落点：curl 的短选项可以连写（-so C:\x、-sLoC:\x、-soC:\x）。
+// 簇里只有第一个吃值的字母管着后面的值——-sLo 里的 s 与 L 只是开关，o 才吃值；
+// 所以先按 HTTP_VALUE_SHORT（与 httpSends 共用一份表）找出那一个，是 o 才算落点。
+// 这张表是 curl / wget 的选项字母表，别的程序的同名开关另有意思：gcc -fopenmp 的 f 是开关、
+// openmp 是它的名字，g++ -fno-exceptions 同理，按 curl 读就会把 o 后面的当文件名。
+// 簇解析因此只给 curl；其余程序（gcc、7z、wget…）照旧只认 -oFILE / -o FILE，
+// wget 的 -O 也走这条紧贴规则，不借这张表。
+// 返回 null 表示这一簇不是输出选项，"" 表示落点写在下一个参数里，其余是紧贴的值。
+/** @param {string} name 已剥掉目录与 .exe 的程序名 @param {string} value */
+function outputShortOption(name, value) {
+  if (name.toLowerCase() !== "curl") return null;
+  const match = /^-([A-Za-z]+)(.*)$/.exec(value);
+  if (!match) return null;
+  const letters = match[1],
+    at = [...letters].findIndex(letter => HTTP_VALUE_SHORT.includes(letter));
+  if (at < 0 || letters[at] !== "o") return null;
+  return letters.slice(at + 1) + match[2];
+}
 // 同一份扫描同时给出写标记与路径文本；-o 的实际参数只拆一次，不因写动词表或参数引号而漏过。
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
@@ -2484,9 +2502,11 @@ function scanWrites(scanned) {
       if (value === "--") break;
       // 已识别的输出目标统一按完整值校验：整段引号、引号拼接与转义
       // 都可能在原文里改变路径的写法，位置标记靠不住
-      if (/^-o.+/i.test(value)) innerPaths.push(value.slice(2));
-      else if (/^-o$/i.test(value)) {
-        // 分离式 -o：下一个参数就是输出目标
+      // -o 的落点三种写法都算：紧贴（-oFILE）、分开（-o FILE）、curl 连在簇里（-so FILE、-sLoFILE）
+      const attached = /^-[oO].+/i.test(value) ? value.slice(2) : outputShortOption(name, value);
+      if (attached) innerPaths.push(attached);
+      else if (attached === "" || /^-[oO]$/i.test(value)) {
+        // 分离式：下一个参数就是输出目标
         const next = call.args[i + 1];
         if (next) {
           innerPaths.push(shellWord(scan, next.start, next.end));
