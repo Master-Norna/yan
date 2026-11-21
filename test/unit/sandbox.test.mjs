@@ -376,6 +376,25 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("iwr https://example.com -OutFile x"), /外联/);
   assert.match(screen("curl $url"), /外联/);
   assert.match(screen("(New-Object Net.WebClient).DownloadString('http://x')"), /外联/);
+  // userinfo 不是主机：真连的是 @ 后面那台；不剥就看成「发给本机」而放行（11-20 检查）
+  assert.match(screen("curl http://127.0.0.1:3000@example.invalid/x"), /外联/);
+  assert.match(screen("curl http://localhost:80@example.invalid/x"), /外联/);
+  // 反过来，user:pass@127.0.0.1 是本机，不该误拦
+  assert.equal(screen("curl http://user:pass@127.0.0.1:3000/"), null);
+});
+test("严档外联：主机只取 authority，未加引号的 shell 分隔符不并入地址", () => {
+  for (const platform of ["win32", "darwin"]) {
+    const check = command => screenCommand(command, "", { platform });
+    for (const command of ["curl 'http://fixture.invalid?label=@localhost'", "curl 'http://fixture.invalid#label=@localhost'"])
+      assert.match(check(command), /外联/, command);
+    for (const sep of ["|", ";"]) assert.equal(check(`curl http://localhost:3000${sep}echo ok`), null, sep);
+    assert.equal(check("curl 'http://demo;user@localhost:3000'"), null);
+    assert.match(check("curl 'http://localhost:3000>output.txt'"), /外联/);
+    assert.equal(check("curl http://localhost:3000 >output.txt"), null);
+    const glued = check("curl http://localhost:3000>output.txt");
+    if (platform === "win32") assert.match(glued, /外联/);
+    else assert.equal(glued, null);
+  }
 });
 test("screenAutoReview：只拦伤及系统与难以恢复的；目录、机密、Git 回退、别名都放行", () => {
   for (const command of [
