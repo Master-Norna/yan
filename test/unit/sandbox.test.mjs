@@ -2061,12 +2061,37 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
   assert.equal(review(atWin ? "Remove-Item sub\\dist -Recurse" : "rm -rf sub/dist"), null);
   // 原本就拦的最夸张那几种不受影响
   assert.match(review("Remove-Item . -Recurse -Force"), /整目录/);
-  // 变量里的路径静态看不出来，与本文件其余规则一样不猜；不是递归删的也不管
-  assert.equal(review("Remove-Item $env:TEMP\\build -Recurse"), null);
+  // 家目录与系统目录写成变量或 ~ 时按出去了算：~、$HOME、$env:USERPROFILE、%USERPROFILE% 展开后删的是工作目录之外的一整片
+  // （`rm -rf ~` 删的就是整个家目录）；名单以外的 $dir 静态看不出落到哪，与本文件其余规则一样不猜
+  for (const command of [
+    "rm -rf ~",
+    "rm -rf $HOME",
+    "Remove-Item ~/Documents -Recurse",
+    "Remove-Item $env:USERPROFILE -Recurse -Force",
+    "Remove-Item $env:TEMP\\build -Recurse",
+    ...(atWin ? ['cmd /c "rmdir /s /q %USERPROFILE%"', "ri ${env:HOME}\\x -r -fo"] : [])
+  ])
+    assert.match(review(command), /整个目录/, command);
+  assert.match(review(atWin ? 'Remove-Item "${env:HOME}\\fixture" -Recurse' : 'rm -r "${HOME}/fixture"'), /整个目录/);
+  assert.match(review(atWin ? "Remove-Item ${env:HOME}\\fixture -Recurse" : "rm -r ${HOME}/fixture"), /整个目录/);
+  assert.equal(review(atWin ? "Get-Content ${env:HOME}\\fixture.txt; Remove-Item ./build -Recurse" : "echo ${HOME}; rm -r ./build"), null);
+  assert.match(review(atWin ? 'Remove-Item -LiteralPath:"${env:HOME}\\fixture" -Recurse' : "rm -r ${HOME:-./fixture}/sample"), /整个目录/);
+  assert.equal(review("Remove-Item $dir\\build -Recurse"), null);
   assert.equal(review("Remove-Item D:\\data\\a.txt"), null);
   // 同一条指令里别处读的路径不算删除目标（`cat /tmp/x; rm -rf ./build` 里前一段只是读）
   assert.equal(
     review(atWin ? "Get-Content C:\\data\\notes.txt; Remove-Item .\\build -Recurse" : "cat /tmp/report.txt; rm -rf ./build"),
     null
   );
+});
+
+// 宿主机是 Windows 时上面那条只走 PowerShell 分支，POSIX 的 `${VAR:-默认}` 一条都验不到——
+// 11-21 的 macOS 红正是这里漏的：`withoutExeDir` 把 `${HOME:-./x}` 里的 `{` 当语句起点，剥成了 `${x}`
+test("审档：POSIX 的 ${VAR:-默认} 不算程序目录，家目录递归删照拦", () => {
+  const review = command => screenAutoReview(command, { platform: "darwin", workdir: "/Users/a/proj" });
+  for (const command of ["rm -rf ${HOME:-./fixture}/sample", "rm -rf ${HOME:-./x}", "rm -r ${HOME:-/tmp/x}/y"])
+    assert.match(review(command), /整个目录/, command);
+  // `{ … }` 仍是语句起点：组里的家目录删除一样拦，只是不认 `${` 里的那一个
+  assert.match(review("{ rm -rf $HOME; }"), /整个目录/);
+  assert.equal(review("echo ${HOME:-./x}; rm -rf ./build"), null);
 });
