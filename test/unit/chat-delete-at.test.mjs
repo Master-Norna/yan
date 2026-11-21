@@ -41,3 +41,37 @@ test("补删不删断的这段里别处写的那份；真晚于它才删", async
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("恢复删除的对话写盘失败时，删除墓碑仍在，旧页面不能复活它", async () => {
+  const fs = createRequire(import.meta.url)("node:fs");
+  const home = mkdtempSync(path.join(tmpdir(), "yan-tombstone-"));
+  const { routes } = createChats({ chatsHome: () => home });
+  const server = http.createServer((req, res) => routes[`POST ${new URL(req.url, "http://x").pathname}`](req, res)).listen(0, "127.0.0.1");
+  await new Promise(resolve => server.once("listening", resolve));
+  const post = (route, body) =>
+    fetch(`http://127.0.0.1:${server.address().port}${route}`, {
+      method: "POST",
+      body: JSON.stringify({ root: home, ...body })
+    }).then(r => r.json());
+  const original = fs.renameSync;
+  try {
+    const now = Date.now();
+    await post("/api/chats/save", { savedAt: now - 3000, conversation: conversation("c1", "旧") });
+    await post("/api/chats/delete", { id: "c1", at: now - 2000 });
+    const before = (await post("/api/chats/load", {})).deleted.c1;
+    assert.equal(before, now - 2000);
+    fs.renameSync = (src, dest) => {
+      if (String(dest).includes("·") && String(dest).endsWith(".json"))
+        throw Object.assign(Error("disk unavailable"), { code: "EACCES" });
+      return original(src, dest);
+    };
+    const saved = await post("/api/chats/save", { savedAt: now, conversation: conversation("c1", "新") });
+    assert.match(saved.error, /对话未能落盘/);
+    assert.equal((await post("/api/chats/load", {})).deleted.c1, before, "保存失败不能撤销墓碑");
+    assert.equal(readdirSync(home).filter(name => name.includes("·")).length, 0, "新正文未成功写入");
+  } finally {
+    fs.renameSync = original;
+    await new Promise(resolve => server.close(resolve));
+    rmSync(home, { recursive: true, force: true });
+  }
+});
