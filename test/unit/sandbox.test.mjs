@@ -522,6 +522,37 @@ test("screenCommand：xargs 的选项值不占指令位，只有指令位上的 
   }
 });
 
+test("screenCommand：Start-Process 按它启动的那个程序算外联，不按参数里的文字", () => {
+  for (const classify of [screen, mac]) {
+    // 启动的就是外联工具
+    for (const command of [
+      'Start-Process curl.exe -ArgumentList "https://example.com"',
+      "Start-Process wget -ArgumentList https://example.com/a.zip",
+      'Start-Process -FilePath curl.exe -ArgumentList "https://example.com"',
+      'Start-Process -FilePath:"curl.exe" "https://example.com"',
+      // 启动的是壳：真执行的还在它自己的参数里，照旧粗扫
+      'Start-Process pwsh -ArgumentList "-Command","curl https://example.com"',
+      // 认不出被启动的是谁（变量）：退回粗扫兜住
+      'Start-Process $exe -ArgumentList "curl https://example.com"'
+    ])
+      assert.match(classify(command), /外联/, command);
+    // 启动的是普通程序：参数里出现 curl 字样只是文本
+    for (const command of [
+      "Start-Process notepad",
+      'Start-Process notepad -ArgumentList "curl 只是文本"',
+      "Start-Process code -ArgumentList README.md",
+      "Start-Process $exe"
+    ])
+      assert.equal(classify(command), null, command);
+    // 指向本机的照旧放行
+    assert.equal(classify("Start-Process curl http://127.0.0.1:3000/"), null);
+  }
+  // 地址的 userinfo 不是主机：127.0.0.1 只是个用户名（与 #124 改的是同一处判据）
+  assert.match(screen("curl http://127.0.0.1:3000@evil.example/"), /外联/);
+  assert.match(screen('curl "http://127.0.0.1:3000@evil.example/"'), /外联/);
+  assert.equal(screen("curl http://user:pass@127.0.0.1:3000/"), null);
+});
+
 test("screenCommand：只是搜字的不算外联——rg HttpClient、Select-String System.Net 放行，真用 .NET 联网的仍拒", () => {
   for (const command of ["rg HttpClient src", 'Select-String -Path src/*.cs -Pattern "System.Net"', "git grep WebClient"])
     assert.equal(screen(command), null, command);

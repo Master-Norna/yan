@@ -1975,6 +1975,52 @@ const NET_TOOLS = new Set(NET_TOOL_NAMES.split("|").map(name => name.toLowerCase
 // 套壳把脚本文本交给别处执行，或 xargs 的参数界定不下来：只对确认是套壳的这一段沿用保守粗扫。
 const NET_WRAPPERS = new Set(["wsl", "docker", "podman", "ssh", "vagrant", "multipass", "xargs"]);
 const NET_TOOL_WORD = new RegExp(String.raw`(^|[\s"';|&()])(${NET_TOOL_NAMES})(?:\.exe)?(?=[\s"';|&()]|$)`, "i");
+// 启动器把真程序写在参数里：PowerShell 的 Start-Process（别名 saps，start 在 PowerShell 里也是它）
+// 取第一个位置参数或 -FilePath 的值。只按认出来的那个程序判——`Start-Process notepad -ArgumentList "curl 是文本"`
+// 不该算外联；认不出目标（$exe 之类）才退回粗扫那一段。
+const START_PROCESS_VALUES = new Set(
+  "argumentlist args credential redirectstandarderror redirectstandardinput redirectstandardoutput verb windowstyle workingdirectory environment".split(
+    " "
+  )
+);
+// 被启动的是壳时，真正执行的还在 -ArgumentList 的文本里，照旧粗扫这一段。
+const SHELL_LAUNCH = new Set(["powershell", "pwsh", "cmd", "sh", "bash", "zsh", "dash", "ksh"]);
+function startProcessTarget(call) {
+  // 变量与表达式静态看不出被启动的是谁：回 null，交回调用方按粗扫兜住
+  const target = value => (value && !/[$%]/.test(value) && !value.startsWith("(") ? value : null);
+  for (let i = 0; i < call.args.length; i++) {
+    const value = call.args[i].value;
+    if (!value) continue;
+    const bound = /^-f[a-z]*:(.+)$/is.exec(value);
+    if (bound) return target(bound[1].replace(/^(["'])([\s\S]*)\1$/, "$2"));
+    const flag = /^-([A-Za-z][A-Za-z0-9]*)$/.exec(value);
+    if (flag) {
+      // -f / -file / -FilePath（PowerShell 允许无歧义的前缀缩写）
+      if (/^f[a-z]*$/i.test(flag[1])) return target(call.args[i + 1]?.value ?? null);
+      if (START_PROCESS_VALUES.has(flag[1].toLowerCase())) i++;
+      continue;
+    }
+    if (value.startsWith("/")) continue;
+    return target(value);
+  }
+  return null;
+}
+/**
+ * 从 URL 的 authority（`//` 之后、路径之前那一段）里取真正的主机：剥掉 userinfo 与端口。
+ * `http://127.0.0.1:3000@evil.example/` 的主机是 evil.example，127.0.0.1 只是用户名——
+ * 不剥就会把「发到外网」看成「发给本机」。反过来 `http://user:pass@127.0.0.1:3000/` 也才认得出是本机。
+ * 与 #124 同一处判据：两条各自都改这一段，合并时取任一份即可。
+ * @param {string} authority
+ */
+function hostOfAuthority(authority) {
+  const head = authority.split(/[/?#]/, 1)[0],
+    hostPort = head.slice(head.lastIndexOf("@") + 1);
+  if (hostPort.startsWith("[")) {
+    const end = hostPort.indexOf("]");
+    return end > 0 ? hostPort.slice(0, end + 1) : "";
+  }
+  return hostPort.replace(/:\d+$/, "");
+}
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
 // 桥接自己的端口：本机别的服务随便测，唯独桥接不行——它的执事接口不带请示与沙箱，指令借 curl、脚本调它就整个绕过去了。
 // 严宽两档都拦（径行开着沙箱时也拦：径行放开的是这段对话的指令，不是桥接的门禁）；静态筛查，脚本里拼出来的地址管不到。
@@ -2238,8 +2284,12 @@ const resolveNameStart = (scanned, at, end, parseXargs) => {
   }
   return at;
 };
-/** @param {ReturnType<typeof shellText>} scanned */
-function commandInvocations(scanned, parseXargs = false) {
+/**
+ * @param {ReturnType<typeof shellText>} scanned
+ * @param {{ parseXargs?: boolean }} [options] 取词开关按名字给，不按位置传布尔值：
+ *   调用方各有各的意图（外联分类要把 xargs 后面的程序认成指令、递归删那边要保住花括号变量），合到一处时都并进这个对象。
+ */
+function commandInvocations(scanned, { parseXargs = false } = {}) {
   const calls = [],
     seen = new Set(),
     ranges = [...scanned.executions],
@@ -2311,7 +2361,7 @@ function commandInvocations(scanned, parseXargs = false) {
                   ? raw
                   : raw.replace(/\\\\|\\([$`"])|\\\n/g, m => (m === "\\\\" ? "\\" : m[1] === "\n" ? "" : m[1])),
               inner = shellText(body, bodyShell);
-            for (const call of commandInvocations(inner, parseXargs)) calls.push({ ...call, scan: inner });
+            for (const call of commandInvocations(inner, { parseXargs })) calls.push({ ...call, scan: inner });
           }
           return;
         }
@@ -3334,15 +3384,43 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const gitWhy = gitEscapeWhy(text, workdir, win);
   if (gitWhy) return gitWhy;
   if (
-    commandInvocations(scanned, true).some(call => {
+    commandInvocations(scanned, { parseXargs: true }).some(call => {
       const scan = call.scan ?? scanned;
-      if (NET_TOOLS.has(call.name.toLowerCase())) return true;
-      if (!NET_WRAPPERS.has(call.name.toLowerCase())) return false;
-      const body = scan.text.slice(call.nameStart, call.argEnd ?? scan.text.length);
-      return NET_TOOL_WORD.test(body);
+      const name = call.name.toLowerCase(),
+        body = scan.text.slice(call.nameStart, call.argEnd ?? scan.text.length);
+      if (NET_TOOLS.has(name)) return true;
+      const launched =
+        name === "start-process" || name === "saps" || (name === "start" && call.shell === "powershell")
+          ? startProcessTarget(call)
+          : undefined;
+      // 普通调用：只有套壳与 xargs 才粗扫那一段（与改前一致，嵌套 shell 由 commandInvocations 自己展开）
+      if (launched === undefined) return NET_WRAPPERS.has(name) && NET_TOOL_WORD.test(body);
+      // 启动器：认得出被启动的程序就只看它；认不出来时静态看不准，按原先的粗扫兜住
+      const target =
+        launched === null
+          ? null
+          : launched
+              .split(/[\\/]/)
+              .pop()
+              .replace(/\.exe$/i, "")
+              .toLowerCase();
+      if (target === null) return NET_TOOL_WORD.test(body);
+      if (NET_TOOLS.has(target)) return true;
+      // 启动的是壳或套壳时，真正执行的程序还在它自己的参数里
+      return (NET_WRAPPERS.has(target) || SHELL_LAUNCH.has(target)) && NET_TOOL_WORD.test(body);
     })
   ) {
-    const hosts = [...text.matchAll(/https?:\/\/([^\s/"'`:]+)(?::\d+)?/gi)].map(m => m[1]);
+    const hosts = Array.from(text.matchAll(/https?:\/\/([^\s/"'`?#]+)/gi), m => {
+      // 仅在当前方言实际断词、且符号没进引号或被转义时截断。PowerShell 的重定向不能紧贴参数。
+      const start = m.index + m[0].length - m[1].length,
+        separators = win ? ";|" : ";|&<>()";
+      for (let i = 0; i < m[1].length; i++) {
+        const ch = m[1][i];
+        if (separators.includes(ch) && scanned.syntax[start + i] === ch && scanned.unquoted[start + i] === ch)
+          return hostOfAuthority(m[1].slice(0, i));
+      }
+      return hostOfAuthority(m[1]);
+    });
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
       return "沙箱拒绝：不直接外联（只放行指向本机 127.0.0.1 / localhost 的）；装依赖走 npm / pip 等包管理器，查资料用 search_web / fetch_page";
   }
