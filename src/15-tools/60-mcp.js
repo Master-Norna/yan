@@ -94,6 +94,8 @@ function registerMcpTools() {
       }
   }
   if (mcp.lazy.length) MCP_LAZY_TOOLS.forEach(defineTool);
+  // 整张表重建后再同步，免得仍可用的工具闪成「跳过」。
+  if (pendingApprovals.size) renderApprovalBar();
   // 接没接浏览器类的服务，定顶栏那枚看台小屏挂不挂
   stageSync();
 }

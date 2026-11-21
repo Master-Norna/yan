@@ -39,7 +39,11 @@ async function askApproval(step, { conversation, assistant, signal }) {
   return answer;
 }
 function settleApproval(stepId, value) {
-  pendingApprovals.get(stepId)?.resolve(value);
+  const entry = pendingApprovals.get(stepId);
+  // Enter、旧按钮和切宽档位都走这里；工具不在时，只有跳过还能结清请示。
+  if (!entry || (value !== false && !approvalRenderer(entry.step))) return false;
+  entry.resolve(value);
+  return true;
 }
 function pendingApprovalHere() {
   const c = currentConversation();
@@ -60,8 +64,10 @@ function renderApprovalBar() {
     if (!bar.classList.contains("hidden")) hideWithFade(bar);
     return;
   }
-  if (bar.dataset.stepId !== entry.step.id) {
+  const available = String(Boolean(approvalRenderer(entry.step)));
+  if (bar.dataset.stepId !== entry.step.id || bar.dataset.available !== available) {
     bar.dataset.stepId = entry.step.id;
+    bar.dataset.available = available;
     bar.dataset.page = "0";
     bar.innerHTML = approvalBarHtml(entry.step);
     formPage(bar);
@@ -72,10 +78,13 @@ function renderApprovalBar() {
 // 带 mcp 标记的工具整批摘掉）时给一张只剩「跳过」的条——原来这里直接取 TOOLS.get(…).approval，
 // 取不到就抛 TypeError，整页 render 停在那一句上，请示条与它后面的几处一并画不出来，那一步还顶着等
 /** @param {Step} step */
+function approvalRenderer(step) {
+  return step.gate ? keepApprovalHtml : TOOLS.get(step.name)?.approval;
+}
+/** @param {Step} step */
 function approvalBarHtml(step) {
-  if (step.gate) return keepApprovalHtml(step);
-  const tool = TOOLS.get(step.name);
-  return tool?.approval ? tool.approval(step) : missingToolApprovalHtml(step);
+  const render = approvalRenderer(step);
+  return render ? render(step) : missingToolApprovalHtml(step);
 }
 /** @param {Step} step */
 function missingToolApprovalHtml(step) {
@@ -102,13 +111,12 @@ function gistHtml(step) {
 function approveFrom(button) {
   const stepId = button.closest("[data-step-id]")?.dataset.stepId,
     c = currentConversation();
-  if (!stepId || !c) return;
+  if (!stepId || !c || !settleApproval(stepId, button.dataset.approve !== "skip")) return;
   if (button.dataset.approve === "auto") {
     c.commandPolicy = "auto";
     saveStore();
     renderWorkAuto();
   }
-  settleApproval(stepId, button.dataset.approve !== "skip");
 }
 // 输入框留空时按 Enter：指令即运行；表单翻到下一题，末题即提交
 function approveByEnter(entry) {
