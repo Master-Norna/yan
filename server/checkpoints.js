@@ -159,7 +159,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   // .yan/ 常被仓库的 .gitignore 整棵忽略（目录记忆与运行数据不随仓库提交），可意是任务状态：退回代码时它得跟着退。
   // 所以即使 .yan 整棵被忽略，也为意进去一趟：其余内容照旧跳过，不下钻
   const INTENT_DIR = INTENT_PATH.slice(0, INTENT_PATH.lastIndexOf("/"));
-  async function walk(root, visit) {
+  async function walk(root, visit, onUnreadable = () => {}) {
     const skipped = skip().map(dir => path.resolve(dir));
     /** @param {boolean} sealed 这一层整棵被忽略、只为收意进来：除它以外一律记「不明」 */
     const down = async (abs, rel, rules, sealed) => {
@@ -196,6 +196,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
           try {
             inner = await down(full, sub, own, reenter);
           } catch {
+            onUnreadable(sub);
             items.push(["x", entry.name]);
             continue;
           }
@@ -287,25 +288,29 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
       files = new Map(),
       dirs = new Set(),
       unknown = new Set();
-    const tree = await walk(store.full, async (abs, rel, name) => {
-      try {
-        const stat = await fs.promises.stat(abs),
-          seen = index[rel];
-        files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await fileHash(abs));
-        return ["f", name];
-      } catch {
-        // 读不到是「不明」，不能当成内容变了或文件丢了。
-        unknown.add(rel);
-        return ["x", name];
-      }
-    });
+    const tree = await walk(
+      store.full,
+      async (abs, rel, name) => {
+        try {
+          const stat = await fs.promises.stat(abs),
+            seen = index[rel];
+          files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await fileHash(abs));
+          return ["f", name];
+        } catch {
+          // 读不到是「不明」，不能当成内容变了或文件丢了。
+          unknown.add(rel);
+          return ["x", name];
+        }
+      },
+      rel => unknown.add(rel)
+    );
     const collectDirs = (items, rel) => {
       for (const item of items) {
         const sub = rel ? `${rel}/${item[1]}` : item[1];
         if (item[0] === "d") {
           dirs.add(sub);
           collectDirs(item[2], sub);
-        } else if (item[0] === "x") unknown.add(sub);
+        }
       }
     };
     collectDirs(tree, "");
