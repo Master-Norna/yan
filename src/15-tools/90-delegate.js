@@ -21,8 +21,11 @@ defineTool({
   html: step => delegateStepHtml(step),
   sync: syncDelegateCard,
   // 断着的写明在等人续：主模型知道它没回来、也不会自己回来
+  // 名字原样交出，不再截 40 字：step.title 是按它寻址的名字（撞名时补了 ·2，见 uniqueHelperTitle），
+  // 截一刀就把序号切掉，下一问的两行摘要成了同一个名字，模型照摘要叫停、传话会命中原名那一位。
+  // 显示要短在画的地方截（CSS 省略），别动寻址名
   digest: step =>
-    t`差遣「${String(step.title || "").slice(0, 40)}」→ ${step.status === "interrupted" ? t`中辍（${step.result || ""}），等用户续上` : step.result || step.status}${subChangedPaths(step).length ? t`，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
+    t`差遣「${String(step.title || "")}」→ ${step.status === "interrupted" ? t`中辍（${step.result || ""}），等用户续上` : step.result || step.status}${subChangedPaths(step).length ? t`，改了 ${subChangedPaths(step).slice(0, 8).join("、")}` : ""}`
 });
 // 给帮手递话：正做着的，话进它的收件口，说到落点时读到（同补言，不掐断）；已收工的即续派，带着先前的经过接着做。
 // 叫停只停正做着的那一个，已做的照未完成回报；翻看只读它的经过（见 helperTrail）。这一步在行迹里也是一枚签（续派 / 传话 / 叫停 / 翻看），点开是那名帮手
@@ -197,6 +200,18 @@ function helperTrail(runs) {
     .join("\n\n");
 }
 // 差遣当即回一句「已开工」，主模型这一轮随即结束、照常往下走；帮手在后台做，做完回报寄给这段对话（见 mailReport）
+// 同一段对话里帮手是按名字寻址的（helper 的传话、叫停、续派、翻看都拿 args.helper 找那一趟）：
+// 两件同名就会递错人、叫错人。差遣时标题只截前 40 字、也不查重，而「查日志」「跑测试」这种名字撞得很自然；
+// 撞了就补个序号，模型在差遣的回执里看得到定下来的名字，往后按它寻址就只认一个
+/** @param {Conversation} conversation @param {string} base @returns {string} */
+function uniqueHelperTitle(conversation, base) {
+  const taken = new Set([...(crews.get(conversation.id) || []).map(box => box.title), ...helperRuns(conversation).map(run => run.title)]);
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const name = `${base}·${n}`;
+    if (!taken.has(name)) return name;
+  }
+}
 /**
  * @param {Step} step
  * @param {Record<string, any>} args
@@ -204,10 +219,12 @@ function helperTrail(runs) {
  */
 function delegateInBackground(step, args, ctx) {
   const task = String(args.task || "").trim();
-  step.title =
+  step.title = uniqueHelperTitle(
+    ctx.conversation,
     String(args.title || "")
       .trim()
-      .slice(0, 40) || task.slice(0, 24);
+      .slice(0, 40) || task.slice(0, 24)
+  );
   if (!task) return { ok: false, content: t("task 不能为空：请把背景、目标、边界与要回报的内容写全"), display: "任务为空" };
   launchHelper(step, args, ctx);
   return { ok: true, background: true, content: prompt("delegate.started", { title: step.title }), display: "后台进行中" };

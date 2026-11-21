@@ -42,12 +42,15 @@ const CMD =
   String.raw`(?:${SHELL}${PREFIX})?`;
 // 带引号的命令名要两头都有引号（& "reg.exe" delete）：rg "start|shutdown" src 里的 |shutdown" 是搜字。
 // args 是非跟不可的参数，不写就只认命令名到此为止；后面贴着 | 或 ) 的不算，(start|shutdown) 多半是一段正则
+// 子命令同样可能被引号包住：PowerShell 与 sh 都会把 "add" 还原成 add 交给程序，
+// 而规则按原文匹配，一字不差的 reg add 拦得住、reg "add" 就漏了。引号可选，但两头要配对
+// （半拉的引号本来就跑不起来，不必替它开脱）；每个 cmd() 用一个自己的组名，拼进别的正则时才不会撞。
+let cmdQuoteSeq = 0;
 const cmd = (names, args = "") => {
   const name = String.raw`(?:${names})(?:\.exe|\.com)?`;
-  return new RegExp(
-    String.raw`${CMD}(?:(?<=["'])${name}["']|${name})${args ? String.raw`\s+(?:${args})` : String.raw`(?=[\s;}]|$)`}`,
-    "im"
-  );
+  if (!args) return new RegExp(String.raw`${CMD}(?:(?<=["'])${name}["']|${name})(?=[\s;}]|$)`, "im");
+  const quoted = `sub${++cmdQuoteSeq}`;
+  return new RegExp(String.raw`${CMD}(?:(?<=["'])${name}["']|${name})\s+(?<${quoted}>["']?)(?:${args})\k<${quoted}>`, "im");
 };
 // cmdlet 带连字符，不会是正则里的一个词，后面贴着什么都算：$(Stop-Computer)、Stop-Computer|x、powershell -c "Stop-Computer"
 const cmdlet = (/** @type {string} */ names) => new RegExp(String.raw`${CMD}(?:${names})(?=[\s;|&)}"']|$)`, "im");
@@ -2065,22 +2068,6 @@ function startProcessTarget(call) {
   }
   return unsure ? null : target(positional);
 }
-/**
- * 从 URL 的 authority（`//` 之后、路径之前那一段）里取真正的主机：剥掉 userinfo 与端口。
- * `http://127.0.0.1:3000@evil.example/` 的主机是 evil.example，127.0.0.1 只是用户名——
- * 不剥就会把「发到外网」看成「发给本机」。反过来 `http://user:pass@127.0.0.1:3000/` 也才认得出是本机。
- * 与 #124 同一处判据：两条各自都改这一段，合并时取任一份即可。
- * @param {string} authority
- */
-function hostOfAuthority(authority) {
-  const head = authority.split(/[/?#]/, 1)[0],
-    hostPort = head.slice(head.lastIndexOf("@") + 1);
-  if (hostPort.startsWith("[")) {
-    const end = hostPort.indexOf("]");
-    return end > 0 ? hostPort.slice(0, end + 1) : "";
-  }
-  return hostPort.replace(/:\d+$/, "");
-}
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
 // 桥接自己的端口：本机别的服务随便测，唯独桥接不行——它的执事接口不带请示与沙箱，指令借 curl、脚本调它就整个绕过去了。
 // 严宽两档都拦（径行开着沙箱时也拦：径行放开的是这段对话的指令，不是桥接的门禁）；静态筛查，脚本里拼出来的地址管不到。
@@ -2206,24 +2193,58 @@ function recursiveDeleteWhy(scanned, workdir, win) {
   return "";
 }
 
-function normalizeLower(p) {
-  return path
-    .normalize(p)
+function normalizeLower(p, P = path) {
+  return P.normalize(p)
     .replace(/(?<=.)[\\/]+$/, "")
     .toLowerCase();
 }
+// 按路径的形状挑一套 path 实现：有盘符或反斜杠的按 Windows，其余按 POSIX。
+// 不能一律用宿主的 path——在 macOS 上量 Windows 路径（预检与用例都会两种都跑）会把「在根里面」
+// 判成越界，反过来也一样；沙箱的用例一直是按平台分两批发过来的。
+function pathFor(sample) {
+  const text = String(sample || "");
+  return /(^|[\\/])[a-z]:[\\/]/i.test(text) || text.includes("\\") ? path.win32 : path.posix;
+}
+// 用同一套 path 实现判「在不在里面」：paths.js 的 pathIsInside 认宿主，这里要认样本自己的写法
+function insideUnder(P, root, target) {
+  const relative = P.relative(root, target);
+  return !relative || (relative !== ".." && !relative.startsWith(`..${P.sep}`) && !P.isAbsolute(relative));
+}
 // 指令文本里所有像绝对路径的片段：盘符（C:\… 与 C:/…，光秃的 C: 也算——那是盘符相对路径）、UNC（\\server\share 与 //server/share，
 // 正斜杠的要带出第二段：//todo 多半是代码注释）；非 Windows 上再加 POSIX 根（/usr/…）。URL 里的 http: 与 key:value 这类前面贴着字母的不算
-function absolutePathsIn(command, win) {
-  const found = [];
+/** @param {ReturnType<typeof shellText>} scanned */
+function absolutePathsIn(command, win, scanned) {
+  const found = [],
+    nestedEdges = new Set();
+  // 第一段是整条指令；只标内层执行范围。去掉只读来源时用空格填，扫描坐标仍和路径文本相同。
+  for (const { start, end } of scanned.executions.slice(1)) {
+    if (start === end) continue;
+    nestedEdges.add(start);
+    nestedEdges.add(end);
+  }
   const drive = /(?<![A-Za-z0-9_])([A-Za-z]:(?:[\\/][^\s"'`;|&<>()]*|(?=[\s"'`;|&<>()]|$)))/g,
     unc = /(?<![\w\\/])(\\\\[^\s\\"'`;|&<>()]+(?:\\[^\s"'`;|&<>()]*)?)/g,
     slashUnc = /(?<![\w\\/:.-])(\/\/[^\s\\/"'`;|&<>()]+\/[^\s"'`;|&<>()]*)/g,
     posix = /(?<![\w./~:-])(\/(?!\/)[^\s"'`;|&<>()]+)/g;
-  for (const match of command.matchAll(drive)) found.push(match[1]);
-  for (const match of command.matchAll(unc)) found.push(match[1]);
-  for (const match of command.matchAll(slashUnc)) found.push(match[1]);
-  if (!win) for (const match of command.matchAll(posix)) found.push(match[1]);
+  // 引号里整段就是一个路径的，按整段取。裸扫按空白切词，`"C:\Users\Me\My Project\out.txt"` 会被截成
+  // `C:\Users\Me\My`——工作目录本身带空格时，目录里的正常写入反倒判成越界（11-20 检查）。
+  // 整段不是路径的（"见 C:\x"）原样留下，仍交给裸扫，免得夹在别的话里的路径反而漏掉。
+  const looksPath = value => /^[A-Za-z]:[\\/]/.test(value) || (win ? /^\\\\[^\s\\]/.test(value) : /^\/{1,2}[^\s\\/]/.test(value));
+  const bare = String(command || "").replace(/(["'])([^"']*)\1/g, (whole, _quote, inner, offset) => {
+    if (!looksPath(inner)) return whole;
+    // 含有内层执行边界就不是一个字面路径。原样交给裸扫，不能把内层路径一起抹掉。
+    // 这些匹配互不重叠，只查各自跨度，总开销仍是线性的。
+    if (nestedEdges.size) {
+      const close = offset + whole.length - 1;
+      for (let at = offset + 1; at < close; at++) if (nestedEdges.has(at)) return whole;
+    }
+    found.push(inner);
+    return " ";
+  });
+  for (const match of bare.matchAll(drive)) found.push(match[1]);
+  for (const match of bare.matchAll(unc)) found.push(match[1]);
+  for (const match of bare.matchAll(slashUnc)) found.push(match[1]);
+  if (!win) for (const match of bare.matchAll(posix)) found.push(match[1]);
   return found;
 }
 // 只读来源不受目录约束，只豁免这次参数出现的位置；移动与删除来源不豁免。
@@ -2592,6 +2613,24 @@ function stripReadSources(scanned, sources = true) {
 // 会带输出路径、且路径能紧贴在 -o 后面的程序：7z 的 -o{dir}、curl 的 -ofile、gcc 的 -oout.exe。
 // 紧贴写法只在它们后面才算路径；别处的 -o 只是某段文字里的一段（Write-Output "-oC:\x"、正则里的 -o）
 const ATTACHED_OUTPUT_TOOL = /^(?:7z|7za|7zr|curl|wget|gcc|g\+\+|cc|c\+\+|clang|clang\+\+|ld|dotnet)(?:\.exe)?$/i;
+// 短选项簇里的落点：curl 的短选项可以连写（-so C:\x、-sLoC:\x、-soC:\x）。
+// 簇里只有第一个吃值的字母管着后面的值——-sLo 里的 s 与 L 只是开关，o 才吃值；
+// 所以先按 HTTP_VALUE_SHORT（与 httpSends 共用一份表）找出那一个，是 o 才算落点。
+// 这张表是 curl / wget 的选项字母表，别的程序的同名开关另有意思：gcc -fopenmp 的 f 是开关、
+// openmp 是它的名字，g++ -fno-exceptions 同理，按 curl 读就会把 o 后面的当文件名。
+// 簇解析因此只给 curl；其余程序（gcc、7z、wget…）照旧只认 -oFILE / -o FILE，
+// wget 的 -O 也走这条紧贴规则，不借这张表。
+// 返回 null 表示这一簇不是输出选项，"" 表示落点写在下一个参数里，其余是紧贴的值。
+/** @param {string} name 已剥掉目录与 .exe 的程序名 @param {string} value */
+function outputShortOption(name, value) {
+  if (name.toLowerCase() !== "curl") return null;
+  const match = /^-([A-Za-z]+)(.*)$/.exec(value);
+  if (!match) return null;
+  const letters = match[1],
+    at = [...letters].findIndex(letter => HTTP_VALUE_SHORT.includes(letter));
+  if (at < 0 || letters[at] !== "o") return null;
+  return letters.slice(at + 1) + match[2];
+}
 // 同一份扫描同时给出写标记与路径文本；-o 的实际参数只拆一次，不因写动词表或参数引号而漏过。
 /** @param {ReturnType<typeof shellText>} scanned */
 function scanWrites(scanned) {
@@ -2615,9 +2654,11 @@ function scanWrites(scanned) {
       if (value === "--") break;
       // 已识别的输出目标统一按完整值校验：整段引号、引号拼接与转义
       // 都可能在原文里改变路径的写法，位置标记靠不住
-      if (/^-o.+/i.test(value)) innerPaths.push(value.slice(2));
-      else if (/^-o$/i.test(value)) {
-        // 分离式 -o：下一个参数就是输出目标
+      // -o 的落点三种写法都算：紧贴（-oFILE）、分开（-o FILE）、curl 连在簇里（-so FILE、-sLoFILE）
+      const attached = /^-[oO].+/i.test(value) ? value.slice(2) : outputShortOption(name, value);
+      if (attached) innerPaths.push(attached);
+      else if (attached === "" || /^-[oO]$/i.test(value)) {
+        // 分离式：下一个参数就是输出目标
         const next = call.args[i + 1];
         if (next) {
           innerPaths.push(shellWord(scan, next.start, next.end));
@@ -2682,17 +2723,23 @@ function scanWrites(scanned) {
  * 整条都按「写」处理，它顺带读的那些路径也一并受约束——静态看不出哪个参数是源、哪个是目标，
  * 识别出的只读来源等已由 scanWrites 从该路径视图排除。这里给严档用；宽档与审档另检查高风险目标。通过返回 null。
  * @param {string} writeText @param {string} workdir @param {boolean} win @param {string} prefix
+ * @param {ReturnType<typeof shellText>} scanned
  */
-function screenWritePaths(writeText, workdir, win, prefix) {
+function screenWritePaths(writeText, workdir, win, prefix, scanned) {
   // 用户目录与系统目录：只是读的来源可以（把 ~/x.txt 拷进来），写进去不行
   if (HOME_SYSTEM_PATH.test(writeText)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
   if (/(^|[\s"'=(\\/:])\.\.([\\/]|$|["'\s;|&)])/.test(writeText)) return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
-  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-  for (const raw of absolutePathsIn(writeText, win)) {
+  // 判据按指令要跑的那个系统的规矩来（win），不按跑这份代码的宿主机：在 macOS 上验一条 Windows 指令
+  // （单测、sandbox-replay --platform）时宿主的 path 不认盘符，会把工作目录之内判成越界，反过来也一样
+  const P = win ? path.win32 : path.posix,
+    trim = value => P.normalize(value).replace(/(?<=.)[\\/]+$/, ""),
+    root = win ? trim(workdir).toLowerCase() : trim(workdir);
+  for (const raw of absolutePathsIn(writeText, win, scanned)) {
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
-    const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
-    if (!pathIsInside(root, candidate))
+    const candidate = win ? trim(raw).toLowerCase() : trim(raw),
+      relative = P.relative(root, candidate);
+    if (relative === ".." || relative.startsWith(`..${P.sep}`) || P.isAbsolute(relative))
       return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
   }
   return null;
@@ -2700,14 +2747,18 @@ function screenWritePaths(writeText, workdir, win, prefix) {
 // 内层视图解出的输出路径是完整的路径值：直接对值做同一套边界检查，
 // 不走按空白切词的 absolutePathsIn——带空格的路径才不会被截成前半段
 function innerPathWhy(paths, workdir, win, prefix) {
-  const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
+  // 与 screenWritePaths 同一套规矩：按指令要跑的那个系统的 path 实现，不按宿主
+  const P = win ? path.win32 : path.posix,
+    trim = value => P.normalize(value).replace(/(?<=.)[\\/]+$/, ""),
+    root = win ? trim(workdir).toLowerCase() : trim(workdir);
   for (const raw of paths || []) {
     if (HOME_SYSTEM_PATH.test(raw)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
     if (/(^|[\\/:])\.\.([\\/]|$)/.test(raw)) return `${prefix}：改动的路径不用 .. 上溯，一律相对工作目录写`;
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
-    if (path.isAbsolute(raw) || (win && /^[a-z]:[\\/]/i.test(raw))) {
-      const candidate = win ? normalizeLower(raw) : path.normalize(raw).replace(/(?<=.)[\\/]+$/, "");
-      if (!pathIsInside(root, candidate))
+    if (P.isAbsolute(raw) || (win && /^[a-z]:[\\/]/i.test(raw))) {
+      const candidate = win ? trim(raw).toLowerCase() : trim(raw),
+        relative = P.relative(root, candidate);
+      if (relative === ".." || relative.startsWith(`..${P.sep}`) || P.isAbsolute(relative))
         return `${prefix}：改动的路径越出了工作目录（${raw}）；只能改 ${workdir} 之内的东西。只是查看的话，去掉这条指令里的写、删、搬与重定向即可`;
     }
   }
@@ -3273,6 +3324,22 @@ function eatsNextArg(arg) {
   return /^-[A-Za-z]+$/.test(arg) && HTTP_VALUE_SHORT.includes(arg[arg.length - 1]);
 }
 /**
+ * 从 URL 的 authority（`//` 之后、路径之前那一段）里取真正的主机：剥掉 userinfo 与端口。
+ * `http://127.0.0.1:3000@evil.example/` 的主机是 evil.example，127.0.0.1 只是用户名——
+ * 不剥就会把「发到外网」看成「发给本机」，外发审查与严档的外联判据都放它过去。
+ * 反过来 `http://user:pass@127.0.0.1:3000/` 也才认得出是本机。
+ * @param {string} authority
+ */
+function hostOfAuthority(authority) {
+  const head = authority.split(/[/?#]/, 1)[0],
+    hostPort = head.slice(head.lastIndexOf("@") + 1);
+  if (hostPort.startsWith("[")) {
+    const end = hostPort.indexOf("]");
+    return end > 0 ? hostPort.slice(0, end + 1) : "";
+  }
+  return hostPort.replace(/:\d+$/, "");
+}
+/**
  * 这一段 HTTP 工具自己写明白的目的地。只看这一段的参数：
  * 整条指令里别处出现的 localhost（payload 里、别的命令里）不能给这次上传开脱
  * 认带协议头的地址、带路径或端口的主机、裸主机名与 IP；认不出的（装在变量里）留给调用方按「出去了」算
@@ -3287,9 +3354,9 @@ function httpHosts(args) {
       continue;
     }
     if (!arg || arg.startsWith("-") || arg.startsWith("@")) continue;
-    const url = arg.match(/^(?:https?|ftp):\/\/(\[[^\]]+\]|[^\s/?#:]+)/i);
+    const url = arg.match(/^(?:https?|ftp):\/\/([^\s/?#]+)/i);
     if (url) {
-      hosts.push(url[1]);
+      hosts.push(hostOfAuthority(url[1]));
       continue;
     }
     if (/^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\]|[a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?::\d+)?(?:[/?#]|$)/i.test(arg))
@@ -3456,7 +3523,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const writes = scanWrites(scanned);
   if (writes.writing) {
     if (GIT_INTERNAL_PATH.test(stripReadSources(scanned, false))) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
-    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝") || innerPathWhy(writes.paths, workdir, win, "沙箱拒绝");
+    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝", scanned) || innerPathWhy(writes.paths, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
   // git 把仓库指到别处：`git -C .. checkout -- f`、`cd ..; git reset --hard` 里都没有一个「改动路径」，
@@ -3581,31 +3648,73 @@ function screenPath(rel, { write = false } = {}) {
 // 开发言自己时仓库里的同名字样不受牵连。静态筛查：脚本里拼出来的路径管不到
 const STORE_SECRETS = ["配置.json", "配置备份", "ChatGPT 登录.json"];
 const STORE_WHY = "不碰言的配置与登录文件（内有 API Key 与令牌）；要改设置，请用户在设置里改";
+// Windows 的扩展长度与设备写法：\\?\C:\x、\\.\C:\x 与 \\.\UNC\\srv\sh\x 指的仍是同一个文件。
+// 只做这一层字符串规整——本模块是纯函数、不碰文件系统，路径上的链接另由 work/paths.js 的 assertReachable 拦
+function withoutExtendedPrefix(value) {
+  const text = String(value || ""),
+    lead = /^[\\/]{2}[?.][\\/](?:UNC[\\/])?/i.exec(text);
+  if (!lead) return text;
+  return (/unc/i.test(lead[0]) ? "\\\\" : "") + text.slice(lead[0].length);
+}
 /** 一个绝对路径是不是落在存储根的这几样上（或就是存储根里它们之下）。是则返回原因 @param {string} full @param {string} root */
 function screenStorePath(full, root) {
   if (!root) return null;
-  const base = normalizeLower(path.resolve(root)),
-    target = normalizeLower(path.resolve(withoutDataStream(full)));
+  const base = normalizeLower(path.resolve(withoutExtendedPrefix(root))),
+    target = normalizeLower(path.resolve(withoutExtendedPrefix(withoutDataStream(full))));
   return STORE_SECRETS.some(name => pathIsInside(normalizeLower(path.join(base, name)), target)) ? `拒绝：${STORE_WHY}` : null;
 }
 /**
+ * 通配写法能不能盖住这个名字（大小写不敏感）：配置*、*.json、配置?json 都能盖住配置.json。
+ * 通配不跨分隔符——* 只盖同一层里的一截。 @param {string} pattern @param {string} name
+ */
+function globCovers(pattern, name) {
+  const source = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, "[^\\\\]*")
+    .replace(/\?/g, "[^\\\\]");
+  return new RegExp(`^${source}$`, "i").test(name);
+}
+/**
+ * 一段路径（可以带通配）按工作目录解析后，是不是冲着存储根顶层那几样去的：
+ * 落在它们里面（..\配置备份\x.json），或与它们同处根顶层、通配盖得住（..\*.json、..\配置*）。
+ * 原先把这张脸认成「文本里带 .yan 又有星号」，`..\*`、`配置*` 这些都不带字面名字，一个也认不出。
+ * @param {string} raw @param {string} rootPath @param {string} workdir
+ */
+function storeSecretHit(raw, rootPath, workdir) {
+  const clean = withoutDataStream(String(raw || ""));
+  if (!clean) return false;
+  // 按存储根的形状选 path 实现：这一道在 macOS 上也要认得出 Windows 写法，反过来也一样
+  const P = pathFor(rootPath),
+    win = P === path.win32,
+    shape = value => String(value).replace(/[\\/]/g, win ? "\\" : "/"),
+    resolved = normalizeLower(P.resolve(shape(workdir || ""), shape(clean)), P),
+    dir = P.dirname(resolved),
+    base = P.basename(resolved);
+  return STORE_SECRETS.some(name => {
+    const target = normalizeLower(P.join(rootPath, name), P);
+    return insideUnder(P, target, resolved) || (dir === normalizeLower(rootPath, P) && globCovers(base, name.toLowerCase()));
+  });
+}
+/**
  * 指令文本里点没点到这几样：写了它们的名字，且又写了存储根（或 .yan），或就在存储根里跑（卷宗、工作都在根下，..\配置.json 即到）；
- * 对存储根顶层用通配（.yan\*）也算。 @param {string} command @param {string} root @param {string} workdir
+ * 不写字面名字、改用通配盖住根顶层的也算（..\*.json、..\配置*、.yan\*）。 @param {string} command @param {string} root @param {string} workdir
  */
 function screenStoreCommand(command, root, workdir) {
   if (!root) return null;
-  const text = String(command || "")
-      .replace(/\//g, "\\")
-      .toLowerCase(),
-    rootPath = normalizeLower(path.resolve(root)),
-    // 对指令文本的那份换成反斜杠；比目录用原样的，不然 macOS 上两边斜杠对不上、在根下跑也认不出
-    base = rootPath.replace(/\//g, "\\"),
+  const raw = String(command || ""),
+    P = pathFor(root),
+    rootPath = normalizeLower(P.resolve(root), P),
+    // 指令文本一并换成同一种分隔符再比，两种写法都能对上
+    text = raw.replace(/[\\/]/g, P === path.win32 ? "\\" : "/").toLowerCase(),
+    base = rootPath,
     named = STORE_SECRETS.some(name => text.includes(name.toLowerCase())),
     near =
-      text.includes(base) || /\\\.yan(?:\\|["'\s]|$)/.test(text) || pathIsInside(rootPath, normalizeLower(path.resolve(workdir || "")));
+      text.includes(base) ||
+      /(^|[\\/])\.yan(?:[\\/]|["'\s]|$)/.test(text) ||
+      insideUnder(P, rootPath, normalizeLower(P.resolve(workdir || ""), P));
   if (named && near) return `拒绝：${STORE_WHY}`;
-  const wild = new RegExp(`(?:${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|\\\\\\.yan)\\\\\\*`);
-  return wild.test(text) ? `拒绝：${STORE_WHY}` : null;
+  const tokens = raw.match(/[^\s"'`;|&<>()]+/g) || [];
+  return tokens.some(token => storeSecretHit(token, rootPath, workdir)) ? `拒绝：${STORE_WHY}` : null;
 }
 
 module.exports = {

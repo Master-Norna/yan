@@ -2,9 +2,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const require = createRequire(import.meta.url);
-const { screenCommand, screenLoose, screenAutoReview, screenUnreviewable, sandboxEnv, screenPath } = require("../../server/sandbox.js");
+const {
+  screenCommand,
+  screenLoose,
+  screenAutoReview,
+  screenUnreviewable,
+  screenStoreCommand,
+  screenStorePath,
+  sandboxEnv,
+  screenPath
+} = require("../../server/sandbox.js");
 const wd = "E:\\项目\\言",
   win = { platform: "win32" },
   screen = command => screenCommand(command, wd, win);
@@ -183,6 +193,52 @@ test("POSIX 写动词守目录，复制与链接来源只豁免当次参数，rs
   }
 });
 
+test("screenCommand：工作目录自己带空格时，引号里的路径按整段比，不截成前半截", () => {
+  // 裸扫按空白切词，`"C:\Users\Me\My Project\out.txt"` 会截成 `C:\Users\Me\My`，
+  // 工作目录里的正常写入反倒被判越界（11-20 检查）。两种写法各验一遍：这一道只看传进来的 platform。
+  const cases = [
+    {
+      platform: "win32",
+      workdir: "C:\\Users\\Me\\My Project",
+      keep: [
+        'Set-Content "C:\\Users\\Me\\My Project\\out.txt" x',
+        'Copy-Item "C:\\Users\\Me\\My Project\\a.txt" "C:\\Users\\Me\\My Project\\b.txt"',
+        'curl -o "C:\\Users\\Me\\My Project\\x.txt" http://127.0.0.1:3000/'
+      ],
+      // 从这一层就出去了：引号包着也不能放
+      out: ['Set-Content "C:\\Users\\Me\\outside.txt" x', 'Copy-Item a.txt "C:\\Users\\Me\\My Project2\\b.txt"']
+    },
+    {
+      platform: "darwin",
+      workdir: "/Users/a/My Project",
+      keep: ['Set-Content "/Users/a/My Project/out.txt" x', 'cp "/Users/a/My Project/a.txt" "/Users/a/My Project/b.txt"'],
+      out: ['Set-Content "/Users/a/outside.txt" x', 'cp a.txt "/Users/a/My Project2/b.txt"']
+    }
+  ];
+  for (const item of cases) {
+    for (const command of item.keep) assert.equal(screenCommand(command, item.workdir, { platform: item.platform }), null, command);
+    for (const command of item.out)
+      assert.match(screenCommand(command, item.workdir, { platform: item.platform }), /越出了工作目录/, command);
+  }
+});
+
+test("screenCommand：合并引号路径时保留内层执行范围的路径检查", () => {
+  // 只把合成路径和占位符交给静态筛查；占位符不读写文件。
+  for (const [platform, dir, sep, writeMarker] of [
+    ["win32", "Q:\\yan-scan", "\\", "Set-Content -WhatIf ./marker x"],
+    ["darwin", "/yan-scan", "/", "touch"]
+  ]) {
+    const workdir = `${dir}${sep}root`,
+      outside = `${dir}${sep}outside`,
+      quoted = `echo "${workdir}${sep}marker$(scan-fixture ${outside})"`,
+      why = screenCommand(`${writeMarker}; ${quoted}`, workdir, { platform });
+    assert.ok(why?.includes(`越出了工作目录（${outside}）`), why ?? "内层合成路径没有被检查");
+
+    const spacedRoot = `${workdir} with spaces`;
+    assert.equal(screenCommand(`${writeMarker}; echo "${spacedRoot}${sep}marker"; echo "$(scan-fixture)"`, spacedRoot, { platform }), null);
+  }
+});
+
 test("screenCommand：日常的开发指令放行——包管理、git、目录内的绝对路径、本机 curl、.草稿 脚本", () => {
   for (const command of [
     "npm run format",
@@ -252,6 +308,9 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
     String.raw`cmd /c "del C:\Windows\x"`,
     String.raw`Invoke-Command -ScriptBlock { Remove-Item C:\Windows\x }`,
     String.raw`curl http://127.0.0.1:3000/x -o C:\Windows\yan-probe.txt`,
+    // 短选项连写里的 -o 也是落点（-so FILE、-sLoFILE）；以前只认「-o 打头」
+    String.raw`curl -so C:\Windows\yan-probe.txt http://127.0.0.1:3000/x`,
+    String.raw`curl -sLoC:\Windows\yan-probe.txt http://127.0.0.1:3000/x`,
     String.raw`Invoke-WebRequest http://127.0.0.1:1/x -OutFile C:\Windows\x`,
     String.raw`Start-Process node -RedirectStandardOutput C:\Users\me\log.txt`,
     String.raw`[IO.File]::WriteAllText("C:\Windows\x", "y")`,
@@ -271,9 +330,37 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
     "Get-Process powershell",
     "tar -tf a.tar",
     "git clone https://github.com/a/b",
-    "gcc -o build/a.exe a.c"
+    "gcc -o build/a.exe a.c",
+    // 簇里的 o 落在目录内照常；吃值的是 d 不是 o，-d 的值不是落点
+    "curl -so out.txt http://127.0.0.1:3000/x",
+    "curl -sd status=ok http://127.0.0.1:3000/x"
   ])
     assert.equal(screen(command), null, command);
+});
+test("screenCommand：别的程序的开关不按 curl 的短选项表读——gcc -fopenmp、g++ -fno-exceptions 不是落点", () => {
+  // 短选项簇里的落点只对 curl 成立（-so FILE、-sLoFILE）。这张字母表是 curl / wget 的，
+  // 拿它读编译开关会把 -fopenmp 的 o 当成吃值的那个、把 openmp 当文件名，
+  // 于是整条被判成「写」，同一条指令里别处的绝对路径（源文件、-I 目录）也跟着按写的边界拦下。
+  for (const command of [
+    "gcc -fopenmp -fsyntax-only a.c",
+    "g++ -fno-exceptions -fsyntax-only a.cpp",
+    "gcc -nostdlib -fsyntax-only a.c",
+    "gcc -fopenmp -c a.c -o build/a.o",
+    // 下面这些只在「被判成写」时才会被拦：读系统目录、读别的盘都是允许的
+    String.raw`gcc -fsyntax-only -fopenmp C:\Windows\a.c`,
+    String.raw`g++ -fno-exceptions -fsyntax-only D:\src\a.cpp`,
+    String.raw`clang -fopenmp -fsyntax-only D:\src\a.c`
+  ])
+    assert.equal(screen(command), null, command);
+  // 宽档同理：误判成写的话，/opt 这类系统目录的源文件会被当成往系统目录里写
+  for (const command of ["gcc -fopenmp /opt/src/a.c", "g++ -fno-exceptions -fsyntax-only /opt/src/a.cpp"])
+    assert.equal(screenLoose(command, { platform: "posix" }), null, command);
+  // 修的是「别的程序借 curl 的表」：curl 自己的连写照旧认得，wget 的 -O 也照旧
+  assert.match(screen("curl -soC:\\Windows\\yan-probe.txt http://127.0.0.1:3000/x"), /越出了工作目录/);
+  assert.match(screen("curl -so C:\\Users\\me\\x.txt http://127.0.0.1:3000/x"), /越出了工作目录|用户目录|系统目录/);
+  assert.equal(screen("curl -so out.txt http://127.0.0.1:3000/x"), null);
+  assert.match(screen("wget http://127.0.0.1:3000/x -O C:\\Windows\\x.txt"), /越出了工作目录/);
+  assert.equal(screen("wget -Oout.txt http://127.0.0.1:3000/x"), null);
 });
 test("screenCommand：只读的来源不受目录限——拷进来、读出来送进管道的那个路径可以在外面，写的那头仍要在目录内", () => {
   for (const command of [
@@ -355,6 +442,12 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("New-Service -Name x"), /系统服务/);
   assert.match(screen("sc stop spooler"), /系统服务/);
   assert.match(screen("net user admin pw /add"), /账户/);
+  // 子命令被引号包住照样算：shell 会把 "add" 还原成 add 交给程序（11-20 检查）
+  assert.match(screen('reg "add" HKCU\\Software\\x /v a /d 1 /f'), /注册表/);
+  assert.match(screen('net "user" admin pw /add'), /账户/);
+  assert.match(screen('net "localgroup" administrators admin /add'), /账户/);
+  // 引号只开不收的半拉写法不替它开脱
+  assert.equal(screen('reg "add HKCU\\Software\\x'), null);
   assert.match(screen("shutdown /s"), /系统、磁盘与权限/);
   assert.match(screen("format c:"), /磁盘/);
   assert.equal(screen("Start-Process notepad"), null);
@@ -366,6 +459,25 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("iwr https://example.com -OutFile x"), /外联/);
   assert.match(screen("curl $url"), /外联/);
   assert.match(screen("(New-Object Net.WebClient).DownloadString('http://x')"), /外联/);
+  // userinfo 不是主机：真连的是 @ 后面那台；不剥就看成「发给本机」而放行（11-20 检查）
+  assert.match(screen("curl http://127.0.0.1:3000@example.invalid/x"), /外联/);
+  assert.match(screen("curl http://localhost:80@example.invalid/x"), /外联/);
+  // 反过来，user:pass@127.0.0.1 是本机，不该误拦
+  assert.equal(screen("curl http://user:pass@127.0.0.1:3000/"), null);
+});
+test("严档外联：主机只取 authority，未加引号的 shell 分隔符不并入地址", () => {
+  for (const platform of ["win32", "darwin"]) {
+    const check = command => screenCommand(command, "", { platform });
+    for (const command of ["curl 'http://fixture.invalid?label=@localhost'", "curl 'http://fixture.invalid#label=@localhost'"])
+      assert.match(check(command), /外联/, command);
+    for (const sep of ["|", ";"]) assert.equal(check(`curl http://localhost:3000${sep}echo ok`), null, sep);
+    assert.equal(check("curl 'http://demo;user@localhost:3000'"), null);
+    assert.match(check("curl 'http://localhost:3000>output.txt'"), /外联/);
+    assert.equal(check("curl http://localhost:3000 >output.txt"), null);
+    const glued = check("curl http://localhost:3000>output.txt");
+    if (platform === "win32") assert.match(glued, /外联/);
+    else assert.equal(glued, null);
+  }
 });
 test("screenAutoReview：只拦伤及系统与难以恢复的；目录、机密、Git 回退、别名都放行", () => {
   for (const command of [
@@ -1211,7 +1323,11 @@ const TABLE = [
     "nice -n5 launchctl load x",
     "nice -n-5 launchctl load x",
     "timeout -k 1 5 launchctl load x",
-    "timeout -k1 5 launchctl load x"
+    "timeout -k1 5 launchctl load x",
+    // 子命令被引号包住：sh 会把 "load" 还原成 load 交给程序，规则按原文匹配，不加这一眼就漏
+    'launchctl "load" x',
+    'defaults "write" com.example x -bool true',
+    'diskutil "eraseDisk" APFS x disk2'
   ].map(command => [command, "x", "x", "x", "o"]),
   ...[
     "command -v launchctl",
@@ -2083,6 +2199,42 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
     review(atWin ? "Get-Content C:\\data\\notes.txt; Remove-Item .\\build -Recurse" : "cat /tmp/report.txt; rm -rf ./build"),
     null
   );
+});
+
+// 名字不写字面、改用通配盖住根顶层时，原先几条都不认（配置*、..\*.json、.yan\*）；这一道按路径解析后比
+test("存储根守卫：通配与相对路径也算点到了那几样", () => {
+  const root = atWin ? "E:\\store\\.yan" : "/tmp/store/.yan",
+    workdir = path.join(root, "卷宗"),
+    guard = command => screenStoreCommand(command, root, workdir);
+  // 对根顶层用通配，盖得住配置与备份
+  for (const target of [path.join(root, "*"), path.join(root, "配置*"), path.join(root, "*.json"), path.join(root, "配置备份", "*")])
+    assert.match(guard("Get-Content " + target) || "", /配置与登录/, target);
+  // 不涉及其他的照旧放行：工作目录里的通配、根顶层但不盖住它们的名字
+  for (const target of [path.join(root, "意.json"), path.join(root, "*.md"), path.join(workdir, "*.json"), path.join(workdir, "notes.md")])
+    assert.equal(guard("Get-Content " + target), null, target);
+  if (!atWin) return; // 下面的相对写法是 Windows 的分隔
+  // 工作目录在根里时，.. 就是根：不写字面名字的相对通配一样拦
+  for (const command of ["Get-Content ..\\*", "Get-Content ..\\*.json", "Get-Content ..\\配置*", "Get-Content ..\\配置备份\\*"])
+    assert.match(guard(command) || "", /配置与登录/, command);
+  for (const command of ["Get-Content ..\\意.json", "Get-ChildItem ..", "Get-ChildItem ..\\卷宗\\*.md", "Get-ChildItem src\\*.js"])
+    assert.equal(guard(command), null, command);
+});
+
+// 存储根里那几样不论档位、沙箱开不开都守（docs/sandbox.md「另有一道不随档位…」）。
+// Windows 的 \\?\ 与 \\.\ 是同一个文件的另一种写法，剥掉前缀后要比得出同一处
+test("存储根守卫：扩展长度写法不改变落点", () => {
+  const root = atWin ? "E:\\store\\.yan" : "/tmp/store/.yan",
+    secret = path.join(root, "配置.json"),
+    backup = path.join(root, "配置备份", "2026.json"),
+    plain = atWin ? "E:\\elsewhere\\notes.md" : "/tmp/elsewhere/notes.md";
+  for (const target of [secret, backup]) assert.match(screenStorePath(target, root) || "", /配置与登录/, target);
+  assert.equal(screenStorePath(plain, root), null);
+  if (!atWin) return; // 扩展前缀是 Windows 的写法，别的地方只是普通文件名
+  for (const target of [`\\\\?\\${secret}`, `\\\\.\\${secret}`, `\\\\?\\${backup}`])
+    assert.match(screenStorePath(target, root) || "", /配置与登录/, target);
+  // UNC 的扩展写法：\\?\UNC\srv\sh\x 与 \\srv\sh\x 同处
+  const unc = { root: "\\\\srv\\share\\.yan", target: "\\\\?\\UNC\\srv\\share\\.yan\\配置.json" };
+  assert.match(screenStorePath(unc.target, unc.root) || "", /配置与登录/);
 });
 
 // 宿主机是 Windows 时上面那条只走 PowerShell 分支，POSIX 的 `${VAR:-默认}` 一条都验不到——

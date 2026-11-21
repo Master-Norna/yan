@@ -393,7 +393,20 @@ async function loadLedger(conversation, signal, role = "main") {
  * @param {{ text: string, lines: number, partial: boolean, sig: string } | null} [ledger] 帮手的那份由领命时现读传进来
  */
 function ledgerNote(conversation, role = "main", profile = null, ledger = ledgers.get(conversation.id)) {
-  if (!ledger) return "";
+  const note = ledgerNoteText(conversation, role, profile, ledger);
+  if (!note) return "";
+  if (role === "main") note.cut ? ledgersCut.add(conversation.id) : ledgersCut.delete(conversation.id);
+  return note.text;
+}
+/**
+ * 这一问要附上的那段（截了就在后面写明余下的用 read_file 看）：只按预算截字，不动「截过没截过」的记录——
+ * 右下角的上下文计数也据它估（见 18-outline.js），那里每敲一个字都会算一回，不能顺带改已读状态
+ * @param {Conversation} conversation @param {"main"|"sub"} role @param {Profile|null} [profile]
+ * @param {{ text: string, lines: number, partial: boolean, sig: string } | null} [ledger]
+ * @returns {{ text: string, cut: boolean } | null}
+ */
+function ledgerNoteText(conversation, role = "main", profile = null, ledger = ledgers.get(conversation.id)) {
+  if (!ledger) return null;
   const { text, lines, partial } = ledger,
     budget = ledgerBudget(profile);
   let shown = text;
@@ -413,6 +426,8 @@ function ledgerNote(conversation, role = "main", profile = null, ledger = ledger
   }
   const shownLines = shown.split("\n").length,
     cut = partial || shown.length < text.length;
-  if (role === "main") cut ? ledgersCut.add(conversation.id) : ledgersCut.delete(conversation.id);
-  return `${prompt(role === "main" ? "work.ledgerHead" : "work.ledgerSub", { path: LEDGER_PATH, text: shown })}${cut ? `\n${prompt("work.ledgerCut", { lines, shown: shownLines })}` : ""}\n\n`;
+  return {
+    text: `${prompt(role === "main" ? "work.ledgerHead" : "work.ledgerSub", { path: LEDGER_PATH, text: shown })}${cut ? `\n${prompt("work.ledgerCut", { lines, shown: shownLines })}` : ""}\n\n`,
+    cut
+  };
 }

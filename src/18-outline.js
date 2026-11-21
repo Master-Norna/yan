@@ -2,7 +2,8 @@
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 
 // ---------- 上下文计数：下一问会送出多少（估算），随输入、流式生成实时变；作答中改显本答这一轮的请求 ----------
-// 与真正发送时的拼法同源（系统提示 + 工具定义 + 上次撮要以来的往来 + 行迹摘要 + 草稿 + 案上待发的附件与引文），附件按入库时记下的字数估。
+// 与真正发送时的拼法同源（系统提示 + 工具定义 + 上次撮要以来的往来 + 行迹摘要 + 草稿 + 案上待发的附件与引文
+// + 这一问之后附的目录记忆与意），附件按入库时记下的字数估。
 // 作答中每轮先估这一轮送出的请求，接口有报提示用量再校正。一答之内撮要压掉往来，下一问的估算看不出来，本答的请求才看得出来。
 /** @param {Conversation} c */
 function contextEstimate(c, draft = "", pending = null, profile = activeProfile(c)) {
@@ -54,6 +55,11 @@ function contextEstimate(c, draft = "", pending = null, profile = activeProfile(
       (pending.quote?.text ? estimateText(pending.quote.text) : 0) +
       filesOf(pending.attachments, true);
   else if (draft) n += 4 + estimateText(draft);
+  // 这一问之后还附上目录记忆与意（见 20-stream.js 的 buildHead）：与前文无关、每一问都带，不数它们，
+  // 右下角的读数与自动压缩的门槛都比真正送出去的少一截，压前文那次也就压晚一拍
+  const ledger = ledgerNoteText(c, "main", profile);
+  if (ledger) n += estimateText(ledger.text);
+  n += estimateText(intentNote(c));
   return Math.round(n);
 }
 let gaugeTimer = null;
