@@ -3479,31 +3479,8 @@ function screenStoreCommand(command, root, workdir) {
       /(^|[\\/])\.yan(?:[\\/]|["'\s]|$)/.test(text) ||
       insideUnder(P, rootPath, normalizeLower(P.resolve(workdir || ""), P));
   if (named && near) return `拒绝：${STORE_WHY}`;
-  const { quotes, executions } = shellText(raw, P === path.win32 ? "powershell" : "posix"),
-    nested = new Map(executions.slice(1).map(({ start, end }) => [start, end])),
-    bare = /[^\s"'`;|&<>()]+/y;
-  for (const { start, end } of executions) {
-    for (let at = start; at < end; ) {
-      const innerEnd = nested.get(at);
-      if (at !== start && innerEnd > at && innerEnd <= end) {
-        at = innerEnd;
-        continue;
-      }
-      if (raw[at] === '"' || raw[at] === "'") {
-        const close = quotes.get(at++);
-        if (close === undefined || close >= end) continue;
-        // 套壳正文有自己的执行范围，不当成路径；普通引号内的空格不分词。
-        if (nested.get(at) !== close && storeSecretHit(raw.slice(at, close), rootPath, workdir)) return `拒绝：${STORE_WHY}`;
-        at = close + 1;
-      } else {
-        bare.lastIndex = at;
-        const word = bare.exec(raw);
-        if (word && storeSecretHit(raw.slice(at, Math.min(bare.lastIndex, end)), rootPath, workdir)) return `拒绝：${STORE_WHY}`;
-        at = word ? bare.lastIndex : at + 1;
-      }
-    }
-  }
-  return null;
+  const tokens = raw.match(/[^\s"'`;|&<>()]+/g) || [];
+  return tokens.some(token => storeSecretHit(token, rootPath, workdir)) ? `拒绝：${STORE_WHY}` : null;
 }
 
 module.exports = {
