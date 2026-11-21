@@ -281,6 +281,31 @@ test("screenCommand：PowerShell 的写别名、套壳的 powershell / cmd、带
   ])
     assert.equal(screen(command), null, command);
 });
+test("screenCommand：别的程序的开关不按 curl 的短选项表读——gcc -fopenmp、g++ -fno-exceptions 不是落点", () => {
+  // 短选项簇里的落点只对 curl 成立（-so FILE、-sLoFILE）。这张字母表是 curl / wget 的，
+  // 拿它读编译开关会把 -fopenmp 的 o 当成吃值的那个、把 openmp 当文件名，
+  // 于是整条被判成「写」，同一条指令里别处的绝对路径（源文件、-I 目录）也跟着按写的边界拦下。
+  for (const command of [
+    "gcc -fopenmp -fsyntax-only a.c",
+    "g++ -fno-exceptions -fsyntax-only a.cpp",
+    "gcc -nostdlib -fsyntax-only a.c",
+    "gcc -fopenmp -c a.c -o build/a.o",
+    // 下面这些只在「被判成写」时才会被拦：读系统目录、读别的盘都是允许的
+    String.raw`gcc -fsyntax-only -fopenmp C:\Windows\a.c`,
+    String.raw`g++ -fno-exceptions -fsyntax-only D:\src\a.cpp`,
+    String.raw`clang -fopenmp -fsyntax-only D:\src\a.c`
+  ])
+    assert.equal(screen(command), null, command);
+  // 宽档同理：误判成写的话，/opt 这类系统目录的源文件会被当成往系统目录里写
+  for (const command of ["gcc -fopenmp /opt/src/a.c", "g++ -fno-exceptions -fsyntax-only /opt/src/a.cpp"])
+    assert.equal(screenLoose(command, { platform: "posix" }), null, command);
+  // 修的是「别的程序借 curl 的表」：curl 自己的连写照旧认得，wget 的 -O 也照旧
+  assert.match(screen("curl -soC:\\Windows\\yan-probe.txt http://127.0.0.1:3000/x"), /越出了工作目录/);
+  assert.match(screen("curl -so C:\\Users\\me\\x.txt http://127.0.0.1:3000/x"), /越出了工作目录|用户目录|系统目录/);
+  assert.equal(screen("curl -so out.txt http://127.0.0.1:3000/x"), null);
+  assert.match(screen("wget http://127.0.0.1:3000/x -O C:\\Windows\\x.txt"), /越出了工作目录/);
+  assert.equal(screen("wget -Oout.txt http://127.0.0.1:3000/x"), null);
+});
 test("screenCommand：只读的来源不受目录限——拷进来、读出来送进管道的那个路径可以在外面，写的那头仍要在目录内", () => {
   for (const command of [
     String.raw`Copy-Item C:\Users\me\input.txt .\input.txt`,
