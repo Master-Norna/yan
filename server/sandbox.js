@@ -1976,34 +1976,92 @@ const NET_TOOLS = new Set(NET_TOOL_NAMES.split("|").map(name => name.toLowerCase
 const NET_WRAPPERS = new Set(["wsl", "docker", "podman", "ssh", "vagrant", "multipass", "xargs"]);
 const NET_TOOL_WORD = new RegExp(String.raw`(^|[\s"';|&()])(${NET_TOOL_NAMES})(?:\.exe)?(?=[\s"';|&()]|$)`, "i");
 // 启动器把真程序写在参数里：PowerShell 的 Start-Process（别名 saps，start 在 PowerShell 里也是它）
-// 取第一个位置参数或 -FilePath 的值。只按认出来的那个程序判——`Start-Process notepad -ArgumentList "curl 是文本"`
-// 不该算外联；认不出目标（$exe 之类）才退回粗扫那一段。
-const START_PROCESS_VALUES = new Set(
-  "argumentlist args credential redirectstandarderror redirectstandardinput redirectstandardoutput verb windowstyle workingdirectory environment".split(
-    " "
-  )
-);
+// 取位置参数里的 FilePath（第 0 位）或 -FilePath 的值。只按认出来的那个程序判——
+// `Start-Process notepad -ArgumentList "curl 是文本"` 不该算外联；认不出目标（$exe 之类）才退回粗扫那一段。
+// PowerShell 认无歧义的前缀缩写（-Arg 就是 -ArgumentList、-Fi 就是 -FilePath），只列全名会把
+// `-Arg "https://…" -FilePath curl.exe` 的值当成被启动的程序、漏掉真正启动的那个。所以按
+// 「前缀恰好命中一个参数」认：撞上多个（-W 之于 -Wait/-WindowStyle/-WorkingDirectory）或认不出来的，
+// 静态判不了，回 null 交回粗扫——宁可多扫一遍，不把参数值当程序。
+const START_PROCESS_ARGS = [
+  { name: "filepath", value: true, alias: ["pspath"] },
+  { name: "argumentlist", value: true, alias: ["args"] },
+  { name: "credential", value: true },
+  { name: "environment", value: true },
+  { name: "redirectstandarderror", value: true },
+  { name: "redirectstandardinput", value: true },
+  { name: "redirectstandardoutput", value: true },
+  { name: "verb", value: true },
+  { name: "windowstyle", value: true },
+  { name: "workingdirectory", value: true },
+  // 公共参数也吃值（-ErrorAction Stop），不列出来就会把 Stop 当成被启动的程序
+  { name: "erroraction", value: true },
+  { name: "errorvariable", value: true },
+  { name: "informationaction", value: true },
+  { name: "informationvariable", value: true },
+  { name: "outbuffer", value: true },
+  { name: "outvariable", value: true },
+  { name: "pipelinevariable", value: true },
+  { name: "warningaction", value: true },
+  { name: "warningvariable", value: true },
+  // 开关型：本身不吃值，列出来是为了 -Wait 之后的位置参数不被当成它的值跳过
+  { name: "confirm" },
+  { name: "debug" },
+  { name: "loaduserprofile" },
+  { name: "nonewwindow" },
+  { name: "passthru" },
+  { name: "usenewenvironment" },
+  { name: "verbose" },
+  { name: "wait" },
+  { name: "whatif" }
+];
+function startProcessParam(name) {
+  const key = name.toLowerCase();
+  const hits = START_PROCESS_ARGS.filter(param => param.name.startsWith(key) || (param.alias ?? []).some(alias => alias.startsWith(key)));
+  return hits.length === 1 ? hits[0] : null;
+}
 // 被启动的是壳时，真正执行的还在 -ArgumentList 的文本里，照旧粗扫这一段。
 const SHELL_LAUNCH = new Set(["powershell", "pwsh", "cmd", "sh", "bash", "zsh", "dash", "ksh"]);
 function startProcessTarget(call) {
   // 变量与表达式静态看不出被启动的是谁：回 null，交回调用方按粗扫兜住
   const target = value => (value && !/[$%]/.test(value) && !value.startsWith("(") ? value : null);
+  const unquote = value => value.replace(/^(["'])([\s\S]*)\1$/, "$2");
+  let positional = null, // 第 0 个位置参数（FilePath）
+    launched = false, // 已认下第 0 个位置参数
+    argument = false, // 已认下第 1 个位置参数（ArgumentList）
+    unsure = false; // 见过认不出或撞名的参数：后面的位置参数不敢当 FilePath
   for (let i = 0; i < call.args.length; i++) {
     const value = call.args[i].value;
     if (!value) continue;
-    const bound = /^-f[a-z]*:(.+)$/is.exec(value);
-    if (bound) return target(bound[1].replace(/^(["'])([\s\S]*)\1$/, "$2"));
+    // -FilePath:C:\x、-Arg:https://… 这样把值绑在冒号后的写法（冒号后没有值时也让下面兜住）
+    const bound = /^-([A-Za-z][A-Za-z0-9]*):([\s\S]*)$/s.exec(value);
+    if (bound) {
+      const param = startProcessParam(bound[1]);
+      if (!param) unsure = true;
+      else if (param.name === "filepath") return target(unquote(bound[2]));
+      continue;
+    }
     const flag = /^-([A-Za-z][A-Za-z0-9]*)$/.exec(value);
     if (flag) {
-      // -f / -file / -FilePath（PowerShell 允许无歧义的前缀缩写）
-      if (/^f[a-z]*$/i.test(flag[1])) return target(call.args[i + 1]?.value ?? null);
-      if (START_PROCESS_VALUES.has(flag[1].toLowerCase())) i++;
+      const param = startProcessParam(flag[1]);
+      if (!param) unsure = true;
+      else if (param.name === "filepath") return target(call.args[i + 1]?.value ?? null);
+      else if (param.value) i++; // 值型参数：下一个词是它的值，不是程序
       continue;
     }
     if (value.startsWith("/")) continue;
-    return target(value);
+    // 位置参数：第 0 位 FilePath、第 1 位 ArgumentList，再往后就没有这个参数了，判不准
+    if (!launched) {
+      launched = true;
+      positional = value;
+      continue;
+    }
+    if (!argument) {
+      argument = true;
+      continue;
+    }
+    return null;
   }
-  return null;
+  return unsure ? null : target(positional);
 }
 /**
  * 从 URL 的 authority（`//` 之后、路径之前那一段）里取真正的主机：剥掉 userinfo 与端口。

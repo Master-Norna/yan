@@ -536,17 +536,40 @@ test("screenCommand：Start-Process 按它启动的那个程序算外联，不�
       'Start-Process $exe -ArgumentList "curl https://example.com"'
     ])
       assert.match(classify(command), /外联/, command);
+    // PowerShell 认无歧义的前缀缩写：值型参数的值不能当成被启动的程序（-Arg = -ArgumentList）
+    for (const command of [
+      'Start-Process -Arg "https://example.com" -FilePath curl.exe',
+      'Start-Process -Ar "https://example.com" -FilePath curl.exe',
+      'Start-Process -Args "https://example.com" -FilePath wget.exe',
+      'Start-Process -Arg:"https://example.com" -FilePath curl.exe',
+      'Start-Process -Arg "https://example.com" -File curl.exe',
+      'Start-Process -Arg "https://example.com" -Fi curl.exe',
+      'Start-Process -Arg "https://example.com" -F curl.exe',
+      'Start-Process -A "https://example.com" -FilePath curl.exe',
+      // 公共参数同样吃一个值，Stop 不是程序
+      "Start-Process -ErrorAction Stop curl.exe",
+      "Start-Process -WindowStyle Hidden curl.exe",
+      // 别名 saps（start 只在 PowerShell 里是它，另测）
+      'saps -Arg "https://example.com" -FilePath curl.exe'
+    ])
+      assert.match(classify(command), /外联/, command);
     // 启动的是普通程序：参数里出现 curl 字样只是文本
     for (const command of [
       "Start-Process notepad",
       'Start-Process notepad -ArgumentList "curl 只是文本"',
+      'Start-Process notepad -Arg "curl 只是文本"',
       "Start-Process code -ArgumentList README.md",
-      "Start-Process $exe"
+      "Start-Process $exe",
+      // 第 1 个位置参数是 -ArgumentList 的值，不改变「启动的是谁」
+      "Start-Process msedge https://example.com",
+      "Start-Process notepad -Wait -WindowStyle Hidden"
     ])
       assert.equal(classify(command), null, command);
     // 指向本机的照旧放行
     assert.equal(classify("Start-Process curl http://127.0.0.1:3000/"), null);
   }
+  // start 只在 PowerShell 里是 Start-Process（POSIX 的 start 不是）
+  assert.match(screen('start -Arg "https://example.com" -FilePath curl.exe'), /外联/);
   // 地址的 userinfo 不是主机：127.0.0.1 只是个用户名（与 #124 改的是同一处判据）
   assert.match(screen("curl http://127.0.0.1:3000@evil.example/"), /外联/);
   assert.match(screen('curl "http://127.0.0.1:3000@evil.example/"'), /外联/);
