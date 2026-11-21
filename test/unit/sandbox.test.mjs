@@ -1957,21 +1957,68 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
   );
 });
 
-// 名字不写字面、改用通配盖住根顶层时，原先几条都不认（配置*、..\*.json、.yan\*）；这一道按路径解析后比
-test("存储根守卫：通配与相对路径也算点到了那几样", () => {
-  const root = atWin ? "E:\\store\\.yan" : "/tmp/store/.yan",
-    workdir = path.join(root, "卷宗"),
-    guard = command => screenStoreCommand(command, root, workdir);
-  // 对根顶层用通配，盖得住配置与备份
-  for (const target of [path.join(root, "*"), path.join(root, "配置*"), path.join(root, "*.json"), path.join(root, "配置备份", "*")])
-    assert.match(guard("Get-Content " + target) || "", /配置与登录/, target);
-  // 不涉及其他的照旧放行：工作目录里的通配、根顶层但不盖住它们的名字
-  for (const target of [path.join(root, "意.json"), path.join(root, "*.md"), path.join(workdir, "*.json"), path.join(workdir, "notes.md")])
-    assert.equal(guard("Get-Content " + target), null, target);
-  if (!atWin) return; // 下面的相对写法是 Windows 的分隔
-  // 工作目录在根里时，.. 就是根：不写字面名字的相对通配一样拦
-  for (const command of ["Get-Content ..\\*", "Get-Content ..\\*.json", "Get-Content ..\\配置*", "Get-Content ..\\配置备份\\*"])
-    assert.match(guard(command) || "", /配置与登录/, command);
-  for (const command of ["Get-Content ..\\意.json", "Get-ChildItem ..", "Get-ChildItem ..\\卷宗\\*.md", "Get-ChildItem src\\*.js"])
-    assert.equal(guard(command), null, command);
-});
+// 两种路径形状在每种宿主上都跑；fixture 只是交给守卫分类的文本。
+for (const [P, anchor] of [
+  [path.win32, "X:\\fixture"],
+  [path.posix, "/tmp/fixture"]
+]) {
+  test(`存储根守卫（${P.sep}）：绝对与相对通配按路径形状判`, () => {
+    const root = P.join(anchor, ".yan"),
+      workdir = P.join(root, "卷宗"),
+      guard = target => screenStoreCommand(`fixture ${target}`, root, workdir);
+    for (const base of [root, ".."]) {
+      for (const target of ["*", "配置*", "*.json", P.join("配置备份", "*")]) {
+        assert.match(guard(P.join(base, target)) || "", /配置与登录/, P.join(base, target));
+      }
+    }
+    for (const target of [
+      P.join(root, "意.json"),
+      P.join(root, "*.md"),
+      P.join(workdir, "*.json"),
+      P.join(workdir, "notes.md"),
+      P.join("..", "意.json"),
+      "..",
+      P.join("..", "卷宗", "*.md"),
+      P.join("src", "*.js")
+    ]) {
+      assert.equal(guard(target), null, target);
+    }
+  });
+
+  test(`存储根守卫（${P.sep}）：带空格的引号路径不拆成几个词`, () => {
+    const root = P.join(anchor + " directory", ".yan"),
+      workdir = P.join(root, "work area");
+    for (const quote of ['"', "'"]) {
+      const guard = (target, cwd = workdir) => screenStoreCommand(`fixture ${quote}${target}${quote}`, root, cwd);
+      for (const target of [
+        P.join(root, "*"),
+        P.join(root, "ChatGPT *.json"),
+        P.join(root, "ChatGPT 登录.json"),
+        P.join("..", "ChatGPT *.json")
+      ]) {
+        assert.match(guard(target) || "", /配置与登录/, target);
+      }
+      assert.equal(guard(P.join(workdir, "*.json")), null);
+      // 若把参数里的空格当分隔符，末尾的 *.json 会被当作存储根顶层的通配。
+      assert.equal(guard("notes *.json", root), null);
+      assert.equal(guard(P.join("work area", "notes *.json"), root), null);
+    }
+  });
+
+  test(`存储根守卫（${P.sep}）：执行正文里的通配照判，正文里的普通引号仍整取`, () => {
+    const root = P.join(anchor, ".yan"),
+      workdir = P.join(root, "work"),
+      wrapper = P === path.win32 ? "pwsh -Command" : "sh -c",
+      body = `fixture ${P.join("..", "*.json")}`;
+    for (const quote of ['"', "'"]) {
+      const inner = quote === '"' ? "'" : '"';
+      assert.match(screenStoreCommand(`${wrapper} ${quote}${body}${quote}`, root, workdir) || "", /配置与登录/);
+      assert.equal(screenStoreCommand(`${wrapper} ${quote}fixture *.json${quote}`, root, workdir), null);
+      assert.equal(screenStoreCommand(`${wrapper} ${quote}fixture ${inner}notes *.json${inner}${quote}`, root, root), null);
+    }
+    const substitution = `fixture "$( ${body} )"`;
+    assert.match(screenStoreCommand(substitution, root, workdir) || "", /配置与登录/);
+    assert.match(screenStoreCommand(`${wrapper} '${substitution}'`, root, workdir) || "", /配置与登录/);
+    assert.equal(screenStoreCommand(`fixture '${wrapper} fixture *.json'`, root, root), null);
+  });
+}
