@@ -64,7 +64,10 @@ class BusResponse extends Writable {
   }
   // 没写完就被掐了（上游断线时 pipeline 会 destroy 它）：不走总线时页面会读到断网，这里也得告诉页面，别让它一直等
   _destroy(error, done) {
-    if (!this.writableFinished) void Promise.resolve().then(() => this.emitEvent({ t: "drop" })).catch(() => {});
+    if (!this.writableFinished)
+      void Promise.resolve()
+        .then(() => this.emitEvent({ t: "drop" }))
+        .catch(() => {});
     done(error);
   }
 }
