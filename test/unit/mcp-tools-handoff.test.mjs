@@ -150,7 +150,8 @@ test("补图只读工作目录与显式 output-dir，忽略越界和链接逃逸
     work = path.join(base, "work"),
     output = path.join(base, "output"),
     secret = path.join(base, "outside.png");
-  fs.mkdirSync(work); fs.mkdirSync(output);
+  fs.mkdirSync(work);
+  fs.mkdirSync(output);
   fs.writeFileSync(path.join(work, "ok.png"), "work");
   fs.writeFileSync(path.join(output, "out.png"), "output");
   fs.writeFileSync(secret, "private");
@@ -160,23 +161,41 @@ test("补图只读工作目录与显式 output-dir，忽略越界和链接逃逸
     linked = true;
   } catch {}
   McpClient.prototype.connect = async function () {
-    this.tools = [{ name: "take" }]; this.toolsChanged = false; this.server = {};
+    this.tools = [{ name: "take" }];
+    this.toolsChanged = false;
+    this.server = {};
     return this;
   };
   McpClient.prototype.call = async function () {
-    return { content: [{ type: "text", text:
-      "- [Okay](./ok.png)\n- [Output](" + path.join(output, "out.png").replaceAll("\\", "/") +
-      ")\n- [Secret](../outside.png)" + (linked ? "\n- [Symlink](./link.png)" : "") }] };
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "- [Okay](./ok.png)\n- [Output](" +
+            path.join(output, "out.png").replaceAll("\\", "/") +
+            ")\n- [Secret](../outside.png)" +
+            (linked ? "\n- [Symlink](./link.png)" : "")
+        }
+      ]
+    };
   };
   const { post, close } = await serve();
   try {
     const result = await post("/api/mcp/call", {
-      server: "images", config: { command: "node", cwd: work, args: ["--output-dir", output] },
-      tool: "take", arguments: {}
+      server: "images",
+      config: { command: "node", cwd: work, args: ["--output-dir", output] },
+      tool: "take",
+      arguments: {}
     });
     const images = result.result.content.filter(item => item.type === "image");
-    assert.deepEqual(images.map(item => Buffer.from(item.data, "base64").toString()), ["work", "output"]);
+    assert.deepEqual(
+      images.map(item => Buffer.from(item.data, "base64").toString()),
+      ["work", "output"]
+    );
   } finally {
-    await close(); restore(); fs.rmSync(base, { recursive: true, force: true });
+    await close();
+    restore();
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });
