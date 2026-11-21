@@ -3,8 +3,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { Readable, Writable } from "node:stream";
+import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
+import { PassThrough, Readable, Writable } from "node:stream";
 import { createRequire } from "node:module";
+import vm from "node:vm";
 
 const require = createRequire(import.meta.url);
 const { createTransport, readEvents, readLimitedText } = require("../../server/mcp/transports.js");
@@ -15,34 +18,78 @@ const streamOf = (...chunks) => ({
     for (const text of chunks) yield Buffer.from(text);
   }
 });
-const tick = () => new Promise(resolve => setImmediate(resolve));
-
-test("事件流：一条事件攒过上限就作罢，不整份留在内存里", async () => {
-  const got = [];
-  await assert.rejects(() => readEvents({ body: streamOf("data: ", "x".repeat(4096)) }, (event, data) => got.push(data), 1024), /事件过大/);
-  assert.deepEqual(got, [], "超限的这条不算数");
+test("事件流：按解码后的单条计量，不因合块或拆开空行误拒", async () => {
+  // 正好 9 个 UTF-16 码元，但 UTF-8 字节更多；末尾空行不计入事件体量。
+  for (const chunks of [["data: 甲😀\n\ndata: b\n\n"], ["data: 甲😀\n", "\ndata: b\n\n"], ["data: 甲😀\r", "\n\r\ndata: b\r\r"]]) {
+    const got = [];
+    await readEvents({ body: streamOf(...chunks) }, (event, data) => got.push(data), 9);
+    assert.deepEqual(got, ["甲😀", "b"]);
+  }
 });
 
-test("整份回话：按上限读，没超的原样交回", async () => {
-  assert.equal(await readLimitedText({ body: streamOf("0123456789") }), "0123456789");
-  await assert.rejects(() => readLimitedText({ body: streamOf("0123456789", "0123456789") }, 15), /回的消息过大/);
+test("事件流：完整事件和未结束余段都限量，已读出的合法事件不丢", async () => {
+  for (const chunks of [
+    ["data: a\n\ndata: 1234\n\ndata: b\n\n"],
+    ["data: a\n\ndata: 12", "34"],
+    ["data: a\n\ndata: 123\n", "x\n\n"],
+    ["data: a\n\ndata: 1234\r\r"]
+  ]) {
+    const got = [];
+    await assert.rejects(() => readEvents({ body: streamOf(...chunks) }, (event, data) => got.push(data), 9), /事件过大/);
+    assert.deepEqual(got, ["a"]);
+  }
 });
 
-test("本机 MCP 服务往 stdout 灌一整段没有换行的文本：报过大，收掉进程", async () => {
-  const transport = createTransport({
-    command: process.execPath,
-    args: ["-e", "process.stdout.write(Buffer.alloc(20 * 1024 * 1024, 120))"]
+test("整份回话：按字节限量，没超的原样交回", async () => {
+  assert.equal(await readLimitedText({ body: streamOf("0", "甲") }, 4), "0甲");
+  await assert.rejects(() => readLimitedText({ body: streamOf("0", "甲") }, 3), /回的消息过大/);
+});
+
+// 用假进程给真实的 stdout 处理器喂确定的块，不依赖 OS 管道如何合块。
+async function fakeStdio(limit) {
+  const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
+  const got = [],
+    errors = [],
+    kills = [],
+    module = { exports: {} };
+  vm.runInNewContext(readFileSync(new URL("../../server/mcp/transports.js", import.meta.url), "utf8"), {
+    module,
+    process,
+    require(name) {
+      if (name === "node:child_process") return { spawn: () => child };
+      if (name === "../platform.js") return { OWN_GROUP: {}, killTree: (...args) => kills.push(args) };
+      return require(name);
+    }
   });
-  const closed = new Promise(resolve => (transport.onclose = resolve));
-  await transport.start();
-  let timer = null;
-  const timeout = new Promise(resolve => (timer = setTimeout(() => resolve(null), 15000)));
-  timer.unref?.();
-  const error = await Promise.race([closed, timeout]);
-  clearTimeout(timer);
-  transport.close();
-  assert.ok(error, "没有按预期收口");
-  assert.match(String(error.message), /消息过大/);
+  const transport = module.exports.createTransport({ command: process.execPath });
+  transport.onmessage = message => got.push(message.id);
+  transport.onclose = error => errors.push(error.message);
+  const started = transport.start(limit);
+  child.emit("spawn");
+  await started;
+  return { child, got, errors, kills };
+}
+
+test("stdio：合在一个块里的行各量各的，余段接到下一块", async () => {
+  const { child, got, errors, kills } = await fakeStdio(11);
+  child.stdout.write('{"id":"😀"}\n{"id":2}\n{"id":');
+  child.stdout.write("3}\n");
+  assert.deepEqual(got, ["😀", 2, 3]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(kills, []);
+});
+
+test("stdio：完整行和未结束余段都限量，超限报错并收进程", async () => {
+  for (const chunks of [['{"id":1}\n {"id":2}\n{"id":3}\n'], ['{"id":1}\n {"id":2', "}"]]) {
+    const { child, got, errors, kills } = await fakeStdio(8);
+    for (const chunk of chunks) child.stdout.write(chunk);
+    assert.equal(errors.length, 1, "不能等到看到换行才检查余段");
+    assert.match(errors[0], /服务回的消息过大（一行超过/);
+    child.stdout.write('{"id":4}\n');
+    assert.deepEqual(got, [1]);
+    assert.equal(errors.length, 1);
+    assert.deepEqual(kills, [[child, "SIGTERM"]]);
+  }
 });
 
 test("可流式 HTTP 回一整份超大 JSON：不再往下读", async t => {

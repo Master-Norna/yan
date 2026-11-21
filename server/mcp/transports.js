@@ -26,7 +26,7 @@ class StdioTransport {
     /** @type {(error: Error) => void} */
     this.onclose = () => {};
   }
-  start() {
+  start(limit = MESSAGE_LIMIT) {
     // 先接桥接的工具环境（Windows 自备包，macOS 系统工具目录），配置里的 env 最后盖上；
     // Python 写的服务在中文 Windows 上默认按 GBK 写 stdout：统一成 UTF-8，且不缓冲
     const env = { PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", ...this.toolEnv(process.env), ...this.env },
@@ -43,23 +43,24 @@ class StdioTransport {
     this.child.stderr.setEncoding("utf8");
     let buffer = "",
       broken = false;
+    const tooLarge = () => {
+      broken = true;
+      buffer = "";
+      const error = Error(`服务回的消息过大（一行超过 ${limit / 1024 / 1024} MB）`);
+      this.note(error.message);
+      this.onclose(error);
+      killTree(this.child, "SIGTERM");
+    };
     this.child.stdout.on("data", chunk => {
       if (broken) return;
       buffer += chunk;
-      // 攒到上限还没见到换行：这一行本身就是一整段（服务在灌日志，或回了一条超大的结果）
-      if (buffer.length > MESSAGE_LIMIT) {
-        broken = true;
-        buffer = "";
-        const error = Error(`服务回的消息过大（一行超过 ${MESSAGE_LIMIT / 1024 / 1024} MB）`);
-        this.note(error.message);
-        this.onclose(error);
-        killTree(this.child, "SIGTERM");
-        return;
-      }
-      let index;
-      while ((index = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, index).trim();
-        buffer = buffer.slice(index + 1);
+      let start = 0,
+        index;
+      // 一个块可以有多行；完整行在 trim 之前量，未见换行的余段也要量。
+      while ((index = buffer.indexOf("\n", start)) >= 0) {
+        if (index - start > limit) return tooLarge();
+        const line = buffer.slice(start, index).trim();
+        start = index + 1;
         // 有的服务往 stdout 打日志：不是 JSON 的行记进 stderr，不当消息
         if (!line.startsWith("{") && !line.startsWith("[")) {
           if (line) this.note(line);
@@ -72,6 +73,8 @@ class StdioTransport {
           this.note(line);
         }
       }
+      if (buffer.length - start > limit) return tooLarge();
+      buffer = buffer.slice(start);
     });
     this.child.stderr.on("data", chunk => this.note(chunk));
     return new Promise((resolve, reject) => {
@@ -127,7 +130,8 @@ function resolveCommand(command, args, env) {
   return { file: [quote(found), ...encoded].join(" "), args: [], shell: true };
 }
 // 一条消息的体量上限：桥接是单进程，服务往 stdout 里灌一段没有换行的超长文本、或回一条超大的结果，
-// 整份攒在内存里就能把它撑死（所有对话、后台指令一起断）。正常的结果远小于这个数
+// 整份攒在内存里就能把它撑死（所有对话、后台指令一起断）。正常的结果远小于这个数。
+// stdio / SSE 已解码，量 UTF-16 码元；整份 HTTP 回话在解码前量字节。
 const MESSAGE_LIMIT = 16 * 1024 * 1024;
 // 整份回来的（不是事件流）：按上限读，超了当场说清，别拿一个残缺的 JSON 去解析
 async function readLimitedText(response, limit = MESSAGE_LIMIT) {
@@ -152,17 +156,21 @@ function findOnPath(command, env) {
   return command;
 }
 
-// 事件流逐条读出：每条事件交给 onEvent(event, data)。一道上限：攒过 limit 还没见到事件结尾（空行）就作罢——
-// 一条事件大得离谱时整份留在 buffer 里，桥接一样会被撑死
+// 事件流逐条读出：每条事件交给 onEvent(event, data)。完整事件和未见空行的余段各自限量。
 async function readEvents(response, onEvent, limit = MESSAGE_LIMIT) {
   const decoder = new TextDecoder();
   let buffer = "",
     carry = "";
+  const checkSize = size => {
+    if (size > limit) throw Error(`事件过大（超过 ${limit / 1024 / 1024} MB），不再往下读`);
+  };
   const drain = () => {
-    let index;
-    while ((index = buffer.indexOf("\n\n")) >= 0) {
-      const block = buffer.slice(0, index);
-      buffer = buffer.slice(index + 2);
+    let start = 0,
+      index;
+    while ((index = buffer.indexOf("\n\n", start)) >= 0) {
+      checkSize(index - start);
+      const block = buffer.slice(start, index);
+      start = index + 2;
       let event = "message",
         data = [];
       for (const line of block.split("\n")) {
@@ -171,13 +179,15 @@ async function readEvents(response, onEvent, limit = MESSAGE_LIMIT) {
       }
       if (data.length) onEvent(event, data.join("\n"));
     }
+    buffer = buffer.slice(start);
+    // 末尾单个换行可能是分隔空行的开头；若下块没接上换行，下一次会把它算进事件。
+    checkSize(buffer.length - (buffer.endsWith("\n") ? 1 : 0));
   };
   for await (const chunk of response.body) {
     // 块尾的 \r 留到下一块再认：它若与下一块开头的 \n 是同一个换行，分开换就成了两个，事件被拦腰切开
     const text = carry + decoder.decode(chunk, { stream: true });
     carry = text.endsWith("\r") ? "\r" : "";
     buffer += (carry ? text.slice(0, -1) : text).replace(/\r\n?/g, "\n");
-    if (buffer.length > limit) throw Error(`事件过大（超过 ${limit / 1024 / 1024} MB），不再往下读`);
     drain();
   }
   if (carry) {
