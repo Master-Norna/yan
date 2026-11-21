@@ -13,11 +13,14 @@ const require = createRequire(import.meta.url);
 const { createTransport, readEvents, readLimitedText } = require("../../server/mcp/transports.js");
 const createModel = require("../../server/model/index.js");
 
-const streamOf = (...chunks) => ({
-  async *[Symbol.asyncIterator]() {
-    for (const text of chunks) yield Buffer.from(text);
-  }
-});
+// 真的 ReadableStream（桥接里收到的回话都是这个形状）：readLimitedBytes 与 readEvents 都按它读、按块交
+const streamOf = (...chunks) =>
+  new ReadableStream({
+    start(controller) {
+      for (const text of chunks) controller.enqueue(Buffer.from(text));
+      controller.close();
+    }
+  });
 test("事件流：按解码后的单条计量，不因合块或拆开空行误拒", async () => {
   // 正好 9 个 UTF-16 码元，但 UTF-8 字节更多；末尾空行不计入事件体量。
   for (const chunks of [["data: 甲😀\n\ndata: b\n\n"], ["data: 甲😀\n", "\ndata: b\n\n"], ["data: 甲😀\r", "\n\r\ndata: b\r\r"]]) {
@@ -51,14 +54,16 @@ async function fakeStdio(limit) {
   const got = [],
     errors = [],
     kills = [],
-    module = { exports: {} };
+    module = { exports: {} },
+    // transports.js 里成对的 require 按它自己所在的位置解析（它现在已经引 ../web.js）
+    requireTransport = createRequire(new URL("../../server/mcp/transports.js", import.meta.url));
   vm.runInNewContext(readFileSync(new URL("../../server/mcp/transports.js", import.meta.url), "utf8"), {
     module,
     process,
     require(name) {
       if (name === "node:child_process") return { spawn: () => child };
       if (name === "../platform.js") return { OWN_GROUP: {}, killTree: (...args) => kills.push(args) };
-      return require(name);
+      return requireTransport(name);
     }
   });
   const transport = module.exports.createTransport({ command: process.execPath });
@@ -104,6 +109,23 @@ test("可流式 HTTP 回一整份超大 JSON：不再往下读", async t => {
   t.after(() => new Promise(resolve => server.close(resolve)));
   const transport = createTransport({ url: `http://127.0.0.1:${server.address().port}/mcp` });
   await assert.rejects(() => transport.send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {} }), /回的消息过大/);
+});
+
+test("可流式 HTTP 回一整份普通 JSON：不超上限的照常交出", async t => {
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } }));
+    });
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const transport = createTransport({ url: `http://127.0.0.1:${server.address().port}/mcp` });
+  const got = [];
+  transport.onmessage = message => got.push(message);
+  await transport.send({ jsonrpc: "2.0", id: 1, method: "ping" });
+  assert.deepEqual(got, [{ jsonrpc: "2.0", id: 1, result: { ok: true } }]);
 });
 
 // 列模型那一路（专司的设置页与「测试连接」都走它）

@@ -7,6 +7,7 @@ const http = require("node:http");
 const path = require("node:path");
 const { createHash, randomBytes, randomUUID } = require("node:crypto");
 const { jsonRoute, writeAtomic, readJsonFile } = require("../http.js");
+const { readLimitedBytes, ERROR_BODY_LIMIT } = require("../web.js");
 const { translateSse } = require("./sse.js");
 const fetchUpstream = require("./upstream.js");
 const { openUrl } = require("../platform.js");
@@ -28,6 +29,9 @@ const DEAD_GRANTS = new Set([
   "refresh_token_invalidated",
   "refresh_token_reused"
 ]);
+// 订阅的模型表按上限读：正常只有几十个名字，超过这个数多半是接口出了毛病、或根本没打算收尾
+// （与 server/model/index.js 的 LIST_LIMIT 同一个理由与量级）
+const MODELS_LIMIT = 4 * 1024 * 1024;
 // 订阅额度那边的几种拒绝，换成用户看得懂的话
 const HINTS = {
   subscription_sharing_usage_limit_exceeded: "ChatGPT 订阅给言的额度用完了，可在 ChatGPT 设置 → 用量里查看或调整",
@@ -277,8 +281,20 @@ module.exports = function createChatgpt({ home }) {
       headers: await headers(),
       signal: AbortSignal.timeout(20000)
     });
-    const data = /** @type {any} */ (await response.json().catch(() => ({})));
-    if (!response.ok) throw Error(hinted(data.error?.code, data.error?.message || `列模型失败（${response.status}）`));
+    // 表按上限读（与 server/model/index.js 的 LIST_LIMIT 同一个理由与量级）：超大或源源不断的 JSON 不能整份进内存；
+    // 非成功的回话只要开头那句，另用小预算，读完即掐
+    const { buffer, truncated } = await readLimitedBytes(response, response.ok ? MODELS_LIMIT : ERROR_BODY_LIMIT),
+      raw = new TextDecoder().decode(buffer);
+    let data = /** @type {any} */ ({});
+    if (!truncated)
+      try {
+        data = JSON.parse(raw);
+      } catch {}
+    if (!response.ok) {
+      const preview = truncated ? raw.trim().slice(0, 200) : "";
+      throw Error(hinted(data.error?.code, data.error?.message || `列模型失败（${response.status}）${preview ? `：${preview}` : ""}`));
+    }
+    if (truncated) throw Error(`模型列表过大（超过 ${MODELS_LIMIT / 1024 / 1024} MB），不再往下读`);
     const list = (Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : []).filter(
       m => m && (m.visibility === undefined || m.visibility === "list")
     );

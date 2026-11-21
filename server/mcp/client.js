@@ -101,8 +101,11 @@ class McpClient {
     if (!entry) return;
     this.pending.delete(id);
     clearTimeout(entry.timer);
-    if (error) entry.reject(error);
-    else entry.resolve(result);
+    if (error) {
+      // 这一问不再等了（超时、用户停止、连接已判死）：传输那头别再读——事件流可能还在往外吐，读完也没人要
+      this.transport?.abort?.(id);
+      entry.reject(error);
+    } else entry.resolve(result);
   }
   receive(message) {
     // 回复

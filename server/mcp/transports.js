@@ -8,6 +8,7 @@
 "use strict";
 const { spawn } = require("node:child_process");
 const { OWN_GROUP, killTree } = require("../platform.js");
+const { readLimitedBytes, ERROR_BODY_LIMIT } = require("../web.js");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -133,16 +134,11 @@ function resolveCommand(command, args, env) {
 // 整份攒在内存里就能把它撑死（所有对话、后台指令一起断）。正常的结果远小于这个数。
 // stdio / SSE 已解码，量 UTF-16 码元；整份 HTTP 回话在解码前量字节。
 const MESSAGE_LIMIT = 16 * 1024 * 1024;
-// 整份回来的（不是事件流）：按上限读，超了当场说清，别拿一个残缺的 JSON 去解析
+// 整份回来的（不是事件流）：按字节上限读（与别处同一个原语），超了当场说清，别拿一个残缺的 JSON 去解析
 async function readLimitedText(response, limit = MESSAGE_LIMIT) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length;
-    if (size > limit) throw Error(`回的消息过大（超过 ${limit / 1024 / 1024} MB），不再往下读`);
-    chunks.push(Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
+  const { buffer, truncated } = await readLimitedBytes(response, limit);
+  if (truncated) throw Error(`回的消息过大（超过 ${limit / 1024 / 1024} MB），不再往下读`);
+  return buffer.toString("utf8");
 }
 function findOnPath(command, env) {
   if (path.isAbsolute(command) || /[\\/]/.test(command)) return command;
@@ -195,9 +191,19 @@ async function readEvents(response, onEvent, limit = MESSAGE_LIMIT) {
     drain();
   }
 }
+// 非成功的回话：只读开头（ERROR_BODY_LIMIT）就够认一句话，整份读进来没有用处。
+// 读完把正文掐掉，别让连接挂着；截断的不拿去解析（半截 JSON 也解析不出来），只留状态码与一小段预览
 async function httpError(response) {
-  const text = await response.text().catch(() => "");
-  return Error(`HTTP ${response.status}${text ? `：${text.slice(0, 200)}` : ""}`);
+  const { buffer, truncated } = await readLimitedBytes(response, ERROR_BODY_LIMIT).catch(() => ({
+    buffer: Buffer.alloc(0),
+    truncated: false
+  }));
+  const text = buffer.toString("utf8");
+  return Error(
+    `HTTP ${response.status}${text ? `：${text.slice(0, 200)}` : ""}${
+      truncated ? `（正文超过 ${ERROR_BODY_LIMIT / 1024} KB，只读了开头）` : ""
+    }`
+  );
 }
 
 class HttpTransport {
@@ -211,6 +217,8 @@ class HttpTransport {
     /** @type {(error: Error) => void} */
     this.onclose = () => {};
     this.aborts = new Set();
+    /** @type {Map<any, AbortController>} 按请求编号记着这一条的掐断开关：等它的人不等了（超时、停止、连接已判死），读取也一并收掉 */
+    this.reads = new Map();
   }
   async start() {}
   headersFor() {
@@ -225,6 +233,11 @@ class HttpTransport {
   async send(message) {
     const abort = new AbortController();
     this.aborts.add(abort);
+    const release = () => {
+      this.aborts.delete(abort);
+      if (message.id !== undefined && this.reads.get(message.id) === abort) this.reads.delete(message.id);
+    };
+    if (message.id !== undefined) this.reads.set(message.id, abort);
     // 回复走事件流时 send 先返回、流还在读：这次请求的掐断开关要留到流读完，close() 才掐得到它
     let streaming = false;
     try {
@@ -236,13 +249,19 @@ class HttpTransport {
       });
       const session = response.headers.get("mcp-session-id");
       if (session) this.session = session;
-      // 会话过期：交给上层重连
+      // 会话过期：交给上层重连。这份正文不采用，当场取消，别让连接挂着
       if (response.status === 404 && this.session) {
+        await response.body?.cancel().catch(() => {});
         this.onclose(Error("会话已过期"));
         return;
       }
       if (!response.ok) throw Object.assign(await httpError(response), { status: response.status });
-      if (response.status === 202 || !response.body) return;
+      // 202 就是「收下了」：有正文也不用
+      if (response.status === 202) {
+        await response.body?.cancel().catch(() => {});
+        return;
+      }
+      if (!response.body) return;
       const type = response.headers.get("content-type") || "";
       if (type.includes("text/event-stream")) {
         // 回复在事件流里，读完为止；不等它读完，send 先返回，别的请求照常发
@@ -255,11 +274,23 @@ class HttpTransport {
             if (!abort.signal.aborted && message.id !== undefined)
               this.onmessage({ jsonrpc: "2.0", id: message.id, error: { message: `事件流中断：${error?.message || error}` } });
           })
-          .finally(() => this.aborts.delete(abort));
-      } else this.deliver(await readLimitedText(response));
+          .finally(release);
+      } else {
+        const text = await readLimitedText(response);
+        // 正文已经读完，这条不必再掐；再往后若收到的是 JSON-RPC 错误，也不该白 abort 一次
+        release();
+        this.deliver(text);
+      }
     } finally {
-      if (!streaming) this.aborts.delete(abort);
+      if (!streaming) release();
     }
+  }
+  // 等这条回复的人不再等了：把还在读的正文与连着的请求一并收掉（只在还没读完时有效）
+  abort(id) {
+    const abort = this.reads.get(id);
+    if (!abort) return;
+    this.reads.delete(id);
+    abort.abort();
   }
   deliver(text) {
     if (!text.trim()) return;
@@ -268,6 +299,7 @@ class HttpTransport {
   }
   close() {
     for (const abort of this.aborts) abort.abort();
+    this.reads.clear();
     if (this.session) void fetch(this.url, { method: "DELETE", headers: this.headersFor() }).catch(() => {});
   }
 }
@@ -311,6 +343,8 @@ class SseTransport {
       body: JSON.stringify(message)
     });
     if (!response.ok) throw await httpError(response);
+    // 旧式 SSE 的投递回执不采用正文（通行是 202 空体）：有也不读，当场取消
+    await response.body?.cancel().catch(() => {});
   }
   close() {
     this.abort.abort();

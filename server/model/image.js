@@ -34,7 +34,11 @@ async function fetchImage(raw, signal, allowLoopback = false) {
   // 裸 fetch 就等于让桥接替它去取（桥接的受信接口对无标记的本机请求是放行的）。
   // 上游在本机时（用户配的本地生图服务）放行回环——它回的本机地址是正常的，与 http_request 同规矩
   const { response } = await fetchPublicResponse(url.href, { timeout: 60000, signal, allowLoopback });
-  if (!response.ok) throw Error(`取图失败：${response.status}`);
+  if (!response.ok) {
+    // 这份正文不采用：当场取消，别让连接挂着
+    await response.body?.cancel().catch(() => {});
+    throw Error(`取图失败：${response.status}`);
+  }
   // 边读边计：超过上限就停下，不先把整份收进内存再判
   const { buffer: bytes, truncated } = await readLimitedBytes(response, IMAGE_LIMIT);
   if (truncated) throw Error("图片过大");

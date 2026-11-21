@@ -11,7 +11,7 @@
 const { Readable } = require("node:stream");
 const { finished } = require("node:stream/promises");
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
-const { readLimitedBytes } = require("../web.js");
+const { readLimitedBytes, ERROR_BODY_LIMIT } = require("../web.js");
 const fetchUpstream = require("./upstream.js");
 const openai = require("./openai.js");
 const anthropic = require("./anthropic.js");
@@ -26,9 +26,20 @@ const LIST_LIMIT = 4 * 1024 * 1024;
 
 // 上游没接下请求时回的那句话。OpenAI 系 { error: { message } }、有的中转站 { error: "…" }、旧版 vLLM { message }、
 // FastAPI 写的自建服务 { detail }（参数校验错是一串对象，整串交出去，思考档位的报错才读得出它认哪几档）；
-// ChatGPT 订阅额度那边的几种拒绝换成看得懂的话。页面只读桥接回的 { error }，各家的样子到此为止
+// ChatGPT 订阅额度那边的几种拒绝换成看得懂的话。页面只读桥接回的 { error }，各家的样子到此为止。
+// 正文只读开头（ERROR_BODY_LIMIT）：报错用不上一整份，网关失控时整份收进来一样能撑死桥接；
+// 完整才尝试解析 JSON，读满上限还没完的只回状态码与一小段预览
 async function upstreamError(response, raw) {
-  raw = raw ?? (await response.text().catch(() => ""));
+  let truncated = false;
+  if (raw === undefined || raw === null) {
+    const read = await readLimitedBytes(response, ERROR_BODY_LIMIT).catch(() => ({ buffer: Buffer.alloc(0), truncated: false }));
+    raw = read.buffer.toString("utf8");
+    truncated = read.truncated;
+  }
+  if (truncated) {
+    const preview = raw.trim().slice(0, 300);
+    return `上游接口返回 ${response.status}（正文超过 ${ERROR_BODY_LIMIT / 1024} KB，只读了开头）${preview ? `：${preview}` : ""}`;
+  }
   try {
     const json = JSON.parse(raw),
       detail = json.detail;
