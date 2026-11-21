@@ -29,7 +29,6 @@ function render(shouldScroll = false) {
   else if (c) renderConversation(shouldScroll);
   else renderOutline();
   restoreDraft();
-  renderAttachments();
   renderSendButtons();
   renderApprovalBar();
   renderHelperBar();

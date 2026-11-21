@@ -26,6 +26,35 @@ function usageSum(a, b) {
   for (const [key, value] of Object.entries(b)) sum[key] = Number(sum[key] || 0) + Number(value || 0);
   return sum;
 }
+// 一轮里的几件调用拟成步骤。id 是这批结果的唯一键（见 runSteps 里按 id 收的 outcomes），也是历史里
+// tool_calls 与 tool 消息配对的凭据：上游偶尔在同一轮的两件调用里给同一个 id（流里 index 分开、id 相同），
+// 照原样收，后一件的结果会盖掉前一件——模型拿着 A 的参数读到 B 的结果，静默错；同 id 的 tool_calls 还有上游直接拒。
+// 撞了就补个序号，两处（发给模型的调用与交回的 tool 消息）用的是同一份。同一答里先前几步的 id 也避开：
+// 行迹按 data-step-id 认那一步，撞了找到的是前一件
+/**
+ * @param {{ id?: string, name: string, arguments?: string }[]} calls
+ * @param {Message|SubAgent} target
+ * @param {string} [scope]
+ * @returns {Step[]}
+ */
+function roundSteps(calls, target, scope) {
+  const used = new Set((target.steps || []).map(step => step.id));
+  return calls.map(call => {
+    const base = call.id || `call_${uid().slice(0, 8)}`;
+    let id = base;
+    for (let n = 2; used.has(id); n += 1) id = `${base}_${n}`;
+    used.add(id);
+    return {
+      id,
+      name: call.name,
+      arguments: call.arguments || "{}",
+      status: "running",
+      at: target.content.length,
+      rat: String(target.reasoning || "").length,
+      ...(scope ? { scope } : {})
+    };
+  });
+}
 /**
  * @param {Message|SubAgent} target 写进哪里：主答、旁注的消息，或帮手
  * @param {Array<Record<string, any>>} history 送给接口的消息，就地追加
@@ -178,15 +207,7 @@ async function runRounds(target, history, run) {
     }
     // 模型请求调用工具：记成步骤、执行、把结果作为 tool 消息回传，再让模型继续；历史里只带本轮新写的正文，前几轮的已在各自的 assistant 消息里
     /** @type {Step[]} */
-    const steps = calls.map(call => ({
-      id: call.id || `call_${uid().slice(0, 8)}`,
-      name: call.name,
-      arguments: call.arguments || "{}",
-      status: "running",
-      at: target.content.length,
-      rat: String(target.reasoning || "").length,
-      ...(run.scope ? { scope: run.scope } : {})
-    }));
+    const steps = roundSteps(calls, target, run.scope);
     (target.steps ||= []).push(...steps);
     // 拟好的调用已入册成步骤，「正在拟」那一行随之撤下
     target.toolCalls = null;
