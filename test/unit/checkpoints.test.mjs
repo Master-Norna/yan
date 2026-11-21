@@ -542,11 +542,15 @@ test("同大小且 mtime 被恢复的编辑仍应被检查点发现", async () =
     write(root, "a.txt", "before");
     const first = await post("/api/checkpoint/take", key);
     assert.equal(first.status, 200);
-    const file = path.join(root, "a.txt"), original = fs.statSync(file);
+    const file = path.join(root, "a.txt"),
+      original = fs.statSync(file);
     write(root, "a.txt", "AFTER!");
     fs.utimesSync(file, original.atime, original.mtime);
     const diff = await post("/api/checkpoint/diff", key);
-    assert.deepEqual(diff.changes.map(item => item.kind + " " + item.path), ["changed a.txt"]);
+    assert.deepEqual(
+      diff.changes.map(item => item.kind + " " + item.path),
+      ["changed a.txt"]
+    );
     const restored = await post("/api/checkpoint/restore", key);
     assert.equal(restored.restored, 1);
     assert.equal(fs.readFileSync(file, "utf8"), "before");
