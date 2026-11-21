@@ -32,6 +32,31 @@ class SlowResponse extends Writable {
   }
 }
 
+// 一直不读的页面连接：写缓冲始终满着，用来验证取消作业后等待与监听都被收掉
+class StalledResponse extends Writable {
+  constructor() {
+    super({ highWaterMark: 1 });
+    this.headersSent = false;
+    this.statusCode = 200;
+    this.pending = null;
+  }
+  writeHead(status) {
+    this.statusCode = status;
+    this.headersSent = true;
+    return this;
+  }
+  _write(_chunk, _encoding, callback) {
+    this.pending = callback;
+  }
+  _destroy(error, callback) {
+    // 销毁时把未完成的写回调放掉，测试进程才能收尾
+    const pending = this.pending;
+    this.pending = null;
+    if (pending) pending();
+    callback(error);
+  }
+}
+
 test("总线：SSE 写不动时向内层转交背压，全部事件仍按顺序抵达", async () => {
   const bus = createBus({
     dispatch: async (_req, res) => {
@@ -131,5 +156,43 @@ test("总线：显式 writeHead 的事件先于数据和结束事件", async () 
     events.slice(1, 3).map(item => item.text),
     ["data", "tail"]
   );
+  sse.destroy();
+});
+
+test("总线：取消背压中的作业会收掉等待，不在页面上留监听", async t => {
+  const jobs = [];
+  const bus = createBus({
+    dispatch: (_req, res) => {
+      jobs.push(res);
+      res.writeHead(200, { "X-Test": "stalled" });
+    }
+  });
+  const page = "stalledpage123";
+  const sse = new StalledResponse();
+  // 断言失败时也要把卡住的这条流收掉，否则测试进程退不出去
+  t.after(() => sse.destroy());
+  const get = Object.assign(Readable.from([]), { url: `/api/bus?page=${page}`, headers: { "user-agent": "stalled-test" } });
+  bus.routes["GET /api/bus"](get, sse);
+  const post = async (path, body) => {
+    const req = Readable.from([Buffer.from(JSON.stringify(body))]);
+    req.headers = { "user-agent": "stalled-test" };
+    await bus.routes[path](req, new SlowResponse());
+  };
+  for (let i = 0; i < 5; i++) await post("POST /api/bus/send", { page, id: `stalled-${i}`, path: "/api/mock", body: "{}" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(jobs.length, 5);
+  // 五个只写响应头的作业都在等同一条堵住的流
+  assert.equal(sse.listenerCount("drain"), 5);
+  assert.equal(sse.listenerCount("error"), 5);
+  for (let i = 0; i < 5; i++) await post("POST /api/bus/cancel", { page, id: `stalled-${i}` });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(
+    jobs.every(job => job.destroyed),
+    "取消后代理响应都应销毁"
+  );
+  // 取消（或整页断开）时把这次的等待结掉：已销毁的作业不能继续挂在页面连接上
+  assert.equal(sse.listenerCount("drain"), 0, "取消后不应再把 drain 监听留在页面连接上");
+  assert.equal(sse.listenerCount("error"), 0, "取消后不应再把 error 监听留在页面连接上");
+  assert.equal(sse.listenerCount("close"), 1, "只剩开页时注册的那条 close 监听");
   sse.destroy();
 });
