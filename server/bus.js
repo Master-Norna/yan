@@ -11,13 +11,18 @@ const { sendJson, readJson } = require("./http.js");
 // 替各接口接响应的 res：与 http.ServerResponse 用到的那几样同形（writeHead / setHeader / write / end / close 事件），
 // 写出的东西转成事件交给 emit。页面停了（cancel）或整页断开时 destroy，接口照旧从 close 事件知道对方走了
 class BusResponse extends Writable {
-  constructor(emit) {
+  constructor(stream, write) {
     super({ decodeStrings: false });
     this.statusCode = 200;
     this.headersSent = false;
     this.headers = {};
-    this.emitEvent = emit;
+    this.stream = stream;
+    this.writeEvent = write;
     this.decoder = new StringDecoder("utf8");
+    // writeHead/flushHeaders 也可能先于正文写入：所有事件按次序排队，背压与断线在同一处处理。
+    this.events = Promise.resolve();
+    // 正等页面读走的那一次：取消或断线时由 releaseWaiter 收掉，不能把监听留在页面连接上。
+    this.waiter = null;
   }
   setHeader(name, value) {
     this.headers[String(name).toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
@@ -41,27 +46,70 @@ class BusResponse extends Writable {
   flushHeaders() {
     this.flushHead();
   }
+  sendEvent(event) {
+    if (this.destroyed) throw Error("总线已断开");
+    if (this.writeEvent(event)) return;
+    // 页面那头堵住了：等它读走再往下写。取消作业时也要把这次等待结了，
+    // 否则已销毁的任务连同监听一直挂在页面的流上。
+    const stream = this.stream;
+    return new Promise((resolve, reject) => {
+      const finish = error => {
+        stream.off("drain", drained);
+        stream.off("close", closed);
+        stream.off("error", failed);
+        if (this.waiter === finish) this.waiter = null;
+        error ? reject(error) : resolve();
+      };
+      const drained = () => finish(),
+        closed = () => finish(Error("总线已断开")),
+        failed = error => finish(error);
+      this.waiter = finish;
+      stream.once("drain", drained);
+      stream.once("close", closed);
+      stream.once("error", failed);
+    });
+  }
+  releaseWaiter(error) {
+    const finish = this.waiter;
+    this.waiter = null;
+    if (finish) finish(error || Error("总线已断开"));
+  }
+  queueEvent(event) {
+    // 任意事件（包括仅 writeHead 发出的 head）失败，都必须收掉任务，
+    // 不能留下无人接的 Promise rejection；排队保证 head → data → end 的顺序。
+    this.events = this.events
+      .then(() => {
+        if (!this.destroyed) return this.sendEvent(event);
+      })
+      .catch(() => this.destroy());
+    return this.events;
+  }
   flushHead() {
     if (this.headersSent) return;
     this.headersSent = true;
-    this.emitEvent({ t: "head", status: this.statusCode, headers: this.headers });
+    void this.queueEvent({ t: "head", status: this.statusCode, headers: { ...this.headers } });
   }
   _write(chunk, encoding, done) {
     this.flushHead();
     const text = typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-    if (text) this.emitEvent({ t: "data", text });
-    done();
+    // SSE 连接堵住时不能立即确认写完：要把背压传回生成内容的接口。
+    (text ? this.queueEvent({ t: "data", text }) : this.events).then(() => done(), done);
   }
   _final(done) {
     this.flushHead();
     const rest = this.decoder.end();
-    if (rest) this.emitEvent({ t: "data", text: rest });
-    this.emitEvent({ t: "end" });
-    done();
+    if (rest) this.queueEvent({ t: "data", text: rest });
+    this.queueEvent({ t: "end" }).then(() => done(), done);
   }
   // 没写完就被掐了（上游断线时 pipeline 会 destroy 它）：不走总线时页面会读到断网，这里也得告诉页面，别让它一直等
   _destroy(error, done) {
-    if (!this.writableFinished) this.emitEvent({ t: "drop" });
+    // 先结掉还在等 drain 的那一次，取消作业后不在页面连接上留监听
+    this.releaseWaiter(error);
+    if (!this.writableFinished)
+      try {
+        // 终结事件尽力写一次即可：连接已堵或已断，都不再为它挂等待
+        this.writeEvent({ t: "drop" });
+      } catch {}
     done(error);
   }
 }
@@ -116,8 +164,9 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
     if (typeof id !== "string" || !id || typeof path !== "string" || !path.startsWith("/api/") || path.startsWith("/api/bus"))
       return sendJson(res, 400, { error: "请求无效" });
     sendJson(res, 202, { ok: true });
-    const job = new BusResponse(event => {
-      if (!entry.res.writableEnded) entry.res.write(`data: ${JSON.stringify({ id, ...event })}\n\n`);
+    const job = new BusResponse(entry.res, event => {
+      if (entry.res.writableEnded || entry.res.destroyed) throw Error("总线已断开");
+      return entry.res.write(`data: ${JSON.stringify({ id, ...event })}\n\n`);
     });
     entry.jobs.set(id, job);
     job.on("close", () => entry.jobs.delete(id));
