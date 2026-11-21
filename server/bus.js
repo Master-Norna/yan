@@ -49,19 +49,22 @@ class BusResponse extends Writable {
   _write(chunk, encoding, done) {
     this.flushHead();
     const text = typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-    if (text) this.emitEvent({ t: "data", text });
-    done();
+    // SSE 连接堵住时不能立即确认写完：要把背压传回生成内容的接口。
+    Promise.resolve()
+      .then(() => (text ? this.emitEvent({ t: "data", text }) : undefined))
+      .then(() => done(), done);
   }
   _final(done) {
     this.flushHead();
     const rest = this.decoder.end();
-    if (rest) this.emitEvent({ t: "data", text: rest });
-    this.emitEvent({ t: "end" });
-    done();
+    Promise.resolve()
+      .then(() => (rest ? this.emitEvent({ t: "data", text: rest }) : undefined))
+      .then(() => this.emitEvent({ t: "end" }))
+      .then(() => done(), done);
   }
   // 没写完就被掐了（上游断线时 pipeline 会 destroy 它）：不走总线时页面会读到断网，这里也得告诉页面，别让它一直等
   _destroy(error, done) {
-    if (!this.writableFinished) this.emitEvent({ t: "drop" });
+    if (!this.writableFinished) void Promise.resolve().then(() => this.emitEvent({ t: "drop" })).catch(() => {});
     done(error);
   }
 }
@@ -117,7 +120,22 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
       return sendJson(res, 400, { error: "请求无效" });
     sendJson(res, 202, { ok: true });
     const job = new BusResponse(event => {
-      if (!entry.res.writableEnded) entry.res.write(`data: ${JSON.stringify({ id, ...event })}\n\n`);
+      if (entry.res.writableEnded || entry.res.destroyed) return Promise.reject(Error("总线已断开"));
+      if (entry.res.write(`data: ${JSON.stringify({ id, ...event })}\n\n`)) return;
+      return new Promise((resolve, reject) => {
+        const done = error => {
+          entry.res.off("drain", drained);
+          entry.res.off("close", closed);
+          entry.res.off("error", failed);
+          error ? reject(error) : resolve();
+        };
+        const drained = () => done(),
+          closed = () => done(Error("总线已断开")),
+          failed = error => done(error);
+        entry.res.once("drain", drained);
+        entry.res.once("close", closed);
+        entry.res.once("error", failed);
+      });
     });
     entry.jobs.set(id, job);
     job.on("close", () => entry.jobs.delete(id));
