@@ -2,9 +2,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const require = createRequire(import.meta.url);
-const { screenCommand, screenLoose, screenAutoReview, screenUnreviewable, sandboxEnv, screenPath } = require("../../server/sandbox.js");
+const {
+  screenCommand,
+  screenLoose,
+  screenAutoReview,
+  screenUnreviewable,
+  screenStorePath,
+  sandboxEnv,
+  screenPath
+} = require("../../server/sandbox.js");
 const wd = "E:\\项目\\言",
   win = { platform: "win32" },
   screen = command => screenCommand(command, wd, win);
@@ -1960,6 +1969,23 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
     review(atWin ? "Get-Content C:\\data\\notes.txt; Remove-Item .\\build -Recurse" : "cat /tmp/report.txt; rm -rf ./build"),
     null
   );
+});
+
+// 存储根里那几样不论档位、沙箱开不开都守（docs/sandbox.md「另有一道不随档位…」）。
+// Windows 的 \\?\ 与 \\.\ 是同一个文件的另一种写法，剥掉前缀后要比得出同一处
+test("存储根守卫：扩展长度写法不改变落点", () => {
+  const root = atWin ? "E:\\store\\.yan" : "/tmp/store/.yan",
+    secret = path.join(root, "配置.json"),
+    backup = path.join(root, "配置备份", "2026.json"),
+    plain = atWin ? "E:\\elsewhere\\notes.md" : "/tmp/elsewhere/notes.md";
+  for (const target of [secret, backup]) assert.match(screenStorePath(target, root) || "", /配置与登录/, target);
+  assert.equal(screenStorePath(plain, root), null);
+  if (!atWin) return; // 扩展前缀是 Windows 的写法，别的地方只是普通文件名
+  for (const target of [`\\\\?\\${secret}`, `\\\\.\\${secret}`, `\\\\?\\${backup}`])
+    assert.match(screenStorePath(target, root) || "", /配置与登录/, target);
+  // UNC 的扩展写法：\\?\UNC\srv\sh\x 与 \\srv\sh\x 同处
+  const unc = { root: "\\\\srv\\share\\.yan", target: "\\\\?\\UNC\\srv\\share\\.yan\\配置.json" };
+  assert.match(screenStorePath(unc.target, unc.root) || "", /配置与登录/);
 });
 
 // 宿主机是 Windows 时上面那条只走 PowerShell 分支，POSIX 的 `${VAR:-默认}` 一条都验不到——
