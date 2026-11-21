@@ -46,6 +46,51 @@ test("旧名的文件删不掉：正本已写好，保存照旧算成", async ()
   }
 });
 
+for (const olderFirst of [true, false]) {
+  test(`旧名还读得出但删不掉（${olderFirst ? "先" : "后"}读旧版）：加载取新版且不报坏文件`, async t => {
+    const home = mkdtempSync(path.join(tmpdir(), "yan-load-stale-")),
+      { post, close } = await bridge(home),
+      fs = createRequire(import.meta.url)("node:fs"),
+      list = fs.readdirSync,
+      remove = fs.rmSync;
+    try {
+      // 不依赖文件系统的目录顺序；两份文件都由保存接口正常写出。
+      t.mock.method(fs, "readdirSync", (target, ...args) => {
+        const names = list(target, ...args);
+        return target === home ? names.sort() : names;
+      });
+      const id = "c-load",
+        first = await post("/api/chats/save", { conversation: conversation(id, olderFirst ? "A" : "Z"), savedAt: 100 }),
+        stale = path.join(home, first.file),
+        newer = { ...conversation(id, olderFirst ? "Z" : "A"), messages: [{ role: "user", content: "最新正文" }] };
+      let attempts = 0;
+      const rm = t.mock.method(fs, "rmSync", (target, ...args) => {
+        if (target === stale) {
+          attempts += 1;
+          throw Object.assign(Error("被占着"), { code: "EBUSY" });
+        }
+        return remove(target, ...args);
+      });
+      const saved = await post("/api/chats/save", { conversation: newer, savedAt: 200, base: 100 });
+      assert.equal(saved.savedAt, 200, "新版已落盘，保存算成");
+      assert.equal(JSON.parse(readFileSync(stale, "utf8")).savedAt, 100, "旧版仍是可读的对话文件");
+      const expected = [{ id, file: saved.file, savedAt: 200, conversation: newer }];
+      for (const query of [{}, { ids: [id], known: { [id]: 100 } }]) {
+        const { items, skipped } = await post("/api/chats/load", query);
+        assert.deepEqual(items, expected, "只返回新版正文");
+        assert.equal(skipped, 0, "删不掉不算读不出");
+      }
+      assert.equal(attempts, 3, "保存和两次加载都尝试过清理旧名");
+      rm.mock.restore();
+      assert.deepEqual((await post("/api/chats/load", {})).items, expected);
+      assert.equal(existsSync(stale), false, "解除故障后下次加载照常清掉旧名");
+    } finally {
+      close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+}
+
 test("行迹删不掉：对话照删，墓碑照写，回执不是失败", async () => {
   const home = mkdtempSync(path.join(tmpdir(), "yan-delete-trail-")),
     { post, close } = await bridge(home),

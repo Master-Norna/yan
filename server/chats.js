@@ -100,6 +100,13 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
     const suffix = `·${codeOf(id)}.json`;
     return fs.readdirSync(home).filter(name => name.endsWith(suffix));
   }
+  function removeStale(home, name) {
+    try {
+      fs.rmSync(path.join(home, name), { force: true });
+    } catch (error) {
+      console.warn(`⚠ 旧名的对话文件没能删掉（${name}）：${error?.code || error?.message || error}`);
+    }
+  }
   function readConversationFile(home, name) {
     const file = path.join(home, name);
     if (fs.statSync(file).size > FILE_LIMIT) throw Error("文件过大");
@@ -189,13 +196,13 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
               continue;
             }
           }
-          // 两份都是言命名的文件时，以保存时刻较晚的为准，只清这类重复件
+          // 两份都是言命名的文件时，以保存时刻较晚的为准；旧名清不掉不影响取新版，也不算读不出
           if (prior && prior.savedAt >= item.savedAt) {
-            fs.rmSync(path.join(home, name), { force: true });
+            removeStale(home, name);
             continue;
           }
-          if (prior) fs.rmSync(path.join(home, prior.file), { force: true });
           seen.set(item.id, item);
+          if (prior) removeStale(home, prior.file);
         } catch {
           skipped += 1;
         }
@@ -242,14 +249,7 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
       writeAtomic(path.join(home, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
       // 标题改过：旧名的文件不留。删不掉（被索引器、杀软、编辑器占着，或设成了只读）只记一笔——
       // 正本已经落盘，这一趟就算成了；为旧名回 400，页面会当成「没存住」写浏览器暂存、每 3 秒重试，盘上还留着两份同 id 的
-      for (const stale of filesFor(home, id))
-        if (stale !== name) {
-          try {
-            fs.rmSync(path.join(home, stale), { force: true });
-          } catch (error) {
-            console.warn(`⚠ 旧名的对话文件没能删掉（${stale}）：${error?.code || error?.message || error}`);
-          }
-        }
+      for (const stale of filesFor(home, id)) if (stale !== name) removeStale(home, stale);
       return { file: name, savedAt };
     },
     error => `对话未能落盘：${describe(error)}`
