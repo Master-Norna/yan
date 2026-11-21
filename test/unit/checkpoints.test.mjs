@@ -532,3 +532,28 @@ test(".gitignore：取反、只管目录、带 / 的从所在层算起、**", ()
   assert.equal(ignored(nested, "sub/only.txt", false), true);
   assert.equal(ignored(nested, "only.txt", false), false);
 });
+
+test("对照时现存文件读失败：标记未知，不误判修改或在恢复时覆盖", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  write(root, "a.txt", "before");
+  const original = fs.promises.stat;
+  try {
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    write(root, "a.txt", "after!");
+    fs.promises.stat = async (...args) => {
+      if (String(args[0]) === path.join(root, "a.txt")) throw Object.assign(Error("locked"), { code: "EACCES" });
+      return original(...args);
+    };
+    assert.deepEqual((await post("/api/checkpoint/diff", key)).changes, []);
+    const result = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([result.restored, result.removed, result.failed], [0, 0, []]);
+    assert.equal(fs.readFileSync(path.join(root, "a.txt"), "utf8"), "after!");
+  } finally {
+    fs.promises.stat = original;
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
