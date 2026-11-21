@@ -59,7 +59,11 @@ test("总线：SSE 写不动时向内层转交背压，全部事件仍按顺序�
     };
     poll();
   });
-  const events = sse.chunks.join("").split("\n\n").filter(s => s.startsWith("data: ")).map(s => JSON.parse(s.slice(6)));
+  const events = sse.chunks
+    .join("")
+    .split("\n\n")
+    .filter(s => s.startsWith("data: "))
+    .map(s => JSON.parse(s.slice(6)));
   assert.equal(events.filter(e => e.t === "data").length, 32);
   assert.equal(events.at(-1).t, "end");
   assert.ok(sse.maxBuffered < 2000, "慢 SSE 端不应随整份回复无上限积累");
