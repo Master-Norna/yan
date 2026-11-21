@@ -285,27 +285,31 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   async function presentOf(store) {
     const index = readJsonFile(store.index, {}),
       files = new Map(),
-      dirs = new Set();
+      dirs = new Set(),
+      unknown = new Set();
     const tree = await walk(store.full, async (abs, rel, name) => {
       try {
         const stat = await fs.promises.stat(abs),
           seen = index[rel];
         files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await fileHash(abs));
+        return ["f", name];
       } catch {
-        files.set(rel, null);
+        // 读不到是「不明」，不能当成内容变了或文件丢了。
+        unknown.add(rel);
+        return ["x", name];
       }
-      return ["f", name];
     });
     const collectDirs = (items, rel) => {
-      for (const item of items)
+      for (const item of items) {
+        const sub = rel ? `${rel}/${item[1]}` : item[1];
         if (item[0] === "d") {
-          const sub = rel ? `${rel}/${item[1]}` : item[1];
           dirs.add(sub);
           collectDirs(item[2], sub);
-        }
+        } else if (item[0] === "x") unknown.add(sub);
+      }
     };
     collectDirs(tree, "");
-    return { files, dirs };
+    return { files, dirs, unknown };
   }
   // 要动哪几件：changed 改回、removed（此刻没有）补回、added（那一刻没有）删去。
   // 夹只在底下一件文件也不牵涉时才单列（路径带 /）：空夹建了或删了，文件那几行管不到它
@@ -313,9 +317,12 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     const then = snapshotOf(store, key),
       now = await presentOf(store),
       changes = [];
-    for (const [rel, hash] of then.files)
+    const unobserved = rel => [...now.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+    for (const [rel, hash] of then.files) {
+      if (unobserved(rel)) continue;
       if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash });
       else if (now.files.get(rel) !== hash) changes.push({ path: rel, kind: "changed", hash });
+    }
     // 那一刻读不了的（被占着的文件、进不去的夹）与忽略的，连同其下的，此刻有也不删
     const unclear = rel => {
       // 确实读过 .yan 这一层、意也没有单独记作不明：它的缺席是已知的，不能被父层的不明盖住。
