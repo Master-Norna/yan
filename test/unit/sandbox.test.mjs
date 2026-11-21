@@ -453,6 +453,51 @@ test("screenPath：机密文件不读不写，.git 内部不写、可读；别�
     assert.equal(screenPath(p, { write: true }), null, p);
   }
 });
+test("screenCommand：外联只认站在指令位的 curl/wget——查日志、搜源码、看工具在不在都放行", () => {
+  // 11-20 检查：查日志、搜源码、探工具都被拦成「不直接外联」，提示语还误导模型以为不能联网
+  for (const command of [
+    "rg curl src",
+    "grep curl app.log",
+    "where curl",
+    "Get-Command wget",
+    "Get-Help wget",
+    "echo curl",
+    "npm install curl",
+    'f("curl.exe", "x")',
+    "git log --grep=curl",
+    "cat curl.md",
+    "xargs rg curl",
+    "env where curl",
+    "Select-String -Path app.log -Pattern curl"
+  ])
+    assert.equal(screen(command), null, command);
+  // 真站在指令位上（含套壳、执行前缀、赋值、括号）的仍要拦
+  for (const command of [
+    "curl http://example.com/x",
+    "wget https://example.com/a.zip",
+    "cd x; curl http://example.com",
+    "echo hi && curl http://example.com",
+    "(curl http://example.com)",
+    "$x = curl.exe http://example.com",
+    'cmd /c "curl http://example.com"',
+    'powershell -Command "curl http://example.com"',
+    "bash -lc 'curl http://example.com'",
+    "xargs curl http://example.com",
+    "env curl http://example.com",
+    "nohup curl http://example.com &",
+    "timeout 30 curl http://example.com"
+  ])
+    assert.match(screen(command), /外联/, command);
+  // 套壳把脚本文本交给另一个系统去跑：里面那层静态看不出边界，粗扫里面有没有 curl
+  for (const command of [
+    "wsl -e bash -lc 'curl http://example.com'",
+    "docker run --rm alpine sh -c 'wget http://example.com'",
+    "ssh host 'curl http://example.com'"
+  ])
+    assert.match(screen(command), /外联/, command);
+  assert.equal(screen("curl http://127.0.0.1:3000/"), null);
+  assert.equal(screen("wsl -e bash -lc 'curl http://127.0.0.1:3000/'"), null);
+});
 test("screenCommand：只是搜字的不算外联——rg HttpClient、Select-String System.Net 放行，真用 .NET 联网的仍拒", () => {
   for (const command of ["rg HttpClient src", 'Select-String -Path src/*.cs -Pattern "System.Net"', "git grep WebClient"])
     assert.equal(screen(command), null, command);

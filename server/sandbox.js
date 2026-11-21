@@ -1964,12 +1964,16 @@ const HOME_SYSTEM_PATH = new RegExp(
   "i"
 );
 // 外联工具：只放行目标全在本机的（curl http://127.0.0.1:3000 这样测本地服务是常事；桥接自己的端口另有一条）。
-// 带引号的只认站在指令位的（& "curl.exe" …）：rg "curl" src 是搜字。curl 的 --connect-to、-x 之类不往下追：静态筛查追不完，问而后行里这些本来就要请示
+// 只认真的站在指令位的调用，与别的规则共用 commandInvocations 那套结构判据：rg curl src、grep curl app.log、
+// where curl、Get-Command curl、JS 字符串里的 "curl" 这些把 curl 当要搜的字、查的工具或一段文本的，
+// 原按「前面有空白就算」一律拦成外联（11-20 检查：查日志、搜源码、探工具在严档全被挡）；cmd /c curl …、
+// powershell -c "curl …" 里的仍然算——嵌套 shell 的执行范围本来就是分开解析的。curl 的 --connect-to、-x 之类不往下追
 const NET_TOOL_NAMES = "curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod";
-const NET_TOOLS = new RegExp(
-  String.raw`(^|[\s;&|(])(${NET_TOOL_NAMES})(\.exe)?(\s|$)|(^|[;&|(\n]${INLINE_SPACE}*)["'](${NET_TOOL_NAMES})(\.exe)?["'](\s|$)`,
-  "i"
-);
+const NET_TOOLS = new Set(NET_TOOL_NAMES.split("|").map(name => name.toLowerCase()));
+// 套壳把脚本文本原样交给另一个系统去跑的：wsl -e bash -lc '…'、docker run … sh -c '…'、ssh host '…'。
+// 里面那层不是本机这套 shell 的执行范围，静态看不出边界，就把这一整段按老办法粗扫一遍（这些词出现即算）
+const NET_WRAPPERS = new Set(["wsl", "docker", "podman", "ssh", "vagrant", "multipass"]);
+const NET_TOOL_WORD = new RegExp(String.raw`(^|[\s"';|&()])(${NET_TOOL_NAMES})(?:\.exe)?(?=[\s"';|&()]|$)`, "i");
 const LOCAL_HOST = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)$/i;
 // 桥接自己的端口：本机别的服务随便测，唯独桥接不行——它的执事接口不带请示与沙箱，指令借 curl、脚本调它就整个绕过去了。
 // 严宽两档都拦（径行开着沙箱时也拦：径行放开的是这段对话的指令，不是桥接的门禁）；静态筛查，脚本里拼出来的地址管不到。
@@ -3295,7 +3299,15 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   // 落到外面时只放行查看类子命令（git -C .. log 仍放行），目录内的 -C sub 照旧
   const gitWhy = gitEscapeWhy(text, workdir, win);
   if (gitWhy) return gitWhy;
-  if (NET_TOOLS.test(text)) {
+  if (
+    commandInvocations(scanned).some(call => {
+      const scan = call.scan ?? scanned;
+      if (NET_TOOLS.has(call.name.toLowerCase())) return true;
+      if (!NET_WRAPPERS.has(call.name.toLowerCase())) return false;
+      const body = scan.text.slice(call.nameStart, call.argEnd ?? scan.text.length);
+      return NET_TOOL_WORD.test(body);
+    })
+  ) {
     const hosts = [...text.matchAll(/https?:\/\/([^\s/"'`:]+)(?::\d+)?/gi)].map(m => m[1]);
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
       return "沙箱拒绝：不直接外联（只放行指向本机 127.0.0.1 / localhost 的）；装依赖走 npm / pip 等包管理器，查资料用 search_web / fetch_page";
