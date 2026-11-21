@@ -532,3 +532,30 @@ test(".gitignore：取反、只管目录、带 / 的从所在层算起、**", ()
   assert.equal(ignored(nested, "sub/only.txt", false), true);
   assert.equal(ignored(nested, "only.txt", false), false);
 });
+
+test("同大小且 mtime 被恢复的编辑仍应被检查点发现", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, "a.txt", "before");
+    const first = await post("/api/checkpoint/take", key);
+    assert.equal(first.status, 200);
+    const file = path.join(root, "a.txt"),
+      original = fs.statSync(file);
+    write(root, "a.txt", "AFTER!");
+    fs.utimesSync(file, original.atime, original.mtime);
+    const diff = await post("/api/checkpoint/diff", key);
+    assert.deepEqual(
+      diff.changes.map(item => item.kind + " " + item.path),
+      ["changed a.txt"]
+    );
+    const restored = await post("/api/checkpoint/restore", key);
+    assert.equal(restored.restored, 1);
+    assert.equal(fs.readFileSync(file, "utf8"), "before");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
