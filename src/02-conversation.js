@@ -141,6 +141,9 @@ function restoreDraft() {
   // 欢迎页也有引文框（游目圈点可引进新对话），草稿里有就照样放回
   pendingQuote = draft.quote;
   renderQuote();
+  // 案上那几件也一并画：renderQuote 只在「引文撤了」时才顺手重画附件条，收尾把补言放回案上这条路不走整页 render，
+  // 少这一下就是「话回来了、附件条里没有它」，而下一问照样会把它送出去（见 10-send.js 的 putBack）
+  renderAttachments();
   const input = currentConversation() ? $("#chatInput") : $("#welcomeInput");
   if (!input) return;
   input.value = draft.text;
