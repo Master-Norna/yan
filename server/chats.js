@@ -243,10 +243,14 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
       if (tombstones[id]) {
         if (savedAt <= Number(tombstones[id]))
           return sendJson(res, 410, { error: "这段对话已在别处删除", deleted: true, at: Number(tombstones[id]) });
+      }
+      // 先让新正文落盘：落盘失败不能提前撤掉删除记录，
+      // 否则其他页面可能将迟到的旧保存当成有效版本。
+      writeAtomic(path.join(home, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
+      if (tombstones[id]) {
         delete tombstones[id];
         writeTombstones(home, tombstones);
       }
-      writeAtomic(path.join(home, name), JSON.stringify({ 言: "对话", version: 1, savedAt, conversation }));
       // 标题改过：旧名的文件不留。删不掉（被索引器、杀软、编辑器占着，或设成了只读）只记一笔——
       // 正本已经落盘，这一趟就算成了；为旧名回 400，页面会当成「没存住」写浏览器暂存、每 3 秒重试，盘上还留着两份同 id 的
       for (const stale of filesFor(home, id)) if (stale !== name) removeStale(home, stale);
