@@ -3111,8 +3111,8 @@ function eatsNextArg(arg) {
  * @param {string} authority
  */
 function hostOfAuthority(authority) {
-  const at = authority.lastIndexOf("@"),
-    hostPort = (at >= 0 ? authority.slice(at + 1) : authority).split(/[/?#]/)[0];
+  const head = authority.split(/[/?#]/, 1)[0],
+    hostPort = head.slice(head.lastIndexOf("@") + 1);
   if (hostPort.startsWith("[")) {
     const end = hostPort.indexOf("]");
     return end > 0 ? hostPort.slice(0, end + 1) : "";
@@ -3312,7 +3312,17 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const gitWhy = gitEscapeWhy(text, workdir, win);
   if (gitWhy) return gitWhy;
   if (NET_TOOLS.test(text)) {
-    const hosts = [...text.matchAll(/https?:\/\/[^\s/"'`]+/gi)].map(m => hostOfAuthority(m[0].slice(m[0].indexOf("//") + 2)));
+    const hosts = Array.from(text.matchAll(/https?:\/\/([^\s/"'`?#]+)/gi), m => {
+      // 仅在当前方言实际断词、且符号没进引号或被转义时截断。PowerShell 的重定向不能紧贴参数。
+      const start = m.index + m[0].length - m[1].length,
+        separators = win ? ";|" : ";|&<>()";
+      for (let i = 0; i < m[1].length; i++) {
+        const ch = m[1][i];
+        if (separators.includes(ch) && scanned.syntax[start + i] === ch && scanned.unquoted[start + i] === ch)
+          return hostOfAuthority(m[1].slice(0, i));
+      }
+      return hostOfAuthority(m[1]);
+    });
     if (!hosts.length || hosts.some(host => !LOCAL_HOST.test(host)))
       return "沙箱拒绝：不直接外联（只放行指向本机 127.0.0.1 / localhost 的）；装依赖走 npm / pip 等包管理器，查资料用 search_web / fetch_page";
   }
