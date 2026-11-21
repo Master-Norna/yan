@@ -229,12 +229,14 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
         try {
           stat = await fs.promises.stat(abs);
           const seen = index[rel];
-          let hash = seen && seen[0] === stat.size && seen[1] === stat.mtimeMs && fs.existsSync(objectPath(store, seen[2])) ? seen[2] : "";
+          let hash =
+            seen && seen[0] === stat.size && seen[1] === stat.mtimeMs && seen[3] === stat.ctimeMs &&
+            fs.existsSync(objectPath(store, seen[2])) ? seen[2] : "";
           if (!hash) {
             hash = await storeFile(store, abs);
             read += 1;
           }
-          next[rel] = [stat.size, stat.mtimeMs, hash];
+          next[rel] = [stat.size, stat.mtimeMs, hash, stat.ctimeMs];
           files += 1;
           return ["f", name, hash, stat.size];
         } catch {
@@ -290,7 +292,12 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
       try {
         const stat = await fs.promises.stat(abs),
           seen = index[rel];
-        files.set(rel, seen && seen[0] === stat.size && seen[1] === stat.mtimeMs ? seen[2] : await fileHash(abs));
+        files.set(
+          rel,
+          seen && seen[0] === stat.size && seen[1] === stat.mtimeMs && seen[3] === stat.ctimeMs
+            ? seen[2]
+            : await fileHash(abs)
+        );
       } catch {
         files.set(rel, null);
       }
