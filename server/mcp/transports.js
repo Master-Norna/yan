@@ -8,11 +8,16 @@
 "use strict";
 const { spawn } = require("node:child_process");
 const { OWN_GROUP, killTree } = require("../platform.js");
-const { readLimitedBytes, ERROR_BODY_LIMIT } = require("../web.js");
+const { OUTBOUND_MARK, readLimitedBytes, ERROR_BODY_LIMIT } = require("../web.js");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const STDERR_KEEP = 4000;
+// 出站请求一律带上「这是言自己转出去的」标记，桥接见到它就 403（见 server.js）。
+// MCP 服务是外来的：它能把回应 307 到 127.0.0.1 的受信接口，Node 的 fetch 默认会跟着跳、
+// 保留方法与正文，而这样发过去的请求没有 Origin、没有 Sec-Fetch-Site，桥接自己分不出来——
+// 标记是唯一挡得住的一道（模型上游经 server/model/upstream.js，带的是同一个）。
+const OUTBOUND = { [OUTBOUND_MARK]: "1" };
 
 class StdioTransport {
   constructor({ command, args = [], cwd, env = {} }, toolEnv = base => base) {
@@ -227,7 +232,8 @@ class HttpTransport {
       Accept: "application/json, text/event-stream",
       ...(this.session ? { "Mcp-Session-Id": this.session } : {}),
       ...(this.protocol ? { "MCP-Protocol-Version": this.protocol } : {}),
-      ...this.headers
+      ...this.headers,
+      ...OUTBOUND
     };
   }
   async send(message) {
@@ -317,7 +323,7 @@ class SseTransport {
   }
   async start() {
     const response = await fetch(this.url, {
-      headers: { Accept: "text/event-stream", ...this.headers },
+      headers: { Accept: "text/event-stream", ...this.headers, ...OUTBOUND },
       signal: this.abort.signal
     });
     if (!response.ok) throw await httpError(response);
@@ -339,7 +345,7 @@ class SseTransport {
   async send(message) {
     const response = await fetch(this.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...this.headers },
+      headers: { "Content-Type": "application/json", ...this.headers, ...OUTBOUND },
       body: JSON.stringify(message)
     });
     if (!response.ok) throw await httpError(response);
