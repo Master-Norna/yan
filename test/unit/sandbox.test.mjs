@@ -1961,3 +1961,14 @@ test("审档：递归删工作目录之外的整个目录回绝，工作目录�
     null
   );
 });
+
+// 宿主机是 Windows 时上面那条只走 PowerShell 分支，POSIX 的 `${VAR:-默认}` 一条都验不到——
+// 11-21 的 macOS 红正是这里漏的：`withoutExeDir` 把 `${HOME:-./x}` 里的 `{` 当语句起点，剥成了 `${x}`
+test("审档：POSIX 的 ${VAR:-默认} 不算程序目录，家目录递归删照拦", () => {
+  const review = command => screenAutoReview(command, { platform: "darwin", workdir: "/Users/a/proj" });
+  for (const command of ["rm -rf ${HOME:-./fixture}/sample", "rm -rf ${HOME:-./x}", "rm -r ${HOME:-/tmp/x}/y"])
+    assert.match(review(command), /整个目录/, command);
+  // `{ … }` 仍是语句起点：组里的家目录删除一样拦，只是不认 `${` 里的那一个
+  assert.match(review("{ rm -rf $HOME; }"), /整个目录/);
+  assert.equal(review("echo ${HOME:-./x}; rm -rf ./build"), null);
+});

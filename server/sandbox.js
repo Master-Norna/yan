@@ -1586,7 +1586,9 @@ function hasHiddenCommand(scanned, dotComments = false) {
 // 无引号的位置复用 PREFIX / SHELL，env 等前缀与单层 sh -c 后的程序目录也统一在这里去掉。
 // 续行（反引号、反斜杠）之后的一行不是指令位，那可能正是写入目标
 const LINE_START = String.raw`(?<![${"`"}\\][ \t]*\r?\n)^`,
-  CALL_SITE = String.raw`(?:${LINE_START}|[;|({&])[ \t]*`,
+  // `{` 是语句起点（`{ rm -rf /; }`），但 `${…}` 是变量展开：把它当起点会把 `${HOME:-./x}`
+  // 里的 `HOME:-./` 当成程序目录去掉，剩下的 `${x}` 既认不出家目录，也让后面的规则看的是另一段文本
+  CALL_SITE = String.raw`(?:${LINE_START}|[;|(&]|(?<!\$)\{)[ \t]*`,
   UNQUOTED_EXE_DIR_WIN = new RegExp(
     String.raw`((?:${CALL_SITE}(?:\.[ \t]+)?|\$[\w:]+[ \t]*=[ \t]*|\bcmd(?:\.exe)?\b[^\n]*?\s/[ck][ \t]*["']?|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s[-/](?:${prefixesOf("command")})[ \t]+["']?)${PREFIX}(?:${SHELL}${PREFIX})?)[^\s"'${"`"};|&<>(){}]*[\\/](?=[^\s"'${"`"};|&<>(){}]+)`,
     "gim"
@@ -2074,7 +2076,7 @@ function recursiveDeleteCall(call) {
 function recursiveDeleteWhy(scanned, workdir, win) {
   if (!workdir || !RECURSIVE_DELETE.test(scanned.text)) return "";
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
-  for (const call of commandInvocations(scanned, true)) {
+  for (const call of commandInvocations(scanned, { keepHomeWords: true })) {
     if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call)) continue;
     for (const arg of call.args) {
       // 选项跳过；-Path X / -LiteralPath:X 的值仍是删除目标。
@@ -2218,8 +2220,12 @@ function homeWordSpans(scanned) {
   }
   return words;
 }
-/** @param {ReturnType<typeof shellText>} scanned */
-function commandInvocations(scanned, keepHomeWords = false) {
+/**
+ * @param {ReturnType<typeof shellText>} scanned
+ * @param {{ keepHomeWords?: boolean }} [options] 取词开关按名字给，不按位置传布尔值：
+ *   调用方各有各的意图（这里要保住花括号变量、外联分类那边要展开 xargs），合到一处时都并进这个对象。
+ */
+function commandInvocations(scanned, { keepHomeWords = false } = {}) {
   // 只在取删除操作数时把花括号变量当一个词；另留执行范围的扫描，不抹掉内层指令。
   const words = keepHomeWords ? homeWordSpans(scanned) : scanned.quotes,
     argScan = words === scanned.quotes ? scanned : { ...scanned, quotes: words };
@@ -2294,7 +2300,7 @@ function commandInvocations(scanned, keepHomeWords = false) {
                   ? raw
                   : raw.replace(/\\\\|\\([$`"])|\\\n/g, m => (m === "\\\\" ? "\\" : m[1] === "\n" ? "" : m[1])),
               inner = shellText(body, bodyShell);
-            for (const call of commandInvocations(inner, keepHomeWords)) calls.push({ ...call, scan: inner });
+            for (const call of commandInvocations(inner, { keepHomeWords })) calls.push({ ...call, scan: inner });
           }
           return;
         }
