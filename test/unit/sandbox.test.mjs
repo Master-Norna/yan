@@ -212,6 +212,23 @@ test("screenCommand：工作目录自己带空格时，引号里的路径按整�
   }
 });
 
+test("screenCommand：合并引号路径时保留内层执行范围的路径检查", () => {
+  // 只把合成路径和占位符交给静态筛查；占位符不读写文件。
+  for (const [platform, dir, sep, writeMarker] of [
+    ["win32", "Q:\\yan-scan", "\\", "Set-Content -WhatIf ./marker x"],
+    ["darwin", "/yan-scan", "/", "touch"]
+  ]) {
+    const workdir = `${dir}${sep}root`,
+      outside = `${dir}${sep}outside`,
+      quoted = `echo "${workdir}${sep}marker$(scan-fixture ${outside})"`,
+      why = screenCommand(`${writeMarker}; ${quoted}`, workdir, { platform });
+    assert.ok(why?.includes(`越出了工作目录（${outside}）`), why ?? "内层合成路径没有被检查");
+
+    const spacedRoot = `${workdir} with spaces`;
+    assert.equal(screenCommand(`${writeMarker}; echo "${spacedRoot}${sep}marker"; echo "$(scan-fixture)"`, spacedRoot, { platform }), null);
+  }
+});
+
 test("screenCommand：日常的开发指令放行——包管理、git、目录内的绝对路径、本机 curl、.草稿 脚本", () => {
   for (const command of [
     "npm run format",

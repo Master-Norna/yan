@@ -2098,8 +2098,16 @@ function normalizeLower(p) {
 }
 // 指令文本里所有像绝对路径的片段：盘符（C:\… 与 C:/…，光秃的 C: 也算——那是盘符相对路径）、UNC（\\server\share 与 //server/share，
 // 正斜杠的要带出第二段：//todo 多半是代码注释）；非 Windows 上再加 POSIX 根（/usr/…）。URL 里的 http: 与 key:value 这类前面贴着字母的不算
-function absolutePathsIn(command, win) {
-  const found = [];
+/** @param {ReturnType<typeof shellText>} scanned */
+function absolutePathsIn(command, win, scanned) {
+  const found = [],
+    nestedEdges = new Set();
+  // 第一段是整条指令；只标内层执行范围。去掉只读来源时用空格填，扫描坐标仍和路径文本相同。
+  for (const { start, end } of scanned.executions.slice(1)) {
+    if (start === end) continue;
+    nestedEdges.add(start);
+    nestedEdges.add(end);
+  }
   const drive = /(?<![A-Za-z0-9_])([A-Za-z]:(?:[\\/][^\s"'`;|&<>()]*|(?=[\s"'`;|&<>()]|$)))/g,
     unc = /(?<![\w\\/])(\\\\[^\s\\"'`;|&<>()]+(?:\\[^\s"'`;|&<>()]*)?)/g,
     slashUnc = /(?<![\w\\/:.-])(\/\/[^\s\\/"'`;|&<>()]+\/[^\s"'`;|&<>()]*)/g,
@@ -2108,8 +2116,14 @@ function absolutePathsIn(command, win) {
   // `C:\Users\Me\My`——工作目录本身带空格时，目录里的正常写入反倒判成越界（11-20 检查）。
   // 整段不是路径的（"见 C:\x"）原样留下，仍交给裸扫，免得夹在别的话里的路径反而漏掉。
   const looksPath = value => /^[A-Za-z]:[\\/]/.test(value) || (win ? /^\\\\[^\s\\]/.test(value) : /^\/{1,2}[^\s\\/]/.test(value));
-  const bare = String(command || "").replace(/(["'])([^"']*)\1/g, (whole, _quote, inner) => {
+  const bare = String(command || "").replace(/(["'])([^"']*)\1/g, (whole, _quote, inner, offset) => {
     if (!looksPath(inner)) return whole;
+    // 含有内层执行边界就不是一个字面路径。原样交给裸扫，不能把内层路径一起抹掉。
+    // 这些匹配互不重叠，只查各自跨度，总开销仍是线性的。
+    if (nestedEdges.size) {
+      const close = offset + whole.length - 1;
+      for (let at = offset + 1; at < close; at++) if (nestedEdges.has(at)) return whole;
+    }
     found.push(inner);
     return " ";
   });
@@ -2522,8 +2536,9 @@ function scanWrites(scanned) {
  * 整条都按「写」处理，它顺带读的那些路径也一并受约束——静态看不出哪个参数是源、哪个是目标，
  * 识别出的只读来源等已由 scanWrites 从该路径视图排除。这里给严档用；宽档与审档另检查高风险目标。通过返回 null。
  * @param {string} writeText @param {string} workdir @param {boolean} win @param {string} prefix
+ * @param {ReturnType<typeof shellText>} scanned
  */
-function screenWritePaths(writeText, workdir, win, prefix) {
+function screenWritePaths(writeText, workdir, win, prefix, scanned) {
   // 用户目录与系统目录：只是读的来源可以（把 ~/x.txt 拷进来），写进去不行
   if (HOME_SYSTEM_PATH.test(writeText)) return `${prefix}：不往用户目录或系统目录里写，改动一律落在工作目录之内`;
   // .. 上溯：起点在工作目录，往上一级就出去了；深处的 cd .. 静态看不出来，一律不许，改用相对工作目录的路径
@@ -2533,7 +2548,7 @@ function screenWritePaths(writeText, workdir, win, prefix) {
   const P = win ? path.win32 : path.posix,
     trim = value => P.normalize(value).replace(/(?<=.)[\\/]+$/, ""),
     root = win ? trim(workdir).toLowerCase() : trim(workdir);
-  for (const raw of absolutePathsIn(writeText, win)) {
+  for (const raw of absolutePathsIn(writeText, win, scanned)) {
     if (win && /^[a-z]:$/i.test(raw)) return `${prefix}：不用盘符相对路径（${raw}），写完整路径`;
     const candidate = win ? trim(raw).toLowerCase() : trim(raw),
       relative = P.relative(root, candidate);
@@ -3305,7 +3320,7 @@ function screenCommand(command, workdir, { platform = process.platform } = {}) {
   const writes = scanWrites(scanned);
   if (writes.writing) {
     if (GIT_INTERNAL_PATH.test(stripReadSources(scanned, false))) return "沙箱拒绝：不直接改 .git 内部；请使用相应的 git 指令";
-    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝") || innerPathWhy(writes.paths, workdir, win, "沙箱拒绝");
+    const why = screenWritePaths(writes.text, workdir, win, "沙箱拒绝", scanned) || innerPathWhy(writes.paths, workdir, win, "沙箱拒绝");
     if (why) return why;
   }
   // git 把仓库指到别处：`git -C .. checkout -- f`、`cd ..; git reset --hard` 里都没有一个「改动路径」，
