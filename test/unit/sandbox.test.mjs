@@ -396,6 +396,12 @@ test("screenCommand：动系统的拒绝——注册表、计划任务、服务�
   assert.match(screen("New-Service -Name x"), /系统服务/);
   assert.match(screen("sc stop spooler"), /系统服务/);
   assert.match(screen("net user admin pw /add"), /账户/);
+  // 子命令被引号包住照样算：shell 会把 "add" 还原成 add 交给程序（11-20 检查）
+  assert.match(screen('reg "add" HKCU\\Software\\x /v a /d 1 /f'), /注册表/);
+  assert.match(screen('net "user" admin pw /add'), /账户/);
+  assert.match(screen('net "localgroup" administrators admin /add'), /账户/);
+  // 引号只开不收的半拉写法不替它开脱
+  assert.equal(screen('reg "add HKCU\\Software\\x'), null);
   assert.match(screen("shutdown /s"), /系统、磁盘与权限/);
   assert.match(screen("format c:"), /磁盘/);
   assert.equal(screen("Start-Process notepad"), null);
@@ -1148,7 +1154,11 @@ const TABLE = [
     "nice -n5 launchctl load x",
     "nice -n-5 launchctl load x",
     "timeout -k 1 5 launchctl load x",
-    "timeout -k1 5 launchctl load x"
+    "timeout -k1 5 launchctl load x",
+    // 子命令被引号包住：sh 会把 "load" 还原成 load 交给程序，规则按原文匹配，不加这一眼就漏
+    'launchctl "load" x',
+    'defaults "write" com.example x -bool true',
+    'diskutil "eraseDisk" APFS x disk2'
   ].map(command => [command, "x", "x", "x", "o"]),
   ...[
     "command -v launchctl",
