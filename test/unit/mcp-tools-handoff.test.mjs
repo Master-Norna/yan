@@ -144,3 +144,14 @@ test("内置游目那样只递几项选择：补图用实际起连接的配置",
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("工具清单：服务重复返回分页游标时停止，而非无限请求", async () => {
+  const client = new McpClient({ name: "x", config: {}, version: "t", toolEnv: env => env });
+  const cursors = [];
+  client.request = async (_method, params) => {
+    cursors.push(params.cursor || "");
+    return { tools: [{ name: "tool" }], nextCursor: "repeat" };
+  };
+  await assert.rejects(() => client.listTools(), /分页游标重复/);
+  assert.deepEqual(cursors, ["", "repeat"]);
+});

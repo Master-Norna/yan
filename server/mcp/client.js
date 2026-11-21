@@ -55,10 +55,14 @@ class McpClient {
   async listTools() {
     const tools = [];
     let cursor;
+    const cursors = new Set();
     do {
       const page = await this.request("tools/list", cursor ? { cursor } : {}, CONNECT_MS);
       tools.push(...page.tools);
       cursor = page.nextCursor;
+      // 上游若反复返回同一游标，不应无限拉取并堆积工具。
+      if (cursor && cursors.has(cursor)) throw Error("MCP 工具清单分页游标重复");
+      if (cursor) cursors.add(cursor);
     } while (cursor);
     // 这里不清 toolsChanged：清单变了要等页面真拿到新的一份才算交接完（见 index.js 的 handleList 与 handleCall）
     return tools;
