@@ -78,3 +78,42 @@ for (const route of ["write", "edit", "intent"])
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+test("write_file：已有文件无法读取时拒绝覆盖，原件不变", async () => {
+  const parent = path.resolve("test/.tmp");
+  fs.mkdirSync(parent, { recursive: true });
+  const root = fs.mkdtempSync(path.join(parent, "write-unreadable-"));
+  const file = path.join(root, "a.txt");
+  fs.writeFileSync(file, "BEFORE");
+  const work = createWork({ archiveHome: () => root, workHome: () => root, toolEnv: env => env });
+  const original = fs.promises.readFile;
+  fs.promises.readFile = async (...args) => {
+    if (String(args[0]) === file) throw Object.assign(Error("read failed"), { code: "EACCES" });
+    return original(...args);
+  };
+  try {
+    const res = Object.assign(new EventEmitter(), {
+      headersSent: false,
+      writableEnded: false,
+      destroyed: false,
+      status: 0,
+      body: "",
+      writeHead(status) {
+        this.status = status;
+        this.headersSent = true;
+      },
+      end(text) {
+        this.body = String(text || "");
+        this.writableEnded = true;
+      }
+    });
+    const req = Readable.from([Buffer.from(JSON.stringify({ workdir: root, path: "a.txt", content: "AFTER", unseen: true }))]);
+    await work.routes["POST /api/work/write"](req, res);
+    assert.equal(res.status, 400);
+    assert.equal(fs.readFileSync(file, "utf8"), "BEFORE");
+    assert.deepEqual(fs.readdirSync(root), ["a.txt"]);
+  } finally {
+    fs.promises.readFile = original;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

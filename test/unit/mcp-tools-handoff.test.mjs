@@ -199,3 +199,14 @@ test("补图只读工作目录与显式 output-dir，忽略越界和链接逃逸
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("工具清单：服务重复返回分页游标时停止，而非无限请求", async () => {
+  const client = new McpClient({ name: "x", config: {}, version: "t", toolEnv: env => env });
+  const cursors = [];
+  client.request = async (_method, params) => {
+    cursors.push(params.cursor || "");
+    return { tools: [{ name: "tool" }], nextCursor: "repeat" };
+  };
+  await assert.rejects(() => client.listTools(), /分页游标重复/);
+  assert.deepEqual(cursors, ["", "repeat"]);
+});
