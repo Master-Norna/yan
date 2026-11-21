@@ -22,19 +22,29 @@ async function attachLinkedImages(result, config) {
     .filter(item => item?.type === "text")
     .map(item => item.text)
     .join("\n");
+  // 本机 MCP 返回的文字不能自行扩大文件读取范围。
+  // 工作目录之外，只有服务启动参数里显式指定的 --output-dir 可以作为截图来源。
+  const outputIndex = config.args?.findIndex(arg => arg === "--output-dir") ?? -1;
+  const outputArg = outputIndex >= 0 ? config.args[outputIndex + 1] : null;
+  const cwd = path.resolve(config.cwd || process.cwd());
+  const allowed = [cwd, ...(typeof outputArg === "string" ? [path.resolve(cwd, outputArg)] : [])];
+  const roots = await Promise.all(allowed.map(dir => fs.promises.realpath(dir).catch(() => null)));
+  const inside = (file, dir) => dir && (file === dir || file.startsWith(dir + path.sep));
   const files = new Set();
   for (const [, target] of text.matchAll(/\]\(([^)\n]+?\.(?:png|jpe?g|webp|gif))\)/gi)) {
     if (files.size >= 4) break;
-    files.add(path.resolve(config.cwd || process.cwd(), target.trim()));
+    files.add(path.resolve(cwd, target.trim()));
   }
   for (const file of files)
     try {
-      const stat = await fs.promises.stat(file);
+      const real = await fs.promises.realpath(file);
+      if (!roots.some(root => inside(real, root))) continue;
+      const stat = await fs.promises.stat(real);
       if (!stat.isFile() || stat.size > 8 * 1024 * 1024) continue;
       content.push({
         type: "image",
-        mimeType: LINKED_IMAGES[path.extname(file).toLowerCase()],
-        data: (await fs.promises.readFile(file)).toString("base64")
+        mimeType: LINKED_IMAGES[path.extname(real).toLowerCase()],
+        data: (await fs.promises.readFile(real)).toString("base64")
       });
     } catch {}
 }
