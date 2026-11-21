@@ -18,6 +18,8 @@ class BusResponse extends Writable {
     this.headers = {};
     this.emitEvent = emit;
     this.decoder = new StringDecoder("utf8");
+    // writeHead/flushHeaders 也可能先于正文写入：所有事件按次序排队，背压与断线在同一处处理。
+    this.events = Promise.resolve();
   }
   setHeader(name, value) {
     this.headers[String(name).toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
@@ -41,26 +43,32 @@ class BusResponse extends Writable {
   flushHeaders() {
     this.flushHead();
   }
+  queueEvent(event) {
+    // 任意事件（包括仅 writeHead 发出的 head）失败，都必须收掉任务，
+    // 不能留下无人接的 Promise rejection；排队保证 head → data → end 的顺序。
+    this.events = this.events
+      .then(() => {
+        if (!this.destroyed) return this.emitEvent(event);
+      })
+      .catch(() => this.destroy());
+    return this.events;
+  }
   flushHead() {
     if (this.headersSent) return;
     this.headersSent = true;
-    this.emitEvent({ t: "head", status: this.statusCode, headers: this.headers });
+    void this.queueEvent({ t: "head", status: this.statusCode, headers: { ...this.headers } });
   }
   _write(chunk, encoding, done) {
     this.flushHead();
     const text = typeof chunk === "string" ? chunk : this.decoder.write(chunk);
     // SSE 连接堵住时不能立即确认写完：要把背压传回生成内容的接口。
-    Promise.resolve()
-      .then(() => (text ? this.emitEvent({ t: "data", text }) : undefined))
-      .then(() => done(), done);
+    (text ? this.queueEvent({ t: "data", text }) : this.events).then(() => done(), done);
   }
   _final(done) {
     this.flushHead();
     const rest = this.decoder.end();
-    Promise.resolve()
-      .then(() => (rest ? this.emitEvent({ t: "data", text: rest }) : undefined))
-      .then(() => this.emitEvent({ t: "end" }))
-      .then(() => done(), done);
+    if (rest) this.queueEvent({ t: "data", text: rest });
+    this.queueEvent({ t: "end" }).then(() => done(), done);
   }
   // 没写完就被掐了（上游断线时 pipeline 会 destroy 它）：不走总线时页面会读到断网，这里也得告诉页面，别让它一直等
   _destroy(error, done) {
