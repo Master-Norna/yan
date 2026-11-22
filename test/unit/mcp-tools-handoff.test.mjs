@@ -210,3 +210,19 @@ test("工具清单：服务重复返回分页游标时停止，而非无限请�
   await assert.rejects(() => client.listTools(), /分页游标重复/);
   assert.deepEqual(cursors, ["", "repeat"]);
 });
+
+test("工具清单持续返回不同游标时，按最大页数拒绝无限枚举", async () => {
+  const client = new McpClient({ name: "x", config: {}, version: "t", toolEnv: env => env });
+  let pages = 0;
+  client.request = async () => ({ tools: [{ name: "read" }], nextCursor: "page-" + ++pages });
+  await assert.rejects(() => client.listTools(), /分页超过上限/);
+  assert.equal(pages, 50);
+});
+
+test("工具总量及清单结构异常时拒绝接入", async () => {
+  const client = new McpClient({ name: "x", config: {}, version: "t", toolEnv: env => env });
+  client.request = async () => ({ tools: Array.from({ length: 1001 }, (_, i) => ({ name: "tool" + i })) });
+  await assert.rejects(() => client.listTools(), /工具数量超过上限/);
+  client.request = async () => ({ other: [] });
+  await assert.rejects(() => client.listTools(), /缺少 tools 数组/);
+});
