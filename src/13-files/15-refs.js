@@ -161,7 +161,7 @@ const refListings = new Map();
 function refListing(root) {
   let listing = refListings.get(root);
   if (!listing) {
-    listing = bridge("/api/archive/list", { root }, AbortSignal.timeout(20000)).then(
+    listing = bridge("/api/archive/list", { root, scratch: false }, AbortSignal.timeout(20000)).then(
       data => (data.entries || []).map(entry => entry.path),
       () => []
     );
