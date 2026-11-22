@@ -138,7 +138,10 @@ test("传播：标成立要前提先立住（同一批也算），事后前提�
   assert.ok(!f.intentEstablished(intent, "上线"));
   assert.match(f.intentText(intent), /\[成立·前提未立\] 上线（根）/);
   intent = change(intent, [{ id: "上线", any: true }]);
-  assert.ok(f.intentEstablished(intent, "上线"), "任一即可：甲立住就够");
+  assert.equal(f.intentState(intent, "上线"), "stale", "改变已封印的前提规则必须待复核");
+  assert.ok(!f.intentEstablished(intent, "上线"));
+  intent = change(intent, [{ id: "上线", state: "done" }]);
+  assert.ok(f.intentEstablished(intent, "上线"), "重封印后任一即可：甲立住就够");
   assert.deepEqual(problems(intent, [{ id: "上线", state: "done" }]), [], "任一即可的，重标成立也只要一项立住");
 });
 
