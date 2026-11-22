@@ -90,6 +90,8 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   // 改名成功的才算拿到；已过了约簿这一关就可删，否则留凭据，重启也不会重新投递这一回。
   function take(ids) {
     // 约簿损坏不应阻塞已经独立落盘的到点记录；无法核对簿时保留认领凭据。
+    // 领取前也核查磁盘：启动后被外部写坏的簿不能凭旧缓存裁定凭据可删。
+    if (!bookCorrupt && fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers)) bookCorrupt = true;
     sync();
     const taken = [],
       open = bookCorrupt ? null : new Set(book.timers.map(firedId));
