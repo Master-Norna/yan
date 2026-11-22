@@ -242,4 +242,9 @@ test("桥接读入正常约簿后被外部改坏，下一次保存也拒绝覆�
   fs.writeFileSync(bookFile, "{truncated");
   assert.throws(() => call("set", { to: "c", due: start + 2000 }), /约簿损坏/);
   assert.equal(fs.readFileSync(bookFile, "utf8"), "{truncated");
+  const restored = { seq: 10, timers: [{ id: "restored-id", to: "c", due: start + 4000 }] };
+  fs.writeFileSync(bookFile, JSON.stringify(restored));
+  assert.deepEqual(call("list").timers, restored.timers, "修复磁盘簿后应读取已恢复的排期");
+  call("set", { to: "c", due: start + 5000 });
+  assert.equal(JSON.parse(fs.readFileSync(bookFile, "utf8")).timers[0].id, "restored-id", "不得用旧缓存覆盖恢复出的约");
 });
