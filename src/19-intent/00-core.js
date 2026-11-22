@@ -109,15 +109,25 @@ function asIntent(raw) {
   const nodes = raw?.nodes && typeof raw.nodes === "object" && !Array.isArray(raw.nodes) ? raw.nodes : {},
     /** @type {Intent} */
     intent = {
+      // 保留未来版本添加的顶层字段：旧版只处理自己认得的节点与日志，
+      // 不能在一次无关修改后把后续版本的元数据悄悄删掉。
+      ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}),
       nodes: {},
       log: Array.isArray(raw?.log)
         ? raw.log
             .filter(entry => entry && typeof entry === "object")
             .slice(-INTENT_LOG_LIMIT)
-            .map(entry => ({ at: String(entry.at || ""), conversation: String(entry.conversation || ""), text: String(entry.text || "") }))
+            .map(entry => ({
+              ...entry,
+              at: String(entry.at || ""),
+              conversation: String(entry.conversation || ""),
+              text: String(entry.text || "")
+            }))
         : [],
       ...(typeof raw?.updated === "string" ? { updated: raw.updated } : {})
     };
+  // 扩展字段照旧保留，但已知字段不能被原始展开绕过类型校验。
+  if (typeof raw?.updated !== "string") delete intent.updated;
   for (const [id, node] of Object.entries(nodes)) {
     if (!node || typeof node !== "object" || !validIntentId(id)) continue;
     intent.nodes[id] = {
