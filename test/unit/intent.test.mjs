@@ -849,3 +849,21 @@ test("守：一直要守的条件——不算根、不孤悬、不计进度；�
   intent = change(intent, [{ id: "测过", keep: false, needs: [] }]);
   assert.equal(intent.nodes["测过"].keep, undefined);
 });
+
+test("读写旧版意时保留未来版本的扩展字段与日志元数据", () => {
+  const raw = {
+    version: 2,
+    extensions: { scheduler: { priority: "high" } },
+    nodes: { 甲: { claim: "A", check: "验收 A", state: "open", customFuture: { tag: "retain" } } },
+    log: [{ at: "a", conversation: "c", text: "原有记录", eventId: "event-1" }]
+  };
+  const decoded = f.asIntent(raw);
+  assert.deepEqual(decoded.extensions, raw.extensions);
+  assert.equal(decoded.log[0].eventId, "event-1");
+  assert.deepEqual(decoded.nodes["甲"].customFuture, { tag: "retain" });
+  const updated = f.applyIntentOps(decoded, [{ id: "甲", state: "doing" }], { at: "b", conversation: "c", ask: "继续" });
+  const restored = f.asIntent(JSON.parse(JSON.stringify(updated)));
+  assert.deepEqual(restored.extensions, raw.extensions);
+  assert.equal(restored.log[0].eventId, "event-1");
+  assert.deepEqual(restored.nodes["甲"].customFuture, { tag: "retain" });
+});
