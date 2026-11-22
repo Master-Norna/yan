@@ -16,7 +16,7 @@ test("正式便携包只允许干净工作区", t => {
   git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial");
   assert.doesNotThrow(() => assertCleanWorkingTree(dir));
   fs.writeFileSync(path.join(dir, "tracked.txt"), "changed");
-  assert.throws(() => assertCleanWorkingTree(dir), /拒绝生成/);
+  assert.throws(() => assertCleanWorkingTree(dir), /1 项.*拒绝生成[\s\S]*tracked\.txt/);
   git("checkout", "--", "tracked.txt");
   fs.writeFileSync(path.join(dir, "untracked.txt"), "new");
   assert.throws(() => assertCleanWorkingTree(dir), /拒绝生成/);
