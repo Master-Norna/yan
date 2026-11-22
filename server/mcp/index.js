@@ -139,7 +139,11 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
       // 只接受 /api/mcp/list 当前登记过的服务与连接配置。页面不能借调用接口临时
       // 起任意 MCP 进程、改远端地址或传入一件未列出的工具。
       const entry = clients.get(body.server);
-      if (!entry || entry.key !== keyOf(body.config || {})) throw Error("MCP 服务未登记或配置已改变，请重新加载工具清单");
+      if (!entry || entry.key !== keyOf(body.config || {})) {
+        // 桥接重启后页面仍可能缓存旧清单：显式要求重新登记，避免每轮调用都失败。
+        sendJson(res, 400, { error: "MCP 服务未登记或配置已改变，请重新加载工具清单", toolsChanged: true });
+        return;
+      }
       // 校验登记过的配置后仍沿用 ensure() 的断线重连语义。
       const client = await ensure(body.server, body.config).ready;
       // 服务发过 list_changed 时，先核对变后的清单；客户端的 toolsChanged 标记
