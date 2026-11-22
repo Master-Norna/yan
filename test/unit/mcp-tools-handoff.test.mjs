@@ -85,7 +85,7 @@ test("调用期间收到 list_changed：下一问 /api/mcp/list 交回新表，�
       first.servers.fake.tools.map(tool => tool.name),
       ["old_tool"]
     );
-    const called = await post("/api/mcp/call", { server: "fake", config: servers.fake, tool: "some_tool", arguments: {} });
+    const called = await post("/api/mcp/call", { server: "fake", config: servers.fake, tool: "old_tool", arguments: {} });
     assert.equal(called.toolsChanged, true, "页面据此使缓存失效");
     const again = await post("/api/mcp/list", { servers });
     assert.deepEqual(
