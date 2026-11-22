@@ -158,7 +158,22 @@ function mcpFormConfig(form, previous) {
         })
         .filter(([k]) => k)
     );
-  const { command, args, cwd, env, url, headers, type, transport, timeout, load, autoApprove, readOnlyTools, note, ...rest } = previous || {};
+  const {
+    command,
+    args,
+    cwd,
+    env,
+    url,
+    headers,
+    type,
+    transport,
+    timeout,
+    load,
+    autoApprove,
+    readOnlyTools,
+    note,
+    ...rest
+  } = previous || {};
   const local = !!form.querySelector('[data-mcp-kind="local"].active');
   /** @type {Record<string, any>} */
   const config = local
