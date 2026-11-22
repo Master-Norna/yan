@@ -136,8 +136,8 @@ test("内置游目那样只递几项选择：补图用实际起连接的配置",
     };
     await post("/api/mcp/list", {
       servers: {
-        "游目": body.config,
-        "完整": { command: "node", cwd: dir }
+        游目: body.config,
+        完整: { command: "node", cwd: dir }
       }
     });
     const builtin = await post("/api/mcp/call", body);
