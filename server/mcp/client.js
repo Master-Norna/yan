@@ -92,11 +92,17 @@ class McpClient {
     return new Promise((resolve, reject) => {
       // 进度能延长空闲等待，但不能让工具靠持续刷进度永久占住请求。
       const deadline = Date.now() + (method === "tools/call" ? timeout * 2 : timeout);
-      const entry = { resolve, reject, timeout, timer: null };
+      const entry = { resolve, reject, timeout, timer: null, lastProgressAt: null };
       entry.arm = () => {
         clearTimeout(entry.timer);
         const remaining = Math.max(1, Math.min(timeout, deadline - Date.now()));
-        entry.timer = setTimeout(() => this.settle(id, Error(`${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`)), remaining);
+        entry.timer = setTimeout(() => {
+          const absolute = method === "tools/call" && Date.now() >= deadline;
+          const reason = absolute
+            ? `${method} 已达绝对时限（${Math.round(timeout * 2 / 1000)} 秒；距上次进度 ${entry.lastProgressAt === null ? "无记录" : `${Math.round((Date.now() - entry.lastProgressAt) / 1000)} 秒`}）`
+            : `${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`;
+          this.settle(id, Error(reason));
+        }, remaining);
       };
       entry.arm();
       this.pending.set(id, entry);
@@ -134,7 +140,13 @@ class McpClient {
     }
     // 通知：工具变了下次调用前重拉；报进度的给那次调用续命
     if (message.method === "notifications/tools/list_changed") this.toolsChanged = true;
-    else if (message.method === "notifications/progress") this.pending.get(message.params?.progressToken)?.arm();
+    else if (message.method === "notifications/progress") {
+      const entry = this.pending.get(message.params?.progressToken);
+      if (entry) {
+        entry.lastProgressAt = Date.now();
+        entry.arm();
+      }
+    }
   }
   lost(error) {
     if (this.closed) return;
