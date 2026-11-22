@@ -72,6 +72,12 @@ function rebuild(diff, content) {
   return { old: asText(old), new: asText(next) };
 }
 
+test("页面切行：空文本没行，单个换行有一行；非字符串照旧先判真假", () => {
+  assert.deepEqual(view.diffCounts("一\r\n二\n\r\n", "一\n二\n"), { added: 0, removed: 1 });
+  for (const value of ["", 0, false, NaN, 0n, null, undefined]) assert.deepEqual(view.diffCounts(value, ""), { added: 0, removed: 0 });
+  for (const value of ["\r\n", [], { toString: () => "" }]) assert.deepEqual(view.diffCounts(value, ""), { added: 0, removed: 1 });
+});
+
 test("改在文件末尾：窗口指到那一行，旧侧带着原文，新侧按行号取得到", () => {
   const lines = plain(300),
     changed = lines.slice();
@@ -213,9 +219,23 @@ test("比法与朴素的最长公共子序列对得上：随机两百对", () =>
   }
 });
 
-test("新建的件没有旧侧，不给 diff", async () => {
-  const { data } = await call("write", { path: "fresh.txt", content: "一\n二\n", unseen: true });
-  assert.equal(data.diff, undefined);
-  assert.equal(data.added, 2);
-  assert.equal(data.removed, 0);
+test("新建的件没有旧侧；新增行数就是写后的行数", async () => {
+  const samples = [
+    ["", 0],
+    ["\n", 1],
+    ["一\r\n二\r\n\r\n", 3],
+    [false, 1],
+    [0, 1]
+  ];
+  for (const [i, [content, lines]] of samples.entries()) {
+    const name = `fresh-${i}.txt`;
+    const { status, data } = await call("write", { path: name, content, unseen: true });
+    assert.equal(status, 200);
+    assert.equal(data.existed, false);
+    assert.equal(data.diff, undefined);
+    assert.equal(data.lines, lines);
+    assert.equal(data.added, data.lines);
+    assert.equal(data.removed, 0);
+    assert.equal(readFileSync(path.join(root, name), "utf8"), String(content));
+  }
 });

@@ -1,13 +1,12 @@
 // 言 · 改动与成品：执事这一答改过哪些文件（改动条），这一答交给人看的是哪几件（成品条）
 // 改动摘要：这一答里执事改过哪些文件、各增减多少行。生成中附在输入框上的工作条里实时累加（见 renderHelperBar），
 // 不跟着正文尾巴跑；写完才落到回复之下，是一道线而不是一只框（见 设计稿/12-改动条与行迹）
-// 按行切开：末尾的换行不算多出一行空行（与桥接的 countLines 同一惯例），空的就是没有行
-const diffLines = text =>
-  text
-    ? String(text)
-        .replace(/\r?\n$/, "")
-        .split(/\r?\n/)
-    : [];
+// 沿用原来的入参归一：假值没有行，真值转成空串时（如 []）仍算一行
+function diffLines(text) {
+  if (!text) return [];
+  const value = String(text);
+  return value ? splitLines(value) : [""];
+}
 // 增删各几行：与点开看的红绿同一套切法、同一套比法，两边对得上
 function diffCounts(oldText, newText) {
   const ops = lcsOps(diffLines(oldText), diffLines(newText));

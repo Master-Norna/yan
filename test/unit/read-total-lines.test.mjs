@@ -99,3 +99,13 @@ test("CRLF 与几种收尾：行数与 countLines 一个数法", async () => {
     assert.equal(data.totalLines, countLines(content), JSON.stringify(content));
   }
 });
+
+test("混合换行按行分页：末尾空行保留，孤立的 CR 不另起一行", async () => {
+  put("mixed.txt", "a\r\nb\rc\n\r\n");
+  const { status, data } = await call("read", { path: "mixed.txt", offset: 2, limit: 2 });
+  assert.equal(status, 200);
+  assert.equal(data.totalLines, 3);
+  assert.equal(data.offset, 2);
+  assert.equal(data.shown, 2);
+  assert.equal(data.text, "   2| b\rc\n   3| ");
+});

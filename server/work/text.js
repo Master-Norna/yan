@@ -5,10 +5,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { decodeEntities } = require("../web.js");
 
-// 行比法与页面同一份（src/15-tools/05-line-ops.js）：页面的段是拼进闭包的普通脚本，这里整段读进去，取出要用的那一个
-/** @type {{ lcsOps: (a: string[], b: string[]) => Array<[string, string]> }} */
-const { lcsOps } = new Function(
-  `"use strict";\n${fs.readFileSync(path.join(__dirname, "../../src/15-tools/05-line-ops.js"), "utf8")}\nreturn { lcsOps };`
+// 切行与行比法都与页面共用（src/15-tools/05-line-ops.js）：页面将普通脚本拼进闭包，这里整段读进去取函数
+/** @type {{ splitLines: (text: string) => string[], lcsOps: (a: string[], b: string[]) => Array<[string, string]> }} */
+const { splitLines, lcsOps } = new Function(
+  `"use strict";\n${fs.readFileSync(path.join(__dirname, "../../src/15-tools/05-line-ops.js"), "utf8")}\nreturn { splitLines, lcsOps };`
 )();
 
 function tail(text, limit) {
@@ -73,13 +73,9 @@ function encodeText(text, encoding) {
 function countLines(text) {
   const value = String(text || "");
   if (!value) return 0;
-  return value.split(/\r?\n/).length - (/\r?\n$/.test(value) ? 1 : 0);
-}
-
-// 按行切开：末尾的换行不算多出一行空行（与 countLines 同一惯例），空的就是没有行
-function splitLines(text) {
-  const value = String(text ?? "");
-  return value ? value.replace(/\r?\n$/, "").split(/\r?\n/) : [];
+  let lines = value.endsWith("\n") ? 0 : 1;
+  for (let at = value.indexOf("\n"); at !== -1; at = value.indexOf("\n", at + 1)) lines++;
+  return lines;
 }
 
 // edit_file 的 old 对不上时：文件里最像它的那一段，照现在的样子带行号交回。
@@ -119,8 +115,8 @@ function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
 // 新的一侧整份还在这一步的参数（step.arguments）里，页面画的时候从那儿取，不另存第二份。
 // 每块记下两侧的行号：页面按号取新侧、按号写「跳过 N 行未改」。不设字数上限，改动一处不落
 function changeHunks(oldText, newText, { context = 3 } = {}) {
-  const a = splitLines(oldText),
-    b = splitLines(newText),
+  const a = splitLines(String(oldText ?? "")),
+    b = splitLines(String(newText ?? "")),
     ops = lcsOps(a, b),
     oldAt = new Int32Array(ops.length + 1),
     newAt = new Int32Array(ops.length + 1);
@@ -166,6 +162,7 @@ module.exports = {
   decodeText,
   encodeText,
   countLines,
+  splitLines,
   changeHunks,
   nearestPassage
 };
