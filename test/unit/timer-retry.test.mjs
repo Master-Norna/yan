@@ -248,3 +248,13 @@ test("桥接读入正常约簿后被外部改坏，下一次保存也拒绝覆�
   call("set", { to: "c", due: start + 5000 });
   assert.equal(JSON.parse(fs.readFileSync(bookFile, "utf8")).timers[0].id, "restored-id", "不得用旧缓存覆盖恢复出的约");
 });
+
+test("合法 JSON 但 timers 不是数组时也要保留损坏约簿", t => {
+  const { boot, bookFile } = fixture(t);
+  const invalid = JSON.stringify({ seq: 7, timers: { unexpected: true } });
+  fs.writeFileSync(bookFile, invalid);
+  const call = boot();
+  assert.throws(() => call("list"), /约簿损坏/);
+  assert.throws(() => call("cancel", { id: "t1" }), /约簿损坏/);
+  assert.equal(fs.readFileSync(bookFile, "utf8"), invalid);
+});
