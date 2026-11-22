@@ -142,7 +142,6 @@ test("MCP 工具持续发进度也不能跨过绝对超时上限", async t => {
   assert.equal(client.pending.size, 0);
 });
 
-
 test("旧式 SSE transport 的 abort 是 AbortController，超时不得把它当函数调用", async () => {
   const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
   const transport = { abort: new AbortController(), send: async () => {} };
