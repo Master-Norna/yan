@@ -107,6 +107,10 @@ async function fixture(t, { attachments = false, intercept = (route, options, se
       "flushOnUnload",
       "syncChatsWithDisk",
       "catchUpFromDisk",
+      "warmConversation",
+      "requestJobs",
+      "syncLeases",
+      "pendingChatWrites",
       "remoteBusy",
       "pendingChatDeletes",
       "discardedChatSpills",
@@ -209,6 +213,124 @@ test("合并结果仍只是暂存版时，等另一页松手再落盘，不提�
   await reopened.sync();
   assert.equal((await post("chats/load")).items[0].conversation.title, "还没落盘的新题");
   assert.equal(records.size, 0);
+});
+
+// 只数顶层就是夹具对话的 JSON.stringify，不数路由信封、单条消息、暂存键等小对象。
+function countChatJson(t, ids) {
+  const stringify = JSON.stringify,
+    counts = new Map();
+  t.mock.method(JSON, "stringify", (value, ...args) => {
+    if (ids.includes(value?.id) && Array.isArray(value.messages) && Array.isArray(value.forks) && Array.isArray(value.threads))
+      counts.set(value.id, (counts.get(value.id) || 0) + 1);
+    return stringify(value, ...args);
+  });
+  return counts;
+}
+
+for (const status of ["complete", "stopped"])
+  test(`全量跟读接回冷行迹后才决定清暂存：${status}`, async t => {
+    const { post, page, records, keyOf, chats } = await fixture(t);
+    const base = conversation("磁盘旧题"),
+      at = Date.now() - 3000,
+      trail = "reply-0001",
+      reasoning = "已经接回的思绪";
+    base.messages[0].content = "问".repeat(1024 * 1024);
+    base.messages.push({ id: "reply", role: "assistant", status: "complete", content: "正文", cold: { key: trail } });
+    await post("chats/save", { conversation: base, savedAt: at });
+    await post("chats/trail/put", { id: base.id, key: trail, piece: { reasoning } });
+    const a = page();
+    await a.sync();
+    const previous = a.store.conversations[0],
+      newer = structuredClone(previous);
+    newer.title = "磁盘新题";
+    newer.messages[1].status = status;
+    assert.equal(await a.warmConversation(previous), 1);
+    await post("chats/save", { conversation: newer, base: at, savedAt: at + 1000 });
+    const id = [chats, base.id],
+      key = keyOf(id),
+      json = a.chatJson(newer);
+    records.set(key, { id, dir: chats, savedAt: at + 1000, json });
+    a.remoteBusy.add(base.id); // 别页握着租约，本轮不能提前写回。
+    const counts = countChatJson(t, [base.id]);
+    await a.sync();
+    const serializations = counts.get(base.id) || 0;
+    t.diagnostic(`${json.length} 字符，整段 JSON.stringify ${serializations} 次`);
+
+    const current = a.store.conversations[0];
+    assert.equal(current.title, newer.title);
+    assert.equal(current.messages[1].reasoning, reasoning, "跟读接回先前已暖的行迹");
+    assert.equal(a.chatJson(current) === json, status === "complete", "未收尾的答接回行迹后，落盘正文不再相同");
+    assert.equal(records.has(key), status !== "complete", "只有跟读结果等于磁盘版才清暂存");
+    assert.equal((await post("chats/load")).items[0].savedAt, at + 1000, "持有远端租约时没有写回");
+    assert.ok(serializations <= 3, `全量跟读最多序列化三次，实际 ${serializations} 次`);
+  });
+
+test("全量跟读保留正作答的对话与答复对象，并写回双方改动", async t => {
+  const { post, page } = await fixture(t);
+  const base = conversation("旧题"),
+    at = Date.now() - 3000;
+  base.messages.push({ id: "reply", role: "assistant", status: "streaming", content: "正在写" });
+  await post("chats/save", { conversation: base, savedAt: at });
+  const a = page();
+  await a.sync();
+  const live = a.store.conversations[0],
+    reply = live.messages[1];
+  reply.content = "这一页还在往下写";
+  a.requestJobs.set(live.id, { conversationId: live.id });
+  await a.syncLeases();
+  await post("chats/save", { conversation: { ...base, pinned: true }, base: at, savedAt: at + 1000 });
+  await a.sync();
+
+  assert.equal(a.store.conversations[0], live);
+  assert.equal(live.messages[1], reply);
+  const disk = (await post("chats/load")).items[0].conversation;
+  assert.equal(disk.pinned, true);
+  assert.equal(disk.messages[1].content, "这一页还在往下写");
+});
+
+test("离页直接暂存待写与在途对话，空闲对话仍用指纹兜住未标脏的改动", async t => {
+  const entered = Promise.withResolvers(),
+    release = Promise.withResolvers();
+  const { post, page, records, chats, keyOf } = await fixture(t, {
+    intercept: async (route, options, send) => {
+      if (route === "/api/chats/save" && JSON.parse(options.body).conversation.id === "active") {
+        entered.resolve();
+        await release.promise;
+      }
+      return send();
+    }
+  });
+  const ids = ["clean", "dirty", "pending", "active", "deleted"],
+    at = Date.now() - 3000;
+  for (const id of ids) await post("chats/save", { conversation: { ...conversation(id), id }, savedAt: at });
+  const a = page();
+  await a.sync();
+  const get = id => a.store.conversations.find(c => c.id === id),
+    baseJson = new Map(ids.map(id => [id, a.chatJson(get(id))]));
+  const writing = a.flushImportedConversations(["active"]);
+  try {
+    await entered.promise;
+    a.pendingChatWrites.set("pending", { force: true });
+    get("dirty").title = "没标脏的新题";
+    get("deleted").title = "不暂存待删的对话";
+    a.pendingChatDeletes.set("deleted", at + 1000);
+    const counts = countChatJson(t, ids);
+    a.flushOnUnload();
+    await new Promise(setImmediate);
+    const serializations = [...counts.values()].reduce((sum, count) => sum + count, 0);
+    t.diagnostic(`五种状态合计整段 JSON.stringify ${serializations} 次`);
+
+    assert.equal(records.size, 3);
+    for (const id of ["active", "pending", "dirty"]) {
+      const row = records.get(keyOf([chats, id]));
+      assert.equal(row?.baseJson, baseJson.get(id), `${id} 暂存保留磁盘基准`);
+      assert.deepEqual(JSON.parse(row.json), JSON.parse(a.chatJson(get(id))), `${id} 暂存当前正文`);
+    }
+    assert.ok(serializations <= 5, `离页快照最多序列化五次，实际 ${serializations} 次`);
+  } finally {
+    release.resolve();
+    await writing;
+  }
 });
 
 test("定向读只短路已见、同版本且唯一的标准文件；取消条件时仍取全份", async t => {
