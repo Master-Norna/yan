@@ -178,8 +178,9 @@ async function runTool(step, ctx) {
     // 审而后行里规则标疑的，再交专司的审查模型判（见 03-review.js）
     const stopped = (await keepHook(step, args, ctx)) || (await reviewHook(step, args, ctx));
     if (stopped) return stopped;
-    // 动文件的：这一答头一回动手前，先把目录此刻的样子记下，日后可退回（见 14-chat-engine/80-checkpoint.js）
-    if (tool.writes && !ctx.lookup) await checkpointBefore(ctx);
+    // 动文件的：这一答头一回动手前，先把目录此刻的样子记下，日后可退回（见 14-chat-engine/80-checkpoint.js）。
+    // 只读的指令不改目录，不必等这张快照；工作目录不在时也能走到桥接那句「重新发送这一问」的说明
+    if (tool.writes && !ctx.lookup && !(tool.name === "run_command" && isReadOnlyCommand(args.command))) await checkpointBefore(ctx);
     // 上面几处都要等（接回行迹、跑守的测试、审查、记检查点），等的工夫里点了「止」就到此为止，不再动手
     ctx.signal.throwIfAborted();
     const outcome = await tool.run(step, args, ctx);
