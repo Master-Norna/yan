@@ -255,6 +255,7 @@ test("调用只接受已登记服务、当前配置和工具清单，移除服�
 test("已登记的 MCP 断线后仍可重连；清单失效的拒绝会提醒页面刷新", async () => {
   let connects = 0;
   McpClient.prototype.connect = async function () {
+    globalThis.__mcpTestClient = this;
     connects++;
     this.closed = false;
     this.tools = [{ name: connects === 1 ? "old_tool" : "new_tool" }];
