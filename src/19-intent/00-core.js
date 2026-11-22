@@ -686,13 +686,14 @@ function applyIntentOps(intent, ops, { at = "", conversation = "", ask = "", pri
       // 根：立时标过、此刻也没有谁以它为前提的（降成别项前提的不再算根，原问留着，哪天又成了根再用）。守也记着原问，但守不是根
       const rooted = !!node.root && !node.keep && !intentDependents(next, id).length,
         // 记改了的那一样：说法没动、只改了验收或情形的，照旧写说法，墨痕里看着像改了一回什么也没变
-        said = node.claim !== was.claim
-          ? node.claim
-          : node.check !== was.check
-            ? `验收 ${node.check}`
-            : (node.when || "") !== was.when
-              ? `情形 ${node.when || "（撤去）"}`
-              : `前提规则 ${node.any ? "任一成立" : "全部成立"}`;
+        said =
+          node.claim !== was.claim
+            ? node.claim
+            : node.check !== was.check
+              ? `验收 ${node.check}`
+              : (node.when || "") !== was.when
+                ? `情形 ${node.when || "（撤去）"}`
+                : `前提规则 ${node.any ? "任一成立" : "全部成立"}`;
       if (node.rev) log(`${rooted ? "改根" : "改意"} ${id}：${said}`);
       // 根改了说法：记下这一问，与原问一起附着，收尾时照着比
       if (node.rev && rooted && ask) node.root.later = String(ask).slice(0, 2000);
