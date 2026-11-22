@@ -14,7 +14,6 @@ test("图像拒绝缓存按实际模型端点隔离，改模型配置后仍尝�
   assert.equal(f.blindProfiles.has(f.blindProfileKey(changedUrl)), false);
 });
 
-
 test("思绪回传拒绝同样按模型端点隔离，不污染同一配置 ID 的新模型", () => {
   const f = load(["echolessProfiles", "blindProfileKey", "dropThoughtEcho", "thoughtEcho"]);
   const first = { id: "p1", api: "openai", source: "custom", baseUrl: "http://local.invalid/v1", model: "old-model" };
