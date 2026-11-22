@@ -27,10 +27,6 @@ jobs:
           node-version: 24
       - run: npm run unit
       - run: npm run check
-      # 临时诊断：输出 Prettier 精确差异；取得差异后恢复本工作流，再提交格式修复。
-      - run: |
-          npx --yes prettier@3.3.3 --write src/17-settings/50-mcp.js
-          git diff -- src/17-settings/50-mcp.js
       - run: npx --yes prettier@3.3.3 --check .
 
   # 最低版本另在 Windows 上跑一遍：engines 写的是 >=22，macOS 那份跑的也是 22，但 macOS 走不到沙箱、任务栏、
