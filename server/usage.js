@@ -11,19 +11,26 @@ const KINDS = ["main", "helper", "side", "review", "image"];
 
 /** @param {{ file: () => string }} options */
 module.exports = function createUsage({ file }) {
-  /** @returns {Record<string, Record<string, number>>} */
+  // 把批次回执和日用量写进同一次原子替换：桥接已记账、页面没收到 ACK 时，
+  // 页面重试同一个 batchId 不再重复入账。旧的只有 days 的文件仍能读。
   function read() {
     try {
-      const days = parseJsonText(fs.readFileSync(file(), "utf8"))?.days;
-      return days && typeof days === "object" ? days : {};
+      const saved = parseJsonText(fs.readFileSync(file(), "utf8")) || {};
+      return {
+        days: saved.days && typeof saved.days === "object" ? saved.days : {},
+        batches: Array.isArray(saved.batches) ? saved.batches : []
+      };
     } catch {
-      return {};
+      return { days: {}, batches: [] };
     }
   }
   // 读、加、写在同一拍里做完（中间没有 await），两页同时报也不会互相盖掉
   const handleAdd = jsonRoute(
     async body => {
-      const days = read();
+      const state = read();
+      const days = state.days;
+      const batchId = typeof body.batchId === "string" && /^[\w-]{1,100}$/.test(body.batchId) ? body.batchId : "";
+      if (batchId && state.batches.includes(batchId)) return { ok: true, duplicate: true };
       let changed = false;
       for (const { day, kind, amount } of Array.isArray(body.items) ? body.items : []) {
         const n = Math.round(Number(amount));
@@ -34,13 +41,15 @@ module.exports = function createUsage({ file }) {
       }
       if (changed) {
         fs.mkdirSync(path.dirname(file()), { recursive: true });
-        writeAtomic(file(), JSON.stringify({ 言: "用量", days }, null, 1));
+        // 只记最近的批次回执，防止长期运行下用量簿无限增长。
+        const batches = batchId ? [...state.batches.slice(-9999), batchId] : state.batches;
+        writeAtomic(file(), JSON.stringify({ 言: "用量", days, batches }, null, 1));
       }
       return { ok: true };
     },
     error => `用量未能记下：${errorText(error, 200)}`
   );
-  const handleRead = jsonRoute(async () => ({ days: read() }));
+  const handleRead = jsonRoute(async () => ({ days: read().days }));
   return {
     routes: {
       "POST /api/usage/add": handleAdd,

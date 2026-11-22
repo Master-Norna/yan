@@ -89,9 +89,12 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   }
   // 改名成功的才算拿到；已过了约簿这一关就可删，否则留凭据，重启也不会重新投递这一回。
   function take(ids) {
+    // 约簿损坏不应阻塞已经独立落盘的到点记录；无法核对簿时保留认领凭据。
+    // 领取前也核查磁盘：启动后被外部写坏的簿不能凭旧缓存裁定凭据可删。
+    if (!bookCorrupt && fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers)) bookCorrupt = true;
     sync();
     const taken = [],
-      open = new Set(book.timers.map(firedId));
+      open = bookCorrupt ? null : new Set(book.timers.map(firedId));
     for (const id of ids) {
       if (!/^[\w-]{1,40}$/.test(id)) continue;
       const file = firedFile(id),
@@ -100,13 +103,14 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
         const item = JSON.parse(fs.readFileSync(file, "utf8"));
         fs.renameSync(file, claimed);
         taken.push(item);
-        if (!open.has(id)) forgetClaim(claimed);
+        if (open && !open.has(id)) forgetClaim(claimed);
       } catch {}
     }
     return taken;
   }
   // 页面等着：有没被跳过的就当场回，没有就挂着，有新的到点或等满一分钟再回
   const handleWait = route(async (body, req, res) => {
+    // 只读到点收件箱无需依赖约簿可写，损坏时照常交付已投递消息。
     sync();
     const at = home(),
       skip = new Set(Array.isArray(body.skip) ? body.skip.map(String) : []),
@@ -134,15 +138,25 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   // ---------- 约好的时刻 ----------
   /** @type {Book} */
   let book = { seq: 0, timers: [] },
-    bookAt = "";
+    bookAt = "",
+    bookCorrupt = false;
+  const bookError = () => Error("约簿损坏或不可读：拒绝覆写约.json，请先修复或从备份恢复");
   /** @type {Map<string, number>} 只挪重试时刻，不改原约的 due */
   const retryAt = new Map();
   // 约.json 随存储根：换了存储位置，读那边的一份重排，不把这边的带过去盖掉它
   function sync() {
-    if (bookAt === bookFile()) return;
+    // 已知损坏时允许下一回重读，以便用户修好文件后无需重启桥接。
+    if (bookAt === bookFile() && !bookCorrupt) return;
     bookAt = bookFile();
     retryAt.clear();
     const saved = readJsonFile(bookAt);
+    bookCorrupt = fs.existsSync(bookAt) && !Array.isArray(saved?.timers);
+    if (bookCorrupt) {
+      book = { seq: 0, timers: [] };
+      clearTimeout(armed);
+      for (const wake of [...waiters]) wake();
+      return;
+    }
     book = Array.isArray(saved?.timers) ? { seq: Number(saved.seq) || 0, timers: saved.timers } : { seq: 0, timers: [] };
     if (Array.isArray(saved?.timers)) {
       // 桥接也可能恰好退在约簿已写、旧凭据还没清的时候。只在确实读到了约簿时裁定。
@@ -154,8 +168,17 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     for (const wake of [...waiters]) wake();
   }
   let armed = null;
+  function requireBook() {
+    sync();
+    if (bookCorrupt) throw bookError();
+  }
   /** @param {Book} next @param {Timer[]} retired */
   function save(next, retired = []) {
+    // 即使读入后有人在磁盘上改坏约簿，也不能静默把错误当作一份空簿覆盖。
+    if (bookCorrupt || (fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers))) {
+      bookCorrupt = true; // 修复原件后下一次必须重新读取，不得继续沿用旧内存簿。
+      throw bookError();
+    }
     fs.mkdirSync(home(), { recursive: true });
     writeAtomic(bookFile(), JSON.stringify({ 言: "候 · 约好的时刻", ...next }, null, 1));
     book = next;
@@ -224,7 +247,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     return timer;
   }
   const handleSet = route(body => {
-    sync();
+    requireBook();
     const to = String(body.to || ""),
       due = Number(body.due),
       every = Number(body.every) || 0;
@@ -247,7 +270,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   });
   // 取消簿上还排着的约定（包括周期约的下一回），不撤已经落盘的到点记录
   const handleCancel = route(body => {
-    sync();
+    requireBook();
     const id = String(body.id || ""),
       timer = book.timers.find(item => item.id === id && (!body.to || item.to === body.to));
     const live = timer && liveTimer(timer);
@@ -257,7 +280,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     return { found: true, timer: live };
   });
   const handleList = route(() => {
-    sync();
+    requireBook();
     return { timers: book.timers.map(liveTimer).filter(Boolean) };
   });
   sync();

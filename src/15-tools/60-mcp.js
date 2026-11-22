@@ -293,9 +293,13 @@ async function runMcpTool(step, server, tool, args, ctx) {
     const denied = flag && (await reviewGate(step, args, ctx, flag));
     if (denied) return denied;
   }
-  const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal).finally(
-    stageWatch(tool, args, ctx.conversation?.id)
-  );
+  const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal)
+    .catch(error => {
+      // 桥接按当前清单拒绝了旧工具：让下一问重新拉清单，不持续展示过期工具。
+      if (error.data?.toolsChanged) mcp.key = "";
+      throw error;
+    })
+    .finally(stageWatch(tool, args, ctx.conversation?.id));
   // 服务说工具变了：下一问前重拉
   if (data.toolsChanged) mcp.key = "";
   const { names, images } = await mcpResultImages(step, data.result),
@@ -376,26 +380,18 @@ function mcpResultText(result, names = []) {
   if (!parts.length && result.structuredContent) parts.push(JSON.stringify(result.structuredContent, null, 2));
   return parts.join("\n\n") || t("（无输出）");
 }
-// 系统提示里 mcp.hint 那一段的值：交给模型的工具里有哪几个服务的，就附上那几个服务的用法——用户在配置里写的 note 在前
-//（模型无从自知的约定，如「我说打开浏览器即指这个」），服务握手时自带的 instructions 在后；一个都没有就不带这段
+// 系统提示只带用户在设置里明确写的 MCP note。服务端握手返回的 instructions 是不可信外部数据，
+// 不能经 mcp.hint 晋升为系统指令；工具自己的描述仍可作为低信任的工具元数据交给模型。
 /** @param {Set<string>} names @param {Preset|null} preset */
 function mcpHintVars(names, preset) {
   const lazy = names.has("mcp_call") ? mcpLazyServers(preset) : [],
     configs = mcpConfigs(),
-    usage = (server, state) =>
-      [
-        String(configs[server]?.note || "").trim(),
-        String(state.instructions || "")
-          .trim()
-          .slice(0, 1500)
-      ]
-        .filter(Boolean)
-        .join("\n");
+    usage = server => String(configs[server]?.note || "").trim();
   const servers = Object.entries(mcp.servers).filter(
     ([server, state]) =>
       state.ok &&
-      usage(server, state) &&
+      usage(server) &&
       (mcp.lazy.includes(server) ? lazy.includes(server) : [...TOOLS.values()].some(tool => tool.server === server && names.has(tool.name)))
   );
-  return servers.length ? { servers: servers.map(([server, state]) => `【${server}】${usage(server, state)}`).join("\n") } : null;
+  return servers.length ? { servers: servers.map(([server, state]) => `【${server}】${usage(server)}`).join("\n") } : null;
 }

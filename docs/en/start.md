@@ -38,7 +38,7 @@ If an older bridge is still running on the same port after you update the portab
 
 ## Packaging
 
-Run `npm run pack` in the repository. It builds `dist/yan-<version>-win-x64.zip` or `dist/yan-<version>-mac-arm64.zip` for the host automatically. Windows uses the system's `curl.exe`, `tar.exe` and .NET Framework 4 `csc.exe`; the launcher source is `pack/launcher.cs` and its icon `pack/icon.ico` is drawn from `web/icon.svg`. macOS uses the system's `ditto` to make the ZIP and preserve executable permissions and symlinks.
+The working tree must be clean, including untracked files; commit or stash your changes first so uncommitted content cannot enter a release package. Run `npm run pack` in the repository. It builds `dist/yan-<version>-win-x64.zip` or `dist/yan-<version>-mac-arm64.zip` for the host automatically. Windows uses the system's `curl.exe`, `tar.exe` and .NET Framework 4 `csc.exe`; the launcher source is `pack/launcher.cs` and its icon `pack/icon.ico` is drawn from `web/icon.svg`. macOS uses the system's `ditto` to make the ZIP and preserve executable permissions and symlinks.
 
 The Node version is set in `pack/pack.mjs`; the Node archive is used only after it matches the nodejs.org checksum. After changing Node versions, run the whole test suite with the bundled Node. See [Additional validation](development.md#additional-validation) for the smoke tests and the separate Finder launch check.
 

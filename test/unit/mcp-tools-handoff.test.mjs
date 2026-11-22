@@ -85,7 +85,7 @@ test("调用期间收到 list_changed：下一问 /api/mcp/list 交回新表，�
       first.servers.fake.tools.map(tool => tool.name),
       ["old_tool"]
     );
-    const called = await post("/api/mcp/call", { server: "fake", config: servers.fake, tool: "some_tool", arguments: {} });
+    const called = await post("/api/mcp/call", { server: "fake", config: servers.fake, tool: "old_tool", arguments: {} });
     assert.equal(called.toolsChanged, true, "页面据此使缓存失效");
     const again = await post("/api/mcp/list", { servers });
     assert.deepEqual(
@@ -134,6 +134,12 @@ test("内置游目那样只递几项选择：补图用实际起连接的配置",
       tool: "browser_take_screenshot",
       arguments: { filename: "shot.png" }
     };
+    await post("/api/mcp/list", {
+      servers: {
+        游目: body.config,
+        完整: { command: "node", cwd: dir }
+      }
+    });
     const builtin = await post("/api/mcp/call", body);
     assert.equal(builtin.result.content.filter(item => item.type === "image").length, 1, "内置游目的命名截图补成了图片结果");
     const full = await post("/api/mcp/call", { ...body, server: "完整", config: { command: "node", cwd: dir } });
@@ -182,6 +188,9 @@ test("补图只读工作目录与显式 output-dir，忽略越界和链接逃逸
   };
   const { post, close } = await serve();
   try {
+    await post("/api/mcp/list", {
+      servers: { images: { command: "node", cwd: work, args: ["--output-dir", output] } }
+    });
     const result = await post("/api/mcp/call", {
       server: "images",
       config: { command: "node", cwd: work, args: ["--output-dir", output] },
@@ -209,4 +218,88 @@ test("工具清单：服务重复返回分页游标时停止，而非无限请�
   };
   await assert.rejects(() => client.listTools(), /分页游标重复/);
   assert.deepEqual(cursors, ["", "repeat"]);
+});
+
+test("工具清单持续返回不同游标时，按最大页数拒绝无限枚举", async () => {
+  const client = new McpClient({ name: "x", config: {}, version: "t", toolEnv: env => env });
+  let pages = 0;
+  client.request = async () => ({ tools: [{ name: "read" }], nextCursor: "page-" + ++pages });
+  await assert.rejects(() => client.listTools(), /分页超过上限/);
+  assert.equal(pages, 50);
+});
+
+test("工具总量及清单结构异常时拒绝接入", async () => {
+  const client = new McpClient({ name: "x", config: {}, version: "t", toolEnv: env => env });
+  client.request = async () => ({ tools: Array.from({ length: 1001 }, (_, i) => ({ name: "tool" + i })) });
+  await assert.rejects(() => client.listTools(), /工具数量超过上限/);
+  client.request = async () => ({ other: [] });
+  await assert.rejects(() => client.listTools(), /缺少 tools 数组/);
+});
+
+test("调用只接受已登记服务、当前配置和工具清单，移除服务后不能继续调用", async () => {
+  const called = [];
+  McpClient.prototype.connect = async function () {
+    this.tools = [{ name: "read" }];
+    this.server = {};
+    this.instructions = "";
+    return this;
+  };
+  McpClient.prototype.call = async function (tool) {
+    called.push(tool);
+    return { content: [{ type: "text", text: "ok" }] };
+  };
+  const { post, close } = await serve();
+  const config = { command: "node" };
+  const call = (server, tool = "read", passed = config) => post("/api/mcp/call", { server, config: passed, tool, arguments: {} });
+  try {
+    const unregistered = await call("fake");
+    assert.equal(unregistered.status, 400, "未登记的服务不能临时起 MCP 进程");
+    assert.equal(unregistered.toolsChanged, true, "桥接重启或尚未登记时要求页面重拉清单");
+    assert.equal((await post("/api/mcp/list", { servers: { fake: config } })).status, 200);
+    assert.equal((await call("fake", "read", { command: "other" })).status, 400, "不可替换已登记的连接配置");
+    const removed = await call("fake", "write");
+    assert.equal(removed.status, 409, "不可调用没有出现在清单中的工具");
+    assert.equal(removed.toolsChanged, true, "通知页面下一问刷新工具清单");
+    assert.equal((await call("fake")).status, 200, "清单里的工具仍正常工作");
+    assert.deepEqual(called, ["read"], "拒绝的调用不应进入 MCP 客户端");
+    assert.equal((await post("/api/mcp/list", { servers: {} })).status, 200);
+    const afterRemoval = await call("fake");
+    assert.equal(afterRemoval.status, 400, "已移除的服务不能继续调用");
+    assert.equal(afterRemoval.toolsChanged, true, "已移除的服务也要求页面清理旧清单");
+  } finally {
+    await close();
+    restore();
+  }
+});
+
+test("已登记的 MCP 断线后仍可重连；清单失效的拒绝会提醒页面刷新", async () => {
+  let connects = 0;
+  McpClient.prototype.connect = async function () {
+    globalThis.__mcpTestClient = this;
+    connects++;
+    this.closed = false;
+    this.tools = [{ name: connects === 1 ? "old_tool" : "new_tool" }];
+    this.server = {};
+    this.instructions = "";
+    return this;
+  };
+  McpClient.prototype.call = async function () {
+    return { content: [{ type: "text", text: "ok" }] };
+  };
+  const { post, close } = await serve();
+  const config = { command: "node" };
+  try {
+    await post("/api/mcp/list", { servers: { fake: config } });
+    assert.equal((await post("/api/mcp/call", { server: "fake", config, tool: "old_tool" })).status, 200);
+    const old = poolClient();
+    old.closed = true;
+    const invalid = await post("/api/mcp/call", { server: "fake", config, tool: "old_tool" });
+    assert.equal(connects, 2, "断线后按原登记配置重连");
+    assert.equal(invalid.status, 409, "旧工具不能在新连接上调用");
+    assert.equal(invalid.toolsChanged, true, "页面需重新载入工具清单");
+    assert.equal((await post("/api/mcp/call", { server: "fake", config, tool: "new_tool" })).status, 200);
+  } finally {
+    await close();
+    restore();
+  }
 });

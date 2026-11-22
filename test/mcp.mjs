@@ -72,7 +72,7 @@ await evalJs(`document.querySelector('#approvalBar [data-approve="run"]').click(
 await waitFor(`${lastAssistant}?.dataset.status === "complete"`, 60000);
 
 const reply = await evalJs(`${lastAssistant}.textContent`);
-check("the server's own instructions ride along in the system prompt", /hint:true/.test(reply), reply.slice(0, 300));
+check("untrusted server instructions never enter the system prompt", /hint:false/.test(reply), reply.slice(0, 300));
 check("the user's note for a server rides along too, under that server", /note:true/.test(reply), reply.slice(0, 300));
 check(
   "small servers are handed over tool by tool; the big one only as a directory",

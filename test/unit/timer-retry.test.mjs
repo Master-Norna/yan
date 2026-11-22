@@ -20,7 +20,13 @@ function fixture(t) {
     t.mock.timers.reset();
     t.mock.timers.enable({ apis: ["Date", "setTimeout"], now });
     const { routes } = createTimers({ home: () => home, known: () => true, route: handle => handle });
-    return (action, body = {}) => routes[`POST /api/timer/${action}`](body);
+    // 这些路由都要看一眼没写完的响应（见 server/http.js 的 requestSignal）：给一个不会断的替身
+    const response = () => {
+      const res = { destroyed: false, writableEnded: false };
+      res.on = res.once = res.removeListener = () => res;
+      return res;
+    };
+    return (action, body = {}) => routes[`POST /api/timer/${action}`](body, null, response());
   };
   const names = () => (fs.existsSync(outbox) ? fs.readdirSync(outbox) : []);
   const pending = () =>
@@ -218,4 +224,74 @@ test("设置和取消写簿失败：不消耗编号、不改变活排期，失�
     pending().map(item => item.timer.id),
     [timer.id]
   );
+});
+
+test("约簿损坏时不当成空簿覆盖，修好文件后可恢复使用", t => {
+  const { boot, bookFile, tick } = fixture(t);
+  const bad = "{bad json";
+  fs.writeFileSync(bookFile, bad);
+  const call = boot();
+  assert.throws(() => call("list"), /约簿损坏/);
+  assert.throws(() => call("set", { to: "c", due: start + 100 }), /约簿损坏/);
+  assert.equal(fs.readFileSync(bookFile, "utf8"), bad, "损坏原件必须保留给人工恢复");
+  fs.writeFileSync(bookFile, JSON.stringify({ seq: 0, timers: [] }));
+  assert.deepEqual(call("list").timers, []);
+  call("set", { to: "c", due: start + 100 });
+  tick(100);
+  assert.equal(call("take", { ids: [] }).fired.length, 0);
+});
+
+test("桥接读入正常约簿后被外部改坏，下一次保存也拒绝覆盖", t => {
+  const { boot, bookFile } = fixture(t);
+  const call = boot();
+  call("set", { to: "c", due: start + 1000 });
+  fs.writeFileSync(bookFile, "{truncated");
+  assert.throws(() => call("set", { to: "c", due: start + 2000 }), /约簿损坏/);
+  assert.equal(fs.readFileSync(bookFile, "utf8"), "{truncated");
+  const restored = { seq: 10, timers: [{ id: "restored-id", to: "c", due: start + 4000 }] };
+  fs.writeFileSync(bookFile, JSON.stringify(restored));
+  assert.deepEqual(call("list").timers, restored.timers, "修复磁盘簿后应读取已恢复的排期");
+  call("set", { to: "c", due: start + 5000 });
+  assert.equal(JSON.parse(fs.readFileSync(bookFile, "utf8")).timers[0].id, "restored-id", "不得用旧缓存覆盖恢复出的约");
+});
+
+test("合法 JSON 但 timers 不是数组时也要保留损坏约簿", t => {
+  const { boot, bookFile } = fixture(t);
+  const invalid = JSON.stringify({ seq: 7, timers: { unexpected: true } });
+  fs.writeFileSync(bookFile, invalid);
+  const call = boot();
+  assert.throws(() => call("list"), /约簿损坏/);
+  assert.throws(() => call("cancel", { id: "t1" }), /约簿损坏/);
+  assert.equal(fs.readFileSync(bookFile, "utf8"), invalid);
+});
+
+test("约簿损坏仍可领取已经投递的消息，并保留认领凭据直到约簿恢复", async t => {
+  const { boot, bookFile, tick, pending, names } = fixture(t);
+  const call = boot();
+  call("set", { to: "c", due: start + 100, every: 1000 });
+  tick(100);
+  const [notice] = pending();
+  assert.ok(notice);
+  fs.writeFileSync(bookFile, "{broken");
+  assert.throws(() => call("set", { to: "c", due: start + 2000 }), /约簿损坏/);
+  const waited = await call("wait", {});
+  assert.deepEqual(waited.fired, [notice], "约簿损坏时 wait 仍能读到落盘的通知");
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
+  assert.ok(names().includes(`${notice.id}.json.taken`), "簿损坏时不能丢弃可能用于去重的认领凭据");
+  assert.equal(fs.readFileSync(bookFile, "utf8"), "{broken");
+  // 恢复簿后重新核对，才可清理已退休的凭据。
+  fs.writeFileSync(bookFile, JSON.stringify({ seq: 1, timers: [] }));
+  assert.deepEqual(call("list").timers, []);
+  assert.ok(!names().includes(`${notice.id}.json.taken`));
+});
+
+test("刚启动时约簿正常、随后无写操作直接损坏：领取仍保留去重凭据", t => {
+  const { boot, bookFile, tick, pending, names } = fixture(t);
+  const call = boot();
+  call("set", { to: "c", due: start + 100, every: 1000 });
+  tick(100);
+  const [notice] = pending();
+  fs.writeFileSync(bookFile, "{external damage");
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
+  assert.ok(names().includes(`${notice.id}.json.taken`), "旧内存簿不能决定已损坏约簿的回执是否可清");
 });
