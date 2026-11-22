@@ -3,5 +3,10 @@ import { execFileSync } from "node:child_process";
 
 export function assertCleanWorkingTree(root) {
   const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim();
-  if (dirty) throw Error("工作区有未提交或未跟踪的改动，拒绝生成正式便携包；请先提交或清理改动");
+  if (dirty) {
+    const changed = dirty.split(/\r?\n/);
+    const preview = changed.slice(0, 8).join("\n");
+    const more = changed.length > 8 ? `\n…另有 ${changed.length - 8} 项` : "";
+    throw Error(`工作区有 ${changed.length} 项未提交或未跟踪的改动，拒绝生成正式便携包；请先提交或清理：\n${preview}${more}`);
+  }
 }
