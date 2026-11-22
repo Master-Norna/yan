@@ -117,7 +117,12 @@ function asIntent(raw) {
         ? raw.log
             .filter(entry => entry && typeof entry === "object")
             .slice(-INTENT_LOG_LIMIT)
-            .map(entry => ({ ...entry, at: String(entry.at || ""), conversation: String(entry.conversation || ""), text: String(entry.text || "") }))
+            .map(entry => ({
+              ...entry,
+              at: String(entry.at || ""),
+              conversation: String(entry.conversation || ""),
+              text: String(entry.text || "")
+            }))
         : [],
       ...(typeof raw?.updated === "string" ? { updated: raw.updated } : {})
     };
