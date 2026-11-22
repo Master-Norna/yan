@@ -239,11 +239,44 @@ test("调用只接受已登记服务、当前配置和工具清单，移除服�
     assert.equal((await call("fake")).status, 400, "未登记的服务不能临时起 MCP 进程");
     assert.equal((await post("/api/mcp/list", { servers: { fake: config } })).status, 200);
     assert.equal((await call("fake", "read", { command: "other" })).status, 400, "不可替换已登记的连接配置");
-    assert.equal((await call("fake", "write")).status, 400, "不可调用没有出现在清单中的工具");
+    const removed = await call("fake", "write");
+    assert.equal(removed.status, 409, "不可调用没有出现在清单中的工具");
+    assert.equal(removed.toolsChanged, true, "通知页面下一问刷新工具清单");
     assert.equal((await call("fake")).status, 200, "清单里的工具仍正常工作");
     assert.deepEqual(called, ["read"], "拒绝的调用不应进入 MCP 客户端");
     assert.equal((await post("/api/mcp/list", { servers: {} })).status, 200);
     assert.equal((await call("fake")).status, 400, "已移除的服务不能继续调用");
+  } finally {
+    await close();
+    restore();
+  }
+});
+
+test("已登记的 MCP 断线后仍可重连；清单失效的拒绝会提醒页面刷新", async () => {
+  let connects = 0;
+  McpClient.prototype.connect = async function () {
+    connects++;
+    this.closed = false;
+    this.tools = [{ name: connects === 1 ? "old_tool" : "new_tool" }];
+    this.server = {};
+    this.instructions = "";
+    return this;
+  };
+  McpClient.prototype.call = async function () {
+    return { content: [{ type: "text", text: "ok" }] };
+  };
+  const { post, close } = await serve();
+  const config = { command: "node" };
+  try {
+    await post("/api/mcp/list", { servers: { fake: config } });
+    assert.equal((await post("/api/mcp/call", { server: "fake", config, tool: "old_tool" })).status, 200);
+    const old = poolClient();
+    old.closed = true;
+    const invalid = await post("/api/mcp/call", { server: "fake", config, tool: "old_tool" });
+    assert.equal(connects, 2, "断线后按原登记配置重连");
+    assert.equal(invalid.status, 409, "旧工具不能在新连接上调用");
+    assert.equal(invalid.toolsChanged, true, "页面需重新载入工具清单");
+    assert.equal((await post("/api/mcp/call", { server: "fake", config, tool: "new_tool" })).status, 200);
   } finally {
     await close();
     restore();
