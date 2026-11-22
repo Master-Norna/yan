@@ -39,7 +39,9 @@ function mcpCardHtml(name) {
         })
         .join("")
     : "";
-  const tools = state?.ok ? `<details class="card-more"><summary>${t(`工具`)}</summary><div class="card-chips">${chips}</div></details>` : "";
+  const tools = state?.ok
+    ? `<details class="card-more"><summary>${t(`工具`)}</summary><div class="card-chips">${chips}</div></details>`
+    : "";
   return `<div class="card" data-mcp="${escapeHtml(name)}"><div class="card-head"><span class="card-name">${escapeHtml(name)}</span><span class="card-tag">${config.command ? t("本机") : t("远端")}</span><span class="card-state ${kind}" title="${escapeHtml(text)}">${escapeHtml(text)}</span><span class="card-actions"><button type="button" class="outline-btn" data-mcp-action="edit">${t(`编辑`)}</button><button type="button" class="outline-btn" data-mcp-action="toggle">${config.disabled ? t("启用") : t("停用")}</button>${config.disabled ? "" : `<button type="button" class="outline-btn" data-mcp-action="restart">${t(`重连`)}</button>`}</span></div><div class="card-sub" title="${escapeHtml(where)}">${escapeHtml(where)}</div>${tools}</div>`;
 }
 // 就地改的表单：本机与远端两种接法各有几栏；键值对一行一个；配置里表单不认得的字段原样留着
