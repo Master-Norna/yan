@@ -8,7 +8,7 @@ const compactingIds = new Set();
 /** @param {Conversation} c */
 function compactable(c, before = null) {
   if (!c || (!before && (conversationRunning(c.id) || runningElsewhere(c.id)))) return [];
-  const contextIndex = c.messages.map(m => m.role).lastIndexOf("context"),
+  const contextIndex = lastContextIndex(c.messages),
     until = before ? c.messages.indexOf(before) : c.messages.length;
   return c.messages
     .slice(contextIndex + 1, Math.max(contextIndex + 1, until))

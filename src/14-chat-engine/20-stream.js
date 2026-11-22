@@ -56,7 +56,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       // 只取这一答之前的：在中间某一答上点「继续生成」时，它后面的问答不能混进来
       const at = conversation.messages.findIndex(m => m.id === assistant.id),
         before = at < 0 ? conversation.messages : conversation.messages.slice(0, at),
-        contextIndex = before.map(m => m.role).lastIndexOf("context");
+        contextIndex = lastContextIndex(before);
       const source = before.slice(contextIndex + 1).filter(
         m =>
           m.id !== assistant.id &&
@@ -65,7 +65,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
           // 刚发出就停下、一个字一步都没有的空答：不进历史（有的兼容接口拒收空的 assistant）
           !(m.role === "assistant" && !String(m.content || "").trim() && !m.steps?.length)
       );
-      lastUserId = source.filter(m => m.role === "user").at(-1)?.id;
+      lastUserId = source.findLast(m => m.role === "user")?.id;
       const head = summaryMessages(contextIndex >= 0 ? before[contextIndex] : null);
       head.push(...(await historyForApi(source, lastUserId, budget)));
       // 这一问的首段往后各问里一字不差，标作缓存点：下一问时连它在内的整段历史都从缓存读（桥接只给 Claude 留着这个标，别家去掉）。
@@ -82,12 +82,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       }
       // 续写：已写的话连同途中递进来的补言、回报照原处排上（与下一问装上一答同一个写法，见 answerParts），
       // 做过的步骤也得让它知道（另发一句「继续」时上一答的行迹本就随着去），不然从头再做一遍。只做了几步、一个字没写就断的也一样
-      if (resumed) {
-        const parts = (await answerForApi(resumed, budget)).filter(part => part.role !== "assistant" || part.content),
-          trail = stepsDigest(resumed);
-        if (parts.length || trail)
-          head.push(...parts, { role: "user", content: `${trail ? `${trail}\n\n` : ""}${prompt("assistant.resume")}` });
-      }
+      if (resumed) head.push(...(await resumeForApi(resumed, budget)));
       return head;
     };
     await Promise.all([loadLedger(conversation, job.controller.signal), loadIntent(conversation, job.controller.signal)]);

@@ -157,7 +157,7 @@ function restorePlace() {
 /** @param {Conversation} c */
 function foldCompacted(c) {
   const host = $("#messages"),
-    index = c.messages.map(m => (m.role === "context" && m.summary ? 1 : 0)).lastIndexOf(1);
+    index = lastContextIndex(c.messages, { withSummary: true });
   const before = new Set(index > 0 ? c.messages.slice(0, index).map(m => m.id) : []);
   for (const node of host.children) {
     const id = node.dataset.message;

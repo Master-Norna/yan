@@ -1,6 +1,11 @@
 // 言 · 对话引擎 · 历史：每一问送给模型的历史怎么装（附件、引文、上一答的行迹、补言）
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 const HISTORY_TEXT_CHARS = 3000;
+// 旧版无摘要的分隔也截断发给模型的历史；页面只折叠确有摘要的前文。
+/** @param {Message[]} messages */
+function lastContextIndex(messages, { withSummary = false } = {}) {
+  return messages.findLastIndex(m => m.role === "context" && (!withSummary || !!m.summary));
+}
 function attachmentExcerpt(text, name, label) {
   const value = String(text || "");
   return value.length > HISTORY_TEXT_CHARS
@@ -103,6 +108,14 @@ function answerParts(message, budget = inlineTextBudget()) {
 /** 一答装成送给接口的几条消息 @param {{ content?: string, steps?: Step[] }} message */
 function answerForApi(message, budget = inlineTextBudget()) {
   return Promise.all(answerParts(message, budget).map(part => (part.role === "assistant" ? part : part.entry)));
+}
+// 续写只重放这一答已写的部分：途中递来的话照原位排，做过的步骤随「继续」附上。
+/** @param {{ content?: string, steps?: Step[] }} message */
+async function resumeForApi(message, budget = inlineTextBudget()) {
+  const parts = (await answerForApi(message, budget)).filter(part => part.role !== "assistant" || part.content),
+    trail = stepsDigest(message);
+  if (parts.length || trail) parts.push({ role: "user", content: `${trail ? `${trail}\n\n` : ""}${prompt("assistant.resume")}` });
+  return parts;
 }
 /** 一条消息里给模型读的字（压缩转写、计数用） */
 function entryText(entry) {

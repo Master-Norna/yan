@@ -527,11 +527,9 @@ async function runDelegate(step, args, ctx, profile, past, progress, resume = fa
     // 续上：已写的话与传话照原处排上，做过的步骤也让它知道，再请它接着做。
     if (resume) {
       const before = { content: sub.content, steps: [...sub.steps] },
-        parts = (await answerForApi(before)).filter(part => part.role !== "assistant" || part.content),
-        trail = stepsDigest(before);
+        parts = await resumeForApi(before);
       box.controller.signal.throwIfAborted();
-      if (parts.length || trail)
-        history.push(...parts, { role: "user", content: `${trail ? `${trail}\n\n` : ""}${prompt("assistant.resume")}` });
+      history.push(...parts);
       sub.content = paragraphBreak(sub.content);
     }
     overrides.head = history.length;

@@ -6,7 +6,17 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { load } from "./harness.mjs";
 
-const f = load(["historyForApi", "answerParts", "answerForApi", "stepsDigest", "keptImageQuestion", "deliverSupplements", "PROMPTS"]);
+const f = load([
+  "historyForApi",
+  "lastContextIndex",
+  "answerParts",
+  "answerForApi",
+  "resumeForApi",
+  "stepsDigest",
+  "keptImageQuestion",
+  "deliverSupplements",
+  "PROMPTS"
+]);
 {
   const win = { YAN_PROMPTS: {} };
   const req = createRequire(import.meta.url);
@@ -14,6 +24,39 @@ const f = load(["historyForApi", "answerParts", "answerForApi", "stepsDigest", "
   Object.assign(f.PROMPTS, win.YAN_PROMPTS);
 }
 const text = content => (typeof content === "string" ? content : content[0].text);
+
+test("旧硬切只截断发给模型的历史，页面仍折在最后一次有摘要的分隔", () => {
+  const messages = [
+    { role: "user" },
+    { role: "context", summary: "摘要" },
+    { role: "user" },
+    { role: "context", summary: "" },
+    { role: "assistant", summary: "不是分隔" }
+  ];
+  assert.equal(f.lastContextIndex(messages), 3);
+  assert.equal(f.lastContextIndex(messages, { withSummary: true }), 1);
+  assert.equal(f.lastContextIndex([{ role: "context" }], { withSummary: true }), -1);
+  assert.equal(f.lastContextIndex([]), -1);
+});
+
+test("续写原位重放回报，行迹附在继续指令上，不送空答", async () => {
+  const work = { name: "edit_file", status: "done", title: "a.js", result: "已改" },
+    report = { name: "relay_note", status: "done", at: 3, report: "收到回报" };
+  assert.deepEqual(await f.resumeForApi({ content: "" }), []);
+  const onlyWork = await f.resumeForApi({ content: "", steps: [work] });
+  assert.deepEqual(
+    onlyWork.map(m => m.role),
+    ["user"]
+  );
+  assert.match(onlyWork[0].content, /^［行迹］.*a\.js.*\n\n.+/s);
+  const resumed = await f.resumeForApi({ content: "先做。后写。", steps: [work, report] }, 6000);
+  assert.deepEqual(resumed, [
+    { role: "assistant", content: "先做。" },
+    { role: "user", content: "收到回报" },
+    { role: "assistant", content: "后写。" },
+    onlyWork[0]
+  ]);
+});
 
 test("上一答里的「不用了我来」留在上一答里，不冠到下一问头上", async () => {
   const before = "先改了 a.js。";
