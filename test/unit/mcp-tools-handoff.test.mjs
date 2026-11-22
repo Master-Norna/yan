@@ -134,6 +134,12 @@ test("内置游目那样只递几项选择：补图用实际起连接的配置",
       tool: "browser_take_screenshot",
       arguments: { filename: "shot.png" }
     };
+    await post("/api/mcp/list", {
+      servers: {
+        "游目": body.config,
+        "完整": { command: "node", cwd: dir }
+      }
+    });
     const builtin = await post("/api/mcp/call", body);
     assert.equal(builtin.result.content.filter(item => item.type === "image").length, 1, "内置游目的命名截图补成了图片结果");
     const full = await post("/api/mcp/call", { ...body, server: "完整", config: { command: "node", cwd: dir } });
@@ -182,6 +188,9 @@ test("补图只读工作目录与显式 output-dir，忽略越界和链接逃逸
   };
   const { post, close } = await serve();
   try {
+    await post("/api/mcp/list", {
+      servers: { images: { command: "node", cwd: work, args: ["--output-dir", output] } }
+    });
     const result = await post("/api/mcp/call", {
       server: "images",
       config: { command: "node", cwd: work, args: ["--output-dir", output] },
@@ -209,4 +218,35 @@ test("工具清单：服务重复返回分页游标时停止，而非无限请�
   };
   await assert.rejects(() => client.listTools(), /分页游标重复/);
   assert.deepEqual(cursors, ["", "repeat"]);
+});
+
+test("调用只接受已登记服务、当前配置和工具清单，移除服务后不能继续调用", async () => {
+  const called = [];
+  McpClient.prototype.connect = async function () {
+    this.tools = [{ name: "read" }];
+    this.server = {};
+    this.instructions = "";
+    return this;
+  };
+  McpClient.prototype.call = async function (tool) {
+    called.push(tool);
+    return { content: [{ type: "text", text: "ok" }] };
+  };
+  const { post, close } = await serve();
+  const config = { command: "node" };
+  const call = (server, tool = "read", passed = config) =>
+    post("/api/mcp/call", { server, config: passed, tool, arguments: {} });
+  try {
+    assert.equal((await call("fake")).status, 400, "未登记的服务不能临时起 MCP 进程");
+    assert.equal((await post("/api/mcp/list", { servers: { fake: config } })).status, 200);
+    assert.equal((await call("fake", "read", { command: "other" })).status, 400, "不可替换已登记的连接配置");
+    assert.equal((await call("fake", "write")).status, 400, "不可调用没有出现在清单中的工具");
+    assert.equal((await call("fake")).status, 200, "清单里的工具仍正常工作");
+    assert.deepEqual(called, ["read"], "拒绝的调用不应进入 MCP 客户端");
+    assert.equal((await post("/api/mcp/list", { servers: {} })).status, 200);
+    assert.equal((await call("fake")).status, 400, "已移除的服务不能继续调用");
+  } finally {
+    await close();
+    restore();
+  }
 });
