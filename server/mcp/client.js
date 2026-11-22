@@ -97,10 +97,19 @@ class McpClient {
   request(method, params, timeout, id = nextId++) {
     if (this.closed) return Promise.reject(Error(this.error || "连接已断开"));
     return new Promise((resolve, reject) => {
-      const entry = { resolve, reject, timeout, timer: null };
+      // 进度能延长空闲等待，但不能让工具靠持续刷进度永久占住请求。
+      const deadline = Date.now() + (method === "tools/call" ? timeout * 2 : timeout);
+      const entry = { resolve, reject, timeout, timer: null, lastProgressAt: null };
       entry.arm = () => {
         clearTimeout(entry.timer);
-        entry.timer = setTimeout(() => this.settle(id, Error(`${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`)), timeout);
+        const remaining = Math.max(1, Math.min(timeout, deadline - Date.now()));
+        entry.timer = setTimeout(() => {
+          const absolute = method === "tools/call" && Date.now() >= deadline;
+          const reason = absolute
+            ? `${method} 超时：已达绝对时限（${Math.round((timeout * 2) / 1000)} 秒；距上次进度 ${entry.lastProgressAt === null ? "无记录" : `${Math.round((Date.now() - entry.lastProgressAt) / 1000)} 秒`}）`
+            : `${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`;
+          this.settle(id, Error(reason));
+        }, remaining);
       };
       entry.arm();
       this.pending.set(id, entry);
@@ -114,7 +123,7 @@ class McpClient {
     clearTimeout(entry.timer);
     if (error) {
       // 这一问不再等了（超时、用户停止、连接已判死）：传输那头别再读——事件流可能还在往外吐，读完也没人要
-      this.transport?.abort?.(id);
+      if (typeof this.transport?.abort === "function") this.transport.abort(id);
       entry.reject(error);
     } else entry.resolve(result);
   }
@@ -138,7 +147,13 @@ class McpClient {
     }
     // 通知：工具变了下次调用前重拉；报进度的给那次调用续命
     if (message.method === "notifications/tools/list_changed") this.toolsChanged = true;
-    else if (message.method === "notifications/progress") this.pending.get(message.params?.progressToken)?.arm();
+    else if (message.method === "notifications/progress") {
+      const entry = this.pending.get(message.params?.progressToken);
+      if (entry) {
+        entry.lastProgressAt = Date.now();
+        entry.arm();
+      }
+    }
   }
   lost(error) {
     if (this.closed) return;

@@ -121,3 +121,32 @@ test("出站请求都带标记：MCP 服务借跳转盲打桥接受信接口的�
   assert.ok(seen.length >= 4, `出口没走全：${seen.map(item => item.url).join(" ")}`);
   for (const item of seen) assert.equal(item.headers[OUTBOUND_MARK], "1", `${item.url} 漏了标记`);
 });
+
+test("MCP 工具持续发进度也不能跨过绝对超时上限", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_700_000_000_000 });
+  const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+  let id;
+  client.transport = {
+    send: async message => {
+      id = message.id;
+    },
+    abort() {}
+  };
+  const pending = client.request("tools/call", {}, 30);
+  for (let i = 0; i < 5; i++) {
+    t.mock.timers.tick(10);
+    client.receive({ method: "notifications/progress", params: { progressToken: id } });
+  }
+  t.mock.timers.tick(10);
+  await assert.rejects(pending, /超时：已达绝对时限.*距上次进度 0 秒/, "持续进度应按绝对上限终止，并注明最近进度");
+  assert.equal(client.pending.size, 0);
+});
+
+test("旧式 SSE transport 的 abort 是 AbortController，超时不得把它当函数调用", async () => {
+  const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+  const transport = { abort: new AbortController(), send: async () => {} };
+  client.transport = transport;
+  await assert.rejects(client.request("tools/call", {}, 10), /超时/);
+  assert.equal(client.pending.size, 0, "超时应正常结清，而不是被 TypeError 打断");
+  assert.equal(transport.abort.signal.aborted, false, "单条请求超时不能关闭整个 SSE 连接");
+});
