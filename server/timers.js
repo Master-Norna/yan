@@ -89,9 +89,10 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   }
   // 改名成功的才算拿到；已过了约簿这一关就可删，否则留凭据，重启也不会重新投递这一回。
   function take(ids) {
-    requireBook();
+    // 约簿损坏不应阻塞已经独立落盘的到点记录；无法核对簿时保留认领凭据。
+    sync();
     const taken = [],
-      open = new Set(book.timers.map(firedId));
+      open = bookCorrupt ? null : new Set(book.timers.map(firedId));
     for (const id of ids) {
       if (!/^[\w-]{1,40}$/.test(id)) continue;
       const file = firedFile(id),
@@ -100,14 +101,15 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
         const item = JSON.parse(fs.readFileSync(file, "utf8"));
         fs.renameSync(file, claimed);
         taken.push(item);
-        if (!open.has(id)) forgetClaim(claimed);
+        if (open && !open.has(id)) forgetClaim(claimed);
       } catch {}
     }
     return taken;
   }
   // 页面等着：有没被跳过的就当场回，没有就挂着，有新的到点或等满一分钟再回
   const handleWait = route(async (body, req, res) => {
-    requireBook();
+    // 只读到点收件箱无需依赖约簿可写，损坏时照常交付已投递消息。
+    sync();
     const at = home(),
       skip = new Set(Array.isArray(body.skip) ? body.skip.map(String) : []),
       fresh = () => pending().filter(item => !skip.has(item.id)),
