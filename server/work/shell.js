@@ -111,8 +111,8 @@ module.exports = function createShell({ toolEnv }) {
       : macBox
         ? ["-p", macSeatbeltProfile(cwd), "/bin/sh", "-c", command]
         : ["-c", command];
-    const inheritedEnv = { ...toolEnv(boxed ? sandbox.sandboxEnv(process.env) : process.env), ...env };
-    const rawGitConfigCount = Number(inheritedEnv.GIT_CONFIG_COUNT ?? 0);
+    const inheritedEnv = toolEnv(boxed ? sandbox.sandboxEnv(process.env) : process.env);
+    const rawGitConfigCount = Number(({ ...inheritedEnv, ...env }).GIT_CONFIG_COUNT ?? 0);
     const gitConfigCount = Number.isSafeInteger(rawGitConfigCount) && rawGitConfigCount >= 0 && rawGitConfigCount <= 1024 ? rawGitConfigCount : 0;
     const child = spawn(win ? (PWSH ? "pwsh.exe" : "powershell.exe") : macBox ? "/usr/bin/sandbox-exec" : "/bin/sh", args, {
       cwd,
@@ -131,6 +131,7 @@ module.exports = function createShell({ toolEnv }) {
         GIT_TERMINAL_PROMPT: "0",
         GIT_EDITOR: process.env.GIT_EDITOR || "true",
         GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+        ...env,
         ...(win ? { YAN_COMMAND: command } : {}),
         // 仓库级 core.fsmonitor 可是可执行命令；仅查 git status 也能执行恶意 hook。
         // Git 的环境配置覆盖仓库本地设置，且不依赖 shell 文本的静态扫描。
