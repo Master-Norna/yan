@@ -4,6 +4,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { connect, STAGE_DEBUG_PORT, PAGE } from "./lib.mjs";
 import { probeTestPort } from "./helpers/test-ports.mjs";
+import { inspectSpecResult } from "./helpers/spec-result.mjs";
 import { existsSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -155,12 +156,10 @@ const runSpec = (file, env = {}) =>
     child.on("close", (exit, signal) => {
       clearTimeout(timer);
       // 超时被杀的退出码是 null、只有 signal：照样算没跑完
-      const code = exit ?? signal;
-      const lines = out.split(/\r?\n/),
-        p = lines.filter(l => l.startsWith("PASS")).length,
-        f = lines.filter(l => l.startsWith("FAIL")).length;
+      const { code, lines, p, f, failures, missing } = inspectSpecResult(file, out, exit, signal);
       passed += p;
-      failed += f + (code && !f ? 1 : 0);
+      failed += failures;
+      if (missing) console.log(`   FAIL ${file} 未报告任何 PASS / FAIL；不把空测试当作成功`);
       console.log(`\n== ${file}: ${p} 过 / ${f} 败${code ? `（退出码 ${code}）` : ""}`);
       for (const l of lines) if (l.startsWith("FAIL") || l.startsWith("  [")) console.log("   " + l.slice(0, 400));
       if (code && err.trim()) console.log("   " + err.trim().split(/\r?\n/).slice(0, 12).join("\n   "));

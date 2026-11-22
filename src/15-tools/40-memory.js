@@ -46,7 +46,17 @@ defineTool({
       }
     }
     refreshMemorySettings();
-    if (did === "delete") return { ok: true, content: t`已删去「${category}」`, display: "删去" };
+    if (did === "delete") {
+      // 删除后的 memoryOf(category) 已经是 null；不能套用下面更新分支的 .text，
+      // 也不能在桥接尚未落盘时宣称「已删去」。
+      if (!flushed)
+        return {
+          ok: false,
+          content: `「${category}」本页已移除，但还没写进存储目录（会自动重试），不能当作已经删去。`,
+          display: "待落盘"
+        };
+      return { ok: true, content: t`已删去「${category}」`, display: "删去" };
+    }
     if (!did) return { ok: true, content: t`「${category}」没有变`, display: "未变" };
     if (!flushed)
       return {

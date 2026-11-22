@@ -81,6 +81,8 @@ function spendTokens(profile, amount, kind = "main") {
 // 攒几秒一并报给桥接，由它往 用量.json 上加（见 server/usage.js）；报不上的留着下回再报，离页时随 keepalive 送出
 /** @typedef {"main"|"helper"|"side"|"review"|"image"} UsageKind */
 let usagePending = new Map(),
+  usageBatches = [],
+  usageFlushing = null,
   usageTimer = 0;
 function localDay(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -95,25 +97,38 @@ function noteUsage(kind, amount) {
 async function flushUsage(leaving = false) {
   clearTimeout(usageTimer);
   usageTimer = 0;
-  if (!usagePending.size) return;
-  const sent = usagePending,
-    items = [...sent].map(([key, amount]) => ({ day: key.split("|")[0], kind: key.split("|")[1], amount }));
-  usagePending = new Map();
+  // 一个批次一旦形成就固定内容和编号。响应丢失时重发原批次，而不是把数值
+  // 混回 usagePending 生成新编号（那会把已落盘的用量重复记账）。
+  if (usagePending.size) {
+    const items = [...usagePending].map(([key, amount]) => ({ day: key.split("|")[0], kind: key.split("|")[1], amount }));
+    usageBatches.push({ batchId: uid(), items });
+    usagePending = new Map();
+  }
+  if (!usageBatches.length) return;
   if (leaving) {
-    fetch(`/api/usage/add`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
-      keepalive: true
-    }).catch(() => {});
+    for (const batch of usageBatches)
+      fetch("/api/usage/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(batch),
+        keepalive: true
+      }).catch(() => {});
     return;
   }
-  try {
-    await bridge("/api/usage/add", { items });
-  } catch {
-    for (const [key, amount] of sent) usagePending.set(key, (usagePending.get(key) || 0) + amount);
-    usageTimer ||= setTimeout(flushUsage, 30000);
-  }
+  // 刷新用量卡与三秒定时器可能同时触发；只让一条发送循环操作队首。
+  if (usageFlushing) return usageFlushing;
+  usageFlushing = (async () => {
+    while (usageBatches.length) {
+      try {
+        await bridge("/api/usage/add", usageBatches[0]);
+        usageBatches.shift();
+      } catch {
+        usageTimer ||= setTimeout(flushUsage, 30000);
+        break;
+      }
+    }
+  })().finally(() => (usageFlushing = null));
+  return usageFlushing;
 }
 /** @param {Profile} profile */
 function quotaExhausted(profile) {

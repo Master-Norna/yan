@@ -138,7 +138,10 @@ test("传播：标成立要前提先立住（同一批也算），事后前提�
   assert.ok(!f.intentEstablished(intent, "上线"));
   assert.match(f.intentText(intent), /\[成立·前提未立\] 上线（根）/);
   intent = change(intent, [{ id: "上线", any: true }]);
-  assert.ok(f.intentEstablished(intent, "上线"), "任一即可：甲立住就够");
+  assert.equal(f.intentState(intent, "上线"), "stale", "改变已封印的前提规则必须待复核");
+  assert.ok(!f.intentEstablished(intent, "上线"));
+  intent = change(intent, [{ id: "上线", state: "done" }]);
+  assert.ok(f.intentEstablished(intent, "上线"), "重封印后任一即可：甲立住就够");
   assert.deepEqual(problems(intent, [{ id: "上线", state: "done" }]), [], "任一即可的，重标成立也只要一项立住");
 });
 
@@ -848,4 +851,52 @@ test("守：一直要守的条件——不算根、不孤悬、不计进度；�
   // 撤去守的身份即回到目标那一套
   intent = change(intent, [{ id: "测过", keep: false, needs: [] }]);
   assert.equal(intent.nodes["测过"].keep, undefined);
+});
+
+test("已封印的意修改 any 前提规则须待复核；重复写同值不改版本", () => {
+  const intent = f.asIntent({
+    nodes: {
+      目标: {
+        claim: "完成交付",
+        check: "验收",
+        needs: ["甲", "乙"],
+        state: "done",
+        rev: 1,
+        seal: { rev: 1, premises: { 甲: 1, 乙: 1 }, prints: {} }
+      },
+      甲: { claim: "A", check: "a", needs: [], state: "done", rev: 1, seal: { rev: 1, premises: {}, prints: {} } },
+      乙: { claim: "B", check: "b", needs: [], state: "done", rev: 1, seal: { rev: 1, premises: {}, prints: {} } }
+    }
+  });
+  const changed = f.applyIntentOps(intent, [{ id: "目标", any: true }], { at: "now" });
+  assert.equal(changed.nodes["目标"].rev, 2);
+  assert.equal(f.intentState(changed, "目标"), "stale");
+  assert.match(changed.log.at(-1).text, /前提规则 任一成立/);
+  const same = f.applyIntentOps(changed, [{ id: "目标", any: true }]);
+  assert.equal(same.nodes["目标"].rev, 2, "相同前提规则不应重复加版本");
+  const certified = f.applyIntentOps(changed, [{ id: "目标", state: "done" }]);
+  assert.equal(f.intentState(certified, "目标"), "done");
+  const back = f.applyIntentOps(certified, [{ id: "目标", any: false }]);
+  assert.equal(f.intentState(back, "目标"), "stale");
+});
+
+test("载入旧式 truthy any 后关掉规则，已封印节点必须待复核", () => {
+  for (const value of [1, "yes"]) {
+    let intent = change(empty(), [
+      { id: "根", claim: "上线", check: "能访问", root: true, needs: ["甲", "乙"], any: true },
+      { id: "甲", claim: "A", check: "a" },
+      { id: "乙", claim: "B", check: "b" }
+    ]);
+    intent = change(intent, [
+      { id: "甲", state: "done" },
+      { id: "根", state: "done" }
+    ]);
+    const raw = structuredClone(intent);
+    raw.nodes["根"].any = value;
+    intent = f.asIntent(raw);
+    assert.equal(intent.nodes["根"].any, true, "旧版 truthy any 的验收语义应被保留");
+    const changed = change(intent, [{ id: "根", any: false }]);
+    assert.equal(f.intentState(changed, "根"), "stale");
+    assert.ok(changed.nodes["根"].rev > intent.nodes["根"].rev);
+  }
 });
