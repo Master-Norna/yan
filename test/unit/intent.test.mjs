@@ -879,3 +879,21 @@ test("已封印的意修改 any 前提规则须待复核；重复写同值不改
   const back = f.applyIntentOps(certified, [{ id: "目标", any: false }]);
   assert.equal(f.intentState(back, "目标"), "stale");
 });
+
+test("载入旧式 truthy any 后关掉规则，已封印节点必须待复核", () => {
+  for (const value of [1, "yes"]) {
+    let intent = change(empty(), [
+      { id: "根", claim: "上线", check: "能访问", root: true, needs: ["甲", "乙"], any: true },
+      { id: "甲", claim: "A", check: "a" },
+      { id: "乙", claim: "B", check: "b" }
+    ]);
+    intent = change(intent, [{ id: "甲", state: "done" }, { id: "根", state: "done" }]);
+    const raw = structuredClone(intent);
+    raw.nodes["根"].any = value;
+    intent = f.asIntent(raw);
+    assert.equal(intent.nodes["根"].any, true, "旧版 truthy any 的验收语义应被保留");
+    const changed = change(intent, [{ id: "根", any: false }]);
+    assert.equal(f.intentState(changed, "根"), "stale");
+    assert.ok(changed.nodes["根"].rev > intent.nodes["根"].rev);
+  }
+});
