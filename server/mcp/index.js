@@ -140,11 +140,15 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
       // 起任意 MCP 进程、改远端地址或传入一件未列出的工具。
       const entry = clients.get(body.server);
       if (!entry || entry.key !== keyOf(body.config || {})) throw Error("MCP 服务未登记或配置已改变，请重新加载工具清单");
-      const client = await entry.ready;
+      // 校验登记过的配置后仍沿用 ensure() 的断线重连语义。
+      const client = await ensure(body.server, body.config).ready;
       // 服务发过 list_changed 时，先核对变后的清单；客户端的 toolsChanged 标记
       // 仍由 /api/mcp/list 负责清除，避免页面错过这一回的工具变更。
       if (client.toolsChanged) client.tools = await client.listTools();
-      if (!client.tools.some(item => item.name === body.tool)) throw Error("MCP 工具未在当前服务清单中");
+      if (!client.tools.some(item => item.name === body.tool)) {
+        sendJson(res, 409, { error: "MCP 工具未在当前服务清单中", toolsChanged: true });
+        return;
+      }
       const result = await client.call(body.tool, body.arguments || {}, {
         // setTimeout 超过 2^31-1 毫秒会溢出成立刻到时：封顶
         timeout: Number(body.timeout) > 0 ? Math.min(Number(body.timeout) * 1000, 2 ** 31 - 1) : undefined,
