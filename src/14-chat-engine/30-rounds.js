@@ -248,7 +248,7 @@ const echolessProfiles = new Set();
 function thoughtEcho(target, from, profile) {
   if (target.thinkingBlocks?.length) return { thinking_blocks: target.thinkingBlocks };
   const thought = String(target.reasoning || "").slice(from);
-  if (!thought.trim() || echolessProfiles.has(profile.id)) return {};
+  if (!thought.trim() || echolessProfiles.has(blindProfileKey(profile))) return {};
   const echo = ownCopy(thought);
   return { reasoning_content: echo, reasoning: echo };
 }
@@ -275,7 +275,7 @@ function dropThoughtEcho(history, profile, message) {
     delete item.reasoning_content;
     delete item.reasoning;
   }
-  if (carried.length) echolessProfiles.add(profile.id);
+  if (carried.length) echolessProfiles.add(blindProfileKey(profile));
   return carried.length > 0;
 }
 // 工具交回的图（游目截的画面之类）：tool 消息只收文字，图另起一条用户消息紧随工具结果（Anthropic 那头并进同一条）。
@@ -283,6 +283,9 @@ function dropThoughtEcho(history, profile, message) {
 // 看不了图的模型：带图被拒就去掉图重发一回（见 readReply），此后这一页不再给它附图
 const toolImageMessages = new WeakSet(),
   blindProfiles = new Set();
+// 同一配置 ID 改接另一模型时不能继承旧模型的「看不了图」判定。
+// API 形式、端点与模型 ID 共同标识实际的图像能力。
+const blindProfileKey = profile => JSON.stringify([profileApi(profile), profile.baseUrl || "", profile.model || ""]);
 /** @param {Profile} profile */
 function attachToolImages(history, images, profile) {
   for (const message of history)
@@ -290,7 +293,7 @@ function attachToolImages(history, images, profile) {
       toolImageMessages.delete(message);
       message.content = prompt("assistant.toolImagesStale");
     }
-  if (blindProfiles.has(profile.id)) return;
+  if (blindProfiles.has(blindProfileKey(profile))) return;
   const message = {
     role: "user",
     content: [
@@ -311,7 +314,7 @@ function dropToolImages(history, profile, message) {
   if (!/image|vision|multi-?modal|图/i.test(message)) return false;
   const blind = !IMAGE_REJECTED.test(message),
     dropped = stripImages(history, blind);
-  if (dropped && blind) blindProfiles.add(profile.id);
+  if (dropped && blind) blindProfiles.add(blindProfileKey(profile));
   return dropped > 0;
 }
 // 历史里的图一概换成一句话：工具交回的整条换掉，用户发的（这一问、最近带图的那一问，见 keptImageQuestion）逐张换。
@@ -351,7 +354,7 @@ async function readReply(profile, history, signal, overrides, target, retried = 
   target.usage = null;
   // 长活：这一答的工具往来快撑满窗口了，先压掉较早的几轮再发（见 14-chat-engine/60-context.js 的 keepInWindow）
   if (!retried) await keepInWindow(profile, history, signal, overrides, { target });
-  if (blindProfiles.has(profile.id)) stripImages(history);
+  if (blindProfiles.has(blindProfileKey(profile))) stripImages(history);
   dropStaleThoughts(history, profile);
   // 每次发送前公布这份请求的估算，不沿用上一轮显示的实测。
   overrides.onSize?.(requestSize(history, overrides));
