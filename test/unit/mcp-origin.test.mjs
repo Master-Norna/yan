@@ -35,11 +35,14 @@ test("HTTP MCP 的 307 重定向不能转发自定义凭据到另一个端口", 
 });
 
 test("旧式 SSE 拒绝跨源 endpoint 通知", async t => {
-  t.mock.method(globalThis, "fetch", async () =>
-    new Response("event: endpoint\ndata: http://127.0.0.1:65534/messages\n\n", {
-      status: 200,
-      headers: { "content-type": "text/event-stream" }
-    })
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response("event: endpoint\ndata: http://127.0.0.1:65534/messages\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      })
   );
   const transport = new SseTransport({ url: "https://example.invalid/sse", headers: { "X-Private-Token": "sentinel" } });
   await assert.rejects(() => transport.start(), /不能跨源/);
