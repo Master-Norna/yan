@@ -14,7 +14,8 @@ const seed = {
     inkMotion: "off",
     activeProfileId: "p1",
     autoTitle: false,
-    mcpServers: { cam: { command: process.execPath, args: [FAKE, "--snap"] } }
+    // 测试用截图工具由用户显式信任为只读；不能依赖服务端自报的 readOnlyHint。
+    mcpServers: { cam: { command: process.execPath, args: [FAKE, "--snap"], readOnlyTools: ["snap"] } }
   },
   profiles: [
     {

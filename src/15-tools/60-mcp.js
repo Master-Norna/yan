@@ -11,7 +11,7 @@ const MCP_INLINE_LIMIT = 12000;
 /** @type {{ key: string, loading: Promise<void>|null, servers: Record<string, McpServerState>, lazy: string[], retryAt: number, waitWarned: boolean }} */
 const mcp = { key: "", loading: null, servers: {}, lazy: [], retryAt: 0, waitWarned: false };
 
-/** 设置里的全部配置：{ 名字: { command, args, cwd, env } 或 { url, headers, type }，另可带 disabled / autoApprove / timeout / load / note } */
+/** 设置里的全部配置：{ 名字: { command, args, cwd, env } 或 { url, headers, type }，另可带 disabled / autoApprove / readOnlyTools / timeout / load / note } */
 // 游目自己的浏览器在 MCP 里的名字（设置 → 游目里开着才有，见 src/26-stage/40-settings.js）
 const STAGE_SERVER = "游目";
 // 人在设置 → MCP 里接的
@@ -99,9 +99,17 @@ function registerMcpTools() {
   // 接没接浏览器类的服务，定顶栏那枚看台小屏挂不挂
   stageSync();
 }
-/** @param {McpToolSpec} spec */
-function mcpReadOnly(spec) {
-  return spec.annotations?.readOnlyHint === true;
+// 服务自述的 readOnlyHint 不具备授权效力：外部服务只信用户亲自填的工具名（readOnlyTools）。
+// 游目是言自己拉起、随包装的那份 Playwright，它的 type 标注与这份代码同源，可以照信；
+// 它的「只读」说的是不改网页——browser_snapshot / browser_take_screenshot 会往工作目录落文件，这不归这层管。
+/** @param {McpToolSpec} spec @param {string} server */
+function mcpReadOnly(spec, server) {
+  const config = mcpConfigs()[server];
+  return (
+    !!config &&
+    ((server === STAGE_SERVER && !!config.stage && spec.annotations?.readOnlyHint === true) ||
+      (Array.isArray(config.readOnlyTools) && config.readOnlyTools.includes(spec.name)))
+  );
 }
 // 逐件摊开的：名字写成 mcp__服务__工具（接口只认字母数字与 _-，最长 64），说明与参数用服务端自带的
 /**
@@ -109,7 +117,7 @@ function mcpReadOnly(spec) {
  * @returns {Tool}
  */
 function mcpInlineTool(server, spec) {
-  const readOnly = mcpReadOnly(spec);
+  const readOnly = mcpReadOnly(spec, server);
   return {
     name: mcpFunctionName(server, spec.name),
     label: server,
@@ -158,10 +166,10 @@ const MCP_LAZY_TOOLS = [
       const found = args.tools.map(name => mcpServerTools(args.server, ctx.lookup).find(tool => tool.name === name)).filter(Boolean);
       if (!found.length) return mcpUnknown(args.server, args.tools.join("、"));
       const text = found
-        .map(
-          tool =>
-            t`## ${tool.name}${mcpReadOnly(tool) ? t("（只读）") : ""}\n${tool.description || tool.title || ""}\n参数：${JSON.stringify(tool.inputSchema)}`
-        )
+        .map(tool => {
+          const mark = mcpReadOnly(tool, args.server) ? t("（只读）") : "";
+          return t`## ${tool.name}${mark}\n${tool.description || tool.title || ""}\n参数：${JSON.stringify(tool.inputSchema)}`;
+        })
         .join("\n\n");
       step.output = trimOutput(text);
       return { ok: true, content: text, display: `${found.length} 件` };
@@ -180,7 +188,7 @@ const MCP_LAZY_TOOLS = [
       const spec = mcp.servers[args.server]?.tools?.find(tool => tool.name === args.tool);
       step.title = `${args.server} · ${args.tool}`;
       if (!spec) return mcpUnknown(args.server, args.tool);
-      if (ctx.lookup && !mcpReadOnly(spec))
+      if (ctx.lookup && !mcpReadOnly(spec, args.server))
         return { ok: false, content: t`旁注只查不改：${args.server} 的 ${args.tool} 不是只读的工具，此处不调`, display: "非只读" };
       // 外层只核了 server / tool；params 对着目标工具自己的参数表再理一遍
       const { args: inner, problems } = normalizeArguments(spec.inputSchema, args.params);
@@ -207,7 +215,7 @@ function mcpLazyServers(preset) {
 /** 一个按需给的服务此处可用的几件：旁注（lookup）只要只读的 @param {string} server @param {boolean} [lookup] */
 function mcpServerTools(server, lookup = false) {
   const tools = mcp.servers[server]?.tools || [];
-  return lookup ? tools.filter(mcpReadOnly) : tools;
+  return lookup ? tools.filter(tool => mcpReadOnly(tool, server)) : tools;
 }
 // 目录：一服务一段，一件一行（名字与说明的头一句）；只读的标出来
 /** @param {Preset|null} preset @param {boolean} [lookup] */
@@ -222,7 +230,7 @@ function mcpDirectory(preset, lookup = false) {
           .split("\n")[0]
           .trim()
           .slice(0, 60);
-        return `- ${tool.name}${mcpReadOnly(tool) ? t("（只读）") : ""}${first ? `：${first}` : ""}`;
+        return `- ${tool.name}${mcpReadOnly(tool, server) ? t("（只读）") : ""}${first ? `：${first}` : ""}`;
       });
       return `【${server}】${head}\n${lines.join("\n")}`;
     })
@@ -253,7 +261,10 @@ async function runMcpTool(step, server, tool, args, ctx) {
   step.code = JSON.stringify(args, null, 2);
   // 守的关口刚批过这一步（见 keepHook）：不再另问
   const ask =
-    !step.granted && !mcpReadOnly(spec) && commandPolicyOf(ctx.conversation) === "ask" && !(config.autoApprove || []).includes(tool);
+    !step.granted &&
+    !mcpReadOnly(spec, server) &&
+    commandPolicyOf(ctx.conversation) === "ask" &&
+    !(config.autoApprove || []).includes(tool);
   if (ask && !(await askApproval(step, ctx))) {
     step.skipped = true;
     return { ok: false, content: prompt("assistant.declined"), display: "" };
@@ -276,7 +287,7 @@ async function runMcpTool(step, server, tool, args, ctx) {
           ? stage
             ? { why: stage, ...(stageKind || { kind: "", label: "" }) }
             : null
-          : !mcpReadOnly(spec) && !(config.autoApprove || []).includes(tool)
+          : !mcpReadOnly(spec, server) && !(config.autoApprove || []).includes(tool)
             ? { why: `调外部服务 ${server} 的写操作 ${tool}`, kind: `mcp:${server}:${tool}`, label: `${server} · ${tool}` }
             : null;
     const denied = flag && (await reviewGate(step, args, ctx, flag));
