@@ -138,6 +138,6 @@ test("MCP 工具持续发进度也不能跨过绝对超时上限", async t => {
     client.receive({ method: "notifications/progress", params: { progressToken: id } });
   }
   t.mock.timers.tick(10);
-  await assert.rejects(pending, /超时/, "持续进度不得无限重置原本的超时限制");
+  await assert.rejects(pending, /超时：已达绝对时限.*距上次进度 10 秒/, "持续进度应按绝对上限终止，并注明最近进度");
   assert.equal(client.pending.size, 0);
 });
