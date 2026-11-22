@@ -126,6 +126,8 @@ function asIntent(raw) {
         : [],
       ...(typeof raw?.updated === "string" ? { updated: raw.updated } : {})
     };
+  // 扩展字段照旧保留，但已知字段不能被原始展开绕过类型校验。
+  if (typeof raw?.updated !== "string") delete intent.updated;
   for (const [id, node] of Object.entries(nodes)) {
     if (!node || typeof node !== "object" || !validIntentId(id)) continue;
     intent.nodes[id] = {
