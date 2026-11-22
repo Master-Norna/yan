@@ -37,7 +37,7 @@ function rootRewinding(root, exceptId) {
 function rewindingOver(c) {
   return rewinding.has(c.id) || (isWork(c) && rootRewinding(workRoot(c), c.id));
 }
-/** 动手前必须成功建立文件检查点：失败就拒绝执行本地写入，避免误以为可以退回 @param {ToolContext} ctx */
+/** 动手前必须成功建立文件检查点：失败就拒绝执行本地写入，避免误以为可以退回；只读指令不必来这一趟（见 00-registry.js），目录不在时交回可照做的说明 @param {ToolContext} ctx */
 function checkpointBefore({ conversation, assistant }) {
   const root = isWork(conversation) && workRoot(conversation);
   if (!root || assistant.checkpoint) return Promise.resolve();
@@ -52,7 +52,11 @@ function checkpointBefore({ conversation, assistant }) {
           markDirty(conversation.id);
         })
         .catch(error => {
-          throw Error(`文件检查点未能建立：${String(error.message || error)}`);
+          const why = String(error.message || error);
+          // 目录不在（改了名、搬走了、外接盘没挂上）：桥接拍不了任何东西，也没有可退的。
+          // 写操作仍然拒绝，但把可照做的那句话交出去——重新发送这一问会重建目录
+          if (/目录不在/.test(why)) throw Error("工作目录已不存在：重新发送这一问即可重建，或另起对话");
+          throw Error(`文件检查点未能建立：${why}`);
         })
         .finally(() => checkpointing.delete(assistant.id))
     );
