@@ -171,7 +171,10 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   /** @param {Book} next @param {Timer[]} retired */
   function save(next, retired = []) {
     // 即使读入后有人在磁盘上改坏约簿，也不能静默把错误当作一份空簿覆盖。
-    if (bookCorrupt || (fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers))) throw bookError();
+    if (bookCorrupt || (fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers))) {
+      bookCorrupt = true; // 修复原件后下一次必须重新读取，不得继续沿用旧内存簿。
+      throw bookError();
+    }
     fs.mkdirSync(home(), { recursive: true });
     writeAtomic(bookFile(), JSON.stringify({ 言: "候 · 约好的时刻", ...next }, null, 1));
     book = next;
