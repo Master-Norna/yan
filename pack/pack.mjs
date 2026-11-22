@@ -8,6 +8,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { assertCleanWorkingTree } from "./clean.mjs";
 
 const require = createRequire(import.meta.url);
 const { fasterSide } = require("../server/mirror.js");
@@ -49,8 +50,7 @@ const curl = (url, out) =>
   execFileSync(MAC ? "/usr/bin/curl" : "curl.exe", ["-fsSL", "--retry", "2", "-o", out, url], { stdio: "inherit" });
 
 function copyTracked() {
-  const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" }).trim();
-  if (dirty) say("工作区有未提交的改动，包里用的是磁盘上的现状");
+  assertCleanWorkingTree(ROOT);
   const files = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" })
     .split("\0")
     .filter(file => file && KEEP.some(keep => (keep.endsWith("/") ? file.startsWith(keep) : file === keep)));
