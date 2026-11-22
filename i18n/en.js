@@ -894,6 +894,8 @@ var YAN_EN = {
   按需: "On demand",
   免请示的工具: "Tools that skip approval",
   "工具名，逗号分隔；只读工具本不请示": "Tool names, comma separated; read-only tools never ask",
+  受信只读工具: "Trusted read-only tools",
+  "仅填确认无副作用的工具名；不信任服务自报的只读": "Only enter tool names you have verified as safe; server read-only hints are not trusted",
   给模型的话: "Note to the model",
   随系统提示交给模型: "Added to the system prompt",
   保存: "Save",
