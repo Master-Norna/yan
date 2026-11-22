@@ -32,7 +32,7 @@ function mcpCardHtml(name) {
         : ["err", t`连接失败：${state.error}`];
   const where = config.command ? [config.command, ...(config.args || [])].join(" ") : config.url;
   const tools = state?.ok
-    ? `<details class="card-more"><summary>${t(`工具`)}</summary><div class="card-chips">${state.tools.map(tool => `<span>${escapeHtml(tool.name)}${mcpReadOnly(tool) ? "<small>" + t("只读") + "</small>" : ""}</span>`).join("")}</div></details>`
+    ? `<details class="card-more"><summary>${t(`工具`)}</summary><div class="card-chips">${state.tools.map(tool => `<span>${escapeHtml(tool.name)}${mcpReadOnly(tool, name) ? "<small>" + t("只读") + "</small>" : ""}</span>`).join("")}</div></details>`
     : "";
   return `<div class="card" data-mcp="${escapeHtml(name)}"><div class="card-head"><span class="card-name">${escapeHtml(name)}</span><span class="card-tag">${config.command ? t("本机") : t("远端")}</span><span class="card-state ${kind}" title="${escapeHtml(text)}">${escapeHtml(text)}</span><span class="card-actions"><button type="button" class="outline-btn" data-mcp-action="edit">${t(`编辑`)}</button><button type="button" class="outline-btn" data-mcp-action="toggle">${config.disabled ? t("启用") : t("停用")}</button>${config.disabled ? "" : `<button type="button" class="outline-btn" data-mcp-action="restart">${t(`重连`)}</button>`}</span></div><div class="card-sub" title="${escapeHtml(where)}">${escapeHtml(where)}</div>${tools}</div>`;
 }
