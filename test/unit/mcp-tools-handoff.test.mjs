@@ -234,8 +234,7 @@ test("调用只接受已登记服务、当前配置和工具清单，移除服�
   };
   const { post, close } = await serve();
   const config = { command: "node" };
-  const call = (server, tool = "read", passed = config) =>
-    post("/api/mcp/call", { server, config: passed, tool, arguments: {} });
+  const call = (server, tool = "read", passed = config) => post("/api/mcp/call", { server, config: passed, tool, arguments: {} });
   try {
     assert.equal((await call("fake")).status, 400, "未登记的服务不能临时起 MCP 进程");
     assert.equal((await post("/api/mcp/list", { servers: { fake: config } })).status, 200);
