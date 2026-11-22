@@ -112,8 +112,9 @@ module.exports = function createShell({ toolEnv }) {
         ? ["-p", macSeatbeltProfile(cwd), "/bin/sh", "-c", command]
         : ["-c", command];
     const inheritedEnv = toolEnv(boxed ? sandbox.sandboxEnv(process.env) : process.env);
-    const rawGitConfigCount = Number(({ ...inheritedEnv, ...env }).GIT_CONFIG_COUNT ?? 0);
-    const gitConfigCount = Number.isSafeInteger(rawGitConfigCount) && rawGitConfigCount >= 0 && rawGitConfigCount <= 1024 ? rawGitConfigCount : 0;
+    const rawGitConfigCount = Number({ ...inheritedEnv, ...env }.GIT_CONFIG_COUNT ?? 0);
+    const gitConfigCount =
+      Number.isSafeInteger(rawGitConfigCount) && rawGitConfigCount >= 0 && rawGitConfigCount <= 1024 ? rawGitConfigCount : 0;
     const child = spawn(win ? (PWSH ? "pwsh.exe" : "powershell.exe") : macBox ? "/usr/bin/sandbox-exec" : "/bin/sh", args, {
       cwd,
       windowsHide: true,

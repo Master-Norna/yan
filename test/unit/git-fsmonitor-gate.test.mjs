@@ -19,7 +19,6 @@ test("仓库配置的 Git fsmonitor 不能在言的 Shell 内生效", async t =>
   assert.equal(result.stdout.trim(), "false", "Git 环境层覆盖不可信的仓库级 fsmonitor 配置");
 });
 
-
 test("保留原有 GIT_CONFIG 环境项并在最后覆盖 fsmonitor", async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yan-git-config-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
