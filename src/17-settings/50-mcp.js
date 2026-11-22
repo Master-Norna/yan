@@ -75,7 +75,7 @@ function mcpFormHtml(name) {
     .map(([value, label]) => `<button type="button" data-mcp-load="${value}" class="${load === value ? "active" : ""}">${label}</button>`)
     .join(
       ""
-    )}</div></label>${field(t("免请示的工具"), "autoApprove", (config.autoApprove || []).join(", "), t("工具名，逗号分隔；只读工具本不请示"))}${trustedReadOnly}${area(t("给模型的话"), "note", config.note || "", t("随系统提示交给模型"))}</div><div class="card-form-foot"><button type="button" class="outline-btn" data-mcp-form="save">${t(`保存`)}</button><button type="button" class="outline-btn" data-mcp-form="cancel">${t(`取消`)}</button><button type="button" class="outline-btn" data-mcp-form="reveal">${mcpRevealed ? t("遮住密钥") : t("显示密钥")}</button><span class="card-error"></span>${name ? `<button type="button" class="danger-btn" data-mcp-form="delete">${t(`删除`)}</button>` : ""}</div></div>`;
+    )}</div></label>${field(t("免请示的工具"), "autoApprove", (config.autoApprove || []).join(", "), t("工具名，逗号分隔；要额外免请示的填这里（只读与否只认上一栏）"))}${trustedReadOnly}${area(t("给模型的话"), "note", config.note || "", t("随系统提示交给模型"))}</div><div class="card-form-foot"><button type="button" class="outline-btn" data-mcp-form="save">${t(`保存`)}</button><button type="button" class="outline-btn" data-mcp-form="cancel">${t(`取消`)}</button><button type="button" class="outline-btn" data-mcp-form="reveal">${mcpRevealed ? t("遮住密钥") : t("显示密钥")}</button><span class="card-error"></span>${name ? `<button type="button" class="danger-btn" data-mcp-form="delete">${t(`删除`)}</button>` : ""}</div></div>`;
 }
 /** @type {"local"|"remote"|null} 表单里切了接法、还没存时记在这里 */
 let mcpFormKind = null;

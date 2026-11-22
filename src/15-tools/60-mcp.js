@@ -99,14 +99,15 @@ function registerMcpTools() {
   // 接没接浏览器类的服务，定顶栏那枚看台小屏挂不挂
   stageSync();
 }
-// 服务自述的 readOnlyHint 不具备授权效力；只信用户亲自认定的工具及内置游目少量查询工具。
-const STAGE_READ_ONLY = new Set(["browser_snapshot", "browser_take_screenshot", "browser_console_messages", "browser_network_requests"]);
+// 服务自述的 readOnlyHint 不具备授权效力：外部服务只信用户亲自填的工具名（readOnlyTools）。
+// 游目是言自己拉起、随包装的那份 Playwright，它的 type 标注与这份代码同源，可以照信；
+// 它的「只读」说的是不改网页——browser_snapshot / browser_take_screenshot 会往工作目录落文件，这不归这层管。
 /** @param {McpToolSpec} spec @param {string} server */
 function mcpReadOnly(spec, server) {
   const config = mcpConfigs()[server];
   return (
     !!config &&
-    ((server === STAGE_SERVER && config.stage && STAGE_READ_ONLY.has(spec.name)) ||
+    ((server === STAGE_SERVER && !!config.stage && spec.annotations?.readOnlyHint === true) ||
       (Array.isArray(config.readOnlyTools) && config.readOnlyTools.includes(spec.name)))
   );
 }

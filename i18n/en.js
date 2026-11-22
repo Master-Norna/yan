@@ -893,7 +893,8 @@ var YAN_EN = {
   逐件: "All listed",
   按需: "On demand",
   免请示的工具: "Tools that skip approval",
-  "工具名，逗号分隔；只读工具本不请示": "Tool names, comma separated; read-only tools never ask",
+  "工具名，逗号分隔；要额外免请示的填这里（只读与否只认上一栏）":
+    "Tool names, comma separated; add tools that should also skip approval (read-only status comes only from the list above)",
   受信只读工具: "Trusted read-only tools",
   "仅填确认无副作用的工具名；不信任服务自报的只读":
     "Only enter tool names you have verified as safe; server read-only hints are not trusted",
