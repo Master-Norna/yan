@@ -279,3 +279,15 @@ test("约簿损坏仍可领取已经投递的消息，并保留认领凭据直�
   assert.deepEqual(call("list").timers, []);
   assert.ok(!names().includes(`${notice.id}.json.taken`));
 });
+
+
+test("刚启动时约簿正常、随后无写操作直接损坏：领取仍保留去重凭据", t => {
+  const { boot, bookFile, tick, pending, names } = fixture(t);
+  const call = boot();
+  call("set", { to: "c", due: start + 100, every: 1000 });
+  tick(100);
+  const [notice] = pending();
+  fs.writeFileSync(bookFile, "{external damage");
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
+  assert.ok(names().includes(`${notice.id}.json.taken`), "旧内存簿不能决定已损坏约簿的回执是否可清");
+});
