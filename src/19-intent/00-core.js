@@ -133,6 +133,8 @@ function asIntent(raw) {
       state: INTENT_MARKS.has(node.state) ? node.state : "open",
       rev: Number(node.rev) || 1
     };
+    // 旧簿或手编 JSON 可能用 1 / "yes" 表示 any；归一化后版本比较与验收语义一致。
+    if (node.any !== undefined) intent.nodes[id].any = Boolean(node.any);
     if (typeof node.in === "string" && node.in !== id && validIntentId(node.in)) intent.nodes[id].in = node.in;
     else delete intent.nodes[id].in;
     if (node.keep === true) intent.nodes[id].keep = true;
