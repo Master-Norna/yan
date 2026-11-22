@@ -20,7 +20,13 @@ function fixture(t) {
     t.mock.timers.reset();
     t.mock.timers.enable({ apis: ["Date", "setTimeout"], now });
     const { routes } = createTimers({ home: () => home, known: () => true, route: handle => handle });
-    return (action, body = {}) => routes[`POST /api/timer/${action}`](body);
+    // 这些路由都要看一眼没写完的响应（见 server/http.js 的 requestSignal）：给一个不会断的替身
+    const response = () => {
+      const res = { destroyed: false, writableEnded: false };
+      res.on = res.once = res.removeListener = () => res;
+      return res;
+    };
+    return (action, body = {}) => routes[`POST /api/timer/${action}`](body, null, response());
   };
   const names = () => (fs.existsSync(outbox) ? fs.readdirSync(outbox) : []);
   const pending = () =>
@@ -259,7 +265,6 @@ test("合法 JSON 但 timers 不是数组时也要保留损坏约簿", t => {
   assert.equal(fs.readFileSync(bookFile, "utf8"), invalid);
 });
 
-
 test("约簿损坏仍可领取已经投递的消息，并保留认领凭据直到约簿恢复", async t => {
   const { boot, bookFile, tick, pending, names } = fixture(t);
   const call = boot();
@@ -279,7 +284,6 @@ test("约簿损坏仍可领取已经投递的消息，并保留认领凭据直�
   assert.deepEqual(call("list").timers, []);
   assert.ok(!names().includes(`${notice.id}.json.taken`));
 });
-
 
 test("刚启动时约簿正常、随后无写操作直接损坏：领取仍保留去重凭据", t => {
   const { boot, bookFile, tick, pending, names } = fixture(t);
