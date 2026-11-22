@@ -849,3 +849,30 @@ test("守：一直要守的条件——不算根、不孤悬、不计进度；�
   intent = change(intent, [{ id: "测过", keep: false, needs: [] }]);
   assert.equal(intent.nodes["测过"].keep, undefined);
 });
+
+test("已封印的意修改 any 前提规则须待复核；重复写同值不改版本", () => {
+  const intent = f.asIntent({
+    nodes: {
+      目标: {
+        claim: "完成交付",
+        check: "验收",
+        needs: ["甲", "乙"],
+        state: "done",
+        rev: 1,
+        seal: { rev: 1, premises: { 甲: 1, 乙: 1 }, prints: {} }
+      },
+      甲: { claim: "A", check: "a", needs: [], state: "done", rev: 1, seal: { rev: 1, premises: {}, prints: {} } },
+      乙: { claim: "B", check: "b", needs: [], state: "done", rev: 1, seal: { rev: 1, premises: {}, prints: {} } }
+    }
+  });
+  const changed = f.applyIntentOps(intent, [{ id: "目标", any: true }], { at: "now" });
+  assert.equal(changed.nodes["目标"].rev, 2);
+  assert.equal(f.intentState(changed, "目标"), "stale");
+  assert.match(changed.log.at(-1).text, /前提规则 任一成立/);
+  const same = f.applyIntentOps(changed, [{ id: "目标", any: true }]);
+  assert.equal(same.nodes["目标"].rev, 2, "相同前提规则不应重复加版本");
+  const certified = f.applyIntentOps(changed, [{ id: "目标", state: "done" }]);
+  assert.equal(f.intentState(certified, "目标"), "done");
+  const back = f.applyIntentOps(certified, [{ id: "目标", any: false }]);
+  assert.equal(f.intentState(back, "目标"), "stale");
+});
