@@ -16,9 +16,11 @@ test("用量批次 ACK 丢失后重试，不重复记账；重启后仍去重", 
   const server = http.createServer((req, res) => usage.routes[`POST ${req.url}`](req, res));
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const post = (endpoint, body = {}) => fetch(`http://127.0.0.1:${server.address().port}/api/usage/${endpoint}`, {
-    method: "POST", body: JSON.stringify(body)
-  }).then(r => r.json());
+  const post = (endpoint, body = {}) =>
+    fetch(`http://127.0.0.1:${server.address().port}/api/usage/${endpoint}`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    }).then(r => r.json());
   const batch = { batchId: "fixed-batch-1", items: [{ day: "2026-11-22", kind: "main", amount: 1200 }] };
   assert.equal((await post("add", batch)).ok, true);
   assert.equal((await post("add", batch)).duplicate, true);
