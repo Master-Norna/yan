@@ -39,7 +39,7 @@ macOS 上双击 `start.command`，用时保持它打开的终端窗口。从源�
 
 ## 打包
 
-在仓库里运行 `npm run pack`，按宿主自动生成 `dist/yan-<版本>-win-x64.zip` 或 `dist/yan-<版本>-mac-arm64.zip`。Windows 用系统的 `curl.exe`、`tar.exe` 与 .NET Framework 4 的 `csc.exe`；启动器源码是 `pack/launcher.cs`，图标 `pack/icon.ico` 由 `web/icon.svg` 画成。macOS 用系统的 `ditto` 打 ZIP，保留执行位和符号链接。
+确保工作区没有未提交或未跟踪的改动（可先提交或暂存），否则打包会拒绝运行，避免把未经提交的文件带进正式发布包。在仓库里运行 `npm run pack`，按宿主自动生成 `dist/yan-<版本>-win-x64.zip` 或 `dist/yan-<版本>-mac-arm64.zip`。Windows 用系统的 `curl.exe`、`tar.exe` 与 .NET Framework 4 的 `csc.exe`；启动器源码是 `pack/launcher.cs`，图标 `pack/icon.ico` 由 `web/icon.svg` 画成。macOS 用系统的 `ditto` 打 ZIP，保留执行位和符号链接。
 
 Node 的版本写在 `pack/pack.mjs`，压缩包按 nodejs.org 的校验和验过才用。换 Node 版本后用随包的 Node 跑一遍整套测试。冒烟与另行检查 Finder 首启，见[按需验证](development.md#按需验证)。
 
