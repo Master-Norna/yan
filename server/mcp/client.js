@@ -90,10 +90,13 @@ class McpClient {
   request(method, params, timeout, id = nextId++) {
     if (this.closed) return Promise.reject(Error(this.error || "连接已断开"));
     return new Promise((resolve, reject) => {
+      // 进度能延长空闲等待，但不能让工具靠持续刷进度永久占住请求。
+      const deadline = Date.now() + (method === "tools/call" ? timeout * 2 : timeout);
       const entry = { resolve, reject, timeout, timer: null };
       entry.arm = () => {
         clearTimeout(entry.timer);
-        entry.timer = setTimeout(() => this.settle(id, Error(`${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`)), timeout);
+        const remaining = Math.max(1, Math.min(timeout, deadline - Date.now()));
+        entry.timer = setTimeout(() => this.settle(id, Error(`${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`)), remaining);
       };
       entry.arm();
       this.pending.set(id, entry);
