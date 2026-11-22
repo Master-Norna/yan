@@ -37,7 +37,7 @@ function rootRewinding(root, exceptId) {
 function rewindingOver(c) {
   return rewinding.has(c.id) || (isWork(c) && rootRewinding(workRoot(c), c.id));
 }
-/** 动手前：这一答还没记过就记一回，帮手与主答同时动手也只记一回。记不下（目录不在、桥接是旧的）不拦着干活 @param {ToolContext} ctx */
+/** 动手前必须成功建立文件检查点：失败就拒绝执行本地写入，避免误以为可以退回 @param {ToolContext} ctx */
 function checkpointBefore({ conversation, assistant }) {
   const root = isWork(conversation) && workRoot(conversation);
   if (!root || assistant.checkpoint) return Promise.resolve();
@@ -47,11 +47,13 @@ function checkpointBefore({ conversation, assistant }) {
       bridge("/api/checkpoint/take", { root, conversation: conversation.id, answer: assistant.id }, AbortSignal.timeout(600000))
         .then(done => {
           // 拍摄时这段对话已被删：册没有落下，别在消息上记一笔（日后退回会说「检查点已不在」）
-          if (done.discarded) return;
+          if (done.discarded) throw Error("对话已删除，不能继续执行后续文件操作");
           assistant.checkpoint = { root, at: now(), files: done.files };
           markDirty(conversation.id);
         })
-        .catch(() => {})
+        .catch(error => {
+          throw Error(`文件检查点未能建立：${String(error.message || error)}`);
+        })
         .finally(() => checkpointing.delete(assistant.id))
     );
   return checkpointing.get(assistant.id) || Promise.resolve();
