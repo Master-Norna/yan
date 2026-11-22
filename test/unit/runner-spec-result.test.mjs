@@ -15,3 +15,8 @@ test("有 PASS 正常通过；有 FAIL 或异常退出均失败", () => {
 test("只作尺寸报告的 prompt-size 是有意的无断言例外", () => {
   assert.equal(inspectSpecResult("prompt-size.mjs", "tokens: 100\n", 0, null).failures, 0);
 });
+
+test("统计脚本从子目录传入时仍是明确例外，其它路径不能空跑", () => {
+  assert.equal(inspectSpecResult("test/spec/prompt-size.mjs", "tokens: 100\n", 0, null).failures, 0);
+  assert.equal(inspectSpecResult("test/spec/no-assertions.mjs", "", 0, null).failures, 1);
+});
