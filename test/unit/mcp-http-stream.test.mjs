@@ -126,7 +126,12 @@ test("MCP 工具持续发进度也不能跨过绝对超时上限", async t => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_700_000_000_000 });
   const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
   let id;
-  client.transport = { send: async message => { id = message.id; }, abort() {} };
+  client.transport = {
+    send: async message => {
+      id = message.id;
+    },
+    abort() {}
+  };
   const pending = client.request("tools/call", {}, 30);
   for (let i = 0; i < 5; i++) {
     t.mock.timers.tick(10);
