@@ -46,6 +46,72 @@ for (const kind of ["bg", "timer"])
     assert.deepEqual(painted.at(-1), [], "别处结束后也立即撤下入口");
   });
 
+test("在途跟读未接纳更新：不刷候，历史与后台监听照旧", async () => {
+  const f = load([
+    "store",
+    "followConversations",
+    `install: (read, calls) => {
+      bridge = read;
+      currentId = "c1";
+      remoteBusy.add("c1");
+      chatDiskStamps.set("c1", 2);
+      requestJobs.set("local", { conversationId: "local" });
+      renderHistory = () => calls.push("history");
+      renderClepsydra = () => calls.push("clepsydra");
+      renderConversation = () => calls.push("conversation");
+      rewatchBackground = () => calls.push("watch");
+    }`
+  ]);
+  const c = conversation([]),
+    local = { ...conversation([]), id: "local" },
+    calls = [];
+  let incoming = { items: [] };
+  f.install(async () => incoming, calls);
+  f.store.conversations = [c, local];
+  await f.followConversations(["c1"], []);
+  incoming = {
+    items: [
+      { id: "c1", savedAt: 2, conversation: conversation([]) },
+      { id: "missing", savedAt: 3, conversation: { ...conversation([]), id: "missing" } },
+      { id: "local", savedAt: 3, conversation: { ...conversation([]), id: "local" } }
+    ]
+  };
+  await f.followConversations(["c1", "missing", "local"], []);
+  assert.equal(f.store.conversations[0], c);
+  assert.equal(f.store.conversations[1], local);
+  assert.deepEqual(calls, ["history", "watch", "history", "watch"]);
+});
+
+test("别处松手：磁盘版本没变也刷候，终稿确认后才接后台监听", async () => {
+  const f = load([
+    "store",
+    "syncLeases",
+    "runningElsewhere",
+    `install: (read, calls) => {
+      chatsOnline = () => true;
+      bridge = read;
+      remoteBusy.add("c1");
+      chatDiskStamps.set("c1", 2);
+      renderHistory = () => calls.push("history");
+      renderClepsydra = () => calls.push("clepsydra");
+      rewatchBackground = () => { if (!remoteBusy.has("c1")) calls.push("watch"); };
+    }`
+  ]);
+  const c = conversation([]),
+    calls = [];
+  let incoming = { items: [], skipped: 1 };
+  f.store.conversations = [c];
+  f.install(async route => (route === "/api/chats/lease" ? { busy: [] } : incoming), calls);
+  await f.syncLeases();
+  assert.equal(f.runningElsewhere("c1"), true);
+  assert.deepEqual(calls, ["history", "clepsydra"], "尚在等终稿的一轮也刷候，不接管后台");
+  incoming = { items: [{ id: "c1", savedAt: 2, conversation: conversation([]) }] };
+  await f.syncLeases();
+  assert.equal(f.store.conversations[0], c);
+  assert.equal(f.runningElsewhere("c1"), false);
+  assert.deepEqual(calls.slice(2), ["history", "clepsydra", "watch"]);
+});
+
 test("直接读回对话新版本时，候随当前步骤更新", () => {
   const f = load([
     "store",
