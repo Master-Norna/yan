@@ -8,6 +8,16 @@ on:
   pull_request:
     paths:
       - "pack/**"
+      - "server/**"
+      - "src/**"
+      - "web/**"
+      - "styles/**"
+      - "prompts/**"
+      - "skills/**"
+      - "i18n/**"
+      - "vendor/**"
+      - "README.md"
+      - "README.en.md"
       - "package.json"
       - "server.js"
       - "start.cmd"
