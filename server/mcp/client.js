@@ -5,7 +5,9 @@ const { createTransport, SseTransport } = require("./transports.js");
 
 const PROTOCOL = "2025-06-18",
   CONNECT_MS = 60000, // 起进程、握手、拉工具：Python 服务导入重的库时要十几二十秒
-  CALL_MS = 600000; // 一件工具默认最多跑十分钟（渲染、构建这类）；服务报进度就续命
+  CALL_MS = 600000, // 一件工具默认最多跑十分钟（渲染、构建这类）；服务报进度就续命
+  TOOL_PAGES_MAX = 50,
+  TOOLS_MAX = 1000; // 一件工具默认最多跑十分钟（渲染、构建这类）；服务报进度就续命
 let nextId = 1;
 
 class McpClient {
@@ -57,9 +59,14 @@ class McpClient {
     let cursor;
     const cursors = new Set();
     do {
+      // 重复游标只是其中一种故障：服务也可能每页给一个全新游标，永远不结束。
+      if (cursors.size >= TOOL_PAGES_MAX) throw Error("MCP 工具清单分页超过上限");
       const page = await this.request("tools/list", cursor ? { cursor } : {}, CONNECT_MS);
+      if (!Array.isArray(page?.tools)) throw Error("MCP 工具清单缺少 tools 数组");
+      if (tools.length + page.tools.length > TOOLS_MAX) throw Error("MCP 工具数量超过上限");
       tools.push(...page.tools);
       cursor = page.nextCursor;
+      if (cursor && typeof cursor !== "string") throw Error("MCP 工具清单游标不是字符串");
       // 上游若反复返回同一游标，不应无限拉取并堆积工具。
       if (cursor && cursors.has(cursor)) throw Error("MCP 工具清单分页游标重复");
       if (cursor) cursors.add(cursor);
