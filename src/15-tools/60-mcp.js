@@ -282,9 +282,13 @@ async function runMcpTool(step, server, tool, args, ctx) {
     const denied = flag && (await reviewGate(step, args, ctx, flag));
     if (denied) return denied;
   }
-  const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal).finally(
-    stageWatch(tool, args, ctx.conversation?.id)
-  );
+  const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal)
+    .catch(error => {
+      // 桥接按当前清单拒绝了旧工具：让下一问重新拉清单，不持续展示过期工具。
+      if (error.data?.toolsChanged) mcp.key = "";
+      throw error;
+    })
+    .finally(stageWatch(tool, args, ctx.conversation?.id));
   // 服务说工具变了：下一问前重拉
   if (data.toolsChanged) mcp.key = "";
   const { names, images } = await mcpResultImages(step, data.result),
