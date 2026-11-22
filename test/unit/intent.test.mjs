@@ -887,7 +887,10 @@ test("载入旧式 truthy any 后关掉规则，已封印节点必须待复核",
       { id: "甲", claim: "A", check: "a" },
       { id: "乙", claim: "B", check: "b" }
     ]);
-    intent = change(intent, [{ id: "甲", state: "done" }, { id: "根", state: "done" }]);
+    intent = change(intent, [
+      { id: "甲", state: "done" },
+      { id: "根", state: "done" }
+    ]);
     const raw = structuredClone(intent);
     raw.nodes["根"].any = value;
     intent = f.asIntent(raw);
