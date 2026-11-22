@@ -83,7 +83,6 @@ const stage = {
   width: 0,
   poll: 0,
   fitTimer: 0,
-  empty: "",
   click: { at: 0, x: 0, y: 0, count: 0 },
   // 人要在后台开新页的那一下（中键、Ctrl 点链接，右键「新标签打开」）：随后冒出的新页不跟过去
   behindAt: 0,

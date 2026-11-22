@@ -621,23 +621,35 @@ function stageEmptyHtml(text, action = "") {
     `<rect class="zhu" x="118" y="66" width="7" height="7" rx=".6"/>`;
   return `<svg class="brush stage-leaf" viewBox="0 0 150 92" aria-hidden="true">${stageLeaf}</svg><span>${text}</span>${action}`;
 }
+// 隔一会儿就重画一回；比上次生成的 HTML，不比浏览器重序列化过的 innerHTML。
+// 没变就保留原节点，免得指针下的按钮、已有焦点被换掉。
+/** @type {WeakMap<Element, string>} */
+const stageRenderedHtml = new WeakMap();
+/** @param {Element} node @param {string} html */
+function stageSetHtml(node, html) {
+  if (stageRenderedHtml.get(node) === html) return;
+  node.innerHTML = html;
+  stageRenderedHtml.set(node, html);
+}
 function stageRender() {
   if (!stageShown()) return;
   // 标签是一行字、丝栏相隔；当前那张底下一笔朱，执事所在的那张题后一粒朱
   const under = brushStroke([1, 2.6, 9, 1.8, 17, 2.4], 2.2, { tone: "zhu", tail: 0 }),
     acting = stageActing();
-  $("#stageTabs").innerHTML = [...stage.tabs]
+  const tabs = [...stage.tabs]
     .map(
       ([id, tab]) =>
         `<div class="stage-tab${id === stage.current ? " on" : ""}" role="tab" aria-selected="${id === stage.current}" data-stage-tab="${escapeHtml(id)}" title="${escapeHtml(tab.title || tab.url)}"><span class="stage-tab-name">${escapeHtml(stageTitle(tab))}</span>${acting && id === stage.front ? `<span class="stage-tab-live" title="${t(`执事在这一页`)}"></span>` : ""}<button type="button" class="stage-tab-x" data-stage-close="${escapeHtml(id)}" title="${t(`关闭此页`)}" aria-label="${t(`关闭此页`)}">×</button>${id === stage.current ? `<svg class="stage-tab-under" viewBox="0 0 18 5" aria-hidden="true">${under}</svg>` : ""}</div>`
     )
     .join("");
+  stageSetHtml($("#stageTabs"), tabs);
   stageRenderMarkBtn();
   const tab = stage.tabs.get(stage.current),
     addr = $("#stageAddr");
   if (document.activeElement !== $("#stageUrl")) {
-    addr.innerHTML = stageAddrHtml(tab);
-    addr.title = tab?.url ? stageReadable(tab.url) : "";
+    stageSetHtml(addr, stageAddrHtml(tab));
+    const title = tab?.url ? stageReadable(tab.url) : "";
+    if (addr.getAttribute("title") !== title) addr.title = title;
   }
   const empty = stage.launching
     ? stageEmptyHtml(t("正在打开浏览器…"))
@@ -649,9 +661,9 @@ function stageRender() {
       : !tab
         ? stageEmptyHtml(t("没有开着的页"), `<button type="button" class="stage-go" data-stage-new>${t(`新建标签页`)}</button>`)
         : "";
-  // 隔一会儿就重画一回：没变不动，免得按钮在指针下被换掉
-  if (empty !== stage.empty) $("#stageEmpty").innerHTML = stage.empty = empty;
-  $("#stageEmpty").classList.toggle("hidden", !empty);
+  const emptyBox = $("#stageEmpty");
+  stageSetHtml(emptyBox, empty);
+  emptyBox.classList.toggle("hidden", !empty);
   $("#stageView").classList.toggle("empty", !!empty);
 }
 /**
