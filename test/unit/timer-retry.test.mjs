@@ -219,3 +219,27 @@ test("设置和取消写簿失败：不消耗编号、不改变活排期，失�
     [timer.id]
   );
 });
+
+test("约簿损坏时不当成空簿覆盖，修好文件后可恢复使用", t => {
+  const { boot, bookFile, tick } = fixture(t);
+  const bad = "{bad json";
+  fs.writeFileSync(bookFile, bad);
+  const call = boot();
+  assert.throws(() => call("list"), /约簿损坏/);
+  assert.throws(() => call("set", { to: "c", due: start + 100 }), /约簿损坏/);
+  assert.equal(fs.readFileSync(bookFile, "utf8"), bad, "损坏原件必须保留给人工恢复");
+  fs.writeFileSync(bookFile, JSON.stringify({ seq: 0, timers: [] }));
+  assert.deepEqual(call("list").timers, []);
+  call("set", { to: "c", due: start + 100 });
+  tick(100);
+  assert.equal(call("take", { ids: [] }).fired.length, 0);
+});
+
+test("桥接读入正常约簿后被外部改坏，下一次保存也拒绝覆盖", t => {
+  const { boot, bookFile } = fixture(t);
+  const call = boot();
+  call("set", { to: "c", due: start + 1000 });
+  fs.writeFileSync(bookFile, "{truncated");
+  assert.throws(() => call("set", { to: "c", due: start + 2000 }), /约簿损坏/);
+  assert.equal(fs.readFileSync(bookFile, "utf8"), "{truncated");
+});
