@@ -18,6 +18,7 @@ on:
       - "vendor/**"
       - "README.md"
       - "README.en.md"
+      - "LICENSE"
       - "package.json"
       - "server.js"
       - "start.cmd"
