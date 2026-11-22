@@ -87,7 +87,9 @@ test("主模型同一答内可连续修改、增加、删除；成功结果给�
   assert.equal((await f.write(seen, "偏好中文\n命令用 PowerShell")).ok, true);
   assert.equal((await f.write(seen, "偏好中文\n命令用 PowerShell\n解释简短")).ok, true);
   assert.match((await f.write(seen, "新的计划", "计划")).content, /新的计划/);
-  assert.equal((await f.write(seen, "", "计划")).ok, true);
+  const deleted = await f.write(seen, "", "计划");
+  assert.equal(deleted.ok, false, "存储目录未确认落盘，删除不应报告成功");
+  assert.match(deleted.content, /还没写进存储目录/);
   assert(!f.memory().items.some(item => item.category === "计划"));
   assert.equal((await f.write(seen, "", "计划")).ok, true);
 });
