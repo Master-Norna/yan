@@ -260,7 +260,7 @@ test("合法 JSON 但 timers 不是数组时也要保留损坏约簿", t => {
 });
 
 
-test("约簿损坏仍可领取已经投递的消息，并保留认领凭据直到约簿恢复", t => {
+test("约簿损坏仍可领取已经投递的消息，并保留认领凭据直到约簿恢复", async t => {
   const { boot, bookFile, tick, pending, names } = fixture(t);
   const call = boot();
   call("set", { to: "c", due: start + 100, every: 1000 });
@@ -269,7 +269,7 @@ test("约簿损坏仍可领取已经投递的消息，并保留认领凭据直�
   assert.ok(notice);
   fs.writeFileSync(bookFile, "{broken");
   assert.throws(() => call("set", { to: "c", due: start + 2000 }), /约簿损坏/);
-  const waited = call("wait", {});
+  const waited = await call("wait", {});
   assert.deepEqual(waited.fired, [notice], "约簿损坏时 wait 仍能读到落盘的通知");
   assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
   assert.ok(names().includes(`${notice.id}.json.taken`), "簿损坏时不能丢弃可能用于去重的认领凭据");
