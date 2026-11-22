@@ -251,7 +251,8 @@ class HttpTransport {
         method: "POST",
         headers: this.headersFor(),
         body: JSON.stringify(message),
-        signal: abort.signal
+        signal: abort.signal,
+        redirect: "error"
       });
       const session = response.headers.get("mcp-session-id");
       if (session) this.session = session;
@@ -306,7 +307,7 @@ class HttpTransport {
   close() {
     for (const abort of this.aborts) abort.abort();
     this.reads.clear();
-    if (this.session) void fetch(this.url, { method: "DELETE", headers: this.headersFor() }).catch(() => {});
+    if (this.session) void fetch(this.url, { method: "DELETE", headers: this.headersFor(), redirect: "error" }).catch(() => {});
   }
 }
 
@@ -324,14 +325,18 @@ class SseTransport {
   async start() {
     const response = await fetch(this.url, {
       headers: { Accept: "text/event-stream", ...this.headers, ...OUTBOUND },
-      signal: this.abort.signal
+      signal: this.abort.signal,
+      redirect: "error"
     });
     if (!response.ok) throw await httpError(response);
     // 第一条 endpoint 事件告诉往哪里投递，此后的 message 事件都是回来的消息
     await new Promise((resolve, reject) => {
       readEvents(response, (event, data) => {
         if (event === "endpoint") {
-          this.endpoint = new URL(data, this.url).href;
+          // 远端 MCP 不得借 endpoint 通知将用户的自定义头（凭据）送到另一来源。
+          const endpoint = new URL(data, this.url);
+          if (endpoint.origin !== new URL(this.url).origin) throw Error("MCP SSE 投递端点不能跨源");
+          this.endpoint = endpoint.href;
           resolve();
         } else if (event === "message") this.onmessage(JSON.parse(data));
       })
@@ -346,7 +351,8 @@ class SseTransport {
     const response = await fetch(this.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.headers, ...OUTBOUND },
-      body: JSON.stringify(message)
+      body: JSON.stringify(message),
+      redirect: "error"
     });
     if (!response.ok) throw await httpError(response);
     // 旧式 SSE 的投递回执不采用正文（通行是 202 空体）：有也不读，当场取消

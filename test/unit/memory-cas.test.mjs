@@ -286,3 +286,19 @@ test("设置页里正编着这一类：别处也改过也留本页的，不把�
   );
   assert.equal(other.memory.items.find(item => item.category === "项目").text, "z");
 });
+
+test("remember 删除落盘失败：不得误报已删去，也不能解引用已删除的条目", async () => {
+  const f = setup();
+  f.store.memory.items = [item("m1", "偏好", "偏好中文")];
+  f.setFlush(async () => false);
+  const memory = new Map([["偏好", f.memoryStamp(f.store.memory.items[0])]]);
+  const result = await f.TOOLS.get("remember").run(
+    {},
+    { category: "偏好", text: "" },
+    { memory, memoryUpdates: new Map(), conversation: { id: "c1" } }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.display, "待落盘");
+  assert.match(result.content, /还没写进存储目录/);
+  assert.doesNotMatch(result.content, /已删去/);
+});
