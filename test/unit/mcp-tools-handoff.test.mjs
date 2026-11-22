@@ -236,7 +236,9 @@ test("调用只接受已登记服务、当前配置和工具清单，移除服�
   const config = { command: "node" };
   const call = (server, tool = "read", passed = config) => post("/api/mcp/call", { server, config: passed, tool, arguments: {} });
   try {
-    assert.equal((await call("fake")).status, 400, "未登记的服务不能临时起 MCP 进程");
+    const unregistered = await call("fake");
+    assert.equal(unregistered.status, 400, "未登记的服务不能临时起 MCP 进程");
+    assert.equal(unregistered.toolsChanged, true, "桥接重启或尚未登记时要求页面重拉清单");
     assert.equal((await post("/api/mcp/list", { servers: { fake: config } })).status, 200);
     assert.equal((await call("fake", "read", { command: "other" })).status, 400, "不可替换已登记的连接配置");
     const removed = await call("fake", "write");
@@ -245,7 +247,9 @@ test("调用只接受已登记服务、当前配置和工具清单，移除服�
     assert.equal((await call("fake")).status, 200, "清单里的工具仍正常工作");
     assert.deepEqual(called, ["read"], "拒绝的调用不应进入 MCP 客户端");
     assert.equal((await post("/api/mcp/list", { servers: {} })).status, 200);
-    assert.equal((await call("fake")).status, 400, "已移除的服务不能继续调用");
+    const afterRemoval = await call("fake");
+    assert.equal(afterRemoval.status, 400, "已移除的服务不能继续调用");
+    assert.equal(afterRemoval.toolsChanged, true, "已移除的服务也要求页面清理旧清单");
   } finally {
     await close();
     restore();
