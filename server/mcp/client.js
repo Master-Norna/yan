@@ -99,7 +99,7 @@ class McpClient {
         entry.timer = setTimeout(() => {
           const absolute = method === "tools/call" && Date.now() >= deadline;
           const reason = absolute
-            ? `${method} 已达绝对时限（${Math.round(timeout * 2 / 1000)} 秒；距上次进度 ${entry.lastProgressAt === null ? "无记录" : `${Math.round((Date.now() - entry.lastProgressAt) / 1000)} 秒`}）`
+            ? `${method} 超时：已达绝对时限（${Math.round(timeout * 2 / 1000)} 秒；距上次进度 ${entry.lastProgressAt === null ? "无记录" : `${Math.round((Date.now() - entry.lastProgressAt) / 1000)} 秒`}）`
             : `${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`;
           this.settle(id, Error(reason));
         }, remaining);
