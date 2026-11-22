@@ -26,9 +26,14 @@ const seed = {
     autoTitle: false,
     commandPolicyDefault: "ask",
     mcpServers: {
-      local: { command: process.execPath, args: [FAKE] },
-      big: { command: process.execPath, args: [FAKE, "--many"] },
-      web: { url: `http://127.0.0.1:${HTTP_PORT}/mcp`, note: "USER-NOTE-WEB" }
+      // 测试服务是本地受信 fixture：显式标白查询工具，不能信任其自报的 readOnlyHint。
+      local: { command: process.execPath, args: [FAKE], readOnlyTools: ["echo"] },
+      big: {
+        command: process.execPath,
+        args: [FAKE, "--many"],
+        readOnlyTools: ["echo", ...Array.from({ length: 40 }, (_, i) => `tool_${String(i).padStart(2, "0")}`)]
+      },
+      web: { url: `http://127.0.0.1:${HTTP_PORT}/mcp`, note: "USER-NOTE-WEB", readOnlyTools: ["echo"] }
     }
   },
   profiles: [
