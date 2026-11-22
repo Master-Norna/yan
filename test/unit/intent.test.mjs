@@ -867,3 +867,12 @@ test("读写旧版意时保留未来版本的扩展字段与日志元数据", ()
   assert.equal(restored.log[0].eventId, "event-1");
   assert.deepEqual(restored.nodes["甲"].customFuture, { tag: "retain" });
 });
+
+test("未来字段保留时，已知 updated 的无效类型仍会丢弃", () => {
+  for (const updated of [12345, { unexpected: true }, null]) {
+    const intent = f.asIntent({ updated, futureVersion: { custom: 1 }, nodes: {}, log: [] });
+    assert.equal(Object.hasOwn(intent, "updated"), false);
+    assert.deepEqual(intent.futureVersion, { custom: 1 });
+  }
+  assert.equal(f.asIntent({ updated: "2026-11-22" }).updated, "2026-11-22");
+});
