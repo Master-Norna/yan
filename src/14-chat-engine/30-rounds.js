@@ -248,7 +248,7 @@ const echolessProfiles = new Set();
 function thoughtEcho(target, from, profile) {
   if (target.thinkingBlocks?.length) return { thinking_blocks: target.thinkingBlocks };
   const thought = String(target.reasoning || "").slice(from);
-  if (!thought.trim() || echolessProfiles.has(profile.id)) return {};
+  if (!thought.trim() || echolessProfiles.has(blindProfileKey(profile))) return {};
   const echo = ownCopy(thought);
   return { reasoning_content: echo, reasoning: echo };
 }
@@ -275,7 +275,7 @@ function dropThoughtEcho(history, profile, message) {
     delete item.reasoning_content;
     delete item.reasoning;
   }
-  if (carried.length) echolessProfiles.add(profile.id);
+  if (carried.length) echolessProfiles.add(blindProfileKey(profile));
   return carried.length > 0;
 }
 // 工具交回的图（游目截的画面之类）：tool 消息只收文字，图另起一条用户消息紧随工具结果（Anthropic 那头并进同一条）。
