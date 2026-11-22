@@ -104,9 +104,10 @@ const STAGE_READ_ONLY = new Set(["browser_snapshot", "browser_take_screenshot", 
 /** @param {McpToolSpec} spec @param {string} server */
 function mcpReadOnly(spec, server) {
   const config = mcpConfigs()[server];
-  return !!config && (
-    (server === STAGE_SERVER && config.stage && STAGE_READ_ONLY.has(spec.name)) ||
-    (Array.isArray(config.readOnlyTools) && config.readOnlyTools.includes(spec.name))
+  return (
+    !!config &&
+    ((server === STAGE_SERVER && config.stage && STAGE_READ_ONLY.has(spec.name)) ||
+      (Array.isArray(config.readOnlyTools) && config.readOnlyTools.includes(spec.name)))
   );
 }
 // 逐件摊开的：名字写成 mcp__服务__工具（接口只认字母数字与 _-，最长 64），说明与参数用服务端自带的
@@ -164,10 +165,10 @@ const MCP_LAZY_TOOLS = [
       const found = args.tools.map(name => mcpServerTools(args.server, ctx.lookup).find(tool => tool.name === name)).filter(Boolean);
       if (!found.length) return mcpUnknown(args.server, args.tools.join("、"));
       const text = found
-        .map(
-          tool =>
-            t`## ${tool.name}${mcpReadOnly(tool, args.server) ? t("（只读）") : ""}\n${tool.description || tool.title || ""}\n参数：${JSON.stringify(tool.inputSchema)}`
-        )
+        .map(tool => {
+          const mark = mcpReadOnly(tool, args.server) ? t("（只读）") : "";
+          return t`## ${tool.name}${mark}\n${tool.description || tool.title || ""}\n参数：${JSON.stringify(tool.inputSchema)}`;
+        })
         .join("\n\n");
       step.output = trimOutput(text);
       return { ok: true, content: text, display: `${found.length} 件` };
@@ -259,7 +260,10 @@ async function runMcpTool(step, server, tool, args, ctx) {
   step.code = JSON.stringify(args, null, 2);
   // 守的关口刚批过这一步（见 keepHook）：不再另问
   const ask =
-    !step.granted && !mcpReadOnly(spec, server) && commandPolicyOf(ctx.conversation) === "ask" && !(config.autoApprove || []).includes(tool);
+    !step.granted &&
+    !mcpReadOnly(spec, server) &&
+    commandPolicyOf(ctx.conversation) === "ask" &&
+    !(config.autoApprove || []).includes(tool);
   if (ask && !(await askApproval(step, ctx))) {
     step.skipped = true;
     return { ok: false, content: prompt("assistant.declined"), display: "" };
