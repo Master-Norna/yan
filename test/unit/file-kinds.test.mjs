@@ -19,6 +19,8 @@ test("大类、件图、预览、抽正文出自同一份", () => {
   assert.deepEqual([fileKind("r.docx").figure, fileKind("r.docx").view, fileKind("r.docx").extract], ["doc", "doc", "zip"]);
   assert.deepEqual([fileKind("s.xlsx").name, fileKind("s.xlsx").figure], ["sheet", "table"]);
   assert.equal(fileKind("p.pdf").extract, "pdf");
+  // 笔记本不当文字读：那样模型收到的是一整份 JSON，抽出来的才是能读的
+  assert.deepEqual([fileKind("a.ipynb").group, fileKind("a.ipynb").view, fileKind("a.ipynb").extract], ["file", "doc", "ipynb"]);
   assert.deepEqual([fileKind("d.csv").group, fileKind("d.csv").view, fileKind("d.csv").figure], ["text", "table", "table"]);
   assert.deepEqual([fileKind("m.json").figure, fileKind("m.json").view], ["code", "text"]);
   assert.deepEqual([fileKind("old.xls").view, fileKind("old.xls").figure], [undefined, "table"]);

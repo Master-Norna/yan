@@ -1058,6 +1058,7 @@ var YAN_EN = {
   "整理收藏…": "Organize bookmarks…",
   "打开本机文件…": "Open local file…",
   "游目阅不了此件，已在本机程序中打开": "The browser panel can't show this file; opened it in its app",
+  "正在摊开「{0}」…": "Opening “{0}” in the panel…",
   复制网址: "Copy URL",
   网址已复制: "URL copied",
   用系统浏览器打开: "Open in system browser",

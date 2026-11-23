@@ -56,9 +56,20 @@ function bundleStyles() {
   const files = partsOf(STYLES, ".css");
   return { text: joinParts(files, "/*", " */"), stamp: stampOf(files), files };
 }
+// 单挑几份：游目摊开本机文档时包的那一页只要基础、正文与预览器那几节，不必背整套界面样式。
+// 名字写相对 styles/ 的路径；认不得的跳过（挪了文件不至于让整页没样式）
+/** @param {string[]} names */
+function stylesAt(names) {
+  return joinParts(
+    names.map(name => path.join(STYLES, name)).filter(file => fs.existsSync(file)),
+    "/*",
+    " */"
+  );
+}
 module.exports = {
   bundleScript,
   bundleStyles,
+  stylesAt,
   scriptParts: () => partsOf(SRC, ".js"),
   promptParts: () => partsOf(PROMPTS, ".js"),
   SCRIPT_HEAD,
