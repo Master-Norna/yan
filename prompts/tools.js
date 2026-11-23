@@ -387,7 +387,7 @@
 
   read_document: {
     description:
-      "读对话附件、卷宗里的文档（PDF、Office、文本）或技能的说明，全文或片段；长文档按页码或关键词只取片段。{{docs}}卷宗里有什么不清楚时，name 留空即列出。",
+      "读对话附件（用户随问发来的文件就在附件里，不在工作目录）、卷宗里的文档（PDF、Office、文本）或技能的说明，全文或片段；长文档按页码或关键词只取片段。{{docs}}卷宗里有什么不清楚时，name 留空即列出。",
     parameters: {
       type: "object",
       properties: {

@@ -145,6 +145,21 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
     },
     error => errorText(error, 200)
   );
+  // 一批原件在哪：发问时随附件说明交给模型，它才知道用户随问发来的文件不在工作目录里、原件在哪。
+  // 只回真要得到路径的（不在存储目录里的不回），一次问齐，免得每件附件一个来回
+  const handlePaths = jsonRoute(
+    async body => {
+      const dir = home(),
+        ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter(id => ID.test(id));
+      const paths = {};
+      for (const id of ids) {
+        const raw = rawFileOf(dir, id, readMeta(dir, id));
+        if (raw) paths[id] = path.resolve(path.join(dir, raw));
+      }
+      return { paths };
+    },
+    error => errorText(error, 200)
+  );
   // 原件直取：GET /api/files/raw?id=…。预览器看 PDF、放音视频用它——同源地址，不必把整份原件编成 data: URL 经 JSON 取回，也免得 blob: 地址被页面的 CSP 挡住
   async function handleRaw(req, res) {
     try {
@@ -232,6 +247,7 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
       "POST /api/files/put": handlePut,
       "POST /api/files/get": handleGet,
       "POST /api/files/path": handlePath,
+      "POST /api/files/paths": handlePaths,
       "GET /api/files/raw": handleRaw,
       "POST /api/files/has": handleHas,
       "POST /api/files/open": handleOpen,

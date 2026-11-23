@@ -28,7 +28,23 @@ function revokeViewerUrls() {
 /** 取一件东西的三种读法：直链（图、PDF、音视频交给浏览器）、正文、字节。
  * 卷宗与落了盘的附件都走桥接的同源地址——页面的 CSP 只许同源的框架与媒体，blob: 的 PDF 会被挡；
  * 原件只暂存在浏览器里（桥接中途断过、还没推进目录）时，才就地造 blob 地址 */
-function urlReader(url) {
+// 预览只用得着开头一段：取正文时按字节要一截（Range），不把几百 MB 的日志整份取回页面再切
+const VIEWER_TEXT_CHARS = 200000;
+// 截到的字节可能落在半个字上：退到没写完的 UTF-8 序列之前
+/** @param {Uint8Array} bytes */
+function trimIncomplete(bytes) {
+  let end = bytes.length;
+  for (let back = 1; back <= 4 && end - back >= 0; back++) {
+    const byte = bytes[end - back];
+    if ((byte & 0xc0) === 0x80) continue;
+    const need = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    if (need > back) end -= back;
+    break;
+  }
+  return bytes.subarray(0, end);
+}
+/** @param {string} url @param {{ extracted?: string | (() => Promise<string>) }} [options] extracted：原件取不到时能退回的那份抽出来的正文 */
+function urlReader(url, { extracted = "" } = {}) {
   const fetched = async () => {
     const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
     if (!response.ok) throw Error(t("取回失败"));
@@ -36,9 +52,19 @@ function urlReader(url) {
   };
   return {
     url: () => url,
-    text: async () => decodeTextBytes(await (await fetched()).arrayBuffer()),
+    // limit 给了就只取一段（多一个字，用来判断后面还有没有）
+    text: async (limit = 0) => {
+      if (!limit) return decodeTextBytes(await (await fetched()).arrayBuffer());
+      const response = await fetch(url, {
+        headers: { Range: `bytes=0-${limit * 4 + 3}` },
+        signal: AbortSignal.timeout(60000)
+      });
+      if (!response.ok) throw Error(t("取回失败"));
+      const text = decodeTextBytes(trimIncomplete(new Uint8Array(await response.arrayBuffer())));
+      return text.length > limit ? text.slice(0, limit + 1) : text;
+    },
     blob: async () => (await fetched()).blob(),
-    extracted: ""
+    extracted
   };
 }
 // 技能带的一件：桥接直取原件
@@ -50,15 +76,22 @@ async function viewerReader(source) {
   if (source.skillDir) return urlReader(skillFileUrl(source));
   const url = `/api/files/raw?id=${encodeURIComponent(source.attachmentId)}`,
     head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
-  if (head?.ok) return urlReader(url);
+  if (head?.ok)
+    // 落了盘的附件另有上传时抽下的正文：预览时重抽不成（PDF 的库没载入、文件太大）就退回那一份，
+    // 不至于明明抽过却写着「未能抽出正文」
+    return urlReader(url, {
+      extracted: async () => (await getAttachmentMeta(source.attachmentId).catch(() => null))?.extractedText || ""
+    });
   const file = await getAttachment(source.attachmentId);
   if (!file) throw Error(t("附件原件已找不到"));
   const blob = attachmentBlob(file);
   return {
     url: () => viewerBlobUrl(blob),
-    text: async () => (file.kind === "text" ? String(file.data) : blob.text()),
+    text: async (limit = 0) => {
+      const text = file.kind === "text" ? String(file.data) : await blob.text();
+      return limit && text.length > limit ? text.slice(0, limit + 1) : text;
+    },
     blob: async () => blob,
-    dataUrl: file.kind === "text" ? "" : String(file.data),
     extracted: String(file.extractedText || "")
   };
 }
@@ -126,8 +159,12 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   if (kind === "audio") return listenPageHtml(listenTrackFrom(viewerSource, name, reader));
   if (kind === "video")
     return `<div class="file-viewer-media"><video controls preload="metadata" src="${escapeHtml(reader.url())}" title="${escapeHtml(name)}"></video></div>`;
-  if (kind === "none")
+  // 扩展名认不出、其实是文字的（Dockerfile、Makefile、.env…）：取开头一段闻一下，是字就照文字看，不给「无法预览」
+  if (kind === "none") {
+    const head = await reader.text(65536).catch(() => "");
+    if (looksLikeText(head)) return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(head)}</pre></div>`;
     return `<div class="file-viewer-empty">${t(`此类文件无法在此预览`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;
+  }
   // 网页放进与页内 ```html 同一个隔离沙箱：不能读本站的存储，也不能联网
   if (kind === "html") {
     let source = await reader.text();
@@ -163,7 +200,8 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
     return `<iframe class="file-viewer-frame" data-viewer-app="${id}" sandbox="allow-scripts" title="${t(`隔离的网页预览`)}"></iframe>`;
   }
   if (kind === "table") {
-    const text = await reader.text(),
+    // 四百行就够看了：只取一段（一行也可能很长），不把整个大表取回来
+    const text = await reader.text(2000000),
       split = fileExtension(name) === "tsv" ? "\t" : ",",
       rows = parseDelimited(text, split, 401),
       cells = rows.slice(0, 400);
@@ -174,15 +212,16 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
       .join("")}</tbody></table>${rows.length > 400 ? `<p class="file-viewer-note">${t(`仅显示前 400 行`)}</p>` : ""}</div>`;
   }
   if (kind === "doc") {
-    // 每回从原件现抽（按结构抽成 Markdown）；原件取不到时才用附件上传时抽下的那份。文中的图照抽出的路再从原件里取（见 withZipImages）
+    // 每回从原件现抽（按结构抽成 Markdown）；原件取不到、或这回没抽出来（PDF 的库没载入、文件太大），
+    // 退回上传时抽下的那一份（附件有，卷宗里的没有）。文中的图照抽出的路再从原件里取（见 withZipImages）。
+    // 原件照 Blob 读成字节直接用，不再经 data: URL 转一趟 base64（大文档编一遍解一遍，纯属白耗）
     let text = "",
-      data = "";
+      bytes = null;
     try {
-      data = reader.dataUrl || (await readFile(await reader.blob(), "data"));
-      text = trimExtractedText(await extractDocumentText(name, data));
-    } catch {
-      text = trimExtractedText(reader.extracted);
-    }
+      bytes = new Uint8Array(await (await reader.blob()).arrayBuffer());
+      text = trimExtractedText(await extractDocumentText(name, bytes));
+    } catch {}
+    if (!text) text = trimExtractedText(typeof reader.extracted === "function" ? await reader.extracted() : reader.extracted).trim();
     if (!text)
       return `<div class="file-viewer-empty">${t(`未能抽出正文`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;
     const note = `<p class="file-viewer-note">${t(`本机按结构抽出，不含原排版 ·`)} <button type="button" class="viewer-open-link" data-viewer-open>${t(`以本机程序打开`)}</button></p>`,
@@ -202,20 +241,33 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
               `<div class="viewer-sheet markdown${i ? " hidden" : ""}" data-viewer-panel="${i}">${renderMarkdown(part.replace(/^## .*\n+/, ""))}</div>`
           )
           .join("")}</div>`,
-        data
+        bytes
       );
     if (sort === "slides" && sections.length)
       return withZipImages(
         `<div class="file-viewer-slides">${note}${sections.map(part => `<div class="viewer-slide markdown">${renderMarkdown(part)}</div>`).join("")}</div>`,
-        data
+        bytes
       );
-    return withZipImages(`<div class="file-viewer-text markdown">${note}${renderMarkdown(text)}</div>`, data);
+    return withZipImages(`<div class="file-viewer-text markdown">${note}${renderMarkdown(text)}</div>`, bytes);
   }
-  const text = await reader.text(),
+  // 只要开头这一段：几百 MB 的日志不整份取回来再切
+  const text = await reader.text(VIEWER_TEXT_CHARS),
     // 截了要说一声：不然读的人当预览的末尾就是文件的末尾（原文件不动，下载、以本机程序打开都在）
-    cut = text.length > 200000 ? `<p class="file-viewer-note">${t("仅显示前 20 万字")}</p>` : "";
-  if (kind === "markdown") return `<div class="file-viewer-text markdown">${renderMarkdown(text.slice(0, 200000))}${cut}</div>`;
-  return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(text.slice(0, 200000))}</pre>${cut}</div>`;
+    cut = text.length > VIEWER_TEXT_CHARS ? `<p class="file-viewer-note">${t("仅显示前 20 万字")}</p>` : "";
+  if (kind === "markdown") return `<div class="file-viewer-text markdown">${renderMarkdown(text.slice(0, VIEWER_TEXT_CHARS))}${cut}</div>`;
+  return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(text.slice(0, VIEWER_TEXT_CHARS))}</pre>${cut}</div>`;
+}
+// 像不像一段字：没有 NUL，坏字节与控制字符都少。压缩包、可执行文件开头一段就满是这些
+/** @param {string} text */
+function looksLikeText(text) {
+  if (!text || text.includes("\0")) return false;
+  let bad = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0xfffd || (code < 32 && code !== 9 && code !== 10 && code !== 13)) bad += 1;
+    if (bad > 8) return false;
+  }
+  return true;
 }
 // CSV / TSV：引号里的换行仍属于同一个字段，显示上限按记录计。
 function parseDelimited(text, split, limit = Infinity) {
@@ -338,7 +390,7 @@ function openImageSet(items, index, trigger = null) {
   mendImages(strip);
   return showImageAt(index, true);
 }
-// 摊开组里的第几件，先按窗口大小看；附件要先从库里取，取到时已换了别件就作罢
+// 摊开组里的第几件，先按窗口大小看；附件先取元数据，落了盘的照同源地址画，取到时已换了别件就作罢
 async function showImageAt(index, opening = false) {
   const item = imageViewerSet[index];
   if (!item) return;
@@ -347,7 +399,7 @@ async function showImageAt(index, opening = false) {
   if (item.id) {
     let file;
     try {
-      file = await getAttachment(item.id);
+      file = await getAttachmentMeta(item.id);
     } catch {
       if (revision === imageViewerRevision) toast(t("图片读取失败"));
       return;
@@ -361,7 +413,16 @@ async function showImageAt(index, opening = false) {
       return toast(t("图片原件已找不到"));
     }
     if (file.kind !== "image") return openFileViewer({ attachmentId: item.id }, file.name, imageViewerReturnFocus?.el);
-    [src, name, label] = [file.data, file.name, `${file.name || t("图片")} · ${formatFileSize(file.size)}`];
+    // 落了盘的照同源地址画：整张图不必先编成 data: URL 攥在页面里
+    const url = await attachmentSrc(item.id);
+    if (revision !== imageViewerRevision) return;
+    if (!url) {
+      $("#imageViewerImage")?.removeAttribute("src");
+      const empty = $("#imageViewerName");
+      if (empty) empty.textContent = t("图片原件已找不到");
+      return toast(t("图片原件已找不到"));
+    }
+    [src, name, label] = [url, file.name, `${file.name || t("图片")} · ${formatFileSize(file.size)}`];
   } else if (item.src) {
     [src, name, label] = [item.src, item.name || "", `${item.name || t("图片")} · ${stageHost(item.url || "")}`];
   } else {

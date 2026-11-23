@@ -2,7 +2,7 @@
 // 搜索的 path 给的是文件就搜这一件、正则写不成按字面搜
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { Readable } from "node:stream";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -81,4 +81,28 @@ test("nearestPassage：满文件重复行也不退化（同步运算，慢了卡
   assert.equal(nearestPassage(source, "nothing here to match\nanother line here\n"), "");
   // 逐次复制数组时这一档要一分多钟；线性只要几十毫秒，这里留足余量
   assert.ok(Date.now() - started < 5000, `${Date.now() - started} ms`);
+});
+test("nearestPassage：old 的每一行都撞在满文件重复的长行上，也不退化", () => {
+  // 真实的一档：生成出来的文件，二十万行同一句（每行都够长，会去投票）；old 是一千行同样的句子，
+  // 以前要投两亿票，桥接（单线程）卡上几秒，所有对话一起停
+  const source = Array(200000).fill("    return self.ok(value)").join("\n"),
+    old = Array(1000).fill("    return self.ok(value)").join("\n"),
+    started = Date.now();
+  assert.equal(nearestPassage(source, old), "");
+  assert.ok(Date.now() - started < 5000, `${Date.now() - started} ms`);
+});
+test("write_file：没读过的已存在文件先拦下，原件不动", async () => {
+  writeFileSync(path.join(root, "kept.txt"), "原样");
+  const { status, data } = await call("write", { path: "kept.txt", content: "覆盖", unseen: true });
+  assert.equal(status, 400);
+  assert.match(data.error, /已存在（6 字节）/);
+  assert.equal(readFileSync(path.join(root, "kept.txt"), "utf8"), "原样");
+});
+test("搜索跳过的照实说：超过 2 MB 的、二进制的都记个数", async () => {
+  writeFileSync(path.join(root, "big.txt"), `unique-needle${"x".repeat(2 * 1024 * 1024)}`);
+  writeFileSync(path.join(root, "bin.dat"), Buffer.from([0, 1, 2, 3]));
+  const { data } = await call("search", { query: "unique-needle" });
+  assert.equal(data.large, 1);
+  assert.equal(data.binary, 1);
+  assert.equal(data.matches.length, 0);
 });

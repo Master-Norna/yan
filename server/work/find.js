@@ -145,7 +145,12 @@ module.exports = function createFind(work) {
     let scanned = 0,
       filesHit = new Set(),
       truncated = false,
-      limited = false;
+      limited = false,
+      // 跳过的也记个数：超大、看着是二进制的、读不出来的。零命中时一并说，
+      // 不然模型会当整片目录都找过了（以前超过 2 MB 的直接跳过，一声不吭）
+      large = 0,
+      binary = 0,
+      unread = 0;
     // 搜一件：rel 是它相对于搜索起点的路径（glob 与沙箱筛查按它认）
     const scanFile = async (full, rel) => {
       if (boxed && sandbox.screenPath(rel)) return; // 沙箱不借检索带出机密文件
@@ -158,10 +163,18 @@ module.exports = function createFind(work) {
         .stat(full)
         .then(s => s.size)
         .catch(() => 0);
-      if (!size || size > SEARCH_FILE_BYTES) return;
+      if (!size) return;
+      if (size > SEARCH_FILE_BYTES) {
+        large += 1;
+        return;
+      }
       const buffer = await fs.promises.readFile(full).catch(() => null),
         decoded = buffer && decodeText(buffer);
-      if (!decoded) return;
+      if (!decoded) {
+        if (buffer) binary += 1;
+        else unread += 1;
+        return;
+      }
       const lines = decoded.text.split(/\r?\n/);
       for (const i of matchLines(regex, lines, rel)) {
         filesHit.add(rel);
@@ -201,6 +214,9 @@ module.exports = function createFind(work) {
       truncated,
       ...(limited ? { limited: SEARCH_FILE_LIMIT } : {}),
       ...(skipped.size ? { skipped: [...skipped].sort() } : {}),
+      ...(large ? { large } : {}),
+      ...(binary ? { binary } : {}),
+      ...(unread ? { unread } : {}),
       ...(note ? { note } : {})
     };
   }, failed);

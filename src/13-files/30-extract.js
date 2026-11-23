@@ -55,21 +55,22 @@ function trimExtractedText(value) {
     ? t`${text.slice(0, MAX_EXTRACTED_CHARS)}\n\n[文档内容过长，已在本机截取前 ${MAX_EXTRACTED_CHARS} 个字符]`
     : text;
 }
-// data：置入的原件（Blob）、或 data: URL（预览器、网页交回的 PDF）；不抽的类型不读
-/** @param {string} name @param {Blob|string} data */
+// data：置入的原件（Blob）、原件的字节（预览器现抽时用），或 data: URL（网页交回的 PDF）；不抽的类型不读
+/** @param {string} name @param {Blob|string|Uint8Array} data */
 async function extractDocumentText(name, data) {
   const extract = fileKind(name).extract;
   if (extract === "pdf") return trimExtractedText(await extractPdfText(data));
   if (extract === "zip") return trimExtractedText(await extractZipDocumentText(fileExtension(name), await bytesOf(data)));
   return "";
 }
-/** @param {Blob|string} data */
+/** @param {Blob|string|Uint8Array} data */
 async function bytesOf(data) {
-  return data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : bytesFromDataUrl(data);
+  return data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data instanceof Uint8Array ? data : bytesFromDataUrl(data);
 }
-/** @param {Blob|string} data */
+/** @param {Blob|string|Uint8Array} data */
 async function extractPdfText(data) {
-  if (!(await ensureLib("pdf"))) return "";
+  // 库没载入就抽不了：说一声，别当成「这份 PDF 没内容」悄悄过去（见 00-ingest.js 的 extractionError）
+  if (!(await ensureLib("pdf"))) throw Error(t("PDF 抽取库未能载入，原件照发"));
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.js";
   const loading = window.pdfjsLib.getDocument({
       data: await bytesOf(data),
@@ -246,15 +247,16 @@ const ZIP_IMAGE_TYPES = {
   bmp: "image/bmp",
   svg: "image/svg+xml"
 };
-// 画好的预览里，照 img 记下的路从原件包里取图换成 data: 地址；取不到的、浏览器画不了的（EMF、WMF、TIFF）留一行字
-async function withZipImages(html, dataUrl) {
-  if (!dataUrl || !html.includes("data-path")) return html;
+// 画好的预览里，照 img 记下的路从原件包里取图换成 data: 地址；取不到的、浏览器画不了的（EMF、WMF、TIFF）留一行字。
+// bytes 是原件本身（Uint8Array）：抽正文与取图共用同一份，不必编成 data: URL 再解一遍
+async function withZipImages(html, bytes) {
+  if (!bytes || !html.includes("data-path")) return html;
   const box = document.createElement("template");
   box.innerHTML = html;
   const imgs = [...box.content.querySelectorAll("img[data-path]")],
     pathOf = img => archiveRelative("", img.getAttribute("data-path") || ""),
     wanted = new Set(imgs.map(pathOf)),
-    media = await unzipSelected(bytesFromDataUrl(dataUrl), name => wanted.has(name), true).catch(() => new Map());
+    media = await unzipSelected(bytes, name => wanted.has(name), true).catch(() => new Map());
   for (const img of imgs) {
     const path = pathOf(img),
       type = ZIP_IMAGE_TYPES[fileExtension(path)];
