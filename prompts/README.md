@@ -13,7 +13,7 @@
 | `mcp.js` | 接入的 MCP 服务自带的用法（接在系统提示里，排在技能与画图行文几句之前）；工具不存在、参数不合、游目视口被定死时回给模型的话 | 服务的用法随提供给模型的 MCP 工具而入系统提示；其余是工具结果 |
 | `review.js` | 审查：审而后行里规则标疑的那一步交专司的审查模型再判——审查员的系统提示、交给它的那段话（用户原话、图、将要做的、规则缘由）、两步判的末句（一字准/疑，疑了再说理由）；驳回时与连驳停手时回给主模型的话 | 只在专司里开了审查、档位是审而后行、规则标疑时，另发给审查模型；`denied` / `halt` 作工具结果 |
 | `image.js` | 生图：画好后回给模型的工具结果（存处、正文怎么引；接口改写过描述的附上改写后的） | 专司里配了生图、模型调了 generate_image 时作工具结果 |
-| `tools.js` | 各工具的 description 与参数说明；带 `brief` 的在言里用 brief（短说明） | 随工具一并交给模型；言不带 edit_file / search_files / update_plan / update_intent / fold；旁注不带 http_request；run_js 谁都有 |
+| `tools.js` | 各工具的 description 与参数说明；带 `brief` 的在言里用 brief（短说明） | 随工具一并交给模型；言不带 edit_file / search_files / update_plan / update_intent / fold；旁注里的 http_request 只许 GET / HEAD；run_js 谁都有 |
 
 拼接顺序（系统提示）：预设的提示词（对话选了预设时）在最前，其后照 `assistant.js` 文末的 `order` 表逐段拼。表里一段一行，写明何时带上：`tool` 是交给模型的工具里有这一件才带，`mode` 是只给行（work）或只给言（chat），`roles` 是只给主答（main）、旁注（side）或帮手（sub）。要填值、或视情形不带的（环境没备好、没有 MCP 服务附用法、旁注注的是一段还是整条），由 `src/14-chat-engine/50-prompt.js` 的 `PROMPT_VARS` 给出，给 `null` 即这回不带。`test/prompt-size.mjs` 用页面同一份代码拼（默认档：沙箱开、问而后行），量出来的与模型实际读到的一致，加一段只需在表里添一行。
 
