@@ -155,13 +155,14 @@ function openRepoMenu(dir, anchor) {
   );
 }
 // 删除一整组：组里的对话连同附件一并移除（目录里的文件一个不碰）。别的页面正写着的那几段跳过，不硬删。
-// 「组里」照侧栏的归组口径算：置顶的单列、归进「集」组的在那一组里，都绑着这个目录也不属于这一组（见 renderHistory 的分法）
+// 「组里」与侧栏共用 historyPlacement：绑着同一个目录的置顶、集组成员也不一定属于这个「工」组。
 /** @param {string} dir */
 async function removeWorkdirGroup(dir) {
-  const members = store.conversations.filter(c => historyKey(c) === dir),
+  const atDir = store.conversations.filter(c => isWork(c) && c.workdir === dir),
+    members = atDir.filter(c => historyPlacement(c) === "repo"),
     busy = members.filter(c => runningElsewhere(c.id)),
     targets = members.filter(c => !busy.includes(c)),
-    outside = store.conversations.filter(c => (c.pinned || groupOf(c)) && isWork(c) && c.workdir === dir).length,
+    outside = atDir.length - members.length,
     name = workdirTitle(dir);
   if (!targets.length) return toast(busy.length ? t("此组正在另一页面作答，暂不能删除") : t("这一组已没有对话"));
   const notes = [
@@ -172,7 +173,9 @@ async function removeWorkdirGroup(dir) {
   if (!(await askConfirm({ title: t`删除「${name}」这一组？`, body: notes.join("\n"), ok: t("删除") }))) return;
   // 确认期间别处仍可接手作答、改归组或换进新版：只删原先选中、现在仍属于这一组且未被别页占用的记录。
   const confirmed = new Set(targets.map(c => c.id)),
-    removing = store.conversations.filter(c => confirmed.has(c.id) && historyKey(c) === dir && !runningElsewhere(c.id));
+    removing = store.conversations.filter(
+      c => confirmed.has(c.id) && c.workdir === dir && historyPlacement(c) === "repo" && !runningElsewhere(c.id)
+    );
   // 一条也没剩下：别报「已删除 0 段对话」，照实说这一回没动
   if (!removing.length) {
     render();

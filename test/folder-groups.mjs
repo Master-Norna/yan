@@ -49,7 +49,8 @@ const seed = {
     conversation("w-new", "组里最新", at(5), here),
     conversation("w-old", "组里旧的", at(20), here),
     conversation("pinned", "置顶的", at(1), here, { pinned: true }),
-    conversation("grouped", "归组的", at(2), here, { groupId: "g1" }),
+    conversation("grouped", "归组的", at(2), here, { groupId: "g1", pinned: true }),
+    conversation("loose", "散列的", at(4)),
     conversation("away", "别处的", at(10), elsewhere)
   ],
   library: [],
@@ -66,6 +67,17 @@ const state = () =>
     })()`
   );
 const first = await state();
+check(
+  "工组、单独置顶、组内置顶和散列各落在应有位置",
+  await evalJs(`(() => {
+    const row = id => document.querySelector('#history [data-conversation="' + id + '"]');
+    return row("w-new")?.closest("[data-repo]")?.dataset.repo === ${JSON.stringify(here)} &&
+      row("pinned")?.closest(".history-group")?.querySelector(".history-label")?.textContent === "置顶" &&
+      row("grouped")?.closest("[data-group]")?.dataset.group === "g1" &&
+      !!row("grouped")?.querySelector(".history-state.pinned") &&
+      !row("loose")?.closest("[data-repo], [data-group]") && !!row("loose");
+  })()`)
+);
 check(
   "目录组的组首有印、名字、＋与⋯，悬停仍是完整目录",
   first.name === "work" && first.seal === "工" && first.buttons === 2 && first.tip.startsWith(here),
@@ -132,11 +144,11 @@ const after = await evalJs(
 );
 check(
   "删掉整组：组里的两段没了，置顶的、别处的、已归进「集」组的都还在，那一组也散了",
-  after.left.join() === "away,grouped,pinned" &&
+  after.left.join() === "away,grouped,loose,pinned" &&
     after.grouped === "g1" &&
     after.groups.join() === "诗书" &&
     after.repos.join() === elsewhere &&
-    after.loose.join() === "away,grouped,pinned",
+    after.loose.join() === "away,grouped,loose,pinned",
   JSON.stringify(after)
 );
 check("删除只动对话，目录里的文件一个不碰", existsSync(`${here}/笔记.md`));

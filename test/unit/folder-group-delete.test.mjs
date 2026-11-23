@@ -75,6 +75,19 @@ test("删目录组确认后重查占用和归属，不带走新加入或已离�
   assert.equal(f.store.settings.workdirNames[dir], "言记");
 });
 
+test("目录键与集组保序键恰好同名，也只删工组里的对话", async () => {
+  const workdir = "group:g1";
+  const { f, deleted, approve } = setup([
+    conversation("grouped", { groupId: "g1", workdir }),
+    conversation("repo", { groupId: "missing", workdir }),
+    conversation("pinned", { pinned: true, workdir })
+  ]);
+  const pending = f.removeWorkdirGroup(workdir);
+  approve();
+  await pending;
+  assert.deepEqual(deleted, ["repo"]);
+});
+
 for (const kind of ["目录组", "单条"]) {
   test(`${kind}删除使用确认后按 id 读回的新版记录清理附件`, async () => {
     const { f, deleted, files, approve, settleDeletes } = setup([conversation("c1")]);

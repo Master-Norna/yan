@@ -105,11 +105,16 @@ function detachConversation(c) {
   }
   return [c.id, files, () => cleanScratch(c)];
 }
-// 一段对话在侧栏落在哪一组：分组是 group:组 id，目录组是目录（置顶的不进目录组），散着的没有；与 renderHistory 的归法、collapsedRepos 的键一致
+// 有效的「集」优先于单独置顶，其次是「工」，最后散列。侧栏已有组表，可直接传入查找结果。
+/** @param {Conversation} c */
+function historyPlacement(c, grouped = !!groupOf(c)) {
+  return grouped ? "set" : c.pinned ? "pinned" : isWork(c) ? "repo" : "chat";
+}
+// 保序键沿用 collapsedRepos 的格式；判断是否属于「工」仍看归属类型，不拿键名当类型。
 /** @param {Conversation} c */
 function historyKey(c) {
-  if (groupOf(c)) return `group:${c.groupId}`;
-  return !c.pinned && isWork(c) ? c.workdir : "";
+  const kind = historyPlacement(c);
+  return kind === "set" ? `group:${c.groupId}` : kind === "repo" ? c.workdir : "";
 }
 function togglePin(id) {
   const c = store.conversations.find(item => item.id === id);
