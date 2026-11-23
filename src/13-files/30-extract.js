@@ -61,6 +61,7 @@ async function extractDocumentText(name, data) {
   const extract = fileKind(name).extract;
   if (extract === "pdf") return trimExtractedText(await extractPdfText(data));
   if (extract === "zip") return trimExtractedText(await extractZipDocumentText(fileExtension(name), await bytesOf(data)));
+  if (extract === "ipynb") return trimExtractedText(ipynbMarkdown(decodeTextBytes(await bytesOf(data))));
   return "";
 }
 /** @param {Blob|string} data */
@@ -325,10 +326,24 @@ function docxMarkdown(documentXml, stylesXml, relsXml) {
     .filter(Boolean)
     .reduce((text, block, i, all) => text + (i ? (/^\s*- /.test(block) && /^\s*- /.test(all[i - 1]) ? "\n" : "\n\n") : "") + block, "");
 }
-// pptx：一页一节「## 第 n 页 · 标题」，其余文字按层级列成要点，页上的表格照表格、图片照图片
+// pptx 的讲话者备注：在 notesSlide 的 body 占位符里——同一份 XML 里还有页码与那一页的缩略图，不算
+function pptxNotes(notesXml) {
+  if (!notesXml) return [];
+  return xmlDeep(parseXml(notesXml), "sp")
+    .filter(shape => /^body$/i.test(xmlDeep(shape, "ph")[0]?.getAttribute("type") || ""))
+    .flatMap(shape => xmlDeep(shape, "p"))
+    .map(p =>
+      xmlDeep(p, "t")
+        .map(t => t.textContent)
+        .join("")
+        .trim()
+    )
+    .filter(Boolean);
+}
+// pptx：一页一节「## 第 n 页 · 标题」，其余文字按层级列成要点，页上的表格照表格、图片照图片，讲话者备注缀在节末
 function pptxMarkdown(slides) {
   return slides
-    .map(({ xml, rels }, index) => {
+    .map(({ xml, rels, notes }, index) => {
       const doc = parseXml(xml),
         images = zipRels(rels, "ppt/slides");
       let title = "";
@@ -362,7 +377,14 @@ function pptxMarkdown(slides) {
           )
         );
       const pictures = xmlDeep(doc, "pic").map(pic => ooxmlImage(pic, images));
-      return [t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`, points.join("\n"), ...tables, ...pictures]
+      const said = pptxNotes(notes);
+      return [
+        t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`,
+        points.join("\n"),
+        ...tables,
+        ...pictures,
+        said.length ? `**${t("备注")}**\n\n${said.map(line => `> ${mdLine(line)}`).join("\n>\n")}` : ""
+      ]
         .filter(Boolean)
         .join("\n\n");
     })
@@ -380,6 +402,77 @@ function xlsxRef(col, row) {
   for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
   return letters && Number.isFinite(row) ? `${letters}${row + 1}` : "";
 }
+// 单元格只存数值，看起来的样子（日期、百分比、千分位）全在 styles.xml 里：numFmt 是自定义的格式串，cellXfs 是「格的 s 属性 → 格式号」那张表。
+// 不照它写，2024-01-15 抽出来是 45306、23.5% 是 0.235——读者（人和模型）得自己拿计算器倒推
+const XLSX_DATE_IDS = new Set([
+  14, 15, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 45, 46, 47, 50, 51, 52, 53, 54, 55, 56, 57, 58
+]);
+function xlsxFormats(stylesXml) {
+  const codes = new Map(),
+    xfs = [];
+  if (!stylesXml) return { codes, xfs };
+  const styles = parseXml(stylesXml);
+  for (const fmt of xmlDeep(styles, "numFmt")) codes.set(Number(fmt.getAttribute("numFmtId")), fmt.getAttribute("formatCode") || "");
+  const list = xmlDeep(styles, "cellXfs")[0];
+  if (list) for (const xf of xmlKids(list, "xf")) xfs.push(Number(xf.getAttribute("numFmtId")) || 0);
+  return { codes, xfs };
+}
+// 序号 → 日子。1900 系统把并不存在的 1900-02-29 当成真日子（Excel 为兼容 Lotus 留的错），60 之前的序号因此得补一天；
+// 1904 系统（旧版 Mac Excel）从 1904-01-01 起算，换成 1900 系统的序号是 +1462
+function xlsxDateTime(serial, withDate, date1904) {
+  const at = new Date(Date.UTC(1899, 11, 30) + Math.round((date1904 ? serial + 1462 : serial < 60 ? serial + 1 : serial) * 86400000)),
+    two = n => String(n).padStart(2, "0"),
+    time = `${two(at.getUTCHours())}:${two(at.getUTCMinutes())}`,
+    date = `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())}`;
+  // 带日子的只看有没有时分（00:00 就不必缀一个 00:00）；纯时刻的格式只给时刻
+  return withDate ? (at.getUTCHours() || at.getUTCMinutes() ? `${date} ${time}` : date) : time;
+}
+// 千分位只动整数部分：1.234567 不该变成 1.234,567
+function xlsxGroup(raw) {
+  const parts = String(raw).match(/^(-?)(\d+)(.*)$/);
+  return parts ? `${parts[1]}${parts[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${parts[3]}` : raw;
+}
+// 内置格式号对应的格式串：styles.xml 只列自定义的那些，内置的（货币、百分比、千分位……）从来不写在里面
+const XLSX_BUILTIN_CODES = {
+  1: "0",
+  2: "0.00",
+  3: "#,##0",
+  4: "#,##0.00",
+  9: "0%",
+  10: "0.00%",
+  11: "0.00E+00",
+  37: "#,##0",
+  38: "#,##0",
+  39: "#,##0.00",
+  40: "#,##0.00",
+  48: "##0.0E+0",
+  49: "@"
+};
+// General 格式不写小数位，二进制浮点的尾巴就露出来了（0.1+0.2 存成 0.30000000000000004，Excel 自己显示 0.3）：
+// 按 Excel 自家的精度（15 位有效数字）收一下，收完更短的才用——长的整数不碰
+function xlsxGeneral(raw) {
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return raw;
+  const tidy = String(Number(number.toPrecision(15)));
+  return tidy.length < String(raw).length ? tidy : raw;
+}
+// 一格数字写成它看起来的样子；格式认不出、或本来就是字符串的，照原值
+function xlsxNumber(raw, numFmtId, code, date1904) {
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return raw;
+  // 去掉引号里的字面量、转义字符与 [颜色]/[条件] 那一类修饰，剩下的才是指示符；多段格式取第一段
+  const bare = String(code || XLSX_BUILTIN_CODES[numFmtId] || "")
+    .replace(/"[^"]*"/g, "")
+    .replace(/\\./g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .split(";")[0];
+  if (bare.includes("%")) return `${Number((number * 100).toFixed(2))}%`;
+  const date = bare ? /[yd]/i.test(bare) : XLSX_DATE_IDS.has(numFmtId),
+    clock = bare ? /[hs]/i.test(bare) && bare.includes(":") : [18, 19, 20, 21, 45, 46, 47].includes(numFmtId);
+  if (date || clock) return xlsxDateTime(number, date, date1904);
+  if (/#,##|0,0/.test(bare)) return xlsxGroup(raw);
+  return xlsxGeneral(raw);
+}
 function xlsxMarkdown(entries) {
   const sharedXml = entries.get("xl/sharedStrings.xml"),
     shared = sharedXml
@@ -390,6 +483,9 @@ function xlsxMarkdown(entries) {
             .join("")
         )
       : [];
+  const styles = xlsxFormats(entries.get("xl/styles.xml")),
+    // 1904 起算的（旧版 Mac Excel）在 workbook.xml 的 workbookPr 上标着
+    date1904 = /date1904="(1|true)"/.test(entries.get("xl/workbook.xml") || "");
   // 表名与表文件的对应：workbook.xml 里的 sheet（名字、r:id）经 rels 找到 worksheets/sheetN.xml；对不上就按文件名顺序、以「工作表 n」为名
   const targets = new Map();
   const rels = entries.get("xl/_rels/workbook.xml.rels");
@@ -415,7 +511,10 @@ function xlsxMarkdown(entries) {
         for (const cell of xmlKids(row, "c")) {
           const at = cell.getAttribute("r") ? xlsxColumn(cell.getAttribute("r")) : next,
             type = cell.getAttribute("t"),
-            value = xmlKids(cell, "v")[0]?.textContent ?? "";
+            value = xmlKids(cell, "v")[0]?.textContent ?? "",
+            // 格上没写 s 就是第 0 号格式（General）；公式没有缓存值时 <v> 是空的，这时把式子本身写出来，比留一格空白诚实
+            format = styles.xfs[Number(cell.getAttribute("s")) || 0] || 0,
+            formula = xmlKids(cell, "f")[0]?.textContent || "";
           next = at + 1;
           if (at >= MD_TABLE_COLS) continue;
           cells[at] =
@@ -429,7 +528,11 @@ function xlsxMarkdown(entries) {
                   ? value === "1"
                     ? "TRUE"
                     : "FALSE"
-                  : value;
+                  : value !== ""
+                    ? xlsxNumber(value, format, styles.codes.get(format), date1904)
+                    : formula
+                      ? `=${formula}`
+                      : "";
         }
         return Array.from(cells, cell => cell ?? "");
       });
@@ -505,6 +608,50 @@ function odfMarkdown(contentXml) {
   if (body) walk(body);
   return out.filter(Boolean).join("\n\n");
 }
+// ipynb：一格一节——Markdown 格照原样，代码格放进围栏、它跑出来的东西跟在下面。
+// 本体是一份 JSON，几万字里大半是代码串、base64 的图和执行计数；直接当文字读，人和模型都得自己从 JSON 里扒
+function ipynbMarkdown(text) {
+  let book;
+  try {
+    book = JSON.parse(text);
+  } catch {
+    throw Error(t("这份 ipynb 不是有效的 JSON，抽不出正文"));
+  }
+  const language = String(book?.metadata?.language_info?.name || book?.metadata?.kernelspec?.language || "").trim(),
+    // 输出里偶尔自带三连反引号，围栏用四连的
+    fence = "`".repeat(4),
+    sourceOf = cell => (Array.isArray(cell.source) ? cell.source.join("") : String(cell.source || "")).replace(/\s+$/, ""),
+    blocks = [];
+  for (const cell of Array.isArray(book?.cells) ? book.cells : []) {
+    if (cell.cell_type === "markdown") {
+      sourceOf(cell).trim() && blocks.push(sourceOf(cell));
+      continue;
+    }
+    if (cell.cell_type !== "code") continue;
+    const source = sourceOf(cell);
+    source.trim() && blocks.push(`${fence}${language}\n${source}\n${fence}`);
+    const said = ipynbOutputs(cell.outputs);
+    if (said) blocks.push(said);
+  }
+  return blocks.join("\n\n");
+}
+// 代码格的输出：文字与报错照录，图只留一行字（JSON 里存的是 base64，抽出来也没法画在别处）
+function ipynbOutputs(outputs) {
+  const fence = "`".repeat(4),
+    lines = [];
+  for (const output of Array.isArray(outputs) ? outputs : []) {
+    const text =
+      output?.output_type === "stream"
+        ? output.text
+        : output?.output_type === "error"
+          ? `${output.ename || ""}: ${output.evalue || ""}`
+          : output?.data?.["text/plain"];
+    const body = Array.isArray(text) ? text.join("") : typeof text === "string" ? text : "";
+    if (body.trim()) lines.push(body.replace(/\s+$/, ""));
+    else if (output?.data && Object.keys(output.data).some(type => type.startsWith("image/"))) lines.push(`[${t("图片")}]`);
+  }
+  return lines.length ? `**${t("输出")}**\n\n${fence}\n${lines.join("\n\n")}\n${fence}` : "";
+}
 async function extractZipDocumentText(extension, bytes) {
   if (extension === "docx") {
     const entries = await unzipSelected(bytes, name =>
@@ -525,18 +672,25 @@ async function extractZipDocumentText(extension, bytes) {
     return `${entries.has("word/document.xml") ? docxMarkdown(entries.get("word/document.xml"), entries.get("word/styles.xml"), entries.get("word/_rels/document.xml.rels")) : ""}${notes.length ? `\n\n---\n\n${notes.join("\n\n")}` : ""}`;
   }
   if (extension === "pptx") {
-    const entries = await unzipSelected(bytes, name => /^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$/.test(name));
+    const entries = await unzipSelected(bytes, name =>
+      /^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$|^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(name)
+    );
     return pptxMarkdown(
       [...entries.keys()]
         .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-        .map(name => ({ xml: entries.get(name), rels: entries.get(relsOf(name)) }))
+        .map(name => {
+          const rels = entries.get(relsOf(name)),
+            // 这一页的备注是 notesSlide 那份，经由页的 rels 找过去（页与备注的编号不一定对得上：删过页就会错开）
+            notes = [...zipRels(rels, "ppt/slides", "notesSlide").values()][0];
+          return { xml: entries.get(name), rels, notes: notes ? entries.get(notes) : undefined };
+        })
     );
   }
   if (extension === "xlsx")
     return xlsxMarkdown(
       await unzipSelected(bytes, name =>
-        /^xl\/(sharedStrings|workbook)\.xml$|^xl\/_rels\/workbook\.xml\.rels$|^xl\/(worksheets|drawings)\/(_rels\/)?(sheet|drawing)\d+\.xml(\.rels)?$/.test(
+        /^xl\/(sharedStrings|styles|workbook)\.xml$|^xl\/_rels\/workbook\.xml\.rels$|^xl\/(worksheets|drawings)\/(_rels\/)?(sheet|drawing)\d+\.xml(\.rels)?$/.test(
           name
         )
       )

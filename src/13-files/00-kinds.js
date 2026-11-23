@@ -5,9 +5,9 @@
 //   group    大类：image / audio / video / text / file——卷宗页按它筛，image 点开进看图，text 的当文字读（附件原样带给模型）
 //   figure   卷宗里的件图（见 10-archive.js 的 FIGURE_MARKS）
 //   view     预览器怎么看：image / pdf / audio / video / html / table / markdown / doc / text；不给即预览不了（见 20-viewer.js）
-//   extract  正文怎么抽：pdf 交给 pdf.js，zip 是 Office / ODF 一类压缩包里的 XML（见 30-extract.js）
+//   extract  正文怎么抽：pdf 交给 pdf.js，zip 是 Office / ODF 一类压缩包里的 XML，ipynb 是笔记本那份 JSON（见 30-extract.js）
 // 加一种文件只需一份登记；某一面要一种新的看法（如新的 view），在那一面添上，再在登记里点名
-/** @typedef {{ name: string, exts: string[], group: "image"|"audio"|"video"|"text"|"file", figure: string, view?: string, extract?: "pdf"|"zip" }} FileKind */
+/** @typedef {{ name: string, exts: string[], group: "image"|"audio"|"video"|"text"|"file", figure: string, view?: string, extract?: "pdf"|"zip"|"ipynb" }} FileKind */
 /** @type {FileKind[]} */
 const FILE_KINDS = [
   {
@@ -29,33 +29,113 @@ const FILE_KINDS = [
   { name: "document", exts: ["docx", "odt"], group: "file", figure: "doc", view: "doc", extract: "zip" },
   { name: "sheet", exts: ["xlsx", "ods"], group: "file", figure: "table", view: "doc", extract: "zip" },
   { name: "slides", exts: ["pptx", "odp"], group: "file", figure: "slides", view: "doc", extract: "zip" },
+  // 笔记本：一格一节，Markdown 与代码照原样、代码的输出跟在下面；不当文字读，不然模型收到的是一段几万字的 JSON
+  { name: "notebook", exts: ["ipynb"], group: "file", figure: "code", view: "doc", extract: "ipynb" },
   // 认得出、抽不出正文的旧格式与压缩包：只画件图
   { name: "legacy-document", exts: ["doc", "rtf", "epub"], group: "file", figure: "doc" },
   { name: "legacy-sheet", exts: ["xls"], group: "file", figure: "table" },
   { name: "legacy-slides", exts: ["ppt", "key"], group: "file", figure: "slides" },
   { name: "archive", exts: ["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz"], group: "file", figure: "zip" },
-  { name: "html", exts: ["html", "htm"], group: "text", figure: "html", view: "html" },
+  { name: "html", exts: ["html", "htm", "xhtml"], group: "text", figure: "html", view: "html" },
   { name: "table", exts: ["csv", "tsv"], group: "text", figure: "table", view: "table" },
-  { name: "markdown", exts: ["md", "markdown"], group: "text", figure: "text", view: "markdown" },
-  { name: "plain", exts: ["txt", "log", "rst"], group: "text", figure: "text", view: "text" },
-  // 代码与配置
+  { name: "markdown", exts: ["md", "markdown", "mdx"], group: "text", figure: "text", view: "markdown" },
+  { name: "plain", exts: ["txt", "log", "rst", "srt", "vtt", "diff", "patch"], group: "text", figure: "text", view: "text" },
+  // 代码与配置：认得出就当文字看（预览给源码、附件原样带进上下文），不必为每种语言单开一栏
   {
     name: "code",
-    exts: ["json", "jsonl", "xml", "yaml", "yml", "toml", "ini", "js", "mjs", "cjs", "ts", "tsx", "jsx", "css", "scss", "less"].concat([
+    exts: [
+      // 通用与配置
+      "json",
+      "jsonl",
+      "xml",
+      "yaml",
+      "yml",
+      "toml",
+      "ini",
+      "cfg",
+      "conf",
+      "properties",
+      "env",
+      "lock"
+    ].concat([
+      // 前端
+      "js",
+      "mjs",
+      "cjs",
+      "ts",
+      "tsx",
+      "jsx",
+      "css",
+      "scss",
+      "less",
+      "vue",
+      "svelte",
+      "astro",
+      "hbs",
+      "ejs",
+      "pug",
+      // 脚本与系统
       "py",
       "rb",
+      "php",
+      "pl",
+      "lua",
+      "r",
+      "jl",
       "go",
       "rs",
-      "java",
+      "zig",
+      "nim",
       "c",
       "h",
       "cpp",
       "hpp",
+      "cc",
       "cs",
-      "php",
+      "java",
+      "kt",
+      "kts",
+      "scala",
+      "groovy",
+      "gradle",
+      "swift",
+      "dart",
+      "m",
+      "mm",
+      "fs",
+      "fsx",
+      "hs",
+      "ml",
+      "clj",
+      "ex",
+      "exs",
+      "erl",
+      "sol",
+      "asm",
+      "s",
+      "v",
+      // 命令行
       "sh",
+      "bash",
+      "zsh",
+      "fish",
+      "bat",
+      "cmd",
       "ps1",
-      "sql"
+      "psm1",
+      "psd1",
+      // 构建、查询与文档源
+      "cmake",
+      "mk",
+      "bazel",
+      "sql",
+      "graphql",
+      "gql",
+      "proto",
+      "tex",
+      "bib",
+      "sty",
+      "cls"
     ]),
     group: "text",
     figure: "code",

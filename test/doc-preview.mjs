@@ -88,11 +88,13 @@ writeFileSync(
     "xl/workbook.xml": `<workbook ${S} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="销量" sheetId="1" r:id="rId1"/><sheet name="说明" sheetId="2" r:id="rId2"/></sheets></workbook>`,
     "xl/_rels/workbook.xml.rels": `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`,
     "xl/sharedStrings.xml": `<sst ${S}><si><t>品名</t></si><si><t>价格</t></si><si><t>藜麦</t></si><si><r><t>富文</t></r><r><t>本</t></r></si></sst>`,
+    // 数字格式：14 是内置的日期，10 是内置的百分比，3 是内置的千分位，164 是自定义的（格式串里带引号包着的中文）
+    "xl/styles.xml": `<styleSheet ${S}><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot;"/></numFmts><cellXfs count="5"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="10"/><xf numFmtId="3"/><xf numFmtId="164"/></cellXfs></styleSheet>`,
     "xl/worksheets/_rels/sheet1.xml.rels": rels({ rId1: ["drawing", "../drawings/drawing1.xml"] }),
     "xl/drawings/drawing1.xml": `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ${R}><xdr:twoCellAnchor><xdr:from><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:from><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="图 1"/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill></xdr:pic></xdr:twoCellAnchor></xdr:wsDr>`,
     "xl/drawings/_rels/drawing1.xml.rels": rels({ rId1: ["image", "../media/image1.png"] }),
     "xl/media/image1.png": PNG,
-    "xl/worksheets/sheet1.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c><c r="C2"><v>48.9</v></c></row></sheetData></worksheet>`,
+    "xl/worksheets/sheet1.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c><c r="C2"><v>48.9</v></c></row><row r="3"><c r="A3" s="1"><v>45306</v></c><c r="B3" s="2"><v>0.235</v></c><c r="C3" s="3"><v>12345.6</v></c></row><row r="4"><c r="A4" s="4"><v>45306</v></c><c r="B4"><f>SUM(C2:C2)</f><v></v></c><c r="C4"><v>9876543.210000001</v></c></row></sheetData></worksheet>`,
     "xl/worksheets/sheet2.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>说明文字</t></is></c></row></sheetData></worksheet>`
   })
 );
@@ -105,8 +107,44 @@ writeFileSync(
   zip({
     "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
     "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${shape("title", [["小结"]])}${shape("", [["推导闭式解"]])}<p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
+    "ppt/slides/_rels/slide1.xml.rels": rels({ rId5: ["notesSlide", "../notesSlides/notesSlide1.xml"] }),
+    // 备注那份里除了讲话者的话，还有页码与整页缩略图两个占位符，都不该混进正文
+    "ppt/notesSlides/notesSlide1.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [["讲慢一些，这里停一下"], ["先给直觉，再给公式"]])}${shape("sldNum", [["12"]])}</p:spTree></p:cSld></p:notes>`,
     "ppt/slides/_rels/slide2.xml.rels": rels({ rId2: ["image", "../media/image1.png"] }),
     "ppt/media/image1.png": PNG
+  })
+);
+// ipynb：Markdown 格、代码格、代码格的三种输出（stdout、结果、报错）与一张图；本体是 JSON，抽出来该是可读的 Markdown
+writeFileSync(
+  `${ARCHIVE}/分析.ipynb`,
+  JSON.stringify({
+    cells: [
+      { cell_type: "markdown", source: ["# 结论\n", "控糖与品类无关。"] },
+      {
+        cell_type: "code",
+        execution_count: 1,
+        source: ["print('hi')\n", "1 + 1"],
+        outputs: [
+          { output_type: "stream", name: "stdout", text: ["hi\n"] },
+          { output_type: "execute_result", data: { "text/plain": ["2"] } }
+        ]
+      },
+      {
+        cell_type: "code",
+        execution_count: 2,
+        source: "boom()",
+        outputs: [{ output_type: "error", ename: "NameError", evalue: "name 'boom' is not defined" }]
+      },
+      {
+        cell_type: "code",
+        execution_count: 3,
+        source: "plt.plot(x)",
+        outputs: [{ output_type: "display_data", data: { "image/png": PNG.toString("base64") } }]
+      }
+    ],
+    metadata: { language_info: { name: "python" } },
+    nbformat: 4,
+    nbformat_minor: 5
   })
 );
 writeFileSync(`${ARCHIVE}/模型.bin`, Buffer.from([0, 1, 2, 3]));
@@ -160,17 +198,25 @@ await open("数据.xlsx");
 await shot("doc-preview-xlsx.png");
 const sheet = JSON.parse(
   await evalJs(
-    `(s => JSON.stringify({ tabs: [...s.querySelectorAll("[data-viewer-tab]")].map(b => b.textContent), head: [...s.querySelectorAll('[data-viewer-panel="0"] th')].map(n => n.textContent), row: [...s.querySelectorAll('[data-viewer-panel="0"] tbody td')].map(n => n.textContent), second: s.querySelector('[data-viewer-panel="1"]').classList.contains("hidden"), img: [...s.querySelectorAll('[data-viewer-panel="0"] img')].map(i => i.parentElement.textContent + "|" + i.src.slice(0, 14)) }))(document.querySelector("#fileViewerStage"))`
+    `(s => JSON.stringify({ tabs: [...s.querySelectorAll("[data-viewer-tab]")].map(b => b.textContent), head: [...s.querySelectorAll('[data-viewer-panel="0"] th')].map(n => n.textContent), rows: [...s.querySelectorAll('[data-viewer-panel="0"] tbody tr')].map(tr => [...tr.querySelectorAll("td")].map(td => td.textContent)), second: s.querySelector('[data-viewer-panel="1"]').classList.contains("hidden"), img: [...s.querySelectorAll('[data-viewer-panel="0"] img')].map(i => i.parentElement.textContent + "|" + i.src.slice(0, 14)) }))(document.querySelector("#fileViewerStage"))`
   )
 );
 check(
   "xlsx: one tab per sheet by its name, cells land in their own columns, shared and rich strings read, a picture under its anchor cell",
   sheet.tabs.join() === "销量,说明" &&
     sheet.head.join() === "品名,,价格" &&
-    sheet.row.join() === "藜麦,富文本,48.9" &&
+    sheet.rows[0].join() === "藜麦,富文本,48.9" &&
     sheet.second &&
     sheet.img.join() === "D5：|data:image/png",
   JSON.stringify(sheet)
+);
+check(
+  "xlsx: numbers read the way they look — a date is a date, a share is a percentage, thousands are grouped; a formula without a stored result shows itself",
+  sheet.rows
+    .map(row => row.map(cell => cell.trim()).join("|"))
+    .slice(1)
+    .join("#") === "2024-01-15|23.5%|12,345.6#2024-01-15|=SUM(C2:C2)|9876543.21",
+  JSON.stringify(sheet.rows)
 );
 await evalJs(`document.querySelectorAll("[data-viewer-tab]")[1].click(); true`);
 check(
@@ -192,6 +238,31 @@ check(
   "pptx: one card per slide, titled, points by level, pictures drawn",
   slides.join("#") === "第 1 页 · 线性回归|从最小二乘说起/几何直观#第 2 页 · 小结|推导闭式解|拟合直线:data:image/png",
   JSON.stringify(slides)
+);
+const said = JSON.parse(
+  await evalJs(
+    `JSON.stringify([...document.querySelectorAll("#fileViewerStage .viewer-slide")].map(s => [...s.querySelectorAll("blockquote p")].map(p => p.textContent.trim()).join("/")))`
+  )
+);
+check(
+  "pptx: the speaker's notes follow their own slide, without the page number and thumbnail placeholders",
+  said.join("#") === "讲慢一些，这里停一下/先给直觉，再给公式#",
+  JSON.stringify(said)
+);
+await closeViewer();
+
+await open("分析.ipynb");
+await shot("doc-preview-ipynb.png");
+const notebook = JSON.parse(
+  await evalJs(
+    `(s => JSON.stringify({ h1: [...s.querySelectorAll("h1")].map(h => h.textContent), pre: [...s.querySelectorAll("pre")].map(p => p.textContent.replace(/\\s+$/, "")) }))(document.querySelector("#fileViewerStage"))`
+  )
+);
+check(
+  "ipynb: markdown cells read as prose, code cells as code, each with what it printed, raised or drew",
+  notebook.h1.join() === "结论" &&
+    notebook.pre.join("#") === "print('hi')\n1 + 1#hi\n\n2#boom()#NameError: name 'boom' is not defined#plt.plot(x)#[图片]",
+  JSON.stringify(notebook)
 );
 await closeViewer();
 
