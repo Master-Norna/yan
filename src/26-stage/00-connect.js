@@ -227,10 +227,13 @@ function stageMessage(message) {
 // 空 URL 是浏览器初始化的过渡态，不当成一次导航；同页锚点跳转也算人已选择新位置。
 /** @param {{ url?: string, nav?: number } | undefined} before @param {{ title: string, url: string, browserContextId?: string }} info */
 function stageTabInfo(before, info) {
-  const moved = !!before?.url && !!info.url && before.url !== info.url;
+  // 浏览器导航中可能暂时报告空 URL；这不是新地址，留着上一个有意义的网址，
+  // 否则后面真正的新地址会与空串比较、漏掉使在途文档失效的机会。
+  const url = info.url || before?.url || "",
+    moved = !!before?.url && !!info.url && before.url !== info.url;
   return {
     title: info.title,
-    url: info.url,
+    url,
     ctx: info.browserContextId,
     nav: moved ? (before.nav || 0) + 1 : before?.nav
   };
