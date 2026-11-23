@@ -91,7 +91,8 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       entries: out,
       dirs,
       truncated: out.length >= ARCHIVE_LIST_LIMIT,
-      scratch: await measureScratch(root)
+      // 只在明确不需要草稿统计时省去这一趟，响应也不带 scratch
+      ...(body.scratch === false ? {} : { scratch: await measureScratch(root) })
     };
   }, failed);
   // 清草稿：给了 id 只清那段对话的，否则整个 .草稿 目录

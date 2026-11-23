@@ -98,16 +98,19 @@ test("一件文件在不在某个根下：不分大小写，夹名只是前缀�
 test("搬走的件：按落脚的次序认，第一个根认不出才看下一个，件表只问一回", async () => {
   const asked = [];
   const f = load(["relocateRef", "setup: request => { bridge = request; }"]);
-  f.setup(async (route, { root }) => {
-    asked.push(root);
-    return { entries: root === "E:/工作" ? [{ path: "a/图.png" }] : [{ path: "图.png" }, { path: "表.png" }] };
+  f.setup(async (route, body) => {
+    asked.push({ route, body });
+    return { entries: body.root === "E:/工作" ? [{ path: "a/图.png" }] : [{ path: "图.png" }, { path: "表.png" }] };
   });
   const anchor = { root: "E:/工作", dir: "E:/工作/a/b", scopes: ["E:/工作", "E:/卷宗"] };
   assert.deepEqual(await f.relocateRef("图.png", anchor), { file: "E:/工作/a/图.png" });
   assert.deepEqual(await f.relocateRef("表.png", anchor), { file: "E:/卷宗/表.png" });
   assert.equal(await f.relocateRef("无.png", anchor), null);
   assert.equal(await f.relocateRef("图.png", { dir: "", scopes: [] }), null);
-  assert.deepEqual(asked, ["E:/工作", "E:/卷宗"]);
+  assert.deepEqual(asked, [
+    { route: "/api/archive/list", body: { root: "E:/工作", scratch: false } },
+    { route: "/api/archive/list", body: { root: "E:/卷宗", scratch: false } }
+  ]);
 });
 
 test("Markdown 相对图片先去查询片段，再解码文件名中的保留字符", () => {
