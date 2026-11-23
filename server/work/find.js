@@ -94,11 +94,20 @@ module.exports = function createFind(work) {
   // 正则是模型写的：写成 (a+)+$ 这类会灾难性回溯的，一行就能把桥接卡死（单线程，所有对话一起停）。
   // 每个文件的逐行匹配放进 vm 跑、限两秒，超时即中止这次检索，把原因回给模型
   const SEARCH_REGEX_MS = 2000,
-    searchScript = new vm.Script("hits = []; for (let i = 0; i < lines.length; i++) if (regex.test(lines[i])) hits.push(i);"),
-    searchContext = vm.createContext({ regex: null, lines: null, hits: null });
-  function matchLines(regex, lines, rel) {
+    searchScript = new vm.Script(
+      "hits = []; for (let i = 0; i < lines.length && hits.length < maxHits; i++) if (regex.test(lines[i])) hits.push(i);"
+    ),
+    searchContext = vm.createContext({ regex: null, lines: null, hits: null, maxHits: 0 });
+  function matchLines(regex, lines, rel, maxHits, literal) {
+    // 逐字匹配已转义，不会灾难性回溯；不用每个文件都跨一次 VM。
+    if (literal) {
+      const hits = [];
+      for (let i = 0; i < lines.length && hits.length < maxHits; i++) if (regex.test(lines[i])) hits.push(i);
+      return hits;
+    }
     searchContext.regex = regex;
     searchContext.lines = lines;
+    searchContext.maxHits = maxHits;
     try {
       searchScript.runInContext(searchContext, { timeout: SEARCH_REGEX_MS });
       return searchContext.hits;
@@ -110,6 +119,7 @@ module.exports = function createFind(work) {
       throw error;
     } finally {
       searchContext.regex = searchContext.lines = searchContext.hits = null;
+      searchContext.maxHits = 0;
     }
   }
   const SEARCH_MATCH_LIMIT = 200,
@@ -128,13 +138,15 @@ module.exports = function createFind(work) {
     const flags = body.caseSensitive === true ? "" : "i",
       literal = text => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
     let regex,
-      note = "";
-    if (body.literal === true) regex = literal(query);
+      note = "",
+      isLiteral = body.literal === true;
+    if (isLiteral) regex = literal(query);
     else
       try {
         regex = new RegExp(query, flags);
       } catch (error) {
         regex = literal(query);
+        isLiteral = true;
         note = `正则无效（${error.message}），已按字面搜`;
       }
     const filter = globToRegExp(body.glob);
@@ -179,7 +191,7 @@ module.exports = function createFind(work) {
         return;
       }
       const lines = decoded.text.split(/\r?\n/);
-      for (const i of matchLines(regex, lines, rel)) {
+      for (const i of matchLines(regex, lines, rel, limit - matches.length, isLiteral)) {
         filesHit.add(rel);
         matches.push({ file: shownPath(workdir, full), line: i + 1, text: lines[i].trim().slice(0, 240) });
         if (matches.length >= limit) {
