@@ -32,7 +32,7 @@ defineTool({
 });
 // 计划卡：一行一项，记号是笔意（与 03-brush.js 的图标同一支笔，不用 ✓ ● ○ 字形）——做完一笔勾、正在做一粒朱点（呼吸）、
 // 未做一粒淡墨点、不做了一短横。题头是正在做的那一项或「全部完成」，右侧一排同样的小记号代替「n/m」：
-// 旧的几张只留这一行（见 markStalePlans），行迹里只有计划长这样，一扫就认得（见 设计稿/40–42）
+// 旧的几张只留这一行（见 markStalePlans），行迹里只有计划长这样，一扫就认得
 /** @param {string} status */
 function planMarkHtml(status) {
   const kind = PLAN_STATUSES.has(status) ? status : "pending",
