@@ -267,10 +267,59 @@ async function withZipImages(html, dataUrl) {
   return box.innerHTML;
 }
 
+// 编号：Word 把「1. 2. 3.」的定义放在 numbering.xml，段落的 pPr 里只说「用第几号」；而用「编号」「项目符号」
+// 按钮设的列表常常连 pPr 都不写，编号挂在对齐的段落样式上（styles.xml 的 pStyle 里的 numPr）。两处都要认，
+// 否则最常见的 Word 列表会塌成普通段落（实测卷宗里《全谷物数据分析报告》54 段 ListBullet 全是这样）。
+// 返回 { styleNum: 样式 id → { numId, ilvl }, levels: numId → (ilvl → { fmt, start }) }
+function docxNumbering(stylesXml, numberingXml) {
+  const styleNum = new Map(),
+    levels = new Map();
+  if (stylesXml)
+    for (const style of xmlDeep(parseXml(stylesXml), "style")) {
+      const numPr = xmlKids(xmlKids(style, "pPr")[0] || style, "numPr")[0];
+      if (!numPr) continue;
+      const numId = xmlKids(numPr, "numId")[0]?.getAttribute("w:val");
+      if (numId != null)
+        styleNum.set(style.getAttribute("w:styleId"), { numId, ilvl: Number(xmlKids(numPr, "ilvl")[0]?.getAttribute("w:val")) || 0 });
+    }
+  if (!numberingXml) return { styleNum, levels };
+  const root = parseXml(numberingXml),
+    abstracts = new Map();
+  for (const abstract of xmlDeep(root, "abstractNum")) {
+    const byLevel = new Map();
+    for (const lvl of xmlKids(abstract, "lvl"))
+      byLevel.set(Number(lvl.getAttribute("w:ilvl")) || 0, {
+        fmt: xmlKids(lvl, "numFmt")[0]?.getAttribute("w:val") || "decimal",
+        start: Number(xmlKids(lvl, "start")[0]?.getAttribute("w:val")) || 1
+      });
+    abstracts.set(abstract.getAttribute("w:abstractNumId"), byLevel);
+  }
+  for (const num of xmlDeep(root, "num")) {
+    const byLevel = abstracts.get(xmlKids(num, "abstractNumId")[0]?.getAttribute("w:val"));
+    if (byLevel) levels.set(num.getAttribute("w:numId"), byLevel);
+  }
+  return { styleNum, levels };
+}
 // docx：正文按块走（段落、表格，内容控件等容器往里钻）；标题认样式名（styles.xml 里的 heading n / Title，中文版 Word 的样式 id 是数字）
-function docxMarkdown(documentXml, stylesXml, relsXml) {
+function docxMarkdown(documentXml, stylesXml, relsXml, numberingXml) {
   const styleNames = new Map(),
-    images = zipRels(relsXml, "word");
+    images = zipRels(relsXml, "word"),
+    lists = docxNumbering(stylesXml, numberingXml),
+    // 各号列表自己的计数：Markdown 的有序列表靠数字开头，序号得自己数（渲染器会重排，但读原文的人与模型看的是这个）
+    counters = new Map();
+  const listMark = (numId, depth) => {
+    const level = lists.levels.get(numId)?.get(depth);
+    // 没有编号定义（合成样本、或 numbering.xml 不全）时退回项目符号：至少仍是一条列表，不冒充有序
+    if (!level) return "- ";
+    if (level.fmt === "none") return "";
+    if (level.fmt === "bullet") return "- ";
+    const slots = counters.get(numId) || new Map();
+    counters.set(numId, slots);
+    const n = slots.has(depth) ? slots.get(depth) + 1 : (level.start ?? 1);
+    slots.set(depth, n);
+    for (const key of [...slots.keys()]) if (key > depth) slots.delete(key);
+    return `${n}. `;
+  };
   if (stylesXml)
     for (const style of xmlDeep(parseXml(stylesXml), "style"))
       styleNames.set(style.getAttribute("w:styleId"), String(xmlKids(style, "name")[0]?.getAttribute("w:val") || "").toLowerCase());
@@ -291,19 +340,24 @@ function docxMarkdown(documentXml, stylesXml, relsXml) {
       styleId = props && xmlKids(props, "pStyle")[0]?.getAttribute("w:val"),
       name = styleNames.get(styleId) || String(styleId || "").toLowerCase(),
       level = name === "title" ? 1 : Number(name.match(/heading ?(\d)/)?.[1]) || 0,
-      numbering = props && xmlKids(props, "numPr")[0],
-      depth = Number(numbering && xmlKids(numbering, "ilvl")[0]?.getAttribute("w:val")) || 0;
+      // 段落自己写了 numPr 就听它的，没写才看它挂的段落样式（Word 的「编号」「项目符号」按钮大多写进样式里）；
+      // numId 写 0 是显式取消编号，仍按普通段落排
+      own = props && xmlKids(props, "numPr")[0],
+      inherited = own ? null : lists.styleNum.get(styleId),
+      numId = own ? xmlKids(own, "numId")[0]?.getAttribute("w:val") : inherited?.numId,
+      depth = own ? Number(xmlKids(own, "ilvl")[0]?.getAttribute("w:val")) || 0 : (inherited?.ilvl ?? 0),
+      mark = numId && numId !== "0" ? listMark(numId, depth) : "";
     const segments = xmlDeep(p, "r").map(run => {
       const rp = xmlKids(run, "rPr")[0];
       return { text: runText(run), bold: !level && flag(rp && xmlKids(rp, "b")[0]), italic: flag(rp && xmlKids(rp, "i")[0]) };
     });
     // 段首的记号转义施在原字上（施在拼好的「**…**」上会把加粗本身转掉）
     const first = segments.find(seg => seg.text.trim());
-    if (first && !level && !numbering) first.text = mdLine(first.text.trimStart());
+    if (first && !level && !mark) first.text = mdLine(first.text.trimStart());
     const text = mdRuns(segments).trim();
     if (!text) return "";
     if (level) return `${"#".repeat(Math.min(level, 6))} ${text.replace(/\n/g, " ")}`;
-    if (numbering) return `${"  ".repeat(depth)}- ${text.replace(/\n/g, " ")}`;
+    if (mark) return `${"  ".repeat(depth)}${mark}${text.replace(/\n/g, " ")}`;
     // 段内换行用反斜杠硬换行（行尾两个空格的写法会被 trimExtractedText 收掉）
     return text.replace(/\n/g, "\\\n");
   };
@@ -324,7 +378,11 @@ function docxMarkdown(documentXml, stylesXml, relsXml) {
   // 列表项之间不空行，别的块之间空一行
   return out
     .filter(Boolean)
-    .reduce((text, block, i, all) => text + (i ? (/^\s*- /.test(block) && /^\s*- /.test(all[i - 1]) ? "\n" : "\n\n") : "") + block, "");
+    .reduce(
+      (text, block, i, all) =>
+        text + (i ? (/^\s*(?:- |\d+\. )/.test(block) && /^\s*(?:- |\d+\. )/.test(all[i - 1]) ? "\n" : "\n\n") : "") + block,
+      ""
+    );
 }
 // pptx 的讲话者备注：在 notesSlide 的 body 占位符里——同一份 XML 里还有页码与那一页的缩略图，不算
 function pptxNotes(notesXml) {
@@ -353,16 +411,35 @@ function pptxMarkdown(slides) {
         const kind = xmlDeep(shape, "ph")[0]?.getAttribute("type") || "",
           paragraphs = xmlDeep(shape, "p");
         const lines = paragraphs
-          .map(p => ({
-            text: xmlDeep(p, "t")
-              .map(t => t.textContent)
-              .join("")
-              .trim(),
-            depth: Number(xmlKids(p, "pPr")[0]?.getAttribute("lvl")) || 0
-          }))
+          .map(p => {
+            const pPr = xmlKids(p, "pPr")[0];
+            return {
+              text: xmlDeep(p, "t")
+                .map(t => t.textContent)
+                .join("")
+                .trim(),
+              depth: Number(pPr?.getAttribute("lvl")) || 0,
+              // 页码与层级之外，PowerPoint 把「这一条是否自动编号」也写在 pPr 里：buAutoNum 是有序、buNone 是不要记号
+              ordered: !!pPr && !!xmlKids(pPr, "buAutoNum")[0],
+              plain: !!pPr && !!xmlKids(pPr, "buNone")[0]
+            };
+          })
           .filter(line => line.text);
         if (/title/i.test(kind) && !title) title = lines.map(line => line.text).join(" ");
-        else for (const line of lines) points.push(`${"  ".repeat(line.depth)}- ${line.text}`);
+        else {
+          // 自动编号的序号由 PowerPoint 运行时数，XML 里不存，得自己按层级数
+          const counts = new Map();
+          for (const line of lines) {
+            let mark = "- ";
+            if (line.ordered) {
+              const n = (counts.get(line.depth) || 0) + 1;
+              counts.set(line.depth, n);
+              for (const key of [...counts.keys()]) if (key > line.depth) counts.delete(key);
+              mark = `${n}. `;
+            } else if (line.plain) mark = "";
+            points.push(`${"  ".repeat(line.depth)}${mark}${line.text}`);
+          }
+        }
       }
       for (const table of xmlDeep(doc, "tbl"))
         tables.push(
@@ -600,6 +677,19 @@ function odfMarkdown(contentXml) {
   let pages = 0;
   const text = node => node.textContent.replace(/\s+/g, " ").trim();
   const repeat = (node, name) => Math.min(50, Number(node.getAttribute(name)) || 1);
+  // 列表的编号也挂在样式上（text:list 的 text:style-name → office:automatic-styles 里的 text:list-style）：
+  // list-level-style-number 是有序、list-level-style-bullet 是项目符号，按 text:level 分层
+  const listStyles = new Map();
+  for (const style of xmlDeep(parseXml(contentXml), "list-style")) {
+    const byLevel = new Map();
+    for (const level of style.children) {
+      const at = Number(level.getAttribute("text:level")) || 1;
+      if (level.localName === "list-level-style-number")
+        byLevel.set(at, { ordered: true, start: Number(level.getAttribute("text:start-value")) || 1 });
+      else if (level.localName === "list-level-style-bullet") byLevel.set(at, { ordered: false });
+    }
+    listStyles.set(style.getAttribute("style:name"), byLevel);
+  }
   // 图在 draw:frame 里，路直指包内的 Pictures/…；一个框可并列几份同图（SVG 与 PNG 替身），取头一份
   const picture = frame => {
     const href = xmlKids(frame, "image")[0]?.getAttribute("xlink:href");
@@ -614,13 +704,25 @@ function odfMarkdown(contentXml) {
         text(child) && out.push(mdLine(text(child)));
         out.push(...xmlDeep(child, "frame").map(picture));
       } else if (name === "frame" && xmlKids(child, "image").length) out.push(picture(child));
-      else if (name === "list")
+      else if (name === "list") {
+        // ODF 的编号每个 text:list 各数各的；层级按嵌套深度对到 list-level 的 text:level
+        const levels = listStyles.get(child.getAttribute("text:style-name")),
+          level = levels?.get(depth + 1),
+          counts = new Map();
         for (const item of xmlKids(child, "list-item")) {
           const line = xmlKids(item, "p").map(text).join(" ");
-          if (line) out.push(`${"  ".repeat(depth)}- ${line}`);
+          if (line) {
+            let mark = "- ";
+            if (level?.ordered) {
+              const n = (counts.get(depth + 1) ?? level.start - 1) + 1;
+              counts.set(depth + 1, n);
+              mark = `${n}. `;
+            }
+            out.push(`${"  ".repeat(depth)}${mark}${line}`);
+          }
           for (const nested of xmlKids(item, "list")) walk({ children: [nested] }, depth + 1);
         }
-      else if (name === "table") {
+      } else if (name === "table") {
         const rows = [];
         for (const row of xmlDeep(child, "table-row")) {
           const cells = xmlKids(row, "table-cell").flatMap(cell =>
@@ -704,7 +806,7 @@ function ipynbOutputs(outputs) {
 async function extractZipDocumentText(extension, bytes) {
   if (extension === "docx") {
     const entries = await unzipSelected(bytes, name =>
-        /^word\/(document|styles|footnotes|endnotes)\.xml$|^word\/_rels\/document\.xml\.rels$/.test(name)
+        /^word\/(document|styles|numbering|footnotes|endnotes)\.xml$|^word\/_rels\/document\.xml\.rels$/.test(name)
       ),
       notes = ["word/footnotes.xml", "word/endnotes.xml"]
         .filter(name => entries.has(name))
@@ -718,7 +820,7 @@ async function extractZipDocumentText(extension, bytes) {
         )
         .flat()
         .filter(Boolean);
-    return `${entries.has("word/document.xml") ? docxMarkdown(entries.get("word/document.xml"), entries.get("word/styles.xml"), entries.get("word/_rels/document.xml.rels")) : ""}${notes.length ? `\n\n---\n\n${notes.join("\n\n")}` : ""}`;
+    return `${entries.has("word/document.xml") ? docxMarkdown(entries.get("word/document.xml"), entries.get("word/styles.xml"), entries.get("word/_rels/document.xml.rels"), entries.get("word/numbering.xml")) : ""}${notes.length ? `\n\n---\n\n${notes.join("\n\n")}` : ""}`;
   }
   if (extension === "pptx") {
     const entries = await unzipSelected(bytes, name =>
