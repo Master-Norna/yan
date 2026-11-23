@@ -120,7 +120,10 @@ async function unzipSelected(bytes, wanted, raw = false) {
   if (eocd < 0) throw Error(t("文档压缩结构无效"));
   const count = view.getUint16(eocd + 10, true),
     centralOffset = view.getUint32(eocd + 16, true),
-    entries = new Map();
+    /** @type {Map<string, string | Uint8Array> & { tooLarge?: string[] }} */
+    entries = new Map(),
+    // 要的那几份里太大、没解开的：抽正文的那条路据此照实说，别悄悄抽出半份
+    tooLarge = [];
   let cursor = centralOffset,
     extractedBytes = 0;
   for (let index = 0; index < count; index++) {
@@ -133,24 +136,28 @@ async function unzipSelected(bytes, wanted, raw = false) {
       commentLength = view.getUint16(cursor + 32, true),
       localOffset = view.getUint32(cursor + 42, true),
       name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
-    if (wanted(name) && uncompressedSize <= 8 * 1024 * 1024 && extractedBytes + uncompressedSize <= 16 * 1024 * 1024) {
-      const localNameLength = view.getUint16(localOffset + 26, true),
-        localExtraLength = view.getUint16(localOffset + 28, true),
-        start = localOffset + 30 + localNameLength + localExtraLength,
-        compressed = bytes.slice(start, start + compressedSize);
-      let output;
-      if (method === 0) output = compressed;
-      else if (method === 8) {
-        const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-        output = new Uint8Array(await new Response(stream).arrayBuffer());
-      }
-      if (output) {
-        entries.set(name, raw ? output : decoder.decode(output));
-        extractedBytes += output.length;
+    if (wanted(name)) {
+      if (uncompressedSize > 8 * 1024 * 1024 || extractedBytes + uncompressedSize > 16 * 1024 * 1024) tooLarge.push(name);
+      else {
+        const localNameLength = view.getUint16(localOffset + 26, true),
+          localExtraLength = view.getUint16(localOffset + 28, true),
+          start = localOffset + 30 + localNameLength + localExtraLength,
+          compressed = bytes.slice(start, start + compressedSize);
+        let output;
+        if (method === 0) output = compressed;
+        else if (method === 8) {
+          const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+          output = new Uint8Array(await new Response(stream).arrayBuffer());
+        }
+        if (output) {
+          entries.set(name, raw ? output : decoder.decode(output));
+          extractedBytes += output.length;
+        }
       }
     }
     cursor += 46 + nameLength + extraLength + commentLength;
   }
+  if (!raw && tooLarge.length) entries.tooLarge = tooLarge;
   return entries;
 }
 function parseXml(value) {
@@ -507,9 +514,15 @@ function odfMarkdown(contentXml) {
   if (body) walk(body);
   return out.filter(Boolean).join("\n\n");
 }
+// 抽正文的那条路：要的那几份太大、解不开时照实说，别悄悄抽出半份或空（扫描件、超大表都比空文好说清）
+async function unzipDocument(bytes, wanted) {
+  const entries = await unzipSelected(bytes, wanted);
+  if (entries.tooLarge?.length) throw Error(t`文档内部有一份太大（${entries.tooLarge[0]}），本机没能抽出正文`);
+  return entries;
+}
 async function extractZipDocumentText(extension, bytes) {
   if (extension === "docx") {
-    const entries = await unzipSelected(bytes, name =>
+    const entries = await unzipDocument(bytes, name =>
         /^word\/(document|styles|footnotes|endnotes)\.xml$|^word\/_rels\/document\.xml\.rels$/.test(name)
       ),
       notes = ["word/footnotes.xml", "word/endnotes.xml"]
@@ -527,7 +540,7 @@ async function extractZipDocumentText(extension, bytes) {
     return `${entries.has("word/document.xml") ? docxMarkdown(entries.get("word/document.xml"), entries.get("word/styles.xml"), entries.get("word/_rels/document.xml.rels")) : ""}${notes.length ? `\n\n---\n\n${notes.join("\n\n")}` : ""}`;
   }
   if (extension === "pptx") {
-    const entries = await unzipSelected(bytes, name => /^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$/.test(name));
+    const entries = await unzipDocument(bytes, name => /^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$/.test(name));
     return pptxMarkdown(
       [...entries.keys()]
         .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
@@ -537,12 +550,12 @@ async function extractZipDocumentText(extension, bytes) {
   }
   if (extension === "xlsx")
     return xlsxMarkdown(
-      await unzipSelected(bytes, name =>
+      await unzipDocument(bytes, name =>
         /^xl\/(sharedStrings|workbook)\.xml$|^xl\/_rels\/workbook\.xml\.rels$|^xl\/(worksheets|drawings)\/(_rels\/)?(sheet|drawing)\d+\.xml(\.rels)?$/.test(
           name
         )
       )
     );
-  const entries = await unzipSelected(bytes, name => name === "content.xml");
+  const entries = await unzipDocument(bytes, name => name === "content.xml");
   return entries.get("content.xml") ? odfMarkdown(entries.get("content.xml")) : "";
 }
