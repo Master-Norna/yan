@@ -139,19 +139,30 @@ async function supplementForApi(user, budget, { latest = false, steer = false } 
 }
 // 附件原件在哪：用户随问发来的文件落在存储目录的 附件/ 里，不在工作目录。只说「附件」，模型会到工作目录里去找同名文件，
 // 找不到就以为没有；要拿原件（脚本处理、复制进目录）时得有个真实路径。按 id 记着，同一页同一件不必每问重问；
-// 取不到的（原件还只在浏览器里）不记，桥接恢复后再问一回
+// 取不到的（原件还只在浏览器里）不记，桥接恢复后再问一回。
+// 记的路径只对当时的存储根成立（换了位置，同一个 id 的原件搬到新根下、路径全变），换过就不算数、重新问
 const attachmentPlaceCache = new Map();
 /** @param {{ attachments?: Attachment[] }[]} messages @returns {Promise<Record<string, string>>} id → 本机原件的绝对路径 */
 async function attachmentPlaces(messages) {
-  const ids = [...new Set(messages.flatMap(message => (message.attachments || []).map(file => file?.id).filter(Boolean)))],
-    missing = ids.filter(id => !attachmentPlaceCache.has(id));
-  if (missing.length) {
-    const data = await bridge("/api/files/paths", { ids: missing }, AbortSignal.timeout(8000)).catch(() => null);
-    for (const id of missing) if (data?.paths?.[id]) attachmentPlaceCache.set(id, String(data.paths[id]));
-  }
+  const root = bootstrap.store?.root || "",
+    ids = [...new Set(messages.flatMap(message => (message.attachments || []).map(file => file?.id).filter(Boolean)))],
+    known = id => {
+      const entry = attachmentPlaceCache.get(id);
+      return entry && entry.root === root ? entry.path : "";
+    },
+    missing = ids.filter(id => !known(id));
+  if (missing.length)
+    try {
+      // 换根途中发出的这一问作废（storeBridge 会拒），下一问按新根重问，不把旧路径留给模型
+      const data = await storeBridge("/api/files/paths", { ids: missing }, AbortSignal.timeout(8000));
+      for (const id of missing) if (data?.paths?.[id]) attachmentPlaceCache.set(id, { root, path: String(data.paths[id]) });
+    } catch {}
   /** @type {Record<string, string>} */
   const places = {};
-  for (const id of ids) if (attachmentPlaceCache.has(id)) places[id] = attachmentPlaceCache.get(id);
+  for (const id of ids) {
+    const at = known(id);
+    if (at) places[id] = at;
+  }
   return places;
 }
 // 一件附件写在说明里的后缀：本机原件在哪
@@ -280,11 +291,16 @@ async function messageForApi(message, latest, budget = inlineTextBudget(), image
       notes += t`\n\n[${file.kind === "image" ? t("图片") : t("文件")}：${file.name}，${formatFileSize(file.size)}，先前发过，原件已不在上下文中${placeSuffix(places, metadata)}]`;
       continue;
     }
-    if (file.kind === "image") content.push({ type: "image_url", image_url: { url: file.data, detail: "auto" } });
-    else {
-      // 本机没抽出正文的（扫描件、解不开的图、抽取库没载入）：照实说缘何附上的是原件，模型读不出来时不会瞎猜
-      if (metadata.extractionError)
-        notes += t`\n\n[附件 ${file.name}：本机没抽出正文（${metadata.extractionError}），原件照发${place ? t`（本机原件：${place}）` : ""}；读不出来就照实告诉用户]`;
+    if (file.kind === "image") {
+      // 图也得写出原件路径：模型看得见图，却不知道它在哪，要把它放进生成的文档、或交给本机工具就无从下手
+      if (place) notes += t`\n\n[图片：${file.name}；本机原件：${place}]`;
+      content.push({ type: "image_url", image_url: { url: file.data, detail: "auto" } });
+    } else {
+      // 本机没抽出正文的（扫描件、解不开的图、抽取库没载入）：照实说缘何附上的是原件，模型读不出来时不会瞎猜；
+      // 抽出来了也照样给它原件路径——要原样嵌进别处时，光有内容同样找不到文件
+      const why = metadata.extractionError ? t`本机没抽出正文（${metadata.extractionError}），` : "";
+      if (metadata.extractionError || place)
+        notes += t`\n\n[附件 ${file.name}：${why}原件照发${place ? t`（本机原件：${place}）` : ""}${metadata.extractionError ? t`；读不出来就照实告诉用户` : ""}]`;
       content.push({ type: "file", file: { filename: file.name, file_data: String(file.data).replace(/^data:[^,]*,/, "") } });
     }
   }

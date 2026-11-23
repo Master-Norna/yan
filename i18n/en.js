@@ -535,6 +535,7 @@ var YAN_EN = {
   隔离的网页预览: "Sandboxed web preview",
   空文件: "Empty file",
   "仅显示前 400 行": "Showing the first 400 lines",
+  "内容过长，只解析了开头一段": "Content too long — only the beginning was parsed",
   未能抽出正文: "Could not extract text",
   "本机按结构抽出，不含原排版 ·": "Extracted locally by structure, original layout not kept ·",
   "[图片 {0} 预览不了]": "[Image {0} can't be previewed]",

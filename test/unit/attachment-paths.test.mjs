@@ -64,6 +64,36 @@ test("没抽出正文的文件：随原件说清缘由，并给本机原件", as
   assert.match(latest, /本机原件：D:\\言\\附件\\s1\.pdf/);
 });
 
+test("换过存储根：旧路径不再算数，按新根重问", async () => {
+  const calls = [],
+    f = load(["attachmentPlaces", "setup:(fn,root)=>{bridge=fn;bootstrap={...bootstrap,store:{root}};}"]);
+  const answer = () => async (route, body) => {
+    calls.push(body.root);
+    return { paths: { t1: `D:\\${body.root}\\附件\\t1.csv` } };
+  };
+  const message = { id: "u1", role: "user", attachments: [{ id: "t1", name: "a.csv", kind: "text" }] };
+  f.setup(answer(), "A");
+  assert.equal((await f.attachmentPlaces([message])).t1, "D:\\A\\附件\\t1.csv");
+  // 同一个根：不再跑桥接
+  await f.attachmentPlaces([message]);
+  assert.equal(calls.length, 1);
+  // 换了位置（原件搬到新根下，同一个 id 的路径全变）：记着的那份不能再用，按新根重问
+  f.setup(answer(), "B");
+  assert.equal((await f.attachmentPlaces([message])).t1, "D:\\B\\附件\\t1.csv");
+  assert.deepEqual(calls, ["A", "B"]);
+});
+
+test("随问发来的图也给本机原件：只有 image_url，要嵌进文档时找不到文件", async () => {
+  const f = load(["messageForApi", "setup:(fn,whole)=>{bridge=fn;getAttachment=whole;}"]);
+  f.setup(
+    async () => ({ paths: {} }),
+    async () => ({ kind: "image", name: "图.png", size: 1234, data: "data:image/png;base64,AAAA" })
+  );
+  const message = { id: "u3", role: "user", content: "看图", attachments: [{ id: "i1", name: "图.png", kind: "image", size: 1234 }] },
+    latest = text(await f.messageForApi(message, true, 24000, true, { i1: "D:\\言\\附件\\i1.png" }));
+  assert.match(latest, /本机原件：D:\\言\\附件\\i1\.png/);
+});
+
 test("桥接：一批附件的原件路径，找不到的不回", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-paths-"));
   const { routes } = createFiles({ filesHome: () => root });

@@ -30,7 +30,8 @@ function revokeViewerUrls() {
  * 原件只暂存在浏览器里（桥接中途断过、还没推进目录）时，才就地造 blob 地址 */
 // 预览只用得着开头一段：取正文时按字节要一截（Range），不把几百 MB 的日志整份取回页面再切
 const VIEWER_TEXT_CHARS = 200000;
-// 截到的字节可能落在半个字上：退到没写完的 UTF-8 序列之前
+// 截到的字节可能落在半个字上：退到没写完的 UTF-8 序列之前。只给真取了一截的那回用；
+// 取全的照原样解，否则 GBK/GB18030 的末字节会被当成半个 UTF-8 切掉
 /** @param {Uint8Array} bytes */
 function trimIncomplete(bytes) {
   let end = bytes.length;
@@ -60,7 +61,12 @@ function urlReader(url, { extracted = "" } = {}) {
         signal: AbortSignal.timeout(60000)
       });
       if (!response.ok) throw Error(t("取回失败"));
-      const text = decodeTextBytes(trimIncomplete(new Uint8Array(await response.arrayBuffer())));
+      const bytes = new Uint8Array(await response.arrayBuffer()),
+        // Content-Range 报的整份有多大；没这道头（服务器不认 Range）、或这一截已到末尾，就是取全了
+        total = Number(/\/(\d+)\s*$/.exec(response.headers.get("content-range") || "")?.[1] || 0);
+      // 取全了原样解；真截断的才补尾巴——先按 UTF-8 退掉半个字，再收掉解不出的替换字符
+      // （GBK/GB18030 的半个字落在末尾时会解成 U+FFFD）
+      const text = total > bytes.length ? decodeTextBytes(trimIncomplete(bytes)).replace(/\uFFFD+$/, "") : decodeTextBytes(bytes);
       return text.length > limit ? text.slice(0, limit + 1) : text;
     },
     blob: async () => (await fetched()).blob(),
@@ -202,14 +208,17 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   if (kind === "table") {
     // 四百行就够看了：只取一段（一行也可能很长），不把整个大表取回来
     const text = await reader.text(2000000),
+      // 字符先到顶也是截了（一行上万字的大表，行数远不到四百）：末条记录没写完，不算数
+      cut = text.length > 2000000,
       split = fileExtension(name) === "tsv" ? "\t" : ",",
-      rows = parseDelimited(text, split, 401),
-      cells = rows.slice(0, 400);
+      rows = parseDelimited(cut ? text.slice(0, 2000000) : text, split, 401, cut),
+      cells = rows.slice(0, 400),
+      note = [cut ? t`内容过长，只解析了开头一段` : "", rows.length > 400 ? t`仅显示前 400 行` : ""].filter(Boolean).join("；");
     if (!cells.length) return `<div class="file-viewer-empty">${t(`空文件`)}</div>`;
     return `<div class="file-viewer-text file-viewer-fit"><table class="file-viewer-table"><thead><tr>${cells[0].map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead><tbody>${cells
       .slice(1)
       .map(row => `<tr>${row.map(c => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`)
-      .join("")}</tbody></table>${rows.length > 400 ? `<p class="file-viewer-note">${t(`仅显示前 400 行`)}</p>` : ""}</div>`;
+      .join("")}</tbody></table>${note ? `<p class="file-viewer-note">${note}</p>` : ""}</div>`;
   }
   if (kind === "doc") {
     // 每回从原件现抽（按结构抽成 Markdown）；原件取不到、或这回没抽出来（PDF 的库没载入、文件太大），
@@ -270,7 +279,8 @@ function looksLikeText(text) {
   return true;
 }
 // CSV / TSV：引号里的换行仍属于同一个字段，显示上限按记录计。
-function parseDelimited(text, split, limit = Infinity) {
+// open＝给进来的这一段是被截断的（字符先到顶），末条多半没写完，不算
+function parseDelimited(text, split, limit = Infinity, open = false) {
   const rows = [];
   let row = [];
   let cell = "",
@@ -308,7 +318,7 @@ function parseDelimited(text, split, limit = Infinity) {
       started = true;
     }
   }
-  finish();
+  if (!open) finish();
   return rows;
 }
 /** @param {boolean} [stop] 点的是 ×：摊着的若是正放的那一曲，一并停下；别的关法只收起，正放着的挂上顶栏接着放 */

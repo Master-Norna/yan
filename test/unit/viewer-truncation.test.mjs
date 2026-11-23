@@ -26,3 +26,38 @@ test("没超上限的不加提示", async () => {
   const html = await f.fileViewerBody(reader, "短.md", "markdown", -1);
   assert.doesNotMatch(html, /仅显示前 20 万字/);
 });
+
+test("CSV：字符先到顶（行数远不到四百）也要报，末条没写完的不算", async () => {
+  // 两百行、每行一万一千字：两百二十万字符，截断落在第 182 行中间
+  const rows = Array.from({ length: 200 }, (_, i) => `r${i},${"x".repeat(11000)}`),
+    f = load(["fileViewerBody"]),
+    reader = { text: async () => rows.join("\n") };
+  const html = await f.fileViewerBody(reader, "宽.csv", "table", -1);
+  assert.match(html, /内容过长，只解析了开头一段/);
+  assert.doesNotMatch(html, /仅显示前 400 行/);
+  assert.match(html, /r180/);
+  assert.doesNotMatch(html, /r181/); // 被截断的那一条不当作完整记录
+});
+
+test("取全的文本照原样解：GBK 末尾的字不被当成半个 UTF-8 切掉", async () => {
+  const f = load(["urlReader"]),
+    original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Uint8Array([0xd6, 0xd0, 0xce, 0xc4]), { status: 200 });
+  try {
+    assert.equal(await f.urlReader("http://127.0.0.1/x").text(200000), "中文");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("真截断的一截：末尾解不出的字照旧退掉", async () => {
+  const f = load(["urlReader"]),
+    original = globalThis.fetch;
+  // 「中」的三个字节只给了前两个，Content-Range 说整份还有第三个
+  globalThis.fetch = async () => new Response(new Uint8Array([0xe4, 0xb8]), { status: 206, headers: { "content-range": "bytes 0-1/3" } });
+  try {
+    assert.equal(await f.urlReader("http://127.0.0.1/x").text(200000), "");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
