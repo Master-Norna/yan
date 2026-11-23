@@ -146,12 +146,12 @@ function stageHome(root) {
 // 名字形如「前缀-ISO 时刻.扩展名」（时刻里的 : 与 . 换成 -）；download- 打头的不算。
 const AUTO_OUTPUT = /^(?!download-)[a-z]+(?:-[a-z]+)*-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.[a-z0-9]+$/,
   OUTPUT_GRACE_MS = 24 * 60 * 60 * 1000;
-/** @param {string} dir 存下载的目录 */
-function sweepOutputs(dir) {
+/** @param {string} dir 存下载的目录 @param {RegExp} [pattern] 只清名字合这一式的（默认照过程文件的规矩） */
+function sweepOutputs(dir, pattern = AUTO_OUTPUT) {
   const cutoff = Date.now() - OUTPUT_GRACE_MS;
   try {
     for (const name of fs.readdirSync(dir))
-      if (AUTO_OUTPUT.test(name))
+      if (pattern.test(name))
         try {
           const file = path.join(dir, name);
           if (fs.statSync(file).mtimeMs < cutoff) fs.rmSync(file, { force: true });
@@ -166,6 +166,8 @@ function sweepOutputs(dir) {
 // raw 是个窄口——页面万一被人借手，也只读得走这六种，读不到密钥、配置这类东西
 const DOC_VIEWABLE = new Set([".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"]),
   DOCPAGE_STYLES = ["00-base.css", "30-chat/40-markdown.css", "85-components.css"],
+  // 摊开的文档页的名字（docpage 写的那一份）。工作/ 里还落着模型给人起的名字（报告、截图），清理只认这一式
+  DOCPAGE_FILE = /^view-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.html$/,
   DOC_RAW_MAX = 256 * 1024 * 1024;
 // 进 HTML 的两处（题名、链接）照规矩逃掉
 const escapeHtml = (/** @type {string} */ text) =>
@@ -200,6 +202,8 @@ body.docpage { margin: 0; min-height: 100%; overflow: auto; background: var(--pa
 .docpage .file-viewer-text { box-sizing: border-box; width: 100%; min-height: 0; padding: 0; border: 0; background: none; font-size: 16px; line-height: 1.8; }
 .docpage .file-viewer-text > .file-viewer-note:first-child { margin-top: 0; }
 .docpage .viewer-tabs { margin: 0 0 14px; }
+/* 工作表页签要真把别的表收起来：.hidden 那条规则在设置页那一片（styles/70-settings/30-panels.css），文档页没带它 */
+.docpage .hidden { display: none !important; }
 .docpage a { overflow-wrap: anywhere; }
 </style>
 </head>
@@ -253,8 +257,8 @@ function prepareMcp(config, where) {
     for (const dir of [at.profile, at.output, at.work]) fs.mkdirSync(dir, { recursive: true });
   } catch {}
   sweepOutputs(at.output);
-  // 摊开的文档页（view-*.html）照同一条规矩清：名字与过程文件同形，一天后的不再有用
-  sweepOutputs(at.work);
+  // 摊开的文档页（view-*.html）照同一条规矩清：一天后的不再有用。只认这一式——工作/ 是模型给人存东西的地方，别的一件不动
+  sweepOutputs(at.work, DOCPAGE_FILE);
   return prepareBrowser(built, where);
 }
 // 页面问调试口、收藏、下载目录时递来的那个服务：游目自己的递选择，别的递参数
@@ -573,7 +577,7 @@ module.exports = function createStage({ root = () => "" } = {}) {
     const href = /^file:\/\//i.test(String(/** @type {any} */ (body).url || "")) ? String(/** @type {any} */ (body).url) : "";
     try {
       fs.mkdirSync(work, { recursive: true });
-      sweepOutputs(work);
+      sweepOutputs(work, DOCPAGE_FILE);
       fs.writeFileSync(file, docPageHtml(String(/** @type {any} */ (body).name || ""), inner, href), "utf8");
     } catch (error) {
       return sendJson(res, 500, { error: `写不成文档页：${String(/** @type {any} */ (error)?.message || error).slice(0, 200)}` });
@@ -622,4 +626,5 @@ module.exports.isPlaywright = isPlaywright;
 module.exports.sweepOutputs = sweepOutputs;
 module.exports.docPageHtml = docPageHtml;
 module.exports.DOC_VIEWABLE = DOC_VIEWABLE;
+module.exports.DOCPAGE_FILE = DOCPAGE_FILE;
 module.exports.savedName = savedName;

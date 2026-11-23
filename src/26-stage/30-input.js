@@ -134,12 +134,18 @@ function stageGo(raw) {
   if (stageDocName(url)) return void stageShowDoc(url);
   stageNavigate(url);
 }
-// 把游目开到那个地址
-/** @param {string} url */
-function stageNavigate(url) {
+// 把游目开到那个地址。from 是发起时的那一页（摊文档用）：取件、抽取、落页要几秒，这期间人可能已切到别的页签——
+// 那就仍开在发起的那一页上，不把眼下这一页拽走
+/** @param {string} url @param {{ tab: string, session: string } | null} [from] */
+function stageNavigate(url, from = null) {
   stage.goAt = Date.now();
+  // 这一页上又开了别的：先前的代数作废（见 stageShowDoc）
+  const one = stage.tabs.get(from ? from.tab : stage.current);
+  if (one) one.nav = (one.nav || 0) + 1;
+  // 指定了发起那一页、它却已关掉：新开一页去，别往一个没了的会话语上发
+  const session = from ? (stage.tabs.has(from.tab) ? from.session : "") : stage.session;
   // 一页都没开着：新开一页去
-  const go = stage.session ? stageSend("Page.navigate", { url }, stage.session) : stageSend("Target.createTarget", { url });
+  const go = session ? stageSend("Page.navigate", { url }, session) : stageSend("Target.createTarget", { url });
   void go.catch(error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`));
 }
 /** @param {string} url @returns {string} 能在游目里摊开看的本机文档就给文件名，否则空 */
@@ -162,6 +168,9 @@ async function stageShowDoc(url) {
   const name = stageDocName(url);
   // 抽不出正文的（旧版 Office、压缩包）：直接交本机程序，不必先取一趟
   if (!name) return void stageOpenInApp(url);
+  // 记下发起时那一页与它的代数：落页时这一页上若已又开了别的（或这一页已关掉），这一份就作罢，别把页拽回来
+  const from = { tab: stage.current, session: stage.session },
+    rev = stage.tabs.get(from.tab)?.nav || 0;
   toast(t`正在摊开「${name}」…`);
   try {
     const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),
@@ -169,17 +178,18 @@ async function stageShowDoc(url) {
     // 抽不出正文时给的是空态（带一颗「以本机程序打开」，文档页里没有谁接它）：交本机程序，别摊一张空纸
     if (!body.includes("file-viewer-empty")) {
       const { url: page } = await bridge("/api/stage/docpage", { name, url, body });
-      return void stageNavigate(page);
+      if ((stage.tabs.get(from.tab)?.nav || 0) !== rev) return;
+      return void stageNavigate(page, from);
     }
   } catch {}
   // 抽不出、或写不成页：仍交本机程序打开原件，与从前一样
   void stageOpenInApp(url);
 }
-// 交给本机程序打开原件（抽不出正文、或摊不开的那几种）
-/** @param {string} url */
-function stageOpenInApp(url) {
+// 交给本机程序打开原件（抽不出正文、或摊不开的那几种；以及从文档页里点「以本机程序打开」）
+/** @param {string} url @param {boolean} [wanted] 本来就是要交本机程序的（别再说「阅不了」） */
+function stageOpenInApp(url, wanted = false) {
   return bridge("/api/stage/open", { url }).then(
-    () => toast(t("游目阅不了此件，已在本机程序中打开")),
+    () => toast(wanted ? t("已在本机程序中打开") : t("游目阅不了此件，已在本机程序中打开")),
     error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`)
   );
 }

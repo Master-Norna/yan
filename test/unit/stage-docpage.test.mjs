@@ -3,10 +3,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { load } from "./harness.mjs";
 
-const { stageDocName } = load(["stageDocName"]);
-const { docPageHtml, DOC_VIEWABLE } = createRequire(import.meta.url)("../../server/stage.js");
+const { stageDocName, stageDocPage } = load(["stageDocName", "stageDocPage"]);
+const { docPageHtml, DOC_VIEWABLE, DOCPAGE_FILE, sweepOutputs } = createRequire(import.meta.url)("../../server/stage.js");
 
 test("能摊开的本机文档：抽得出正文的六种才认，旧格式与压缩包仍交本机程序", () => {
   const url = name => `file:///E:/%E6%A1%88/${encodeURIComponent(name)}`;
@@ -49,6 +52,8 @@ test("文档页的壳：一张素纸，样式取言自己的，正文原样进�
   assert.match(html, /font-size: 16px; line-height: 1\.8;/);
   // 纸纹是浮层那张小纸的，整屏读时嫌花：文档页要把它压掉
   assert.match(html, /\.docpage \.file-viewer-text \{[^}]*background: none/);
+  // 工作表页签：.hidden 那条规则在设置页那一片，文档页没带它，得自带一条，否则几张表会一起摊着
+  assert.match(html, /\.docpage \.hidden \{ display: none !important; \}/);
 });
 
 test("「以本机程序打开」换成指向原件的链接：独立页里没人接那颗按钮", () => {
@@ -73,4 +78,50 @@ test("「以本机程序打开」换成指向原件的链接：独立页里没�
 test("文件名的 HTML 记号要逃掉：它进的是 <title>", () => {
   const html = docPageHtml('<a&b>"c".docx', '<div class="file-viewer-text"></div>');
   assert.match(html, /<title>&lt;a&amp;b&gt;&quot;c&quot;\.docx<\/title>/);
+});
+
+test("摊开的文档页认得出来：从它里头点原件链接，是「以本机程序打开」而不是再摊一回", () => {
+  const page = "file:///E:/%E8%81%8A%E5%A4%A9/.yan/%E6%B8%B8%E7%9B%AE/%E5%B7%A5%E4%BD%9C/view-2026-11-23T05-47-12-345Z.html";
+  assert.equal(stageDocPage(page), true);
+  // 带查询、带锚点的仍是同一页
+  assert.equal(stageDocPage(`${page}?x=1#top`), true);
+  // 别的本机页、网页、名字不像的都不算：那些地方点文档仍该摊开看
+  for (const url of [
+    "file:///E:/a/report.docx",
+    "file:///E:/a/view.html",
+    "file:///E:/a/view-2026-11-23.html",
+    "file:///E:/a/x-view-2026-11-23T05-47-12-345Z.html.bak",
+    "https://a.b/view-2026-11-23T05-47-12-345Z.html",
+    "about:blank",
+    ""
+  ])
+    assert.equal(stageDocPage(url), false, url);
+});
+
+test("工作目录里只清摊开的文档页：模型起了名字的件一件不动", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "yan-docpage-sweep-")),
+    old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    aged = name => {
+      const file = path.join(dir, name);
+      writeFileSync(file, "x");
+      utimesSync(file, old, old);
+      return file;
+    };
+  try {
+    // 与 docpage 写出来的名字同形（ISO 时刻里的 : 与 . 换成 -）
+    assert.equal(DOCPAGE_FILE.test("view-2026-11-23T05-47-12-345Z.html"), true);
+    assert.equal(DOCPAGE_FILE.test("view-2026-11-23T05-47-12-345Z.xlsx"), false);
+    const page = aged("view-2026-11-01T12-00-00-000Z.html"),
+      report = aged("report-2026-11-01T12-00-00-000Z.xlsx"),
+      shot = aged("shot-2026-11-01T12-00-00-000Z.png"),
+      fresh = path.join(dir, "view-2026-11-23T12-00-00-000Z.html");
+    writeFileSync(fresh, "x");
+    sweepOutputs(dir, DOCPAGE_FILE);
+    assert.equal(existsSync(page), false, "一天前的文档页清掉");
+    assert.equal(existsSync(report), true, "模型给人起的名字：表不动");
+    assert.equal(existsSync(shot), true, "截图不动");
+    assert.equal(existsSync(fresh), true, "还没到一天的留着");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -19,7 +19,7 @@ const stage = {
   seq: 0,
   /** @type {Map<number, { resolve: (v: any) => void, reject: (e: Error) => void }>} */
   pending: new Map(),
-  /** @type {Map<string, { title: string, url: string, ctx?: string }>} 浏览器里开着的页，按开的先后；ctx 是所在的浏览器上下文 */
+  /** @type {Map<string, { title: string, url: string, ctx?: string, nav?: number }>} 浏览器里开着的页，按开的先后；ctx 是所在的浏览器上下文，nav 是这一页开到第几处的代数（见 stageShowDoc） */
   tabs: new Map(),
   // setDiscoverTargets 会把已开着的页逐个报来：那些不算「新开」，别跟过去
   listing: false,
@@ -102,6 +102,12 @@ const stage = {
   // 人切签或主动激活的代数：切签即递增，stageLocate 拿回旧前台时不覆写已发生的新切签
   frontRevision: 0
 };
+
+// 摊开的文档页：落进 游目/工作/view-<ISO>.html 的那一份（server/stage.js 的 docpage 写的，名字同过程文件的规矩）。
+// 从这样一页里点原件链接，是「要以本机程序打开」，不是要再摊一回——认的是此刻这一页，不是那份文件
+const DOCPAGE_URL = /^file:\/\/.*\/view-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.html$/i,
+  /** @param {string} url 游目此刻看着的那一页 @returns {boolean} */
+  stageDocPage = url => DOCPAGE_URL.test(String(url || "").split(/[?#]/)[0]);
 
 // ---------- 连上浏览器 ----------
 // 已连着时也问一回：模型若把别的页请到了前台（选签、新开），看台跟过去
@@ -280,9 +286,10 @@ function stagePageEvent(method, params) {
     Date.now() - Math.max(stage.userAt, stage.keyAt, stage.goAt) < 3000
   ) {
     // 人开的本机文件浏览器显示不了（Office 文档、压缩包、csv 等）就会当下载：当场取消，不拷进下载目录。
-    // 抽得出正文的文档摊成文档页在这儿看，其余交给本机程序打开原件（两条入口——地址栏与下载——同一段路）
+    // 抽得出正文的文档摊成文档页在这儿看，其余交给本机程序打开原件（两条入口——地址栏与下载——同一段路）。
+    // 从摊开的文档页里点「以本机程序打开」也是这一下：那本来就是要交本机程序，再摊一回只会绕回原处
     void stageSend("Browser.cancelDownload", { guid: params.guid, browserContextId: stage.tabs.get(stage.current)?.ctx }).catch(() => {});
-    void stageShowDoc(params.url);
+    void (stageDocPage(stage.tabs.get(stage.current)?.url) ? stageOpenInApp(params.url, true) : stageShowDoc(params.url));
   } else if (method === "Page.downloadWillBegin") {
     // 下载：浏览器在屏幕外存，游目只记一笔（名、来处、多大、到哪一步）；存到哪由 MCP 的结果补上（见 stageNoteDownload）
     stage.downloads = [
