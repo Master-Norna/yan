@@ -12,9 +12,10 @@ const os = require("node:os");
 const { spawn, execFile } = require("node:child_process");
 const { fasterSide, pickSource } = require("./mirror.js");
 const path = require("node:path");
-const { fileURLToPath } = require("node:url");
-const { sendJson, readJson, openWithSystem } = require("./http.js");
+const { fileURLToPath, pathToFileURL } = require("node:url");
+const { sendJson, readJson, openWithSystem, sendFile } = require("./http.js");
 const platform = require("./platform.js");
+const { stylesAt } = require("./build.js");
 
 // 参数里哪一项都没写调试口时的默认（见 docs/stage.md：避开常被端口转发占着的 9222 / 9223）
 const DEFAULT_PORT = 9288;
@@ -157,6 +158,69 @@ function sweepOutputs(dir) {
         } catch {}
   } catch {}
 }
+// ---------- 本机文档摊在游目里看 ----------
+// 浏览器只会把 Office 文档当下载：人点开一个 docx，只落得本机 Word 弹出窗口，在游目里看不见内容。要看内容就得把言的抽取搬过来——
+// 页面取原件（raw）、用与预览同一套抽正文（src/13-files/30-extract.js），正文交给 docpage；这里包成一份自足的文档页落进 工作/，
+// 页面再以 file:// 打开。样式取自言自己的 styles/，与言里的预览同一副样子，改一处两处都变。
+// 只认下面六种：抽得出正文的现代 Office 与 ODF。旧格式 doc/xls/ppt 抽不出、压缩包也无正文，仍交本机程序。
+// raw 是个窄口——页面万一被人借手，也只读得走这六种，读不到密钥、配置这类东西
+const DOC_VIEWABLE = new Set([".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"]),
+  DOCPAGE_STYLES = ["00-base.css", "30-chat/40-markdown.css", "85-components.css"],
+  DOC_RAW_MAX = 256 * 1024 * 1024;
+// 进 HTML 的两处（题名、链接）照规矩逃掉
+const escapeHtml = (/** @type {string} */ text) =>
+  String(text || "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+// 文档页的壳：一张素纸铺满整屏，窗外是案。纸上不加纸纹——纸纹是预览浮层那张小纸的（.file-viewer-text 的 background），
+// 整屏读的时候嫌花；正文照文档排法 16px / 1.8，浮层那份是 14px / 1.85（窄纸密排），铺满整屏读着吃力。
+// 版心仍是 860：纸 860 + 两侧各 40 的内边距。
+// 正文里那颗「以本机程序打开」在这儿换成指向原件的链接：独立页里没有预览浮层那套事件，按钮点了没谁接；
+// 链接反倒真能用——点了仍是「人开的本机文件」，页面那头照样消掉下载、交本机程序
+/** @param {string} name @param {string} inner @param {string} [href] 原件的 file: 地址 */
+function docPageHtml(name, inner, href = "") {
+  const title = escapeHtml(name),
+    // 认两种写法：页面里写的是不带值的 data-viewer-open，过了 innerHTML 会补成 data-viewer-open=""
+    body = href
+      ? inner.replace(
+          /<button type="button" class="viewer-open-link" data-viewer-open(?:="[^"]*")?>([^<]*)<\/button>/g,
+          (_, text) => `<a href="${escapeHtml(href)}">${text}</a>`
+        )
+      : inner;
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>
+${stylesAt(DOCPAGE_STYLES)}
+/* ---- 文档页自补的一层：纸面 ---- */
+html { height: 100%; }
+body.docpage { margin: 0; min-height: 100%; overflow: auto; background: var(--paper-2); color: var(--ink); font-family: var(--body); -webkit-font-smoothing: antialiased; }
+.docpage-paper { box-sizing: border-box; max-width: 940px; min-height: 100vh; margin: 0 auto; padding: 44px 40px 80px; background: var(--paper); }
+.docpage .file-viewer-text { box-sizing: border-box; width: 100%; min-height: 0; padding: 0; border: 0; background: none; font-size: 16px; line-height: 1.8; }
+.docpage .file-viewer-text > .file-viewer-note:first-child { margin-top: 0; }
+.docpage .viewer-tabs { margin: 0 0 14px; }
+.docpage a { overflow-wrap: anywhere; }
+</style>
+</head>
+<body class="docpage">
+<main class="docpage-paper">
+${body}
+</main>
+<script>
+// 工作表的页签：文档页里没有预览浮层那套事件，就地绑一份（只这一件事，别的照旧不动）
+document.addEventListener("click", event => {
+  const tab = event.target.closest("[data-viewer-tab]");
+  if (!tab) return;
+  const box = tab.closest(".file-viewer-wide") || document;
+  for (const one of box.querySelectorAll("[data-viewer-tab]")) one.classList.toggle("active", one === tab);
+  for (const panel of box.querySelectorAll("[data-viewer-panel]")) panel.classList.toggle("hidden", panel.dataset.viewerPanel !== tab.dataset.viewerTab);
+});
+</script>
+</body>
+</html>
+`;
+}
 // 下载存成的名字：Playwright 按浏览器给的名存，名里的 ASCII 符号与空格换成 -（照它的 sanitizeForFilePath）
 /** @param {string} name */
 function savedName(name) {
@@ -189,6 +253,8 @@ function prepareMcp(config, where) {
     for (const dir of [at.profile, at.output, at.work]) fs.mkdirSync(dir, { recursive: true });
   } catch {}
   sweepOutputs(at.output);
+  // 摊开的文档页（view-*.html）照同一条规矩清：名字与过程文件同形，一天后的不再有用
+  sweepOutputs(at.work);
   return prepareBrowser(built, where);
 }
 // 页面问调试口、收藏、下载目录时递来的那个服务：游目自己的递选择，别的递参数
@@ -476,6 +542,44 @@ module.exports = function createStage({ root = () => "" } = {}) {
     if (!process.env.YAN_NO_EXTERNAL) platform.openUrl(url);
     sendJson(res, 200, { ok: true });
   }
+  // 原件直取：GET /api/stage/raw?url=file:///…，页面抽正文用。只认那六种、只认盘上的普通文件：
+  // 路径从 file: 地址解出来（UNC 与非本机主机的地址 fileURLToPath 会直接抛，不必另挡）
+  async function raw(req, res) {
+    let file = "";
+    try {
+      file = fileURLToPath(String(new URL(req.url, "http://127.0.0.1").searchParams.get("url") || ""));
+    } catch {
+      return sendJson(res, 400, { error: "只认本机文件的地址" });
+    }
+    if (!DOC_VIEWABLE.has(path.extname(file).toLowerCase())) return sendJson(res, 400, { error: "这一类文档摊不开" });
+    const stat = await fs.promises.stat(file).catch(() => null);
+    if (!stat?.isFile()) return sendJson(res, 404, { error: "文件不在了" });
+    if (stat.size > DOC_RAW_MAX) return sendJson(res, 413, { error: "这件太大，摊不开" });
+    try {
+      await sendFile(req, res, file, { name: path.basename(file) });
+    } catch (error) {
+      if (!res.headersSent) sendJson(res, 500, { error: String(/** @type {any} */ (error)?.message || error) });
+    }
+  }
+  // 把页面抽好的正文包成一份文档页，落进 工作/（名字照过程文件的规矩，一天后由 sweepOutputs 清），回它的 file: 地址。
+  // 只收预览器那几层正文容器：这个口只用来摊文档，别的东西不往盘上写
+  async function docpage(req, res) {
+    const body = await readJson(req).catch(() => ({})),
+      inner = String(/** @type {any} */ (body).body || "");
+    if (!/^<div class="file-viewer-(text|slides)/.test(inner)) return sendJson(res, 400, { error: "只收本机抽出来的正文" });
+    const work = stageHome(root()).work,
+      file = path.join(work, `view-${new Date().toISOString().replace(/[:.]/g, "-")}.html`);
+    // 原件地址只作那颗「以本机程序打开」的去处：收它但只当链接写进去
+    const href = /^file:\/\//i.test(String(/** @type {any} */ (body).url || "")) ? String(/** @type {any} */ (body).url) : "";
+    try {
+      fs.mkdirSync(work, { recursive: true });
+      sweepOutputs(work);
+      fs.writeFileSync(file, docPageHtml(String(/** @type {any} */ (body).name || ""), inner, href), "utf8");
+    } catch (error) {
+      return sendJson(res, 500, { error: `写不成文档页：${String(/** @type {any} */ (error)?.message || error).slice(0, 200)}` });
+    }
+    sendJson(res, 200, { url: pathToFileURL(file).href });
+  }
   // 只显出、不打开：下载来的可能是程序，开它要人自己在资源管理器里点。
   // 没记着路径的（人点的下载，之后执事没再动手，结果里没报存到哪）按名字在存下载的目录里找；找不着才开整个目录
   async function reveal(req, res) {
@@ -501,6 +605,8 @@ module.exports = function createStage({ root = () => "" } = {}) {
       "POST /api/stage/bookmarks": bookmarks,
       "POST /api/stage/reveal": reveal,
       "POST /api/stage/open": open,
+      "POST /api/stage/docpage": docpage,
+      "GET /api/stage/raw": raw,
       "POST /api/stage/home": home,
       "POST /api/stage/install": install
     }
@@ -514,4 +620,6 @@ module.exports.installStage = installStage;
 module.exports.stageState = stageState;
 module.exports.isPlaywright = isPlaywright;
 module.exports.sweepOutputs = sweepOutputs;
+module.exports.docPageHtml = docPageHtml;
+module.exports.DOC_VIEWABLE = DOC_VIEWABLE;
 module.exports.savedName = savedName;

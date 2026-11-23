@@ -279,12 +279,10 @@ function stagePageEvent(method, params) {
     /^file:/i.test(params.url || "") &&
     Date.now() - Math.max(stage.userAt, stage.keyAt, stage.goAt) < 3000
   ) {
-    // 人开的本机文件浏览器显示不了（Office 文档、压缩包、csv 等）就会当下载：当场取消，不拷进下载目录，交给本机程序打开原件
+    // 人开的本机文件浏览器显示不了（Office 文档、压缩包、csv 等）就会当下载：当场取消，不拷进下载目录。
+    // 抽得出正文的文档摊成文档页在这儿看，其余交给本机程序打开原件（两条入口——地址栏与下载——同一段路）
     void stageSend("Browser.cancelDownload", { guid: params.guid, browserContextId: stage.tabs.get(stage.current)?.ctx }).catch(() => {});
-    void bridge("/api/stage/open", { url: params.url }).then(
-      () => toast(t("游目阅不了此件，已在本机程序中打开")),
-      error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`)
-    );
+    void stageShowDoc(params.url);
   } else if (method === "Page.downloadWillBegin") {
     // 下载：浏览器在屏幕外存，游目只记一笔（名、来处、多大、到哪一步）；存到哪由 MCP 的结果补上（见 stageNoteDownload）
     stage.downloads = [

@@ -130,10 +130,58 @@ function stageCaretSoon() {
 function stageGo(raw) {
   const url = stageUrlOf(raw);
   if (!url || !stage.ws) return;
+  // 人开的 Office 文档浏览器只会当下载：先抽出正文摊成文档页，不直接把游目导航过去（见 stageShowDoc）
+  if (stageDocName(url)) return void stageShowDoc(url);
+  stageNavigate(url);
+}
+// 把游目开到那个地址
+/** @param {string} url */
+function stageNavigate(url) {
   stage.goAt = Date.now();
   // 一页都没开着：新开一页去
   const go = stage.session ? stageSend("Page.navigate", { url }, stage.session) : stageSend("Target.createTarget", { url });
   void go.catch(error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`));
+}
+/** @param {string} url @returns {string} 能在游目里摊开看的本机文档就给文件名，否则空 */
+function stageDocName(url) {
+  if (!/^file:/i.test(url)) return "";
+  let name = "";
+  try {
+    name = decodeURIComponent(url.split("/").pop() || "");
+  } catch {
+    return "";
+  }
+  // 照文件种类登记认：view 是 doc 的（docx / xlsx / pptx / odt / ods / odp）才抽得出正文，不另立一张扩展名表
+  return name && fileKind(name).view === "doc" ? name : "";
+}
+// 人点开一份本机文档：用与预览同一套的抽取（13-files/）摊成一份自足的文档页，落进 游目/工作/ 再以 file:// 打开——
+// 内容在游目里看得见、能对着它说话，原件一笔不动。抽不出、写不成仍交本机程序，与从前一样。
+// 模型自己开的文件不走这儿：它经 MCP 直接导航，地址不经过 stageGo，仍当下载（只有人开的才转交本机程序，见 00-connect.js）
+/** @param {string} url */
+async function stageShowDoc(url) {
+  const name = stageDocName(url);
+  // 抽不出正文的（旧版 Office、压缩包）：直接交本机程序，不必先取一趟
+  if (!name) return void stageOpenInApp(url);
+  toast(t`正在摊开「${name}」…`);
+  try {
+    const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),
+      body = await fileViewerBody(reader, name, "doc");
+    // 抽不出正文时给的是空态（带一颗「以本机程序打开」，文档页里没有谁接它）：交本机程序，别摊一张空纸
+    if (!body.includes("file-viewer-empty")) {
+      const { url: page } = await bridge("/api/stage/docpage", { name, url, body });
+      return void stageNavigate(page);
+    }
+  } catch {}
+  // 抽不出、或写不成页：仍交本机程序打开原件，与从前一样
+  void stageOpenInApp(url);
+}
+// 交给本机程序打开原件（抽不出正文、或摊不开的那几种）
+/** @param {string} url */
+function stageOpenInApp(url) {
+  return bridge("/api/stage/open", { url }).then(
+    () => toast(t("游目阅不了此件，已在本机程序中打开")),
+    error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`)
+  );
 }
 // 开本机文件（纸签、Ctrl+O）：经桥接弹系统的选文件窗，拿真路径开 file://——不拷进临时目录，网页旁的样式、脚本、图才引得到。
 // 浏览器显示不了的（Office 文档等）会当下载，由 downloadWillBegin 那头转交本机程序
