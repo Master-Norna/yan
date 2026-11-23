@@ -5,6 +5,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { connect, check, sleep, PAGE, TMP, MODEL_DEBUG } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
+// 附件里的图：落了盘的原件照同源地址画，只暂存在浏览器里的才编成 data: URL。断言认「画出来了」，不认取图走哪条路
+const drawnImage = `(el => {
+  const src = (el && el.getAttribute("src")) || "";
+  return !!el && (src.startsWith("data:image") || src.startsWith("/api/files/raw?id="));
+})`;
 const bail = () => {
   close();
   try {
@@ -353,11 +358,11 @@ check(
   await evalJs(`document.querySelector("#welcomeQuote .composer-quote-text").textContent.includes("圈「链接」")`),
   await evalJs(`document.querySelector("#welcomeQuote .composer-quote-text").textContent`)
 );
-await waitFor(`!!document.querySelector("#welcomeQuote .quote-shot img[src^='data:image']")`, 8000).catch(() => {});
+await waitFor(`${drawnImage}(document.querySelector("#welcomeQuote .quote-shot img"))`, 8000).catch(() => {});
 check(
   "the picture with the circle rides inside the quote, not in the attachment list",
   await evalJs(
-    `!!document.querySelector("#welcomeQuote .quote-shot img[src^='data:image']") && !document.querySelector("#welcomeAttachments .attachment-card")`
+    `${drawnImage}(document.querySelector("#welcomeQuote .quote-shot img")) && !document.querySelector("#welcomeAttachments .attachment-card")`
   )
 );
 check(
