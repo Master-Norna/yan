@@ -181,9 +181,12 @@ defineTool({
     step.output = trimOutput(lines.join("\n"));
     // 桥接替模型圆过的（正则写不成，按字面搜了）：说在结果前头
     step.note = data.note || (lines.length ? "" : "无匹配");
-    // 搜得不全的照实说：扫到文件上限、没进去的大目录。零命中时模型最容易据此断言「没有」
+    // 搜得不全的照实说：扫到文件上限、没进去的大目录、跳过的大文件与二进制。零命中时模型最容易据此断言「没有」
     const partial = [
         data.limited && t`只扫了前 ${data.limited} 个文件，其余未搜；请缩小 path 或加 glob`,
+        data.large && t`另有 ${data.large} 件超过 2 MB 未搜；要搜其中一件就把 path 指到它（单件可搜到 32 MB）`,
+        data.binary && t`另有 ${data.binary} 件像是二进制，未搜`,
+        data.unread && t`另有 ${data.unread} 件读不出来，未搜`,
         data.skipped?.length && t`未进入 ${data.skipped.join("、")}；要搜其中的，把 path 指进去`
       ]
         .filter(Boolean)

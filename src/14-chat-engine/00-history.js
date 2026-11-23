@@ -6,11 +6,12 @@ const HISTORY_TEXT_CHARS = 3000;
 function lastContextIndex(messages, { withSummary = false } = {}) {
   return messages.findLastIndex(m => m.role === "context" && (!withSummary || !!m.summary));
 }
-function attachmentExcerpt(text, name, label) {
-  const value = String(text || "");
+function attachmentExcerpt(text, name, label, place = "") {
+  const value = String(text || ""),
+    at = place ? t`；本机原件：${place}` : "";
   return value.length > HISTORY_TEXT_CHARS
-    ? t`\n\n--- 附件：${name}（${label}，开头）---\n${value.slice(0, HISTORY_TEXT_CHARS)}\n[全文共 ${value.length} 字，此处只留开头 ${HISTORY_TEXT_CHARS} 字；其余要用时以 read_document 读取]`
-    : t`\n\n--- 附件：${name}（${label}）---\n${value}`;
+    ? t`\n\n--- 附件：${name}（${label}${at}，开头）---\n${value.slice(0, HISTORY_TEXT_CHARS)}\n[全文共 ${value.length} 字，此处只留开头 ${HISTORY_TEXT_CHARS} 字；其余要用时以 read_document 读取]`
+    : t`\n\n--- 附件：${name}（${label}${at}）---\n${value}`;
 }
 /** @param {Message} message */
 function quotedText(message) {
@@ -129,11 +130,45 @@ function entryText(entry) {
 // 补言进历史：与作答途中递给模型时同一个样子（前缀注明是途中补的）。latest：正递着的这一句，附件整份带上；往后重装历史时只带摘要
 /** @param {Message} user */
 async function supplementForApi(user, budget, { latest = false, steer = false } = {}) {
-  const entry = await messageForApi(user, latest, budget),
+  const places = await attachmentPlaces(user.attachments?.length ? [user] : []),
+    entry = await messageForApi(user, latest, budget, latest, places),
     prefix = prompt(steer ? "assistant.steer" : "assistant.supplement");
   if (typeof entry.content === "string") entry.content = `${prefix}${entry.content}`;
   else entry.content[0].text = `${prefix}${entry.content[0].text}`;
   return entry;
+}
+// 附件原件在哪：用户随问发来的文件落在存储目录的 附件/ 里，不在工作目录。只说「附件」，模型会到工作目录里去找同名文件，
+// 找不到就以为没有；要拿原件（脚本处理、复制进目录）时得有个真实路径。按 id 记着，同一页同一件不必每问重问；
+// 取不到的（原件还只在浏览器里）不记，桥接恢复后再问一回。
+// 记的路径只对当时的存储根成立（换了位置，同一个 id 的原件搬到新根下、路径全变），换过就不算数、重新问
+const attachmentPlaceCache = new Map();
+/** @param {{ attachments?: Attachment[] }[]} messages @returns {Promise<Record<string, string>>} id → 本机原件的绝对路径 */
+async function attachmentPlaces(messages) {
+  const root = bootstrap.store?.root || "",
+    ids = [...new Set(messages.flatMap(message => (message.attachments || []).map(file => file?.id).filter(Boolean)))],
+    known = id => {
+      const entry = attachmentPlaceCache.get(id);
+      return entry && entry.root === root ? entry.path : "";
+    },
+    missing = ids.filter(id => !known(id));
+  if (missing.length)
+    try {
+      // 换根途中发出的这一问作废（storeBridge 会拒），下一问按新根重问，不把旧路径留给模型
+      const data = await storeBridge("/api/files/paths", { ids: missing }, AbortSignal.timeout(8000));
+      for (const id of missing) if (data?.paths?.[id]) attachmentPlaceCache.set(id, { root, path: String(data.paths[id]) });
+    } catch {}
+  /** @type {Record<string, string>} */
+  const places = {};
+  for (const id of ids) {
+    const at = known(id);
+    if (at) places[id] = at;
+  }
+  return places;
+}
+// 一件附件写在说明里的后缀：本机原件在哪
+/** @param {Record<string, string>} places @param {{ id?: string }} file */
+function placeSuffix(places, file) {
+  return places[file.id] ? t`；本机原件：${places[file.id]}` : "";
 }
 // 用户发的图只留最新的一批：这一问带着的整份送出，此前最近一回带图的那一问也还带着（「刚才那张图的左下角」才答得上），
 // 再早的换成一行字。与工具交回的图同一条规矩（见 attachToolImages）；新的一批来了才换，前文不会每问都变，缓存只在那时断一回
@@ -147,7 +182,8 @@ function keptImageQuestion(source, current) {
 async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
   const history = [],
     pictured = keptImageQuestion(source, lastUserId),
-    rewinds = rewindNotes(source);
+    rewinds = rewindNotes(source),
+    places = await attachmentPlaces(source);
   let trail = "",
     asked = "";
   for (const m of source) {
@@ -156,7 +192,7 @@ async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
       trail = settledDigest(m);
       continue;
     }
-    const entry = await messageForApi(m, m.id === lastUserId, budget, m.id === lastUserId || m.id === pictured);
+    const entry = await messageForApi(m, m.id === lastUserId, budget, m.id === lastUserId || m.id === pictured, places);
     if (m.role === "user") {
       const head = [trail, ...rewinds.filter(r => r.at > asked && r.at <= m.timestamp).map(r => r.text)].filter(Boolean).join("\n\n");
       asked = m.timestamp || asked;
@@ -173,7 +209,7 @@ async function historyForApi(source, lastUserId, budget = inlineTextBudget()) {
   return history;
 }
 /** @param {Message} message @param {boolean} [images] 图片整份送（这一问、或最近带图的那一问，见 keptImageQuestion） */
-async function messageForApi(message, latest, budget = inlineTextBudget(), images = latest) {
+async function messageForApi(message, latest, budget = inlineTextBudget(), images = latest, places = {}) {
   if (message.role === "assistant") return { role: "assistant", content: message.content };
   if (message.role !== "user" || !message.attachments?.length)
     return { role: message.role, content: message.role === "user" ? quotedText(message) : message.content };
@@ -183,37 +219,45 @@ async function messageForApi(message, latest, budget = inlineTextBudget(), image
   const content = [{ type: "text", text: quotedText(message) || t("请查看附件。") }];
   let notes = "";
   for (const metadata of message.attachments) {
+    const place = places[metadata.id] || "";
     // 模型接口通常不收压缩包；原件已经落在本机，给出可用的路径，让本机工具解包。
     // 历史里的包也保留这条索引。先复制到工作目录再解压，来源在目录外时也不必放宽沙箱。
     // 没抽出正文、又大得不该整份送的文件同此：给路径，由模型用工具读
     if (fileKind(metadata.name).name === "archive") {
-      try {
-        const local = await bridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
-        notes += t`\n\n[压缩包：${metadata.name}；本机原件路径：${local.path}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`;
-      } catch (error) {
-        notes += t`\n\n[压缩包 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}]`;
-      }
+      if (place)
+        notes += t`\n\n[压缩包：${metadata.name}；本机原件路径：${place}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`;
+      else
+        try {
+          const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
+          notes += t`\n\n[压缩包：${metadata.name}；本机原件路径：${local.path}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`;
+        } catch (error) {
+          notes += t`\n\n[压缩包 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}]`;
+        }
       continue;
     }
     // 早先消息里的图片只留一行占位，用不着原件：不必每问都把它从存储目录整份取回来。
     // 占位照实说图已不在：写「已在此前发送」，模型会当自己还看得见，问起图里的细节便凭空作答
     if (!images && metadata.kind === "image") {
-      notes += t`\n\n[图片：${metadata.name}，${formatFileSize(metadata.size)}，先前发过，原图已不在上下文中]`;
+      notes += t`\n\n[图片：${metadata.name}，${formatFileSize(metadata.size)}，先前发过，原图已不在上下文中${placeSuffix(places, metadata)}]`;
       continue;
     }
     // 没抽出正文的文件：往后各问只留一行，用不着原件
     const raw = metadata.kind === "file" && !metadata.extracted;
     if (raw && !latest) {
-      notes += t`\n\n[${t("文件")}：${metadata.name}，${formatFileSize(metadata.size)}，先前发过，原件已不在上下文中]`;
+      notes += t`\n\n[${t("文件")}：${metadata.name}，${formatFileSize(metadata.size)}，先前发过，原件已不在上下文中${placeSuffix(places, metadata)}]`;
       continue;
     }
     if (raw && metadata.size > INLINE_FILE_BYTES) {
-      try {
-        const local = await bridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
-        notes += t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${local.path}。需要时用工具读取，不要修改原件。]`;
-      } catch (error) {
-        notes += t`\n\n[文件 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}]`;
-      }
+      const why = metadata.extractionError ? t`；本机没抽出正文：${metadata.extractionError}` : "";
+      if (place)
+        notes += t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${place}。需要时用工具读取，不要修改原件${why}]`;
+      else
+        try {
+          const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
+          notes += t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${local.path}。需要时用工具读取，不要修改原件${why}]`;
+        } catch (error) {
+          notes += t`\n\n[文件 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}${why}]`;
+        }
       continue;
     }
     // 图片与要整份送的文件取原件；文本、抽出正文的只取正文
@@ -224,32 +268,46 @@ async function messageForApi(message, latest, budget = inlineTextBudget(), image
           ? await getAttachment(metadata.id)
           : await getAttachmentMeta(metadata.id);
     if (!file) {
-      notes += t`\n\n[附件 ${metadata.name} 的原件已找不到]`;
+      notes += t`\n\n[附件 ${metadata.name} 的原件已找不到${placeSuffix(places, metadata)}]`;
       continue;
     }
     if (file.kind === "text") {
       notes += latest
         ? tooLongToInline(file.data, budget)
-          ? t`\n\n[附件 ${file.name}：文本 ${String(file.data).length} 字，过长未随消息附上；需要时用 read_document 按页或关键词读取]`
-          : t`\n\n--- 附件：${file.name} ---\n${file.data}`
-        : attachmentExcerpt(file.data, file.name, t("文本"));
+          ? t`\n\n[附件 ${file.name}：文本 ${String(file.data).length} 字，过长未随消息附上${placeSuffix(places, metadata)}；需要时用 read_document 按页或关键词读取]`
+          : t`\n\n--- 附件：${file.name}${place ? t`（本机原件：${place}）` : ""} ---\n${file.data}`
+        : attachmentExcerpt(file.data, file.name, t("文本"), place);
       continue;
     }
     if (file.kind !== "image" && file.extractedText) {
       notes += latest
         ? tooLongToInline(file.extractedText, budget)
-          ? t`\n\n[附件 ${file.name}：本机提取文本 ${String(file.extractedText).length} 字，过长未随消息附上；需要时用 read_document 按页或关键词读取]`
-          : t`\n\n--- 附件：${file.name}（本机提取）---\n${file.extractedText}`
-        : attachmentExcerpt(file.extractedText, file.name, t("本机提取"));
+          ? t`\n\n[附件 ${file.name}：本机提取文本 ${String(file.extractedText).length} 字，过长未随消息附上${placeSuffix(places, metadata)}；需要时用 read_document 按页或关键词读取]`
+          : t`\n\n--- 附件：${file.name}（本机提取${place ? t`；本机原件：${place}` : ""}）---\n${file.extractedText}`
+        : attachmentExcerpt(file.extractedText, file.name, t("本机提取"), place);
       continue;
     }
     if (file.kind === "image" ? !images : !latest) {
-      notes += t`\n\n[${file.kind === "image" ? t("图片") : t("文件")}：${file.name}，${formatFileSize(file.size)}，先前发过，原件已不在上下文中]`;
+      notes += t`\n\n[${file.kind === "image" ? t("图片") : t("文件")}：${file.name}，${formatFileSize(file.size)}，先前发过，原件已不在上下文中${placeSuffix(places, metadata)}]`;
       continue;
     }
-    if (file.kind === "image") content.push({ type: "image_url", image_url: { url: file.data, detail: "auto" } });
-    else content.push({ type: "file", file: { filename: file.name, file_data: String(file.data).replace(/^data:[^,]*,/, "") } });
+    if (file.kind === "image") {
+      // 图也得写出原件路径：模型看得见图，却不知道它在哪，要把它放进生成的文档、或交给本机工具就无从下手
+      if (place) notes += t`\n\n[图片：${file.name}；本机原件：${place}]`;
+      content.push({ type: "image_url", image_url: { url: file.data, detail: "auto" } });
+    } else {
+      // 本机没抽出正文的（扫描件、解不开的图、抽取库没载入）：照实说缘何附上的是原件，模型读不出来时不会瞎猜；
+      // 抽出来了也照样给它原件路径——要原样嵌进别处时，光有内容同样找不到文件
+      const why = metadata.extractionError ? t`本机没抽出正文（${metadata.extractionError}），` : "";
+      if (metadata.extractionError || place)
+        notes += t`\n\n[附件 ${file.name}：${why}原件照发${place ? t`（本机原件：${place}）` : ""}${metadata.extractionError ? t`；读不出来就照实告诉用户` : ""}]`;
+      content.push({ type: "file", file: { filename: file.name, file_data: String(file.data).replace(/^data:[^,]*,/, "") } });
+    }
   }
+  // 用户随问发来的文件在对话附件里，不在工作目录：说明白了，模型才不会到工作目录里找同名文件、找不到就说没有。
+  // 只带图的一问也要说：图同样能当文件用（取原件、放进文档），模型不知道它在哪就只能干瞪眼
+  if (latest)
+    notes = t`\n\n[这一问的附件是随消息发来的（在对话附件里，不在工作目录）；要用原件就按各项的「本机原件」路径取，别改动原件]${notes}`;
   if (notes) content.splice(1, 0, { type: "text", text: notes.trimStart() });
   return { role: "user", content };
 }

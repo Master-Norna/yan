@@ -55,21 +55,23 @@ function trimExtractedText(value) {
     ? t`${text.slice(0, MAX_EXTRACTED_CHARS)}\n\n[文档内容过长，已在本机截取前 ${MAX_EXTRACTED_CHARS} 个字符]`
     : text;
 }
-// data：置入的原件（Blob）、或 data: URL（预览器、网页交回的 PDF）；不抽的类型不读
-/** @param {string} name @param {Blob|string} data */
+// data：置入的原件（Blob）、原件的字节（预览器现抽时用），或 data: URL（网页交回的 PDF）；不抽的类型不读
+/** @param {string} name @param {Blob|string|Uint8Array} data */
 async function extractDocumentText(name, data) {
   const extract = fileKind(name).extract;
   if (extract === "pdf") return trimExtractedText(await extractPdfText(data));
   if (extract === "zip") return trimExtractedText(await extractZipDocumentText(fileExtension(name), await bytesOf(data)));
+  if (extract === "ipynb") return trimExtractedText(ipynbMarkdown(decodeTextBytes(await bytesOf(data))));
   return "";
 }
-/** @param {Blob|string} data */
+/** @param {Blob|string|Uint8Array} data */
 async function bytesOf(data) {
-  return data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : bytesFromDataUrl(data);
+  return data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data instanceof Uint8Array ? data : bytesFromDataUrl(data);
 }
-/** @param {Blob|string} data */
+/** @param {Blob|string|Uint8Array} data */
 async function extractPdfText(data) {
-  if (!(await ensureLib("pdf"))) return "";
+  // 库没载入就抽不了：说一声，别当成「这份 PDF 没内容」悄悄过去（见 00-ingest.js 的 extractionError）
+  if (!(await ensureLib("pdf"))) throw Error(t("PDF 抽取库未能载入，原件照发"));
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.js";
   const loading = window.pdfjsLib.getDocument({
       data: await bytesOf(data),
@@ -105,8 +107,8 @@ async function extractPdfText(data) {
   if (chars < pages.length * 10) throw Error(t("PDF 没有文字层（多半是扫描件），原件照发"));
   return pages.join("\n\n");
 }
-// 取包里选中的几份：默认解成文字，raw 给原字节（图）
-async function unzipSelected(bytes, wanted, raw = false) {
+// 取包里选中的几份：默认解成文字，raw 给原字节（图）；optional 的条目解不开时留给调用方降级
+async function unzipSelected(bytes, wanted, { raw = false, optional = false } = {}) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     decoder = new TextDecoder(),
     minimum = Math.max(0, bytes.length - 65557);
@@ -119,7 +121,10 @@ async function unzipSelected(bytes, wanted, raw = false) {
   if (eocd < 0) throw Error(t("文档压缩结构无效"));
   const count = view.getUint16(eocd + 10, true),
     centralOffset = view.getUint32(eocd + 16, true),
-    entries = new Map();
+    /** @type {Map<string, string | Uint8Array> & { tooLarge?: string[] }} */
+    entries = new Map(),
+    // 要的那几份里太大、没解开的：抽正文的那条路据此照实说，别悄悄抽出半份
+    tooLarge = [];
   let cursor = centralOffset,
     extractedBytes = 0;
   for (let index = 0; index < count; index++) {
@@ -132,24 +137,31 @@ async function unzipSelected(bytes, wanted, raw = false) {
       commentLength = view.getUint16(cursor + 32, true),
       localOffset = view.getUint32(cursor + 42, true),
       name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
-    if (wanted(name) && uncompressedSize <= 8 * 1024 * 1024 && extractedBytes + uncompressedSize <= 16 * 1024 * 1024) {
-      const localNameLength = view.getUint16(localOffset + 26, true),
-        localExtraLength = view.getUint16(localOffset + 28, true),
-        start = localOffset + 30 + localNameLength + localExtraLength,
-        compressed = bytes.slice(start, start + compressedSize);
-      let output;
-      if (method === 0) output = compressed;
-      else if (method === 8) {
-        const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-        output = new Uint8Array(await new Response(stream).arrayBuffer());
-      }
-      if (output) {
-        entries.set(name, raw ? output : decoder.decode(output));
-        extractedBytes += output.length;
-      }
+    if (wanted(name)) {
+      if (uncompressedSize > 8 * 1024 * 1024 || extractedBytes + uncompressedSize > 16 * 1024 * 1024) tooLarge.push(name);
+      else
+        try {
+          const localNameLength = view.getUint16(localOffset + 26, true),
+            localExtraLength = view.getUint16(localOffset + 28, true),
+            start = localOffset + 30 + localNameLength + localExtraLength,
+            compressed = bytes.slice(start, start + compressedSize);
+          let output;
+          if (method === 0) output = compressed;
+          else if (method === 8) {
+            const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+            output = new Uint8Array(await new Response(stream).arrayBuffer());
+          }
+          if (output) {
+            entries.set(name, raw ? output : decoder.decode(output));
+            extractedBytes += output.length;
+          }
+        } catch (error) {
+          if (!optional) throw error;
+        }
     }
     cursor += 46 + nameLength + extraLength + commentLength;
   }
+  if (!raw && tooLarge.length) entries.tooLarge = tooLarge;
   return entries;
 }
 function parseXml(value) {
@@ -246,15 +258,16 @@ const ZIP_IMAGE_TYPES = {
   bmp: "image/bmp",
   svg: "image/svg+xml"
 };
-// 画好的预览里，照 img 记下的路从原件包里取图换成 data: 地址；取不到的、浏览器画不了的（EMF、WMF、TIFF）留一行字
-async function withZipImages(html, dataUrl) {
-  if (!dataUrl || !html.includes("data-path")) return html;
+// 画好的预览里，照 img 记下的路从原件包里取图换成 data: 地址；取不到的、浏览器画不了的（EMF、WMF、TIFF）留一行字。
+// bytes 是原件本身（Uint8Array）：抽正文与取图共用同一份，不必编成 data: URL 再解一遍
+async function withZipImages(html, bytes) {
+  if (!bytes || !html.includes("data-path")) return html;
   const box = document.createElement("template");
   box.innerHTML = html;
   const imgs = [...box.content.querySelectorAll("img[data-path]")],
     pathOf = img => archiveRelative("", img.getAttribute("data-path") || ""),
     wanted = new Set(imgs.map(pathOf)),
-    media = await unzipSelected(bytesFromDataUrl(dataUrl), name => wanted.has(name), true).catch(() => new Map());
+    media = await unzipSelected(bytes, name => wanted.has(name), { raw: true }).catch(() => new Map());
   for (const img of imgs) {
     const path = pathOf(img),
       type = ZIP_IMAGE_TYPES[fileExtension(path)];
@@ -266,10 +279,65 @@ async function withZipImages(html, dataUrl) {
   return box.innerHTML;
 }
 
+// 编号：Word 把「1. 2. 3.」的定义放在 numbering.xml，段落的 pPr 里只说「用第几号」；而用「编号」「项目符号」
+// 按钮设的列表常常连 pPr 都不写，编号挂在对齐的段落样式上（styles.xml 的 pStyle 里的 numPr）。两处都要认，
+// 否则最常见的 Word 列表会塌成普通段落（实测卷宗里《全谷物数据分析报告》54 段 ListBullet 全是这样）。
+// 返回 { styleNum: 样式 id → { numId, ilvl }, levels: numId → (ilvl → { fmt, start }) }
+function docxNumbering(stylesXml, numberingXml) {
+  const styleNum = new Map(),
+    levels = new Map();
+  if (stylesXml)
+    for (const style of xmlDeep(parseXml(stylesXml), "style")) {
+      const numPr = xmlKids(xmlKids(style, "pPr")[0] || style, "numPr")[0];
+      if (!numPr) continue;
+      const numId = xmlKids(numPr, "numId")[0]?.getAttribute("w:val");
+      if (numId != null)
+        styleNum.set(style.getAttribute("w:styleId"), { numId, ilvl: Number(xmlKids(numPr, "ilvl")[0]?.getAttribute("w:val")) || 0 });
+    }
+  if (!numberingXml) return { styleNum, levels };
+  const root = parseXml(numberingXml),
+    abstracts = new Map();
+  for (const abstract of xmlDeep(root, "abstractNum")) {
+    const byLevel = new Map();
+    for (const lvl of xmlKids(abstract, "lvl"))
+      byLevel.set(Number(lvl.getAttribute("w:ilvl")) || 0, {
+        fmt: xmlKids(lvl, "numFmt")[0]?.getAttribute("w:val") || "decimal",
+        start: Number(xmlKids(lvl, "start")[0]?.getAttribute("w:val")) || 1
+      });
+    abstracts.set(abstract.getAttribute("w:abstractNumId"), byLevel);
+  }
+  for (const num of xmlDeep(root, "num")) {
+    const byLevel = abstracts.get(xmlKids(num, "abstractNumId")[0]?.getAttribute("w:val"));
+    if (byLevel) levels.set(num.getAttribute("w:numId"), byLevel);
+  }
+  return { styleNum, levels };
+}
 // docx：正文按块走（段落、表格，内容控件等容器往里钻）；标题认样式名（styles.xml 里的 heading n / Title，中文版 Word 的样式 id 是数字）
-function docxMarkdown(documentXml, stylesXml, relsXml) {
+function docxMarkdown(documentXml, stylesXml, relsXml, numberingXml) {
   const styleNames = new Map(),
-    images = zipRels(relsXml, "word");
+    images = zipRels(relsXml, "word"),
+    lists = docxNumbering(stylesXml, numberingXml),
+    // 各号列表自己的计数：Markdown 的有序列表靠数字开头，序号得自己数（渲染器会重排，但读原文的人与模型看的是这个）
+    counters = new Map(),
+    // 各号列表在每一层用过的记号宽度：子项要缩进到父项记号之后那一列，`- ` 是 2 格、`1. ` 是 3 格
+    seenMarks = new Map();
+  const listSeen = numId => {
+    if (!seenMarks.has(numId)) seenMarks.set(numId, []);
+    return seenMarks.get(numId);
+  };
+  const listMark = (numId, depth) => {
+    const level = lists.levels.get(numId)?.get(depth);
+    // 没有编号定义（合成样本、或 numbering.xml 不全）时退回项目符号：至少仍是一条列表，不冒充有序
+    if (!level) return "- ";
+    if (level.fmt === "none") return "";
+    if (level.fmt === "bullet") return "- ";
+    const slots = counters.get(numId) || new Map();
+    counters.set(numId, slots);
+    const n = slots.has(depth) ? slots.get(depth) + 1 : (level.start ?? 1);
+    slots.set(depth, n);
+    for (const key of [...slots.keys()]) if (key > depth) slots.delete(key);
+    return `${n}. `;
+  };
   if (stylesXml)
     for (const style of xmlDeep(parseXml(stylesXml), "style"))
       styleNames.set(style.getAttribute("w:styleId"), String(xmlKids(style, "name")[0]?.getAttribute("w:val") || "").toLowerCase());
@@ -290,19 +358,34 @@ function docxMarkdown(documentXml, stylesXml, relsXml) {
       styleId = props && xmlKids(props, "pStyle")[0]?.getAttribute("w:val"),
       name = styleNames.get(styleId) || String(styleId || "").toLowerCase(),
       level = name === "title" ? 1 : Number(name.match(/heading ?(\d)/)?.[1]) || 0,
-      numbering = props && xmlKids(props, "numPr")[0],
-      depth = Number(numbering && xmlKids(numbering, "ilvl")[0]?.getAttribute("w:val")) || 0;
+      // 段落自己写了 numPr 就听它的，没写才看它挂的段落样式（Word 的「编号」「项目符号」按钮大多写进样式里）。
+      // 两样各按各的取：段落只写 ilvl、把 numId 留给样式的写法很常见（沿用上一段的编号、只降一级），
+      // 一并当成「没写 numPr」会把继承来的编号整个丢掉，那一段就落成普通文字。
+      // numId 写 0 是显式取消编号，仍按普通段落排
+      own = props && xmlKids(props, "numPr")[0],
+      ownId = own ? xmlKids(own, "numId")[0]?.getAttribute("w:val") : undefined,
+      ownLevel = own ? xmlKids(own, "ilvl")[0]?.getAttribute("w:val") : undefined,
+      inherited = lists.styleNum.get(styleId),
+      numId = ownId !== undefined ? ownId : inherited?.numId,
+      depth = ownLevel !== undefined ? Number(ownLevel) || 0 : (inherited?.ilvl ?? 0),
+      mark = numId && numId !== "0" ? listMark(numId, depth) : "";
     const segments = xmlDeep(p, "r").map(run => {
       const rp = xmlKids(run, "rPr")[0];
       return { text: runText(run), bold: !level && flag(rp && xmlKids(rp, "b")[0]), italic: flag(rp && xmlKids(rp, "i")[0]) };
     });
     // 段首的记号转义施在原字上（施在拼好的「**…**」上会把加粗本身转掉）
     const first = segments.find(seg => seg.text.trim());
-    if (first && !level && !numbering) first.text = mdLine(first.text.trimStart());
+    if (first && !level && !mark) first.text = mdLine(first.text.trimStart());
     const text = mdRuns(segments).trim();
     if (!text) return "";
     if (level) return `${"#".repeat(Math.min(level, 6))} ${text.replace(/\n/g, " ")}`;
-    if (numbering) return `${"  ".repeat(depth)}- ${text.replace(/\n/g, " ")}`;
+    // 缩进到父项记号之后那一列：有序列表的记号比项目符号宽一格，一律缩两格时渲染器不认这一层，子项会被当成父项的续文
+    if (mark) {
+      const seen = listSeen(numId),
+        indent = seen.slice(0, depth).reduce((spaces, width) => spaces + Math.max(2, width), 0);
+      seen[depth] = mark.length;
+      return `${" ".repeat(indent)}${mark}${text.replace(/\n/g, " ")}`;
+    }
     // 段内换行用反斜杠硬换行（行尾两个空格的写法会被 trimExtractedText 收掉）
     return text.replace(/\n/g, "\\\n");
   };
@@ -323,12 +406,94 @@ function docxMarkdown(documentXml, stylesXml, relsXml) {
   // 列表项之间不空行，别的块之间空一行
   return out
     .filter(Boolean)
-    .reduce((text, block, i, all) => text + (i ? (/^\s*- /.test(block) && /^\s*- /.test(all[i - 1]) ? "\n" : "\n\n") : "") + block, "");
+    .reduce(
+      (text, block, i, all) =>
+        text + (i ? (/^\s*(?:- |\d+\. )/.test(block) && /^\s*(?:- |\d+\. )/.test(all[i - 1]) ? "\n" : "\n\n") : "") + block,
+      ""
+    );
 }
-// pptx：一页一节「## 第 n 页 · 标题」，其余文字按层级列成要点，页上的表格照表格、图片照图片
+// DrawingML 的软换行和单元格里各自独立的段落都不是相邻的字。
+const pptxParagraph = p =>
+  [...p.children]
+    .map(part =>
+      part.localName === "br"
+        ? "\n"
+        : xmlKids(part, "t")
+            .map(t => t.textContent)
+            .join("")
+    )
+    .join("")
+    .trim();
+// 备注只取 body 占位符；页码与缩略图不算。一份坏备注不该拖掉所有幻灯片正文。
+function pptxNotes(notesXml) {
+  if (notesXml === undefined) return [];
+  try {
+    return xmlDeep(parseXml(notesXml), "sp")
+      .filter(shape => /^body$/i.test(xmlDeep(shape, "ph")[0]?.getAttribute("type") || ""))
+      .flatMap(shape => xmlDeep(shape, "p"))
+      .map(pptxParagraph)
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+// 非阿拉伯式自动编号不能直接写成 Markdown 的 a. / iv.：marked 不认它们是列表。
+// 遇到这些编号时，仅把那一组要点写成安全的 HTML ol/ul；数字列表仍沿用原来的 Markdown 路。
+// ol 的 type/start 由浏览器负责显示 c.、IV. 等标记，不丢层级，也不自己拼一串容易出错的罗马数字。
+function pptxSpecialLists(lines) {
+  const roots = [],
+    parents = [];
+  for (const line of lines) {
+    let depth = Math.max(0, Math.min(line.depth, parents.length));
+    if (depth && !parents[depth - 1]) depth = 0;
+    const item = { ...line, children: [] };
+    if (depth) parents[depth - 1].children.push(item);
+    else roots.push(item);
+    parents.length = depth;
+    parents[depth] = item;
+  }
+  const typeOf = line => {
+    if (!line.ordered) return "ul";
+    const code = String(line.numberType || "");
+    if (/^alphaLc/.test(code)) return "a";
+    if (/^alphaUc/.test(code)) return "A";
+    if (/^romanLc/.test(code)) return "i";
+    if (/^romanUc/.test(code)) return "I";
+    return "1";
+  };
+  const render = items => {
+    let out = "",
+      group = [],
+      current = "";
+    const flush = () => {
+      if (!group.length) return;
+      const ordered = current !== "ul",
+        start = group[0].startAt || 1;
+      out += `<${ordered ? "ol" : "ul"}${ordered ? ` type="${current}" start="${start}"` : ""}>${group
+        .map(item => `<li>${escapeHtml(item.text)}${render(item.children)}</li>`)
+        .join("")}</${ordered ? "ol" : "ul"}>`;
+      group = [];
+    };
+    for (const item of items) {
+      if (item.plain) {
+        flush();
+        out += `<p>${escapeHtml(item.text)}</p>${render(item.children)}`;
+        continue;
+      }
+      const type = typeOf(item);
+      if (group.length && (type !== current || (item.startSpecified && item.startAt !== 1))) flush();
+      current = type;
+      group.push(item);
+    }
+    flush();
+    return out;
+  };
+  return render(roots);
+}
+// pptx：一页一节「## 第 n 页 · 标题」，其余文字按层级列成要点，页上的表格照表格、图片照图片，讲话者备注缀在节末
 function pptxMarkdown(slides) {
   return slides
-    .map(({ xml, rels }, index) => {
+    .map(({ xml, rels, notes }, index) => {
       const doc = parseXml(xml),
         images = zipRels(rels, "ppt/slides");
       let title = "";
@@ -338,31 +503,70 @@ function pptxMarkdown(slides) {
         const kind = xmlDeep(shape, "ph")[0]?.getAttribute("type") || "",
           paragraphs = xmlDeep(shape, "p");
         const lines = paragraphs
-          .map(p => ({
-            text: xmlDeep(p, "t")
-              .map(t => t.textContent)
-              .join("")
-              .trim(),
-            depth: Number(xmlKids(p, "pPr")[0]?.getAttribute("lvl")) || 0
-          }))
+          .map(p => {
+            const pPr = xmlKids(p, "pPr")[0],
+              auto = pPr ? xmlKids(pPr, "buAutoNum")[0] : null;
+            return {
+              text: pptxParagraph(p),
+              depth: Number(pPr?.getAttribute("lvl")) || 0,
+              // 页码与层级之外，PowerPoint 把「这一条是否自动编号」也写在 pPr 里：buAutoNum 是有序、buNone 是不要记号
+              ordered: !!auto,
+              numberType: auto?.getAttribute("type") || "",
+              // startAt 是「这一步从第几号起」（接着上一页往下数的流程常见），不写就是 1
+              startAt: Number(auto?.getAttribute("startAt")) || 1,
+              startSpecified: auto?.hasAttribute("startAt") || false,
+              plain: !!pPr && !!xmlKids(pPr, "buNone")[0]
+            };
+          })
           .filter(line => line.text);
-        if (/title/i.test(kind) && !title) title = lines.map(line => line.text).join(" ");
-        else for (const line of lines) points.push(`${"  ".repeat(line.depth)}- ${line.text}`);
+        if (/title/i.test(kind) && !title) title = lines.map(line => line.text.replace(/\n/g, " ")).join(" ");
+        else if (lines.some(line => /^(?:alpha|roman)(?:Lc|Uc)/.test(line.numberType))) {
+          points.push(pptxSpecialLists(lines));
+        } else {
+          // 自动编号的序号由 PowerPoint 运行时数，XML 里不存，得自己按层级数
+          const counts = new Map(),
+            seen = [],
+            group = [],
+            flush = () => {
+              if (group.length) points.push(group.splice(0).join("\n"));
+            };
+          for (const line of lines) {
+            if (line.plain) {
+              flush();
+              points.push(line.text.split("\n").map(mdLine).join("\\\n"));
+              continue;
+            }
+            let mark = "- ";
+            if (line.ordered) {
+              // 这一层还没有数过就从 startAt 起（不然接着上一页的第 5 步会重又从 1 开始）
+              const n = (counts.get(line.depth) || line.startAt - 1) + 1;
+              counts.set(line.depth, n);
+              for (const key of [...counts.keys()]) if (key > line.depth) counts.delete(key);
+              mark = `${n}. `;
+            }
+            // 与 docx 同一处道理：子项缩进到父项记号之后那一列
+            const indent = seen.slice(0, line.depth).reduce((spaces, width) => spaces + Math.max(2, width), 0);
+            seen[line.depth] = mark.length;
+            group.push(`${" ".repeat(indent)}${mark}${mdLine(line.text.replace(/\n/g, " "))}`);
+          }
+          flush();
+        }
       }
       for (const table of xmlDeep(doc, "tbl"))
-        tables.push(
-          mdTable(
-            xmlKids(table, "tr").map(tr =>
-              xmlKids(tr, "tc").map(tc =>
-                xmlDeep(tc, "t")
-                  .map(t => t.textContent)
-                  .join("")
-              )
-            )
-          )
-        );
+        tables.push(mdTable(xmlKids(table, "tr").map(tr => xmlKids(tr, "tc").map(tc => xmlDeep(tc, "p").map(pptxParagraph).join(" ")))));
       const pictures = xmlDeep(doc, "pic").map(pic => ooxmlImage(pic, images));
-      return [t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`, points.join("\n"), ...tables, ...pictures]
+      const said = pptxNotes(notes);
+      return [
+        t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`,
+        points.join("\n\n"),
+        ...tables,
+        ...pictures,
+        said === null
+          ? t("（这一页的备注未能读出）")
+          : said.length
+            ? `**${t("备注")}**\n\n${said.map(line => `> ${line.split("\n").map(mdLine).join("\\\n> ")}`).join("\n>\n")}`
+            : ""
+      ]
         .filter(Boolean)
         .join("\n\n");
     })
@@ -380,7 +584,139 @@ function xlsxRef(col, row) {
   for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
   return letters && Number.isFinite(row) ? `${letters}${row + 1}` : "";
 }
+// 单元格只存数值，看起来的样子（日期、百分比、千分位）全在 styles.xml 里：numFmt 是自定义的格式串，cellXfs 是「格的 s 属性 → 格式号」那张表。
+// 不照它写，2024-01-15 抽出来是 45306、23.5% 是 0.235——读者（人和模型）得自己拿计算器倒推
+function xlsxFormats(stylesXml) {
+  const codes = new Map(),
+    xfs = [];
+  if (!stylesXml) return { codes, xfs };
+  const styles = parseXml(stylesXml);
+  for (const fmt of xmlDeep(styles, "numFmt")) codes.set(Number(fmt.getAttribute("numFmtId")), fmt.getAttribute("formatCode") || "");
+  const list = xmlDeep(styles, "cellXfs")[0];
+  if (list) for (const xf of xmlKids(list, "xf")) xfs.push(Number(xf.getAttribute("numFmtId")) || 0);
+  return { codes, xfs };
+}
+// 序号 → 字面。三种形态分开：带日子的日历；只有时刻；经过时长（[h]:mm:ss 的 36 小时写 36:00:00，
+// 不绕回 24 小时以内、也不进位成日子）。秒只在格式里有 s 时才写，格式里没有 h 的（mm:ss）从分钟起。
+// 时刻一律写成 24 小时制：格式里的 AM/PM 与「上午/下午」不另转，给人读时 24 小时制反倒是没有歧义的。
+// 1900 系统把并不存在的 1900-02-29 当成真日子（Excel 为兼容 Lotus 留的错），60 之前的序号因此得补一天；
+// 1904 系统（旧版 Mac Excel）从 1904-01-01 起算，换成 1900 系统的序号是 +1462
+function xlsxTimeText(serial, bare, date1904, elapsed, withDate) {
+  const two = n => String(n).padStart(2, "0"),
+    withHour = /h/i.test(bare) || elapsed === "h",
+    withSecond = /s/i.test(bare) || elapsed === "s",
+    // 秒数先进位再拆，免得 59.9999 秒落成 59:60
+    clockOf = seconds =>
+      `${withHour ? `${Math.floor(seconds / 3600)}:${two(Math.floor(seconds / 60) % 60)}` : two(Math.floor(seconds / 60) % 60)}${withSecond ? `:${two(seconds % 60)}` : ""}`;
+  // 累计时长连整天一起算，不绕回 24 小时：[h] 数总小时、[m] 数总分钟、[s] 数总秒；
+  // 格式里没写的单位不缀（[h] 就是 36、[m]:ss 才是 2160:00）。
+  // 只认 [h] 的话，[m]:ss 的 36 小时会被剥掉修饰、当成「只有秒的时刻」，显示成 00:00
+  if (elapsed) {
+    const total = Math.round(serial * 86400);
+    if (elapsed === "s") return String(total);
+    if (elapsed === "m") return withSecond ? `${Math.floor(total / 60)}:${two(total % 60)}` : String(Math.floor(total / 60));
+    const hours = Math.floor(total / 3600);
+    if (!withSecond && !/m/i.test(bare)) return String(hours);
+    return `${hours}:${two(Math.floor(total / 60) % 60)}${withSecond ? `:${two(total % 60)}` : ""}`;
+  }
+  const days = date1904 ? serial + 1462 : serial < 60 ? serial + 1 : serial,
+    whole = Math.floor(days),
+    at = new Date(Date.UTC(1899, 11, 30) + whole * 86400000),
+    date = `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())}`,
+    clock = clockOf(Math.round((days - whole) * 86400));
+  // 格式里有 h 就一定缀时刻（22 号「m/d/yyyy h:mm」的 00:00 也是它的一部分）；只有日子的不缀
+  return withDate ? (withHour || withSecond ? `${date} ${clock}` : date) : clock;
+}
+// 按格式把数写成它看起来的样子：# 是「有才写」的可选位（末尾的 0 要收掉），0 是必写位（留着）。
+// 百分比也一样照格式：0.##% 的 0.235 是 23.5%、不是 24%——只数 0 会把它当没有小数位、四舍五入掉
+function xlsxFixed(number, bare) {
+  const spec = (bare.match(/\.([0#]+)/) || [])[1];
+  if (!spec) return number.toFixed(0);
+  const [whole, fraction = ""] = number.toFixed(spec.length).split("."),
+    least = spec.replace(/#/g, "").length;
+  let end = fraction.length;
+  while (end > least && fraction[end - 1] === "0") end--;
+  return end ? `${whole}.${fraction.slice(0, end)}` : whole;
+}
+// 千分位只动整数部分：1.234567 不该变成 1.234,567
+function xlsxGroup(raw) {
+  const parts = String(raw).match(/^(-?)(\d+)(.*)$/);
+  return parts ? `${parts[1]}${parts[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${parts[3]}` : raw;
+}
+// 内置格式号对应的格式串：styles.xml 只列自定义的那些，内置的（日期、时刻、百分比、千分位……）从来不写在里面。
+// 要判准是不是日期、要不要带秒，就得知道格式串，常用的这些照 Excel 自己的定义补在这里
+const XLSX_BUILTIN_CODES = {
+  1: "0",
+  2: "0.00",
+  3: "#,##0",
+  4: "#,##0.00",
+  9: "0%",
+  10: "0.00%",
+  11: "0.00E+00",
+  14: "m/d/yyyy",
+  15: "d-mmm-yy",
+  16: "d-mmm",
+  17: "mmm-yy",
+  18: "h:mm AM/PM",
+  19: "h:mm:ss AM/PM",
+  20: "h:mm",
+  21: "h:mm:ss",
+  22: "m/d/yyyy h:mm",
+  37: "#,##0",
+  38: "#,##0",
+  39: "#,##0.00",
+  40: "#,##0.00",
+  45: "mm:ss",
+  46: "[h]:mm:ss",
+  47: "mm:ss.0",
+  48: "##0.0E+0",
+  49: "@"
+};
+// 上表没列的内置号只有各语言（中日韩等）的日期与时刻格式，判不出格式串，就只认它属于哪一类
+const XLSX_DATE_IDS = new Set([27, 28, 29, 30, 31, 36, 50, 51, 52, 53, 54, 57, 58]),
+  XLSX_CLOCK_IDS = new Set([32, 33, 34, 35, 55, 56]);
+// General 格式不写小数位，二进制浮点的尾巴就露出来了（0.1+0.2 存成 0.30000000000000004，Excel 自己显示 0.3）：
+// 按 Excel 自家的精度（15 位有效数字）收一下，收完更短的才用——长的整数不碰
+function xlsxGeneral(raw) {
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return raw;
+  const tidy = String(Number(number.toPrecision(15)));
+  return tidy.length < String(raw).length ? tidy : raw;
+}
+// 一格数字写成它看起来的样子；格式认不出、或本来就是字符串的，照原值
+function xlsxNumber(raw, numFmtId, code, date1904) {
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return raw;
+  const sections = String(code || XLSX_BUILTIN_CODES[numFmtId] || "")
+    .replace(/"[^"]*"/g, "")
+    .replace(/\\./g, "")
+    .split(";");
+  // 条件可能让正数也跳到后面的段；不猜条件，保留原值。颜色与累计单位不是条件。
+  if (sections.some(section => /\[\s*[<>=]/.test(section))) return raw;
+  // 复杂的正/负/零分段不猜；先挑出这一格能用的段，再辨累计单位。
+  if ((number < 0 && sections.length > 1) || (number === 0 && sections.length > 2)) return raw;
+  const written = sections[0],
+    elapsed = /\[h+\]/i.test(written) ? "h" : /\[m+\]/i.test(written) ? "m" : /\[s+\]/i.test(written) ? "s" : "",
+    bare = written.replace(/\[[^\]]*\]/g, ""),
+    numeric = /^(?:[#0]|#,##0)(?:\.[0#]{1,20})?%?$/.test(bare);
+  if (numeric) {
+    const percent = bare.endsWith("%"),
+      fixed = xlsxFixed(percent ? number * 100 : number, bare);
+    return `${bare.startsWith("#,##") ? xlsxGroup(fixed) : fixed}${percent ? "%" : ""}`;
+  }
+  // 判不出格式串的内置号只能照号认：那几号是日期还是时刻
+  const date = /[yd]/i.test(bare) || (!bare && XLSX_DATE_IDS.has(numFmtId)),
+    clock = elapsed || /[hs]/i.test(bare) || (!bare && XLSX_CLOCK_IDS.has(numFmtId));
+  if (date || clock) return xlsxTimeText(number, bare, date1904, elapsed, date);
+  return bare ? raw : xlsxGeneral(raw);
+}
 function xlsxMarkdown(entries) {
+  const oversized = new Set(entries.tooLarge || []),
+    skippedSheets = new Set([...oversized].filter(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))),
+    omit = name => t`（文档内部一份太大，未能列出：${name}）`;
+  // 缺共享字符串或工作簿索引，内容可能整体读错。缺单张表，则留住其它表并标明缺页。
+  const missing = [...oversized].find(name => /^xl\/(sharedStrings|workbook)\.xml$|^xl\/_rels\/workbook\.xml\.rels$/.test(name));
+  if (missing) throw Error(t`文档内部有一份太大（${missing}），本机没能抽出正文`);
   const sharedXml = entries.get("xl/sharedStrings.xml"),
     shared = sharedXml
       ? xmlDeep(parseXml(sharedXml), "si").map(si =>
@@ -390,6 +726,9 @@ function xlsxMarkdown(entries) {
             .join("")
         )
       : [];
+  const styles = xlsxFormats(entries.get("xl/styles.xml")),
+    // 1904 起算的（旧版 Mac Excel）在 workbook.xml 的 workbookPr 上标着
+    date1904 = /date1904="(1|true)"/.test(entries.get("xl/workbook.xml") || "");
   // 表名与表文件的对应：workbook.xml 里的 sheet（名字、r:id）经 rels 找到 worksheets/sheetN.xml；对不上就按文件名顺序、以「工作表 n」为名
   const targets = new Map();
   const rels = entries.get("xl/_rels/workbook.xml.rels");
@@ -400,22 +739,26 @@ function xlsxMarkdown(entries) {
   let sheets = workbook
     ? xmlDeep(parseXml(workbook), "sheet")
         .map(sheet => ({ name: sheet.getAttribute("name"), file: targets.get(sheet.getAttribute("r:id")) }))
-        .filter(sheet => entries.has(sheet.file))
+        .filter(sheet => entries.has(sheet.file) || skippedSheets.has(sheet.file))
     : [];
   if (!sheets.length)
-    sheets = [...entries.keys()]
+    sheets = [...entries.keys(), ...skippedSheets]
       .filter(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
       .map((file, i) => ({ name: t`工作表 ${i + 1}`, file }));
   return sheets
-    .map(({ name, file }) => {
+    .map(({ name, file }, i) => {
+      if (skippedSheets.has(file)) return `## ${name}\n\n${omit(file)}`;
       const rows = xmlDeep(parseXml(entries.get(file)), "row").map(row => {
         const cells = [];
         let next = 0;
         for (const cell of xmlKids(row, "c")) {
           const at = cell.getAttribute("r") ? xlsxColumn(cell.getAttribute("r")) : next,
             type = cell.getAttribute("t"),
-            value = xmlKids(cell, "v")[0]?.textContent ?? "";
+            value = xmlKids(cell, "v")[0]?.textContent ?? "",
+            // 格上没写 s 就是第 0 号格式（General）；公式没有缓存值时 <v> 是空的，这时把式子本身写出来，比留一格空白诚实
+            format = styles.xfs[Number(cell.getAttribute("s")) || 0] || 0,
+            formula = xmlKids(cell, "f")[0]?.textContent || "";
           next = at + 1;
           if (at >= MD_TABLE_COLS) continue;
           cells[at] =
@@ -429,7 +772,14 @@ function xlsxMarkdown(entries) {
                   ? value === "1"
                     ? "TRUE"
                     : "FALSE"
-                  : value;
+                  : value === ""
+                    ? formula
+                      ? `=${formula}`
+                      : ""
+                    : // 字符串型的公式结果（t="str"）与错误（t="e"）照原值：TEXT(A1,"00000") 的 00123 不能收成 123
+                      type === "str" || type === "e"
+                      ? value
+                      : xlsxNumber(value, format, styles.codes.get(format), date1904);
         }
         return Array.from(cells, cell => cell ?? "");
       });
@@ -447,7 +797,8 @@ function xlsxMarkdown(entries) {
           });
         })
         .filter(Boolean);
-      return [`## ${name}`, mdTable(rows) || (pictures.length ? "" : t("（空表）")), ...pictures].filter(Boolean).join("\n\n");
+      const other = i === 0 ? [...oversized].filter(part => !skippedSheets.has(part)).map(omit) : [];
+      return [`## ${name}`, mdTable(rows) || (pictures.length ? "" : t("（空表）")), ...pictures, ...other].filter(Boolean).join("\n\n");
     })
     .join("\n\n");
 }
@@ -455,15 +806,30 @@ function xlsxMarkdown(entries) {
 function odfMarkdown(contentXml) {
   const out = [];
   let pages = 0;
+  // 每一层用过的记号宽度：子项要缩进到父项记号之后那一列（同 docx、pptx）
+  const seen = [];
   const text = node => node.textContent.replace(/\s+/g, " ").trim();
   const repeat = (node, name) => Math.min(50, Number(node.getAttribute(name)) || 1);
+  // 列表的编号也挂在样式上（text:list 的 text:style-name → office:automatic-styles 里的 text:list-style）：
+  // list-level-style-number 是有序、list-level-style-bullet 是项目符号，按 text:level 分层
+  const listStyles = new Map();
+  for (const style of xmlDeep(parseXml(contentXml), "list-style")) {
+    const byLevel = new Map();
+    for (const level of style.children) {
+      const at = Number(level.getAttribute("text:level")) || 1;
+      if (level.localName === "list-level-style-number")
+        byLevel.set(at, { ordered: true, start: Number(level.getAttribute("text:start-value")) || 1 });
+      else if (level.localName === "list-level-style-bullet") byLevel.set(at, { ordered: false });
+    }
+    listStyles.set(style.getAttribute("style:name"), byLevel);
+  }
   // 图在 draw:frame 里，路直指包内的 Pictures/…；一个框可并列几份同图（SVG 与 PNG 替身），取头一份
   const picture = frame => {
     const href = xmlKids(frame, "image")[0]?.getAttribute("xlink:href");
     if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href)) return "";
     return mdImage(xmlKids(frame, "desc")[0]?.textContent || xmlKids(frame, "title")[0]?.textContent, archiveRelative("", href));
   };
-  const walk = (node, depth = 0) => {
+  const walk = (node, depth = 0, inheritedListStyle = "") => {
     for (const child of node.children) {
       const name = child.localName;
       if (name === "h") out.push(`${"#".repeat(Math.min(6, Number(child.getAttribute("text:outline-level")) || 1))} ${text(child)}`);
@@ -471,13 +837,30 @@ function odfMarkdown(contentXml) {
         text(child) && out.push(mdLine(text(child)));
         out.push(...xmlDeep(child, "frame").map(picture));
       } else if (name === "frame" && xmlKids(child, "image").length) out.push(picture(child));
-      else if (name === "list")
+      else if (name === "list") {
+        // ODF 的编号每个 text:list 各数各的；层级按嵌套深度对到 list-level 的 text:level
+        // ODF 允许内层 text:list 省略 text:style-name：此时沿用外层列表的样式，
+        // 而不是把有序的第二层错误退回项目符号。
+        const styleName = child.getAttribute("text:style-name") || inheritedListStyle,
+          levels = listStyles.get(styleName),
+          level = levels?.get(depth + 1),
+          counts = new Map();
         for (const item of xmlKids(child, "list-item")) {
           const line = xmlKids(item, "p").map(text).join(" ");
-          if (line) out.push(`${"  ".repeat(depth)}- ${line}`);
-          for (const nested of xmlKids(item, "list")) walk({ children: [nested] }, depth + 1);
+          if (line) {
+            let mark = "- ";
+            if (level?.ordered) {
+              const n = (counts.get(depth + 1) ?? level.start - 1) + 1;
+              counts.set(depth + 1, n);
+              mark = `${n}. `;
+            }
+            const indent = seen.slice(0, depth).reduce((spaces, width) => spaces + Math.max(2, width), 0);
+            seen[depth] = mark.length;
+            out.push(`${" ".repeat(indent)}${mark}${line}`);
+          }
+          for (const nested of xmlKids(item, "list")) walk({ children: [nested] }, depth + 1, styleName);
         }
-      else if (name === "table") {
+      } else if (name === "table") {
         const rows = [];
         for (const row of xmlDeep(child, "table-row")) {
           const cells = xmlKids(row, "table-cell").flatMap(cell =>
@@ -497,18 +880,77 @@ function odfMarkdown(contentXml) {
         out.push(
           t`## 第 ${pages} 页${child.getAttribute("draw:name") && !/^page\d+$/i.test(child.getAttribute("draw:name")) ? ` · ${child.getAttribute("draw:name")}` : ""}`
         );
-        walk(child, depth);
-      } else walk(child, depth);
+        walk(child, depth, inheritedListStyle);
+      } else walk(child, depth, inheritedListStyle);
     }
   };
   const body = xmlDeep(parseXml(contentXml), "body")[0];
   if (body) walk(body);
   return out.filter(Boolean).join("\n\n");
 }
+// 围栏要比内容里最长的那一串反引号还长：代码格里的 Markdown 文档常带三连、四连反引号，
+// 固定四连时会被提前闭合，后面的字跑到代码块外面去
+function ipynbFence(texts) {
+  let longest = 2;
+  for (const text of texts) for (const run of String(text).match(/`+/g) || []) longest = Math.max(longest, run.length);
+  return "`".repeat(longest + 1);
+}
+// ipynb：一格一节——Markdown 格照原样，代码格放进围栏、它跑出来的东西跟在下面。
+// 本体是一份 JSON，几万字里大半是代码串、base64 的图和执行计数；直接当文字读，人和模型都得自己从 JSON 里扒
+function ipynbMarkdown(text) {
+  let book;
+  try {
+    book = JSON.parse(text);
+  } catch {
+    throw Error(t("这份 ipynb 不是有效的 JSON，抽不出正文"));
+  }
+  const language = String(book?.metadata?.language_info?.name || book?.metadata?.kernelspec?.language || "").trim(),
+    sourceOf = cell => (Array.isArray(cell.source) ? cell.source.join("") : String(cell.source || "")).replace(/\s+$/, ""),
+    blocks = [];
+  for (const cell of Array.isArray(book?.cells) ? book.cells : []) {
+    if (cell.cell_type === "markdown") {
+      sourceOf(cell).trim() && blocks.push(sourceOf(cell));
+      continue;
+    }
+    if (cell.cell_type !== "code") continue;
+    const source = sourceOf(cell);
+    if (source.trim()) {
+      const fence = ipynbFence([source]);
+      blocks.push(`${fence}${language}\n${source}\n${fence}`);
+    }
+    const said = ipynbOutputs(cell.outputs);
+    if (said) blocks.push(said);
+  }
+  return blocks.join("\n\n");
+}
+// 代码格的输出：文字与报错照录，图只留一行字（JSON 里存的是 base64，抽出来也没法画在别处）
+function ipynbOutputs(outputs) {
+  const lines = [];
+  for (const output of Array.isArray(outputs) ? outputs : []) {
+    const text =
+      output?.output_type === "stream"
+        ? output.text
+        : output?.output_type === "error"
+          ? `${output.ename || ""}: ${output.evalue || ""}`
+          : output?.data?.["text/plain"];
+    const body = Array.isArray(text) ? text.join("") : typeof text === "string" ? text : "";
+    if (body.trim()) lines.push(body.replace(/\s+$/, ""));
+    else if (output?.data && Object.keys(output.data).some(type => type.startsWith("image/"))) lines.push(`[${t("图片")}]`);
+  }
+  if (!lines.length) return "";
+  const fence = ipynbFence(lines);
+  return `**${t("输出")}**\n\n${fence}\n${lines.join("\n\n")}\n${fence}`;
+}
+// 抽正文的那条路：要的那几份太大、解不开时照实说，别悄悄抽出半份或空（扫描件、超大表都比空文好说清）
+async function unzipDocument(bytes, wanted) {
+  const entries = await unzipSelected(bytes, wanted);
+  if (entries.tooLarge?.length) throw Error(t`文档内部有一份太大（${entries.tooLarge[0]}），本机没能抽出正文`);
+  return entries;
+}
 async function extractZipDocumentText(extension, bytes) {
   if (extension === "docx") {
-    const entries = await unzipSelected(bytes, name =>
-        /^word\/(document|styles|footnotes|endnotes)\.xml$|^word\/_rels\/document\.xml\.rels$/.test(name)
+    const entries = await unzipDocument(bytes, name =>
+        /^word\/(document|styles|numbering|footnotes|endnotes)\.xml$|^word\/_rels\/document\.xml\.rels$/.test(name)
       ),
       notes = ["word/footnotes.xml", "word/endnotes.xml"]
         .filter(name => entries.has(name))
@@ -522,25 +964,53 @@ async function extractZipDocumentText(extension, bytes) {
         )
         .flat()
         .filter(Boolean);
-    return `${entries.has("word/document.xml") ? docxMarkdown(entries.get("word/document.xml"), entries.get("word/styles.xml"), entries.get("word/_rels/document.xml.rels")) : ""}${notes.length ? `\n\n---\n\n${notes.join("\n\n")}` : ""}`;
+    return `${entries.has("word/document.xml") ? docxMarkdown(entries.get("word/document.xml"), entries.get("word/styles.xml"), entries.get("word/_rels/document.xml.rels"), entries.get("word/numbering.xml")) : ""}${notes.length ? `\n\n---\n\n${notes.join("\n\n")}` : ""}`;
   }
   if (extension === "pptx") {
-    const entries = await unzipSelected(bytes, name => /^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$/.test(name));
-    return pptxMarkdown(
-      [...entries.keys()]
-        .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-        .map(name => ({ xml: entries.get(name), rels: entries.get(relsOf(name)) }))
-    );
+    const index = await unzipDocument(bytes, name => name === "ppt/presentation.xml" || name === "ppt/_rels/presentation.xml.rels"),
+      manifest = index.get("ppt/presentation.xml"),
+      targets = zipRels(index.get("ppt/_rels/presentation.xml.rels"), "ppt", "slide"),
+      // 包内文件名不是页序。按 presentation.xml 的关系走，没清单的残缺件才沿用编号顺序。
+      order = manifest
+        ? xmlDeep(parseXml(manifest), "sldIdLst")
+            .flatMap(list => xmlKids(list, "sldId"))
+            .map(id =>
+              targets.get(
+                id.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id") ||
+                  id.getAttributeNS("http://purl.oclc.org/ooxml/officeDocument/relationships", "id")
+              )
+            )
+            .filter(Boolean)
+        : null,
+      wanted = order ? new Set(order.flatMap(name => [name, relsOf(name)])) : null,
+      entries = await unzipDocument(bytes, name =>
+        wanted ? wanted.has(name) : /^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$/.test(name)
+      ),
+      slides =
+        order ||
+        [...entries.keys()]
+          .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      parts = slides
+        .filter(name => entries.has(name))
+        .map(name => {
+          const rels = entries.get(relsOf(name)),
+            // 重排后备注仍跟着本页；备注编号与幻灯片编号无关。
+            note = zipRels(rels, "ppt/slides", "notesSlide").values().next().value;
+          return { xml: entries.get(name), rels, note };
+        }),
+      notes = new Set(parts.map(part => part.note).filter(Boolean)),
+      noteEntries = notes.size ? await unzipSelected(bytes, name => notes.has(name), { optional: true }) : new Map();
+    return pptxMarkdown(parts.map(({ xml, rels, note }) => ({ xml, rels, notes: note ? (noteEntries.get(note) ?? "") : undefined })));
   }
   if (extension === "xlsx")
     return xlsxMarkdown(
       await unzipSelected(bytes, name =>
-        /^xl\/(sharedStrings|workbook)\.xml$|^xl\/_rels\/workbook\.xml\.rels$|^xl\/(worksheets|drawings)\/(_rels\/)?(sheet|drawing)\d+\.xml(\.rels)?$/.test(
+        /^xl\/(sharedStrings|styles|workbook)\.xml$|^xl\/_rels\/workbook\.xml\.rels$|^xl\/(worksheets|drawings)\/(_rels\/)?(sheet|drawing)\d+\.xml(\.rels)?$/.test(
           name
         )
       )
     );
-  const entries = await unzipSelected(bytes, name => name === "content.xml");
+  const entries = await unzipDocument(bytes, name => name === "content.xml");
   return entries.get("content.xml") ? odfMarkdown(entries.get("content.xml")) : "";
 }

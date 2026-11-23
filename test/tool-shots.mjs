@@ -6,6 +6,12 @@ import { connect, check, sleep, PAGE } from "./lib.mjs";
 
 const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fake-mcp.mjs");
 const { send, evalJs, waitFor, close } = await connect();
+// 附件里的图：落了盘的原件照同源地址画（浏览器自己取、自己缓存），只暂存在浏览器里的才编成 data: URL。
+// 两样都算「画出来了」——断言认的是这一点，不是取图走哪条路
+const drawnImage = `(el => {
+  const src = (el && el.getAttribute("src")) || "";
+  return !!el && (src.startsWith("data:image") || src.startsWith("/api/files/raw?id="));
+})`;
 const seed = {
   version: 4,
   settings: {
@@ -81,10 +87,12 @@ check("only the latest picture rides along, right after the tool results", /imag
 check("the earlier picture is replaced by a line of text", /stale:true/.test(reply), reply.slice(0, 200));
 check("the picture goes to the model as a data: url", /png:true/.test(reply), reply.slice(0, 200));
 check("the tool result tells the model the picture's name and how to show it", /named:true/.test(reply), reply.slice(0, 200));
-await waitFor(`!!${lastAssistant}.querySelector(".markdown .reply-shot img[src^='data:image/png']")`, 8000).catch(() => {});
+await waitFor(`${drawnImage}(${lastAssistant}.querySelector(".markdown .reply-shot img"))`, 8000).catch(() => {});
 check(
   "a picture the reply refers to by name is drawn right in the reply",
-  await evalJs(`!!${lastAssistant}.querySelector(".markdown .reply-shot[data-open-image] img[src^='data:image/png']")`)
+  await evalJs(
+    `(img => ${drawnImage}(img) && img.complete && img.naturalWidth > 0)(${lastAssistant}.querySelector(".markdown .reply-shot[data-open-image] img"))`
+  )
 );
 const steps = JSON.parse(
   await evalJs(
@@ -96,13 +104,16 @@ check(
   steps.length === 2 && steps.every(s => s.files.length === 1 && s.files[0].kind === "image" && s.files[0].data === undefined),
   JSON.stringify(steps).slice(0, 300)
 );
-await waitFor(`${lastAssistant}.querySelectorAll(".tool-shot img[src^='data:image/png']").length === 2`, 10000).catch(() => {});
+await waitFor(
+  `${lastAssistant}.querySelectorAll(".tool-shot img").length === 2 && [...${lastAssistant}.querySelectorAll(".tool-shot img")].every(${drawnImage})`,
+  10000
+).catch(() => {});
 const shots = await evalJs(
   `[...${lastAssistant}.querySelectorAll(".tool-shot")].map(el => ({ src: (el.querySelector("img").getAttribute("src") || "").slice(0, 22), shown: el.getBoundingClientRect().height > 0 }))`
 );
 check(
   "trail shows a thumbnail per picture, visible even with the step folded",
-  shots.length === 2 && shots.every(s => s.src === "data:image/png;base64," && s.shown),
+  shots.length === 2 && shots.every(s => s.shown && (s.src.startsWith("data:image/png;base64,") || s.src.startsWith("/api/files/raw?id="))),
   JSON.stringify(shots)
 );
 await evalJs(`${lastAssistant}.querySelector(".tool-shot").click(); true`);

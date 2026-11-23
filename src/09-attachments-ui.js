@@ -7,7 +7,9 @@ function formatFileSize(value) {
     ? `${bytes} B`
     : bytes < 1048576
       ? `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`
-      : `${(bytes / 1048576).toFixed(1)} MB`;
+      : bytes < 1073741824
+        ? `${(bytes / 1048576).toFixed(1)} MB`
+        : `${(bytes / 1073741824).toFixed(2)} GB`;
 }
 // 一件附件是一条「件条」：与卷宗同一张件图（图片换成它自己的缩略），名字，大小。见 设计稿/27 三·甲
 // drop：改问编辑框里的一件，× 是从这一问里去掉它（不删原件，旧版本还用着）
@@ -236,17 +238,24 @@ function openImageFrom(el) {
     el
   );
 }
-// 图片缩略图：原件在 IndexedDB，渲染后异步补上 src；缓存最近 40 张
+// 图片缩略图：落了盘的原件照同源地址画（浏览器自己取、自己缓存，不必把整份图编成 data: URL 攥在页面里），
+// 只暂存在浏览器里的才从库里取；缓存最近 40 张
+async function attachmentSrc(id) {
+  const url = `/api/files/raw?id=${encodeURIComponent(id)}`,
+    head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
+  if (head?.ok) return url;
+  const file = await getAttachment(id);
+  return file && file.kind === "image" && typeof file.data === "string" ? file.data : "";
+}
 async function loadThumbnails(root) {
   for (const img of root.querySelectorAll("img[data-thumb]:not([src])")) {
     const id = img.dataset.thumb;
     try {
       let url = thumbCache.get(id);
       if (!url) {
-        const file = await getAttachment(id);
+        url = await attachmentSrc(id);
         // 原件没取到、或记录里没有数据：留空，不拿一个空地址去设 src（那会落成破图）
-        if (!file || file.kind !== "image" || typeof file.data !== "string" || !file.data) continue;
-        url = file.data;
+        if (!url) continue;
         thumbCache.set(id, url);
         if (thumbCache.size > 40) thumbCache.delete(thumbCache.keys().next().value);
       }

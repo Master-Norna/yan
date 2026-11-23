@@ -81,6 +81,11 @@ function countLines(text) {
 // edit_file 的 old 对不上时：文件里最像它的那一段，照现在的样子带行号交回。
 // 拿 old 的每一行（去掉首尾空白）到文件里找同样的行，各自推出「old 若从这里开始」的起点，起点得票最多的那段即是；
 // 太短的行（}、else:、空行）满文件都是，不投票，除非 old 里只有这种行。票太少（多行的 old 只对上一行）的不算像，宁可不给
+// 满文件重复的行也不投票：生成的分隔线、同一句空函数体指不出旧文在哪一段，却让票表按「old 的行数 × 出现次数」涨——
+// 二十万行同一句的文件里对一段一千行的 old，一回就是上亿次（桥接单线程，所有对话一起停几秒）。总数另有上限，
+// 再多也按「不像」处理：宁可回「请先 read_file」，不占住桥接
+const NEAR_REPEAT = 32,
+  NEAR_VOTES = 200000;
 function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
   const lines = String(source).split(/\r?\n/),
     want = String(oldText).split(/\r?\n/),
@@ -97,7 +102,16 @@ function nearestPassage(source, oldText, { context = 1, maxLines = 60 } = {}) {
     else at.set(text, [i]);
   });
   const votes = new Map();
-  for (const { k, text } of voters) for (const i of at.get(text) || []) votes.set(i - k, (votes.get(i - k) || 0) + 1);
+  let spent = 0;
+  for (const { k, text } of voters) {
+    const hits = at.get(text) || [];
+    if (hits.length > NEAR_REPEAT) continue;
+    for (const i of hits) {
+      votes.set(i - k, (votes.get(i - k) || 0) + 1);
+      if (++spent >= NEAR_VOTES) break;
+    }
+    if (spent >= NEAR_VOTES) break;
+  }
   let best = null,
     score = 0;
   for (const [start, count] of votes) if (count > score || (count === score && start < best)) [best, score] = [start, count];

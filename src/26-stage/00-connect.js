@@ -19,7 +19,7 @@ const stage = {
   seq: 0,
   /** @type {Map<number, { resolve: (v: any) => void, reject: (e: Error) => void }>} */
   pending: new Map(),
-  /** @type {Map<string, { title: string, url: string, ctx?: string }>} 浏览器里开着的页，按开的先后；ctx 是所在的浏览器上下文 */
+  /** @type {Map<string, { title: string, url: string, ctx?: string, nav?: number }>} 浏览器里开着的页，按开的先后；ctx 是所在的浏览器上下文，nav 是这一页开到第几处的代数（见 stageShowDoc） */
   tabs: new Map(),
   // setDiscoverTargets 会把已开着的页逐个报来：那些不算「新开」，别跟过去
   listing: false,
@@ -94,6 +94,8 @@ const stage = {
   keyAt: 0,
   // 人最近一回经游目开网址的时刻（地址栏、收藏、开本机文件）：随后浏览器要「下载」的本机文件是人要开的
   goAt: 0,
+  // 起初没有页签的文档请求也能占码；后来开别的地址时作废
+  emptyNav: 0,
   /** @type {PointerEvent | null} */
   moved: null,
   // 正在把某一页激活到前台的在途承诺：stageLocate 等它落定才查前台，免得撞上切签中途
@@ -102,6 +104,12 @@ const stage = {
   // 人切签或主动激活的代数：切签即递增，stageLocate 拿回旧前台时不覆写已发生的新切签
   frontRevision: 0
 };
+
+// 摊开的文档页：落进 游目/工作/view-<ISO>.html 的那一份（server/stage.js 的 docpage 写的，名字同过程文件的规矩）。
+// 从这样一页里点原件链接，是「要以本机程序打开」，不是要再摊一回——认的是此刻这一页，不是那份文件
+const DOCPAGE_URL = /^file:\/\/.*\/view-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.html$/i,
+  /** @param {string} url 游目此刻看着的那一页 @returns {boolean} */
+  stageDocPage = url => DOCPAGE_URL.test(String(url || "").split(/[?#]/)[0]);
 
 // ---------- 连上浏览器 ----------
 // 已连着时也问一回：模型若把别的页请到了前台（选签、新开），看台跟过去
@@ -200,8 +208,11 @@ function stageMessage(message) {
     // 空页后来才补出类型与地址：不再是标签时，要撤掉此前收进来的那一项。
     if (!stageTabType(info) || (stage.helperCtx && info.browserContextId === stage.helperCtx) || stageNotTab(info))
       return void stageDropTab(info.targetId);
-    const fresh = !stage.tabs.has(info.targetId);
-    stage.tabs.set(info.targetId, { title: info.title, url: info.url, ctx: info.browserContextId });
+    const fresh = !stage.tabs.has(info.targetId),
+      // 标题、地址变了只换这两样：nav 是「这一页开到第几处」的代数（见 30-input.js 的 stageShowDoc），
+      // 整份盖掉会让正在摊的文档认不出自己那一笔，也会让后来的请求从 1 重新数、与本该作废的旧请求撞上
+      before = stage.tabs.get(info.targetId);
+    stage.tabs.set(info.targetId, stageTabInfo(before, info));
     // 模型新开了一页：跟过去。人用中键、Ctrl 点链接开的是后台的一页，与浏览器一样留在原处
     if (fresh && !stage.listing && !stageOpenedBehind()) stageShow(info.targetId);
     else stageRender();
@@ -212,6 +223,22 @@ function stageMessage(message) {
   } else if (message.method === "Target.detachedFromTarget") {
     if (params.sessionId === stage.session) stage.session = stage.attached = "";
   } else if (message.sessionId && message.sessionId === stage.session) stagePageEvent(message.method, params);
+}
+// 标题更新不影响正在摊的文档；但浏览器真正导航了（包括用户点链接、执事经 MCP 导航），
+// 就得让那份在途抽取失效，不能在新网页载入之后被旧文档页覆盖。
+// 空 URL 是浏览器初始化的过渡态，不当成一次导航；同页锚点跳转也算人已选择新位置。
+/** @param {{ url?: string, nav?: number } | undefined} before @param {{ title: string, url: string, browserContextId?: string }} info */
+function stageTabInfo(before, info) {
+  // 浏览器导航中可能暂时报告空 URL；这不是新地址，留着上一个有意义的网址，
+  // 否则后面真正的新地址会与空串比较、漏掉使在途文档失效的机会。
+  const url = info.url || before?.url || "",
+    moved = !!before?.url && !!info.url && before.url !== info.url;
+  return {
+    title: info.title,
+    url,
+    ctx: info.browserContextId,
+    nav: moved ? (before.nav || 0) + 1 : before?.nav
+  };
 }
 // 列成签的：寻常网页；Edge 的设置页报成 browser_ui，也算（不列它，点「浏览器设置」就像没反应）
 /** @param {{ type: string, url: string }} info */
@@ -279,12 +306,11 @@ function stagePageEvent(method, params) {
     /^file:/i.test(params.url || "") &&
     Date.now() - Math.max(stage.userAt, stage.keyAt, stage.goAt) < 3000
   ) {
-    // 人开的本机文件浏览器显示不了（Office 文档、压缩包、csv 等）就会当下载：当场取消，不拷进下载目录，交给本机程序打开原件
+    // 人开的本机文件浏览器显示不了（Office 文档、压缩包、csv 等）就会当下载：当场取消，不拷进下载目录。
+    // 抽得出正文的文档摊成文档页在这儿看，其余交给本机程序打开原件（两条入口——地址栏与下载——同一段路）。
+    // 从摊开的文档页里点「以本机程序打开」也是这一下：那本来就是要交本机程序，再摊一回只会绕回原处
     void stageSend("Browser.cancelDownload", { guid: params.guid, browserContextId: stage.tabs.get(stage.current)?.ctx }).catch(() => {});
-    void bridge("/api/stage/open", { url: params.url }).then(
-      () => toast(t("游目阅不了此件，已在本机程序中打开")),
-      error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`)
-    );
+    void (stageDocPage(stage.tabs.get(stage.current)?.url) ? stageOpenInApp(params.url, true) : stageShowDoc(params.url));
   } else if (method === "Page.downloadWillBegin") {
     // 下载：浏览器在屏幕外存，游目只记一笔（名、来处、多大、到哪一步）；存到哪由 MCP 的结果补上（见 stageNoteDownload）
     stage.downloads = [

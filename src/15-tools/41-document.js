@@ -29,10 +29,16 @@ defineTool({
     if (!wanted) return documentList(step, docs);
     // 技能的 SKILL.md 凭技能名即可找到
     const keys = d => [d.name, d.archive, d.main && d.skill].filter(Boolean).map(key => String(key).toLowerCase());
-    const doc =
-      docs.find(d => keys(d).includes(wanted)) ||
-      docs.find(d => keys(d).some(key => key.includes(wanted))) ||
-      (docs.length === 1 ? docs[0] : null);
+    // 同名有几件（附件里三个 README.md、卷宗两层各一份 config.json）：给了卷宗路径的照路径取；没给的取最近发来的那件，
+    // 并在步骤上写明读的是哪一件——以前按名字去重，同名的后一件根本进不了这张表，给路径也找不到
+    const exact = docs.filter(d => keys(d).includes(wanted)),
+      byPath = exact.find(d => d.archive && String(d.archive).toLowerCase() === wanted),
+      doc =
+        byPath ||
+        exact.filter(d => d.id).at(-1) ||
+        exact.at(-1) ||
+        docs.find(d => keys(d).some(key => key.includes(wanted))) ||
+        (docs.length === 1 ? docs[0] : null);
     if (!doc) {
       const listed = documentList(step, docs);
       return { ok: false, content: t`未找到文档「${args.name}」。${listed.content}`, display: "未找到" };
@@ -40,6 +46,13 @@ defineTool({
     // 翻技能的一步标作「Skill」，题写技能名（附属文件写全名）
     if (doc.skill) step.label = "Skill";
     step.title = doc.main ? doc.skill : doc.name;
+    const sameNote =
+      exact.length > 1 && !byPath
+        ? t`同名 ${exact.length} 件，读的是${doc.archive ? t`卷宗里的 ${doc.archive}` : doc.skill ? t`技能「${doc.skill}」` : t("最近发来的那件附件")}`
+        : "";
+    // 同名的说明跟着这一次的结果走（页码、命中数照样写在后面）
+    const noted = value => (sameNote ? `${sameNote}\n\n${value}` : value),
+      noteOf = value => [sameNote, value].filter(Boolean).join(" · ");
     let text = "";
     if (doc.archive) {
       try {
@@ -64,8 +77,8 @@ defineTool({
     if (args.page) {
       const page = pages.find(p => p.startsWith(`第 ${args.page} 页`));
       if (!page) return { ok: false, content: t`没有第 ${args.page} 页，共 ${pageCount || 1} 页`, display: "页码超出" };
-      step.note = `第 ${args.page} 页`;
-      return { ok: true, content: page.slice(0, 20000), display: `第 ${args.page} 页 · ${page.length} 字` };
+      step.note = noteOf(`第 ${args.page} 页`);
+      return { ok: true, content: noted(page.slice(0, 20000)), display: `第 ${args.page} 页 · ${page.length} 字` };
     }
     if (args.query) {
       const needle = args.query.toLowerCase(),
@@ -76,20 +89,21 @@ defineTool({
         hits.push(text.slice(Math.max(0, index - 300), index + needle.length + 300).trim());
         index = lower.indexOf(needle, index + needle.length + 300);
       }
-      step.note = `关键词「${args.query}」`;
+      step.note = noteOf(`关键词「${args.query}」`);
       return hits.length
-        ? { ok: true, content: hits.map((hit, i) => t`片段 ${i + 1}：…${hit}…`).join("\n\n"), display: `${hits.length} 处匹配` }
-        : { ok: true, content: t`全文未出现「${args.query}」`, display: "无匹配" };
+        ? { ok: true, content: noted(hits.map((hit, i) => t`片段 ${i + 1}：…${hit}…`).join("\n\n")), display: `${hits.length} 处匹配` }
+        : { ok: true, content: noted(t`全文未出现「${args.query}」`), display: "无匹配" };
     }
     // 技能的说明与参考是写给模型照做的，截了后半便照不全（长的有三万来字）；按页码翻对 md 也无从说起
     const limit = doc.skill ? 60000 : 12000;
-    step.note = `${text.length} 字${pageCount ? ` · ${pageCount} 页` : ""}`;
+    step.note = noteOf(`${text.length} 字${pageCount ? ` · ${pageCount} 页` : ""}`);
     return {
       ok: true,
-      content:
+      content: noted(
         text.length > limit
           ? t`${text.slice(0, limit)}\n\n[文档共 ${text.length} 字${pageCount ? t`、${pageCount} 页` : ""}，此处只给出开头；可用 page 或 query 参数读取其余部分]`
-          : text,
+          : text
+      ),
       display: `${Math.min(text.length, limit)} 字`
     };
   }
@@ -103,8 +117,11 @@ function documentList(step, docs) {
     skills = docs.filter(d => d.kind === "skill" && !d.manual),
     archived = docs.filter(d => d.archive).sort((a, b) => new Date(b.modifiedAt || 0).getTime() - new Date(a.modifiedAt || 0).getTime());
   step.title ||= t("可读文档");
+  // 同名的标上大小，模型与人都分得清是哪一件（名字一样的两件，光看名字没法指）
+  const count = new Map();
+  for (const d of attached) count.set(d.name, (count.get(d.name) || 0) + 1);
   const lines = [
-    ...attached.map(d => t`附件 ${d.name}`),
+    ...attached.map(d => t`附件 ${d.name}${count.get(d.name) > 1 ? `（${formatFileSize(d.size || 0)}）` : ""}`),
     ...skills.slice(0, DOCUMENT_LIST_LIMIT).map(d => t`技能 ${d.name}`),
     ...archived.slice(0, DOCUMENT_LIST_LIMIT).map(d => t`卷宗 ${d.archive}（${formatFileSize(d.size || 0)}）`)
   ];
@@ -118,16 +135,28 @@ function documentList(step, docs) {
 }
 /** @param {Conversation} conversation */
 function availableDocuments(conversation) {
-  const seen = new Map();
+  // 按 id、按卷宗路径去重：按名字去重会把同名的后一件整个吞掉（附件里三个 README.md 只留一个，卷宗里同名的也进不来），
+  // 模型拿到路径也搜不着
+  /** @type {any[]} */
+  const docs = [],
+    seen = new Set();
   for (const file of (conversation?.messages || []).flatMap(m => m.attachments || []))
-    if (file.id && !seen.has(file.name) && (file.kind === "text" || (file.kind === "file" && file.extracted))) seen.set(file.name, file);
+    if (file.id && !seen.has(`att:${file.id}`) && (file.kind === "text" || (file.kind === "file" && file.extracted))) {
+      seen.add(`att:${file.id}`);
+      docs.push(file);
+    }
   if (store.settings.archiveRead !== false)
     for (const entry of archiveEntries || []) {
-      if (seen.has(entry.name) || !(fileKind(entry.name).extract || isTextFile({ name: entry.name, type: "" }))) continue;
-      seen.set(entry.name, { name: entry.name, archive: entry.path, size: entry.size, modifiedAt: entry.modifiedAt, kind: "archive" });
+      if (seen.has(`arc:${entry.path}`) || !(fileKind(entry.name).extract || isTextFile({ name: entry.name, type: "" }))) continue;
+      seen.add(`arc:${entry.path}`);
+      docs.push({ name: entry.name, archive: entry.path, size: entry.size, modifiedAt: entry.modifiedAt, kind: "archive" });
     }
-  for (const doc of skillDocuments()) if (!seen.has(doc.name)) seen.set(doc.name, doc);
-  return [...seen.values()];
+  for (const doc of skillDocuments())
+    if (!seen.has(`skill:${doc.name}`)) {
+      seen.add(`skill:${doc.name}`);
+      docs.push(doc);
+    }
+  return docs;
 }
 // 磁盘卷宗里的文档：取回原件，文本直接用，PDF / Office 在本机抽正文；按路径与修改时间缓存几份
 const archiveDocCache = new Map();

@@ -131,9 +131,15 @@ async function ingestFile(original) {
     }
   if (kind === "text") await putAttachment({ ...metadata, data: text, extractedText, extractionError });
   else await putAttachment({ ...metadata, extractedText, extractionError }, file);
-  // 顺手记下文字量的估算：上下文计数与「是否整份塞进提示」都按它算，不再拿文件字节数粗估（压缩过的 docx 字节数与字数没什么关系）
+  // 顺手记下文字量的估算：上下文计数与「是否整份塞进提示」都按它算，不再拿文件字节数粗估（压缩过的 docx 字节数与字数没什么关系）。
+  // extractionError 也带上：发给模型时照实说「本机没抽出正文」的缘由（扫描件、解不开的图、库没载入），不然它只收到一份读不懂的原件
   const words = kind === "text" ? text : extractedText;
-  return { ...metadata, extracted: !!extractedText, ...(words ? { tokens: estimateText(words) } : {}) };
+  return {
+    ...metadata,
+    extracted: !!extractedText,
+    ...(extractionError ? { extractionError } : {}),
+    ...(words ? { tokens: estimateText(words) } : {})
+  };
 }
 
 async function downloadAttachment(id) {

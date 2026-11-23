@@ -114,7 +114,10 @@ module.exports = function createFind(work) {
   }
   const SEARCH_MATCH_LIMIT = 200,
     SEARCH_FILE_LIMIT = 4000,
-    SEARCH_FILE_BYTES = 2 * 1024 * 1024;
+    SEARCH_FILE_BYTES = 2 * 1024 * 1024,
+    // 模型点名要搜的那一件（把它的路径当 path 给）：目录里顺手扫过的按上面那道，点名的放开到与写文件齐——
+    // 只读这一件，且模型是照着结果的提示来点名的，卡住它就等于把那条提示写成死路
+    SEARCH_ONE_BYTES = 32 * 1024 * 1024;
   const handleWorkSearch = jsonRoute(async body => {
     const workdir = resolveWorkdir(body.workdir),
       dir = await targetOf(workdir, body),
@@ -145,9 +148,14 @@ module.exports = function createFind(work) {
     let scanned = 0,
       filesHit = new Set(),
       truncated = false,
-      limited = false;
-    // 搜一件：rel 是它相对于搜索起点的路径（glob 与沙箱筛查按它认）
-    const scanFile = async (full, rel) => {
+      limited = false,
+      // 跳过的也记个数：超大、看着是二进制的、读不出来的。零命中时一并说，
+      // 不然模型会当整片目录都找过了（以前超过 2 MB 的直接跳过，一声不吭）
+      large = 0,
+      binary = 0,
+      unread = 0;
+    // 搜一件：rel 是它相对于搜索起点的路径（glob 与沙箱筛查按它认）；explicit＝模型点名只搜这一件
+    const scanFile = async (full, rel, explicit = false) => {
       if (boxed && sandbox.screenPath(rel)) return; // 沙箱不借检索带出机密文件
       if (sandbox.screenStorePath(full, storeRoot())) return; // 存储根的配置与登录文件，不论档位
       if (++scanned > SEARCH_FILE_LIMIT) {
@@ -158,10 +166,18 @@ module.exports = function createFind(work) {
         .stat(full)
         .then(s => s.size)
         .catch(() => 0);
-      if (!size || size > SEARCH_FILE_BYTES) return;
+      if (!size) return;
+      if (size > (explicit ? SEARCH_ONE_BYTES : SEARCH_FILE_BYTES)) {
+        large += 1;
+        return;
+      }
       const buffer = await fs.promises.readFile(full).catch(() => null),
         decoded = buffer && decodeText(buffer);
-      if (!decoded) return;
+      if (!decoded) {
+        if (buffer) binary += 1;
+        else unread += 1;
+        return;
+      }
       const lines = decoded.text.split(/\r?\n/);
       for (const i of matchLines(regex, lines, rel)) {
         filesHit.add(rel);
@@ -190,9 +206,9 @@ module.exports = function createFind(work) {
         await scanFile(full, rel);
       }
     };
-    // 给的是一件文件：就搜这一件（模型常把要查的那个文件当 path 给）
+    // 给的是一件文件：就搜这一件（模型常把要查的那个文件当 path 给），不受目录里那道上限的约束
     if (stat.isDirectory()) await walk(dir);
-    else await scanFile(dir, path.basename(dir));
+    else await scanFile(dir, path.basename(dir), true);
     return {
       path: shownPath(workdir, dir) || ".",
       matches,
@@ -201,6 +217,9 @@ module.exports = function createFind(work) {
       truncated,
       ...(limited ? { limited: SEARCH_FILE_LIMIT } : {}),
       ...(skipped.size ? { skipped: [...skipped].sort() } : {}),
+      ...(large ? { large } : {}),
+      ...(binary ? { binary } : {}),
+      ...(unread ? { unread } : {}),
       ...(note ? { note } : {})
     };
   }, failed);

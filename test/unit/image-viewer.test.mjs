@@ -8,7 +8,7 @@ function viewer() {
     "openArchiveImage",
     "closeImageViewer",
     "doc: () => document",
-    "setup: read => { getAttachment = read; toast = () => {}; }"
+    "setup: read => { getAttachment = read; getAttachmentMeta = read; toast = () => {}; }"
   ]);
   const query = f.doc().querySelector;
   const nodes = new Map();

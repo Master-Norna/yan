@@ -130,10 +130,98 @@ function stageCaretSoon() {
 function stageGo(raw) {
   const url = stageUrlOf(raw);
   if (!url || !stage.ws) return;
+  // 人开的 Office 文档浏览器只会当下载：先抽出正文摊成文档页，不直接把游目导航过去（见 stageShowDoc）
+  if (stageDocName(url)) return void stageShowDoc(url);
+  stageNavigate(url);
+}
+// 页签上记一笔：这一页开到第几处了。摊文档要几秒，晚到的落页拿它比，对不上就作罢（见 stageShowDoc）
+/** @param {string} tab @returns {number} 记下的这一笔 */
+function stageNavMark(tab) {
+  const one = stage.tabs.get(tab);
+  if (!one) return 0;
+  one.nav = (one.nav || 0) + 1;
+  return one.nav;
+}
+// 把游目开到那个地址。from 是发起时的那一页（摊文档用）：取件、抽取、落页要几秒，这期间人可能已切到别的页签——
+// 那就仍开在发起的那一页上，不把眼下这一页拽走
+/** @param {string} url @param {{ tab: string } | null} [from] */
+function stageNavigate(url, from = null) {
   stage.goAt = Date.now();
-  // 一页都没开着：新开一页去
-  const go = stage.session ? stageSend("Page.navigate", { url }, stage.session) : stageSend("Target.createTarget", { url });
+  // 这一页上又开了别的：先前那几笔作废。起初没页签的请求也不再算数。
+  stage.emptyNav++;
+  const rev = stageNavMark(from ? from.tab : stage.current);
+  const go = from?.tab
+    ? stageNavigateIn(from.tab, url, rev)
+    : !from && stage.session
+      ? stageSend("Page.navigate", { url }, stage.session)
+      : stageSend("Target.createTarget", { url });
   void go.catch(error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`));
+}
+// 往指定的那一页发导航。人已切走（或看台没连着）：临时接一下这一页、发完就放下——
+// 几秒前那个会话早随切页签解除了（见 10-view.js 的 stageAttach），拿它发只会报会话失效
+/** @param {string} tab @param {string} url @param {number} rev */
+async function stageNavigateIn(tab, url, rev) {
+  const current = () => stage.tabs.get(tab)?.nav === rev;
+  if (!current()) return;
+  if (tab === stage.current && stage.session) return stageSend("Page.navigate", { url }, stage.session);
+  const { sessionId } = await stageSend("Target.attachToTarget", { targetId: tab, flatten: true });
+  try {
+    if (current()) return await stageSend("Page.navigate", { url }, sessionId);
+  } finally {
+    void stageSend("Target.detachFromTarget", { sessionId }).catch(() => {});
+  }
+}
+/** @param {string} url @returns {string} 能在游目里摊开看的本机文档就给文件名，否则空 */
+function stageDocName(url) {
+  if (!/^file:/i.test(url)) return "";
+  let name = "";
+  try {
+    name = decodeURIComponent(url.split("/").pop() || "");
+  } catch {
+    return "";
+  }
+  // 照文件种类登记认：view 是 doc 的（docx / xlsx / pptx / odt / ods / odp）才抽得出正文，不另立一张扩展名表
+  return name && fileKind(name).view === "doc" ? name : "";
+}
+// 人点开一份本机文档：用与预览同一套的抽取（13-files/）摊成一份自足的文档页，落进 游目/工作/ 再以 file:// 打开——
+// 内容在游目里看得见、能对着它说话，原件一笔不动。抽不出、写不成仍交本机程序，与从前一样。
+// 模型自己开的文件不走这儿：它经 MCP 直接导航，地址不经过 stageGo，仍当下载（只有人开的才转交本机程序，见 00-connect.js）
+/** @param {string} url */
+async function stageShowDoc(url) {
+  const name = stageDocName(url);
+  // 抽不出正文的（旧版 Office、压缩包）：直接交本机程序，不必先取一趟
+  if (!name) return void stageOpenInApp(url);
+  // 记下发起时那一页、先占一码：落页时这一页上若已又开了别的（或这一页已关掉），这一份就作罢，别把页拽回来。
+  // 先后开了两件时后开的那件说了算——它占的码更新。
+  // 只记页、不记会话：切页签会把旧会话解除（见 10-view.js 的 stageAttach），落页时再按页去接
+  const from = { tab: stage.tabs.has(stage.current) ? stage.current : "" },
+    ws = stage.ws,
+    rev = from.tab ? stageNavMark(from.tab) : 0,
+    emptyRev = ++stage.emptyNav,
+    // 起初没有页签则新开；发起页后来被关、换址或浏览器断开，则连本机回退也取消。
+    mine = () => !!ws && stage.ws === ws && (from.tab ? stage.tabs.get(from.tab)?.nav === rev : stage.emptyNav === emptyRev);
+  toast(t`正在摊开「${name}」…`);
+  try {
+    const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),
+      body = await fileViewerBody(reader, name, "doc");
+    // 抽不出正文时给的是空态（带一颗「以本机程序打开」，文档页里没有谁接它）：交本机程序，别摊一张空纸
+    if (!mine()) return;
+    if (!body.startsWith('<div class="file-viewer-empty')) {
+      const { url: page } = await bridge("/api/stage/docpage", { name, url, body });
+      if (!mine()) return;
+      return void stageNavigate(page, from);
+    }
+  } catch {}
+  // 抽不出、或写不成页：仍交本机程序打开原件，与从前一样（人已经又开了别的就不作数）
+  if (mine()) void stageOpenInApp(url);
+}
+// 交给本机程序打开原件（抽不出正文、或摊不开的那几种；以及从文档页里点「以本机程序打开」）
+/** @param {string} url @param {boolean} [wanted] 本来就是要交本机程序的（别再说「阅不了」） */
+function stageOpenInApp(url, wanted = false) {
+  return bridge("/api/stage/open", { url }).then(
+    () => toast(wanted ? t("已在本机程序中打开") : t("游目阅不了此件，已在本机程序中打开")),
+    error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`)
+  );
 }
 // 开本机文件（纸签、Ctrl+O）：经桥接弹系统的选文件窗，拿真路径开 file://——不拷进临时目录，网页旁的样式、脚本、图才引得到。
 // 浏览器显示不了的（Office 文档等）会当下载，由 downloadWillBegin 那头转交本机程序

@@ -33,15 +33,17 @@ module.exports = function createFiles(work) {
         throw error;
       });
       if (existing?.isDirectory()) throw Error(`${body.path} 是目录，不能作为文件写入`);
+      // 这一答（或这名帮手）没读过它就整份覆盖：先拦下，请它读了再写——最危险的整份覆盖不该比 edit_file 更不设防。
+      // 空文件不拦。判据用 stat 的字节数：几百 MB 的旧件为这一句整份读进来太贵，而 read_file 只读到 8 MB，
+      // 这么大的文件本来就算「没读过」
+      if (body.unseen === true && existing?.size)
+        throw Error(`${body.path} 已存在（${existing.size} 字节），整份覆盖前请先 read_file 看过`);
       await fs.promises.mkdir(path.dirname(file), { recursive: true }).catch(error => {
         throw Error(describeFsError(error, path.dirname(String(body.path))));
       });
       const existed = !!existing,
         // 文件已经存在却读不出，绝不可把「未知」当成空文件覆盖。
         previous = existed ? await fs.promises.readFile(file) : null;
-      // 这一答（或这名帮手）没读过它就整份覆盖：先拦下，请它读了再写——最危险的整份覆盖不该比 edit_file 更不设防。空文件不拦
-      if (body.unseen === true && previous?.length)
-        throw Error(`${body.path} 已存在（${previous.length} 字节），整份覆盖前请先 read_file 看过；只改几处用 edit_file`);
       // 读过之后被别人改过：拿旧印象整份写回，别人的改动就悄悄没了。不写，回现状的指纹，页面据此查是谁改的、请它重读
       // 读后被清空也算被改过（空的也有指纹）：不比长度
       if (typeof body.seen === "string" && previous && fingerprint(previous) !== body.seen)
