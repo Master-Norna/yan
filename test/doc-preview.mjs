@@ -90,8 +90,8 @@ const S = `xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"`;
 writeFileSync(
   `${ARCHIVE}/数据.xlsx`,
   zip({
-    "xl/workbook.xml": `<workbook ${S} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="销量" sheetId="1" r:id="rId1"/><sheet name="说明" sheetId="2" r:id="rId2"/></sheets></workbook>`,
-    "xl/_rels/workbook.xml.rels": `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`,
+    "xl/workbook.xml": `<workbook ${S} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="销量" sheetId="1" r:id="rId1"/><sheet name="说明" sheetId="2" r:id="rId2"/><sheet name="超限页" sheetId="3" r:id="rId3"/></sheets></workbook>`,
+    "xl/_rels/workbook.xml.rels": `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Target="worksheets/sheet3.xml"/></Relationships>`,
     "xl/sharedStrings.xml": `<sst ${S}><si><t>品名</t></si><si><t>价格</t></si><si><t>藜麦</t></si><si><r><t>富文</t></r><r><t>本</t></r></si></sst>`,
     // 数字格式：14 是内置的日期，10 是内置的百分比，3 是内置的千分位，164 是自定义的（格式串里带引号包着的中文）
     "xl/styles.xml": `<styleSheet ${S}><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot;"/></numFmts><cellXfs count="6"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="10"/><xf numFmtId="3"/><xf numFmtId="164"/><xf numFmtId="46"/></cellXfs></styleSheet>`,
@@ -99,6 +99,7 @@ writeFileSync(
     "xl/drawings/drawing1.xml": `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ${R}><xdr:twoCellAnchor><xdr:from><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:from><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="图 1"/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill></xdr:pic></xdr:twoCellAnchor></xdr:wsDr>`,
     "xl/drawings/_rels/drawing1.xml.rels": rels({ rId1: ["image", "../media/image1.png"] }),
     "xl/media/image1.png": PNG,
+    "xl/worksheets/sheet3.xml": Buffer.alloc(8 * 1024 * 1024 + 1, 32),
     "xl/worksheets/sheet1.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c><c r="C2"><v>48.9</v></c></row><row r="3"><c r="A3" s="1"><v>45306</v></c><c r="B3" s="2"><v>0.235</v></c><c r="C3" s="3"><v>12345.6</v></c></row><row r="4"><c r="A4" s="4"><v>45306</v></c><c r="B4"><f>SUM(C2:C2)</f><v></v></c><c r="C4"><v>9876543.210000001</v></c></row><row r="5"><c r="A5" t="str"><f>TEXT(A1,"00000")</f><v>00123</v></c><c r="B5" t="e"><f>1/0</f><v>#DIV/0!</v></c><c r="C5" s="5"><v>1.5</v></c></row></sheetData></worksheet>`,
     "xl/worksheets/sheet2.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>说明文字</t></is></c></row></sheetData></worksheet>`
   })
@@ -110,16 +111,23 @@ const P = `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" 
 writeFileSync(
   `${ARCHIVE}/讲义.pptx`,
   zip({
+    "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${[2, 1, 3, 4].map(i => `<p:sldId id="${255 + i}" rel:id="rId${i}"/>`).join("")}</p:sldIdLst></p:presentation>`,
+    "ppt/_rels/presentation.xml.rels": rels(Object.fromEntries([1, 2, 3, 4].map(i => [`rId${i}`, ["slide", `slides/slide${i}.xml`]]))),
+    "ppt/slides/slide5.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["不在清单里的页"]])}</p:spTree></p:cSld></p:sld>`,
     "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
     "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${shape("title", [["小结"]])}${shape("", [["推导闭式解"]])}<p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
     // 第三页是有序的步骤：第一条从第 5 步起（接着上一页数），第二条降一层
-    "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+    "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>## 这是正文</a:t></a:r><a:br/><a:r><a:t>不是新的一页</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
     // 字母和罗马数字：不是十进制列表，Markdown 原生不能表达其 marker，渲染时改用 ol[type]。
-    "ppt/slides/slide4.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["编号类型"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:t>第三项</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod"/></a:pPr><a:r><a:t>第四项</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="romanUcPeriod" startAt="4"/></a:pPr><a:r><a:t>子步骤四</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="romanLcPeriod" startAt="2"/></a:pPr><a:r><a:t>罗马二</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaUcPeriod"/></a:pPr><a:r><a:t>大写甲</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+    "ppt/slides/slide4.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["编号类型"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:t>第三项</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod"/></a:pPr><a:r><a:t>第四项</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="romanUcPeriod" startAt="4"/></a:pPr><a:r><a:t>子步骤四</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="romanLcPeriod" startAt="2"/></a:pPr><a:r><a:t>罗马二</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaUcPeriod"/></a:pPr><a:r><a:t>大写甲</a:t></a:r></a:p></p:txBody></p:sp>${shape("", [["另一个文字框"]])}</p:spTree></p:cSld></p:sld>`,
     "ppt/slides/_rels/slide1.xml.rels": rels({ rId5: ["notesSlide", "../notesSlides/notesSlide1.xml"] }),
     // 备注那份里除了讲话者的话，还有页码与整页缩略图两个占位符，都不该混进正文
     "ppt/notesSlides/notesSlide1.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [["讲慢一些，这里停一下"], ["先给直觉，再给公式"]])}${shape("sldNum", [["12"]])}</p:spTree></p:cSld></p:notes>`,
-    "ppt/slides/_rels/slide2.xml.rels": rels({ rId2: ["image", "../media/image1.png"] }),
+    "ppt/slides/_rels/slide2.xml.rels": rels({
+      rId2: ["image", "../media/image1.png"],
+      rId9: ["notesSlide", "../notesSlides/notesSlide9.xml"]
+    }),
+    "ppt/notesSlides/notesSlide9.xml": "<broken>",
     "ppt/media/image1.png": PNG
   })
 );
@@ -239,7 +247,7 @@ const sheet = JSON.parse(
 );
 check(
   "xlsx: one tab per sheet by its name, cells land in their own columns, shared and rich strings read, a picture under its anchor cell",
-  sheet.tabs.join() === "销量,说明" &&
+  sheet.tabs.join() === "销量,说明,超限页" &&
     sheet.head.join() === "品名,,价格" &&
     sheet.rows[0].join() === "藜麦,富文本,48.9" &&
     sheet.second &&
@@ -261,6 +269,10 @@ check(
     `(s => s.querySelector('[data-viewer-panel="0"]').classList.contains("hidden") && s.querySelector('[data-viewer-panel="1"] td, [data-viewer-panel="1"] th')?.textContent === "说明文字")(document.querySelector("#fileViewerStage"))`
   )
 );
+check(
+  "xlsx: an oversized sheet leaves the other tabs and explains its absence",
+  await evalJs(`document.querySelector('[data-viewer-panel="2"]')?.textContent.includes('文档内部一份太大')`)
+);
 await closeViewer();
 
 await open("讲义.pptx");
@@ -271,18 +283,30 @@ const slides = JSON.parse(
   )
 );
 check(
-  "pptx: one card per slide, titled, points by level, pictures drawn",
+  "pptx follows presentation order, skips unused slides, keeps headings, levels and pictures",
   slides.join("#") ===
-    "第 1 页 · 线性回归|从最小二乘说起/几何直观#第 2 页 · 小结|推导闭式解|拟合直线:data:image/png#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲",
+    "第 1 页 · 小结|推导闭式解|拟合直线:data:image/png#第 2 页 · 线性回归|从最小二乘说起/几何直观#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲/另一个文字框",
   JSON.stringify(slides)
 );
 check(
   "pptx 里 PowerPoint 自动编号的那些要点也认得出是有序的（buAutoNum）",
-  await evalJs(`[...document.querySelectorAll("#fileViewerStage .viewer-slide")].at(-1).querySelectorAll("ol li").length === 3`)
+  await evalJs(
+    `[...document.querySelectorAll("#fileViewerStage .viewer-slide")].find(s => s.querySelector("h2")?.textContent.endsWith(" · 步骤")).querySelectorAll("ol li").length === 3`
+  )
+);
+check(
+  "pptx: a non-list paragraph stays separate and a soft break does not split the slide",
+  await evalJs(
+    `!![...document.querySelectorAll("#fileViewerStage .viewer-slide > p")].find(p => p.textContent === "## 这是正文不是新的一页" && p.querySelector("br"))`
+  )
+);
+check(
+  "pptx: damaged notes leave the slide and other notes intact",
+  await evalJs(`document.querySelector("#fileViewerStage .viewer-slide").textContent.includes("这一页的备注未能读出")`)
 );
 const numbered = JSON.parse(
   await evalJs(
-    `(s => { const last = [...s.querySelectorAll(".viewer-slide")].at(-1), ol = last?.querySelector("ol"); return JSON.stringify({ start: ol?.getAttribute("start"), nested: last.querySelectorAll("ol ol > li").length }); })(document.querySelector("#fileViewerStage"))`
+    `(s => { const numbered = [...s.querySelectorAll(".viewer-slide")].find(slide => slide.querySelector("h2")?.textContent.endsWith(" · 步骤")), ol = numbered?.querySelector("ol"); return JSON.stringify({ start: ol?.getAttribute("start"), nested: numbered?.querySelectorAll("ol ol > li").length }); })(document.querySelector("#fileViewerStage"))`
   )
 );
 check(
@@ -297,7 +321,7 @@ const said = JSON.parse(
 );
 check(
   "pptx: the speaker's notes follow their own slide, without the page number and thumbnail placeholders",
-  said.join("#") === "讲慢一些，这里停一下/先给直觉，再给公式##",
+  said.join("#") === "#讲慢一些，这里停一下/先给直觉，再给公式##",
   JSON.stringify(said)
 );
 check(

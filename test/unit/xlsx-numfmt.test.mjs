@@ -37,6 +37,13 @@ test("百分比与千分位都照格式写小数位", () => {
   assert.equal(xlsxNumber("48.9", 2, undefined, false), "48.90");
 });
 
+test("不擅加分组、不误判带缩放的逗号，正半负半都向外取整", () => {
+  assert.equal(xlsxNumber("12345.6", 2, undefined, false), "12345.60");
+  assert.equal(xlsxNumber("1234567", 164, "0,", false), "1234567");
+  assert.equal(xlsxNumber("-2.5", 1, undefined, false), "-3");
+  assert.equal(xlsxNumber("0.5", 164, "h:mm;[m]:ss", false), "12:00");
+});
+
 test("格式里的 # 是「有才写」的可选小数位，末尾的 0 收掉、非零留着", () => {
   // 0.##% 的 0.235 是 23.5%，不是 24%——只数 0 会把它当没有小数位
   assert.equal(xlsxNumber("0.235", 164, "0.##%", false), "23.5%");

@@ -228,7 +228,7 @@ async function messageForApi(message, latest, budget = inlineTextBudget(), image
         notes += t`\n\n[压缩包：${metadata.name}；本机原件路径：${place}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`;
       else
         try {
-          const local = await bridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
+          const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
           notes += t`\n\n[压缩包：${metadata.name}；本机原件路径：${local.path}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`;
         } catch (error) {
           notes += t`\n\n[压缩包 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}]`;
@@ -253,7 +253,7 @@ async function messageForApi(message, latest, budget = inlineTextBudget(), image
         notes += t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${place}。需要时用工具读取，不要修改原件${why}]`;
       else
         try {
-          const local = await bridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
+          const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
           notes += t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${local.path}。需要时用工具读取，不要修改原件${why}]`;
         } catch (error) {
           notes += t`\n\n[文件 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}${why}]`;

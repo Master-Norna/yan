@@ -148,25 +148,27 @@ function stageNavMark(tab) {
 function stageNavigate(url, from = null) {
   stage.goAt = Date.now();
   // 这一页上又开了别的：先前那几笔作废
-  stageNavMark(from ? from.tab : stage.current);
+  const rev = stageNavMark(from ? from.tab : stage.current);
   const go = !from
     ? stage.session
       ? stageSend("Page.navigate", { url }, stage.session)
       : stageSend("Target.createTarget", { url })
     : stage.tabs.has(from.tab)
-      ? stageNavigateIn(from.tab, url)
+      ? stageNavigateIn(from.tab, url, rev)
       : // 发起那一页已关掉：新开一页去，别往一个没了的会话语上发
         stageSend("Target.createTarget", { url });
   void go.catch(error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`));
 }
 // 往指定的那一页发导航。人已切走（或看台没连着）：临时接一下这一页、发完就放下——
 // 几秒前那个会话早随切页签解除了（见 10-view.js 的 stageAttach），拿它发只会报会话失效
-/** @param {string} tab @param {string} url */
-async function stageNavigateIn(tab, url) {
+/** @param {string} tab @param {string} url @param {number} rev */
+async function stageNavigateIn(tab, url, rev) {
+  const current = () => stage.tabs.get(tab)?.nav === rev;
+  if (!current()) return;
   if (tab === stage.current && stage.session) return stageSend("Page.navigate", { url }, stage.session);
   const { sessionId } = await stageSend("Target.attachToTarget", { targetId: tab, flatten: true });
   try {
-    return await stageSend("Page.navigate", { url }, sessionId);
+    if (current()) return await stageSend("Page.navigate", { url }, sessionId);
   } finally {
     void stageSend("Target.detachFromTarget", { sessionId }).catch(() => {});
   }
@@ -203,7 +205,8 @@ async function stageShowDoc(url) {
     const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),
       body = await fileViewerBody(reader, name, "doc");
     // 抽不出正文时给的是空态（带一颗「以本机程序打开」，文档页里没有谁接它）：交本机程序，别摊一张空纸
-    if (!body.includes("file-viewer-empty")) {
+    if (!mine()) return;
+    if (!body.startsWith('<div class="file-viewer-empty')) {
       const { url: page } = await bridge("/api/stage/docpage", { name, url, body });
       if (!mine()) return;
       return void stageNavigate(page, from);

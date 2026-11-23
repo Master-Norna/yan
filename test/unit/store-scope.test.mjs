@@ -158,6 +158,19 @@ test("换根主动重排候并唤回旧等待：新根无需先查列表，旧�
     assert.equal((await post("/api/timer/take", { root: next, ids })).data.fired.length, 1);
   }));
 
+test("换根后的两个附件路径口都拒绝旧根，不泄漏新根的原件位置", async () =>
+  fixture(async ({ a, b, post }) => {
+    assert.equal((await post("/api/store/move", { parent: b })).status, 200);
+    for (const [route, body] of [
+      ["/api/files/path", { id: "sample" }],
+      ["/api/files/paths", { ids: ["sample"] }]
+    ]) {
+      const result = await post(route, { ...body, root: a });
+      assert.equal(result.status, 400, route);
+      assert.match(result.data.error, /存储位置已变化/, route);
+    }
+  }));
+
 for (const result of ["success", "conflict", "failure"])
   test(`切根后旧配置保存的${result}回话不改新基准，也不释放新请求的锁`, async () => {
     const first = deferred(),

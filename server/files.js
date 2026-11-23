@@ -138,7 +138,7 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
     return path.join(dir, raw);
   }
   // 原件交给本机工具时只取位置（如压缩包），不用先把整份编成 base64。
-  const handlePath = jsonRoute(
+  const handlePath = route(
     async body => {
       const id = checkId(body.id);
       return { id, path: path.resolve(rawPathOf(id)) };
@@ -147,7 +147,7 @@ module.exports = function createFiles({ filesHome, playable, route = jsonRoute }
   );
   // 一批原件在哪：发问时随附件说明交给模型，它才知道用户随问发来的文件不在工作目录里、原件在哪。
   // 只回真要得到路径的（不在存储目录里的不回），一次问齐，免得每件附件一个来回
-  const handlePaths = jsonRoute(
+  const handlePaths = route(
     async body => {
       const dir = home(),
         ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter(id => ID.test(id));

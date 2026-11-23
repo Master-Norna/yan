@@ -181,6 +181,7 @@ const escapeHtml = (/** @type {string} */ text) =>
 function docPageHtml(name, inner, href = "") {
   const title = escapeHtml(name),
     // 认两种写法：页面里写的是不带值的 data-viewer-open，过了 innerHTML 会补成 data-viewer-open=""
+    nonce = crypto.randomBytes(16).toString("base64"),
     body = href
       ? inner.replace(
           /<button type="button" class="viewer-open-link" data-viewer-open(?:="[^"]*")?>([^<]*)<\/button>/g,
@@ -192,6 +193,7 @@ function docPageHtml(name, inner, href = "") {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <title>${title}</title>
 <style>
 ${stylesAt(DOCPAGE_STYLES)}
@@ -211,7 +213,7 @@ body.docpage { margin: 0; min-height: 100%; overflow: auto; background: var(--pa
 <main class="docpage-paper">
 ${body}
 </main>
-<script>
+<script nonce="${nonce}">
 // 工作表的页签：文档页里没有预览浮层那套事件，就地绑一份（只这一件事，别的照旧不动）
 document.addEventListener("click", event => {
   const tab = event.target.closest("[data-viewer-tab]");
@@ -547,17 +549,22 @@ module.exports = function createStage({ root = () => "" } = {}) {
     sendJson(res, 200, { ok: true });
   }
   // 原件直取：GET /api/stage/raw?url=file:///…，页面抽正文用。Office/ODF 六种加 ipynb（#169）、只认盘上的普通文件：
-  // 路径从 file: 地址解出来（UNC 与非本机主机的地址 fileURLToPath 会直接抛，不必另挡）
+  // 路径从 file: 地址解出来；在碰文件系统前先挡掉远程主机与 UNC。
   async function raw(req, res) {
     let file = "";
     try {
-      file = fileURLToPath(String(new URL(req.url, "http://127.0.0.1").searchParams.get("url") || ""));
+      const url = new URL(new URL(req.url, "http://127.0.0.1").searchParams.get("url") || "");
+      // WHATWG 已把 file://localhost 归为无主机名；Windows 对其余主机名会解成 UNC，而不是拒绝。
+      if (url.hostname) throw Error("Not local");
+      file = fileURLToPath(url);
+      if (/^[\\/]{2}/.test(file)) throw Error("Not local");
     } catch {
       return sendJson(res, 400, { error: "只认本机文件的地址" });
     }
     // 名字叫 .docx、实际链到别处去的（符号链接、快捷方式）：按真正要读的那一份再认一遍，这个口只保证读得走这六种
     const real = await fs.promises.realpath(file).catch(() => "");
-    if (!real || !DOC_VIEWABLE.has(path.extname(real).toLowerCase())) return sendJson(res, 400, { error: "这一类文档摊不开" });
+    if (!real || /^[\\/]{2}/.test(real) || !DOC_VIEWABLE.has(path.extname(real).toLowerCase()))
+      return sendJson(res, 400, { error: "这一类文档摊不开" });
     const stat = await fs.promises.stat(real).catch(() => null);
     if (!stat?.isFile()) return sendJson(res, 404, { error: "文件不在了" });
     if (stat.size > DOC_RAW_MAX) return sendJson(res, 413, { error: "这件太大，摊不开" });

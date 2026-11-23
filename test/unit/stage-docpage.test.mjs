@@ -44,6 +44,11 @@ test("文档页的壳：一张素纸，样式取言自己的，正文原样进�
   assert.match(html, /<title>报告.docx<\/title>/);
   assert.match(html, /<body class="docpage">/);
   assert.ok(html.includes(inner), "正文原样进来");
+  const nonce = html.match(/script-src 'nonce-([^']+)'/)?.[1];
+  assert.ok(nonce);
+  assert.ok(html.includes(`<script nonce="${nonce}">`));
+  assert.match(html, /default-src 'none'/);
+  assert.match(html, /img-src data:/);
   // 样式来自 styles/：变量、正文与预览器那几节都在（少了它们，表格页签与幻灯片的排法会散）
   assert.match(html, /--paper:/);
   assert.match(html, /\.file-viewer-text/);
@@ -149,4 +154,22 @@ test("工作目录里只清摊开的文档页：模型起了名字的件一件�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("等待临时接入期间页签已经导航：不覆盖新地址，但仍断开这次临时接入", async () => {
+  const { stage, stageNavigateIn, stageMessage } = load(["stage", "stageNavigateIn", "stageMessage"]);
+  const sent = [];
+  stage.ws = { readyState: WebSocket.OPEN, send: value => sent.push(JSON.parse(value)) };
+  stage.current = "b";
+  stage.tabs.set("a", { nav: 3 });
+  const going = stageNavigateIn("a", "file:///a/old.html", 3);
+  assert.equal(sent[0].method, "Target.attachToTarget");
+  stage.tabs.set("a", { nav: 4 });
+  stageMessage({ id: sent[0].id, result: { sessionId: "temporary" } });
+  await going;
+  assert.deepEqual(
+    sent.map(command => command.method),
+    ["Target.attachToTarget", "Target.detachFromTarget"]
+  );
+  stageMessage({ id: sent[1].id, result: {} });
 });

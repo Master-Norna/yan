@@ -537,6 +537,8 @@ var YAN_EN = {
   "仅显示前 400 行": "Showing the first 400 lines",
   "内容过长，只解析了开头一段": "Content too long — only the beginning was parsed",
   未能抽出正文: "Could not extract text",
+  "（文档内部一份太大，未能列出：${name}）": "(A part was too large to display: ${name})",
+  "（这一页的备注未能读出）": "(Could not read this slide’s notes)",
   "本机按结构抽出，不含原排版 ·": "Extracted locally by structure, original layout not kept ·",
   "[图片 {0} 预览不了]": "[Image {0} can't be previewed]",
   "工作表 {0}": "Sheet {0}",
