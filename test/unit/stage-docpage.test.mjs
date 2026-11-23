@@ -103,7 +103,7 @@ test("页签元数据变更保留版本；真实导航让在途文档请求失�
   assert.equal(stage.tabs.get("t1").nav, 4, "空 URL 之后的真实导航也须取消旧请求");
   // 版本号不因重建对象归零
   assert.equal(stageNavMark("t1"), 5);
-  assert.deepEqual([stage.tabs.get("t1").title, stage.tabs.get("t1").ctx], ["载入中", "c1"]);
+  assert.deepEqual([stage.tabs.get("t1").title, stage.tabs.get("t1").ctx], ["真正下一页", "c1"]);
 });
 
 test("摊开的文档页认得出来：从它里头点原件链接，是「以本机程序打开」而不是再摊一回", () => {
