@@ -64,8 +64,8 @@ writeFileSync(
   `${ARCHIVE}/报告.docx`,
   zip({
     "word/styles.xml": `<w:styles ${W}><w:style w:styleId="1"><w:name w:val="heading 1"/></w:style><w:style w:styleId="2"><w:name w:val="heading 2"/></w:style><w:style w:styleId="3"><w:name w:val="List Number"/><w:pPr><w:numPr><w:numId w:val="2"/></w:numPr></w:pPr></w:style></w:styles>`,
-    // 编号的定义在 numbering.xml：numId 2 是多级编号的第 0 层，十进制；numId 1 故意不给定义（退回项目符号）
-    "word/numbering.xml": `<w:numbering ${W}><w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum><w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num></w:numbering>`,
+    // 编号的定义在 numbering.xml：numId 2 是多级编号的第 0、1 层，十进制；numId 1 故意不给定义（退回项目符号）
+    "word/numbering.xml": `<w:numbering ${W}><w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl><w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%2."/></w:lvl></w:abstractNum><w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num></w:numbering>`,
     "word/_rels/document.xml.rels": rels({ rId7: ["image", "media/image1.png"], rId8: ["image", "media/image2.emf"] }),
     "word/media/image1.png": PNG,
     "word/media/image2.emf": EMF,
@@ -76,6 +76,7 @@ writeFileSync(
       <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>${run("荞麦最多")}</w:p>
       <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>${run("糙米其次")}</w:p>
       <w:p><w:pPr><w:pStyle w:val="3"/></w:pPr>${run("第一步")}</w:p>
+      <w:p><w:pPr><w:pStyle w:val="3"/><w:numPr><w:ilvl w:val="1"/></w:numPr></w:pPr>${run("细项一")}</w:p>
       <w:p><w:pPr><w:pStyle w:val="3"/></w:pPr>${run("第二步")}</w:p>
       <w:p>${run("1. 不是列表，只是以数字起头")}</w:p>
       <w:p><w:r><w:drawing><wp:inline><wp:docPr id="1" name="图 1" descr="销量走势"/><a:graphic><a:graphicData><a:blip r:embed="rId7"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>
@@ -111,7 +112,8 @@ writeFileSync(
   zip({
     "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
     "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${shape("title", [["小结"]])}${shape("", [["推导闭式解"]])}<p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
-    "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody>${["先归一化", "再拟合"].map(text => `<a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>${text}</a:t></a:r></a:p>`).join("")}</p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+    // 第三页是有序的步骤：第一条从第 5 步起（接着上一页数），第二条降一层
+    "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
     "ppt/slides/_rels/slide1.xml.rels": rels({ rId5: ["notesSlide", "../notesSlides/notesSlide1.xml"] }),
     // 备注那份里除了讲话者的话，还有页码与整页缩略图两个占位符，都不该混进正文
     "ppt/notesSlides/notesSlide1.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [["讲慢一些，这里停一下"], ["先给直觉，再给公式"]])}${shape("sldNum", [["12"]])}</p:spTree></p:cSld></p:notes>`,
@@ -156,7 +158,7 @@ writeFileSync(
 writeFileSync(
   `${ARCHIVE}/说明.odt`,
   zip({
-    "content.xml": `<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><office:automatic-styles><text:list-style style:name="L1"><text:list-level-style-number text:level="1" style:num-format="1"/></text:list-style><text:list-style style:name="L2"><text:list-level-style-bullet text:level="1"/></text:list-style></office:automatic-styles><office:body><office:text><text:h text:outline-level="1">步骤</text:h><text:list text:style-name="L1"><text:list-item><text:p>先归一化</text:p></text:list-item><text:list-item><text:p>再拟合</text:p></text:list-item></text:list><text:list text:style-name="L2"><text:list-item><text:p>附注一</text:p></text:list-item></text:list></office:text></office:body></office:document-content>`
+    "content.xml": `<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><office:automatic-styles><text:list-style style:name="L1"><text:list-level-style-number text:level="1" style:num-format="1"/><text:list-level-style-number text:level="2" style:num-format="1"/></text:list-style><text:list-style style:name="L2"><text:list-level-style-bullet text:level="1"/></text:list-style></office:automatic-styles><office:body><office:text><text:h text:outline-level="1">步骤</text:h><text:list text:style-name="L1"><text:list-item><text:p>先归一化</text:p><text:list text:style-name="L1"><text:list-item><text:p>细项</text:p></text:list-item></text:list></text:list-item><text:list-item><text:p>再拟合</text:p></text:list-item></text:list><text:list text:style-name="L2"><text:list-item><text:p>附注一</text:p></text:list-item></text:list></office:text></office:body></office:document-content>`
   })
 );
 writeFileSync(`${ARCHIVE}/模型.bin`, Buffer.from([0, 1, 2, 3]));
@@ -194,7 +196,7 @@ check(
     docx.inline === "58%" &&
     docx.list.join() === "荞麦最多,糙米其次" &&
     docx.lists === 1 &&
-    docx.ordered.join() === "第一步,第二步" &&
+    docx.ordered.length === 3 &&
     docx.digits &&
     docx.table === "糙米,34" &&
     docx.open,
@@ -202,8 +204,20 @@ check(
 );
 check(
   "docx 的编号挂在段落样式上时也认得出是有序列表（Word 的「编号」按钮大多这么写）",
-  docx.ordered.length === 2,
+  docx.ordered.length === 3,
   JSON.stringify(docx.ordered)
+);
+check(
+  "docx 的下一层缩进到父项记号之后那一列，才真成一层（缩两格时有序列表的子项会被当成父项的续文）",
+  await evalJs(
+    `(s => s.querySelectorAll("ol ol li").length === 1 && s.querySelector("ol ol li").textContent.trim() === "细项一")(document.querySelector("#fileViewerStage"))`
+  )
+);
+check(
+  "docx 的段落只写层级、编号 id 留给样式时，仍照样式那份编号排",
+  await evalJs(
+    `(s => [...s.querySelector("ol").children].map(li => li.firstChild.textContent.trim()).join() === "第一步,第二步")(document.querySelector("#fileViewerStage"))`
+  )
 );
 check(
   "docx images: drawn from the original with their caption; a format the browser can't draw leaves a line",
@@ -255,12 +269,22 @@ const slides = JSON.parse(
 check(
   "pptx: one card per slide, titled, points by level, pictures drawn",
   slides.join("#") ===
-    "第 1 页 · 线性回归|从最小二乘说起/几何直观#第 2 页 · 小结|推导闭式解|拟合直线:data:image/png#第 3 页 · 步骤|先归一化/再拟合",
+    "第 1 页 · 线性回归|从最小二乘说起/几何直观#第 2 页 · 小结|推导闭式解|拟合直线:data:image/png#第 3 页 · 步骤|先归一化/补充/再拟合",
   JSON.stringify(slides)
 );
 check(
   "pptx 里 PowerPoint 自动编号的那些要点也认得出是有序的（buAutoNum）",
-  await evalJs(`[...document.querySelectorAll("#fileViewerStage .viewer-slide")].at(-1).querySelectorAll("ol li").length === 2`)
+  await evalJs(`[...document.querySelectorAll("#fileViewerStage .viewer-slide")].at(-1).querySelectorAll("ol li").length === 3`)
+);
+const numbered = JSON.parse(
+  await evalJs(
+    `(s => { const last = [...s.querySelectorAll(".viewer-slide")].at(-1), ol = last?.querySelector("ol"); return JSON.stringify({ start: ol?.getAttribute("start"), nested: last.querySelectorAll("ol ol > li").length }); })(document.querySelector("#fileViewerStage"))`
+  )
+);
+check(
+  "pptx 的 startAt 是「从第几号起」、下一层缩进到父项记号之后（不然接着上一页的流程会重又从 1 开始、子项也塌成续文）",
+  numbered.start === "5" && numbered.nested === 1,
+  JSON.stringify(numbered)
 );
 const said = JSON.parse(
   await evalJs(
@@ -277,14 +301,15 @@ await closeViewer();
 await open("说明.odt");
 const odt = JSON.parse(
   await evalJs(
-    `(s => JSON.stringify({ h1: s.querySelector("h1")?.textContent, ordered: [...s.querySelectorAll("ol li")].map(li => li.textContent), bullet: [...s.querySelectorAll("ul li")].map(li => li.textContent) }))(document.querySelector("#fileViewerStage"))`
+    `(s => JSON.stringify({ h1: s.querySelector("h1")?.textContent, ordered: [...s.querySelector("ol").children].map(li => li.firstChild.textContent.trim()), nested: [...s.querySelectorAll("ol ol li")].map(li => li.textContent.trim()), bullet: [...s.querySelectorAll("ul li")].map(li => li.textContent) }))(document.querySelector("#fileViewerStage"))`
   )
 );
 check(
   "odt: 编号列表认出是有序的、项目符号仍是无序的（编号挂在 text:list-style 上）",
-  odt.h1 === "步骤" && odt.ordered.map(t => t.trim()).join() === "先归一化,再拟合" && odt.bullet.join() === "附注一",
+  odt.h1 === "步骤" && odt.ordered.join() === "先归一化,再拟合" && odt.bullet.join() === "附注一",
   JSON.stringify(odt)
 );
+check("odt 的下一层也真成一层（缩进与记号宽度对得上）", odt.nested.join() === "细项", JSON.stringify(odt));
 await closeViewer();
 
 await open("分析.ipynb");

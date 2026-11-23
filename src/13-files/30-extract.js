@@ -306,7 +306,13 @@ function docxMarkdown(documentXml, stylesXml, relsXml, numberingXml) {
     images = zipRels(relsXml, "word"),
     lists = docxNumbering(stylesXml, numberingXml),
     // 各号列表自己的计数：Markdown 的有序列表靠数字开头，序号得自己数（渲染器会重排，但读原文的人与模型看的是这个）
-    counters = new Map();
+    counters = new Map(),
+    // 各号列表在每一层用过的记号宽度：子项要缩进到父项记号之后那一列，`- ` 是 2 格、`1. ` 是 3 格
+    seenMarks = new Map();
+  const listSeen = numId => {
+    if (!seenMarks.has(numId)) seenMarks.set(numId, []);
+    return seenMarks.get(numId);
+  };
   const listMark = (numId, depth) => {
     const level = lists.levels.get(numId)?.get(depth);
     // 没有编号定义（合成样本、或 numbering.xml 不全）时退回项目符号：至少仍是一条列表，不冒充有序
@@ -340,12 +346,16 @@ function docxMarkdown(documentXml, stylesXml, relsXml, numberingXml) {
       styleId = props && xmlKids(props, "pStyle")[0]?.getAttribute("w:val"),
       name = styleNames.get(styleId) || String(styleId || "").toLowerCase(),
       level = name === "title" ? 1 : Number(name.match(/heading ?(\d)/)?.[1]) || 0,
-      // 段落自己写了 numPr 就听它的，没写才看它挂的段落样式（Word 的「编号」「项目符号」按钮大多写进样式里）；
+      // 段落自己写了 numPr 就听它的，没写才看它挂的段落样式（Word 的「编号」「项目符号」按钮大多写进样式里）。
+      // 两样各按各的取：段落只写 ilvl、把 numId 留给样式的写法很常见（沿用上一段的编号、只降一级），
+      // 一并当成「没写 numPr」会把继承来的编号整个丢掉，那一段就落成普通文字。
       // numId 写 0 是显式取消编号，仍按普通段落排
       own = props && xmlKids(props, "numPr")[0],
-      inherited = own ? null : lists.styleNum.get(styleId),
-      numId = own ? xmlKids(own, "numId")[0]?.getAttribute("w:val") : inherited?.numId,
-      depth = own ? Number(xmlKids(own, "ilvl")[0]?.getAttribute("w:val")) || 0 : (inherited?.ilvl ?? 0),
+      ownId = own ? xmlKids(own, "numId")[0]?.getAttribute("w:val") : undefined,
+      ownLevel = own ? xmlKids(own, "ilvl")[0]?.getAttribute("w:val") : undefined,
+      inherited = lists.styleNum.get(styleId),
+      numId = ownId !== undefined ? ownId : inherited?.numId,
+      depth = ownLevel !== undefined ? Number(ownLevel) || 0 : (inherited?.ilvl ?? 0),
       mark = numId && numId !== "0" ? listMark(numId, depth) : "";
     const segments = xmlDeep(p, "r").map(run => {
       const rp = xmlKids(run, "rPr")[0];
@@ -357,7 +367,13 @@ function docxMarkdown(documentXml, stylesXml, relsXml, numberingXml) {
     const text = mdRuns(segments).trim();
     if (!text) return "";
     if (level) return `${"#".repeat(Math.min(level, 6))} ${text.replace(/\n/g, " ")}`;
-    if (mark) return `${"  ".repeat(depth)}${mark}${text.replace(/\n/g, " ")}`;
+    // 缩进到父项记号之后那一列：有序列表的记号比项目符号宽一格，一律缩两格时渲染器不认这一层，子项会被当成父项的续文
+    if (mark) {
+      const seen = listSeen(numId),
+        indent = seen.slice(0, depth).reduce((spaces, width) => spaces + Math.max(2, width), 0);
+      seen[depth] = mark.length;
+      return `${" ".repeat(indent)}${mark}${text.replace(/\n/g, " ")}`;
+    }
     // 段内换行用反斜杠硬换行（行尾两个空格的写法会被 trimExtractedText 收掉）
     return text.replace(/\n/g, "\\\n");
   };
@@ -412,7 +428,8 @@ function pptxMarkdown(slides) {
           paragraphs = xmlDeep(shape, "p");
         const lines = paragraphs
           .map(p => {
-            const pPr = xmlKids(p, "pPr")[0];
+            const pPr = xmlKids(p, "pPr")[0],
+              auto = pPr ? xmlKids(pPr, "buAutoNum")[0] : null;
             return {
               text: xmlDeep(p, "t")
                 .map(t => t.textContent)
@@ -420,7 +437,9 @@ function pptxMarkdown(slides) {
                 .trim(),
               depth: Number(pPr?.getAttribute("lvl")) || 0,
               // 页码与层级之外，PowerPoint 把「这一条是否自动编号」也写在 pPr 里：buAutoNum 是有序、buNone 是不要记号
-              ordered: !!pPr && !!xmlKids(pPr, "buAutoNum")[0],
+              ordered: !!auto,
+              // startAt 是「这一步从第几号起」（接着上一页往下数的流程常见），不写就是 1
+              startAt: Number(auto?.getAttribute("startAt")) || 1,
               plain: !!pPr && !!xmlKids(pPr, "buNone")[0]
             };
           })
@@ -428,16 +447,21 @@ function pptxMarkdown(slides) {
         if (/title/i.test(kind) && !title) title = lines.map(line => line.text).join(" ");
         else {
           // 自动编号的序号由 PowerPoint 运行时数，XML 里不存，得自己按层级数
-          const counts = new Map();
+          const counts = new Map(),
+            seen = [];
           for (const line of lines) {
             let mark = "- ";
             if (line.ordered) {
-              const n = (counts.get(line.depth) || 0) + 1;
+              // 这一层还没有数过就从 startAt 起（不然接着上一页的第 5 步会重又从 1 开始）
+              const n = (counts.get(line.depth) || line.startAt - 1) + 1;
               counts.set(line.depth, n);
               for (const key of [...counts.keys()]) if (key > line.depth) counts.delete(key);
               mark = `${n}. `;
             } else if (line.plain) mark = "";
-            points.push(`${"  ".repeat(line.depth)}${mark}${line.text}`);
+            // 与 docx 同一处道理：子项缩进到父项记号之后那一列
+            const indent = seen.slice(0, line.depth).reduce((spaces, width) => spaces + Math.max(2, width), 0);
+            seen[line.depth] = mark.length;
+            points.push(`${" ".repeat(indent)}${mark}${line.text}`);
           }
         }
       }
@@ -498,13 +522,22 @@ function xlsxFormats(stylesXml) {
 // 1904 系统（旧版 Mac Excel）从 1904-01-01 起算，换成 1900 系统的序号是 +1462
 function xlsxTimeText(serial, bare, date1904, elapsed, withDate) {
   const two = n => String(n).padStart(2, "0"),
-    withHour = /h/i.test(bare) || elapsed,
-    withSecond = /s/i.test(bare),
+    withHour = /h/i.test(bare) || elapsed === "h",
+    withSecond = /s/i.test(bare) || elapsed === "s",
     // 秒数先进位再拆，免得 59.9999 秒落成 59:60
     clockOf = seconds =>
       `${withHour ? `${Math.floor(seconds / 3600)}:${two(Math.floor(seconds / 60) % 60)}` : two(Math.floor(seconds / 60) % 60)}${withSecond ? `:${two(seconds % 60)}` : ""}`;
-  // 累计小时连整天一起算
-  if (elapsed) return clockOf(Math.round(serial * 86400));
+  // 累计时长连整天一起算，不绕回 24 小时：[h] 数总小时、[m] 数总分钟、[s] 数总秒；
+  // 格式里没写的单位不缀（[h] 就是 36、[m]:ss 才是 2160:00）。
+  // 只认 [h] 的话，[m]:ss 的 36 小时会被剥掉修饰、当成「只有秒的时刻」，显示成 00:00
+  if (elapsed) {
+    const total = Math.round(serial * 86400);
+    if (elapsed === "s") return String(total);
+    if (elapsed === "m") return withSecond ? `${Math.floor(total / 60)}:${two(total % 60)}` : String(Math.floor(total / 60));
+    const hours = Math.floor(total / 3600);
+    if (!withSecond && !/m/i.test(bare)) return String(hours);
+    return `${hours}:${two(Math.floor(total / 60) % 60)}${withSecond ? `:${two(total % 60)}` : ""}`;
+  }
   const days = date1904 ? serial + 1462 : serial < 60 ? serial + 1 : serial,
     whole = Math.floor(days),
     at = new Date(Date.UTC(1899, 11, 30) + whole * 86400000),
@@ -513,9 +546,16 @@ function xlsxTimeText(serial, bare, date1904, elapsed, withDate) {
   // 格式里有 h 就一定缀时刻（22 号「m/d/yyyy h:mm」的 00:00 也是它的一部分）；只有日子的不缀
   return withDate ? (withHour || withSecond ? `${date} ${clock}` : date) : clock;
 }
-// 小数位照格式写：0.00 就两位、0 就没有（Excel 里 #,##0 的 12345.6 显示 12,346，不是 12,345.6）
-function xlsxPlaces(bare) {
-  return (bare.match(/\.(0+)/) || [])[1]?.length || 0;
+// 按格式把数写成它看起来的样子：# 是「有才写」的可选位（末尾的 0 要收掉），0 是必写位（留着）。
+// 百分比也一样照格式：0.##% 的 0.235 是 23.5%、不是 24%——只数 0 会把它当没有小数位、四舍五入掉
+function xlsxFixed(number, bare) {
+  const spec = (bare.match(/\.([0#]+)/) || [])[1];
+  if (!spec) return String(Math.round(number));
+  const [whole, fraction = ""] = number.toFixed(spec.length).split("."),
+    least = spec.replace(/#/g, "").length;
+  let end = fraction.length;
+  while (end > least && fraction[end - 1] === "0") end--;
+  return end ? `${whole}.${fraction.slice(0, end)}` : whole;
 }
 // 千分位只动整数部分：1.234567 不该变成 1.234,567
 function xlsxGroup(raw) {
@@ -567,8 +607,8 @@ function xlsxNumber(raw, numFmtId, code, date1904) {
   const number = Number(raw);
   if (!Number.isFinite(number)) return raw;
   const written = String(code || XLSX_BUILTIN_CODES[numFmtId] || "").replace(/"[^"]*"/g, "");
-  // [h] 是累计小时（36:00:00 那种经过时长），清理修饰之前先认出来，清完就没了
-  const elapsed = /\[h+\]/i.test(written),
+  // [h]/[m]/[s] 是累计时长（36:00:00、2160:00 那种经过时长，不绕回 24 小时），清理修饰之前先认出来，清完就没了
+  const elapsed = /\[h+\]/i.test(written) ? "h" : /\[m+\]/i.test(written) ? "m" : /\[s+\]/i.test(written) ? "s" : "",
     // 去掉转义字符与 [颜色]/[条件]/[h] 那一类修饰，剩下的才是指示符；多段格式取第一段
     bare = written
       .replace(/\\./g, "")
@@ -576,15 +616,15 @@ function xlsxNumber(raw, numFmtId, code, date1904) {
       .split(";")[0];
   // 百分比与千分位都照格式写小数位：0.00000% 的 0.0000123 是 0.00123%，不能一律压到两位、把非零写成 0
   if (bare.includes("%")) {
-    const hundred = (number * 100).toFixed(xlsxPlaces(bare));
+    const hundred = xlsxFixed(number * 100, bare);
     return `${/#,##|0,0/.test(bare) ? xlsxGroup(hundred) : hundred}%`;
   }
   // 判不出格式串的内置号只能照号认：那几号是日期还是时刻
   const date = /[yd]/i.test(bare) || (!bare && XLSX_DATE_IDS.has(numFmtId)),
     clock = elapsed || /[hs]/i.test(bare) || (!bare && XLSX_CLOCK_IDS.has(numFmtId));
   if (date || clock) return xlsxTimeText(number, bare, date1904, elapsed, date);
-  // 数字格式同样照它写小数位：#,##0 的 12345.6 是 12,346，0.00 的 48.9 是 48.90
-  if (/^[#0,]*\.?0*$/.test(bare) && /[#0]/.test(bare)) return xlsxGroup(number.toFixed(xlsxPlaces(bare)));
+  // 数字格式同样照它写小数位：#,##0 的 12345.6 是 12,346，0.00 的 48.9 是 48.90，0.## 的 48.90 是 48.9
+  if (/^[#0,]*\.?[0#]*$/.test(bare) && /[#0]/.test(bare)) return xlsxGroup(xlsxFixed(number, bare));
   return xlsxGeneral(raw);
 }
 function xlsxMarkdown(entries) {
@@ -675,6 +715,8 @@ function xlsxMarkdown(entries) {
 function odfMarkdown(contentXml) {
   const out = [];
   let pages = 0;
+  // 每一层用过的记号宽度：子项要缩进到父项记号之后那一列（同 docx、pptx）
+  const seen = [];
   const text = node => node.textContent.replace(/\s+/g, " ").trim();
   const repeat = (node, name) => Math.min(50, Number(node.getAttribute(name)) || 1);
   // 列表的编号也挂在样式上（text:list 的 text:style-name → office:automatic-styles 里的 text:list-style）：
@@ -718,7 +760,9 @@ function odfMarkdown(contentXml) {
               counts.set(depth + 1, n);
               mark = `${n}. `;
             }
-            out.push(`${"  ".repeat(depth)}${mark}${line}`);
+            const indent = seen.slice(0, depth).reduce((spaces, width) => spaces + Math.max(2, width), 0);
+            seen[depth] = mark.length;
+            out.push(`${" ".repeat(indent)}${mark}${line}`);
           }
           for (const nested of xmlKids(item, "list")) walk({ children: [nested] }, depth + 1);
         }

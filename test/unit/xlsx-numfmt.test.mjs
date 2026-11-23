@@ -37,6 +37,27 @@ test("百分比与千分位都照格式写小数位", () => {
   assert.equal(xlsxNumber("48.9", 2, undefined, false), "48.90");
 });
 
+test("格式里的 # 是「有才写」的可选小数位，末尾的 0 收掉、非零留着", () => {
+  // 0.##% 的 0.235 是 23.5%，不是 24%——只数 0 会把它当没有小数位
+  assert.equal(xlsxNumber("0.235", 164, "0.##%", false), "23.5%");
+  // 五位可选位：0.0000123 是 0.00123%
+  assert.equal(xlsxNumber("0.0000123", 164, "0.#####%", false), "0.00123%");
+  // 必写位（0）留着、可选位（#）收掉：0.00# 的 23.5 是 23.50
+  assert.equal(xlsxNumber("0.235", 164, "0.00#%", false), "23.50%");
+  // 纯数字格式同理：0.## 的 48.90 是 48.9、48.95 是 48.95
+  assert.equal(xlsxNumber("48.9", 164, "0.##", false), "48.9");
+  assert.equal(xlsxNumber("48.95", 164, "0.##", false), "48.95");
+});
+
+test("经过时长认得出 [h]、[m]、[s] 三种累计单位，都不绕回 24 小时", () => {
+  // 1.5 天是 36 小时：按总分钟数是 2160 分、按总秒数是 129600 秒
+  assert.equal(xlsxNumber("1.5", 164, "[m]:ss", false), "2160:00");
+  assert.equal(xlsxNumber("1.5", 164, "[s]", false), "129600");
+  // [h] 仍是总小时，带秒的写法照写秒
+  assert.equal(xlsxNumber("1.5", 164, "[h]:mm:ss", false), "36:00:00");
+  assert.equal(xlsxNumber("1.5", 164, "[h]", false), "36");
+});
+
 test("ipynb 的围栏比内容里最长的一串反引号还长", () => {
   const book = {
     metadata: { language_info: { name: "python" } },
