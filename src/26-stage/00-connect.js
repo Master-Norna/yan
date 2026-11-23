@@ -222,10 +222,18 @@ function stageMessage(message) {
     if (params.sessionId === stage.session) stage.session = stage.attached = "";
   } else if (message.sessionId && message.sessionId === stage.session) stagePageEvent(message.method, params);
 }
-// 页签的元数据（题名、地址、所在上下文）变了：只换这几样，nav 那笔留着——它是摊文档时占的代数，不是元数据
-/** @param {{ nav?: number } | undefined} before @param {{ title: string, url: string, browserContextId?: string }} info */
+// 标题更新不影响正在摊的文档；但浏览器真正导航了（包括用户点链接、执事经 MCP 导航），
+// 就得让那份在途抽取失效，不能在新网页载入之后被旧文档页覆盖。
+// 空 URL 是浏览器初始化的过渡态，不当成一次导航；同页锚点跳转也算人已选择新位置。
+/** @param {{ url?: string, nav?: number } | undefined} before @param {{ title: string, url: string, browserContextId?: string }} info */
 function stageTabInfo(before, info) {
-  return { title: info.title, url: info.url, ctx: info.browserContextId, nav: before?.nav };
+  const moved = !!before?.url && !!info.url && before.url !== info.url;
+  return {
+    title: info.title,
+    url: info.url,
+    ctx: info.browserContextId,
+    nav: moved ? (before.nav || 0) + 1 : before?.nav
+  };
 }
 // 列成签的：寻常网页；Edge 的设置页报成 browser_ui，也算（不列它，点「浏览器设置」就像没反应）
 /** @param {{ type: string, url: string }} info */
