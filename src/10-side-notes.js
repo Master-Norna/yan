@@ -554,7 +554,7 @@ async function streamSideReply(conversation, thread, assistant, profile) {
   try {
     const anchorIndex = conversation.messages.findIndex(m => m.id === thread.anchor.messageId);
     const main = anchorIndex >= 0 ? conversation.messages.slice(0, anchorIndex + 1) : conversation.messages;
-    const contextIndex = main.map(m => m.role).lastIndexOf("context");
+    const contextIndex = lastContextIndex(main);
     const source = main
       .slice(contextIndex + 1)
       .filter(m => m.status !== "error" && m.status !== "streaming" && ["user", "assistant"].includes(m.role));

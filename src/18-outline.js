@@ -15,12 +15,12 @@ function contextEstimate(c, draft = "", pending = null, profile = activeProfile(
     n += estimateText(systemPrompt(c, tools));
     if (tools) n += estimateText(JSON.stringify(tools));
   }
-  const contextIndex = c.messages.map(m => m.role).lastIndexOf("context"),
+  const contextIndex = lastContextIndex(c.messages),
     marker = contextIndex >= 0 ? c.messages[contextIndex] : null;
   if (marker?.summary) n += 12 + estimateText(marker.summary);
   const source = c.messages.slice(contextIndex + 1).filter(m => m.status !== "error" && ["user", "assistant"].includes(m.role)),
     // 案上有待发的东西时，下一问就是它；历史里最后一问不再是「最新一问」，它的附件只按摘要算
-    lastUser = pending ? null : source.filter(m => m.role === "user").at(-1),
+    lastUser = pending ? null : source.findLast(m => m.role === "user"),
     // 用户发的图只留最新的一批（见 keptImageQuestion）
     pictured = keptImageQuestion(source, lastUser?.id);
   const filesOf = (files, latest, images = latest) => {
@@ -141,7 +141,7 @@ function renderOutline() {
   if (!rail) return;
   // 压缩过的前文在页上折着，导航条上也不列它们的问；「展开前文」后再列出来
   const c = currentConversation(),
-    foldAt = c && !c.showCompacted ? c.messages.map(m => (m.role === "context" && m.summary ? 1 : 0)).lastIndexOf(1) : -1,
+    foldAt = c && !c.showCompacted ? lastContextIndex(c.messages, { withSummary: true }) : -1,
     users = c && view === "chat" ? c.messages.slice(foldAt + 1).filter(m => m.role === "user" && !m.relay) : [];
   if (users.length < 2) {
     rail.classList.add("hidden");
@@ -164,16 +164,29 @@ function syncOutline() {
     const rail = $("#outline"),
       host = $("#chatScroll");
     if (!rail || rail.classList.contains("hidden") || Date.now() < outlineLockUntil) return;
-    // 「当前所在」取阅读线以上最近的一问：阅读线在视口上部，短问短答挤在一屏时也不会把下一问算成当前
-    const line = host.getBoundingClientRect().top + Math.min(120, host.clientHeight * 0.25);
-    let current = null;
-    for (const item of rail.querySelectorAll(".outline-item")) {
-      const article = host.querySelector(`#messages [data-message="${CSS.escape(item.dataset.target)}"]`);
-      if (article && article.getBoundingClientRect().top <= line) current = item;
-    }
+    const items = rail.querySelectorAll(".outline-item"),
+      height = host.clientHeight;
     // 滚到了底便是最后一问：末一轮短问短答时，它的顶未必越得过阅读线
-    if (host.scrollHeight - host.scrollTop - host.clientHeight < 8) current = [...rail.querySelectorAll(".outline-item")].at(-1);
-    if (!current) current = rail.querySelector(".outline-item");
+    let current = items[items.length - 1];
+    if (host.scrollHeight - host.scrollTop - height >= 8) {
+      // 当帧扫一次消息节点，不逐问查 DOM，也不跨帧留着可能被换掉的节点。重号仍取 DOM 里的第一项。
+      const articles = new Map();
+      for (const article of host.querySelectorAll("#messages [data-message]")) {
+        const id = article.getAttribute("data-message");
+        if (!articles.has(id)) articles.set(id, article);
+      }
+      const line = host.getBoundingClientRect().top + Math.min(120, height * 0.25);
+      current = items[0];
+      // 取导航顺序里最后一个越过阅读线的问；倒着找，命中就停。
+      for (let i = items.length - 1; i >= 0; i--) {
+        const item = items[i],
+          article = articles.get(item.dataset.target);
+        if (article && article.getBoundingClientRect().top <= line) {
+          current = item;
+          break;
+        }
+      }
+    }
     rail.querySelectorAll(".outline-item.active").forEach(item => item !== current && item.classList.remove("active"));
     current?.classList.add("active");
   });

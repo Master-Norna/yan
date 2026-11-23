@@ -93,6 +93,29 @@ check(
   "last question active when scrolled to bottom",
   await evalJs(`[...document.querySelectorAll("#outline .outline-item")].at(-1).classList.contains("active")`)
 );
+// 收窄视口后直接滚到第二问，不走点击导航的强制高亮路径。
+const middle = await evalJs(`(() => {
+  const host = document.querySelector("#chatScroll"), second = document.querySelectorAll("#messages .message.user")[1];
+  const maxHeight = host.style.maxHeight;
+  // 与手动上滚一样先退出跟随，免得缩视口触发 ResizeObserver 又把位置拉回底部。
+  host.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+  host.style.maxHeight = "140px";
+  const line = host.getBoundingClientRect().top + Math.min(120, host.clientHeight * .25);
+  host.scrollTo({ top: host.scrollTop + second.getBoundingClientRect().top - line + 4, behavior: "instant" });
+  return { id: second.dataset.message, maxHeight };
+})()`);
+await waitFor(`document.querySelector("#outline .outline-item.active")?.dataset.target === ${JSON.stringify(middle.id)}`);
+check(
+  "scrolling to a middle question highlights it without a click or bottom override",
+  await evalJs(`(() => {
+    const host = document.querySelector("#chatScroll"), [, second, third] = document.querySelectorAll("#messages .message.user");
+    const line = host.getBoundingClientRect().top + Math.min(120, host.clientHeight * .25);
+    return host.scrollTop > 0 && host.scrollHeight - host.scrollTop - host.clientHeight >= 8 &&
+      second.getBoundingClientRect().top <= line && third.getBoundingClientRect().top > line &&
+      document.querySelector("#outline .outline-item.active")?.dataset.target === second.dataset.message;
+  })()`)
+);
+await evalJs(`document.querySelector("#chatScroll").style.maxHeight = ${JSON.stringify(middle.maxHeight)}; true`);
 const grabber = await evalJs(`(() => {
   const host = document.querySelector("#chatScroll"), rail = document.querySelector("#chatScrollGrabber"), composer = document.querySelector("#composerArea");
   host.scrollTop = 0;
@@ -190,4 +213,22 @@ check(
 );
 await evalJs(`document.querySelector("[data-toggle-compacted]").click(); true`);
 check("folding again hides them", (await evalJs(`document.querySelector("#outline").classList.contains("hidden")`)) === true);
+// 旧版硬切照样截断请求，但不把撮要之后、硬切之前的问从页面或导航藏起来。
+await evalJs(`(() => {
+  const c = __yanState().conversations.find(c => c.messages.some(m => m.role === "context" && m.summary));
+  c.messages.push({ id: "legacy-cut", role: "context", content: "", timestamp: new Date().toISOString() });
+  return true;
+})()`);
+await ask("#chatInput", "BIND 硬切之后", "#chatSend");
+await waitFor(
+  `document.querySelectorAll(".message.assistant").length === 5 && [...document.querySelectorAll(".message.assistant")].at(-1).dataset.status === "complete"`
+);
+const afterCut = await evalJs(`[...document.querySelectorAll(".message.assistant .assistant-block > .markdown")].at(-1).textContent`);
+check("legacy cut sends only the new question and system prompt", /\|n:2$/.test(afterCut.trim()), afterCut);
+check(
+  "legacy cut does not replace the summary as the page and outline folding boundary",
+  await evalJs(`document.querySelectorAll("#messages > .compacted").length === 6 &&
+    document.querySelectorAll("#outline .outline-item").length === 2 &&
+    getComputedStyle(document.querySelector("[data-message=legacy-cut]")).display !== "none"`)
+);
 close();

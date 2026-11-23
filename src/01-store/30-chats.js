@@ -285,8 +285,9 @@ async function writeConversation(id) {
         // 目录里那份比这边上次见过的新（别处写过）：两份并起来，下一轮带着新的时间戳再写
         if (error.status === 409 && error.data?.item && !chatDeletePending(id)) {
           activeChatWrites.delete(id);
-          const merged = catchUpConversation(error.data.item);
-          if (merged && chatJson(merged) === chatBases.get(id)) result = "disk";
+          const caughtUp = catchUpConversation(error.data.item);
+          // 409 跟读会就地重画；仍在重画之后核对这份正文。
+          if (caughtUp && chatJson(caughtUp.next) === chatBases.get(id)) result = "disk";
           continue;
         }
         // 迟到的旧保存撞上了别处的删除：不暂存、不复活，这边也跟着拿掉
@@ -488,15 +489,17 @@ function forgetConversation(id, through) {
     .catch(() => {});
 }
 // 目录里有一份比这边新的（别处写过）。这边手上的已落过盘、之后没再动过，直接换上；
-// 否则（这边改过、正写着、或只暂存在浏览器里）两份并起来再写回去，谁写的都不丢。返回换上的那份；quiet：调用方自己重画
-function catchUpConversation(item, { quiet = false } = {}) {
+// 否则（这边改过、正写着、或只暂存在浏览器里）两份并起来再写回去，谁写的都不丢。
+// 返回换上的那份及是否与磁盘正文一致；quiet：调用方自己重画；localHash：本轮已算过的本地指纹。
+/** @param {{ id: string, conversation: Conversation, savedAt: number }} item @param {{ quiet?: boolean, localHash?: string }} [options] */
+function catchUpConversation(item, { quiet = false, localHash } = {}) {
   const index = store.conversations.findIndex(c => c.id === item.id);
   if (index < 0) return null;
   const c = store.conversations[index],
     theirs = normalizeConversation(item.conversation),
     theirJson = chatJson(theirs),
     stamp = chatStamps.get(c.id) || 0,
-    clean = chatHashes.get(c.id) === hashText(chatJson(c)) && chatDiskStamps.get(c.id) === stamp && !busyHere(c.id),
+    clean = chatHashes.get(c.id) === (localHash ?? hashText(chatJson(c))) && chatDiskStamps.get(c.id) === stamp && !busyHere(c.id),
     base = chatBases.has(c.id) ? JSON.parse(chatBases.get(c.id)) : null,
     next = clean ? theirs : mergeConversation(c, theirs, base);
   carryWarm(c, next);
@@ -504,7 +507,8 @@ function catchUpConversation(item, { quiet = false } = {}) {
   chatDiskStamps.set(c.id, item.savedAt);
   chatBases.set(c.id, theirJson);
   chatStamps.set(c.id, Math.max(stamp, item.savedAt));
-  if (chatJson(next) === theirJson) {
+  const matchesDisk = chatJson(next) === theirJson;
+  if (matchesDisk) {
     chatStamps.set(c.id, item.savedAt);
     chatHashes.set(c.id, hashText(theirJson));
   } else {
@@ -522,7 +526,7 @@ function catchUpConversation(item, { quiet = false } = {}) {
     renderHistory();
     renderClepsydra();
   }
-  return next;
+  return { next, matchesDisk };
 }
 let mergeNoticed = false;
 // 共同起点上没改的字段取对方，只有一边改了的取改动；同一字段都改了时本机胜出。
@@ -645,8 +649,8 @@ function collectChatSpills() {
   for (const conversation of store.conversations) {
     const id = conversation.id;
     if (chatDeletePending(id)) continue;
-    const hash = hashText(chatJson(conversation));
-    if (!pendingChatWrites.has(id) && !activeChatWrites.has(id) && chatHashes.get(id) === hash) continue;
+    // 待写与在途无论指纹是否相同都要暂存；只用指纹兜空闲时漏标脏的改动。
+    if (!pendingChatWrites.has(id) && !activeChatWrites.has(id) && chatHashes.get(id) === hashText(chatJson(conversation))) continue;
     records.push({
       id: chatSpillKey(dir, id),
       savedAt: nextChatStamp(id),
@@ -905,9 +909,9 @@ async function syncChatsWithDisk({ spillsReady = true } = {}) {
         if (diskStamp !== undefined && item.savedAt < diskStamp) return c;
         // 刚读回的暂存版有共同起点时，按起点合并；离页时刻并不是它见过的磁盘版本。
         if (diskStamp === undefined ? item.savedAt > stamp || chatBases.has(c.id) : item.savedAt > diskStamp) {
-          const next = catchUpConversation(item, { quiet: true });
+          const { next, matchesDisk } = catchUpConversation(item, { quiet: true, localHash: hash });
           // 指纹也可能只是暂存版的；只有合并结果已在磁盘上才能清暂存。
-          (chatBases.get(c.id) === chatJson(next) ? settled : push).add(c.id);
+          (matchesDisk ? settled : push).add(c.id);
           changed = true;
           if (c.id === currentId) currentReplaced = true;
           return next;

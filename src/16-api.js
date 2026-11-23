@@ -1,8 +1,9 @@
 // 言 · 接口：用量估算、请求、SSE 读取、错误说明
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 function estimateText(text) {
-  const chinese = (text.match(/[㐀-鿿]/g) || []).length;
-  return chinese + Math.ceil((text.length - chinese) / 4);
+  // 按整段汉字剥离，不为每个汉字在匹配数组里留一项；字区间和 UTF-16 计数不变。
+  const other = text.replace(/[㐀-鿿]+/g, "").length;
+  return text.length - other + Math.ceil(other / 4);
 }
 // 上下文过重的门槛：每一答的用量标注超过它就转为印色提醒
 const CONTEXT_HEAVY = 24000;

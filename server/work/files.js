@@ -8,7 +8,7 @@ const { jsonRoute, requestSignal } = require("../http.js");
 const { fetchPublicResponse, readLimitedBytes } = require("../web.js");
 const sandbox = require("../sandbox.js");
 const { describeFsError, clampNumber, relPath } = require("./paths.js");
-const { decodeText, encodeText, countLines, changeHunks, nearestPassage } = require("./text.js");
+const { decodeText, encodeText, countLines, splitLines, changeHunks, nearestPassage } = require("./text.js");
 const writeTextAtomic = require("./atomic.js");
 // 读一回最多交出多少字
 const WORK_FILE_LIMIT = 200000;
@@ -63,15 +63,12 @@ module.exports = function createFiles(work) {
       // 并排一比成了「什么都没改」（见 text.js 的 changeHunks）
       const same = existed && previousText === content,
         diff = existed && !same ? changeHunks(previousText, content) : null,
-        counts = diff
-          ? { added: diff.added, removed: diff.removed }
-          : existed
-            ? { added: 0, removed: 0 }
-            : { added: countLines(content), removed: 0 };
+        lines = countLines(content),
+        counts = diff ? { added: diff.added, removed: diff.removed } : { added: existed ? 0 : lines, removed: 0 };
       return {
         path: shownPath(workdir, file),
         bytes: output.length,
-        lines: countLines(content),
+        lines,
         existed,
         ...(previous?.length && !prior ? { binary: true } : {}),
         ...(prior?.encoding === "gbk" ? { converted: "gbk" } : {}),
@@ -96,9 +93,7 @@ module.exports = function createFiles(work) {
     });
     const decoded = decodeText(buffer);
     if (!decoded) throw Error("二进制文件，不予读取");
-    // 末尾的一个换行不算多一行，与 write_file 那边的 countLines 同口径：空文件 0 行，"a\nb\n\n" 仍是 3 行（a、b、空行）
-    const source = decoded.text.replace(/\r?\n$/, ""),
-      lines = decoded.text ? source.split(/\r?\n/) : [],
+    const lines = splitLines(decoded.text),
       offset = Math.floor(clampNumber(body.offset, 1, 1, Math.max(1, lines.length))),
       limit = Math.floor(clampNumber(body.limit, 400, 1, 2000));
     const slice = lines.slice(offset - 1, offset - 1 + limit);
