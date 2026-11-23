@@ -165,11 +165,12 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   if (kind === "audio") return listenPageHtml(listenTrackFrom(viewerSource, name, reader));
   if (kind === "video")
     return `<div class="file-viewer-media"><video controls preload="metadata" src="${escapeHtml(reader.url())}" title="${escapeHtml(name)}"></video></div>`;
-  // 扩展名认不出、其实是文字的（Dockerfile、Makefile、.env…）：取开头一段闻一下，是字就照文字看，不给「无法预览」
+  // 扩展名认不出、其实是文字的（Dockerfile、Makefile、.env…）：取开头一段闻一下，是字就照文字看，不给「无法预览」。
+  // 闻中了不在这儿画：落下去走下面那条通用的文字路——这里只读了 64 KB，几百 MB 的日志照它画就少了「仅显示前 20 万字」那句
   if (kind === "none") {
     const head = await reader.text(65536).catch(() => "");
-    if (looksLikeText(head)) return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(head)}</pre></div>`;
-    return `<div class="file-viewer-empty">${t(`此类文件无法在此预览`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;
+    if (!looksLikeText(head))
+      return `<div class="file-viewer-empty">${t(`此类文件无法在此预览`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;
   }
   // 网页放进与页内 ```html 同一个隔离沙箱：不能读本站的存储，也不能联网
   if (kind === "html") {

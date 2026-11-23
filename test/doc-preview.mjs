@@ -110,6 +110,8 @@ writeFileSync(
   })
 );
 writeFileSync(`${ARCHIVE}/模型.bin`, Buffer.from([0, 1, 2, 3]));
+// 认不出扩展名的文字（Dockerfile、Makefile 那类），且长过预览那二十万字：要说一声「只看了开头」，别把开头当全文
+writeFileSync(`${ARCHIVE}/Dockerfile`, `# 构建\n${"RUN echo hello\n".repeat(18000)}`);
 
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
@@ -201,6 +203,20 @@ check(
   await evalJs(
     `!!document.querySelector("#fileViewerStage .file-viewer-empty [data-viewer-open]") && !!document.querySelector("#fileViewerStage [data-viewer-download]")`
   )
+);
+await closeViewer();
+
+// 认不出扩展名、其实是文字的：照文字看，且看的是预览那二十万字、不是只闻味的那 64 KB；到头了要说一声
+await open("Dockerfile");
+const plain = JSON.parse(
+  await evalJs(
+    `(s => JSON.stringify({ code: s.querySelector("pre.file-viewer-code")?.textContent.length || 0, cut: s.textContent.includes("仅显示前 20 万字") }))(document.querySelector("#fileViewerStage"))`
+  )
+);
+check(
+  "an extension-less text file reads as text, well past the sniffing window, and says when it was cut",
+  plain.code > 150000 && plain.cut,
+  JSON.stringify(plain)
 );
 await closeViewer();
 close();

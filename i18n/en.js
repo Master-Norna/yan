@@ -541,6 +541,13 @@ var YAN_EN = {
   "[图片 {0} 预览不了]": "[Image {0} can't be previewed]",
   "工作表 {0}": "Sheet {0}",
   "仅显示前 20 万字": "Showing the first 200,000 characters",
+  // 抽取失败时的那几句：进了附件的说明、预览的空态，英文界面也该看得懂（这几句出自 13-files/30-extract.js）
+  "PDF 抽取库未能载入，原件照发": "The PDF library couldn't load; the original file is sent as is",
+  "PDF 没有文字层（多半是扫描件），原件照发": "This PDF has no text layer (likely a scan); the original file is sent as is",
+  文档压缩结构无效: "The document's archive structure is invalid",
+  "文档 XML 无效": "The document's XML is invalid",
+  "文档内部有一份太大（{0}），本机没能抽出正文": "A part inside the document is too large ({0}); the text couldn't be extracted",
+  "（空表）": "(empty sheet)",
   图片预览: "Image preview",
   原图: "Original size",
   "此视频浏览器放不了，可交本机程序打开": "The browser can't play this video. Open it with a system app",
