@@ -506,7 +506,8 @@ function xlsxNumber(raw, numFmtId, code, date1904) {
   const date = /[yd]/i.test(bare) || (!bare && XLSX_DATE_IDS.has(numFmtId)),
     clock = elapsed || /[hs]/i.test(bare) || (!bare && XLSX_CLOCK_IDS.has(numFmtId));
   if (date || clock) return xlsxTimeText(number, bare, date1904, elapsed, date);
-  if (/#,##|0,0/.test(bare)) return xlsxGroup(number.toFixed(xlsxPlaces(bare)));
+  // 数字格式同样照它写小数位：#,##0 的 12345.6 是 12,346，0.00 的 48.9 是 48.90
+  if (/^[#0,]*\.?0*$/.test(bare) && /[#0]/.test(bare)) return xlsxGroup(number.toFixed(xlsxPlaces(bare)));
   return xlsxGeneral(raw);
 }
 function xlsxMarkdown(entries) {

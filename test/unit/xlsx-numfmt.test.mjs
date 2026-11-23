@@ -32,6 +32,9 @@ test("百分比与千分位都照格式写小数位", () => {
   assert.equal(xlsxNumber("12345.6", 3, undefined, false), "12,346");
   assert.equal(xlsxNumber("12345.6", 4, undefined, false), "12,345.60");
   assert.equal(xlsxNumber("12345.678", 164, "#,##0.0", false), "12,345.7");
+  // 不带千分位的纯数字格式也照小数位写
+  assert.equal(xlsxNumber("48.9", 164, "0.00", false), "48.90");
+  assert.equal(xlsxNumber("48.9", 2, undefined, false), "48.90");
 });
 
 test("ipynb 的围栏比内容里最长的一串反引号还长", () => {
