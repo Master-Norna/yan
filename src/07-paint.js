@@ -625,7 +625,7 @@ function paintHelperTrail(trail, step, animate, seen) {
   if (report)
     parts.push({ key: "report", sig: report, html: () => `<div class="sub-report"></div>`, paint: el => paintMarkdown(el, report) });
   // 交了差（或断了）的一趟，末尾同主答一排：复制回报、这一趟耗的墨；做着时不露，同主答。
-  // 断着的照主答断了的样子先落一句，那一排是续写（设计稿/97）——人多半是点开面板看它断在哪，看完就地续上
+  // 断着的照主答断了的样子先落一句，那一排是续写——人多半是点开面板看它断在哪，看完就地续上
   if (sub && !live) {
     const interrupted = status === "interrupted",
       why = interrupted ? tr(stepText(step.result) || "").replace(/[。.\s]+$/, "") : "",
