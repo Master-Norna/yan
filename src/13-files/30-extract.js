@@ -414,6 +414,59 @@ function pptxNotes(notesXml) {
     )
     .filter(Boolean);
 }
+// 非阿拉伯式自动编号不能直接写成 Markdown 的 a. / iv.：marked 不认它们是列表。
+// 遇到这些编号时，仅把那一组要点写成安全的 HTML ol/ul；数字列表仍沿用原来的 Markdown 路。
+// ol 的 type/start 由浏览器负责显示 c.、IV. 等标记，不丢层级，也不自己拼一串容易出错的罗马数字。
+function pptxSpecialLists(lines) {
+  const roots = [],
+    parents = [];
+  for (const line of lines) {
+    let depth = Math.max(0, Math.min(line.depth, parents.length));
+    if (depth && !parents[depth - 1]) depth = 0;
+    const item = { ...line, children: [] };
+    if (depth) parents[depth - 1].children.push(item);
+    else roots.push(item);
+    parents.length = depth;
+    parents[depth] = item;
+  }
+  const typeOf = line => {
+    if (!line.ordered) return "ul";
+    const code = String(line.numberType || "");
+    if (/^alphaLc/.test(code)) return "a";
+    if (/^alphaUc/.test(code)) return "A";
+    if (/^romanLc/.test(code)) return "i";
+    if (/^romanUc/.test(code)) return "I";
+    return "1";
+  };
+  const render = items => {
+    let out = "",
+      group = [],
+      current = "";
+    const flush = () => {
+      if (!group.length) return;
+      const ordered = current !== "ul",
+        start = group[0].startAt || 1;
+      out += `<${ordered ? "ol" : "ul"}${ordered ? ` type="${current}" start="${start}"` : ""}>${group
+        .map(item => `<li>${escapeHtml(item.text)}${render(item.children)}</li>`)
+        .join("")}</${ordered ? "ol" : "ul"}>`;
+      group = [];
+    };
+    for (const item of items) {
+      if (item.plain) {
+        flush();
+        out += `<p>${escapeHtml(item.text)}</p>`;
+        continue;
+      }
+      const type = typeOf(item);
+      if (group.length && (type !== current || (item.startSpecified && item.startAt !== 1))) flush();
+      current = type;
+      group.push(item);
+    }
+    flush();
+    return out;
+  };
+  return render(roots);
+}
 // pptx：一页一节「## 第 n 页 · 标题」，其余文字按层级列成要点，页上的表格照表格、图片照图片，讲话者备注缀在节末
 function pptxMarkdown(slides) {
   return slides
@@ -438,14 +491,18 @@ function pptxMarkdown(slides) {
               depth: Number(pPr?.getAttribute("lvl")) || 0,
               // 页码与层级之外，PowerPoint 把「这一条是否自动编号」也写在 pPr 里：buAutoNum 是有序、buNone 是不要记号
               ordered: !!auto,
+              numberType: auto?.getAttribute("type") || "",
               // startAt 是「这一步从第几号起」（接着上一页往下数的流程常见），不写就是 1
               startAt: Number(auto?.getAttribute("startAt")) || 1,
+              startSpecified: auto?.hasAttribute("startAt") || false,
               plain: !!pPr && !!xmlKids(pPr, "buNone")[0]
             };
           })
           .filter(line => line.text);
         if (/title/i.test(kind) && !title) title = lines.map(line => line.text).join(" ");
-        else {
+        else if (lines.some(line => /^(?:alpha|roman)(?:Lc|Uc)/.test(line.numberType))) {
+          points.push(pptxSpecialLists(lines));
+        } else {
           // 自动编号的序号由 PowerPoint 运行时数，XML 里不存，得自己按层级数
           const counts = new Map(),
             seen = [];
@@ -738,7 +795,7 @@ function odfMarkdown(contentXml) {
     if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href)) return "";
     return mdImage(xmlKids(frame, "desc")[0]?.textContent || xmlKids(frame, "title")[0]?.textContent, archiveRelative("", href));
   };
-  const walk = (node, depth = 0) => {
+  const walk = (node, depth = 0, inheritedListStyle = "") => {
     for (const child of node.children) {
       const name = child.localName;
       if (name === "h") out.push(`${"#".repeat(Math.min(6, Number(child.getAttribute("text:outline-level")) || 1))} ${text(child)}`);
@@ -748,7 +805,10 @@ function odfMarkdown(contentXml) {
       } else if (name === "frame" && xmlKids(child, "image").length) out.push(picture(child));
       else if (name === "list") {
         // ODF 的编号每个 text:list 各数各的；层级按嵌套深度对到 list-level 的 text:level
-        const levels = listStyles.get(child.getAttribute("text:style-name")),
+        // ODF 允许内层 text:list 省略 text:style-name：此时沿用外层列表的样式，
+        // 而不是把有序的第二层错误退回项目符号。
+        const styleName = child.getAttribute("text:style-name") || inheritedListStyle,
+          levels = listStyles.get(styleName),
           level = levels?.get(depth + 1),
           counts = new Map();
         for (const item of xmlKids(child, "list-item")) {
@@ -764,7 +824,7 @@ function odfMarkdown(contentXml) {
             seen[depth] = mark.length;
             out.push(`${" ".repeat(indent)}${mark}${line}`);
           }
-          for (const nested of xmlKids(item, "list")) walk({ children: [nested] }, depth + 1);
+          for (const nested of xmlKids(item, "list")) walk({ children: [nested] }, depth + 1, styleName);
         }
       } else if (name === "table") {
         const rows = [];
@@ -786,8 +846,8 @@ function odfMarkdown(contentXml) {
         out.push(
           t`## 第 ${pages} 页${child.getAttribute("draw:name") && !/^page\d+$/i.test(child.getAttribute("draw:name")) ? ` · ${child.getAttribute("draw:name")}` : ""}`
         );
-        walk(child, depth);
-      } else walk(child, depth);
+        walk(child, depth, inheritedListStyle);
+      } else walk(child, depth, inheritedListStyle);
     }
   };
   const body = xmlDeep(parseXml(contentXml), "body")[0];
