@@ -114,6 +114,8 @@ writeFileSync(
     "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${shape("title", [["小结"]])}${shape("", [["推导闭式解"]])}<p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
     // 第三页是有序的步骤：第一条从第 5 步起（接着上一页数），第二条降一层
     "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+    // 字母和罗马数字：不是十进制列表，Markdown 原生不能表达其 marker，渲染时改用 ol[type]。
+    "ppt/slides/slide4.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["编号类型"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:t>第三项</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod"/></a:pPr><a:r><a:t>第四项</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="romanUcPeriod" startAt="4"/></a:pPr><a:r><a:t>子步骤四</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="romanLcPeriod" startAt="2"/></a:pPr><a:r><a:t>罗马二</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaUcPeriod"/></a:pPr><a:r><a:t>大写甲</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
     "ppt/slides/_rels/slide1.xml.rels": rels({ rId5: ["notesSlide", "../notesSlides/notesSlide1.xml"] }),
     // 备注那份里除了讲话者的话，还有页码与整页缩略图两个占位符，都不该混进正文
     "ppt/notesSlides/notesSlide1.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [["讲慢一些，这里停一下"], ["先给直觉，再给公式"]])}${shape("sldNum", [["12"]])}</p:spTree></p:cSld></p:notes>`,
@@ -158,7 +160,7 @@ writeFileSync(
 writeFileSync(
   `${ARCHIVE}/说明.odt`,
   zip({
-    "content.xml": `<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><office:automatic-styles><text:list-style style:name="L1"><text:list-level-style-number text:level="1" style:num-format="1"/><text:list-level-style-number text:level="2" style:num-format="1"/></text:list-style><text:list-style style:name="L2"><text:list-level-style-bullet text:level="1"/></text:list-style></office:automatic-styles><office:body><office:text><text:h text:outline-level="1">步骤</text:h><text:list text:style-name="L1"><text:list-item><text:p>先归一化</text:p><text:list text:style-name="L1"><text:list-item><text:p>细项</text:p></text:list-item></text:list></text:list-item><text:list-item><text:p>再拟合</text:p></text:list-item></text:list><text:list text:style-name="L2"><text:list-item><text:p>附注一</text:p></text:list-item></text:list></office:text></office:body></office:document-content>`
+    "content.xml": `<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><office:automatic-styles><text:list-style style:name="L1"><text:list-level-style-number text:level="1" style:num-format="1"/><text:list-level-style-number text:level="2" style:num-format="1"/></text:list-style><text:list-style style:name="L2"><text:list-level-style-bullet text:level="1"/></text:list-style></office:automatic-styles><office:body><office:text><text:h text:outline-level="1">步骤</text:h><text:list text:style-name="L1"><text:list-item><text:p>先归一化</text:p><text:list><text:list-item><text:p>细项</text:p></text:list-item></text:list></text:list-item><text:list-item><text:p>再拟合</text:p></text:list-item></text:list><text:list text:style-name="L2"><text:list-item><text:p>附注一</text:p></text:list-item></text:list></office:text></office:body></office:document-content>`
   })
 );
 writeFileSync(`${ARCHIVE}/模型.bin`, Buffer.from([0, 1, 2, 3]));
@@ -269,7 +271,7 @@ const slides = JSON.parse(
 check(
   "pptx: one card per slide, titled, points by level, pictures drawn",
   slides.join("#") ===
-    "第 1 页 · 线性回归|从最小二乘说起/几何直观#第 2 页 · 小结|推导闭式解|拟合直线:data:image/png#第 3 页 · 步骤|先归一化/补充/再拟合",
+    "第 1 页 · 线性回归|从最小二乘说起/几何直观#第 2 页 · 小结|推导闭式解|拟合直线:data:image/png#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲",
   JSON.stringify(slides)
 );
 check(
@@ -296,6 +298,16 @@ check(
   said.join("#") === "讲慢一些，这里停一下/先给直觉，再给公式##",
   JSON.stringify(said)
 );
+check(
+  "pptx 的字母/罗马数字编号保留类型与起始数，嵌套列表仍嵌在前一项下",
+  await evalJs(`(s => { const last = [...s.querySelectorAll(".viewer-slide")].at(-1);
+    const alpha = last.querySelector('ol[type="a"][start="3"]');
+    return !!alpha && alpha.querySelectorAll(':scope > li').length === 2 &&
+      !!alpha.querySelector('ol[type="I"][start="4"] > li') &&
+      !!last.querySelector('ol[type="i"][start="2"] > li') &&
+      !!last.querySelector('ol[type="A"] > li');
+  })(document.querySelector("#fileViewerStage"))`)
+);
 await closeViewer();
 
 await open("说明.odt");
@@ -309,7 +321,7 @@ check(
   odt.h1 === "步骤" && odt.ordered.join() === "先归一化,再拟合" && odt.bullet.join() === "附注一",
   JSON.stringify(odt)
 );
-check("odt 的下一层也真成一层（缩进与记号宽度对得上）", odt.nested.join() === "细项", JSON.stringify(odt));
+check("odt 的下一层不写 text:style-name 时继承外层编号样式，且缩进后真成为子列表", odt.nested.join() === "细项", JSON.stringify(odt));
 await closeViewer();
 
 await open("分析.ipynb");
