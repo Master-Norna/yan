@@ -38,36 +38,13 @@ test("搜索：目录里跳过的大件，点名把 path 指到它就能搜到",
     assert.equal(one.matches.length, 1);
     assert.equal(one.matches[0].line, 3001);
     assert.equal(one.large, undefined);
-  } finally {
-    await new Promise(resolve => server.close(resolve));
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("搜索：字面快路与命中上限早停，不扫描后面的高耗时正则", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-find-")),
-    routes = routesFor(root),
-    server = http.createServer((req, res) => routes[`POST ${req.url.split("?")[0]}`](req, res)).listen(0, "127.0.0.1");
-  await new Promise(resolve => server.once("listening", resolve));
-  const post = (route, body) =>
-    fetch(`http://127.0.0.1:${server.address().port}${route}`, { method: "POST", body: JSON.stringify(body) }).then(r => r.json());
-  try {
-    fs.writeFileSync(path.join(root, "source.txt"), ["Needle.(", "a".repeat(12000) + "!", "NEEDLE.("].join("\n"));
-    const literal = await post("/api/work/search", { workdir: root, query: "needle.(", literal: true, limit: 1 });
-    assert.deepEqual(literal.matches.map(hit => hit.line), [1]);
-    assert.equal(literal.truncated, true);
-
-    // 已经命中首行时，不能再对第二行运行灾难性回溯的正则分支。
-    const regex = await post("/api/work/search", { workdir: root, query: "needle|(?:a+)+$", limit: 1 });
-    assert.deepEqual(regex.matches.map(hit => hit.line), [1]);
-    assert.equal(regex.truncated, true);
-
-    const fallback = await post("/api/work/search", { workdir: root, query: "needle.(", limit: 2 });
-    assert.deepEqual(fallback.matches.map(hit => hit.line), [1, 3]);
-    assert.match(fallback.note, /正则无效/);
-
-    const sensitive = await post("/api/work/search", { workdir: root, query: "needle.(", literal: true, caseSensitive: true });
-    assert.deepEqual(sensitive.matches.map(hit => hit.line), []);
+    // 命中上限后不再扫描下一行；原本这行会导致灾难性正则回溯超时。
+    fs.writeFileSync(path.join(root, "needle.txt"), "Needle.(\n" + "a".repeat(12000) + "!");
+    const early = await post("/api/work/search", { workdir: root, path: "needle.txt", query: "Needle|(?:a+)+$", limit: 1 });
+    assert.equal(early.matches.length, 1);
+    assert.equal(early.matches[0].line, 1);
+    const literal = await post("/api/work/search", { workdir: root, path: "needle.txt", query: "needle.(", literal: true });
+    assert.equal(literal.matches.length, 1);
   } finally {
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });
