@@ -134,14 +134,21 @@ function stageGo(raw) {
   if (stageDocName(url)) return void stageShowDoc(url);
   stageNavigate(url);
 }
+// 页签上记一笔：这一页开到第几处了。摊文档要几秒，晚到的落页拿它比，对不上就作罢（见 stageShowDoc）
+/** @param {string} tab @returns {number} 记下的这一笔 */
+function stageNavMark(tab) {
+  const one = stage.tabs.get(tab);
+  if (!one) return 0;
+  one.nav = (one.nav || 0) + 1;
+  return one.nav;
+}
 // 把游目开到那个地址。from 是发起时的那一页（摊文档用）：取件、抽取、落页要几秒，这期间人可能已切到别的页签——
 // 那就仍开在发起的那一页上，不把眼下这一页拽走
 /** @param {string} url @param {{ tab: string, session: string } | null} [from] */
 function stageNavigate(url, from = null) {
   stage.goAt = Date.now();
-  // 这一页上又开了别的：先前的代数作废（见 stageShowDoc）
-  const one = stage.tabs.get(from ? from.tab : stage.current);
-  if (one) one.nav = (one.nav || 0) + 1;
+  // 这一页上又开了别的：先前那几笔作废
+  stageNavMark(from ? from.tab : stage.current);
   // 指定了发起那一页、它却已关掉：新开一页去，别往一个没了的会话语上发
   const session = from ? (stage.tabs.has(from.tab) ? from.session : "") : stage.session;
   // 一页都没开着：新开一页去
@@ -168,9 +175,10 @@ async function stageShowDoc(url) {
   const name = stageDocName(url);
   // 抽不出正文的（旧版 Office、压缩包）：直接交本机程序，不必先取一趟
   if (!name) return void stageOpenInApp(url);
-  // 记下发起时那一页与它的代数：落页时这一页上若已又开了别的（或这一页已关掉），这一份就作罢，别把页拽回来
+  // 记下发起时那一页、先占一码：落页时这一页上若已又开了别的（或这一页已关掉），这一份就作罢，别把页拽回来。
+  // 先后开了两件时后开的那件说了算——它占的码更新
   const from = { tab: stage.current, session: stage.session },
-    rev = stage.tabs.get(from.tab)?.nav || 0;
+    rev = stageNavMark(from.tab);
   toast(t`正在摊开「${name}」…`);
   try {
     const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),
