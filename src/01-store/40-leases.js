@@ -139,7 +139,8 @@ async function followConversations(ids, released, finishRelease = _id => true) {
         ),
     data = await bridge("/api/chats/load", query, AbortSignal.timeout(20000));
   if (bootstrap.store !== scope || chatsDir() !== root || !Array.isArray(data?.items)) return;
-  let current = false;
+  let accepted = false,
+    current = false;
   for (const item of data.items) {
     if (
       !store.conversations.some(c => c.id === item.id) ||
@@ -148,6 +149,7 @@ async function followConversations(ids, released, finishRelease = _id => true) {
     )
       continue;
     catchUpConversation(item, { quiet: true });
+    accepted = true;
     if (item.id === currentId) current = true;
   }
   for (const id of released) {
@@ -161,7 +163,8 @@ async function followConversations(ids, released, finishRelease = _id => true) {
     }
   }
   renderHistory();
-  renderClepsydra();
+  // 在途跟读没有接纳新版时，不随心跳重画漏壶；有松手待处理仍照常刷新。
+  if (accepted || released.length) renderClepsydra();
   if (current && view === "chat") renderConversation(false);
   // 别处松了手（写完、关页、崩了）：刚接手过来的这些对话里还记着「在等」的后台指令由这边重新等上，
   // 结束时会叫醒、寄回报。只在开页时挂一次的话，多页接手后长任务做完就没人叫醒了（见 rewatchBackground）
