@@ -15,7 +15,7 @@ for (const route of ["write", "edit", "intent"])
     fs.mkdirSync(parent, { recursive: true });
     const root = fs.mkdtempSync(path.join(parent, "cancel-write-"));
     assert.equal(path.dirname(root), parent);
-    const file = path.join(root, route === "intent" ? ".yan/意.json" : "a.txt");
+    const file = path.join(root, route === "intent" ? ".yan/图.json" : "a.txt");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const original = route === "intent" ? '{"nodes":{},"log":[]}' : "BEFORE";
     fs.writeFileSync(file, original);

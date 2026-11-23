@@ -1,5 +1,5 @@
 // 右下角的上下文计数与自动压缩的门槛共用一个估算：它得跟真正送出去的那份一致。
-// 一答开工时把目录记忆与意接在这一问的末条 user 消息之后（见 14-chat-engine/20-stream.js 的 buildHead），
+// 一答开工时把目录记忆与图接在这一问的末条 user 消息之后（见 14-chat-engine/20-stream.js 的 buildHead），
 // 估的时候漏掉它们，读数就偏小、压前文也就压晚一拍。
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +44,7 @@ test("目录记忆算在下一问的估算里，算的正是真附上去的那�
   assert.equal(f.contextEstimate(c, "", null, profile) - before, f.estimateText(shown.text));
 });
 
-test("意算在下一问的估算里", () => {
+test("图算在下一问的估算里", () => {
   const f = fixture(),
     c = conversation(),
     intent = f.applyIntentOps(
@@ -55,7 +55,7 @@ test("意算在下一问的估算里", () => {
     before = f.contextEstimate(c, "", null, profile);
   f.intents.set("c", { intent, now: {} });
   const note = f.intentNote(c);
-  assert.ok(note.trim(), "有意时这一问确实要附一段");
+  assert.ok(note.trim(), "有图时这一问确实要附一段");
   assert.equal(f.contextEstimate(c, "", null, profile) - before, f.estimateText(note));
 });
 

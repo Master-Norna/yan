@@ -1,5 +1,5 @@
 // 言 · 桥接的执事接口：工作目录、各接口共用的落点与沙箱筛查、指令与后台指令、目录选择对话框；
-// 文件读写见 files.js，列与搜见 find.js，意与指纹见 intent.js，卷宗目录见 archive.js
+// 文件读写见 files.js，列与搜见 find.js，图与指纹见 intent.js，卷宗目录见 archive.js
 // 由 server.js 装配：require("./server/work/index.js")({ archiveHome, workHome, toolEnv })
 "use strict";
 const { sendJson, readJson, jsonRoute, requestSignal, stamp, errorText } = require("../http.js");
@@ -228,7 +228,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
     }
     return { why: sandbox.screenCommand(command, workdir) };
   }, failed);
-  // 文件、列与搜、意各一段，共用上面的落点、沙箱筛查与报错写法
+  // 文件、列与搜、图各一段，共用上面的落点、沙箱筛查与报错写法
   const work = { failed, resolveWorkdir, targetOf, missingHint, shownPath, strictBox, lockFile, storeRoot };
 
   return {

@@ -1288,16 +1288,16 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
-      // 收尾前对照意：递来的那句话原样回显，就此收尾（只拦一回，回显之后不该再来）
+      // 收尾前对照结论图：递来的那句话原样回显，就此收尾（只拦一回，回显之后不该再来）
       // HOOK2 被拦下后要接着改，由下面 HOOK 那一段接
       if (
         typeof lastUser === "string" &&
-        lastUser.startsWith("［收尾前对照意］") &&
-        !/HOOK2/.test(String(msgs.findLast(m => m.role === "user" && !String(m.content).startsWith("［收尾前对照意］"))?.content))
+        lastUser.startsWith("［收尾前对照结论图］") &&
+        !/HOOK2/.test(String(msgs.findLast(m => m.role === "user" && !String(m.content).startsWith("［收尾前对照结论图］"))?.content))
       )
         return sse(res, [delta({ content: `GATE|${lastUser}` }), delta({}, { usage: { total_tokens: 5 } })]);
       // INTENTC：两项同依托 api/user.js，标成立后改它、再标成立、再改……第三回改完该说相持；末轮回显各工具结果。
-      // 须排在 INTENTA、INTENTB 前：同一目录的意里记着它们的原话，随这一问附着
+      // 须排在 INTENTA、INTENTB 前：同一目录的图里记着它们的原话，随这一问附着
       if (typeof lastUser === "string" && lastUser.includes("INTENTC")) {
         const n = toolResults.length,
           call = (index, name, args) => ({
@@ -1335,21 +1335,22 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
-      // INTENTB：第二问，把这一问附着的整段（意在其中）回显；须先认它——它附着的意里有第一问的原话 INTENTA
+      // INTENTB：第二问，把这一问附着的整段（图在其中）回显；须先认它——它附着的图里有第一问的原话 INTENTA
       if (typeof lastUser === "string" && lastUser.includes("INTENTB"))
         return sse(res, [delta({ content: `INTENTB|${lastUser}` }), delta({}, { usage: { total_tokens: 5 } })]);
-      // INTENTA：立意（一根一前提，前提依托 src/a.js）并写出那个文件；第二轮标前提成立、再改根的说法；第三轮回显各结果
-      // 意里的守（见 test/intent-hook.mjs）：HOOK1 立一项目标、一条守（挂 test:）并把守标成立；HOOK2 把 a.txt 改坏后想收尾，
+      // INTENTA：立图（一根一前提，前提依托 src/a.js）并写出那个文件；第二轮标前提成立、再改根的说法；第三轮回显各结果
+      // 图里的守（见 test/intent-hook.mjs）：HOOK1 立一项目标、一条守（挂 test:）并把守标成立；HOOK2 把 a.txt 改坏后想收尾，
       // 收尾前对照拦下就改回（覆写已有文件得先读过）；HOOK3 只改一个无关的文件，不该被拦。轮次按这一问之后的工具结果数
-      // 认哪一问：跳过收尾对照递来的话；问里附的意带着 HOOK1 的原问，所以后来的问先认
+      // 认哪一问：跳过收尾对照递来的话；问里附的图带着 HOOK1 的原问，所以后来的问先认
       const hookAt = msgs.findLastIndex(
-        m => m.role === "user" && typeof m.content === "string" && /HOOK[1-6]/.test(m.content) && !m.content.startsWith("［收尾前对照意］")
+        m =>
+          m.role === "user" && typeof m.content === "string" && /HOOK[1-6]/.test(m.content) && !m.content.startsWith("［收尾前对照结论图］")
       );
-      if (hookAt >= 0 && (/HOOK[1-6]/.test(String(lastUser)) || String(lastUser).includes("［收尾前对照意］"))) {
+      if (hookAt >= 0 && (/HOOK[1-6]/.test(String(lastUser)) || String(lastUser).includes("［收尾前对照结论图］"))) {
         const ask = msgs[hookAt].content,
           after = msgs.slice(hookAt + 1),
           n = after.filter(m => m.role === "tool").length,
-          gate = after.find(m => m.role === "user" && String(m.content).includes("［收尾前对照意］")),
+          gate = after.find(m => m.role === "user" && String(m.content).includes("［收尾前对照结论图］")),
           call = (name, args) =>
             sse(res, [
               delta({

@@ -341,7 +341,7 @@ function closeFileViewer(stop = false) {
   returnFocus(target);
 }
 // 不是一件文件、而是现成的一段内容（如一件文件在这一答里的改动）也摊在这层浮层里看：没有可下载的，下载键收起
-/** 顶栏那一枚印：预览一律「览」，意的卡片换它自己的石青「意」（全页仍只一枚印） @param {string} [glyph] */
+/** 顶栏那一枚印：预览一律「览」，图的卡片换它自己的石青「图」（全页仍只一枚印） @param {string} [glyph] */
 function setViewerSeal(glyph = t("览")) {
   const seal = $("#fileViewer .file-viewer-head > .seal");
   if (seal) seal.textContent = seal.dataset.seal = glyph;

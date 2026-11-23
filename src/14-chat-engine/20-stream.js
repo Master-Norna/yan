@@ -70,7 +70,7 @@ async function streamReply(conversation, assistant, profile, { resume = false } 
       head.push(...(await historyForApi(source, lastUserId, budget)));
       // 这一问的首段往后各问里一字不差，标作缓存点：下一问时连它在内的整段历史都从缓存读（桥接只给 Claude 留着这个标，别家去掉）。
       // 目录记忆只附在这一问（之前的问不带，免得一份目录记忆背上几十遍），所以接在后面另起一段——冠在开头，这一问每问都变，缓存只接得到上一答之前。
-      // 意也一样（见 19-intent/10-store.js）
+      // 图也一样（见 19-intent/10-store.js）
       const ask = head.findLast(entry => entry.role === "user"),
         ledger = ledgerNote(conversation, "main", profile),
         intent = intentNote(conversation);

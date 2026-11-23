@@ -37,7 +37,7 @@
     transform: none;
   }
 }
-/* 开层：盖上一层（设置、确认、文件预览与 diff、意、差遣、看图）一律「纸落案上」——底淡出来，纸从下方起来停定；
+/* 开层：盖上一层（设置、确认、文件预览与 diff、图、差遣、看图）一律「纸落案上」——底淡出来，纸从下方起来停定；
    关时纸沉下、底淡掉（.leaving，见 hideWithFade）。右侧的旁注、游目是纸从右边进来。
    落选（设计稿/93）：各自淡入（现状，看不出是一层纸）；从点的那一处长出、关时收回（起点会随生成滚走或被重画，找不到时要另退一路，两套不如一套） */
 @keyframes layIn {
@@ -175,7 +175,7 @@
   animation: none !important;
 }
 /* 展开与收起一律同一种：高度从零滑开、内容淡入，曲线与时长同思绪、行迹（setProcessDetails）。
-   思绪、行迹、出处由脚本动（流式里自动开合要能半途掉头），这里不叠第二层；不是 details 的（侧栏的组、意的簿录）走 morphHeight */
+   思绪、行迹、出处由脚本动（流式里自动开合要能半途掉头），这里不叠第二层；不是 details 的（侧栏的组、图的簿录）走 morphHeight */
 @supports selector(details::details-content) {
   details {
     interpolate-size: allow-keywords;

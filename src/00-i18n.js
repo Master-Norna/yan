@@ -43,7 +43,7 @@ function tr(text, loose = false) {
     .map(key => ({
       re: new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\{(\d+)\\\}/g, (_, i) => `(?<g${i}>[\\s\\S]*?)`)}$`),
       en: I18N[key],
-      // 引号里的名字、关键词是数据，不是待翻译的状态；意的节点名也是如此。
+      // 引号里的名字、关键词是数据，不是待翻译的状态；图的节点名也是如此。
       literal: new Set([...Array.from(key.matchAll(/「\{(\d+)\}」/g), m => m[1]), ...(key === "已立 {0} / {1} · {2}" ? ["2"] : [])]),
       count: /^\{0\}\s*(?:问|秒|件|字|步|条|轮|行|项|处|段|页|类|夹|分|小时|天)(?=\{|\s|$)/.test(key),
       han: (key.replace(/\{\d+\}/g, "").match(/[一-鿿]/g) || []).length

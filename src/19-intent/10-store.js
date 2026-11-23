@@ -1,8 +1,8 @@
-// 言 · 意 · 读写与附着。每一答开工时读一回，连同已成立、已假定各项凭据此刻的指纹（取法见 05-anchors.js），附在这一问之后——与目录记忆同一个位置、同一个道理
-// （见 15-tools/21-files.js 的 ledgerNote）：附在问上而不进系统提示，意改了也不冲掉前面的缓存；这一答里再改，改完的那份由工具结果交回。
+// 言 · 图 · 读写与附着。每一答开工时读一回，连同已成立、已假定各项凭据此刻的指纹（取法见 05-anchors.js），附在这一问之后——与目录记忆同一个位置、同一个道理
+// （见 15-tools/21-files.js 的 ledgerNote）：附在问上而不进系统提示，图改了也不冲掉前面的缓存；这一答里再改，改完的那份由工具结果交回。
 // 写只经桥接（/api/work/intent），带上读到的版本：别处刚写过就照新的那份重算再写
-const INTENT_FILE = ".yan/意.json";
-/** @type {Map<string, { intent: Intent, now: IntentPrints, closed?: Set<string> }>} 按对话：这一答开工时读到的意与指纹、那时已了结的 */
+const INTENT_FILE = ".yan/图.json";
+/** @type {Map<string, { intent: Intent, now: IntentPrints, closed?: Set<string> }>} 按对话：这一答开工时读到的图与指纹、那时已了结的 */
 const intents = new Map();
 /** 这一答眼里了结的：开工时已了结、此刻也还了结的。这一答才立住的留到它收尾：标完成立还要拿原问对照、进度也不至于一下归零 @param {Conversation} conversation @param {Intent} intent */
 const answerClosed = (conversation, intent) => intentClosed(intent, intents.get(conversation.id)?.closed);
@@ -62,10 +62,10 @@ async function intentRound(conversation, watch, signal) {
   for (const id of fresh) watch.bounces.set(id, (watch.bounces.get(id) || 0) + 1);
   return intentRoundText(held.intent, held.now, fresh, watch.bounces);
 }
-// 收尾前对照：这一答动过意（改过它，或它所挂的凭据在这一答里变过），模型说完要收尾时拦一次——只一次，拦完即放。
+// 收尾前对照：这一答动过图（改过它，或它所挂的凭据在这一答里变过），模型说完要收尾时拦一次——只一次，拦完即放。
 // 守（一直要守的条件，见 00-core.js）写不出触发条件的，挂的探针、测试作答途中不跑：这一答动过手，收尾前先重取一回，有条因此转待复核也算动过。
 // 没变就照常收尾，不多费一轮；因守而拦的那一步右侧写出事的那几条与事由（设计稿/80 行迹乙）。写了触发条件的走钩子（见 keepHook），收尾时不再跑。
-// 摆出此刻的意（重读一回，探针也跑）、这一答里转待复核过的、改了而无凭据罩着的文件，请它对照各根的原话自己判：能收就收，未尽的接着做。
+// 摆出此刻的图（重读一回，探针也跑）、这一答里转待复核过的、改了而无凭据罩着的文件，请它对照各根的原话自己判：能收就收，未尽的接着做。
 // 不替它验、不复验、不再拦：要不要派帮手核对由它定。递的话记作行迹里的一步，往后重装这一答照原处插回（replay）
 const INTENT_UNOWNED_SHOWN = 8;
 /** @param {Message} assistant 这一答改过的文件（帮手改的也算） */
@@ -105,7 +105,7 @@ async function intentGate(conversation, assistant, watch, signal) {
       ...rechecked?.prints
     };
   keepIntent(conversation, intent, now);
-  // 已动过意时走上面的整体验证，也要据最终指纹记下守的失败；先重查过的那几条不重复算一回。
+  // 已动过图时走上面的整体验证，也要据最终指纹记下守的失败；先重查过的那几条不重复算一回。
   const broken = intentKeeps(intent, closed).filter(id => intentState(intent, id, now) === "stale");
   for (const id of broken)
     if (!watch.stale.has(id) && !rechecked?.fresh.includes(id)) watch.bounces.set(id, (watch.bounces.get(id) || 0) + 1);
@@ -131,7 +131,7 @@ async function intentGate(conversation, assistant, watch, signal) {
     arguments: "{}",
     status: "done",
     // 存中文原文，画出来时照语言换
-    title: "收尾前对照意",
+    title: "收尾前对照结论图",
     result: broken.length ? `${broken.join("、")} · ${keepWhy(intent, now, broken)}` : `已立 ${standing} / ${live}`,
     ...(broken.length ? { keep: true } : {}),
     at: String(assistant.content || "").length,
@@ -177,7 +177,7 @@ function keepAnchors(intent, closed) {
 }
 // 守的钩子：写了 on 的守，有副作用的一步（指令、写文件、调接口……帮手做的也算）对得上它，动手前（请示之前）先跑它挂的测试，
 // 将要做的经环境变量交给测试：YAN_TOOL 是工具名，YAN_TARGET 是指令原文、路径或网址（别的工具即整份参数）。不过即不做这一步，测试的输出作这一步的结果回给模型。
-// 跟探针一样随档位：问而后行里只自动跑明确只读的，别的不跑——那一步本就要人批。跑不成的这回不拦。改意不过钩子：写宽了的 on 不能连撤它的那一步也拦下。
+// 跟探针一样随档位：问而后行里只自动跑明确只读的，别的不跑——那一步本就要人批。跑不成的这回不拦。改图不过钩子：写宽了的 on 不能连撤它的那一步也拦下。
 // 没挂测试的即禁令，对上就不做；标了 ask 的是关口：测试过了（或没挂）还要请用户批，不论档位——径行也问，批了这一步不再另问。
 // 对上的几条先过禁令、再跑测试，都过了才请人批：批完又被另一条的测试拦下，那回准许就白费了，改好重来还得再批一回
 /** @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx @returns {Promise<ToolOutcome|null>} 拦下即交回这一步的结果 */
@@ -261,19 +261,19 @@ function keepWhy(intent, now, ids) {
   const failed = ids.some(id => intent.nodes[id]?.anchors.some(key => anchorParts(key)[0] === "test" && now[key] === "不过"));
   return failed ? "测试不过" : "凭据已变";
 }
-/** 这一答里改过意：记下改完的那份，往后几轮据它比（作答途中压了前文要重装时，附的也是它）；题下与书眉跟着换 @param {Conversation} conversation @param {Intent} intent @param {IntentPrints} now */
+/** 这一答里改过图：记下改完的那份，往后几轮据它比（作答途中压了前文要重装时，附的也是它）；题下与书眉跟着换 @param {Conversation} conversation @param {Intent} intent @param {IntentPrints} now */
 function keepIntent(conversation, intent, now) {
   intents.set(conversation.id, { intent, now, closed: intents.get(conversation.id)?.closed });
   noteIntentGlance(conversation, intent, now);
 }
-/** 附在这一问之后的一段；意里一项都没有就不附 @param {Conversation} conversation */
+/** 附在这一问之后的一段；图里一项都没有就不附 @param {Conversation} conversation */
 function intentNote(conversation) {
   const held = intents.get(conversation.id),
     text = held ? intentText(held.intent, held.now, { path: INTENT_FILE, closed: answerClosed(conversation, held.intent) }) : "";
   return text ? `${text}\n\n` : "";
 }
 /**
- * 改意：读、算、写。版本对不上（别的对话、别的页面刚写过）就照新的那份重算再写
+ * 改图：读、算、写。版本对不上（别的对话、别的页面刚写过）就照新的那份重算再写
  * @template T
  * @param {Conversation} conversation
  * @param {AbortSignal} signal
@@ -288,5 +288,5 @@ async function changeIntent(conversation, signal, change) {
     const data = await bridge("/api/work/intent", { ...workScope(conversation), data: result.next, base: version }, signal);
     if (!data.conflict) return result;
   }
-  throw Error(t("意被别处接连改动，没写成，稍后再试"));
+  throw Error(t("图被别处接连改动，没写成，稍后再试"));
 }

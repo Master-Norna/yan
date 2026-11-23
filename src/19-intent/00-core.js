@@ -1,4 +1,4 @@
-// 言 · 意：一件工程要成立的结论图——项目实现的骨架。存在目录的 .yan/意.json（桥接是唯一的写者，见 server/work/index.js），
+// 言 · 图：一件工程要成立的结论图——项目实现的骨架。存在目录的 .yan/图.json（桥接是唯一的写者，见 server/work/index.js），
 // 不属于哪一段对话：换一段对话、压缩了前文、被回报叫醒另起一答，看到的都是同一份。
 // 程序只给形式约束与可见性，成立与否由模型自己判：
 //   结构——前提要在、不成环，不合的整批不收；立根时记下用户那一问的原话，日后拿它比；根的说法只照用户的话改，改时记下那一问、留一笔痕；
@@ -6,7 +6,7 @@
 //   回归——一项标成立时记下凭据（自己与各前提的说法版本、所依托凭据的指纹：文件、目录、探针，见 05-anchors.js），
 //     此后说法改了、凭据变了，它就转待复核。只是标记、不驱动什么：由数据算出，算一回就停，不会自己转起来；复核后再标成立，即换一份凭据。
 // 方案改了、写错了的整项撤去（state 给 removed），指向它的前提一并抹掉，只留一笔痕；弃（dropped）不同——是主线上走过、不通的路，
-// 留在文件里作记号：不算数、不上图，卡片图下列着，模型读的意里也点到名，免得再走一遍。
+// 留在文件里作记号：不算数、不上图，卡片图下列着，模型读的图里也点到名，免得再走一遍。
 // 降级有合法的写法：借外部结论、不自己做的标「假定」（note 写出处），算立住，但往上记着借了几条——降在哪、降多少看得见。
 // 假定也可挂凭据：所借的变了（接口改版、依赖升级），它同样转待复核。
 // 卡在人手里、要等人拍板的标「待定」（note 写等谁、定什么）：不算立住，换了对话、过了几天也看得见卡在谁那儿。
@@ -18,7 +18,7 @@
 // 嵌套：一项做的事拆开还有许多步，就是模块——细项写 in 指向它，至多两层（全局 › 模块 › 子模块）。
 // 模块以里面收口的几项（同层没人以它为前提的）为前提，所以里面立住它才算立住，传播、回归照旧，不另写判定。
 // 前提可跨模块：依的是哪一项就连哪一项（评测依的是训练里那一步，不是整个训练模块）；模块只是分组，图仍是一张 DAG，查环时连模块到收口项那几条一并算。
-// 一项不成图：新立意时只有一项要立的，退回——一答之内做得完的活用不着意。
+// 一项不成图：新立一张图时只有一项要立的，退回——一答之内做得完的活用不着图。
 // 标成立要前提先立住（同一批一起标也算，模块即里面收口的几项）：自己做完而前提未立的仍是进行中。凭据变了转待复核是事后的，不在此拦。
 // 根可补标：当初没标、后来看清它就是整件事要立的，补标时记下那一问的原话；已是别项前提的不能标根。
 // 了结：一个目录可以先后做几件事，一棵根一件；上面这张图是专项的，要一直成立的归下面的守。根立住，那一件就了结（见 intentClosed）：
@@ -45,7 +45,7 @@
  * @property {string} [on] 守的钩子：正则，对得上的那一步（指令原文、路径、网址或工具名）动手前先跑它挂的测试；没挂测试即不做
  * @property {boolean} [ask] 写了 on 的守是关口：测试过了（或没挂）还要请用户批
  * @typedef {{ rev: number, premises: Record<string, number>, prints: Record<string, string|null>, anchors?: string[] }} IntentSeal
- * @typedef {{ at: string, conversation: string, text: string }} IntentLog 改意、弃、假定的留痕
+ * @typedef {{ at: string, conversation: string, text: string }} IntentLog 改图、弃、假定的留痕
  * @typedef {{ nodes: Record<string, IntentNode>, log: IntentLog[], updated?: string }} Intent updated：最近一回写入的时刻——单拿出来看时，看得出旧不旧
  * @typedef {{ id: string, claim?: string, check?: string, when?: string, needs?: string[], any?: boolean, anchors?: string[], state?: IntentMark, note?: string, root?: boolean, keep?: boolean, on?: string, ask?: boolean, in?: string, remove?: boolean, rename?: string }} IntentOp in：空串即挪回全局；remove：整项撤去；rename：已有一项改叫这个名字
  * @typedef {Record<string, string|null>} IntentPrints 各凭据此刻的指纹，按「种类:值」；不在其中的即不知道，不据它判
@@ -104,7 +104,7 @@ function renameIntentNode(intent, from, to) {
       node.seal.premises = Object.fromEntries(Object.entries(premises).map(([k, v]) => [k === from ? to : k, v]));
   }
 }
-/** 读到的 JSON 理成一份意：缺的补上，认不得的项丢掉 @returns {Intent} */
+/** 读到的 JSON 理成一份图：缺的补上，认不得的项丢掉 @returns {Intent} */
 function asIntent(raw) {
   const nodes = raw?.nodes && typeof raw.nodes === "object" && !Array.isArray(raw.nodes) ? raw.nodes : {},
     /** @type {Intent} */
@@ -392,7 +392,7 @@ function intentBorrowed(intent, id) {
   }
   return [...out];
 }
-/** 已成立、已假定各项记过指纹的凭据：读意时据此取一回此刻的；了结的不取 @param {Intent} intent @param {Set<string>} [closed] */
+/** 已成立、已假定各项记过指纹的凭据：读图时据此取一回此刻的；了结的不取 @param {Intent} intent @param {Set<string>} [closed] */
 function intentSealedAnchors(intent, closed = intentClosed(intent)) {
   return [
     ...new Set(
@@ -428,7 +428,7 @@ function intentRetryBatch(intent, prior, items) {
   return merged;
 }
 /**
- * @param {Intent} intent 此刻的意
+ * @param {Intent} intent 此刻的图
  * @param {any} raw 模型给的 nodes
  * @param {string|null} [workdir] 凭据里的路径据此写成相对的
  * @returns {{ ops: IntentOp[], problems: string[], tidied: [string, string][] }} tidied：照规矩改写过的名字（原样 → 改后），回给模型时说一声
@@ -572,7 +572,7 @@ function normalizeIntentOps(intent, raw, workdir = "") {
       problems.push(
         t`${id} 孤悬：没有谁以它为前提，也没标根。它撑的是哪一项，就写进那一项的 needs（可跨模块），或归进它所服务的模块（in）；一直要守住的条件标 keep；本就是整件事要立的另一条结论，标 root`
       );
-  // 数的是开着的：旧事都了结时再立一项，与新立意是一回事（否则「发吧」这样一句话也成一棵根）。接着做了结的不算新立：写进 needs 的连着它一起开，根改回 doing 的不是新项
+  // 数的是开着的：旧事都了结时再立一项，与新立一张图是一回事（否则「发吧」这样一句话也成一棵根）。接着做了结的不算新立：写进 needs 的连着它一起开，根改回 doing 的不是新项
   /** @param {Intent} at */
   const alive = at => {
       const closed = intentClosed(at);
@@ -582,7 +582,7 @@ function normalizeIntentOps(intent, raw, workdir = "") {
     lone = goals(trial);
   if (!goals(intent).length && lone.length === 1 && !intent.nodes[lone[0]] && !ops.some(op => op.rename === lone[0]))
     problems.push(
-      t`意是几项结论连成的图，只有一项不必立：一答之内做得完的活用不着意。真是跨多答的长活，把它要先立住的几项一并写上（needs 或 in）`
+      t`一张图是几项结论连成的，只有一项不必立：一答之内做得完的活用不着图。真是跨多答的长活，把它要先立住的几项一并写上（needs 或 in）`
     );
   for (const op of ops) {
     const id = intentOpId(op),
@@ -613,7 +613,7 @@ function normalizeIntentOps(intent, raw, workdir = "") {
   }
   const live = alive(trial).length;
   if (live > INTENT_LIMIT && live > alive(intent).length)
-    problems.push(t`意里的项不宜多于 ${INTENT_LIMIT} 项（此刻 ${live}）：一项是值得单独判的结论，不是每一步动作；细的并进上一级`);
+    problems.push(t`图里的项不宜多于 ${INTENT_LIMIT} 项（此刻 ${live}）：一项是值得单独判的结论，不是每一步动作；细的并进上一级`);
   return { ops, problems, tidied: [...tidied] };
 }
 /**
@@ -706,7 +706,7 @@ function applyIntentOps(intent, ops, { at = "", conversation = "", ask = "", pri
               : (node.when || "") !== was.when
                 ? `情形 ${node.when || "（撤去）"}`
                 : `前提规则 ${node.any ? "任一成立" : "全部成立"}`;
-      if (node.rev) log(`${rooted ? "改根" : "改意"} ${id}：${said}`);
+      if (node.rev) log(`${rooted ? "改根" : "改图"} ${id}：${said}`);
       // 根改了说法：记下这一问，与原问一起附着，收尾时照着比
       if (node.rev && rooted && ask) node.root.later = String(ask).slice(0, 2000);
       node.rev += 1;
@@ -758,7 +758,7 @@ function intentTally(intent, now = {}, closed = intentClosed(intent)) {
  * @param {Intent} intent @param {IntentPrints} [now]
  * @param {{ path?: string, asks?: boolean, closed?: Set<string> }} [options] asks：立住了的根也附原话（收尾前对照用）；closed：作答途中传这一答眼里了结的
  */
-function intentText(intent, now = {}, { path = t(".yan/意.json"), asks = false, closed = intentClosed(intent) } = {}) {
+function intentText(intent, now = {}, { path = t(".yan/图.json"), asks = false, closed = intentClosed(intent) } = {}) {
   const order = intentOrder(intent)
       .reverse()
       .filter(id => !intent.nodes[id].keep && !intentGone(intent, id) && !closed.has(id)),
@@ -807,7 +807,7 @@ function intentText(intent, now = {}, { path = t(".yan/意.json"), asks = false,
     return [head, t`  验收：${node.check}`, ...(state === "stale" ? [t`  缘由：${intentStaleWhy(intent, id, now)}`] : []), ...ask];
   });
   return [
-    `${live ? t`［意 ${path}］已立 ${standing} / ${live}` : `［意 ${path}］`}${dropped.length ? t`，已弃（走过不通的）：${dropped.join("、")}` : ""}`,
+    `${live ? t`［图 ${path}］已立 ${standing} / ${live}` : `［图 ${path}］`}${dropped.length ? t`，已弃（走过不通的）：${dropped.join("、")}` : ""}`,
     ...level("", ""),
     ...(kept.length ? [t("守（常驻的约束）："), ...kept] : [])
   ].join("\n");
@@ -825,7 +825,7 @@ function intentStaleIds(intent, now, closed = intentClosed(intent)) {
  */
 function intentRoundText(intent, now, fresh, bounces) {
   if (!fresh.length) return "";
-  const lines = [t`［意］此轮之后转待复核：${fresh.map(id => `${id}（${intentStaleWhy(intent, id, now)}）`).join("、")}`];
+  const lines = [t`［图］此轮之后转待复核：${fresh.map(id => `${id}（${intentStaleWhy(intent, id, now)}）`).join("、")}`];
   for (const id of fresh) {
     const times = bounces.get(id) || 0;
     if (times < INTENT_STALEMATE) continue;

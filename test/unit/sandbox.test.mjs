@@ -2210,13 +2210,13 @@ test("存储根守卫：通配与相对路径也算点到了那几样", () => {
   for (const target of [path.join(root, "*"), path.join(root, "配置*"), path.join(root, "*.json"), path.join(root, "配置备份", "*")])
     assert.match(guard("Get-Content " + target) || "", /配置与登录/, target);
   // 不涉及其他的照旧放行：工作目录里的通配、根顶层但不盖住它们的名字
-  for (const target of [path.join(root, "意.json"), path.join(root, "*.md"), path.join(workdir, "*.json"), path.join(workdir, "notes.md")])
+  for (const target of [path.join(root, "图.json"), path.join(root, "*.md"), path.join(workdir, "*.json"), path.join(workdir, "notes.md")])
     assert.equal(guard("Get-Content " + target), null, target);
   if (!atWin) return; // 下面的相对写法是 Windows 的分隔
   // 工作目录在根里时，.. 就是根：不写字面名字的相对通配一样拦
   for (const command of ["Get-Content ..\\*", "Get-Content ..\\*.json", "Get-Content ..\\配置*", "Get-Content ..\\配置备份\\*"])
     assert.match(guard(command) || "", /配置与登录/, command);
-  for (const command of ["Get-Content ..\\意.json", "Get-ChildItem ..", "Get-ChildItem ..\\卷宗\\*.md", "Get-ChildItem src\\*.js"])
+  for (const command of ["Get-Content ..\\图.json", "Get-ChildItem ..", "Get-ChildItem ..\\卷宗\\*.md", "Get-ChildItem src\\*.js"])
     assert.equal(guard(command), null, command);
 });
 
