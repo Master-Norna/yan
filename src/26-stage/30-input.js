@@ -144,16 +144,32 @@ function stageNavMark(tab) {
 }
 // 把游目开到那个地址。from 是发起时的那一页（摊文档用）：取件、抽取、落页要几秒，这期间人可能已切到别的页签——
 // 那就仍开在发起的那一页上，不把眼下这一页拽走
-/** @param {string} url @param {{ tab: string, session: string } | null} [from] */
+/** @param {string} url @param {{ tab: string } | null} [from] */
 function stageNavigate(url, from = null) {
   stage.goAt = Date.now();
   // 这一页上又开了别的：先前那几笔作废
   stageNavMark(from ? from.tab : stage.current);
-  // 指定了发起那一页、它却已关掉：新开一页去，别往一个没了的会话语上发
-  const session = from ? (stage.tabs.has(from.tab) ? from.session : "") : stage.session;
-  // 一页都没开着：新开一页去
-  const go = session ? stageSend("Page.navigate", { url }, session) : stageSend("Target.createTarget", { url });
+  const go = !from
+    ? stage.session
+      ? stageSend("Page.navigate", { url }, stage.session)
+      : stageSend("Target.createTarget", { url })
+    : stage.tabs.has(from.tab)
+      ? stageNavigateIn(from.tab, url)
+      : // 发起那一页已关掉：新开一页去，别往一个没了的会话语上发
+        stageSend("Target.createTarget", { url });
   void go.catch(error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`));
+}
+// 往指定的那一页发导航。人已切走（或看台没连着）：临时接一下这一页、发完就放下——
+// 几秒前那个会话早随切页签解除了（见 10-view.js 的 stageAttach），拿它发只会报会话失效
+/** @param {string} tab @param {string} url */
+async function stageNavigateIn(tab, url) {
+  if (tab === stage.current && stage.session) return stageSend("Page.navigate", { url }, stage.session);
+  const { sessionId } = await stageSend("Target.attachToTarget", { targetId: tab, flatten: true });
+  try {
+    return await stageSend("Page.navigate", { url }, sessionId);
+  } finally {
+    void stageSend("Target.detachFromTarget", { sessionId }).catch(() => {});
+  }
 }
 /** @param {string} url @returns {string} 能在游目里摊开看的本机文档就给文件名，否则空 */
 function stageDocName(url) {
@@ -176,9 +192,12 @@ async function stageShowDoc(url) {
   // 抽不出正文的（旧版 Office、压缩包）：直接交本机程序，不必先取一趟
   if (!name) return void stageOpenInApp(url);
   // 记下发起时那一页、先占一码：落页时这一页上若已又开了别的（或这一页已关掉），这一份就作罢，别把页拽回来。
-  // 先后开了两件时后开的那件说了算——它占的码更新
-  const from = { tab: stage.current, session: stage.session },
-    rev = stageNavMark(from.tab);
+  // 先后开了两件时后开的那件说了算——它占的码更新。
+  // 只记页、不记会话：切页签会把旧会话解除（见 10-view.js 的 stageAttach），落页时再按页去接
+  const from = { tab: stage.current },
+    rev = stageNavMark(from.tab),
+    // 这一份还算不算数：发起那页关了、或人又在那页上开了别的，都不作数了——连「交本机程序」也不该再自作主张
+    mine = () => !!stage.tabs.has(from.tab) && stage.tabs.get(from.tab)?.nav === rev;
   toast(t`正在摊开「${name}」…`);
   try {
     const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),
@@ -186,12 +205,12 @@ async function stageShowDoc(url) {
     // 抽不出正文时给的是空态（带一颗「以本机程序打开」，文档页里没有谁接它）：交本机程序，别摊一张空纸
     if (!body.includes("file-viewer-empty")) {
       const { url: page } = await bridge("/api/stage/docpage", { name, url, body });
-      if ((stage.tabs.get(from.tab)?.nav || 0) !== rev) return;
+      if (!mine()) return;
       return void stageNavigate(page, from);
     }
   } catch {}
-  // 抽不出、或写不成页：仍交本机程序打开原件，与从前一样
-  void stageOpenInApp(url);
+  // 抽不出、或写不成页：仍交本机程序打开原件，与从前一样（人已经又开了别的就不作数）
+  if (mine()) void stageOpenInApp(url);
 }
 // 交给本机程序打开原件（抽不出正文、或摊不开的那几种；以及从文档页里点「以本机程序打开」）
 /** @param {string} url @param {boolean} [wanted] 本来就是要交本机程序的（别再说「阅不了」） */

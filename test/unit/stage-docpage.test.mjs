@@ -80,6 +80,18 @@ test("文件名的 HTML 记号要逃掉：它进的是 <title>", () => {
   assert.match(html, /<title>&lt;a&amp;b&gt;&quot;c&quot;\.docx<\/title>/);
 });
 
+test("页签的元数据变了，摊文档占的那一码还在", () => {
+  const { stage, stageNavMark, stageTabInfo } = load(["stage", "stageNavMark", "stageTabInfo"]);
+  stage.tabs.set("t1", { title: "旧题", url: "file:///a.docx", ctx: "c1" });
+  assert.equal(stageNavMark("t1"), 1, "头一回占码");
+  // 摊文档要几秒，这期间网页自己也会改题名、地址：整份盖掉的话这一码就归零，正在摊的那份认不出自己，白摊
+  stage.tabs.set("t1", stageTabInfo(stage.tabs.get("t1"), { title: "新题", url: "file:///a.docx#p2", browserContextId: "c1" }));
+  const one = stage.tabs.get("t1");
+  assert.deepEqual([one.title, one.url, one.ctx, one.nav], ["新题", "file:///a.docx#p2", "c1", 1]);
+  // 也不回到 1：回去的话，本该作废的旧请求会与新的撞上
+  assert.equal(stageNavMark("t1"), 2, "接着往上数");
+});
+
 test("摊开的文档页认得出来：从它里头点原件链接，是「以本机程序打开」而不是再摊一回", () => {
   const page = "file:///E:/%E8%81%8A%E5%A4%A9/.yan/%E6%B8%B8%E7%9B%AE/%E5%B7%A5%E4%BD%9C/view-2026-11-23T05-47-12-345Z.html";
   assert.equal(stageDocPage(page), true);

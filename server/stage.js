@@ -555,12 +555,14 @@ module.exports = function createStage({ root = () => "" } = {}) {
     } catch {
       return sendJson(res, 400, { error: "只认本机文件的地址" });
     }
-    if (!DOC_VIEWABLE.has(path.extname(file).toLowerCase())) return sendJson(res, 400, { error: "这一类文档摊不开" });
-    const stat = await fs.promises.stat(file).catch(() => null);
+    // 名字叫 .docx、实际链到别处去的（符号链接、快捷方式）：按真正要读的那一份再认一遍，这个口只保证读得走这六种
+    const real = await fs.promises.realpath(file).catch(() => "");
+    if (!real || !DOC_VIEWABLE.has(path.extname(real).toLowerCase())) return sendJson(res, 400, { error: "这一类文档摊不开" });
+    const stat = await fs.promises.stat(real).catch(() => null);
     if (!stat?.isFile()) return sendJson(res, 404, { error: "文件不在了" });
     if (stat.size > DOC_RAW_MAX) return sendJson(res, 413, { error: "这件太大，摊不开" });
     try {
-      await sendFile(req, res, file, { name: path.basename(file) });
+      await sendFile(req, res, real, { name: path.basename(file) });
     } catch (error) {
       if (!res.headersSent) sendJson(res, 500, { error: String(/** @type {any} */ (error)?.message || error) });
     }

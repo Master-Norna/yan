@@ -206,8 +206,11 @@ function stageMessage(message) {
     // 空页后来才补出类型与地址：不再是标签时，要撤掉此前收进来的那一项。
     if (!stageTabType(info) || (stage.helperCtx && info.browserContextId === stage.helperCtx) || stageNotTab(info))
       return void stageDropTab(info.targetId);
-    const fresh = !stage.tabs.has(info.targetId);
-    stage.tabs.set(info.targetId, { title: info.title, url: info.url, ctx: info.browserContextId });
+    const fresh = !stage.tabs.has(info.targetId),
+      // 标题、地址变了只换这两样：nav 是「这一页开到第几处」的代数（见 30-input.js 的 stageShowDoc），
+      // 整份盖掉会让正在摊的文档认不出自己那一笔，也会让后来的请求从 1 重新数、与本该作废的旧请求撞上
+      before = stage.tabs.get(info.targetId);
+    stage.tabs.set(info.targetId, stageTabInfo(before, info));
     // 模型新开了一页：跟过去。人用中键、Ctrl 点链接开的是后台的一页，与浏览器一样留在原处
     if (fresh && !stage.listing && !stageOpenedBehind()) stageShow(info.targetId);
     else stageRender();
@@ -218,6 +221,11 @@ function stageMessage(message) {
   } else if (message.method === "Target.detachedFromTarget") {
     if (params.sessionId === stage.session) stage.session = stage.attached = "";
   } else if (message.sessionId && message.sessionId === stage.session) stagePageEvent(message.method, params);
+}
+// 页签的元数据（题名、地址、所在上下文）变了：只换这几样，nav 那笔留着——它是摊文档时占的代数，不是元数据
+/** @param {{ nav?: number } | undefined} before @param {{ title: string, url: string, browserContextId?: string }} info */
+function stageTabInfo(before, info) {
+  return { title: info.title, url: info.url, ctx: info.browserContextId, nav: before?.nav };
 }
 // 列成签的：寻常网页；Edge 的设置页报成 browser_ui，也算（不列它，点「浏览器设置」就像没反应）
 /** @param {{ type: string, url: string }} info */
