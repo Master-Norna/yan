@@ -89,12 +89,12 @@ writeFileSync(
     "xl/_rels/workbook.xml.rels": `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`,
     "xl/sharedStrings.xml": `<sst ${S}><si><t>品名</t></si><si><t>价格</t></si><si><t>藜麦</t></si><si><r><t>富文</t></r><r><t>本</t></r></si></sst>`,
     // 数字格式：14 是内置的日期，10 是内置的百分比，3 是内置的千分位，164 是自定义的（格式串里带引号包着的中文）
-    "xl/styles.xml": `<styleSheet ${S}><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot;"/></numFmts><cellXfs count="5"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="10"/><xf numFmtId="3"/><xf numFmtId="164"/></cellXfs></styleSheet>`,
+    "xl/styles.xml": `<styleSheet ${S}><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot;"/></numFmts><cellXfs count="6"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="10"/><xf numFmtId="3"/><xf numFmtId="164"/><xf numFmtId="46"/></cellXfs></styleSheet>`,
     "xl/worksheets/_rels/sheet1.xml.rels": rels({ rId1: ["drawing", "../drawings/drawing1.xml"] }),
     "xl/drawings/drawing1.xml": `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ${R}><xdr:twoCellAnchor><xdr:from><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:from><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="图 1"/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill></xdr:pic></xdr:twoCellAnchor></xdr:wsDr>`,
     "xl/drawings/_rels/drawing1.xml.rels": rels({ rId1: ["image", "../media/image1.png"] }),
     "xl/media/image1.png": PNG,
-    "xl/worksheets/sheet1.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c><c r="C2"><v>48.9</v></c></row><row r="3"><c r="A3" s="1"><v>45306</v></c><c r="B3" s="2"><v>0.235</v></c><c r="C3" s="3"><v>12345.6</v></c></row><row r="4"><c r="A4" s="4"><v>45306</v></c><c r="B4"><f>SUM(C2:C2)</f><v></v></c><c r="C4"><v>9876543.210000001</v></c></row></sheetData></worksheet>`,
+    "xl/worksheets/sheet1.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c><c r="C2"><v>48.9</v></c></row><row r="3"><c r="A3" s="1"><v>45306</v></c><c r="B3" s="2"><v>0.235</v></c><c r="C3" s="3"><v>12345.6</v></c></row><row r="4"><c r="A4" s="4"><v>45306</v></c><c r="B4"><f>SUM(C2:C2)</f><v></v></c><c r="C4"><v>9876543.210000001</v></c></row><row r="5"><c r="A5" t="str"><f>TEXT(A1,"00000")</f><v>00123</v></c><c r="B5" t="e"><f>1/0</f><v>#DIV/0!</v></c><c r="C5" s="5"><v>1.5</v></c></row></sheetData></worksheet>`,
     "xl/worksheets/sheet2.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>说明文字</t></is></c></row></sheetData></worksheet>`
   })
 );
@@ -211,11 +211,11 @@ check(
   JSON.stringify(sheet)
 );
 check(
-  "xlsx: numbers read the way they look — a date is a date, a share is a percentage, thousands are grouped; a formula without a stored result shows itself",
+  "xlsx: numbers read the way they look — a date is a date, a share is a percentage, thousands are grouped; a formula without a stored result shows itself, a string result keeps its leading zeros, a duration passes 24 hours",
   sheet.rows
     .map(row => row.map(cell => cell.trim()).join("|"))
     .slice(1)
-    .join("#") === "2024-01-15|23.5%|12,345.6#2024-01-15|=SUM(C2:C2)|9876543.21",
+    .join("#") === "2024-01-15|23.50%|12,346#2024-01-15|=SUM(C2:C2)|9876543.21#00123|#DIV/0!|36:00:00",
   JSON.stringify(sheet.rows)
 );
 await evalJs(`document.querySelectorAll("[data-viewer-tab]")[1].click(); true`);

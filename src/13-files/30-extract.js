@@ -404,9 +404,6 @@ function xlsxRef(col, row) {
 }
 // 单元格只存数值，看起来的样子（日期、百分比、千分位）全在 styles.xml 里：numFmt 是自定义的格式串，cellXfs 是「格的 s 属性 → 格式号」那张表。
 // 不照它写，2024-01-15 抽出来是 45306、23.5% 是 0.235——读者（人和模型）得自己拿计算器倒推
-const XLSX_DATE_IDS = new Set([
-  14, 15, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 45, 46, 47, 50, 51, 52, 53, 54, 55, 56, 57, 58
-]);
 function xlsxFormats(stylesXml) {
   const codes = new Map(),
     xfs = [];
@@ -417,22 +414,39 @@ function xlsxFormats(stylesXml) {
   if (list) for (const xf of xmlKids(list, "xf")) xfs.push(Number(xf.getAttribute("numFmtId")) || 0);
   return { codes, xfs };
 }
-// 序号 → 日子。1900 系统把并不存在的 1900-02-29 当成真日子（Excel 为兼容 Lotus 留的错），60 之前的序号因此得补一天；
+// 序号 → 字面。三种形态分开：带日子的日历；只有时刻；经过时长（[h]:mm:ss 的 36 小时写 36:00:00，
+// 不绕回 24 小时以内、也不进位成日子）。秒只在格式里有 s 时才写，格式里没有 h 的（mm:ss）从分钟起。
+// 时刻一律写成 24 小时制：格式里的 AM/PM 与「上午/下午」不另转，给人读时 24 小时制反倒是没有歧义的。
+// 1900 系统把并不存在的 1900-02-29 当成真日子（Excel 为兼容 Lotus 留的错），60 之前的序号因此得补一天；
 // 1904 系统（旧版 Mac Excel）从 1904-01-01 起算，换成 1900 系统的序号是 +1462
-function xlsxDateTime(serial, withDate, date1904) {
-  const at = new Date(Date.UTC(1899, 11, 30) + Math.round((date1904 ? serial + 1462 : serial < 60 ? serial + 1 : serial) * 86400000)),
-    two = n => String(n).padStart(2, "0"),
-    time = `${two(at.getUTCHours())}:${two(at.getUTCMinutes())}`,
-    date = `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())}`;
-  // 带日子的只看有没有时分（00:00 就不必缀一个 00:00）；纯时刻的格式只给时刻
-  return withDate ? (at.getUTCHours() || at.getUTCMinutes() ? `${date} ${time}` : date) : time;
+function xlsxTimeText(serial, bare, date1904, elapsed, withDate) {
+  const two = n => String(n).padStart(2, "0"),
+    withHour = /h/i.test(bare) || elapsed,
+    withSecond = /s/i.test(bare),
+    // 秒数先进位再拆，免得 59.9999 秒落成 59:60
+    clockOf = seconds =>
+      `${withHour ? `${Math.floor(seconds / 3600)}:${two(Math.floor(seconds / 60) % 60)}` : two(Math.floor(seconds / 60) % 60)}${withSecond ? `:${two(seconds % 60)}` : ""}`;
+  // 累计小时连整天一起算
+  if (elapsed) return clockOf(Math.round(serial * 86400));
+  const days = date1904 ? serial + 1462 : serial < 60 ? serial + 1 : serial,
+    whole = Math.floor(days),
+    at = new Date(Date.UTC(1899, 11, 30) + whole * 86400000),
+    date = `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())}`,
+    clock = clockOf(Math.round((days - whole) * 86400));
+  // 格式里有 h 就一定缀时刻（22 号「m/d/yyyy h:mm」的 00:00 也是它的一部分）；只有日子的不缀
+  return withDate ? (withHour || withSecond ? `${date} ${clock}` : date) : clock;
+}
+// 小数位照格式写：0.00 就两位、0 就没有（Excel 里 #,##0 的 12345.6 显示 12,346，不是 12,345.6）
+function xlsxPlaces(bare) {
+  return (bare.match(/\.(0+)/) || [])[1]?.length || 0;
 }
 // 千分位只动整数部分：1.234567 不该变成 1.234,567
 function xlsxGroup(raw) {
   const parts = String(raw).match(/^(-?)(\d+)(.*)$/);
   return parts ? `${parts[1]}${parts[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${parts[3]}` : raw;
 }
-// 内置格式号对应的格式串：styles.xml 只列自定义的那些，内置的（货币、百分比、千分位……）从来不写在里面
+// 内置格式号对应的格式串：styles.xml 只列自定义的那些，内置的（日期、时刻、百分比、千分位……）从来不写在里面。
+// 要判准是不是日期、要不要带秒，就得知道格式串，常用的这些照 Excel 自己的定义补在这里
 const XLSX_BUILTIN_CODES = {
   1: "0",
   2: "0.00",
@@ -441,13 +455,28 @@ const XLSX_BUILTIN_CODES = {
   9: "0%",
   10: "0.00%",
   11: "0.00E+00",
+  14: "m/d/yyyy",
+  15: "d-mmm-yy",
+  16: "d-mmm",
+  17: "mmm-yy",
+  18: "h:mm AM/PM",
+  19: "h:mm:ss AM/PM",
+  20: "h:mm",
+  21: "h:mm:ss",
+  22: "m/d/yyyy h:mm",
   37: "#,##0",
   38: "#,##0",
   39: "#,##0.00",
   40: "#,##0.00",
+  45: "mm:ss",
+  46: "[h]:mm:ss",
+  47: "mm:ss.0",
   48: "##0.0E+0",
   49: "@"
 };
+// 上表没列的内置号只有各语言（中日韩等）的日期与时刻格式，判不出格式串，就只认它属于哪一类
+const XLSX_DATE_IDS = new Set([27, 28, 29, 30, 31, 36, 50, 51, 52, 53, 54, 57, 58]),
+  XLSX_CLOCK_IDS = new Set([32, 33, 34, 35, 55, 56]);
 // General 格式不写小数位，二进制浮点的尾巴就露出来了（0.1+0.2 存成 0.30000000000000004，Excel 自己显示 0.3）：
 // 按 Excel 自家的精度（15 位有效数字）收一下，收完更短的才用——长的整数不碰
 function xlsxGeneral(raw) {
@@ -460,17 +489,24 @@ function xlsxGeneral(raw) {
 function xlsxNumber(raw, numFmtId, code, date1904) {
   const number = Number(raw);
   if (!Number.isFinite(number)) return raw;
-  // 去掉引号里的字面量、转义字符与 [颜色]/[条件] 那一类修饰，剩下的才是指示符；多段格式取第一段
-  const bare = String(code || XLSX_BUILTIN_CODES[numFmtId] || "")
-    .replace(/"[^"]*"/g, "")
-    .replace(/\\./g, "")
-    .replace(/\[[^\]]*\]/g, "")
-    .split(";")[0];
-  if (bare.includes("%")) return `${Number((number * 100).toFixed(2))}%`;
-  const date = bare ? /[yd]/i.test(bare) : XLSX_DATE_IDS.has(numFmtId),
-    clock = bare ? /[hs]/i.test(bare) && bare.includes(":") : [18, 19, 20, 21, 45, 46, 47].includes(numFmtId);
-  if (date || clock) return xlsxDateTime(number, date, date1904);
-  if (/#,##|0,0/.test(bare)) return xlsxGroup(raw);
+  const written = String(code || XLSX_BUILTIN_CODES[numFmtId] || "").replace(/"[^"]*"/g, "");
+  // [h] 是累计小时（36:00:00 那种经过时长），清理修饰之前先认出来，清完就没了
+  const elapsed = /\[h+\]/i.test(written),
+    // 去掉转义字符与 [颜色]/[条件]/[h] 那一类修饰，剩下的才是指示符；多段格式取第一段
+    bare = written
+      .replace(/\\./g, "")
+      .replace(/\[[^\]]*\]/g, "")
+      .split(";")[0];
+  // 百分比与千分位都照格式写小数位：0.00000% 的 0.0000123 是 0.00123%，不能一律压到两位、把非零写成 0
+  if (bare.includes("%")) {
+    const hundred = (number * 100).toFixed(xlsxPlaces(bare));
+    return `${/#,##|0,0/.test(bare) ? xlsxGroup(hundred) : hundred}%`;
+  }
+  // 判不出格式串的内置号只能照号认：那几号是日期还是时刻
+  const date = /[yd]/i.test(bare) || (!bare && XLSX_DATE_IDS.has(numFmtId)),
+    clock = elapsed || /[hs]/i.test(bare) || (!bare && XLSX_CLOCK_IDS.has(numFmtId));
+  if (date || clock) return xlsxTimeText(number, bare, date1904, elapsed, date);
+  if (/#,##|0,0/.test(bare)) return xlsxGroup(number.toFixed(xlsxPlaces(bare)));
   return xlsxGeneral(raw);
 }
 function xlsxMarkdown(entries) {
@@ -528,11 +564,14 @@ function xlsxMarkdown(entries) {
                   ? value === "1"
                     ? "TRUE"
                     : "FALSE"
-                  : value !== ""
-                    ? xlsxNumber(value, format, styles.codes.get(format), date1904)
-                    : formula
+                  : value === ""
+                    ? formula
                       ? `=${formula}`
-                      : "";
+                      : ""
+                    : // 字符串型的公式结果（t="str"）与错误（t="e"）照原值：TEXT(A1,"00000") 的 00123 不能收成 123
+                      type === "str" || type === "e"
+                      ? value
+                      : xlsxNumber(value, format, styles.codes.get(format), date1904);
         }
         return Array.from(cells, cell => cell ?? "");
       });
@@ -608,6 +647,13 @@ function odfMarkdown(contentXml) {
   if (body) walk(body);
   return out.filter(Boolean).join("\n\n");
 }
+// 围栏要比内容里最长的那一串反引号还长：代码格里的 Markdown 文档常带三连、四连反引号，
+// 固定四连时会被提前闭合，后面的字跑到代码块外面去
+function ipynbFence(...texts) {
+  let longest = 2;
+  for (const text of texts) for (const run of String(text).match(/`+/g) || []) longest = Math.max(longest, run.length);
+  return "`".repeat(longest + 1);
+}
 // ipynb：一格一节——Markdown 格照原样，代码格放进围栏、它跑出来的东西跟在下面。
 // 本体是一份 JSON，几万字里大半是代码串、base64 的图和执行计数；直接当文字读，人和模型都得自己从 JSON 里扒
 function ipynbMarkdown(text) {
@@ -618,8 +664,6 @@ function ipynbMarkdown(text) {
     throw Error(t("这份 ipynb 不是有效的 JSON，抽不出正文"));
   }
   const language = String(book?.metadata?.language_info?.name || book?.metadata?.kernelspec?.language || "").trim(),
-    // 输出里偶尔自带三连反引号，围栏用四连的
-    fence = "`".repeat(4),
     sourceOf = cell => (Array.isArray(cell.source) ? cell.source.join("") : String(cell.source || "")).replace(/\s+$/, ""),
     blocks = [];
   for (const cell of Array.isArray(book?.cells) ? book.cells : []) {
@@ -629,7 +673,10 @@ function ipynbMarkdown(text) {
     }
     if (cell.cell_type !== "code") continue;
     const source = sourceOf(cell);
-    source.trim() && blocks.push(`${fence}${language}\n${source}\n${fence}`);
+    if (source.trim()) {
+      const fence = ipynbFence(source);
+      blocks.push(`${fence}${language}\n${source}\n${fence}`);
+    }
     const said = ipynbOutputs(cell.outputs);
     if (said) blocks.push(said);
   }
@@ -637,8 +684,7 @@ function ipynbMarkdown(text) {
 }
 // 代码格的输出：文字与报错照录，图只留一行字（JSON 里存的是 base64，抽出来也没法画在别处）
 function ipynbOutputs(outputs) {
-  const fence = "`".repeat(4),
-    lines = [];
+  const lines = [];
   for (const output of Array.isArray(outputs) ? outputs : []) {
     const text =
       output?.output_type === "stream"
@@ -650,7 +696,9 @@ function ipynbOutputs(outputs) {
     if (body.trim()) lines.push(body.replace(/\s+$/, ""));
     else if (output?.data && Object.keys(output.data).some(type => type.startsWith("image/"))) lines.push(`[${t("图片")}]`);
   }
-  return lines.length ? `**${t("输出")}**\n\n${fence}\n${lines.join("\n\n")}\n${fence}` : "";
+  if (!lines.length) return "";
+  const fence = ipynbFence(...lines);
+  return `**${t("输出")}**\n\n${fence}\n${lines.join("\n\n")}\n${fence}`;
 }
 async function extractZipDocumentText(extension, bytes) {
   if (extension === "docx") {

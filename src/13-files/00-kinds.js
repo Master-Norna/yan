@@ -168,6 +168,9 @@ const TEXT_MIMES = [
 ];
 function isTextFile(file) {
   const mime = String(file.type || "").toLowerCase();
+  // 要抽正文的种类（docx / xlsx / ipynb 之类）即便 MIME 报成 application/json 也不当文字读：
+  // 那样进上下文的是整份原始的包或 JSON（ipynb 里还有 base64 的图），抽出来的才是能读的正文
+  if (fileKind(file.name).extract) return false;
   return (
     mime.startsWith("text/") ||
     TEXT_MIMES.includes(mime) ||
