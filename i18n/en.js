@@ -534,6 +534,7 @@ var YAN_EN = {
   此类文件无法在此预览: "This file type can't be previewed here",
   隔离的网页预览: "Sandboxed web preview",
   空文件: "Empty file",
+  预览范围内没有完整记录: "No complete records within the preview limit",
   "仅显示前 400 行": "Showing the first 400 lines",
   "内容过长，只解析了开头一段": "Content too long — only the beginning was parsed",
   未能抽出正文: "Could not extract text",

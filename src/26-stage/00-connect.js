@@ -94,6 +94,8 @@ const stage = {
   keyAt: 0,
   // 人最近一回经游目开网址的时刻（地址栏、收藏、开本机文件）：随后浏览器要「下载」的本机文件是人要开的
   goAt: 0,
+  // 起初没有页签的文档请求也能占码；后来开别的地址时作废
+  emptyNav: 0,
   /** @type {PointerEvent | null} */
   moved: null,
   // 正在把某一页激活到前台的在途承诺：stageLocate 等它落定才查前台，免得撞上切签中途

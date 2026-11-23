@@ -215,7 +215,7 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
       rows = parseDelimited(cut ? text.slice(0, 2000000) : text, split, 401, cut),
       cells = rows.slice(0, 400),
       note = [cut ? t`内容过长，只解析了开头一段` : "", rows.length > 400 ? t`仅显示前 400 行` : ""].filter(Boolean).join("；");
-    if (!cells.length) return `<div class="file-viewer-empty">${t(`空文件`)}</div>`;
+    if (!cells.length) return `<div class="file-viewer-empty">${cut ? t(`预览范围内没有完整记录`) : t(`空文件`)}</div>`;
     return `<div class="file-viewer-text file-viewer-fit"><table class="file-viewer-table"><thead><tr>${cells[0].map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead><tbody>${cells
       .slice(1)
       .map(row => `<tr>${row.map(c => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`)

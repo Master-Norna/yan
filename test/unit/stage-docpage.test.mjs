@@ -156,6 +156,73 @@ test("工作目录里只清摊开的文档页：模型起了名字的件一件�
   }
 });
 
+function docStage(body) {
+  const f = load([
+      "stage",
+      "stageGo",
+      "stageShowDoc",
+      `setup: (preview, request, send) => {
+        fileViewerBody = preview;
+        bridge = request;
+        stageSend = send;
+      }`
+    ]),
+    requests = [],
+    commands = [];
+  f.stage.ws = {};
+  f.setup(
+    () => body,
+    async (route, payload) => {
+      requests.push([route, payload.url]);
+      return { url: "file:///a/view.html" };
+    },
+    async (method, { url }) => void commands.push([method, url])
+  );
+  return { ...f, requests, commands };
+}
+
+const DOC_ORIGINAL = "file:///a/报告.pptx",
+  DOC_BODY = '<div class="file-viewer-slides">正文</div>',
+  DOC_EMPTY = '<div class="file-viewer-empty">未能抽出正文</div>';
+
+test("浏览器已连接但起初没有页签：文档另开一页，不占后来出现的页签", async () => {
+  const f = docStage(DOC_BODY);
+  const viewing = f.stageShowDoc(DOC_ORIGINAL);
+  f.stage.tabs.set("later", { nav: 1 });
+  f.stage.current = "later";
+  f.stage.session = "later-session";
+  await viewing;
+  assert.deepEqual(f.requests, [["/api/stage/docpage", DOC_ORIGINAL]]);
+  assert.deepEqual(f.commands, [["Target.createTarget", "file:///a/view.html"]]);
+});
+
+test("起初没有页签而抽不到正文：仍交本机程序打开", async () => {
+  const f = docStage(DOC_EMPTY);
+  await f.stageShowDoc(DOC_ORIGINAL);
+  assert.deepEqual(f.requests, [["/api/stage/open", DOC_ORIGINAL]]);
+  assert.deepEqual(f.commands, []);
+});
+
+test("发起页后来被关，或起初没有页签却已开了别的地址：不再摊页或弹本机程序", async () => {
+  for (const body of [DOC_BODY, DOC_EMPTY]) {
+    const closed = docStage(body);
+    closed.stage.tabs.set("old", { nav: 1 });
+    closed.stage.current = "old";
+    const viewing = closed.stageShowDoc(DOC_ORIGINAL);
+    closed.stage.tabs.delete("old");
+    await viewing;
+    assert.deepEqual(closed.requests, []);
+    assert.deepEqual(closed.commands, []);
+
+    const replaced = docStage(body);
+    const opening = replaced.stageShowDoc(DOC_ORIGINAL);
+    replaced.stageGo("about:blank");
+    await opening;
+    assert.deepEqual(replaced.requests, []);
+    assert.deepEqual(replaced.commands, [["Target.createTarget", "about:blank"]]);
+  }
+});
+
 test("等待临时接入期间页签已经导航：不覆盖新地址，但仍断开这次临时接入", async () => {
   const { stage, stageNavigateIn, stageMessage } = load(["stage", "stageNavigateIn", "stageMessage"]);
   const sent = [];

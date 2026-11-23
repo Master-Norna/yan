@@ -1,16 +1,18 @@
 // 文档预览：docx / xlsx / pptx 按结构抽成 Markdown 再画——标题、加粗、列表、表格照原样，xlsx 一张表一页签，pptx 一页一张卡；
-// 认不得的格式给「以本机程序打开」。样本在这里现拼（不压缩的 zip，只放解析要读的那几份 XML）
+// 认不得的格式给「以本机程序打开」。样本在这里现拼（只放解析要读的几份 XML，其中一份备注故意未压完）
 import { mkdirSync, writeFileSync } from "node:fs";
-import { crc32 } from "node:zlib";
+import { crc32, deflateRawSync } from "node:zlib";
 import { connect, check, sleep, PAGE, ARCHIVE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 
-function zip(files) {
+function zip(files, incomplete = "") {
   const locals = [],
     centrals = [];
   let offset = 0;
   for (const [name, text] of Object.entries(files)) {
     const data = Buffer.from(text),
+      deflated = name === incomplete,
+      stored = deflated ? deflateRawSync(data).subarray(0, 1) : data,
       label = Buffer.from(name),
       crc = crc32(data),
       local = Buffer.alloc(30),
@@ -18,22 +20,24 @@ function zip(files) {
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
     local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(deflated ? 8 : 0, 8);
     local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(stored.length, 18);
     local.writeUInt32LE(data.length, 22);
     local.writeUInt16LE(label.length, 26);
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(deflated ? 8 : 0, 10);
     central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(stored.length, 20);
     central.writeUInt32LE(data.length, 24);
     central.writeUInt16LE(label.length, 28);
     central.writeUInt32LE(offset, 42);
-    locals.push(local, label, data);
+    locals.push(local, label, stored);
     centrals.push(central, label);
-    offset += 30 + label.length + data.length;
+    offset += 30 + label.length + stored.length;
   }
   const directory = Buffer.concat(centrals),
     end = Buffer.alloc(22),
@@ -110,26 +114,31 @@ const P = `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" 
     `<p:sp><p:nvSpPr><p:nvPr>${ph ? `<p:ph type="${ph}"/>` : ""}</p:nvPr></p:nvSpPr><p:txBody>${paragraphs.map(([text, lvl]) => `<a:p>${lvl ? `<a:pPr lvl="${lvl}"/>` : ""}<a:r><a:t>${text}</a:t></a:r></a:p>`).join("")}</p:txBody></p:sp>`;
 writeFileSync(
   `${ARCHIVE}/讲义.pptx`,
-  zip({
-    "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${[2, 1, 3, 4].map(i => `<p:sldId id="${255 + i}" rel:id="rId${i}"/>`).join("")}</p:sldIdLst></p:presentation>`,
-    "ppt/_rels/presentation.xml.rels": rels(Object.fromEntries([1, 2, 3, 4].map(i => [`rId${i}`, ["slide", `slides/slide${i}.xml`]]))),
-    "ppt/slides/slide5.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["不在清单里的页"]])}</p:spTree></p:cSld></p:sld>`,
-    "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
-    "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${shape("title", [["小结"]])}${shape("", [["推导闭式解"]])}<p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
-    // 第三页是有序的步骤：第一条从第 5 步起（接着上一页数），第二条降一层
-    "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>## 这是正文</a:t></a:r><a:br/><a:r><a:t>不是新的一页</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
-    // 字母和罗马数字：不是十进制列表，Markdown 原生不能表达其 marker，渲染时改用 ol[type]。
-    "ppt/slides/slide4.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["编号类型"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:t>第三项</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod"/></a:pPr><a:r><a:t>第四项</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="romanUcPeriod" startAt="4"/></a:pPr><a:r><a:t>子步骤四</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="romanLcPeriod" startAt="2"/></a:pPr><a:r><a:t>罗马二</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaUcPeriod"/></a:pPr><a:r><a:t>大写甲</a:t></a:r></a:p></p:txBody></p:sp>${shape("", [["另一个文字框"]])}</p:spTree></p:cSld></p:sld>`,
-    "ppt/slides/_rels/slide1.xml.rels": rels({ rId5: ["notesSlide", "../notesSlides/notesSlide1.xml"] }),
-    // 备注那份里除了讲话者的话，还有页码与整页缩略图两个占位符，都不该混进正文
-    "ppt/notesSlides/notesSlide1.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [["讲慢一些，这里停一下"], ["先给直觉，再给公式"]])}${shape("sldNum", [["12"]])}</p:spTree></p:cSld></p:notes>`,
-    "ppt/slides/_rels/slide2.xml.rels": rels({
-      rId2: ["image", "../media/image1.png"],
-      rId9: ["notesSlide", "../notesSlides/notesSlide9.xml"]
-    }),
-    "ppt/notesSlides/notesSlide9.xml": "<broken>",
-    "ppt/media/image1.png": PNG
-  })
+  zip(
+    {
+      "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${[2, 1, 3, 4].map(i => `<p:sldId id="${255 + i}" rel:id="rId${i}"/>`).join("")}</p:sldIdLst></p:presentation>`,
+      "ppt/_rels/presentation.xml.rels": rels(Object.fromEntries([1, 2, 3, 4].map(i => [`rId${i}`, ["slide", `slides/slide${i}.xml`]]))),
+      "ppt/slides/slide5.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["不在清单里的页"]])}</p:spTree></p:cSld></p:sld>`,
+      "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
+      "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${shape("title", [["小结"]])}${shape("", [["推导闭式解"]])}<p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
+      // 第三页是有序的步骤：第一条从第 5 步起（接着上一页数），第二条降一层
+      "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>## 这是正文</a:t></a:r><a:br/><a:r><a:t>不是新的一页</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+      // 字母和罗马数字：不是十进制列表，Markdown 原生不能表达其 marker，渲染时改用 ol[type]。
+      "ppt/slides/slide4.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["编号类型"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:t>第三项</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod"/></a:pPr><a:r><a:t>第四项</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="romanUcPeriod" startAt="4"/></a:pPr><a:r><a:t>子步骤四</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="romanLcPeriod" startAt="2"/></a:pPr><a:r><a:t>罗马二</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaUcPeriod"/></a:pPr><a:r><a:t>大写甲</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>分段说明</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="alphaLcPeriod" startAt="2"/></a:pPr><a:r><a:t>说明下的子项</a:t></a:r></a:p></p:txBody></p:sp>${shape("", [["另一个文字框"]])}</p:spTree></p:cSld></p:sld>`,
+      "ppt/slides/_rels/slide1.xml.rels": rels({ rId5: ["notesSlide", "../notesSlides/notesSlide1.xml"] }),
+      // 备注那份里除了讲话者的话，还有页码与整页缩略图两个占位符，都不该混进正文
+      "ppt/notesSlides/notesSlide1.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [["讲慢一些，这里停一下"], ["先给直觉，再给公式"]])}${shape("sldNum", [["12"]])}</p:spTree></p:cSld></p:notes>`,
+      "ppt/slides/_rels/slide2.xml.rels": rels({
+        rId2: ["image", "../media/image1.png"],
+        rId9: ["notesSlide", "../notesSlides/notesSlide9.xml"]
+      }),
+      "ppt/notesSlides/notesSlide9.xml": "<broken>",
+      "ppt/slides/_rels/slide3.xml.rels": rels({ rId3: ["notesSlide", "../notesSlides/notesSlide3.xml"] }),
+      "ppt/notesSlides/notesSlide3.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("body", [["未压完的备注"]])}</p:spTree></p:cSld></p:notes>`,
+      "ppt/media/image1.png": PNG
+    },
+    "ppt/notesSlides/notesSlide3.xml"
+  )
 );
 // ipynb：Markdown 格、代码格、代码格的三种输出（stdout、结果、报错）与一张图；本体是 JSON，抽出来该是可读的 Markdown
 writeFileSync(
@@ -285,7 +294,7 @@ const slides = JSON.parse(
 check(
   "pptx follows presentation order, skips unused slides, keeps headings, levels and pictures",
   slides.join("#") ===
-    "第 1 页 · 小结|推导闭式解|拟合直线:data:image/png#第 2 页 · 线性回归|从最小二乘说起/几何直观#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲/另一个文字框",
+    "第 1 页 · 小结|推导闭式解|拟合直线:data:image/png#第 2 页 · 线性回归|从最小二乘说起/几何直观#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲/说明下的子项/另一个文字框",
   JSON.stringify(slides)
 );
 check(
@@ -301,8 +310,10 @@ check(
   )
 );
 check(
-  "pptx: damaged notes leave the slide and other notes intact",
-  await evalJs(`document.querySelector("#fileViewerStage .viewer-slide").textContent.includes("这一页的备注未能读出")`)
+  "pptx: malformed XML and unfinished compression in notes affect only the corresponding notes",
+  (await evalJs(
+    `JSON.stringify([...document.querySelectorAll("#fileViewerStage .viewer-slide")].map(s => s.textContent.includes("这一页的备注未能读出")))`
+  )) === "[true,false,true,false]"
 );
 const numbered = JSON.parse(
   await evalJs(
@@ -331,7 +342,8 @@ check(
     return !!alpha && alpha.querySelectorAll(':scope > li').length === 2 &&
       !!alpha.querySelector('ol[type="I"][start="4"] > li') &&
       !!last.querySelector('ol[type="i"][start="2"] > li') &&
-      !!last.querySelector('ol[type="A"] > li');
+      !!last.querySelector('ol[type="A"] > li') &&
+      [...last.querySelectorAll(':scope > p')].find(p => p.textContent === "分段说明")?.nextElementSibling?.matches('ol[type="a"][start="2"]');
   })(document.querySelector("#fileViewerStage"))`)
 );
 await closeViewer();

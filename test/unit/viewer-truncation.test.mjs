@@ -39,6 +39,20 @@ test("CSV：字符先到顶（行数远不到四百）也要报，末条没写�
   assert.doesNotMatch(html, /r181/); // 被截断的那一条不当作完整记录
 });
 
+test("CSV / TSV 预览截在首条记录内时，不说文件是空的", async () => {
+  const f = load(["fileViewerBody"]);
+  for (const [ext, split] of [
+    ["csv", ","],
+    ["tsv", "\t"]
+  ]) {
+    const reader = text => ({ text: async () => text });
+    const long = await f.fileViewerBody(reader(`名称${split}"${"x".repeat(2000000)}\n仍在引号里"`), `宽.${ext}`, "table", -1);
+    assert.match(long, /预览范围内没有完整记录/);
+    assert.doesNotMatch(long, /空文件|<table/);
+    assert.match(await f.fileViewerBody(reader(""), `空.${ext}`, "table", -1), /空文件/);
+  }
+});
+
 test("取全的文本照原样解：GBK 末尾的字不被当成半个 UTF-8 切掉", async () => {
   const f = load(["urlReader"]),
     original = globalThis.fetch;

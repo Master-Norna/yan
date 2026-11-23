@@ -147,16 +147,14 @@ function stageNavMark(tab) {
 /** @param {string} url @param {{ tab: string } | null} [from] */
 function stageNavigate(url, from = null) {
   stage.goAt = Date.now();
-  // 这一页上又开了别的：先前那几笔作废
+  // 这一页上又开了别的：先前那几笔作废。起初没页签的请求也不再算数。
+  stage.emptyNav++;
   const rev = stageNavMark(from ? from.tab : stage.current);
-  const go = !from
-    ? stage.session
+  const go = from?.tab
+    ? stageNavigateIn(from.tab, url, rev)
+    : !from && stage.session
       ? stageSend("Page.navigate", { url }, stage.session)
-      : stageSend("Target.createTarget", { url })
-    : stage.tabs.has(from.tab)
-      ? stageNavigateIn(from.tab, url, rev)
-      : // 发起那一页已关掉：新开一页去，别往一个没了的会话语上发
-        stageSend("Target.createTarget", { url });
+      : stageSend("Target.createTarget", { url });
   void go.catch(error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`));
 }
 // 往指定的那一页发导航。人已切走（或看台没连着）：临时接一下这一页、发完就放下——
@@ -196,10 +194,12 @@ async function stageShowDoc(url) {
   // 记下发起时那一页、先占一码：落页时这一页上若已又开了别的（或这一页已关掉），这一份就作罢，别把页拽回来。
   // 先后开了两件时后开的那件说了算——它占的码更新。
   // 只记页、不记会话：切页签会把旧会话解除（见 10-view.js 的 stageAttach），落页时再按页去接
-  const from = { tab: stage.current },
-    rev = stageNavMark(from.tab),
-    // 这一份还算不算数：发起那页关了、或人又在那页上开了别的，都不作数了——连「交本机程序」也不该再自作主张
-    mine = () => !!stage.tabs.has(from.tab) && stage.tabs.get(from.tab)?.nav === rev;
+  const from = { tab: stage.tabs.has(stage.current) ? stage.current : "" },
+    ws = stage.ws,
+    rev = from.tab ? stageNavMark(from.tab) : 0,
+    emptyRev = ++stage.emptyNav,
+    // 起初没有页签则新开；发起页后来被关、换址或浏览器断开，则连本机回退也取消。
+    mine = () => !!ws && stage.ws === ws && (from.tab ? stage.tabs.get(from.tab)?.nav === rev : stage.emptyNav === emptyRev);
   toast(t`正在摊开「${name}」…`);
   try {
     const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),

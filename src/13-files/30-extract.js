@@ -107,8 +107,8 @@ async function extractPdfText(data) {
   if (chars < pages.length * 10) throw Error(t("PDF 没有文字层（多半是扫描件），原件照发"));
   return pages.join("\n\n");
 }
-// 取包里选中的几份：默认解成文字，raw 给原字节（图）
-async function unzipSelected(bytes, wanted, raw = false) {
+// 取包里选中的几份：默认解成文字，raw 给原字节（图）；optional 的条目解不开时留给调用方降级
+async function unzipSelected(bytes, wanted, { raw = false, optional = false } = {}) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     decoder = new TextDecoder(),
     minimum = Math.max(0, bytes.length - 65557);
@@ -139,22 +139,25 @@ async function unzipSelected(bytes, wanted, raw = false) {
       name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
     if (wanted(name)) {
       if (uncompressedSize > 8 * 1024 * 1024 || extractedBytes + uncompressedSize > 16 * 1024 * 1024) tooLarge.push(name);
-      else {
-        const localNameLength = view.getUint16(localOffset + 26, true),
-          localExtraLength = view.getUint16(localOffset + 28, true),
-          start = localOffset + 30 + localNameLength + localExtraLength,
-          compressed = bytes.slice(start, start + compressedSize);
-        let output;
-        if (method === 0) output = compressed;
-        else if (method === 8) {
-          const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-          output = new Uint8Array(await new Response(stream).arrayBuffer());
+      else
+        try {
+          const localNameLength = view.getUint16(localOffset + 26, true),
+            localExtraLength = view.getUint16(localOffset + 28, true),
+            start = localOffset + 30 + localNameLength + localExtraLength,
+            compressed = bytes.slice(start, start + compressedSize);
+          let output;
+          if (method === 0) output = compressed;
+          else if (method === 8) {
+            const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+            output = new Uint8Array(await new Response(stream).arrayBuffer());
+          }
+          if (output) {
+            entries.set(name, raw ? output : decoder.decode(output));
+            extractedBytes += output.length;
+          }
+        } catch (error) {
+          if (!optional) throw error;
         }
-        if (output) {
-          entries.set(name, raw ? output : decoder.decode(output));
-          extractedBytes += output.length;
-        }
-      }
     }
     cursor += 46 + nameLength + extraLength + commentLength;
   }
@@ -264,7 +267,7 @@ async function withZipImages(html, bytes) {
   const imgs = [...box.content.querySelectorAll("img[data-path]")],
     pathOf = img => archiveRelative("", img.getAttribute("data-path") || ""),
     wanted = new Set(imgs.map(pathOf)),
-    media = await unzipSelected(bytes, name => wanted.has(name), true).catch(() => new Map());
+    media = await unzipSelected(bytes, name => wanted.has(name), { raw: true }).catch(() => new Map());
   for (const img of imgs) {
     const path = pathOf(img),
       type = ZIP_IMAGE_TYPES[fileExtension(path)];
@@ -474,7 +477,7 @@ function pptxSpecialLists(lines) {
     for (const item of items) {
       if (item.plain) {
         flush();
-        out += `<p>${escapeHtml(item.text)}</p>`;
+        out += `<p>${escapeHtml(item.text)}</p>${render(item.children)}`;
         continue;
       }
       const type = typeOf(item);
@@ -688,6 +691,8 @@ function xlsxNumber(raw, numFmtId, code, date1904) {
     .replace(/"[^"]*"/g, "")
     .replace(/\\./g, "")
     .split(";");
+  // 条件可能让正数也跳到后面的段；不猜条件，保留原值。颜色与累计单位不是条件。
+  if (sections.some(section => /\[\s*[<>=]/.test(section))) return raw;
   // 复杂的正/负/零分段不猜；先挑出这一格能用的段，再辨累计单位。
   if ((number < 0 && sections.length > 1) || (number === 0 && sections.length > 2)) return raw;
   const written = sections[0],
@@ -995,7 +1000,7 @@ async function extractZipDocumentText(extension, bytes) {
           return { xml: entries.get(name), rels, note };
         }),
       notes = new Set(parts.map(part => part.note).filter(Boolean)),
-      noteEntries = notes.size ? await unzipSelected(bytes, name => notes.has(name)) : new Map();
+      noteEntries = notes.size ? await unzipSelected(bytes, name => notes.has(name), { optional: true }) : new Map();
     return pptxMarkdown(parts.map(({ xml, rels, note }) => ({ xml, rels, notes: note ? (noteEntries.get(note) ?? "") : undefined })));
   }
   if (extension === "xlsx")

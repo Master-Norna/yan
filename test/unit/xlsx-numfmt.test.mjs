@@ -44,6 +44,15 @@ test("不擅加分组、不误判带缩放的逗号，正半负半都向外取�
   assert.equal(xlsxNumber("0.5", 164, "h:mm;[m]:ss", false), "12:00");
 });
 
+test("含条件的数字格式保留原值，不把颜色、累计单位或引号内的文字当条件", () => {
+  assert.equal(xlsxNumber("0.25", 164, "[>=100]0.0%;0.00", false), "0.25");
+  assert.equal(xlsxNumber("0.25", 164, "0.0%;[<0]0.00", false), "0.25");
+  assert.equal(xlsxNumber("45306", 164, "[=1]yyyy-mm-dd;0", false), "45306");
+  assert.equal(xlsxNumber("12345.6", 164, "[Red]#,##0.00", false), "12,345.60");
+  assert.equal(xlsxNumber("1.5", 164, "[h]:mm:ss", false), "36:00:00");
+  assert.equal(xlsxNumber("0.25", 164, `"[>=100]"0.0%`, false), "25.0%");
+});
+
 test("格式里的 # 是「有才写」的可选小数位，末尾的 0 收掉、非零留着", () => {
   // 0.##% 的 0.235 是 23.5%，不是 24%——只数 0 会把它当没有小数位
   assert.equal(xlsxNumber("0.235", 164, "0.##%", false), "23.5%");
