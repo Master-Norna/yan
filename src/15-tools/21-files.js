@@ -211,11 +211,18 @@ defineTool({
   sideEffect: true,
   writes: true,
   digest: true,
-  async run(step, args, { conversation, signal }) {
+  async run(step, args, ctx) {
     const url = args.url.trim();
     step.url = url;
     step.title = args.path?.trim() || url.split("/").pop() || url;
-    const data = await bridge("/api/work/download", { ...workScope(conversation), url, path: args.path }, signal);
+    const { data, denied } = await bridgePrivate(
+      "/api/work/download",
+      { ...workScope(ctx.conversation), url, path: args.path },
+      step,
+      args,
+      ctx
+    );
+    if (denied) return denied;
     step.title = data.path;
     step.note = url;
     step.change = { path: data.path, added: 0, removed: 0, created: true }; // 计入这一答的改动摘要

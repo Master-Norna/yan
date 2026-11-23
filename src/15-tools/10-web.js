@@ -1,4 +1,5 @@
-// 言 · 联网：检索、翻网页、调接口，都经桥接。地址门禁在桥接那头：本机 127.0.0.1 可，别的内网地址不可
+// 言 · 联网：检索、翻网页、调接口，都经桥接。地址门禁在桥接那头：问而后行不连本机与内网，审而后行交审查，
+// 径行直连（见 03-review.js 的 bridgePrivate）
 defineTool({
   name: "search_web",
   group: "web",
@@ -43,10 +44,11 @@ defineTool({
   digest: step =>
     t`翻阅 ${String(step.title || step.url || "").slice(0, 60)}${step.url && step.title ? `（${step.url}）` : ""} → ${step.status === "done" ? t("已读") : step.result || step.status}`,
   sources: step => [{ url: step.url, title: step.title, read: true }],
-  async run(step, args, { signal }) {
+  async run(step, args, ctx) {
     step.url = args.url;
     const offset = Math.max(0, Math.floor(Number(args.offset) || 0)),
-      data = await bridge("/api/fetch", { url: args.url, offset }, signal);
+      { data, denied } = await bridgePrivate("/api/fetch", { url: args.url, offset }, step, args, ctx);
+    if (denied) return denied;
     step.title = data.title || args.url;
     let { text, total } = data;
     // PDF 由桥接原样交回，在这头抽字（与附件同一套 pdf.js），一段与网页一样长
@@ -80,14 +82,15 @@ defineTool({
   lookup: true,
   sideEffect: true,
   digest: step => t`调接口 ${String(step.title || "").slice(0, 120)} → ${step.result || step.status}`,
-  async run(step, args, { signal, lookup }) {
+  async run(step, args, ctx) {
     const url = args.url.trim(),
       method = (args.method || "GET").trim().toUpperCase();
     step.url = url;
     step.title = `${method} ${url}`.slice(0, 200);
-    if (lookup && !["GET", "HEAD"].includes(method))
+    if (ctx.lookup && !["GET", "HEAD"].includes(method))
       return { ok: false, content: t`旁注只查不改：${method} 不调，只许 GET、HEAD`, display: "非只读" };
-    const data = await bridge("/api/http", { url, method, headers: args.headers, body: args.body }, signal);
+    const { data, denied } = await bridgePrivate("/api/http", { url, method, headers: args.headers, body: args.body }, step, args, ctx);
+    if (denied) return denied;
     const headers = Object.entries(data.headers)
       .map(([name, value]) => `${name}: ${String(value).slice(0, 300)}`)
       .join("\n");

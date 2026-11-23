@@ -83,9 +83,9 @@ function mcpJsonHtml() {
   const servers = Object.fromEntries(Object.entries(mcpUserConfigs()).map(([name, config]) => [name, mcpMask(config)]));
   return `<div class="json-head"><span>${t(`整份配置 · mcpServers 格式；遮蔽的密钥原样保留即沿用`)}</span><button type="button" class="outline-btn" id="mcpJsonReveal">${mcpRevealed ? t("遮住密钥") : t("显示密钥")}</button></div><textarea id="mcpConfig" class="field field-area json-editor" spellcheck="false" autocomplete="off">${escapeHtml(JSON.stringify({ mcpServers: servers }, null, 2))}</textarea><div class="card-form-foot"><button id="mcpJsonSave" class="outline-btn" type="button">${t(`保存并连接`)}</button><span id="mcpError" class="card-error"></span></div>`;
 }
-// 环境变量与请求头里像密钥的值遮住（显示密钥时不遮）
-function mcpMask(config) {
-  if (mcpRevealed) return config;
+// 环境变量与请求头里像密钥的值遮住（显示密钥、或调用方要原文时不遮）
+function mcpMask(config, reveal = mcpRevealed) {
+  if (reveal) return config;
   const hide = object =>
     object && Object.fromEntries(Object.entries(object).map(([key, value]) => [key, SECRET_KEY.test(key) && value ? SECRET_MASK : value]));
   return { ...config, ...(config.env ? { env: hide(config.env) } : {}), ...(config.headers ? { headers: hide(config.headers) } : {}) };
@@ -144,14 +144,40 @@ function renderMcpSettings() {
 // 粘进来的可能是整份 { mcpServers: {…} }，也可能只是里面那一层
 function parseMcpConfig(text) {
   const parsed = JSON.parse(text || "{}");
-  const servers = parsed.mcpServers ?? parsed;
+  return mcpValidateServers(parsed.mcpServers ?? parsed, mcpUserConfigs());
+}
+// 服务配置过一遍：每项要有 command（本机程序）或 url（远端服务）；还是遮蔽占位的密钥换回原值（原值不可寻即报错）。
+// 设置页与模型手里的 mcp_config 共用这一段（见 15-tools/60-mcp.js）
+function mcpValidateServers(servers, previous) {
   if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw Error(t('应是 { "mcpServers": { 名字: 配置 } }'));
   for (const [name, config] of Object.entries(servers)) {
+    // 名字会当键写进配置对象：__proto__ 之类会改原型而不是记一项
+    if (!name.trim() || ["__proto__", "constructor", "prototype"].includes(name)) throw Error(t`服务名「${name}」不可用`);
     if (!config || typeof config !== "object" || !(typeof config.command === "string" || typeof config.url === "string"))
       throw Error(t`「${name}」要有 command（本机程序）或 url（远端服务）`);
-    mcpUnmask(name, config, mcpUserConfigs()[name]);
+    mcpUnmask(name, config, previous?.[name]);
   }
   return servers;
+}
+// 改一个服务：给到的键盖过去，没给的照旧；env / headers 按键合并，值给 null 即删去那一个。
+// 模型只报一两处改动时，不必把整份配置搬来搬去
+function mcpPatchConfig(previous = {}, patch = {}) {
+  const out = { ...previous };
+  for (const [key, value] of Object.entries(patch && typeof patch === "object" ? patch : {})) {
+    if (value === null) {
+      delete out[key];
+      continue;
+    }
+    if ((key === "env" || key === "headers") && value && typeof value === "object" && !Array.isArray(value)) {
+      const merged = { ...(previous[key] || {}) };
+      for (const [name, one] of Object.entries(value)) one === null ? delete merged[name] : (merged[name] = one);
+      if (Object.keys(merged).length) out[key] = merged;
+      else delete out[key];
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 // 从表单收一份配置：认得的几栏按表单来，其余字段照旧
 function mcpFormConfig(form, previous) {

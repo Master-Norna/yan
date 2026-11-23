@@ -238,8 +238,9 @@ const MODEL = require("./server/model/index.js")({ home: () => STORE.paths().roo
 // 用量簿：按日记各类花了多少，给设置里的用量卡看（见 server/usage.js）
 const USAGE = require("./server/usage.js")({ file: () => path.join(STORE.paths().root, "用量.json") });
 
-// 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件、模型转发，以及能打本机的 http_request），
-// 只受理本站页面与本机脚本；另一半是引导、总线与只取公网内容的检索、翻页。总线转交的请求仍由分发器照原门禁处理
+// 接口表：「方法 路径」→ 处理函数。受信的那一半能碰本机磁盘与本机服务（执事、卷宗、对话目录、存储、附件、模型转发，
+// 以及能打本机与内网的翻网页、http_request），只受理本站页面与本机脚本；另一半只有引导、总线与只取公网内容的检索。
+// 总线转交的请求仍由分发器照原门禁处理
 const OPEN_ROUTES = {
     "GET /api/bootstrap": handleBootstrap,
     ...WEB.openRoutes,

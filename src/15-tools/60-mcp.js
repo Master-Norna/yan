@@ -380,6 +380,125 @@ function mcpResultText(result, names = []) {
   if (!parts.length && result.structuredContent) parts.push(JSON.stringify(result.structuredContent, null, 2));
   return parts.join("\n\n") || t("（无输出）");
 }
+// 设置里那份 MCP 配置也在模型手里：能看、能改——与设置页改的是同一份 store.settings.mcpServers，存在 配置.json，
+// 合并规矩照旧。这一栏写的是命令与参数，本机服务由桥接直接起进程、不经指令沙箱：问而后行照 run_command 的尺子先请示，
+// 审而后行交审查（见 03-review.js 的 reviewFlag）；径行不问。密钥只遮不拦——模型本就能经游目自己登录取得，
+// 遮着只为防网页里的一句话诱它带走（与宽档不拦读密钥同一条取舍）
+const MCP_CONFIG_WAIT = 20000;
+defineTool({
+  name: "mcp_config",
+  label: "MCP",
+  mainOnly: true,
+  sideEffect: true,
+  approval: mcpApprovalHtml,
+  digest: true,
+  async run(step, args, ctx) {
+    const patch = args.servers && typeof args.servers === "object" && !Array.isArray(args.servers) ? args.servers : null,
+      names = list => [...new Set((Array.isArray(list) ? list : []).map(name => String(name).trim()).filter(Boolean))],
+      remove = names(args.remove),
+      reconnect = names(args.reconnect),
+      reveal = args.reveal === true,
+      writes = !!patch || remove.length > 0,
+      touched = [...new Set([...remove, ...Object.keys(patch || {})])];
+    step.title = writes ? t`改 ${touched.join("、")}` : reconnect.length ? t`重连 ${reconnect.join("、")}` : t`MCP 服务`;
+    // 问而后行：写这一栏要起本机进程，照 run_command 的尺子先问一声（守的关口刚批过这一步的不再问）
+    if (writes && !step.granted && commandPolicyOf(ctx.conversation) === "ask") {
+      step.code = mcpChangePreview(patch, remove);
+      if (!(await askApproval(step, ctx))) {
+        step.skipped = true;
+        return { ok: false, content: prompt("assistant.declined"), display: "" };
+      }
+    }
+    const notes = [];
+    if (writes) {
+      const current = mcpUserConfigs(),
+        next = { ...current };
+      for (const name of remove) {
+        if (name in next) delete next[name];
+        else notes.push(t`没有名为「${name}」的服务，这一条没删`);
+      }
+      for (const [name, one] of Object.entries(patch || {})) {
+        if (!name.trim() || ["__proto__", "constructor", "prototype"].includes(name))
+          return { ok: false, content: t`服务名「${name}」不可用`, display: "未改" };
+        next[name] = mcpPatchConfig(next[name], one);
+      }
+      let servers;
+      try {
+        servers = mcpValidateServers(next, current);
+      } catch (error) {
+        return { ok: false, content: String(error.message || error), display: "未改" };
+      }
+      step.code = mcpChangePreview(patch, remove);
+      store.settings.mcpServers = servers;
+      saveStore();
+      for (const name of touched) delete mcp.servers[name];
+      renderMcpStatus();
+      // 落盘与记忆同一套：写不成（桥接不在、超时）照实说，别让「本页已改」当成「已经存住」
+      if (!(await flushConfig())) notes.push(t("本页已改，还没写进存储目录（会自动重试）"));
+    }
+    const restart = [...new Set([...touched, ...reconnect])].filter(name => name in mcpActiveConfigs());
+    if (writes || restart.length) {
+      // 冷启动一个 npx 服务要好一阵：等一个短窗口，没连上就照当时的模样回报，连上后下一问自然有它的工具
+      let timer;
+      const ready = await Promise.race([
+        mcpReady(restart).then(() => true),
+        new Promise(resolve => (timer = setTimeout(() => resolve(false), MCP_CONFIG_WAIT)))
+      ]);
+      clearTimeout(timer);
+      if (!ready) notes.push(t`服务还在连接，连上后下一问才有它的工具`);
+    }
+    const text = mcpConfigReport(reveal);
+    // 行迹里留的那份总把密钥遮上：要看原文是这一步的事，不必连对话记录里也多一份
+    step.output = trimOutput(reveal ? mcpConfigReport(false) : text);
+    return {
+      ok: true,
+      content: [...notes, text].filter(Boolean).join("\n\n"),
+      display: t`${Object.keys(mcpUserConfigs()).length} 个服务`
+    };
+  }
+});
+// 交给模型的那份清单：一个服务一段，状态一行、配置一段。密钥遮着（reveal 才露）；遮着的那份原样送回来即沿用原值
+// （见 mcpUnmask），所以看完照着改，不会把密钥弄丢
+function mcpConfigReport(reveal = false) {
+  const configs = mcpUserConfigs(),
+    list = Object.keys(configs);
+  if (!list.length)
+    return t`尚未接入任何服务。写法：{ "名字": { "command": "npx", "args": ["-y", "@某/mcp-server"], "env": { "API_KEY": "…" } } }，或 { "名字": { "url": "https://…/mcp", "headers": { "Authorization": "Bearer …" } } }`;
+  const parts = list.map(name => {
+    const config = configs[name],
+      state = mcp.servers[name],
+      status = config.disabled
+        ? t("停用")
+        : !state
+          ? t("未连")
+          : state.ok
+            ? t`已连接 · ${state.tools.length} 件工具${mcp.lazy.includes(name) ? t("（按需给）") : ""}`
+            : t`连接失败：${state.error}`;
+    return `【${name}】${config.command ? t("本机") : t("远端")} · ${status}\n${JSON.stringify(mcpMask(config, reveal), null, 2)}`;
+  });
+  // 游目是随设置开合的内置服务，不在这份配置里；开着就说一句，免得模型去找它
+  if (mcp.servers[STAGE_SERVER]) parts.push(t`【游目】在设置 → 游目里开合，不在这份配置里`);
+  return parts.join("\n\n");
+}
+// 请示条与行迹里给人看的那段：要添改的、要删的；密钥遮着
+function mcpChangePreview(patch, remove) {
+  const masked = patch
+    ? Object.fromEntries(
+        Object.entries(patch).map(([name, config]) => [name, mcpMask(config && typeof config === "object" ? config : {}, false)])
+      )
+    : null;
+  return JSON.stringify({ ...(masked ? { servers: masked } : {}), ...(remove.length ? { remove } : {}) }, null, 2);
+}
+// 交审查的那份参数：同上，env / headers 里像密钥的值遮住，别把它们送去审查模型那里
+function mcpMaskedArgs(args) {
+  if (!args?.servers || typeof args.servers !== "object") return args;
+  return {
+    ...args,
+    servers: Object.fromEntries(
+      Object.entries(args.servers).map(([name, config]) => [name, mcpMask(config && typeof config === "object" ? config : {}, false)])
+    )
+  };
+}
 // 系统提示只带用户在设置里明确写的 MCP note。服务端握手返回的 instructions 是不可信外部数据，
 // 不能经 mcp.hint 晋升为系统指令；工具自己的描述仍可作为低信任的工具元数据交给模型。
 /** @param {Set<string>} names @param {Preset|null} preset */

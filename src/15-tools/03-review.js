@@ -2,6 +2,7 @@
 // 没开审查、或档位不是审而后行，一切照旧（规则拦的回绝，没拦的照做）；审查出错也退回这样，最坏不比没开差。
 // 标疑的几类：指令被宽的沙箱或审查规则拦下的；指令本身把东西送出去（HTTP 上传、git push、gh 的写、远程复制、
 // 发布包、写网络共享——见 server/sandbox.js 的 egressOf）；往外发、网址里带着一长串用户没给过的参数，或带着内容 POST 出去的；
+// 要连本机与内网地址的（桥接先拒，见 bridgePrivate）；改 MCP 配置的（那一栏写的是命令与参数，往后会起本机进程）；
 // 往技能目录里写的（会进往后每段对话的上下文）；调 MCP 服务的写操作（见 60-mcp.js）——游目的浏览器另按 stageReviewWhy 收窄。
 // 授权按这一答算：交给审查的用户原话分「这一答」与「更早」，更早的只作背景；同一类外发审准过一回之后，再来须这一答里明确要。
 // 写记忆不审：记偏好、约定、做出来的结论本是模型自己拿主意的事，照「用户授权了没有」判几乎都驳（实测 7 回驳 3，
@@ -17,7 +18,8 @@ const reviewTally = new Map();
 async function reviewHook(step, args, ctx) {
   if (!reviewOn(ctx.conversation)) return null;
   const flag = await reviewFlag(step, args, ctx);
-  return flag ? reviewGate(step, args, ctx, flag) : null;
+  // flag.args：交给审查的那份参数（遮过密钥的，如 MCP 配置里的 env）；审查只看这一步做什么
+  return flag ? reviewGate(step, flag.args || args, ctx, flag) : null;
 }
 /** @param {Conversation} conversation */
 function reviewOn(conversation) {
@@ -58,6 +60,14 @@ async function reviewFlag(step, args, ctx) {
   }
   if (["write_file", "edit_file"].includes(step.name) && insideSkills(String(args.path || ""), conversation))
     return { why: "往技能目录里写，往后的对话都会照着做", kind: "", label: "" };
+  // 改 MCP 配置：那一栏写的是命令与参数，往后由桥接直接起本机进程、不经指令沙箱。交给审查的那份遮住 env / headers 里像密钥的值
+  if (step.name === "mcp_config" && (args.servers || (Array.isArray(args.remove) && args.remove.length)))
+    return {
+      why: "改 MCP 配置：往后的连接会以用户的权限起本机进程",
+      kind: "mcp-config",
+      label: "改 MCP 配置",
+      args: mcpMaskedArgs(args)
+    };
   return null;
 }
 /** 往外发的：带着内容 POST 出去，或网址里有一长串用户没给过、也不是检索与网页交回的参数 */
@@ -200,6 +210,58 @@ async function reviewGate(step, args, ctx, flag) {
     content: `${prompt("review.denied", { why: verdict.why || "没说理由" })}${halt ? `\n${prompt("review.halt", { count: tally.total })}` : ""}`,
     display: "审查未准"
   };
+}
+/**
+ * 调桥接的联网接口；撞上「本机或内网地址」那道门时照档位再判一次：
+ * 径行直接放（首次就带上 allowPrivate）、审而后行交审查（准了带 allowPrivate 重发；审查没成仍不连）、
+ * 问而后行照旧拒，回一句指路的话。桥接在连之前就拒了，一个字节都没发出去，重发是安全的（见 server/web.js 的 privateRefusal）
+ * @param {string} path @param {Record<string, any>} payload @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx
+ * @returns {Promise<{ data?: any, denied?: ToolOutcome }>}
+ */
+async function bridgePrivate(path, payload, step, args, ctx) {
+  const policy = commandPolicyOf(ctx.conversation),
+    send = allowPrivate => bridge(path, allowPrivate ? { ...payload, allowPrivate: true } : payload, ctx.signal);
+  try {
+    return { data: await send(policy === "auto") };
+  } catch (error) {
+    if (!error.data?.private) throw error;
+    // 问而后行与没开审查的审而后行：照旧不连，说明切到哪一档才连得上
+    if (policy === "ask")
+      return {
+        denied: {
+          ok: false,
+          content: t`${error.message}（问而后行不连本机与内网地址；要用，把权限切到「审而后行」）`,
+          display: "内网未连"
+        }
+      };
+    // 这一步已交审查准过（如网址里带一长串参数那一路）：不再问第二回
+    if (step.reviewed?.ok) return { data: await send(true) };
+    if (!reviewOn(ctx.conversation)) throw error;
+    const denied = await reviewGate(step, args, ctx, {
+      why: `要连本机或内网地址（${hostOfUrl(args.url)}）`,
+      kind: "private-address",
+      label: "连本机或内网"
+    });
+    if (denied) return { denied };
+    // 审查没成（连不上、没答准）：照没开审查的规矩，仍不连——审查只该让它更容易过，不该更容易（见 03-review.js 开头）
+    if (!step.reviewed?.ok)
+      return {
+        denied: {
+          ok: false,
+          content: t`${error.message}（审查没成，这次没有连本机或内网地址；稍后再试，或看看设置 → 专司里的审查模型）`,
+          display: "审查未成"
+        }
+      };
+    return { data: await send(true) };
+  }
+}
+/** 网址的主机：只作审查与回话里的缘由 @param {string} raw */
+function hostOfUrl(raw) {
+  try {
+    return new URL(String(raw || "")).host || String(raw || "");
+  } catch {
+    return String(raw || "");
+  }
 }
 /** 两步判：先只要一个字；疑了再同一段话换个末句要理由（前头一字不差，走缓存） @returns {Promise<{ ok: boolean, why: string }>} */
 async function askReviewer(step, args, ctx, flag) {

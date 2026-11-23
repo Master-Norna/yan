@@ -6,7 +6,8 @@ import dns from "node:dns";
 import { gzipSync } from "node:zlib";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const { fetchPublicResponse, readLimitedBytes } = require("../../server/web.js");
+const { fetchPublicResponse, readLimitedBytes, assertPublicUrl } = require("../../server/web.js");
+const { jsonRoute } = require("../../server/http.js");
 const createPublicProxy = require("../../server/headless-proxy.js");
 const listen = async server => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -83,6 +84,43 @@ test("超量的响应及时取消，DNS 指向内网时在连接前拒绝", asyn
     await assert.rejects(fetchPublicResponse("http://own-test.invalid"), /内网/);
   } finally {
     dns.promises.lookup = original;
+    await close(server);
+  }
+});
+
+test("本机与内网按档位：不给 allowPrivate 照拒，给了才连；拒时带 private 记号", async () => {
+  const server = http.createServer((req, res) => res.end("lan"));
+  const base = await listen(server);
+  try {
+    // 私网地址字面量：不给许可照旧拒，且带着记号——页面据此交审查、准了再带 allowPrivate 重发
+    await assert.rejects(
+      assertPublicUrl(new URL("http://10.1.2.3/")),
+      error => error.detail?.private === true && /内网/.test(error.message)
+    );
+    // http_request 那一路放行本机回环，但局域网仍拒
+    await assert.rejects(fetchPublicResponse("http://10.1.2.3:1/", { allowLoopback: true }), error => error.detail?.private === true);
+    // 回环：不给 allowPrivate（也不给 allowLoopback）时照旧拒
+    await assert.rejects(fetchPublicResponse(base), /本机或内网/);
+    const { response } = await fetchPublicResponse(base, { allowPrivate: true });
+    assert.equal(await response.text(), "lan");
+    assert.deepEqual(await assertPublicUrl(new URL(base), { allowPrivate: true }), [{ address: "127.0.0.1", family: 4 }]);
+  } finally {
+    await close(server);
+  }
+});
+
+test("撞上内网门禁时，接口回的 400 带 private 记号", async () => {
+  const server = http.createServer((req, res) =>
+    jsonRoute(async () => {
+      throw Object.assign(Error("不允许访问本机或内网地址"), { detail: { private: true } });
+    })(req, res)
+  );
+  const base = await listen(server);
+  try {
+    const answer = await fetch(base, { method: "POST", body: "{}" });
+    assert.equal(answer.status, 400);
+    assert.deepEqual(await answer.json(), { error: "不允许访问本机或内网地址", private: true });
+  } finally {
     await close(server);
   }
 });
