@@ -503,11 +503,21 @@ function fenceAfter(open, line) {
 function stableCut(content) {
   const listy = line => /^\s*(?:[-*+]|\d+[.)])\s/.test(line) || /^\s+\S/.test(line);
   let cut = content.lastIndexOf("\n\n");
+  /** @type {Set<number>|undefined} */
+  let openCuts;
   while (cut > 0) {
-    const before = content.slice(0, cut),
-      prevLine = before.slice(before.lastIndexOf("\n") + 1),
-      nextLine = content.slice(cut + 2).split("\n")[0];
-    const inFence = inOpenFence(liftBareHtml(before));
+    const prevLine = content.slice(content.lastIndexOf("\n", cut - 1) + 1, cut),
+      nextEnd = content.indexOf("\n", cut + 2),
+      nextLine = content.slice(cut + 2, nextEnd < 0 ? content.length : nextEnd);
+    let inFence,
+      unlifted = false;
+    if (openCuts) inFence = openCuts.has(cut);
+    else {
+      const before = content.slice(0, cut),
+        lifted = liftBareHtml(before);
+      inFence = inOpenFence(lifted);
+      unlifted = lifted.length === cut;
+    }
     const continues =
       /^\s+\S/.test(nextLine) ||
       (listy(nextLine) && listy(prevLine)) ||
@@ -515,8 +525,24 @@ function stableCut(content) {
       (/>\s*$/.test(prevLine) && (!nextLine || HTML_LINE.test(nextLine)));
     if (!inFence && !continues) break;
     cut = content.lastIndexOf("\n\n", cut - 1);
+    // 候选都在换行前。HTML 提升的空行向后看，只在短前缀已经无行可看时才会受新增行影响，只可能续长末段。
+    // 提升只插入围栏；长前缀没提升，则更短的也没有。否则照旧按各自的前缀算，不拿整段或尾段的状态代替。
+    if (unlifted && cut > 0) openCuts = openFenceCuts(content, cut);
   }
   return Math.max(0, cut);
+}
+
+/** 一次记下指定断点及之前的空行中，哪些在未闭合的围栏里。@param {string} content @param {number} lastCut */
+function openFenceCuts(content, lastCut) {
+  const cuts = new Set();
+  let open = null;
+  for (let start = 0; start <= lastCut; ) {
+    const end = content.indexOf("\n", start);
+    open = fenceAfter(open, content.slice(start, end));
+    if (open && content[end + 1] === "\n") cuts.add(end);
+    start = end + 1;
+  }
+  return cuts;
 }
 
 // 正文里的代码块：复制；各种嵌件自己的事件由它们各自接上（见 EMBEDS 的 bind）
