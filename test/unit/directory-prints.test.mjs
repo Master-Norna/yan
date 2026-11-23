@@ -35,17 +35,17 @@ function folder() {
   };
 }
 
-test("目录凭据不因言自己的目录记忆、意与临时稿更新而失效", async () => {
+test("目录凭据不因言自己的目录记忆、图与临时稿更新而失效", async () => {
   const { root, print, clean } = folder();
   try {
     fs.writeFileSync(path.join(root, "app.js"), "业务代码");
     const before = await print();
     fs.mkdirSync(path.join(root, ".yan"));
-    fs.writeFileSync(path.join(root, ".yan/意.json"), '{"nodes":{}}');
+    fs.writeFileSync(path.join(root, ".yan/图.json"), '{"nodes":{}}');
     fs.mkdirSync(path.join(root, ".草稿"));
     fs.writeFileSync(path.join(root, ".草稿/probe.py"), "print('x')");
     assert.equal(await print(), before);
-    fs.writeFileSync(path.join(root, ".yan/意.json"), '{"nodes":{"甲":{}}}');
+    fs.writeFileSync(path.join(root, ".yan/图.json"), '{"nodes":{"甲":{}}}');
     assert.equal(await print(), before);
   } finally {
     clean();

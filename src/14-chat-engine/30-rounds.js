@@ -64,8 +64,8 @@ function roundSteps(calls, target, scope) {
  *   beforeEnd?: () => Promise<Record<string, any>|null> }} run
  *   host：步骤画在哪条消息上（帮手的步骤画在主答的差遣卡里）；scope：步骤记上属于哪名帮手；kind：墨记进用量簿的哪一类（帮手按 scope 认）；
  *   onStatus：网络重试这类状态；
- *   afterRound：一轮工具做完、要接在工具结果后让它知道的话（主答的意，见 19-intent/10-store.js 的 intentRound）；
- *   beforeEnd：模型说完要收尾时，递回一条消息即接着做，给 null 即收尾（主答的意，见 intentGate）
+ *   afterRound：一轮工具做完、要接在工具结果后让它知道的话（主答的图，见 19-intent/10-store.js 的 intentRound）；
+ *   beforeEnd：模型说完要收尾时，递回一条消息即接着做，给 null 即收尾（主答的图，见 intentGate）
  */
 async function runRounds(target, history, run) {
   const { profile, conversation, host, signal, overrides, tally, inbox = null } = run,
@@ -180,7 +180,7 @@ async function runRounds(target, history, run) {
       // 说完了就收尾，帮手还在后台也不等：回报到了另起一答（见 mailReport），等着的时候没有谁醒着。
       // 只剩用户的补言也照旧收尾，补言由 settleSupplements 作下一问送出。这一轮说着时已到的回报（或递给帮手的话）才当场递上接着做
       if (!inbox?.queue.some(item => item.report !== undefined)) {
-        // 收尾前要它再看一眼的（主答的意，见 19-intent/10-store.js 的 intentGate）：递回一句话即接着这一答写，不另起。轮次到顶的不拦
+        // 收尾前要它再看一眼的（主答的图，见 19-intent/10-store.js 的 intentGate）：递回一句话即接着这一答写，不另起。轮次到顶的不拦
         const entry = run.beforeEnd && overrides.tools && overrides.toolChoice !== "none" ? await run.beforeEnd() : null;
         if (!entry) break;
         const said = target.content.slice(roundStart).trim();
@@ -229,7 +229,7 @@ async function runRounds(target, history, run) {
     for (const step of steps) history.push({ role: "tool", tool_call_id: step.id, content: outcomes.get(step.id) ?? "" });
     // 它这一轮自己撮了要：此前的往来换成它写的笔记（见 60-context.js 的 foldByModel）
     foldByModel(history, overrides, steps);
-    // 一轮做完之后要让它知道的（意里新转待复核的几项）：接在这一轮末一条工具结果后
+    // 一轮做完之后要让它知道的（图里新转待复核的几项）：接在这一轮末一条工具结果后
     const after = run.afterRound ? await run.afterRound() : "";
     if (after) history.at(-1).content = `${history.at(-1).content}\n\n${after}`;
     if (images.length) attachToolImages(history, images, profile);

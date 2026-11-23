@@ -28,7 +28,7 @@ function trailWork(message) {
 function trailBase(message) {
   return trailWork(message) ? trailGroups(message).at(-1)?.at || 0 : 0;
 }
-// 收尾前递的话（coda，如收尾前对照意）放了行、其后没再动手：走向没变，之前那段话仍是答复。这一步不进行迹，照实际的先后画在答复之后、
+// 收尾前递的话（coda，如收尾前对照结论图）放了行、其后没再动手：走向没变，之前那段话仍是答复。这一步不进行迹，照实际的先后画在答复之后、
 // 它引出的那几句之前（见 07-paint.js 的正文）；还在写时照常进行迹
 /** @param {Message|SubAgent} message @returns {Step|null} */
 function trailCoda(message) {

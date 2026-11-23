@@ -30,7 +30,7 @@ function restoreScrollPosition(snapshot, { follow = true } = {}) {
   if (anchor) host.scrollTop += anchor.getBoundingClientRect().top - host.getBoundingClientRect().top - snapshot.anchorOffset;
   else host.scrollTop = Math.min(snapshot.top, Math.max(0, host.scrollHeight - host.clientHeight));
 }
-// 标题下的元信息行：日期、几问、旁注、意；一答收尾后也刷一次。绑定（更换）目录、存入卷宗都在侧栏对话的「⋯」里，这里不重复
+// 标题下的元信息行：日期、几问、旁注、图；一答收尾后也刷一次。绑定（更换）目录、存入卷宗都在侧栏对话的「⋯」里，这里不重复
 /** @param {Conversation} c */
 function renderChatMeta(c) {
   $("#chatMeta").innerHTML =
@@ -38,12 +38,12 @@ function renderChatMeta(c) {
   renderRunningHead();
   requestAnimationFrame(syncRunningHead);
 }
-// 意属于目录（见 19-intent/50-glance.js）
+// 图属于目录（见 19-intent/50-glance.js）
 function intentGlance(c) {
   const html = intentGlanceHtml(c);
   return html ? ` · ${html}` : "";
 }
-// 书眉：标题滚出视口后才显出题名与问数（工作目录立了意的，再带一枚意）。字随 renderChatMeta 与改标题刷新（renderRunningHead），滚动时只切显隐（syncRunningHead）
+// 书眉：标题滚出视口后才显出题名与问数（工作目录立了图的，再带一枚图）。字随 renderChatMeta 与改标题刷新（renderRunningHead），滚动时只切显隐（syncRunningHead）
 function renderRunningHead() {
   const c = currentConversation(),
     head = $("#runningHead");

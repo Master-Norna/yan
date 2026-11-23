@@ -1,4 +1,4 @@
-// 意的卡片上那张图：摆法本身不让它重合——字在列里、线在列间、汇点在记号前。随机生成几百张图，逐张查：字框不相叠，线不穿字，结不压字
+// 图的卡片上那张图：摆法本身不让它重合——字在列里、线在列间、汇点在记号前。随机生成几百张图，逐张查：字框不相叠，线不穿字，结不压字
 import test from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";

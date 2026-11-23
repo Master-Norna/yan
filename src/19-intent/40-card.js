@@ -1,15 +1,15 @@
-// 言 · 意 · 卡片（见 设计稿/55 甲 · 一张纸、58 甲、63 甲 · 钻入、65 二 · 照言已有的语汇、66 · 簿录与墨痕）：意属于任务，不画在对话里。
-// 题下一行与书眉里那一枚（50-glance.js）、行迹里「意」那一步点开，都在预览浮层里铺开这一张，顶栏的印换成石青「意」。
+// 言 · 图 · 卡片（见 设计稿/55 甲 · 一张纸、58 甲、63 甲 · 钻入、65 二 · 照言已有的语汇、66 · 簿录与墨痕）：图属于任务，不画在对话里。
+// 题下一行与书眉里那一枚（50-glance.js）、行迹里「图」那一步点开，都在预览浮层里铺开这一张，顶栏的印换成石青「图」。
 // 起首是页头（与卷宗、分组、设置各栏同一个样子）：目录名、一行事实（进度、借了几条假定、更新于何时），右端一个「墨痕」作动作，下压墨线。
 // 其下一张图（前提在左、根在右，摆法见 30-layout.js），图下是这一层的簿录：根在先、余者随图自右而左、自上而下，一项一行——记号、名、进度、说法；
 // 有事的那几项说法换成事由（待复核的缘由、前提未立的卡在哪、假定的出处），不另立「待察」。点一行或图上点名，那一行就地摊开成一张笺（验收、前提支撑、凭据……），再点收起。
-// 墨痕（原「留痕」：改意、弃、撤、归入的记录）只为查考，平时只是页头一个字；点开图下换成墨痕。弃了的不上图，就记在墨痕里（带灰叉、写弃时的缘由），不再单立一节。
+// 墨痕（原「留痕」：改图、弃、撤、归入的记录）只为查考，平时只是页头一个字；点开图下换成墨痕。弃了的不上图，就记在墨痕里（带灰叉、写弃时的缘由），不再单立一节。
 // 卡片只给看、不给改：要改的往往不是一两个字，直接告诉模型。
 // 嵌套：图只画一层。模块在图上与簿录里带「里面已立几项 ›」，点它即进模块：整张图换成模块里的，以模块自己收尾（最右那一项，淡些），
 // 页头下一行写所在（可点回上层）；模块的前提与撑起什么点开它那一项即见，不在这行另列。
 // 了结的几件（见 00-core.js 的 intentClosed）不上这张图：页头右端「往事 n」与墨痕同一个样子，点开图下换成一件一行、新的在上，点「›」进它自己那张图，与进模块同一种走法；
 // 眼下没有开着的事，打开即这一页。
-// 由程序照 .yan/意.json 画，与文件一字不差，不请模型另画；展开的因果（支撑、缘由、哪条凭据变了）也是程序从图与指纹推出的，不经模型。
+// 由程序照 .yan/图.json 画，与文件一字不差，不请模型另画；展开的因果（支撑、缘由、哪条凭据变了）也是程序从图与指纹推出的，不经模型。
 /** @typedef {"holds"|"premised"|"stale"|"assumed"|"doing"|"waiting"|"open"|"dropped"|"kept"} IntentView 画出来的状态：成立的再按前提分已立与前提未立；kept：守，没出事 */
 const INTENT_VIEW_TEXT = {
     holds: t("已立"),
@@ -241,7 +241,7 @@ function intentGraphSvg(intent, now, selected, level = "", past = false) {
     .sort((a, b) => +!!b.node.root - +!!a.node.root || b.x - a.x || a.y - b.y)
     .map(n => n.id);
   return {
-    svg: `<svg class="intent-svg" width="${drawing.width}" height="${drawing.height}" viewBox="0 0 ${drawing.width} ${drawing.height}" role="img" aria-label="${t(`意的结构图`)}">${edges}${knots}${nodes}</svg>`,
+    svg: `<svg class="intent-svg" width="${drawing.width}" height="${drawing.height}" viewBox="0 0 ${drawing.width} ${drawing.height}" role="img" aria-label="${t(`图的结构`)}">${edges}${knots}${nodes}</svg>`,
     order
   };
 }
@@ -342,20 +342,22 @@ function intentKeepHtml(intent, now, selected, level) {
   if (!keeps.length) return "";
   return `<div class="intent-keep-head">${t(`守`)}<small>${t`${keeps.length} 条`}</small></div>${intentRollHtml(intent, now, keeps, selected, level)}`;
 }
-/** 墨痕：新的在上，同一时刻的几笔并作一组；每笔写是哪一种（弃、撤、改意、归入……）。弃的带灰叉、写弃时的缘由，假定的带泥金勾；还在图上的名可点 @param {Intent} intent */
+/** 墨痕：新的在上，同一时刻的几笔并作一组；每笔写是哪一种（弃、撤、改图、归入……）。弃的带灰叉、写弃时的缘由，假定的带泥金勾；还在图上的名可点 @param {Intent} intent */
 function intentInkHtml(intent) {
   /** @type {{ time: string, items: string[] }[]} */
   const groups = [];
   for (const entry of [...intent.log].reverse()) {
     const time = intentTime(entry.at);
     if (groups.at(-1)?.time !== time) groups.push({ time, items: [] });
-    const said = entry.text.match(/^(弃|撤|改意|改根|立根|假定|待定|复立|改名) ([^：]+?)(?:：([\s\S]*))?$/),
+    const said = entry.text.match(/^(弃|撤|改意|改图|改根|立根|假定|待定|复立|改名) ([^：]+?)(?:：([\s\S]*))?$/),
       moved = !said && entry.text.match(/^(.+?) 归入(.+)$/);
     let [kind, name, rest] = said
       ? [said[1], said[2], said[3] || ""]
       : moved
         ? ["归入", moved[1], moved[2] === "全局" ? t("全局") : moved[2]]
         : ["", "", entry.text];
+    // 改名前的墨痕写着「改意」：旧数据照旧认，显示与今天新写的「改图」一致
+    if (kind === "改意") kind = "改图";
     const node = intent.nodes[name];
     if (kind === "弃" && node?.state === "dropped") rest = node.note || node.claim;
     const mark =
@@ -396,7 +398,7 @@ function intentCrumbHtml(intent, level) {
  */
 function intentCardHtml(intent, now, { selected = "", level = "", name = "", ink = false, past = false } = {}) {
   if (!Object.keys(intent.nodes).some(id => !intentGone(intent, id)))
-    return `<div class="intent-card"><div class="file-viewer-empty">${t(`此目录尚未立意`)}</div></div>`;
+    return `<div class="intent-card"><div class="file-viewer-empty">${t(`此目录尚未立图`)}</div></div>`;
   const closed = intentClosed(intent),
     { standing, live } = intentTally(intent, now, closed),
     settled = intentPast(intent, closed).length,
@@ -464,10 +466,10 @@ function workdirName(conversation) {
 async function openIntentCard(conversation, trigger = null) {
   if (!conversation || !isWork(conversation)) return;
   showInFileViewer(
-    t`意 · ${workdirName(conversation)}`,
+    t`图 · ${workdirName(conversation)}`,
     `<div class="intent-card"><div class="file-viewer-empty">${t(`正在取出…`)}</div></div>`,
     trigger,
-    t("意")
+    t("图")
   );
   const revision = viewerRevision;
   intentCard = null;
@@ -508,7 +510,7 @@ function pickIntentNode(id, toggle) {
 /** 点了就开合（再点收起）的：图上一项、簿录一行、摊开的笺的题；别处的名（前提、支撑、墨痕）是跳过去 */
 const INTENT_TOGGLES = "g[data-intent-node], .intent-row, .intent-detail-head";
 function bindIntentEvents() {
-  // 题下一行与书眉里那一枚、行迹里「意」那一步：点开卡片
+  // 题下一行与书眉里那一枚、行迹里「图」那一步：点开卡片
   for (const area of [$("#messages"), $("#chatMeta"), $("#runningHead")])
     area.addEventListener("click", event => {
       const open = event.target.closest("[data-intent-open]");

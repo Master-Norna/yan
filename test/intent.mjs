@@ -1,5 +1,5 @@
-// 意：存在目录的 .yan/意.json，跨对话沿用。立根时记下用户的原话；标成立时记下依托文件的指纹，此后文件被谁改了（这里在外面直接改），
-// 下一问附着的意里它就是待复核；模型照用户的话改根，留痕、记下那一问；桥接是唯一的写者，带着旧版本写会被退回
+// 图：存在目录的 .yan/图.json，跨对话沿用。立根时记下用户的原话；标成立时记下依托文件的指纹，此后文件被谁改了（这里在外面直接改），
+// 下一问附着的图里它就是待复核；模型照用户的话改根，留痕、记下那一问；桥接是唯一的写者，带着旧版本写会被退回
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
@@ -15,21 +15,21 @@ await evalJs(
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
 const reply = n =>
-  `((__yanState().conversations.find(c => c.messages[0]?.content === "INTENTA 立意")?.messages || []).filter(m => m.role === "assistant" && m.status === "complete")[${n}]?.content || "")`;
+  `((__yanState().conversations.find(c => c.messages[0]?.content === "INTENTA 立图")?.messages || []).filter(m => m.role === "assistant" && m.status === "complete")[${n}]?.content || "")`;
 const post = (path, body) =>
   fetch(PAGE + path.slice(1), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r =>
     r.json()
   );
 try {
   await evalJs(
-    `document.querySelector("#welcomeInput").value = "INTENTA 立意"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
+    `document.querySelector("#welcomeInput").value = "INTENTA 立图"; document.querySelector("#welcomeInput").dispatchEvent(new Event("input")); document.querySelector("#welcome .send-trigger").click(); true`
   );
   await waitFor(`${reply(0)}.startsWith("INTENTA|")`, 30000);
   const first = await evalJs(reply(0)),
-    saved = JSON.parse(readFileSync(`${dir}/.yan/意.json`, "utf8"));
+    saved = JSON.parse(readFileSync(`${dir}/.yan/图.json`, "utf8"));
   check(
     "the intent is written into the workdir: the root keeps the user's own words, the premise's file is made relative",
-    saved.nodes["上线"]?.root?.ask === "INTENTA 立意" &&
+    saved.nodes["上线"]?.root?.ask === "INTENTA 立图" &&
       JSON.stringify(saved.nodes["甲"]?.anchors) === '["file:src/a.js","dir:src","cmd:node --version"]',
     JSON.stringify(saved)
   );
@@ -45,31 +45,31 @@ try {
   check(
     "the model rewords the root: the log says so, the first ask stays and this ask is kept beside it",
     saved.nodes["上线"].claim === "只在内网访问" &&
-      saved.nodes["上线"].root.ask === "INTENTA 立意" &&
-      saved.nodes["上线"].root.later === "INTENTA 立意" &&
+      saved.nodes["上线"].root.ask === "INTENTA 立图" &&
+      saved.nodes["上线"].root.later === "INTENTA 立图" &&
       saved.log.some(entry => entry.text === "改根 上线：只在内网访问"),
     JSON.stringify(saved.nodes["上线"])
   );
   const steps = await evalJs(
-    `(__yanState().conversations.find(c => c.messages[0]?.content === "INTENTA 立意").messages.at(-1).steps || []).filter(s => s.name === "update_intent").map(s => s.title + "|" + s.status)`
+    `(__yanState().conversations.find(c => c.messages[0]?.content === "INTENTA 立图").messages.at(-1).steps || []).filter(s => s.name === "update_intent").map(s => s.title + "|" + s.status)`
   );
   check(
     "the trail keeps one line per change",
     steps.length === 3 && steps[0].startsWith("已立 0 / 2 · 上线、甲|done"),
     JSON.stringify(steps)
   );
-  // 收尾前对照：这一答动过意，说完要收尾时拦一回——此刻的意（立住了的根也附原话）、无主改动、请它对照原话自判；只一回
+  // 收尾前对照：这一答动过图，说完要收尾时拦一回——此刻的图（立住了的根也附原话）、无主改动、请它对照原话自判；只一回
   const gate = first.slice(first.indexOf("GATE|")),
     gates = await evalJs(
-      `(__yanState().conversations.find(c => c.messages[0]?.content === "INTENTA 立意").messages.at(-1).steps || []).filter(s => s.name === "intent_gate").length`
+      `(__yanState().conversations.find(c => c.messages[0]?.content === "INTENTA 立图").messages.at(-1).steps || []).filter(s => s.name === "intent_gate").length`
     );
   check(
     "before finishing, the answer is stopped once with the intent, the root's own words and the unowned change",
     first.split("GATE|").length === 2 &&
       gates === 1 &&
-      /^GATE\|［收尾前对照意］\n［意 \.yan\/意\.json］已立 1 \/ 2/.test(gate) &&
-      /原问：INTENTA 立意/.test(gate) &&
-      /本答改了、意里没有凭据罩着的：notes\.txt\n/.test(gate) &&
+      /^GATE\|［收尾前对照结论图］\n［图 \.yan\/图\.json］已立 1 \/ 2/.test(gate) &&
+      /原问：INTENTA 立图/.test(gate) &&
+      /本答改了、图里没有凭据罩着的：notes\.txt\n/.test(gate) &&
       /对照各根的原问，看这一答能否就此收尾/.test(gate),
     gate
   );
@@ -81,22 +81,22 @@ try {
     "a gate that lets the answer close: the reply stays outside the trail, the gate and what it drew out follow it in order",
     settled.kids.length === 3 &&
       settled.kids[0].startsWith("INTENTA|") &&
-      settled.kids[1] === "coda:收尾前对照意" &&
+      settled.kids[1] === "coda:收尾前对照结论图" &&
       settled.kids[2].startsWith("GATE|") &&
       !settled.gateInTrail &&
       !settled.notes.some(n => n.startsWith("INTENTA|")),
     JSON.stringify(settled)
   );
 
-  // 意的卡片：题下一行（目录之后）与书眉常显一枚「意」，点开在预览浮层里画出卡片；点图上一项，图下展开；卡片只给看
+  // 图的卡片：题下一行（目录之后）与书眉常显一枚「图」，点开在预览浮层里画出卡片；点图上一项，图下展开；卡片只给看
   const lastMessage = `[...document.querySelectorAll('#messages .message.assistant')].at(-1)`,
     glance = await evalJs(
       `({ meta: document.querySelector('#chatMeta .intent-glance')?.textContent || "", head: document.querySelector('#runningHead .intent-glance')?.textContent || "", marks: [...document.querySelectorAll('#chatMeta .intent-glance .intent-mk')].map(m => m.dataset.mark).join(","), bar: !!${lastMessage}?.querySelector('.change-bar .change-intent'), files: ${lastMessage}?.querySelector('.change-bar .change-summary')?.textContent || "" })`
     );
   check(
     "the intent stays in sight under the title and in the running head, with one mark per item; the change bar is left to the files",
-    glance.meta === "意进度 1 / 2" &&
-      glance.head === "意1/2" &&
+    glance.meta === "图进度 1 / 2" &&
+      glance.head === "图1/2" &&
       glance.marks === "holds,open" &&
       !glance.bar &&
       /改动 2 个文件/.test(glance.files),
@@ -109,7 +109,7 @@ try {
   );
   check(
     "the card draws the intent of this folder: when it was last updated, each item in its state, nothing to edit",
-    card.name === "意 · intent-work" &&
+    card.name === "图 · intent-work" &&
       !card.editable &&
       /^更新于 \d\d-\d\d \d\d:\d\d$/.test(card.updated || "") &&
       card.states === "上线:open,甲:holds",
@@ -146,7 +146,7 @@ try {
   check("the intent step in the trail opens the same card", true);
   await evalJs(`document.querySelector('#fileViewerClose').click(); true`);
 
-  // 在言之外改了那个文件：下一问开工时重取指纹，附着的意里它转待复核，并写明缘由
+  // 在言之外改了那个文件：下一问开工时重取指纹，附着的图里它转待复核，并写明缘由
   writeFileSync(`${dir}/src/a.js`, "v2");
   await evalJs(
     `document.querySelector("#chatInput").value = "INTENTB 再看"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
@@ -155,9 +155,9 @@ try {
   const second = await evalJs(reply(1));
   check(
     "next question carries the intent after the question, with the changed file turning the premise back to be rechecked",
-    /INTENTB 再看[\s\S]*［意 \.yan\/意\.json］已立 0 \/ 2/.test(second) &&
+    /INTENTB 再看[\s\S]*［图 \.yan\/图\.json］已立 0 \/ 2/.test(second) &&
       /\[待复核\] 甲：a\.js 写好[\s\S]*缘由：凭据已变：src\/a\.js、src\/$/m.test(second) &&
-      /原问：INTENTA 立意/.test(second),
+      /原问：INTENTA 立图/.test(second),
     second
   );
   check("an answer that neither touched the intent nor changed its anchors is not stopped", !second.includes("GATE|"), second);
@@ -187,7 +187,7 @@ try {
   );
   check(
     "after the first edit both items turn back, told right after that round's tool result",
-    rounds[3]?.includes("［意］此轮之后转待复核：登录（凭据已变：api/user.js）、隐私（凭据已变：api/user.js）") && !/相持/.test(rounds[3]),
+    rounds[3]?.includes("［图］此轮之后转待复核：登录（凭据已变：api/user.js）、隐私（凭据已变：api/user.js）") && !/相持/.test(rounds[3]),
     rounds[3]
   );
   check(
@@ -197,14 +197,14 @@ try {
   );
   check(
     "the other conversation's intent is still there: one intent per folder",
-    !!JSON.parse(readFileSync(`${dir}/.yan/意.json`, "utf8")).nodes["上线"],
+    !!JSON.parse(readFileSync(`${dir}/.yan/图.json`, "utf8")).nodes["上线"],
     ""
   );
 
-  // 一份齐全的意（设计稿/55 的博客例子）：凭据变了的转待复核、牵连上面的成「前提未立」、借来的是假定、择一的结、弃了的岔路，卡片都画得出
+  // 一份齐全的图（设计稿/55 的博客例子）：凭据变了的转待复核、牵连上面的成「前提未立」、借来的是假定、择一的结、弃了的岔路，卡片都画得出
   const seal = (premises, prints = {}) => ({ rev: 1, premises, prints });
   writeFileSync(
-    `${dir}/.yan/意.json`,
+    `${dir}/.yan/图.json`,
     JSON.stringify({
       nodes: {
         上线: {
@@ -286,7 +286,7 @@ try {
       log: [
         { at: "2026-10-11T14:02:00Z", conversation: "", text: "假定 域名：用户说已在 DNS 面板配好" },
         { at: "2026-10-11T15:20:00Z", conversation: "", text: "弃 自写" },
-        { at: "2026-10-11T16:41:00Z", conversation: "", text: "改意 首页：首页列出最新十篇" }
+        { at: "2026-10-11T16:41:00Z", conversation: "", text: "改图 首页：首页列出最新十篇" }
       ]
     })
   );
@@ -319,7 +319,7 @@ try {
   );
   check(
     "a dropped path is not drawn; the ink log (behind 墨痕 in the head) keeps it with a cross, in place of the roll",
-    !("自写" in rich.states) && /弃自写自写一套配色/.test(ink.ink) && /改意首页首页列出最新十篇/.test(ink.ink) && !ink.roll && ink.dropMark,
+    !("自写" in rich.states) && /弃自写自写一套配色/.test(ink.ink) && /改图首页首页列出最新十篇/.test(ink.ink) && !ink.roll && ink.dropMark,
     JSON.stringify(ink)
   );
   await evalJs(`document.querySelector('#fileViewerStage [data-intent-ink]').click(); true`);
@@ -338,10 +338,10 @@ try {
   await evalJs(`document.documentElement.dataset.theme = "light"; document.querySelector('#fileViewerClose').click(); true`);
 
   // 嵌套（设计稿/63 甲 · 钻入）：图只画一层；模块带里面已立几项，点开即换成模块里的图，模块自己收尾，顶上一行写所在、可点回
-  const richIntent = readFileSync(`${dir}/.yan/意.json`, "utf8");
+  const richIntent = readFileSync(`${dir}/.yan/图.json`, "utf8");
   const done = (premises = {}) => ({ state: "done", seal: { rev: 1, premises, prints: {} } });
   writeFileSync(
-    `${dir}/.yan/意.json`,
+    `${dir}/.yan/图.json`,
     JSON.stringify({
       nodes: {
         成品: { claim: "以推理时间换质量的模型", check: "评测过", needs: ["训练"], root: { ask: "训一个模型", at: "" } },
@@ -403,7 +403,7 @@ try {
     )
   );
   await evalJs(`document.querySelector('#fileViewerClose').click(); true`);
-  writeFileSync(`${dir}/.yan/意.json`, richIntent);
+  writeFileSync(`${dir}/.yan/图.json`, richIntent);
 
   // 把真实响应暂扣：先打开的一张迟到，旧结果不能改眼前的卡片。
   const delayIntent = async () =>
@@ -427,9 +427,9 @@ try {
   const releaseIntent = () => evalJs(`Response.prototype.json = window.__intentDelay.original; window.__intentDelay.release(); true`);
   const openCard = () => evalJs(`document.querySelector('#chatMeta .intent-glance').click(); true`);
   const setClaim = claim => {
-    const data = JSON.parse(readFileSync(`${dir}/.yan/意.json`, "utf8"));
+    const data = JSON.parse(readFileSync(`${dir}/.yan/图.json`, "utf8"));
     data.nodes["上线"].claim = claim;
-    writeFileSync(`${dir}/.yan/意.json`, JSON.stringify(data));
+    writeFileSync(`${dir}/.yan/图.json`, JSON.stringify(data));
   };
   const rootSays = text =>
     `document.querySelector('#fileViewerStage g[data-intent-node="上线"] title')?.textContent.endsWith(${JSON.stringify(` · ${text}`)})`;
@@ -481,7 +481,7 @@ try {
     names = `[...document.querySelectorAll('#fileViewerStage .intent-roll .intent-row-name')].map(n => n.textContent).join(",")`,
     drawn = `[...document.querySelectorAll('#fileViewerStage g[data-intent-node]')].map(n => n.dataset.intentNode).sort().join(",")`;
   await evalJs(`document.querySelector('#fileViewerClose').click(); true`);
-  writeFileSync(`${dir}/.yan/意.json`, JSON.stringify(closedSet));
+  writeFileSync(`${dir}/.yan/图.json`, JSON.stringify(closedSet));
   await openCard();
   await waitFor(`${stage('g[data-intent-node="新事"]')}`);
   check("the graph draws only the open job", (await evalJs(drawn)) === "新一步,新事");
@@ -513,20 +513,20 @@ try {
   closedSet.nodes.新一步.state = "done";
   closedSet.nodes.总界限.anchors = [];
   delete closedSet.nodes.总界限.seal;
-  writeFileSync(`${dir}/.yan/意.json`, JSON.stringify(closedSet));
+  writeFileSync(`${dir}/.yan/图.json`, JSON.stringify(closedSet));
   await openCard();
   await waitFor(`${names} === "新事,旧模块,旧链,总界限"`);
   check("with nothing open the card opens on the closed jobs, with no switch", !(await evalJs(`!!${stage("[data-intent-past]")}`)));
-  await waitFor(`document.querySelector('#chatMeta .intent-glance')?.textContent === "意往事 3"`);
+  await waitFor(`document.querySelector('#chatMeta .intent-glance')?.textContent === "图往事 3"`);
   check(
     "the glance says how many are closed and draws no marks",
     !(await evalJs(`!!document.querySelector('#chatMeta .intent-glance .intent-mk')`))
   );
 
   await evalJs(`document.querySelector('#fileViewerClose').click(); true`);
-  writeFileSync(`${dir}/.yan/意.json`, '{"nodes":null,"log":[null]}');
+  writeFileSync(`${dir}/.yan/图.json`, '{"nodes":null,"log":[null]}');
   await openCard();
-  await waitFor(`document.querySelector('#fileViewerStage .file-viewer-empty')?.textContent === "此目录尚未立意"`);
+  await waitFor(`document.querySelector('#fileViewerStage .file-viewer-empty')?.textContent === "此目录尚未立图"`);
   check("a malformed empty intent still opens as an empty card", true);
 } finally {
   await evalJs(

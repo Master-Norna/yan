@@ -1,4 +1,4 @@
-// 意：任务的结论图——结构约束、传播、回归标记由数据算出；成立与否由模型自己标
+// 图：任务的结论图——结构约束、传播、回归标记由数据算出；成立与否由模型自己标
 import test from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
@@ -109,7 +109,7 @@ test("改正：整批没收后只重给改了的项，按 id 叠到上一批上�
   // 一项都不沾上一批的：丢下那批另改别处，原样交回
   const other = [{ id: "丁", claim: "别处", check: "别处能跑" }];
   assert.equal(f.intentRetryBatch(intent, prior, other), other);
-  // 已在意里的项给 removed 是撤它，照常叠上去交给后面判
+  // 已在图里的项给 removed 是撤它，照常叠上去交给后面判
   const held = change(intent, merged);
   assert.equal(f.intentRetryBatch(held, [{ id: "甲", note: "x" }], [{ id: "甲", state: "removed" }])[0].state, "removed");
 });
@@ -175,7 +175,7 @@ test("回归：前提改了说法、后加了前提、自己改了说法，已�
   const revised = change(intent, [{ id: "甲", claim: "A（改）" }]);
   assert.equal(f.intentStaleWhy(revised, "根"), "前提「甲」说法已改");
   assert.equal(f.intentStaleWhy(revised, "甲"), "说法已改");
-  assert.match(revised.log.at(-1).text, /^改意 甲：A（改）/);
+  assert.match(revised.log.at(-1).text, /^改图 甲：A（改）/);
   const added = change(intent, [{ id: "根", needs: ["甲", "乙"] }]);
   assert.equal(f.intentStaleWhy(added, "根"), "前提「乙」为后添");
   // 弃了的前提不算在内
@@ -215,7 +215,7 @@ test("根：立时记下用户的原话；改说法时记下那一问、留痕�
   );
   const kept = change(intent, [{ id: "只用Lean", claim: "只用Lean", check: "无别的证明器", keep: true }], { ask: "只用Lean" }),
     keepRevised = change(kept, [{ id: "只用Lean", check: "不装 Coq" }], { ask: "别的事" });
-  assert.equal(keepRevised.log.at(-1).text, "改意 只用Lean：验收 不装 Coq", "守也记着原问，但改它不是改根");
+  assert.equal(keepRevised.log.at(-1).text, "改图 只用Lean：验收 不装 Coq", "守也记着原问，但改它不是改根");
   assert.equal(keepRevised.nodes["只用Lean"].root.later, undefined, "别的事的那一问不记到守上");
   assert.match(problems(intent, [{ id: "模性", state: "assumed" }])[0], /note 里写明/);
   intent = change(intent, [
@@ -239,11 +239,11 @@ test("给模型读的字：根在前；立住的一行，没立住的带验收�
     ],
     { ask: "把这个项目上线" }
   );
-  const text = f.intentText(intent, {}, { path: ".yan/意.json" });
+  const text = f.intentText(intent, {}, { path: ".yan/图.json" });
   assert.equal(
     text,
     [
-      "［意 .yan/意.json］已立 0 / 2",
+      "［图 .yan/图.json］已立 0 / 2",
       "- [未做] 上线（根）：可在公网访问（前提：部署）",
       "  验收：外网打得开",
       "  原问：把这个项目上线",
@@ -268,7 +268,7 @@ test("读到空节点表、残缺凭据或坏留痕：仍能画卡片和给模�
   assert.deepEqual(f.asIntent({ nodes: null }).nodes, {});
   const intent = f.asIntent({
     nodes: { 甲: { claim: "A", check: "a", state: "done", seal: { rev: 1 }, needs: ["constructor"] } },
-    log: [null, 1, { at: "t", text: "改意" }]
+    log: [null, 1, { at: "t", text: "改图" }]
   });
   assert.doesNotThrow(() => f.intentText(intent));
   assert.deepEqual(intent.nodes["甲"].needs, []);
@@ -323,7 +323,7 @@ test("一答之内：新转待复核的接在这一轮后；同一项第 3 回�
   ]);
   assert.equal(
     f.intentRoundText(intent, now, ["登录", "隐私"], bounces),
-    "［意］此轮之后转待复核：登录（凭据已变：api/user.js）、隐私（凭据已变：api/user.js）"
+    "［图］此轮之后转待复核：登录（凭据已变：api/user.js）、隐私（凭据已变：api/user.js）"
   );
   assert.equal(f.intentRoundText(intent, now, [], bounces), "");
   bounces.set("登录", 3).set("隐私", 2);
@@ -406,7 +406,7 @@ test("了结：根立住那件收起——不附着，不计进度，不取指�
   assert.deepEqual(f.intentStaleIds(intent, { "file:甲.txt": "v2" }), []);
   assert.equal(f.intentText(intent, { "file:甲.txt": null }), "", "没有开着的事、也没有守：什么都不附");
   const guarded = change(intent, [{ id: "界限", claim: "只用本机", check: "c", keep: true }]);
-  assert.equal(f.intentText(guarded), "［意 .yan/意.json］\n守（常驻的约束）：\n- 界限：只用本机", "只有守：不写 0 / 0，也不提了结的");
+  assert.equal(f.intentText(guarded), "［图 .yan/图.json］\n守（常驻的约束）：\n- 界限：只用本机", "只有守：不写 0 / 0，也不提了结的");
   assert.ok(f.intentClosed(intent).has("甲"), "了结不看指纹：与此刻的文件无关");
 });
 
@@ -657,10 +657,10 @@ test("撤与弃：撤即整项删去、抹掉指向它的前提、留一笔痕�
   assert.ok(!both.nodes["新路"] && !both.nodes["细项"], "同一批先撤里面的即可");
   const dropped = change(intent, [{ id: "旧路", state: "dropped", note: "算力不够" }]);
   assert.ok(dropped.nodes["旧路"], "弃的留在文件里");
-  assert.match(f.intentText(dropped), /^［意 .*］已立 0 \/ 3，已弃（走过不通的）：旧路$/m);
+  assert.match(f.intentText(dropped), /^［图 .*］已立 0 \/ 3，已弃（走过不通的）：旧路$/m);
 });
 
-test("一项不成图：新立意时只有一项要立的退回；守不算，已有的意里添一项不拦", () => {
+test("一项不成图：新立一张图时只有一项要立的退回；守不算，已有的图里添一项不拦", () => {
   assert.ok(problems(empty(), [{ id: "独一", claim: "x", check: "c", root: true }]).some(p => LONE.test(p)));
   assert.deepEqual(
     problems(empty(), [
@@ -679,7 +679,7 @@ test("一项不成图：新立意时只有一项要立的退回；守不算，�
     { id: "根", claim: "R", check: "r", root: true, needs: ["甲"] },
     { id: "甲", claim: "A", check: "a" }
   ]);
-  assert.deepEqual(problems(change(two, [{ id: "甲", state: "removed" }]), [{ id: "根", state: "doing" }]), [], "已有的意撤剩一项不拦");
+  assert.deepEqual(problems(change(two, [{ id: "甲", state: "removed" }]), [{ id: "根", state: "doing" }]), [], "已有的图撤剩一项不拦");
 });
 
 test("补标根：当初没标的可补标，记下补标那一问、留一笔痕；已是别项前提的不能标根", () => {
@@ -786,14 +786,14 @@ test("改名：前提、所属、所记的前提版本一并换，立住的照�
   assert.ok(!f.intentEstablished(next, "卖点落地"));
 });
 
-test("降下来的根：成了别项的前提就不再算根，原问不再附；改说法记作改意", () => {
-  let intent = change(empty(), [{ id: "建模达标", claim: "M", check: "m", root: true }], { ask: "把当前任务的意建立起来" });
+test("降下来的根：成了别项的前提就不再算根，原问不再附；改说法记作改图", () => {
+  let intent = change(empty(), [{ id: "建模达标", claim: "M", check: "m", root: true }], { ask: "把当前任务的图建立起来" });
   intent = change(intent, [{ id: "竞赛做成", claim: "R", check: "r", root: true, needs: ["建模达标"] }], { ask: "竞赛整体做成" });
   const text = f.intentText(intent, {}, { asks: true });
   assert.match(text, /原问：竞赛整体做成/);
-  assert.ok(!text.includes("把当前任务的意建立起来"));
+  assert.ok(!text.includes("把当前任务的图建立起来"));
   const revised = change(intent, [{ id: "建模达标", claim: "M2" }], { ask: "改一下" });
-  assert.equal(revised.log.at(-1).text, "改意 建模达标：M2");
+  assert.equal(revised.log.at(-1).text, "改图 建模达标：M2");
   assert.equal(revised.nodes["建模达标"].root.later, undefined);
 });
 
@@ -853,7 +853,7 @@ test("守：一直要守的条件——不算根、不孤悬、不计进度；�
   assert.equal(intent.nodes["测过"].keep, undefined);
 });
 
-test("读写旧版意时保留未来版本的扩展字段与日志元数据", () => {
+test("读写旧版图时保留未来版本的扩展字段与日志元数据", () => {
   const raw = {
     version: 2,
     extensions: { scheduler: { priority: "high" } },
@@ -880,7 +880,7 @@ test("未来字段保留时，已知 updated 的无效类型仍会丢弃", () =>
   assert.equal(f.asIntent({ updated: "2026-11-22" }).updated, "2026-11-22");
 });
 
-test("已封印的意修改 any 前提规则须待复核；重复写同值不改版本", () => {
+test("已封印的图修改 any 前提规则须待复核；重复写同值不改版本", () => {
   const intent = f.asIntent({
     nodes: {
       目标: {

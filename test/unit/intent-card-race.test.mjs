@@ -57,7 +57,7 @@ function viewer(read) {
 }
 
 for (const fail of [false, true])
-  test(`意 A 还在读取时打开 B：A 迟到的${fail ? "错误" : "结果"}不覆盖 B`, async () => {
+  test(`图 A 还在读取时打开 B：A 迟到的${fail ? "错误" : "结果"}不覆盖 B`, async () => {
     const gate = deferred();
     const { f, node, restore } = viewer(c => (c.id === "A" ? gate.promise : Promise.resolve({ intent: intent(c.id) })));
     try {

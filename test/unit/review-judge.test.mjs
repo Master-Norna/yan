@@ -245,10 +245,10 @@ test("作答途中寄来的补言也是用户的原话：交审查、也算用�
   assert.equal(f.stageReviewWhy("browser_navigate", { url: `https://a.example/c?d=${TOKEN}` }, chat), "");
 });
 
-test("意另起一节；这一步过了关口的那条守标明已照过", () => {
+test("图另起一节；这一步过了关口的那条守标明已照过", () => {
   const f2 = load(["reviewCase", "intents", "PROMPTS"]);
   Object.assign(f2.PROMPTS, {
-    review: { case: "{{now}}{{earlier}}{{intent}}|{{action}}", earlier: "|early:{{user}}", intent: "［意］{{text}}" }
+    review: { case: "{{now}}{{earlier}}{{intent}}|{{action}}", earlier: "|early:{{user}}", intent: "［结论图］{{text}}" }
   });
   const nodes = {
     发布: { claim: "开 PR", needs: [], state: "doing" },
@@ -258,7 +258,7 @@ test("意另起一节；这一步过了关口的那条守标明已照过", () =>
   f2.intents.set("c", { intent: { nodes } });
   const now = { name: "mcp_call", granted: ["发布审批"] },
     text = f2.reviewCase(now, {}, { id: "c", messages: [{ role: "assistant", steps: [now] }] }, "缘由");
-  assert.match(text, /准许了\n\n［意］/);
+  assert.match(text, /准许了\n\n［结论图］/);
   assert.match(text, /发布前给用户看过、批了再发（这一步已过此守的关口：用户看过、准许了）；不删远端分支\|/);
 });
 

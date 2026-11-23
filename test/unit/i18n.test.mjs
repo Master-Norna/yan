@@ -81,7 +81,7 @@ function skipExpr(src, i) {
   }
   return i;
 }
-// 给模型看的话（工具结果、对话引擎拼的上下文、意的校验）不进表，这几处整片不查；界面上的零星几句另记
+// 给模型看的话（工具结果、对话引擎拼的上下文、图的校验）不进表，这几处整片不查；界面上的零星几句另记
 const MODEL_FACING = ["14-chat-engine/", "15-tools/", "19-intent/00-core.js", "13-files/30-extract.js"];
 const MODEL_KEYS = new Set([
   "我说「打开浏览器」即指这个",

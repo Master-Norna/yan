@@ -1,4 +1,4 @@
-// 意里的守（言的钩子）：立一项目标「上线」（以「部署」为前提）、一条守「测过」（凭据 test:node check.js，标成立时记下「过」）。守不上图、不计进度，
+// 图里的守（言的钩子）：立一项目标「上线」（以「部署」为前提）、一条守「测过」（凭据 test:node check.js，标成立时记下「过」）。守不上图、不计进度，
 // 卡片里在簿录之后另起一节。此后哪一答动过手、测试转为不过，收尾前对照就拦一次——那一步右侧朱字写「测过 · 测试不过」，模型接着改，
 // 收尾后再取一回，书眉不挂着「守」；动了手而测试照旧过的，照常收尾，不多费一轮。
 // 写了 on 的守走钩子：对得上的指令动手前先跑它的测试（将要做的经 YAN_TARGET 交给它），不过即不做，对不上的照常跑
@@ -33,7 +33,7 @@ const ask = async (text, n) => {
 };
 try {
   const one = await ask("HOOK1 立一条：改完测试要过", 0),
-    saved = JSON.parse(readFileSync(`${dir}/.yan/意.json`, "utf8"));
+    saved = JSON.parse(readFileSync(`${dir}/.yan/图.json`, "utf8"));
   check(
     "a keep with a test: anchor seals as 过 and records the ask",
     saved.nodes["测过"]?.keep === true &&

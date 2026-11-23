@@ -90,7 +90,7 @@ function approvalBarHtml(step) {
 function missingToolApprovalHtml(step) {
   return `<div class="approval-head"><span class="seal approval-seal" aria-hidden="true">${t(`失`)}</span><span class="approval-title">${t(`这件工具已不在了`)} · ${escapeHtml(toolLabel(step.name))}</span></div><div class="approval-sandbox">${escapeHtml(t("服务可能刚被停用，这一步无从执行；跳过它，把结果交回模型。"))}</div><div class="approval-actions"><button type="button" data-approve="skip">${t(`跳过`)}</button></div>`;
 }
-// 守的关口（意里标了 ask 的守，见 19-intent/10-store.js 的 keepHook）：不论哪件工具都是这一张——守的原话领起，下面是将要做的；
+// 守的关口（图里标了 ask 的守，见 19-intent/10-store.js 的 keepHook）：不论哪件工具都是这一张——守的原话领起，下面是将要做的；
 // 只有准许与跳过，没有「径行」：关口不随档位放宽
 /** @param {Step} step */
 function keepApprovalHtml(step) {

@@ -1395,10 +1395,10 @@ var YAN_EN = {
   "第{0}问 · 共 {1} 问": "Question {0} of {1}",
   "Enter 提交": "Enter to submit",
   "Enter 下一题": "Enter for next",
-  "意 → {0}": "Intent → {0}",
+  "图 → {0}": "Intent → {0}",
   未改: "Not changed",
   "已立 {0} / {1} · {2}": "Settled {0} / {1} · {2}",
-  ' data-intent-open role="button" tabindex="0" title="打开意"': ' data-intent-open role="button" tabindex="0" title="Open intent"',
+  ' data-intent-open role="button" tabindex="0" title="打开图"': ' data-intent-open role="button" tabindex="0" title="Open intent"',
   记入: "Remember",
   内容为空: "Empty",
   过长: "Too long",
@@ -1487,7 +1487,7 @@ var YAN_EN = {
   看这一趟的经过: "View this run",
   待递: "Pending",
 
-  // ---- 意 ----
+  // ---- 图 ----
   全局: "Top level",
   说法已改: "Claim changed",
   凭据已改: "Evidence changed",
@@ -1497,7 +1497,7 @@ var YAN_EN = {
   "凭据已变：{0}{1}": "Evidence changed: {0}{1}",
   弃: "Dropped",
   撤: "Removed",
-  改意: "Revised",
+  改图: "Revised",
   改根: "Root revised",
   立根: "Marked root",
   假定: "Assumed",
@@ -1522,14 +1522,14 @@ var YAN_EN = {
   "探针「{0}」": 'Probe "{0}"',
   "{0} {1} 回": "{0} {1}×",
   " 等 {0} 个": " and {0} more",
-  收尾前对照意: "Check intent before finishing",
+  收尾前对照结论图: "Check intent before finishing",
   "已立 {0} / {1}": "Settled {0} / {1}",
-  "意被别处接连改动，没写成，稍后再试": "Intent was changed elsewhere repeatedly; not saved. Try again later",
+  "图被别处接连改动，没写成，稍后再试": "Intent was changed elsewhere repeatedly; not saved. Try again later",
   已立: "Settled",
   "存疑 · 前提未立": "Doubtful · premises not settled",
   或: "or",
   打开模块: "Open module",
-  意的结构图: "Intent map",
+  图的结构: "Intent map",
   文件: "File",
   目录: "Folder",
   探针: "Probe",
@@ -1564,15 +1564,15 @@ var YAN_EN = {
   "前提{0}未立": "Premise{0} not settled",
   "出处：{0}": "Source: {0}",
   撑起: "Supports",
-  此目录尚未立意: "No intent in this folder yet",
+  此目录尚未立图: "No intent in this folder yet",
   进度: "Progress",
   "假定 {0}": "Assumed {0}",
   "更新于 {0}": "Updated {0}",
   "墨痕 {0}": "History {0}",
-  "意 · {0}": "Intent · {0}",
-  "意：进度 {0} / {1}，点开看图": "Intent: {0} / {1} settled, click to view",
+  "图 · {0}": "Intent · {0}",
+  "图：进度 {0} / {1}，点开卡片": "Intent: {0} / {1} settled, click to view",
   "往事 {0}": "Past {0}",
-  "意：往事 {0} 件，点开看": "Intent: {0} past, click to view",
+  "图：往事 {0} 件，点开看": "Intent: {0} past, click to view",
 
   // ---- 桥接回的话（页面在提示条、报错与状态行上照这几句换；桥接那头照旧写中文） ----
   缺少页面标识: "Missing page ID",
@@ -1880,10 +1880,10 @@ var YAN_EN = {
   "帮手看不到这段对话，只凭任务说明行事；它不向你请示，也不带记忆。页面刷新或关掉，后台的帮手随之中断。":
     "A subagent can't see this conversation and works only from its task description; it never asks you anything and doesn't carry memory. Reloading or closing the page interrupts subagents in the background.",
   "长活的骨架，属于目录": "The skeleton of a long job, kept in the folder",
-  "跨几答的长活，模型可在目录里立一份「意」：这件事要成立哪几条结论，各以什么为前提、凭什么。换一段对话接着做，看到的仍是同一份。":
+  "跨几答的长活，模型可在目录里立一份「图」：这件事要成立哪几条结论，各以什么为前提、凭什么。换一段对话接着做，看到的仍是同一份。":
     "For a job that spans several replies, the model can set up an intent in the folder: which conclusions the job must establish, what each one rests on, and what backs it. Continue in another conversation and it sees the same intent.",
   结论与前提: "Conclusions and prerequisites",
-  "意是一张图：每一项是一句要成立的结论，写明怎么算成立、以哪几项为前提。无所支撑者为根，即这件事最终要立的。成立与否由模型自判；前提未立，其上的便不算已立。":
+  "它是一张图：每一项是一句要成立的结论，写明怎么算成立、以哪几项为前提。无所支撑者为根，即这件事最终要立的。成立与否由模型自判；前提未立，其上的便不算已立。":
     "An intent is a graph: each item is a conclusion to establish, with how it's checked and which items it depends on. An item nothing else depends on is a root, what the job ultimately sets out to establish. The model judges whether each item holds; anything resting on an unsettled prerequisite doesn't count as settled.",
   模块: "Modules",
   "一项拆开还有许多步，便是模块，细项归在它里面，至多两层。里面都立住了，模块才算立住。卡片上的图只画一层，模块带「里面已立几项 ›」，点开钻入。手上的一步不挂在任何一项之下、孤悬于全局的，模型写不进去，须归入它所服务的模块。":
@@ -1897,14 +1897,14 @@ var YAN_EN = {
   "做不到、或借外部结论的一项可标「假定」，写明出处，算作已立，卡片上记着借了几条。走过不通的路标「弃」，留作记号，免得再走一遍；方案改了、写错了的，模型整项撤去，只留一笔痕。根立起时记下你那一问的原话，即「原问」；要改根的说法，直接告诉模型；改了留痕，你那句话也随原问一起附着。":
     "An item that can't be done, or that borrows an outside conclusion, can be marked assumed, with its source written down; it counts as settled, and the card notes how many are borrowed. A path that proved a dead end is marked dropped and kept as a marker so it isn't tried again; an item from a changed plan or written by mistake is removed outright, leaving only a trace in the history. When a root is set, your question is recorded word for word as the original question. To reword a root, just tell the model; the change is logged and your words are kept alongside the original question.",
   收尾前对照: "Checking before finishing",
-  "这一答动过意，模型说完要收尾时会被拦一次：摆出此刻的意、这一答里转待复核过的几项、改了而无凭据罩着的文件，请它对照原问自判能否收尾。只拦一次，拦完即放。":
+  "这一答动过图，模型说完要收尾时会被拦一次：摆出此刻的图、这一答里转待复核过的几项、改了而无凭据罩着的文件，请它对照原问自判能否收尾。只拦一次，拦完即放。":
     "If a reply touched the intent, the model is held once when it tries to finish: it's shown the current intent, the items that turned to needs recheck during this reply, and changed files no evidence covers, and asked to judge against the original question whether it can finish. It's held only once, then let go.",
-  看意: "Viewing the intent",
-  "工作目录立了意，题下一行与书眉常显一枚石青「意」：进度、一排记号，点开即卡片；行迹里「意」那一步亦可点开。卡片页头写着进度与更新于何时，右端「墨痕」记着改意、弃、撤的来历；其下是一张图，图下一份簿录，一项一行。图上的记号：青绿勾已立，泥金勾假定，泥金问号存疑（自称成立而前提未立），泥金虚圈进行中，朱圈待复核；弃了的不上图，记在墨痕里。点图上一项或簿录一行，就地展开它的验收、凭据与缘由——这些因果由程序从图与凭据推出，不经模型。卡片只给看，要改什么直接告诉模型。":
-    "Once the working folder has an intent, a blue “意” mark shows in the line under the title and in the header, with progress and a row of marks; click it for the card. The intent step under Steps opens it too. The card's header shows progress and when it was last updated, with History at the right recording revisions, drops and removals; below is the graph, and below that a list, one item per line. Marks on the graph: a green tick is settled, a gold tick is assumed, a gold question mark is doubtful (claimed settled while a prerequisite isn't), a gold dashed circle is in progress, a red circle needs recheck; dropped items are left off the graph and recorded in History. Click an item on the graph or a line in the list to expand its check, evidence and reasons in place; these links are derived by the program from the graph and evidence, not by the model. The card is for viewing only; to change something, tell the model.",
-  "意记结论，你定的界限记作意里的「守」；记忆记做法：这个目录往后还用得上的路径与配置、定下的做法与习惯、踩过的坑，模型立在目录的 `.yan/记忆.md`，自己增删合并，不记流水账；关于你本人、处处成立的仍记进跨对话的记忆。每一问之后附上一份，帮手领命时附一份只读的。可以记很多，每一问附多少随模型的窗口；附不下便附开头一段，其后的模型按需翻看。":
+  看图: "Viewing the intent",
+  "工作目录立了图，题下一行与书眉常显一枚石青「图」：进度、一排记号，点开即卡片；行迹里「图」那一步亦可点开。卡片页头写着进度与更新于何时，右端「墨痕」记着改图、弃、撤的来历；其下是一张图，图下一份簿录，一项一行。图上的记号：青绿勾已立，泥金勾假定，泥金问号存疑（自称成立而前提未立），泥金虚圈进行中，朱圈待复核；弃了的不上图，记在墨痕里。点图上一项或簿录一行，就地展开它的验收、凭据与缘由——这些因果由程序从图与凭据推出，不经模型。卡片只给看，要改什么直接告诉模型。":
+    "Once the working folder has an intent, a blue “图” mark shows in the line under the title and in the header, with progress and a row of marks; click it for the card. The intent step under Steps opens it too. The card's header shows progress and when it was last updated, with History at the right recording revisions, drops and removals; below is the graph, and below that a list, one item per line. Marks on the graph: a green tick is settled, a gold tick is assumed, a gold question mark is doubtful (claimed settled while a prerequisite isn't), a gold dashed circle is in progress, a red circle needs recheck; dropped items are left off the graph and recorded in History. Click an item on the graph or a line in the list to expand its check, evidence and reasons in place; these links are derived by the program from the graph and evidence, not by the model. The card is for viewing only; to change something, tell the model.",
+  "图记结论，你定的界限记作图里的「守」；记忆记做法：这个目录往后还用得上的路径与配置、定下的做法与习惯、踩过的坑，模型立在目录的 `.yan/记忆.md`，自己增删合并，不记流水账；关于你本人、处处成立的仍记进跨对话的记忆。每一问之后附上一份，帮手领命时附一份只读的。可以记很多，每一问附多少随模型的窗口；附不下便附开头一段，其后的模型按需翻看。":
     "The intent records conclusions, and limits you set are recorded in it as keeps. Memory here records how things are done in this folder: paths and settings worked out, practices and habits agreed on, pitfalls hit. The model keeps it in the folder at `.yan/记忆.md`, adding, removing and merging entries itself rather than logging every step; things about you that hold everywhere still go into cross-chat memory. A copy goes with each message, and subagents get a read-only copy with their task. It can grow large; how much is attached each time depends on the model's window, and if it doesn't fit, the opening part is attached and the model reads the rest as needed.",
-  "意与记忆都在目录的 `.yan/` 下，换一段对话绑同一目录，接着用的仍是这两份。":
+  "图与记忆都在目录的 `.yan/` 下，换一段对话绑同一目录，接着用的仍是这两份。":
     "Both the intent and memory live in the folder's `.yan/`; another conversation bound to the same folder carries on with the same two.",
   "挂上就走，到时叫醒": "Leave it running, get woken when it's time",
   "要等的事——一条指令跑完、一个时刻到来——执事挂上即可收尾，不必醒着守候；到时自会叫醒它，接着做。":
