@@ -1,5 +1,6 @@
 // 联网三件（翻网页 / 问接口 / 下载）撞上「本机或内网」那道门时照档位再判一次：
-// 径行直连、审而后行交审查准了再发一次、问而后行照拒并说明切到哪一档；桥接在连之前就拒，重发是安全的
+// 径行直连、审而后行交审查准了再发一次、问而后行照拒并说明切到哪一档；首跳就撞门时桥接一个字节都没发出去，
+// 重发是安全的；若是公网地址把请求转到内网（detail 带 sent），那一跳已经发出去了，不重放、只如实交回
 import test from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
@@ -86,6 +87,28 @@ test("问而后行：照拒，回一句指路的话", async () => {
     globalThis.__calls.map(call => call.allowPrivate),
     [false]
   );
+});
+
+test("公网地址跳到内网：不重发、不送审，把要跟的地址交回", async () => {
+  const f = load([
+    "bridgePrivate",
+    `setup: () => {
+      globalThis.__calls = 0;
+      bridge = async () => {
+        globalThis.__calls++;
+        throw Object.assign(Error("不允许访问本机或内网地址"), {
+          data: { private: true, sent: true, at: "http://192.168.1.1/next" }
+        });
+      };
+      reviewOn = () => true;
+      reviewGate = async () => { throw Error("不该送审"); };
+    }`
+  ]);
+  f.setup();
+  const { denied } = await f.bridgePrivate("/api/http", { url: "https://a.example/", method: "POST" }, newStep(), args, ctx("review"));
+  assert.equal(globalThis.__calls, 1, "没有第二次");
+  assert.equal(denied.display, "跳转未跟");
+  assert.match(denied.content, /192\.168\.1\.1\/next/, "交回要跟的地址");
 });
 
 test("不是内网门禁的错：照原样抛，不吞", async () => {

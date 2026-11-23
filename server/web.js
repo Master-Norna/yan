@@ -149,21 +149,31 @@ function isLoopback(value) {
   return host === "localhost" || host === "::1" || (net.isIPv4(host) && host.startsWith("127."));
 }
 // 撞上「本机或内网」这道门：detail 随 400 的 JSON 一起回给页面（见 server/http.js 的 jsonRoute），
-// 页面据此知道换条路——审而后行交审查，准了带 allowPrivate 再发一次（见 src/15-tools/03-review.js 的 bridgePrivate）
-function privateRefusal(message) {
-  return Object.assign(Error(message), { detail: { private: true } });
+// 页面据此知道换条路——审而后行交审查，准了带 allowPrivate 再发一次（见 src/15-tools/03-review.js 的 bridgePrivate）。
+// afterRedirect：拦的是「公网地址把请求转过来的那一跳」，此前已经发出过请求。页面不能再发一次——原请求
+// （可能是 POST）已经做过一遍，重发就是做第二遍；故连要跟的地址一并交回（at），让模型自己决定跟不跟
+function privateRefusal(message, afterRedirect = null) {
+  return Object.assign(Error(message), {
+    detail: afterRedirect ? { private: true, sent: true, at: afterRedirect } : { private: true }
+  });
+}
+// 交回页面的地址剥掉 userinfo：跳转的 Location 是对方写的，别把凭据字面转手
+function shownAddress(url) {
+  const copy = new URL(url.href);
+  copy.username = copy.password = "";
+  return copy.href;
 }
 // allowPrivate 由页面按档位给：径行直接带、审而后行审准了再带；不给则照旧拒（问而后行与没开审查的审而后行）
-async function assertPublicUrl(url, { allowLoopback = false, allowPrivate = false } = {}) {
+async function assertPublicUrl(url, { allowLoopback = false, allowPrivate = false, afterRedirect = false } = {}) {
+  const refused = message => privateRefusal(message, afterRedirect ? shownAddress(url) : null);
   if (!/^https?:$/.test(url.protocol)) throw Error("只支持 http 或 https 地址");
   const host = hostLiteral(url.hostname);
   const blocked = address => !allowPrivate && isPrivateAddress(address) && !(allowLoopback && isLoopback(address));
-  if (blocked(host))
-    throw privateRefusal(allowLoopback ? "不允许访问内网地址（本机 127.0.0.1 / localhost 除外）" : "不允许访问本机或内网地址");
+  if (blocked(host)) throw refused(allowLoopback ? "不允许访问内网地址（本机 127.0.0.1 / localhost 除外）" : "不允许访问本机或内网地址");
   if (net.isIP(host)) return [{ address: host, family: net.isIP(host) }];
   const addresses = await dns.lookup(host, { all: true, verbatim: true });
   const hit = addresses.find(item => blocked(item.address) && !isFakeIpAddress(item.address));
-  if (!addresses.length || hit) throw privateRefusal(`网址解析到了本机或内网地址${hit ? `（${hit.address}）` : ""}`);
+  if (!addresses.length || hit) throw refused(`网址解析到了本机或内网地址${hit ? `（${hit.address}）` : ""}`);
   return addresses;
 }
 // 连接只用刚验过的解析结果：Host / TLS SNI 仍取原域名，不在 fetch 时再解析一回。
@@ -218,7 +228,8 @@ async function fetchPublicResponse(
   const deadline = AbortSignal.timeout(timeout),
     stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
   for (let redirects = 0; redirects <= 5; redirects++) {
-    const addresses = await assertPublicUrl(current, { allowLoopback, allowPrivate });
+    // 第二跳起（redirects > 0）此前已经发出过请求：撞到内网时页面不能重放，要连目标地址一并回
+    const addresses = await assertPublicUrl(current, { allowLoopback, allowPrivate, afterRedirect: redirects > 0 });
     const response = await pinnedFetch(
       current,
       {

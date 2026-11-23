@@ -214,7 +214,9 @@ async function reviewGate(step, args, ctx, flag) {
 /**
  * 调桥接的联网接口；撞上「本机或内网地址」那道门时照档位再判一次：
  * 径行直接放（首次就带上 allowPrivate）、审而后行交审查（准了带 allowPrivate 重发；审查没成仍不连）、
- * 问而后行照旧拒，回一句指路的话。桥接在连之前就拒了，一个字节都没发出去，重发是安全的（见 server/web.js 的 privateRefusal）
+ * 问而后行照旧拒，回一句指路的话。首跳就被拒时桥接一个字节都没发出去，重发是安全的；
+ * 若是公网地址把请求转到内网（桥接回的 detail 带 sent），那一跳此前已经发出去了——重发会把它再做一遍，
+ * 故只如实交回、不重放（见 server/web.js 的 privateRefusal）
  * @param {string} path @param {Record<string, any>} payload @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx
  * @returns {Promise<{ data?: any, denied?: ToolOutcome }>}
  */
@@ -225,6 +227,16 @@ async function bridgePrivate(path, payload, step, args, ctx) {
     return { data: await send(policy === "auto") };
   } catch (error) {
     if (!error.data?.private) throw error;
+    // 门禁是在发出过请求之后才撞上的（公网地址把请求转到本机或内网）：原请求已经做过一遍，再发就是第二遍
+    //（POST 尤甚）。不重放、也不必送审——这一跳什么也没做，用不着批；把要跟的地址如实交回，由模型自己决定
+    if (error.data.sent)
+      return {
+        denied: {
+          ok: false,
+          content: t`原请求已发出，服务器把它转到本机或内网地址（${error.data.at || "未知"}），这一跳没有跟；要跟，直接请求那个地址（会照档位再判一次）`,
+          display: "跳转未跟"
+        }
+      };
     // 问而后行与没开审查的审而后行：照旧不连，说明切到哪一档才连得上
     if (policy === "ask")
       return {

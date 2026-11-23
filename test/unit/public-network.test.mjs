@@ -109,6 +109,36 @@ test("本机与内网按档位：不给 allowPrivate 照拒，给了才连；拒
   }
 });
 
+test("公网地址跳到内网：拦下时带 sent 与要跟的地址，首跳只发一次", async () => {
+  let received = 0;
+  const server = http.createServer((req, res) => {
+    received++;
+    res.writeHead(302, { Location: "http://u:p@192.168.7.7/next?a=1" });
+    res.end();
+  });
+  const base = await listen(server);
+  try {
+    // 首跳是本机回环（allowLoopback 放行），它把请求转到局域网：第二跳在发出之前被拦
+    let caught = null;
+    try {
+      await fetchPublicResponse(base + "/start", { method: "POST", body: "x", allowLoopback: true });
+    } catch (error) {
+      caught = error;
+    }
+    assert.equal(received, 1, "只发出首跳那一次");
+    assert.equal(caught?.detail?.private, true);
+    assert.equal(caught?.detail?.sent, true, "告诉页面：此前已经发出过请求，不能重放");
+    assert.equal(caught?.detail?.at, "http://192.168.7.7/next?a=1", "交回要跟的地址，且剥掉 userinfo");
+    // 首跳即内网：一个字节都没发出去，没有 sent——页面照旧可以送审后重发
+    await assert.rejects(
+      fetchPublicResponse("http://192.168.7.7/next"),
+      error => error.detail?.private === true && !error.detail.sent && !error.detail.at
+    );
+  } finally {
+    await close(server);
+  }
+});
+
 test("撞上内网门禁时，接口回的 400 带 private 记号", async () => {
   const server = http.createServer((req, res) =>
     jsonRoute(async () => {
