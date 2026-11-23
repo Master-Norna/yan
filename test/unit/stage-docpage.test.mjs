@@ -85,8 +85,7 @@ test("页签元数据变更保留版本；真实导航让在途文档请求失�
   const { stage, stageNavMark, stageTabInfo } = load(["stage", "stageNavMark", "stageTabInfo"]);
   stage.tabs.set("t1", { title: "旧题", url: "https://example.com/a", ctx: "c1" });
   assert.equal(stageNavMark("t1"), 1, "头一回占码");
-  const update = (title, url) =>
-    stage.tabs.set("t1", stageTabInfo(stage.tabs.get("t1"), { title, url, browserContextId: "c1" }));
+  const update = (title, url) => stage.tabs.set("t1", stageTabInfo(stage.tabs.get("t1"), { title, url, browserContextId: "c1" }));
   // 仅修改标题不应白白取消正在抽取的文档
   update("新题", "https://example.com/a");
   assert.equal(stage.tabs.get("t1").nav, 1);
