@@ -31,8 +31,9 @@ test("文件名里的转义照解：中文与空格、以及解不开的那种",
   assert.equal(stageDocName("file:///E:/a/%zz.docx"), "");
 });
 
-test("只认这六种：窄口就是窄口，读不到别的本机文件", () => {
-  assert.deepEqual([...DOC_VIEWABLE].sort(), [".docx", ".odp", ".ods", ".odt", ".pptx", ".xlsx"]);
+test("原件直取放行六种 Office/ODF 与 ipynb：旧格式与其他本机文件仍不许读", () => {
+  // ipynb 在 #169 登记为 view=doc；此处先让桥接接受，避免两个 PR 合并后前端摊开却被服务端拒绝
+  assert.deepEqual([...DOC_VIEWABLE].sort(), [".docx", ".ipynb", ".odp", ".ods", ".odt", ".pptx", ".xlsx"]);
   for (const ext of [".env", ".json", ".txt", ".pdf", ".doc", ".zip"]) assert.equal(DOC_VIEWABLE.has(ext), false, ext);
 });
 
@@ -80,16 +81,26 @@ test("文件名的 HTML 记号要逃掉：它进的是 <title>", () => {
   assert.match(html, /<title>&lt;a&amp;b&gt;&quot;c&quot;\.docx<\/title>/);
 });
 
-test("页签的元数据变了，摊文档占的那一码还在", () => {
+test("页签元数据变更保留版本；真实导航让在途文档请求失效", () => {
   const { stage, stageNavMark, stageTabInfo } = load(["stage", "stageNavMark", "stageTabInfo"]);
-  stage.tabs.set("t1", { title: "旧题", url: "file:///a.docx", ctx: "c1" });
+  stage.tabs.set("t1", { title: "旧题", url: "https://example.com/a", ctx: "c1" });
   assert.equal(stageNavMark("t1"), 1, "头一回占码");
-  // 摊文档要几秒，这期间网页自己也会改题名、地址：整份盖掉的话这一码就归零，正在摊的那份认不出自己，白摊
-  stage.tabs.set("t1", stageTabInfo(stage.tabs.get("t1"), { title: "新题", url: "file:///a.docx#p2", browserContextId: "c1" }));
-  const one = stage.tabs.get("t1");
-  assert.deepEqual([one.title, one.url, one.ctx, one.nav], ["新题", "file:///a.docx#p2", "c1", 1]);
-  // 也不回到 1：回去的话，本该作废的旧请求会与新的撞上
-  assert.equal(stageNavMark("t1"), 2, "接着往上数");
+  const update = (title, url) =>
+    stage.tabs.set("t1", stageTabInfo(stage.tabs.get("t1"), { title, url, browserContextId: "c1" }));
+  // 仅修改标题不应白白取消正在抽取的文档
+  update("新题", "https://example.com/a");
+  assert.equal(stage.tabs.get("t1").nav, 1);
+  // 普通链接、执事直接调用 MCP 时不经过 stageGo；靠 targetInfoChanged 的 URL 更新取消旧任务
+  update("第二页", "https://example.com/b");
+  assert.equal(stage.tabs.get("t1").nav, 2);
+  // 同页锚点也是用户主动跳转；浏览器初始化的空 URL 则不能误判
+  update("第二页", "https://example.com/b#section");
+  assert.equal(stage.tabs.get("t1").nav, 3);
+  update("载入中", "");
+  assert.equal(stage.tabs.get("t1").nav, 3);
+  // 版本号不因重建对象归零
+  assert.equal(stageNavMark("t1"), 4);
+  assert.deepEqual([stage.tabs.get("t1").title, stage.tabs.get("t1").ctx], ["载入中", "c1"]);
 });
 
 test("摊开的文档页认得出来：从它里头点原件链接，是「以本机程序打开」而不是再摊一回", () => {
