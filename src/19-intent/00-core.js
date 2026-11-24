@@ -227,7 +227,8 @@ function intentClosed(intent, before) {
   };
   const opened = new Set(),
     settled = new Set();
-  for (const id of intentRoots(intent)) walk(id, intentEstablished(intent, id) ? settled : opened);
+  const holds = intentEvaluator(intent);
+  for (const id of intentRoots(intent)) walk(id, holds(id) ? settled : opened);
   const closed = new Set([...settled].filter(id => !opened.has(id)));
   for (const id of Object.keys(intent.nodes)) if (intent.nodes[id].keep && closed.has(intent.nodes[id].in)) closed.add(id);
   return before ? new Set([...closed].filter(id => before.has(id))) : closed;
@@ -366,17 +367,41 @@ function intentState(intent, id, now = {}) {
 // 「立住」：自己成立（或是假定）、凭据作数，前提也都立住了（any 的有一项立住即可）。弃了的前提不算在内
 /** @param {Intent} intent @param {string} id @param {IntentPrints} [now] */
 function intentEstablished(intent, id, now = {}, seen = new Set()) {
-  const node = intent.nodes[id];
-  if (!node || seen.has(id)) return false;
-  const state = intentState(intent, id, now);
-  if (state === "assumed") return true;
-  if (state !== "done") return false;
-  // any 只管写明的前提；模块收口的几项都得立住
-  const written = writtenNeeds(intent, id),
-    tops = intentTops(intent, id),
-    next = new Set(seen).add(id),
-    holds = need => intentEstablished(intent, need, now, next);
-  return (node.any && written.length ? written.some(holds) : written.every(holds)) && tops.every(holds);
+  return intentEvaluator(intent, now, seen)(id);
+}
+// 一次求值共用结果，不跨图或指纹快照缓存。手编的环仍按当前路径判，不缓存遇环的结果。
+/** @param {Intent} intent @param {IntentPrints} [now] @param {Set<string>} [seen] */
+function intentEvaluator(intent, now = {}, seen = new Set()) {
+  /** @type {Map<string, boolean>} */
+  const memo = new Map(),
+    visiting = new Set(seen);
+  let cycles = 0;
+  /** @param {string} id @returns {boolean} */
+  const holds = id => {
+    if (visiting.has(id)) {
+      cycles++;
+      return false;
+    }
+    if (memo.has(id)) return memo.get(id);
+    const node = intent.nodes[id];
+    if (!node) return false;
+    const state = intentState(intent, id, now);
+    if (state !== "done") {
+      const result = state === "assumed";
+      memo.set(id, result);
+      return result;
+    }
+    const before = cycles,
+      written = writtenNeeds(intent, id),
+      tops = intentTops(intent, id);
+    visiting.add(id);
+    // any 只管写明的前提；模块收口的几项都得立住
+    const result = (node.any && written.length ? written.some(holds) : written.every(holds)) && tops.every(holds);
+    visiting.delete(id);
+    if (cycles === before) memo.set(id, result);
+    return result;
+  };
+  return holds;
 }
 /** 这一项底下借了哪几条假定 @param {Intent} intent @param {string} id */
 function intentBorrowed(intent, id) {
@@ -592,7 +617,7 @@ function normalizeIntentOps(intent, raw, workdir = "") {
       problems.push(t`${id} 是 ${intentDependents(trial, id).join("、")} 的前提，不是根：根是没有谁以它为前提的`);
     if (op.state !== "done" || node.keep) continue;
     // 前提照这一批改完的算；此刻取不到指纹，凭据变没变不在此判
-    const holds = k => intentEstablished(trial, k),
+    const holds = intentEvaluator(trial),
       written = writtenNeeds(trial, id),
       stuck = [
         ...(node.any && written.length && written.some(holds) ? [] : written.filter(k => !holds(k))),
@@ -749,8 +774,12 @@ const INTENT_STATE_TEXT = {
 };
 /** 进度只数开着的目标，守、了结的不算 @param {Intent} intent @param {IntentPrints} [now] @param {Set<string>} [closed] */
 function intentTally(intent, now = {}, closed = intentClosed(intent)) {
+  return tallyWith(intent, closed, intentEvaluator(intent, now));
+}
+/** @param {Intent} intent @param {Set<string>} closed @param {(id: string) => boolean} holds */
+function tallyWith(intent, closed, holds) {
   const live = Object.keys(intent.nodes).filter(id => !intent.nodes[id].keep && !intentGone(intent, id) && !closed.has(id));
-  return { live: live.length, standing: live.filter(id => intentEstablished(intent, id, now)).length };
+  return { live: live.length, standing: live.filter(holds).length };
 }
 /**
  * 根在前、前提在后；立住了的只留一行，没立住的写验收与缘由，没立住的根附上用户的原话。
@@ -766,7 +795,8 @@ function intentText(intent, now = {}, { path = t(".yan/图.json"), asks = false,
     roots = new Set(intentRoots(intent)),
     strays = new Set(intentStrays(intent, closed));
   if (!order.length && !keeps.length) return "";
-  const { live, standing } = intentTally(intent, now, closed),
+  const holds = intentEvaluator(intent, now),
+    { live, standing } = tallyWith(intent, closed, holds),
     dropped = Object.keys(intent.nodes).filter(id => intent.nodes[id].state === "dropped" && !closed.has(intent.nodes[id].in)),
     // 开着的一项可以落在了结的模块里（新事依了它里面的一步）：模块不写了，它提到全局写，不能漏
     shelf = id => (order.includes(intent.nodes[id].in) ? intent.nodes[id].in : "");
@@ -774,11 +804,11 @@ function intentText(intent, now = {}, { path = t(".yan/图.json"), asks = false,
   const item = (id, pad) => {
     const node = intent.nodes[id],
       state = intentState(intent, id, now),
-      established = intentEstablished(intent, id, now),
+      established = holds(id),
       tag = state === "done" && !established ? t("成立·前提未立") : INTENT_STATE_TEXT[state],
       premises = writtenNeeds(intent, id),
       kids = intentChildren(intent, id),
-      inside = kids.filter(k => intentEstablished(intent, k, now)).length,
+      inside = kids.filter(holds).length,
       folded = kids.length && inside === kids.length,
       borrowed = roots.has(id) && established ? intentBorrowed(intent, id).filter(b => b !== id) : [],
       head = `${pad}- [${tag}] ${id}${strays.has(id) ? t("（孤悬）") : roots.has(id) ? t("（根）") : ""}${kids.length ? t`（模块，${folded ? t`内 ${kids.length} 项都已立` : t`内已立 ${inside} / ${kids.length}`}）` : ""}：${node.claim}${node.when ? t`（情形：${node.when}）` : ""}${premises.length ? t`（前提：${premises.join("、")}${node.any ? t("，任一即可") : ""}）` : ""}${borrowed.length ? t`（借假定：${borrowed.join("、")}）` : ""}`;
