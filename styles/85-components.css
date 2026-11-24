@@ -621,7 +621,7 @@ button.source-local {
 .viewer-tabs button {
   position: relative;
   padding: 3px 7px;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font: var(--fs-small) var(--title);
 }
 .viewer-tabs button:first-child {
@@ -634,7 +634,8 @@ button.source-local {
   top: 5px;
   bottom: 5px;
   width: 1px;
-  background: color-mix(in srgb, var(--ink-3) 55%, transparent);
+  /* 与纸之比：浅色 2.13、暗色 2.78——1px 的线要到 1.8–2.2 才看得见又不抢字（借 --line 只有 1.36，等于没画）。 */
+  background: color-mix(in srgb, var(--ink-3) 65%, transparent);
 }
 .viewer-tabs button:hover,
 .viewer-tabs button.active {
