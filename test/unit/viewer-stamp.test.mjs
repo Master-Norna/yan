@@ -22,3 +22,10 @@ test("取不到（HEAD 不成功、根本没有回话）给空串，那份就不
   assert.equal(f.stampFromHead({ ok: false, headers: new Headers() }), "");
   assert.equal(f.stampFromHead(null), "");
 });
+
+test("缺少修改时刻或大小时，不把不完整的记号当成缓存凭据", () => {
+  assert.equal(f.stampFromHead({ ok: true, headers: new Headers() }), "");
+  assert.equal(f.stampFromHead({ ok: true, headers: new Headers({ "content-length": "31" }) }), "");
+  assert.equal(f.stampFromHead({ ok: true, headers: new Headers({ "last-modified": "Mon, 24 Nov 2026 04:00:00 GMT" }) }), "");
+  assert.equal(f.stampFromHead({ ok: true, headers: new Headers({ etag: 'W/"1f-19abc"' }) }), 'W/"1f-19abc"');
+});
