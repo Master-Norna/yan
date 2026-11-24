@@ -316,3 +316,26 @@ test("到点回报未写完就断线：原件仍在，下一页可重新认领",
   assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
   assert.deepEqual(pending(), []);
 });
+
+test("回报已写完、认领凭据暂时写不成：不重复递送，修复后自动补记", t => {
+  const { boot, tick, pending, names } = fixture(t),
+    call = boot();
+  call("set", { to: "c", due: start + 100 });
+  tick(100);
+  const [notice] = pending();
+  const rename = fs.renameSync;
+  let blocked = true;
+  t.mock.method(fs, "renameSync", (from, to) => {
+    if (blocked && String(to).endsWith(".taken")) throw fault();
+    return rename(from, to);
+  });
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
+  assert.deepEqual(pending(), [notice]);
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, []);
+  tick(retry);
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, []);
+  blocked = false;
+  tick(retry);
+  assert.deepEqual(names(), []);
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, []);
+});

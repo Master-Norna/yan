@@ -31,7 +31,9 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     bookFile = () => path.join(home(), "约.json");
   /** @type {Set<() => void>} 正等着的页面 */
   const waiters = new Set(),
-    reserved = new Set(); // 响应在途，正本仍留在盘上；按完整路径认，换根也不串
+    reserved = new Set(), // 响应在途或已写完但凭据尚未落盘；按完整路径认，换根也不串
+    completed = new Map(); // 只重试持久化凭据，不再把同一回递给页面
+  let claimRetry = null;
 
   // ---------- 到点的那一回：落盘、等、认领 ----------
   const firedFile = id => path.join(firedDir(), `${id}.json`);
@@ -88,26 +90,28 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
       .filter(Boolean)
       .sort((a, b) => a.at - b.at);
   }
-  // 改名成功的才算拿到；已过了约簿这一关就可删，否则留凭据，重启也不会重新投递这一回。
-  function take(ids) {
-    // 约簿损坏不应阻塞已经独立落盘的到点记录；无法核对簿时保留认领凭据。
-    // 领取前也核查磁盘：启动后被外部写坏的簿不能凭旧缓存裁定凭据可删。
-    if (!bookCorrupt && fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers)) bookCorrupt = true;
-    sync();
-    const taken = [],
-      open = bookCorrupt ? null : new Set(book.timers.map(firedId));
-    for (const id of ids) {
-      if (!/^[\w-]{1,40}$/.test(id)) continue;
-      const file = firedFile(id),
-        claimed = `${file}.taken`;
+  // 回报已写完才落认领凭据。失败时保留内存中的认领，只有凭据落稳或正本确已不在才释放。
+  function persistClaims() {
+    clearTimeout(claimRetry);
+    claimRetry = null;
+    for (const [file, { scope, id }] of completed) {
       try {
-        const item = JSON.parse(fs.readFileSync(file, "utf8"));
+        const saved = readJsonFile(path.join(scope, "约.json")),
+          open = Array.isArray(saved?.timers) ? new Set(saved.timers.map(firedId)) : null,
+          claimed = `${file}.taken`;
         fs.renameSync(file, claimed);
-        taken.push(item);
         if (open && !open.has(id)) forgetClaim(claimed);
-      } catch {}
+      } catch (error) {
+        // 不可访问不等于不存在；尤其不能把 EACCES/EPERM 当成已清理。
+        if (error.code !== "ENOENT") continue;
+      }
+      completed.delete(file);
+      reserved.delete(file);
     }
-    return taken;
+    if (completed.size) {
+      claimRetry = setTimeout(persistClaims, RETRY_MS);
+      claimRetry.unref?.();
+    }
   }
   // 页面等着：有没被跳过的就当场回，没有就挂着，有新的到点或等满一分钟再回
   const handleWait = route(async (body, req, res) => {
@@ -135,6 +139,8 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     return { fired: home() === at ? (fired.length ? fired : fresh()) : [] };
   });
   const handleTake = route((body, req, res) => {
+    if (!bookCorrupt && fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers)) bookCorrupt = true;
+    sync();
     const scope = home(),
       ids = Array.isArray(body.ids) ? body.ids.map(String) : [],
       fired = [];
@@ -149,14 +155,13 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     }
     if (fired.length)
       onResponseSettled(res, finished => {
-        try {
-          if (finished && home() === scope) take(fired.map(item => item.id));
-        } catch (error) {
-          console.warn(`[${stamp()}] 候 · 认领未能保存`, error);
-        } finally {
-          for (const item of fired) reserved.delete(path.join(scope, "到点", `${item.id}.json`));
-          for (const wake of [...waiters]) wake();
+        for (const { id } of fired) {
+          const file = path.join(scope, "到点", `${id}.json`);
+          if (finished) completed.set(file, { scope, id });
+          else reserved.delete(file);
         }
+        if (finished) persistClaims();
+        for (const wake of [...waiters]) wake();
       });
     return { fired };
   });
