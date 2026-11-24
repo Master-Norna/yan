@@ -135,3 +135,26 @@ test("非流式长度截断同样自动续写，旧正文不会掩盖非流式�
   assert.equal(f.requests.length, 3);
   assert.equal(f.requests[1].at(-1).content, "请从断处继续");
 });
+
+test("SSE：一个 JSON 事件可拆成多行 data", async () => {
+  const f = setup();
+  const target = { content: "" };
+  await f.readSse(sse('data: {"choices": [\ndata: {"delta": {"content": "多行"}}]}\n\ndata: [DONE]\n\n'), target);
+  assert.equal(target.content, "多行");
+});
+
+test("上游事件转换：多行 JSON 可读，转换器内部异常不能静默吞掉", async () => {
+  const { translateSse } = createRequire(import.meta.url)("../../server/model/sse.js");
+  const wire = 'event: sample\ndata: {"text":\ndata: "ok"}\n\n';
+  const source = () => new Response(wire).body;
+  const translated = source().pipeThrough(translateSse("model", (out, data, name) => {
+    assert.equal(name, "sample");
+    out.chunk({ content: data.text });
+    out.done();
+  }));
+  assert.match(await new Response(translated).text(), /"content":"ok"/);
+  const failed = source().pipeThrough(translateSse("model", () => {
+    throw Error("converter failure");
+  }));
+  await assert.rejects(new Response(failed).text(), /converter failure/);
+});

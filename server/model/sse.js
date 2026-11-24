@@ -12,6 +12,7 @@ function translateSse(model, handle) {
     id = `chatcmpl-${Date.now().toString(36)}`;
   let buffer = "",
     event = "",
+    dataLines = [],
     stopped = false,
     /** @type {TransformStreamDefaultController} */ controller;
   const send = text => controller.enqueue(encoder.encode(text));
@@ -37,13 +38,25 @@ function translateSse(model, handle) {
     buffer = lines.pop() || "";
     for (const line of lines) {
       if (stopped) return;
-      if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:"))
+      if (line.startsWith("event:")) {
+        event = line.slice(6).trim();
+        dataLines = [];
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).replace(/^ /, ""));
+        let data;
         try {
-          const data = JSON.parse(line.slice(5).trim());
-          handle(out, data, event || data.type);
-        } catch {}
-      else if (!line) event = "";
+          data = JSON.parse(dataLines.join("\n"));
+        } catch {
+          // JSON 还没拼全；兼容把一个事件分成多行 data: 的服务。
+          continue;
+        }
+        dataLines = [];
+        // 不把转换器自身的异常冒充 JSON 残片吞掉。
+        handle(out, data, event || data?.type);
+      } else if (!line) {
+        event = "";
+        dataLines = [];
+      }
     }
   };
   return new TransformStream({

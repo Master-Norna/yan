@@ -196,3 +196,24 @@ test("总线：取消背压中的作业会收掉等待，不在页面上留监�
   assert.equal(sse.listenerCount("close"), 1, "只剩开页时注册的那条 close 监听");
   sse.destroy();
 });
+
+test("总线：同一请求标识不能覆盖仍在途的作业", async t => {
+  const jobs = [];
+  const bus = createBus({ dispatch: (_req, res) => jobs.push(res) });
+  const page = "duplicate1234";
+  const sse = new SlowResponse();
+  t.after(() => sse.destroy());
+  const get = Object.assign(Readable.from([]), { url: `/api/bus?page=${page}`, headers: { "user-agent": "duplicate" } });
+  bus.routes["GET /api/bus"](get, sse);
+  const send = async () => {
+    const req = Readable.from([Buffer.from(JSON.stringify({ page, id: "one", path: "/api/mock", body: "{}" }))]);
+    req.headers = { "user-agent": "duplicate" };
+    const ack = new SlowResponse();
+    await bus.routes["POST /api/bus/send"](req, ack);
+    return ack.statusCode;
+  };
+  assert.equal(await send(), 202);
+  assert.equal(await send(), 409);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].destroyed, false);
+});
