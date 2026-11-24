@@ -157,9 +157,10 @@ function hookRuntime({ policy = "auto", exitCode = 1, keep = {}, grant = true, b
     intent = f.applyIntentOps(f.asIntent(null), ops, { prints: {} }),
     runs = [],
     asked = [];
+  let diskIntent = intent;
   f.setup(
     async (url, body) => {
-      if (url === "/api/work/intent") return { data: intent, version: "1" };
+      if (url === "/api/work/intent") return { data: diskIntent, version: "1" };
       assert.equal(url, "/api/work/run");
       runs.push(body);
       return { exitCode, stdout: "预约已过截止", stderr: "" };
@@ -173,7 +174,7 @@ function hookRuntime({ policy = "auto", exitCode = 1, keep = {}, grant = true, b
   );
   f.keepIntent(conversation, intent, {});
   const ctx = { conversation, assistant: { steps: [] } };
-  return { ...f, conversation, intent, problems, runs, asked, ctx };
+  return { ...f, conversation, intent, problems, runs, asked, ctx, setDisk: next => (diskIntent = next) };
 }
 
 test("钩子：对得上的指令动手前跑守的测试，将要做的交给它；不过即不做", async () => {
@@ -290,4 +291,17 @@ test("on 的写法：只给守、须是合法的正则；ask 要有 on，撤了 
     problems([goal, { id: "算力", claim: "限机器", check: "看", keep: true, on: "ssh(", anchors: ["test:x"] }]),
     /算力 的 on 不是合法的正则/
   );
+});
+
+test("另一答改了守：下一次动手按磁盘最新约束，不必等主答收尾", async () => {
+  const f = hookRuntime({ exitCode: 0 });
+  const step = { name: "run_command" };
+  assert.equal(await f.keepHook(step, { command: "git push" }, f.ctx), null);
+  const next = structuredClone(f.intent);
+  next.nodes["算力"].on = "git push";
+  next.nodes["算力"].anchors = [];
+  f.setDisk(next);
+  assert.equal((await f.keepHook(step, { command: "git push" }, f.ctx)).display, "守拦下 · 算力");
+  f.setDisk(f.intent);
+  assert.equal(await f.keepHook(step, { command: "git push" }, f.ctx), null);
 });
