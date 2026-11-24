@@ -729,6 +729,17 @@ button.source-local {
 .viewer-slide-canvas .pv-img {
   object-fit: fill;
 }
+/* 图表、智能图形只留一块淡虚线框，写着这里本来是什么 */
+.viewer-slide-canvas .pv-blank {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed color-mix(in srgb, currentColor 30%, transparent);
+  font-size: 1.6cqw;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+}
 .viewer-slide-canvas .pv-table {
   border-collapse: collapse;
   table-layout: fixed;

@@ -173,7 +173,7 @@ writeFileSync(
   zip({
     "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" rel:id="rId1"/></p:sldIdLst><p:sldSz cx="9144000" cy="6858000"/></p:presentation>`,
     "ppt/_rels/presentation.xml.rels": rels({ rId1: ["slide", "slides/slide1.xml"] }),
-    "ppt/slides/slide1.xml": `<p:sld ${r32}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>母版里定的标题</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr><a:normAutofit fontScale="92500" lnSpcReduction="20000"/></a:bodyPr><a:p><a:r><a:t>正文照母版 18 磅</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="4" name="不折行"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="3657600"/><a:ext cx="914400" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr wrap="none"><a:spAutoFit/></a:bodyPr><a:p><a:r><a:rPr sz="1800"/><a:t>这一行比框长也不折</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+    "ppt/slides/slide1.xml": `<p:sld ${r32}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>母版里定的标题</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr><a:normAutofit fontScale="92500" lnSpcReduction="20000"/></a:bodyPr><a:p><a:r><a:t>正文照母版 18 磅</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="4" name="不折行"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="3657600"/><a:ext cx="914400" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr wrap="none"><a:spAutoFit/></a:bodyPr><a:p><a:r><a:rPr sz="1800"/><a:t>这一行比框长也不折</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="图"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="5486400" y="4572000"/><a:ext cx="2286000" cy="1143000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId2"/></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
     "ppt/slides/_rels/slide1.xml.rels": rels({ rId1: ["slideLayout", "../slideLayouts/slideLayout1.xml"] }),
     // 版式只给正文的位置；标题的框与字号都在母版里
     "ppt/slideLayouts/slideLayout1.xml": `<p:sldLayout ${MASTER}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/></p:txBody></p:sp></p:spTree></p:cSld></p:sldLayout>`,
@@ -513,7 +513,8 @@ const inherited = JSON.parse(
     titleAnchor: first && getComputedStyle(first).justifyContent,
     bodyFs: bodySpan ? +(parseFloat(getComputedStyle(bodySpan).fontSize) / r.width).toFixed(4) : 0,
     lineRatio: para && bodySpan ? +(parseFloat(getComputedStyle(para).lineHeight) / parseFloat(getComputedStyle(bodySpan).fontSize)).toFixed(2) : 0,
-    nowrap: texts[2] ? getComputedStyle(texts[2]).whiteSpace : ""
+    nowrap: texts[2] ? getComputedStyle(texts[2]).whiteSpace : "",
+    blank: page.querySelector(".pv-blank") && { text: page.querySelector(".pv-blank").textContent, ...box(page.querySelector(".pv-blank")) }
   });
 })()`)
 );
@@ -533,6 +534,14 @@ check(
   JSON.stringify(inherited)
 );
 check("pptx 画布：wrap=none 的框照一行排出去，不在框里折断", inherited.nowrap === "pre", JSON.stringify(inherited));
+check(
+  "pptx 画布：画不出的图表留一块虚线框，位置照原框，不当作没这一块",
+  !!inherited.blank &&
+    inherited.blank.text === "图表" &&
+    Math.abs(inherited.blank.l - 0.6) < 0.01 &&
+    Math.abs(inherited.blank.t - 0.667) < 0.01,
+  JSON.stringify(inherited.blank)
+);
 await closeViewer();
 
 await open("说明.odt");

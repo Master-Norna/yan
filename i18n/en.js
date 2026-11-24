@@ -546,6 +546,8 @@ var YAN_EN = {
   "工作表 {0}": "Sheet {0}",
   "## 第 {0} 页{1}": "## Page {0}{1}",
   演示页导航: "Slide navigation",
+  图表: "Chart",
+  图示: "Diagram",
   上一页: "Previous slide",
   下一页: "Next slide",
   "仅显示前 20 万字": "Showing the first 200,000 characters",

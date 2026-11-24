@@ -326,6 +326,19 @@ function pptxCanvas(doc, ctx) {
           xfrm = pptxKids(shape, "xfrm")[0],
           off = xfrm && pptxKids(xfrm, "off")[0],
           ext = xfrm && pptxKids(xfrm, "ext")[0];
+        // 图表与智能图形画不出来：留一块淡淡的虚线框，好知道这里本来有东西
+        if (!tbl && off && ext) {
+          const box = map(pptxAttr(off, "x"), pptxAttr(off, "y"), pptxAttr(ext, "cx"), pptxAttr(ext, "cy"));
+          shapes.push({
+            x: unit(box.x),
+            y: unit(box.y),
+            w: unit(box.w),
+            h: unit(box.h),
+            g: "blank",
+            k: pptxDeep(shape, "chart")[0] ? "chart" : "diagram"
+          });
+          continue;
+        }
         if (!tbl || !off || !ext) continue;
         const rows = pptxKids(tbl, "tr")
           .map(tr => pptxKids(tr, "tc").map(tc => pptxDeep(tc, "p").map(pptxParagraph)))

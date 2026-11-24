@@ -262,6 +262,9 @@ function pptxCanvasHtml(layout, ratio) {
             .join("");
         return `<table class="pv-table" style="left:${pct(shape.x)};top:${vpct(shape.y)};width:${pct(shape.w)};height:${vpct(shape.h)};font-size:${cqw(shape.s || 140)}">${cols}<tbody>${rows}</tbody></table>`;
       }
+      // 图表、智能图形画不出来：一块淡虚线框，标一句这是什么
+      if (shape.g === "blank")
+        return `<i class="pv-blank" style="left:${pct(shape.x)};top:${vpct(shape.y)};width:${pct(shape.w)};height:${vpct(shape.h)}">${shape.k === "chart" ? t`图表` : t`图示`}</i>`;
       if (shape.g === "img")
         return `<img class="pv-img" data-path="${escapeHtml(shape.src)}" alt="" style="left:${pct(shape.x)};top:${vpct(shape.y)};width:${pct(shape.w)};height:${vpct(shape.h)}">`;
       const style = [`left:${pct(shape.x)}`, `top:${vpct(shape.y)}`, `width:${pct(shape.w)}`, `height:${vpct(shape.h)}`];
