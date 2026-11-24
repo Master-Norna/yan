@@ -1,6 +1,6 @@
 // 言 / 行合一：没绑目录的对话是言——工具落在卷宗目录（存储根里的 卷宗/），脚本落在隐藏的草稿目录、非只读指令先问；
 // 中途绑上目录即为行，提示词随之而变，解开又回到言；卷宗页面即目录的视图，不列草稿
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, WORK, ARCHIVE, HOME } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
@@ -25,6 +25,10 @@ check(
     w.btn === "chat言 · 对谈",
   welcome
 );
+
+// 先放一份 300 KB 的中文长文（超过只取开头的 256 KB，且正截在半个字上）。
+// 卷宗清单在「这一答有写操作」收尾时会重取一趟（下面第一答就会写文件），到 DOC 那一问它已列在里面
+writeFileSync(`${ARCHIVE}/长文.txt`, "中文".repeat(80000));
 
 // ---- 言里做文件：write_file 落到卷宗目录，系统提示是卷宗那段
 await evalJs(
@@ -125,7 +129,8 @@ check(
     `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewerStage").innerHTML`
   )
 );
-// 卷宗里的文档对模型可读：read_document 直接读磁盘上的报表
+// 卷宗里的文档对模型可读：read_document 直接读磁盘上的报表。
+// 另有一份 300 KB 的中文长文（开头处放好的，已随第一答的写操作进了卷宗清单）
 await evalJs(
   `document.querySelector("#chatInput").value = "DOC 读报表"; document.querySelector("#chatInput").dispatchEvent(new Event("input")); document.querySelector("#chatSend").click(); true`
 );
@@ -134,6 +139,13 @@ await waitFor(
 );
 const docText = await evalJs(`[...document.querySelectorAll(".message.assistant .assistant-block > .markdown")].at(-1).textContent`);
 check("read_document reads a file straight from the archive on disk", /DOC\|a,b 1,2/.test(docText), docText);
+// 长文只取了开头 256 KB，截在半个字上：开头的字仍要是中文，不能落成 GB18030 的乱码
+check(
+  "a long text cut mid-character still decodes as Chinese, and says it only took the start",
+  /中文中文中文/.test(docText) && !/涓枃/.test(docText) && /cut:1/.test(docText),
+  docText
+);
+rmSync(`${ARCHIVE}/长文.txt`, { force: true });
 check(
   "the step is labelled 翻阅文档 with the file name",
   await evalJs(

@@ -218,6 +218,9 @@ async function sendFile(req, res, file, { name, download = false }) {
     ...(partial ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
     "Cache-Control": "no-cache",
     "Last-Modified": stat.mtime.toUTCString(),
+    // 秒级不够：同一秒里改成长短一样的内容，Last-Modified 与 Content-Length 都看不出（预览的抽取缓存据此判原件改没改）。
+    // 弱 ETag 正好担这件事——只判「还是不是同一份」，不逐字节校验
+    ETag: `W/"${size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`,
     "Content-Security-Policy": "sandbox",
     "Content-Disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(name)}`
   });
