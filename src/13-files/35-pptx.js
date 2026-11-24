@@ -156,7 +156,8 @@ function pptxTextBlocks(lines) {
     const text = line.bold ? [pptxInline(line.text, true)] : line.text.split("\n").map(mdLine);
     if (line.plain) {
       flush();
-      points.push(text.join("\\\n"));
+      // 文本框中的字面围栏不是代码块，不能把下一框也卷进去。
+      points.push(text.map(part => part.replace(/^(\s*)(?=```|~~~)/, "$1\\")).join("\\\n"));
       counts.clear();
       seen.length = 0;
       continue;
@@ -176,12 +177,37 @@ function pptxTextBlocks(lines) {
   flush();
   return points;
 }
+const PPTX_MC = "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  PPTX_SHAPE_NAMESPACES = new Set([
+    "http://schemas.openxmlformats.org/presentationml/2006/main",
+    "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "http://purl.oclc.org/ooxml/presentationml/main",
+    "http://purl.oclc.org/ooxml/drawingml/main"
+  ]);
+// 兼容包装不另建坐标系，只把可以读的那一支当作原位置上的孩子；不能把两支一同列出。
+/** @param {Element} root @returns {Element[]} */
+function pptxShapeChildren(root) {
+  return [...root.children].flatMap(child => {
+    if (child.namespaceURI !== PPTX_MC || child.localName !== "AlternateContent") return [child];
+    const branches = [...child.children].filter(branch => branch.namespaceURI === PPTX_MC),
+      selected =
+        branches.find(branch => {
+          const requires = branch.getAttribute("Requires")?.trim();
+          return (
+            branch.localName === "Choice" &&
+            requires &&
+            requires.split(/\s+/).every(prefix => PPTX_SHAPE_NAMESPACES.has(branch.lookupNamespaceURI(prefix)))
+          );
+        }) || branches.find(branch => branch.localName === "Fallback");
+    return selected ? pptxShapeChildren(selected) : [];
+  });
+}
 function pptxPage(xml, rels, notes, index, height) {
   const tree = xmlDeep(parseXml(xml), "spTree")[0],
     images = zipRels(rels, "ppt/slides");
   const collect = (root, frameHeight) => {
     const items = [];
-    for (const shape of root.children) {
+    for (const shape of pptxShapeChildren(root)) {
       const position = pptxPosition(shape);
       let box = null,
         blocks = [];
@@ -212,6 +238,8 @@ function pptxPage(xml, rels, notes, index, height) {
           item =>
             item.box &&
             !item.box.kind &&
+            item.box.lines.length === 1 &&
+            item.box.lines[0].plain &&
             item.box.size >= 2000 &&
             item.position?.y >= 0 &&
             item.position.y <= height / 3 &&

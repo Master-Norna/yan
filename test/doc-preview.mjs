@@ -115,6 +115,14 @@ const P = `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" 
     `<p:sp><p:nvSpPr><p:nvPr>${ph ? `<p:ph type="${ph}"/>` : ""}</p:nvPr></p:nvSpPr><p:txBody>${paragraphs.map(([text, lvl]) => `<a:p>${lvl ? `<a:pPr lvl="${lvl}"/>` : ""}<a:r><a:t>${text}</a:t></a:r></a:p>`).join("")}</p:txBody></p:sp>`;
 const floatBox = (x, y, size, text, bold = false) =>
   `<p:sp><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:rPr sz="${size}" b="${Number(bold)}"/><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
+// 页顶最大的是列表，旁边较小的「小结」才是标题。
+const topList = `<p:sp><p:spPr><a:xfrm><a:off x="4700000" y="880000"/></a:xfrm></p:spPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="7"/></a:pPr><a:r><a:rPr sz="3600"/><a:t>核对输入</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:rPr sz="3600"/><a:t>记录结果</a:t></a:r></a:p></p:txBody></p:sp>`;
+// 最先适用的根级 Choice 保留图；局部 d 是标准 DrawingML 的另一个前缀。
+const wrappedPic = `<mc:AlternateContent xmlns:u="urn:yan:test:unsupported"><mc:Choice Requires="p u">${shape("", [["根未知分支"]])}</mc:Choice><mc:Choice xmlns:d="http://schemas.openxmlformats.org/drawingml/2006/main" Requires="p d"><p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></mc:Choice><mc:Choice Requires="a">${shape("", [["根第二适用分支"]])}</mc:Choice><mc:Fallback>${shape("", [["根备用分支"]])}</mc:Fallback></mc:AlternateContent>`;
+// 组内没有适用的 Choice，要走 Fallback，并继续按组内坐标排序。
+const wrappedGroupText = `<mc:AlternateContent><mc:Choice xmlns:u="urn:yan:test:unsupported" Requires="u">${shape("", [["组未知分支"]])}</mc:Choice><mc:Fallback>${floatBox(0, 600000, 1600, "组内说明")}${floatBox(0, 30000, 1600, "组内题")}</mc:Fallback></mc:AlternateContent>`;
+const fenceTexts = ["```", "反引号之后的文本框", "~~~", "波浪号之后的文本框"];
+const fenceBoxes = fenceTexts.map(text => shape("", [[text]])).join("");
 writeFileSync(
   `${ARCHIVE}/讲义.pptx`,
   zip(
@@ -123,11 +131,11 @@ writeFileSync(
       "ppt/_rels/presentation.xml.rels": rels(Object.fromEntries([1, 2, 3, 4].map(i => [`rId${i}`, ["slide", `slides/slide${i}.xml`]]))),
       "ppt/slides/slide5.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["不在清单里的页"]])}</p:spTree></p:cSld></p:sld>`,
       "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("body", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
-      "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${floatBox(4700000, 2400000, 1600, "右栏说明")}${floatBox(0, 6800000, 1100, "页脚")}${floatBox(0, 300000, 900, "页眉")}${floatBox(500000, 900000, 3200, "小结")}${floatBox(500000, 2440000, 1700, "推导闭式解", true)}<p:grpSp><p:grpSpPr><a:xfrm><a:off x="500000" y="3200000"/><a:chExt cx="2000000" cy="2000000"/></a:xfrm></p:grpSpPr>${floatBox(0, 600000, 1600, "组内说明")}${floatBox(0, 30000, 1600, "组内题")}</p:grpSp><p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
+      "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><p:cSld><p:spTree>${floatBox(4700000, 2400000, 1600, "右栏说明")}${floatBox(0, 6800000, 1100, "页脚")}${floatBox(0, 300000, 900, "页眉")}${floatBox(500000, 900000, 3200, "小结")}${topList}${floatBox(500000, 2440000, 1700, "推导闭式解", true)}<p:grpSp><p:grpSpPr><a:xfrm><a:off x="500000" y="3200000"/><a:chExt cx="2000000" cy="2000000"/></a:xfrm></p:grpSpPr>${wrappedGroupText}</p:grpSp>${wrappedPic}</p:spTree></p:cSld></p:sld>`,
       // 第三页是有序的步骤：第一条从第 5 步起（接着上一页数），第二条降一层
       "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>## 这是正文</a:t></a:r><a:br/><a:r><a:t>不是新的一页</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
       // 字母和罗马数字：不是十进制列表，Markdown 原生不能表达其 marker，渲染时改用 ol[type]。
-      "ppt/slides/slide4.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["编号类型"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:t>第三项</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod"/></a:pPr><a:r><a:t>第四项</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="romanUcPeriod" startAt="4"/></a:pPr><a:r><a:t>子步骤四</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="romanLcPeriod" startAt="2"/></a:pPr><a:r><a:t>罗马二</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaUcPeriod"/></a:pPr><a:r><a:t>大写甲</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>分段说明</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="alphaLcPeriod" startAt="2"/></a:pPr><a:r><a:t>说明下的子项</a:t></a:r></a:p></p:txBody></p:sp>${shape("", [["另一个文字框"]])}</p:spTree></p:cSld></p:sld>`,
+      "ppt/slides/slide4.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["编号类型"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:t>第三项</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaLcPeriod"/></a:pPr><a:r><a:t>第四项</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="romanUcPeriod" startAt="4"/></a:pPr><a:r><a:t>子步骤四</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="romanLcPeriod" startAt="2"/></a:pPr><a:r><a:t>罗马二</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="alphaUcPeriod"/></a:pPr><a:r><a:t>大写甲</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>分段说明</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="alphaLcPeriod" startAt="2"/></a:pPr><a:r><a:t>说明下的子项</a:t></a:r></a:p></p:txBody></p:sp>${shape("", [["另一个文字框"]])}${fenceBoxes}</p:spTree></p:cSld></p:sld>`,
       "ppt/slides/_rels/slide1.xml.rels": rels({ rId5: ["notesSlide", "../notesSlides/notesSlide1.xml"] }),
       // 备注那份里除了讲话者的话，还有页码与整页缩略图两个占位符，都不该混进正文
       "ppt/notesSlides/notesSlide1.xml": `<p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [["讲慢一些，这里停一下"], ["先给直觉，再给公式"]])}${shape("sldNum", [["12"]])}</p:spTree></p:cSld></p:notes>`,
@@ -323,7 +331,7 @@ const slides = JSON.parse(
 check(
   "pptx follows presentation order, skips unused slides, keeps headings, levels and pictures",
   slides.join("#") ===
-    "第 1 页 · 小结||拟合直线:data:image/png#第 2 页 · 线性回归|从最小二乘说起/几何直观#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲/说明下的子项",
+    "第 1 页 · 小结|核对输入/记录结果|拟合直线:data:image/png#第 2 页 · 线性回归|从最小二乘说起/几何直观#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲/说明下的子项",
   JSON.stringify(slides)
 );
 check(
@@ -331,6 +339,32 @@ check(
   await evalJs(
     `(s => [...s.querySelectorAll(':scope > p')].map(p => p.textContent).slice(0, 6).join("|") === "页眉|推导闭式解|右栏说明|组内题|组内说明|页脚" && s.querySelector("p strong")?.textContent === "推导闭式解")(document.querySelector("#fileViewerStage .viewer-slide"))`
   )
+);
+check(
+  "pptx: root AlternateContent uses the first supported Choice; the group uses Fallback only",
+  await evalJs(`(s => {
+    const pics = [...s.querySelectorAll("img")];
+    const paragraphs = [...s.querySelectorAll(":scope > p")].map(p => p.textContent);
+    return pics.length === 1 && pics[0].alt === "拟合直线" && pics[0].getAttribute("src")?.startsWith("data:image/png") &&
+      ["组内题", "组内说明"].every(text => paragraphs.filter(p => p === text).length === 1) &&
+      !/根未知分支|根第二适用分支|根备用分支|组未知分支/.test(s.textContent);
+  })(document.querySelector("#fileViewerStage .viewer-slide"))`)
+);
+check(
+  "pptx: the large freeform list at the top keeps its numbering; the smaller text is the title",
+  await evalJs(`(s => {
+    const list = s.querySelector(':scope > ol[start="7"]');
+    return s.querySelector("h2")?.textContent === "第 1 页 · 小结" &&
+      !!list && [...list.querySelectorAll(":scope > li")].map(li => li.textContent.trim()).join("|") === "核对输入|记录结果";
+  })(document.querySelector("#fileViewerStage .viewer-slide"))`)
+);
+check(
+  "pptx: literal backtick and tilde fences and the following text boxes stay separate paragraphs",
+  await evalJs(`(s => {
+    const last = [...s.querySelectorAll(".viewer-slide")].at(-1);
+    const paragraphs = [...last.querySelectorAll(":scope > p")].map(p => p.textContent);
+    return !last.querySelector("pre") && JSON.stringify(paragraphs.slice(-4)) === JSON.stringify(${JSON.stringify(fenceTexts)});
+  })(document.querySelector("#fileViewerStage"))`)
 );
 check(
   "pptx 里 PowerPoint 自动编号的那些要点也认得出是有序的（buAutoNum）",
