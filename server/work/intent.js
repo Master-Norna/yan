@@ -55,14 +55,20 @@ module.exports = function createIntent(work) {
   }, failed);
   // 为图的凭据算指纹：文件按内容，目录计入空夹及各文件，跳过依赖目录、言的簿记、临时稿与链接。
   // 文件数或累计字节数超过阈值时，相关文件只记大小和修改时刻，仍遍历目录。
-  // 整个目标取不到时给 null；目录里的文件取不到 stat 时跳过，取不到内容哈希时记「?」。
+  // 明确不存在才记 null；暂时读不到则不报指纹（不把 I/O 错误当文件消失）。
+  // 同一批文件与重叠目录共享读取，保留原指纹格式，不能跨批缓存外部改动。
   const PRINT_DIR_FILES = 2000,
     PRINT_DIR_BYTES = 32 * 1024 * 1024;
-  async function dirHash(dir) {
+  const missing = error => error?.code === "ENOENT" || error?.code === "ENOTDIR" || error?.code === "EISDIR";
+  async function dirHash(dir, readDir, readStat, hashFile) {
     const files = [],
       directories = [];
     const walk = async at => {
-      const entries = await fs.promises.readdir(at, { withFileTypes: true });
+      const entries = await readDir(at).catch(error => {
+        // 根不存在才是整个目录消失；遍历途中某个子目录消失视为本次快照不完整。
+        if (at === dir) throw error;
+        throw Error(describeFsError(error, at));
+      });
       for (const entry of entries) {
         const full = path.join(at, entry.name);
         if (
@@ -83,33 +89,59 @@ module.exports = function createIntent(work) {
     for (const directory of directories.sort()) hash.update(`dir:${directory}\u0000\n`);
     let bytes = 0;
     for (const file of files) {
-      const stat = await fs.promises.stat(file).catch(() => null);
-      if (!stat) continue;
+      const stat = await readStat(file).catch(error => {
+        throw Error(describeFsError(error, file));
+      });
       bytes += stat.size;
       const content =
         bytes <= PRINT_DIR_BYTES && files.length <= PRINT_DIR_FILES
-          ? await fileHash(file).catch(() => "?")
+          ? await hashFile(file).catch(error => {
+              throw Error(describeFsError(error, file));
+            })
           : `${stat.size}:${stat.mtimeMs}`;
       hash.update(`${relPath(dir, file)}\u0000${content}\n`);
     }
     return hash.digest("hex");
   }
-  const handleWorkPrints = jsonRoute(async body => {
-    const workdir = resolveWorkdir(body.workdir),
-      list = key => (Array.isArray(body[key]) ? body[key] : []).map(String).filter(Boolean).slice(0, 400),
-      prints = {},
-      dirs = {};
-    const take = (given, into, read) =>
-      targetOf(workdir, { ...body, path: given })
-        .then(read)
-        .then(
-          print => void (into[given] = print),
-          () => void (into[given] = null)
-        );
-    await Promise.all([
-      ...list("paths").map(given => take(given, prints, fileHash)),
-      ...list("dirs").map(given => take(given, dirs, dirHash))
-    ]);
+  // 缓存 Promise 而不只缓存结果，并行的目录也不会重复读取同一份。
+  function oncePerPath(read) {
+    const cache = new Map();
+    return file => {
+      if (!cache.has(file)) cache.set(file, read(file));
+      return cache.get(file);
+    };
+  }
+  const handleWorkPrints = jsonRoute(async (body, req, res) => {
+    const signal = requestSignal(res),
+      workdir = resolveWorkdir(body.workdir),
+      list = key => [...new Set((Array.isArray(body[key]) ? body[key] : []).map(String).filter(Boolean))].slice(0, 400),
+      prints = Object.create(null),
+      dirs = Object.create(null),
+      readDir = oncePerPath(at => fs.promises.readdir(at, { withFileTypes: true })),
+      readStat = oncePerPath(file => fs.promises.stat(file)),
+      hashFile = oncePerPath(fileHash),
+      take = async (given, into, read) => {
+        try {
+          const target = await targetOf(workdir, { ...body, path: given });
+          into[given] = await read(target);
+        } catch (error) {
+          if (missing(error)) into[given] = null;
+        }
+      },
+      jobs = [
+        ...list("paths").map(given => () => take(given, prints, hashFile)),
+        ...list("dirs").map(given => () => take(given, dirs, dir => dirHash(dir, readDir, readStat, hashFile)))
+      ];
+    // 限并发，避免 400 条凭据同时打开文件；目录内部仍顺序读取。
+    let cursor = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(8, jobs.length) }, async () => {
+        while (cursor < jobs.length) {
+          signal.throwIfAborted();
+          await jobs[cursor++]();
+        }
+      })
+    );
     return { prints, dirs };
   }, failed);
   return {
