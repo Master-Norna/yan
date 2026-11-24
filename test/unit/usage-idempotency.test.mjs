@@ -31,3 +31,29 @@ test("用量批次 ACK 丢失后重试，不重复记账；重启后仍去重", 
   await post("add", { ...batch, batchId: "fixed-batch-2" });
   assert.equal((await post("read")).days["2026-11-22"].main, 2400);
 });
+
+test("同时到达的用量批次合并写盘，重复批次只计一次；换根不串账", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-usage-batch-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let target = path.join(root, "first.json");
+  const usage = createUsage({ file: () => target });
+  const server = http.createServer((req, res) => usage.routes[`POST ${req.url}`](req, res));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const post = body =>
+    fetch(`http://127.0.0.1:${server.address().port}/api/usage/add`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    }).then(r => r.json());
+  const batch = id => ({ batchId: id, items: [{ day: "2026-11-22", kind: "main", amount: 10 }] });
+  const results = await Promise.all([post(batch("a")), post(batch("a")), post(batch("b"))]);
+  assert.equal(results.filter(item => item.duplicate).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(target, "utf8")).days["2026-11-22"].main, 20);
+  target = path.join(root, "second.json");
+  await post(batch("a"));
+  assert.equal(JSON.parse(fs.readFileSync(target, "utf8")).days["2026-11-22"].main, 10);
+  fs.writeFileSync(target, "{broken");
+  const rejected = await post(batch("b"));
+  assert.ok(rejected.error);
+  assert.equal(fs.readFileSync(target, "utf8"), "{broken");
+});

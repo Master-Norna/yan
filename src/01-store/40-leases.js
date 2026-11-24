@@ -78,7 +78,7 @@ function syncLeases() {
   });
 }
 // 开工前认领：报到每隔几秒才一次，两页几乎同时点发送时都以为没人在写。认领就是一次带上这段的报到，
-// 桥接一次只办一件，先到的那页记上了，后到的一页看见它已有主就让开。桥接连不上时不拦（只剩这一页能写）
+// 桥接一次只办一件，先到的那页记上了，后到的一页看见它已有主就让开。无共享目录时照旧放行；共享目录已接通但认领失败不放行
 function claimConversation(id) {
   if (leaseReleased.has(id)) return Promise.resolve(false);
   if (!chatsOnline()) return Promise.resolve(true);
@@ -100,13 +100,18 @@ function claimConversation(id) {
       );
       if (bootstrap.store !== scope) return false;
       // 认领别段时也会收到远端持有的正项：作废那些段尚在途的松手跟读。不从这里推断谁已松手。
-      if (!Array.isArray(busy)) return true;
+      if (!Array.isArray(busy)) {
+        if (!held) leaseHold.delete(id);
+        return false;
+      }
       noteRemoteLeases(busy);
       if (!busy.includes(id)) return true;
       if (!held) leaseHold.delete(id);
       return false;
     } catch {
-      return bootstrap.store === scope;
+      // 已连接的共享目录中，超时不是「没有别页」。不能凭未收到认领回执放行。
+      if (bootstrap.store === scope && !held) leaseHold.delete(id);
+      return false;
     }
   })().finally(() => {
     if (bootstrap.store === scope) leaseClaims.delete(id);
