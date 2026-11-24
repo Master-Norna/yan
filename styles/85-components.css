@@ -603,20 +603,36 @@ button.source-local {
 .file-viewer-empty .outline-btn + .outline-btn {
   margin-left: 8px;
 }
-/* 表格文件：纸放宽，一张表一页，表名作页签（字加一道朱线，同卷宗的分类）；表宽了横着滚 */
+/* 表格文件：一张表一页，表名作页签（字加一道朱线，同卷宗的分类）；表宽了横着滚 */
 .file-viewer-wide {
   width: min(100%, 1200px);
 }
+/* 页签之间一道短丝栏（同分段钮）：二十来页的工作簿排成两行，没有这道线就读成一串字。
+   折行的行首那道线落在纸外，靠 overflow 剪掉——行首不该起出一道线 */
 .viewer-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  row-gap: 4px;
   margin: 0 0 12px;
+  overflow: hidden;
 }
 .viewer-tabs button {
-  padding: 2px 0;
+  position: relative;
+  padding: 3px 7px;
   color: var(--ink-3);
   font: var(--fs-small) var(--title);
+}
+.viewer-tabs button:first-child {
+  padding-left: 0;
+}
+.viewer-tabs button + button::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 5px;
+  bottom: 5px;
+  width: 1px;
+  background: var(--line);
 }
 .viewer-tabs button:hover,
 .viewer-tabs button.active {

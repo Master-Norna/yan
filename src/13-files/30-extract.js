@@ -27,16 +27,26 @@ function decodeTextBytes(bytes) {
     return new TextDecoder("gb18030").decode(bytes);
   }
 }
-// 扩展名不在表里、浏览器也没报类型的（.vue、.kt、Dockerfile、.env……）：看开头 64KB，没有 NUL、按 UTF-8 或 GBK 解得通的当文字
+// 扩展名不在表里、浏览器也没报类型的（.vue、.kt、Dockerfile、.env……）：看开头 64KB，解得通、且不像二进制的当文字。
+// 只判「没有 NUL」不够：不少二进制本来就没有 NUL，GB18030 又几乎什么字节都解得出来——解出来的字还得干净。
+// 控制字符（\t \n \r \f 与 ESC 除外）与替换字符过 2% 的算二进制；ESC 留着，带色码的日志也算文字
 async function sniffText(file) {
   const head = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
   if (head.includes(0)) return false;
+  let text = "";
   for (const label of ["utf-8", "gb18030"])
     try {
-      new TextDecoder(label, { fatal: true }).decode(head, { stream: true });
-      return true;
+      // stream：截到半个字的那一截不算错，留着尾巴不判
+      text = new TextDecoder(label, { fatal: true }).decode(head, { stream: true });
+      break;
     } catch {}
-  return false;
+  if (!text) return false;
+  let bad = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0xfffd || (code < 32 && code !== 9 && code !== 10 && code !== 13 && code !== 12 && code !== 27)) bad += 1;
+  }
+  return bad <= text.length * 0.02;
 }
 function bytesFromDataUrl(value) {
   const encoded = String(value).slice(String(value).indexOf(",") + 1),

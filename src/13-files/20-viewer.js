@@ -44,8 +44,8 @@ function trimIncomplete(bytes) {
   }
   return bytes.subarray(0, end);
 }
-/** @param {string} url @param {{ extracted?: string | (() => Promise<string>) }} [options] extracted：原件取不到时能退回的那份抽出来的正文 */
-function urlReader(url, { extracted = "" } = {}) {
+/** @param {string} url @param {{ extracted?: string | (() => Promise<string>), stamp?: string }} [options] extracted：原件取不到时能退回的那份抽出来的正文；stamp：原件的修改时刻与大小 */
+function urlReader(url, { extracted = "", stamp = "" } = {}) {
   const fetched = async () => {
     const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
     if (!response.ok) throw Error(t("取回失败"));
@@ -70,22 +70,38 @@ function urlReader(url, { extracted = "" } = {}) {
       return text.length > limit ? text.slice(0, limit + 1) : text;
     },
     blob: async () => (await fetched()).blob(),
-    extracted
+    extracted,
+    stamp
   };
 }
 // 技能带的一件：桥接直取原件
 function skillFileUrl(source, download = false) {
   return `/api/skills/raw?dir=${encodeURIComponent(source.skillDir)}&path=${encodeURIComponent(source.skillPath)}${download ? "&download=1" : ""}`;
 }
+// 抽过的正文留几份（按「修改时刻 + 大小」核，改过的不算）：同一份文档开开关关，不必每回重抽
+const docTextCache = new Map(),
+  DOC_TEXT_CACHE_MAX = 6;
+// 原件的「修改时刻 + 大小」：判同一份、还是改过了的记号。取不到就给空串——那份不进缓存，宁可重抽
+async function stampOf(url) {
+  const head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
+  return head?.ok ? `${head.headers.get("last-modified") || ""}|${head.headers.get("content-length") || ""}` : "";
+}
 async function viewerReader(source) {
-  if (source.file) return urlReader(localFileUrl(source.file));
-  if (source.skillDir) return urlReader(skillFileUrl(source));
+  if (source.file) {
+    const url = localFileUrl(source.file);
+    return urlReader(url, { stamp: await stampOf(url) });
+  }
+  if (source.skillDir) {
+    const url = skillFileUrl(source);
+    return urlReader(url, { stamp: await stampOf(url) });
+  }
   const url = `/api/files/raw?id=${encodeURIComponent(source.attachmentId)}`,
     head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
   if (head?.ok)
     // 落了盘的附件另有上传时抽下的正文：预览时重抽不成（PDF 的库没载入、文件太大）就退回那一份，
     // 不至于明明抽过却写着「未能抽出正文」
     return urlReader(url, {
+      stamp: `${head.headers.get("last-modified") || ""}|${head.headers.get("content-length") || ""}`,
       extracted: async () => (await getAttachmentMeta(source.attachmentId).catch(() => null))?.extractedText || ""
     });
   const file = await getAttachment(source.attachmentId);
@@ -222,15 +238,33 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
       .join("")}</tbody></table>${note ? `<p class="file-viewer-note">${note}</p>` : ""}</div>`;
   }
   if (kind === "doc") {
-    // 每回从原件现抽（按结构抽成 Markdown）；原件取不到、或这回没抽出来（PDF 的库没载入、文件太大），
+    // 从原件现抽（按结构抽成 Markdown）；原件取不到、或这回没抽出来（PDF 的库没载入、文件太大），
     // 退回上传时抽下的那一份（附件有，卷宗里的没有）。文中的图照抽出的路再从原件里取（见 withZipImages）。
-    // 原件照 Blob 读成字节直接用，不再经 data: URL 转一趟 base64（大文档编一遍解一遍，纯属白耗）
+    // 原件照 Blob 读成字节直接用，不再经 data: URL 转一趟 base64（大文档编一遍解一遍，纯属白耗）。
+    // 抽过的正文按原件的「修改时刻 + 大小」留几份：同一份再打开不必重抽，原件改过则照新抽
     let text = "",
       bytes = null;
-    try {
-      bytes = new Uint8Array(await (await reader.blob()).arrayBuffer());
-      text = trimExtractedText(await extractDocumentText(name, bytes));
-    } catch {}
+    const stamp = String(reader.stamp || ""),
+      // 名字不够：同名的两件（两层的 README.md）大小与时刻恰好一样也少见，但地址是各是各的
+      cacheKey = stamp ? `${reader.url?.() || name}|${stamp}` : "";
+    text = cacheKey ? docTextCache.get(cacheKey) || "" : "";
+    if (!text)
+      try {
+        bytes = new Uint8Array(await (await reader.blob()).arrayBuffer());
+        text = trimExtractedText(await extractDocumentText(name, bytes));
+        if (text && cacheKey) {
+          docTextCache.delete(cacheKey);
+          docTextCache.set(cacheKey, text);
+          if (docTextCache.size > DOC_TEXT_CACHE_MAX) docTextCache.delete(docTextCache.keys().next().value);
+        }
+      } catch {}
+    // 缓存住的正文若带着图，仍得从原件里把图取出来（data-path 由 withZipImages 换掉）
+    if (text && !bytes && text.includes("data-path"))
+      bytes = await reader
+        .blob()
+        .then(blob => blob.arrayBuffer())
+        .then(buffer => new Uint8Array(buffer))
+        .catch(() => null);
     if (!text) text = trimExtractedText(typeof reader.extracted === "function" ? await reader.extracted() : reader.extracted).trim();
     if (!text)
       return `<div class="file-viewer-empty">${t(`未能抽出正文`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;

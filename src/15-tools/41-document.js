@@ -56,7 +56,8 @@ defineTool({
     let text = "";
     if (doc.archive) {
       try {
-        text = await archiveDocumentText(doc);
+        // 没问页码、也没检索，就只取开头（纯文本按 Range 取一段，Office/PDF 仍整份抽）
+        text = await archiveDocumentText(doc, !args.page && !args.query);
       } catch (error) {
         return { ok: false, content: t`卷宗文档读取失败：${String(error.message || error).slice(0, 120)}`, display: "读取失败" };
       }
@@ -158,18 +159,34 @@ function availableDocuments(conversation) {
     }
   return docs;
 }
-// 磁盘卷宗里的文档：取回原件，文本直接用，PDF / Office 在本机抽正文；按路径与修改时间缓存几份
-const archiveDocCache = new Map();
-async function archiveDocumentText(doc) {
-  const key = `${doc.archive}|${doc.modifiedAt}`;
+// 磁盘卷宗里的文档：取回原件，文本直接用，PDF / Office 在本机抽正文；按路径与修改时间缓存几份。
+// 只读开头（没给页码、也没检索）时，纯文本只取前 256 KB——几百 MB 的日志不必整份拉回来；要翻页或检索才取全
+const ARCHIVE_HEAD_BYTES = 256 * 1024,
+  archiveDocCache = new Map();
+async function archiveDocumentText(doc, head = false) {
+  const isText = isTextFile({ name: doc.name, type: "" }),
+    key = `${doc.archive}|${doc.modifiedAt}${head && isText ? "|head" : ""}`;
   if (archiveDocCache.has(key)) return archiveDocCache.get(key);
-  const response = await fetch(localFileUrl(archiveFile(doc.archive)), { signal: AbortSignal.timeout(60000) });
+  const response = await fetch(localFileUrl(archiveFile(doc.archive)), {
+    headers: head && isText ? { Range: `bytes=0-${ARCHIVE_HEAD_BYTES - 1}` } : {},
+    signal: AbortSignal.timeout(60000)
+  });
   if (!response.ok) throw Error(t("取回失败"));
   const blob = await response.blob();
-  const text = isTextFile({ name: doc.name, type: "" })
-    ? decodeTextBytes(await blob.arrayBuffer())
-    : await extractDocumentText(doc.name, blob);
-  archiveDocCache.set(key, text);
+  if (isText) {
+    const body = decodeTextBytes(await blob.arrayBuffer()),
+      // Content-Range 报的整份有多大；没这道头（服务器不认 Range）就是取全了
+      total = Number(/\/(\d+)\s*$/.exec(response.headers.get("content-range") || "")?.[1] || 0),
+      cut =
+        total > blob.size
+          ? t`\n\n[原件 ${formatFileSize(total)}，这里只取了开头 ${formatFileSize(blob.size)}；要看其余部分或用 query 检索，说一声即可]`
+          : "";
+    archiveDocCache.set(key, body + cut);
+    if (archiveDocCache.size > 12) archiveDocCache.delete(archiveDocCache.keys().next().value);
+    return body + cut;
+  }
+  const extracted = await extractDocumentText(doc.name, blob);
+  archiveDocCache.set(key, extracted);
   if (archiveDocCache.size > 12) archiveDocCache.delete(archiveDocCache.keys().next().value);
-  return text;
+  return extracted;
 }
