@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { EventEmitter } from "node:events";
 
 const createTimers = createRequire(import.meta.url)("../../server/timers.js");
 const start = 1_700_000_000_000;
@@ -22,11 +23,19 @@ function fixture(t) {
     const { routes } = createTimers({ home: () => home, known: () => true, route: handle => handle });
     // 这些路由都要看一眼没写完的响应（见 server/http.js 的 requestSignal）：给一个不会断的替身
     const response = () => {
-      const res = { destroyed: false, writableEnded: false };
-      res.on = res.once = res.removeListener = () => res;
-      return res;
+      return Object.assign(new EventEmitter(), { destroyed: false, writableEnded: false, writableFinished: false });
     };
-    return (action, body = {}) => routes[`POST /api/timer/${action}`](body, null, response());
+    return (action, body = {}, event = "finish") => {
+      const res = response();
+      const result = routes[`POST /api/timer/${action}`](body, null, res);
+      const settle = value => {
+        if (event === "finish") res.writableFinished = true;
+        else res.destroyed = true;
+        res.emit(event);
+        return value;
+      };
+      return result?.then ? result.then(settle) : settle(result);
+    };
   };
   const names = () => (fs.existsSync(outbox) ? fs.readdirSync(outbox) : []);
   const pending = () =>
@@ -294,4 +303,16 @@ test("刚启动时约簿正常、随后无写操作直接损坏：领取仍保�
   fs.writeFileSync(bookFile, "{external damage");
   assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
   assert.ok(names().includes(`${notice.id}.json.taken`), "旧内存簿不能决定已损坏约簿的回执是否可清");
+});
+
+test("到点回报未写完就断线：原件仍在，下一页可重新认领", t => {
+  const { boot, tick, pending } = fixture(t),
+    call = boot();
+  call("set", { to: "c", due: start + 100 });
+  tick(100);
+  const [notice] = pending();
+  assert.deepEqual(call("take", { ids: [notice.id] }, "close").fired, [notice]);
+  assert.deepEqual(pending(), [notice]);
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
+  assert.deepEqual(pending(), []);
 });

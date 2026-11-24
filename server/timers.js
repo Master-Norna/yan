@@ -1,13 +1,13 @@
 // 言 · 桥接的候 · 等时刻：模型约好几点叫醒自己（set_timer），桥接记着，到点把那一回落进 存储根/候/到点/ 再交给页面——
 // 无人领取的到点记录和未到点的约定都写盘，供关页后读回及桥接重启后续排。由 server.js 装配：require("./server/timers.js")({ home, known })
 //   约.json         约好的时刻：几点叫、叫哪段对话的哪一步、附什么话、隔多久再叫。启动时读回，错过的当场补叫并记下迟了多久
-//   到点/<编号>.json 到了点、还没被页面取走的那一回；页面经 /api/timer/wait 等着、/api/timer/take 认领（改名即认领，几页同等也只一页拿到）
+//   到点/<编号>.json 到了点、还没被页面取走的那一回；页面经 /api/timer/wait 等着、/api/timer/take 认领（响应在途先保留正本，写完即改名认领，几页同等也只一页拿到）
 // 定时放在桥接而不交系统的计划任务：到点的那一回本就要经桥接送进页面，桥接不在，到点也送不到
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
-const { jsonRoute, requestSignal, writeAtomic, readJsonFile, stamp } = require("./http.js");
+const { jsonRoute, requestSignal, onResponseSettled, writeAtomic, readJsonFile, stamp } = require("./http.js");
 
 // setTimeout 至多等这么久（约 24.8 天），再远的到时候再排一回
 const MAX_DELAY = 2 ** 31 - 1;
@@ -30,7 +30,8 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   const firedDir = () => path.join(home(), "到点"),
     bookFile = () => path.join(home(), "约.json");
   /** @type {Set<() => void>} 正等着的页面 */
-  const waiters = new Set();
+  const waiters = new Set(),
+    reserved = new Set(); // 响应在途，正本仍留在盘上；按完整路径认，换根也不串
 
   // ---------- 到点的那一回：落盘、等、认领 ----------
   const firedFile = id => path.join(firedDir(), `${id}.json`);
@@ -82,7 +83,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   }
   function pending() {
     return firedNames()
-      .filter(name => name.endsWith(".json"))
+      .filter(name => name.endsWith(".json") && !reserved.has(path.join(firedDir(), name)))
       .map(name => readJsonFile(path.join(firedDir(), name)))
       .filter(Boolean)
       .sort((a, b) => a.at - b.at);
@@ -133,7 +134,32 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     // 等待归发起时的根；换根唤回旧等待时交空手，不把新根的信递给尚未换过来的旧页面。
     return { fired: home() === at ? (fired.length ? fired : fresh()) : [] };
   });
-  const handleTake = route(body => ({ fired: take(Array.isArray(body.ids) ? body.ids.map(String) : []) }));
+  const handleTake = route((body, req, res) => {
+    const scope = home(),
+      ids = Array.isArray(body.ids) ? body.ids.map(String) : [],
+      fired = [];
+    for (const id of ids) {
+      if (!/^[\w-]{1,40}$/.test(id)) continue;
+      const file = firedFile(id);
+      if (reserved.has(file)) continue;
+      const item = readJsonFile(file);
+      if (!item) continue;
+      reserved.add(file);
+      fired.push(item);
+    }
+    if (fired.length)
+      onResponseSettled(res, finished => {
+        try {
+          if (finished && home() === scope) take(fired.map(item => item.id));
+        } catch (error) {
+          console.warn(`[${stamp()}] 候 · 认领未能保存`, error);
+        } finally {
+          for (const item of fired) reserved.delete(path.join(scope, "到点", `${item.id}.json`));
+          for (const wake of [...waiters]) wake();
+        }
+      });
+    return { fired };
+  });
 
   // ---------- 约好的时刻 ----------
   /** @type {Book} */

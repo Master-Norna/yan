@@ -64,3 +64,38 @@ for (const cancel of [true, false])
       fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
     }
   });
+
+test("后台完成回报未写完即断开，重连仍能领取退出码", { timeout: 15000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-bg-watch-retry-"));
+  const work = createWork({ archiveHome: () => root, workHome: () => root, toolEnv: env => env });
+  let cut = true;
+  const server = http.createServer((req, res) => {
+    if (req.url === "/watch" && cut) {
+      // 在真正响应写完前模拟连接丢失，确定性地打中回报窗口。
+      res.end = function () {
+        this.destroy();
+        return this;
+      };
+    }
+    return work.routes[req.url === "/watch" ? "POST /api/work/watch" : "POST /api/work/run"](req, res);
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
+  });
+  const post = (route, body) =>
+    fetch(`http://127.0.0.1:${server.address().port}${route}`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    }).then(res => res.json());
+  const job = await post("/run", { workdir: root, command: "echo finished", background: true });
+  const identity = { id: job.id, key: job.key };
+  await assert.rejects(post("/watch", identity));
+  cut = false;
+  const done = await post("/watch", identity);
+  assert.equal(done.exitCode, 0);
+  assert.equal(done.reported, undefined);
+  assert.equal((await post("/watch", identity)).reported, true);
+});

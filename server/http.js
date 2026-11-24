@@ -56,6 +56,23 @@ function requestSignal(res) {
     });
   return abort.signal;
 }
+// finish 只表示桥接写完响应，不保证页面已处理；close 先到时则肯定不能把本次回报算作送完。
+function onResponseSettled(res, settle) {
+  let settled = false;
+  const done = finished => {
+    if (settled) return;
+    settled = true;
+    res.removeListener("finish", finish);
+    res.removeListener("close", close);
+    settle(finished);
+  };
+  const finish = () => done(true),
+    close = () => done(res.writableFinished === true);
+  res.once("finish", finish);
+  res.once("close", close);
+  if (res.writableFinished) finish();
+  else if (res.destroyed) close();
+}
 // 桥接日志每行打头的时刻
 const stamp = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
 function jsonRoute(handle, describe = errorText, limit = undefined) {
@@ -297,6 +314,7 @@ module.exports = {
   readJson,
   jsonRoute,
   requestSignal,
+  onResponseSettled,
   stamp,
   errorText,
   uniqueStamp,
