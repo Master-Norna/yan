@@ -1800,7 +1800,8 @@ http
         ]);
       }
       if (typeof lastUser === "string" && lastUser.includes("DOC")) {
-        // 翻卷宗里的文档：read_document 读磁盘上的报表，再把读到的回出来
+        // 翻卷宗里的文档：read_document 读磁盘上的报表，再把读到的回出来；
+        // 第二份是 300 KB 的中文长文（超过只取开头的 256 KB），看截在半个字上会不会整段乱码
         if (!toolResults.length)
           return sse(res, [
             delta({ content: "翻卷宗。" }),
@@ -1816,8 +1817,28 @@ http
             }),
             delta({}, { usage: { total_tokens: 5 } })
           ]);
+        if (toolResults.length === 1)
+          return sse(res, [
+            delta({ content: "再翻长文。" }),
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_doc_long",
+                  type: "function",
+                  function: { name: "read_document", arguments: JSON.stringify({ name: "长文.txt" }) }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        // 两件的正文各自压成一行，报上开头几十字；长文另报一句「是不是说了只取了开头」
+        const csv = String(toolResults[0]?.content || "").replace(/\s+/g, " "),
+          long = String(toolResults[1]?.content || "").replace(/\s+/g, " ");
         return sse(res, [
-          delta({ content: `DOC|${String(toolResults.at(-1).content).replace(/\s+/g, " ").slice(0, 60)}` }),
+          delta({
+            content: `DOC|${csv.slice(0, 60)}|${long.slice(0, 30)}|cut:${long.includes("只取了开头") ? 1 : 0}`
+          }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }

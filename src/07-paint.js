@@ -387,7 +387,7 @@ function stepSeen(id) {
 }
 const knownStepIds = new Map();
 // 一列步骤按 id 对齐：新的接在后头，变了的就地换，撤下的（没递出去的补言）拿掉。
-// 连着的同类只读步骤（三步起）并成一行「读取 · src/app.js 等 7 件」，点开再列（设计稿/85 甲）——通读时十几行一模一样的读取，
+// 连着的同类只读步骤（三步起）并成一行「读取 · src/app.js 等 7 件」，点开再列——通读时十几行一模一样的读取，
 // 把要人看的改动与运行挤到后头。改、写、运行、差遣照旧一行一件；没做完、失败的不并，单独露出来。
 // 落选：一段只读并一行（看不出先读了什么、后搜了什么）、名字铺在行里不必点（几十件时折成好几行）
 const RUN_TOOLS = new Set([
@@ -625,7 +625,7 @@ function paintHelperTrail(trail, step, animate, seen) {
   if (report)
     parts.push({ key: "report", sig: report, html: () => `<div class="sub-report"></div>`, paint: el => paintMarkdown(el, report) });
   // 交了差（或断了）的一趟，末尾同主答一排：复制回报、这一趟耗的墨；做着时不露，同主答。
-  // 断着的照主答断了的样子先落一句，那一排是续写（设计稿/97）——人多半是点开面板看它断在哪，看完就地续上
+  // 断着的照主答断了的样子先落一句，那一排是续写——人多半是点开面板看它断在哪，看完就地续上
   if (sub && !live) {
     const interrupted = status === "interrupted",
       why = interrupted ? tr(stepText(step.result) || "").replace(/[。.\s]+$/, "") : "",

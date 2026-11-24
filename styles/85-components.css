@@ -603,20 +603,39 @@ button.source-local {
 .file-viewer-empty .outline-btn + .outline-btn {
   margin-left: 8px;
 }
-/* 表格文件：纸放宽，一张表一页，表名作页签（字加一道朱线，同卷宗的分类）；表宽了横着滚 */
+/* 表格文件：一张表一页，表名作页签（字加一道朱线，同卷宗的分类）；表宽了横着滚 */
 .file-viewer-wide {
   width: min(100%, 1200px);
 }
+/* 页签之间一道短丝栏（同分段钮）：二十来页的工作簿排成两行，没有这道线就读成一串字。
+   丝栏不能借 --line（#ded8ca 与纸之比只有 1.36，1px 的淡线在纸上看不出来，等于没画），
+   改由墨色兑出来：--ink-3 的 55%，浅色 1.87、暗色约 2.4——看得见，又不抢字。
+   折行的行首那道线落在纸外，靠 overflow 剪掉——行首不该起出一道线 */
 .viewer-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  row-gap: 6px;
   margin: 0 0 12px;
+  overflow: hidden;
 }
 .viewer-tabs button {
-  padding: 2px 0;
-  color: var(--ink-3);
+  position: relative;
+  padding: 3px 7px;
+  color: var(--ink-2);
   font: var(--fs-small) var(--title);
+}
+.viewer-tabs button:first-child {
+  padding-left: 0;
+}
+.viewer-tabs button + button::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 5px;
+  bottom: 5px;
+  width: 1px;
+  /* 与纸之比：浅色 2.13、暗色 2.78——1px 的线要到 1.8–2.2 才看得见又不抢字（借 --line 只有 1.36，等于没画）。 */
+  background: color-mix(in srgb, var(--ink-3) 65%, transparent);
 }
 .viewer-tabs button:hover,
 .viewer-tabs button.active {
