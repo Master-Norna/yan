@@ -93,7 +93,7 @@ function claimConversation(id) {
     const held = leaseHold.has(id);
     leaseHold.add(id);
     try {
-      const { busy = [] } = await bridge(
+      const { busy } = await bridge(
         "/api/chats/lease",
         { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold], claim: id },
         AbortSignal.timeout(3000)

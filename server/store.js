@@ -19,8 +19,14 @@ const { expandHome, pathIsInside } = require("./work/paths.js");
 
 const MAC = process.platform === "darwin";
 
-/** @param {{ working?: () => number, background?: () => boolean, environment?: () => boolean, onMove?: () => void }} [options] */
-module.exports = function createStore({ working = () => 0, background = () => false, environment = () => false, onMove = () => {} } = {}) {
+/** @param {{ working?: () => number, background?: () => boolean, environment?: () => boolean, beforeMove?: () => void, onMove?: () => void }} [options] */
+module.exports = function createStore({
+  working = () => 0,
+  background = () => false,
+  environment = () => false,
+  beforeMove = () => {},
+  onMove = () => {}
+} = {}) {
   const HOME_ROOT = path.join(os.homedir(), ".yan"),
     POINTER_DIR = MAC
       ? path.join(os.homedir(), "Library", "Application Support")
@@ -205,6 +211,8 @@ module.exports = function createStore({ working = () => 0, background = () => fa
       // 而旧处是叫人自行删去的，删了它就没处落笔了。等它结束再换（见 server/work/shell.js 的 backgroundRunning）
       if (background()) throw Error("有后台指令还在跑，等它结束再换");
       if (environment()) throw Error("有环境作业还在跑，等它结束再换");
+      // 把已接收、尚未落盘的用量等批次先交代在旧根；后面拷贝与切换全程同步。
+      beforeMove();
       const existing = fs.existsSync(path.join(next, CONFIG_FILE));
       let locked = [];
       if (!existing) {

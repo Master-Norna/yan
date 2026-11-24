@@ -158,6 +158,7 @@ const STORE = require("./server/store.js")({
   working: () => CHATS.working(),
   background: () => WORK.backgroundRunning(),
   environment: () => ENV.busy(),
+  beforeMove: () => USAGE.flush(),
   onMove: () => {
     ENV.resetJob();
     TIMERS.sync();

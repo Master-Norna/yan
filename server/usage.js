@@ -86,6 +86,7 @@ module.exports = function createUsage({ file }) {
     return { days: read(target).days };
   });
   return {
+    flush: () => flush(file()),
     routes: {
       "POST /api/usage/add": handleAdd,
       "POST /api/usage/read": handleRead
