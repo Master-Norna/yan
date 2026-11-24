@@ -200,7 +200,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
   async function handleWorkWatch(req, res) {
     try {
       const body = await readJson(req),
-        result = await watchBackground(body.id, body.key, requestSignal(res));
+        result = await watchBackground(body.id, body.key, requestSignal(res), res);
       if (!res.writableEnded && !res.destroyed) sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 400, { error: failed(error) });

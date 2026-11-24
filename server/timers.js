@@ -1,13 +1,13 @@
 // 言 · 桥接的候 · 等时刻：模型约好几点叫醒自己（set_timer），桥接记着，到点把那一回落进 存储根/候/到点/ 再交给页面——
 // 无人领取的到点记录和未到点的约定都写盘，供关页后读回及桥接重启后续排。由 server.js 装配：require("./server/timers.js")({ home, known })
 //   约.json         约好的时刻：几点叫、叫哪段对话的哪一步、附什么话、隔多久再叫。启动时读回，错过的当场补叫并记下迟了多久
-//   到点/<编号>.json 到了点、还没被页面取走的那一回；页面经 /api/timer/wait 等着、/api/timer/take 认领（改名即认领，几页同等也只一页拿到）
+//   到点/<编号>.json 到了点、还没被页面取走的那一回；页面经 /api/timer/wait 等着、/api/timer/take 认领（响应在途先保留正本，写完即改名认领，几页同等也只一页拿到）
 // 定时放在桥接而不交系统的计划任务：到点的那一回本就要经桥接送进页面，桥接不在，到点也送不到
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
-const { jsonRoute, requestSignal, writeAtomic, readJsonFile, stamp } = require("./http.js");
+const { jsonRoute, requestSignal, onResponseSettled, writeAtomic, readJsonFile, stamp } = require("./http.js");
 
 // setTimeout 至多等这么久（约 24.8 天），再远的到时候再排一回
 const MAX_DELAY = 2 ** 31 - 1;
@@ -30,7 +30,10 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   const firedDir = () => path.join(home(), "到点"),
     bookFile = () => path.join(home(), "约.json");
   /** @type {Set<() => void>} 正等着的页面 */
-  const waiters = new Set();
+  const waiters = new Set(),
+    reserved = new Set(), // 响应在途或已写完但凭据尚未落盘；按完整路径认，换根也不串
+    completed = new Map(); // 只重试持久化凭据，不再把同一回递给页面
+  let claimRetry = null;
 
   // ---------- 到点的那一回：落盘、等、认领 ----------
   const firedFile = id => path.join(firedDir(), `${id}.json`);
@@ -82,31 +85,33 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   }
   function pending() {
     return firedNames()
-      .filter(name => name.endsWith(".json"))
+      .filter(name => name.endsWith(".json") && !reserved.has(path.join(firedDir(), name)))
       .map(name => readJsonFile(path.join(firedDir(), name)))
       .filter(Boolean)
       .sort((a, b) => a.at - b.at);
   }
-  // 改名成功的才算拿到；已过了约簿这一关就可删，否则留凭据，重启也不会重新投递这一回。
-  function take(ids) {
-    // 约簿损坏不应阻塞已经独立落盘的到点记录；无法核对簿时保留认领凭据。
-    // 领取前也核查磁盘：启动后被外部写坏的簿不能凭旧缓存裁定凭据可删。
-    if (!bookCorrupt && fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers)) bookCorrupt = true;
-    sync();
-    const taken = [],
-      open = bookCorrupt ? null : new Set(book.timers.map(firedId));
-    for (const id of ids) {
-      if (!/^[\w-]{1,40}$/.test(id)) continue;
-      const file = firedFile(id),
-        claimed = `${file}.taken`;
+  // 回报已写完才落认领凭据。失败时保留内存中的认领，只有凭据落稳或正本确已不在才释放。
+  function persistClaims() {
+    clearTimeout(claimRetry);
+    claimRetry = null;
+    for (const [file, { scope, id }] of completed) {
       try {
-        const item = JSON.parse(fs.readFileSync(file, "utf8"));
+        const saved = readJsonFile(path.join(scope, "约.json")),
+          open = Array.isArray(saved?.timers) ? new Set(saved.timers.map(firedId)) : null,
+          claimed = `${file}.taken`;
         fs.renameSync(file, claimed);
-        taken.push(item);
         if (open && !open.has(id)) forgetClaim(claimed);
-      } catch {}
+      } catch (error) {
+        // 不可访问不等于不存在；尤其不能把 EACCES/EPERM 当成已清理。
+        if (error.code !== "ENOENT") continue;
+      }
+      completed.delete(file);
+      reserved.delete(file);
     }
-    return taken;
+    if (completed.size) {
+      claimRetry = setTimeout(persistClaims, RETRY_MS);
+      claimRetry.unref?.();
+    }
   }
   // 页面等着：有没被跳过的就当场回，没有就挂着，有新的到点或等满一分钟再回
   const handleWait = route(async (body, req, res) => {
@@ -133,7 +138,33 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     // 等待归发起时的根；换根唤回旧等待时交空手，不把新根的信递给尚未换过来的旧页面。
     return { fired: home() === at ? (fired.length ? fired : fresh()) : [] };
   });
-  const handleTake = route(body => ({ fired: take(Array.isArray(body.ids) ? body.ids.map(String) : []) }));
+  const handleTake = route((body, req, res) => {
+    if (!bookCorrupt && fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers)) bookCorrupt = true;
+    sync();
+    const scope = home(),
+      ids = Array.isArray(body.ids) ? body.ids.map(String) : [],
+      fired = [];
+    for (const id of ids) {
+      if (!/^[\w-]{1,40}$/.test(id)) continue;
+      const file = firedFile(id);
+      if (reserved.has(file)) continue;
+      const item = readJsonFile(file);
+      if (!item) continue;
+      reserved.add(file);
+      fired.push(item);
+    }
+    if (fired.length)
+      onResponseSettled(res, finished => {
+        for (const { id } of fired) {
+          const file = path.join(scope, "到点", `${id}.json`);
+          if (finished) completed.set(file, { scope, id });
+          else reserved.delete(file);
+        }
+        if (finished) persistClaims();
+        for (const wake of [...waiters]) wake();
+      });
+    return { fired };
+  });
 
   // ---------- 约好的时刻 ----------
   /** @type {Book} */

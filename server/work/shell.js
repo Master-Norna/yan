@@ -7,6 +7,7 @@ const path = require("node:path");
 const sandbox = require("../sandbox.js");
 const { OWN_GROUP, killTree, killTreeSync } = require("../platform.js");
 const { tail, decodeClixml, encodePowerShell } = require("./text.js");
+const { onResponseSettled } = require("../http.js");
 
 // Windows 上有 PowerShell 7（pwsh）就用它：被 Select-Object -First 截断的原生程序不再报退出码 -1、&& 与 || 可用、
 // 原生程序的 stderr 经 2>&1 不再裹成一串 NativeCommandError；没装的退回系统自带的 Windows PowerShell 5.1
@@ -313,14 +314,14 @@ module.exports = function createShell({ toolEnv }) {
     return { released: !!release };
   }
   // 等到指令结束、输出停了一会儿（服务器起好了往往就不再出声）或时间到；交出去的是上次取过之后的新输出
-  async function backgroundReport(job, waitMs) {
+  async function backgroundReport(job, waitMs, consume = true) {
     const start = Date.now(),
       until = start + waitMs;
     while (Date.now() < until && job.exitCode === null && Date.now() - Math.max(job.grew, start) < 1500)
       await new Promise(resolve => setTimeout(resolve, 200));
     const fresh = key => {
       const text = job.text[key].slice(Math.max(0, job.read[key] - job.base[key]));
-      job.read[key] = job.base[key] + job.text[key].length;
+      if (consume) job.read[key] = job.base[key] + job.text[key].length;
       return text;
     };
     const out = fresh("out"),
@@ -373,16 +374,38 @@ module.exports = function createShell({ toolEnv }) {
   // 几处页面都在等、或刷新后重新等上的，后来的接手，先前的作罢（superseded）；报过的不再报（reported）；
   // 记录不存在或 key 对不上时回 lost；若仍记得该编号曾被淘汰，也带 evicted
   // 模型自己用 check_command 看到它结束了的，也算报过（reported，带上退出码，页面只把签改成已结束）
-  async function watchBackground(id, key, signal) {
+  async function watchBackground(id, key, signal, res) {
     const job = backgroundJobs.get(String(id || ""));
     if (!job || (key && job.key !== key)) return { id, lost: true, ...(evictedJobs.has(String(id)) ? { evicted: true } : {}) };
     if (job.reported) return { id, reported: true, exitCode: job.exitCode };
     const ticket = (job.watchTicket = (job.watchTicket || 0) + 1);
-    await Promise.race([job.ended, new Promise(resolve => signal?.addEventListener("abort", resolve, { once: true }))]);
-    if (ticket !== job.watchTicket || signal?.aborted) return { id, superseded: true };
-    if (job.reported) return { id, reported: true, exitCode: job.exitCode };
-    job.reported = true;
-    return { ...(await backgroundReport(job, 0)), command: job.command, ...(job.stopped ? { stopped: true } : {}) };
+    let stop;
+    const aborted = new Promise(resolve => {
+      stop = () => resolve(null);
+      if (signal?.aborted) stop();
+      else signal?.addEventListener("abort", stop, { once: true });
+    });
+    const superseded = () => ticket !== job.watchTicket || signal?.aborted || res.destroyed;
+    try {
+      await Promise.race([job.ended, aborted]);
+      // 另一页的完成回报还在写：等它写完或断开再判断，不抢同一份输出。
+      while (job.reporting && !superseded()) await Promise.race([job.reporting, aborted]);
+      if (superseded()) return { id, superseded: true };
+      if (job.reported) return { id, reported: true, exitCode: job.exitCode };
+      let release;
+      job.reporting = new Promise(resolve => (release = resolve));
+      onResponseSettled(res, finished => {
+        if (finished) {
+          job.reported = true;
+          for (const key of ["out", "err"]) job.read[key] = job.base[key] + job.text[key].length;
+        }
+        job.reporting = null;
+        release();
+      });
+      return { ...(await backgroundReport(job, 0, false)), command: job.command, ...(job.stopped ? { stopped: true } : {}) };
+    } finally {
+      signal?.removeEventListener("abort", stop);
+    }
   }
   return {
     WORK_SHELL,
