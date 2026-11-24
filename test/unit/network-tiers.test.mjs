@@ -17,10 +17,10 @@ function setup(approve) {
         return { ok: true, path };
       };
       reviewOn = () => approve !== "off";
-      reviewGate = async step => {
+      reviewGate = async (step, args, ctx, flag) => {
         if (approve === "deny") return { ok: false, content: "驳回", display: "审查未准" };
         // 真的 reviewGate 准了会记下 step.reviewed；"error" 这一档模拟审查没成：回 null 却没记
-        if (approve === "allow") step.reviewed = { ok: true, why: "" };
+        if (approve === "allow") step.reviewed = { ok: true, why: "", kind: flag.kind };
         return null;
       };
     }`
@@ -122,4 +122,23 @@ test("不是内网门禁的错：照原样抛，不吞", async () => {
   ]);
   f.setup();
   await assert.rejects(f.bridgePrivate("/api/fetch", { url: args.url }, newStep(), args, ctx("review")), /连不上/);
+});
+
+test("外发已经审准，仍须核准新发现的内网地址；审查失败不能沿用旧定夺", async () => {
+  const f = setup("error"),
+    step = { ...newStep(), reviewed: { ok: true, why: "", kind: "http-post" } };
+  const { denied } = await f.bridgePrivate("/api/http", { url: args.url, method: "POST" }, step, args, ctx("review"));
+  assert.equal(denied.display, "审查未成");
+  assert.deepEqual(
+    globalThis.__calls.map(call => call.allowPrivate),
+    [false]
+  );
+});
+
+test("外发已经审准，新发现的内网地址经审查准了才连", async () => {
+  const f = setup("allow"),
+    step = { ...newStep(), reviewed: { ok: true, why: "", kind: "http-post" } };
+  const { data } = await f.bridgePrivate("/api/http", { url: args.url, method: "POST" }, step, args, ctx("review"));
+  assert.equal(data.ok, true);
+  assert.equal(step.reviewed.kind, "private-address");
 });
