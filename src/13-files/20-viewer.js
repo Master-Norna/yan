@@ -81,10 +81,16 @@ function skillFileUrl(source, download = false) {
 // 抽过的正文留几份（按「修改时刻 + 大小」核，改过的不算）：同一份文档开开关关，不必每回重抽
 const docTextCache = new Map(),
   DOC_TEXT_CACHE_MAX = 6;
-// 原件的「修改时刻 + 大小」：判同一份、还是改过了的记号。取不到就给空串——那份不进缓存，宁可重抽
+// 原件的「这一份」记号：优先用桥接回的 ETag（带毫秒），其次「修改时刻 + 大小」。
+// 只有后两者时秒级不够——同一秒里改成长短一样的内容就看不出来，抽过的旧正文会再拿出来用。都取不到给空串，那份不进缓存、宁可重抽
+function stampFromHead(head) {
+  return head?.ok
+    ? head.headers.get("etag") || `${head.headers.get("last-modified") || ""}|${head.headers.get("content-length") || ""}`
+    : "";
+}
 async function stampOf(url) {
   const head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
-  return head?.ok ? `${head.headers.get("last-modified") || ""}|${head.headers.get("content-length") || ""}` : "";
+  return stampFromHead(head);
 }
 async function viewerReader(source) {
   if (source.file) {
@@ -101,7 +107,7 @@ async function viewerReader(source) {
     // 落了盘的附件另有上传时抽下的正文：预览时重抽不成（PDF 的库没载入、文件太大）就退回那一份，
     // 不至于明明抽过却写着「未能抽出正文」
     return urlReader(url, {
-      stamp: `${head.headers.get("last-modified") || ""}|${head.headers.get("content-length") || ""}`,
+      stamp: stampFromHead(head),
       extracted: async () => (await getAttachmentMeta(source.attachmentId).catch(() => null))?.extractedText || ""
     });
   const file = await getAttachment(source.attachmentId);
