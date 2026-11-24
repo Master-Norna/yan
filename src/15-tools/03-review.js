@@ -213,7 +213,7 @@ async function reviewGate(step, args, ctx, flag) {
 }
 /**
  * 调桥接的联网接口；撞上「本机或内网地址」那道门时照档位再判一次：
- * 径行直接放（首次就带上 allowPrivate）、审而后行交审查（准了带 allowPrivate 重发；审查没成仍不连）、
+ * 径行直接放（首次就带上 allowPrivate）、审而后行交审查（准了只放行首跳；审查没成仍不连）、
  * 问而后行照旧拒，回一句指路的话。首跳就被拒时桥接一个字节都没发出去，重发是安全的；
  * 若是公网地址把请求转到内网（桥接回的 detail 带 sent），那一跳此前已经发出去了——重发会把它再做一遍，
  * 故只如实交回、不重放（见 server/web.js 的 privateRefusal）
@@ -222,21 +222,29 @@ async function reviewGate(step, args, ctx, flag) {
  */
 async function bridgePrivate(path, payload, step, args, ctx) {
   const policy = commandPolicyOf(ctx.conversation),
-    send = allowPrivate => bridge(path, allowPrivate ? { ...payload, allowPrivate: true } : payload, ctx.signal);
+    send = allowPrivate => bridge(path, allowPrivate ? { ...payload, allowPrivate: true } : payload, ctx.signal),
+    redirectDenied = error => ({
+      denied: {
+        ok: false,
+        content: t`原请求已发出，服务器把它转到本机或内网地址（${error.data.at || "未知"}），这一跳没有跟；要跟，直接请求那个地址（会照档位再判一次）`,
+        display: "跳转未跟"
+      }
+    }),
+    retry = async () => {
+      try {
+        return { data: await bridge(path, { ...payload, allowPrivateFirstHop: true }, ctx.signal) };
+      } catch (error) {
+        if (error.data?.private && error.data.sent) return redirectDenied(error);
+        throw error;
+      }
+    };
   try {
     return { data: await send(policy === "auto") };
   } catch (error) {
     if (!error.data?.private) throw error;
     // 门禁是在发出过请求之后才撞上的（公网地址把请求转到本机或内网）：原请求已经做过一遍，再发就是第二遍
     //（POST 尤甚）。不重放、也不必送审——这一跳什么也没做，用不着批；把要跟的地址如实交回，由模型自己决定
-    if (error.data.sent)
-      return {
-        denied: {
-          ok: false,
-          content: t`原请求已发出，服务器把它转到本机或内网地址（${error.data.at || "未知"}），这一跳没有跟；要跟，直接请求那个地址（会照档位再判一次）`,
-          display: "跳转未跟"
-        }
-      };
+    if (error.data.sent) return redirectDenied(error);
     // 问而后行与没开审查的审而后行：照旧不连，说明切到哪一档才连得上
     if (policy === "ask")
       return {
@@ -248,7 +256,7 @@ async function bridgePrivate(path, payload, step, args, ctx) {
       };
     // 外发审查准的是外发，不等于准许访问内网：桥接直到此处才发现地址性质。
     // 只复用明确审过内网的定夺；若此次审查失败，不可拿旧的外发定夺当通行证。
-    if (step.reviewed?.ok && step.reviewed.kind === "private-address") return { data: await send(true) };
+    if (step.reviewed?.ok && step.reviewed.kind === "private-address") return retry();
     if (!reviewOn(ctx.conversation)) throw error;
     const denied = await reviewGate(step, args, ctx, {
       why: `要连本机或内网地址（${hostOfUrl(args.url)}）`,
@@ -265,7 +273,7 @@ async function bridgePrivate(path, payload, step, args, ctx) {
           display: "审查未成"
         }
       };
-    return { data: await send(true) };
+    return retry();
   }
 }
 /** 网址的主机：只作审查与回话里的缘由 @param {string} raw */

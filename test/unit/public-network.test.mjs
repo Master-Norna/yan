@@ -203,3 +203,33 @@ test("抓取浏览器代理：HTTP 与 CONNECT 只用已验的地址；默认拒
     await close(target);
   }
 });
+
+test("审准首跳不授权内网重定向，径行仍可访问", async () => {
+  let firstHits = 0,
+    otherHits = 0;
+  const other = http.createServer((req, res) => {
+    otherHits++;
+    res.end("other");
+  });
+  const target = await listen(other);
+  const first = http.createServer((req, res) => {
+    firstHits++;
+    res.writeHead(307, { Location: target + "/next" });
+    res.end();
+  });
+  const base = await listen(first);
+  try {
+    await assert.rejects(
+      fetchPublicResponse(base, { method: "POST", body: "x", allowLoopback: true, allowPrivateFirstHop: true }),
+      error => error.detail?.private === true && error.detail.sent === true && error.detail.at === target + "/next"
+    );
+    assert.equal(firstHits, 1);
+    assert.equal(otherHits, 0);
+    const { response } = await fetchPublicResponse(base, { allowPrivate: true });
+    assert.equal(await response.text(), "other");
+    assert.equal(otherHits, 1);
+  } finally {
+    await close(first);
+    await close(other);
+  }
+});

@@ -221,15 +221,29 @@ const OUTBOUND_MARK = "x-yan-outbound";
 // 带方法与请求体的公网请求（http_request / download_file 用）：同样的地址门禁，跳转逐跳再查；返回的是 Response，正文由调用者按需读
 async function fetchPublicResponse(
   url,
-  { method = "GET", headers = {}, body = null, timeout = 30000, allowLoopback = false, allowPrivate = false, signal = null } = {}
+  {
+    method = "GET",
+    headers = {},
+    body = null,
+    timeout = 30000,
+    allowLoopback = false,
+    allowPrivate = false,
+    allowPrivateFirstHop = false,
+    signal = null
+  } = {}
 ) {
   let current = new URL(url);
   // 调用方的中止（页面走了、这一问停了）与超时一并算数；没传即照旧只有超时
   const deadline = AbortSignal.timeout(timeout),
     stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
   for (let redirects = 0; redirects <= 5; redirects++) {
+    // 审查许可只给首跳，不能让对端借重定向把许可转交别的内网服务；径行仍可逐跳访问。
     // 第二跳起（redirects > 0）此前已经发出过请求：撞到内网时页面不能重放，要连目标地址一并回
-    const addresses = await assertPublicUrl(current, { allowLoopback, allowPrivate, afterRedirect: redirects > 0 });
+    const addresses = await assertPublicUrl(current, {
+      allowLoopback: allowLoopback && (!allowPrivateFirstHop || redirects === 0),
+      allowPrivate: allowPrivate || (allowPrivateFirstHop && redirects === 0),
+      afterRedirect: redirects > 0
+    });
     const response = await pinnedFetch(
       current,
       {
@@ -321,7 +335,8 @@ const handleHttp = jsonRoute(async body => {
       body: payload,
       timeout: 30000,
       allowLoopback: true,
-      allowPrivate: body.allowPrivate === true
+      allowPrivate: body.allowPrivate === true,
+      allowPrivateFirstHop: body.allowPrivateFirstHop === true
     });
   const type = response.headers.get("content-type") || "",
     textual =
@@ -390,11 +405,12 @@ async function readLimitedText(response, limit = FETCH_TEXT_LIMIT) {
 }
 // 取网页的字（翻网页、检索）：地址门禁与逐跳再查都经 fetchPublicResponse，只此一路。没成的报错带 status（翻网页据此认被拒）；
 // pdf：是 PDF 就原样交回字节，不当文字读
-async function fetchText(url, { timeout = 15000, headers = {}, pdf = false, allowPrivate = false } = {}) {
+async function fetchText(url, { timeout = 15000, headers = {}, pdf = false, allowPrivate = false, allowPrivateFirstHop = false } = {}) {
   const { response, url: finalUrl } = await fetchPublicResponse(url, {
     headers: { Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5", ...headers },
     timeout,
-    allowPrivate
+    allowPrivate,
+    allowPrivateFirstHop
   });
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
@@ -423,11 +439,12 @@ const handleFetch = jsonRoute(async body => {
     throw Error("网址无效");
   }
   const offset = Math.max(0, Math.floor(Number(body.offset) || 0)),
-    allowPrivate = body.allowPrivate === true;
+    allowPrivate = body.allowPrivate === true,
+    allowPrivateFirstHop = body.allowPrivateFirstHop === true;
   let page = null,
     refused = null;
   try {
-    page = await fetchText(url.href, { timeout: 20000, pdf: true, allowPrivate });
+    page = await fetchText(url.href, { timeout: 20000, pdf: true, allowPrivate, allowPrivateFirstHop });
   } catch (error) {
     if (!REFUSED.has(error.status) || !browser.available()) throw error;
     refused = error;
@@ -445,7 +462,7 @@ const handleFetch = jsonRoute(async body => {
     finalUrl = page?.url || url.href,
     scripted = !!page && html && full.trim().length < 200 && (page.text.match(/<script/gi) || []).length >= 3;
   // 无头浏览器走的是只放行公网的代理（见 server/headless.js）：本机与内网地址过不去，这一档就照直接请求的结果作答，不借它再试
-  const directOnly = allowPrivate && isPrivateAddress(url.hostname);
+  const directOnly = allowPrivateFirstHop || (allowPrivate && isPrivateAddress(url.hostname));
   if (!directOnly && (refused || (scripted && browser.available())))
     try {
       const shown = await browser.render(url.href, {

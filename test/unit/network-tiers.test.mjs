@@ -11,8 +11,12 @@ function setup(approve) {
     `setup: approve => {
       globalThis.__calls = [];
       bridge = async (path, payload) => {
-        globalThis.__calls.push({ path, allowPrivate: payload.allowPrivate === true });
-        if (payload.allowPrivate !== true)
+        globalThis.__calls.push({
+          path,
+          allowPrivate: payload.allowPrivate === true || payload.allowPrivateFirstHop === true,
+          scoped: payload.allowPrivateFirstHop === true
+        });
+        if (payload.allowPrivate !== true && payload.allowPrivateFirstHop !== true)
           throw Object.assign(Error("不允许访问本机或内网地址"), { data: { private: true } });
         return { ok: true, path };
       };
@@ -56,6 +60,7 @@ test("审而后行：先不带；审准了带 allowPrivate 再发一次", async 
     globalThis.__calls.map(call => call.allowPrivate),
     [false, true]
   );
+  assert.deepEqual(globalThis.__calls.map(call => call.scoped), [false, true]);
 });
 
 test("审而后行：驳了不再发", async () => {
@@ -141,4 +146,33 @@ test("外发已经审准，新发现的内网地址经审查准了才连", async
   const { data } = await f.bridgePrivate("/api/http", { url: args.url, method: "POST" }, step, args, ctx("review"));
   assert.equal(data.ok, true);
   assert.equal(step.reviewed.kind, "private-address");
+});
+
+test("审准首跳后再遇内网重定向：不重放，仍交回目标", async () => {
+  const f = load([
+    "bridgePrivate",
+    `setup: () => {
+      globalThis.__calls = [];
+      bridge = async (path, payload) => {
+        globalThis.__calls.push(payload);
+        if (!payload.allowPrivateFirstHop)
+          throw Object.assign(Error("内网"), { data: { private: true } });
+        throw Object.assign(Error("内网"), {
+          data: { private: true, sent: true, at: "http://192.168.1.2/next" }
+        });
+      };
+      reviewOn = () => true;
+      reviewGate = async (step, args, ctx, flag) => {
+        step.reviewed = { ok: true, kind: flag.kind };
+        return null;
+      };
+    }`
+  ]);
+  f.setup();
+  const { denied } = await f.bridgePrivate("/api/http", { url: args.url, method: "POST" }, newStep(), args, ctx("review"));
+  assert.equal(denied.display, "跳转未跟");
+  assert.match(denied.content, /192\.168\.1\.2\/next/);
+  assert.equal(globalThis.__calls.length, 2);
+  assert.equal(globalThis.__calls[1].allowPrivateFirstHop, true);
+  assert.equal(globalThis.__calls[1].allowPrivate, undefined);
 });

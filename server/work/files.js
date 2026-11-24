@@ -217,7 +217,8 @@ module.exports = function createFiles(work) {
       { response } = await fetchPublicResponse(url.href, {
         timeout: 120000,
         allowLoopback: true,
-        allowPrivate: body.allowPrivate === true
+        allowPrivate: body.allowPrivate === true,
+        allowPrivateFirstHop: body.allowPrivateFirstHop === true
       });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
