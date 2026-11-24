@@ -136,3 +136,24 @@ test("凭据：暂时无法访问不等于消失", async () => {
     clean();
   }
 });
+
+test("凭据：目录内的链接失去目标时记为消失，而不是未知", async () => {
+  const { root, batch, clean } = folder();
+  const target = path.join(root, "target"),
+    link = path.join(root, "link");
+  try {
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, "x"), "a");
+    fs.symlinkSync(target, link, "junction");
+    const body = { paths: ["link/x"], dirs: ["link"] };
+    const before = await batch(body);
+    assert.equal(typeof before.prints["link/x"], "string");
+    assert.equal(typeof before.dirs.link, "string");
+    fs.rmSync(target, { recursive: true });
+    const after = await batch(body);
+    assert.equal(after.prints["link/x"], null);
+    assert.equal(after.dirs.link, null);
+  } finally {
+    clean();
+  }
+});

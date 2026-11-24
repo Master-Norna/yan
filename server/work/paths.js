@@ -115,8 +115,8 @@ async function assertNoEscapingLink(workdir, target) {
     });
     if (!stat) break;
     if (!stat.isSymbolicLink()) continue;
-    const real = await fs.promises.realpath(current).catch(() => {
-      throw Error(`路径包含失效的链接：${relPath(workdir, current)}`);
+    const real = await fs.promises.realpath(current).catch(error => {
+      throw Object.assign(Error(`路径包含失效的链接：${relPath(workdir, current)}`), { code: error.code });
     });
     if (!pathIsInside(realRoot, real)) throw Error(`路径经过链接越出了工作目录：${relPath(workdir, current)}`);
   }
