@@ -64,7 +64,10 @@ function jsonRoute(handle, describe = errorText, limit = undefined) {
       const data = await handle(await readJson(req, limit), req, res);
       if (data !== undefined && !res.writableEnded && !res.destroyed) sendJson(res, 200, data);
     } catch (error) {
-      if (!res.headersSent) sendJson(res, 400, { error: describe(error) });
+      // 出错时除了那句话，还可捎带一段结构化说明（error.detail）：如 private —— 撞的是「本机或内网地址」那道门，
+      // 页面据此决定要不要交审查、准了再带上 allowPrivate 重发（见 server/web.js 的 privateRefusal）
+      const detail = error && typeof error.detail === "object" && error.detail ? error.detail : {};
+      if (!res.headersSent) sendJson(res, 400, { error: describe(error), ...detail });
       else res.end();
     }
   };

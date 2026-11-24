@@ -398,6 +398,25 @@
     }
   },
 
+  // 设置 → MCP 那份配置也在模型手里：能看、能改、能删、能重连。写这一栏会让桥接起本机进程，按档位请示或送审
+  mcp_config: {
+    description:
+      "看和改设置里的 MCP 服务。不给参数即列出各服务与连接状态（密钥遮着，reveal 才露）。servers 添改（写法同 mcpServers：本机填 command / args，远端填 url / headers；只给要改的键，env / headers 按键合并、值给 null 即删），remove 删服务，改过会自动重连；连不上时看得到失败原因。",
+    parameters: {
+      type: "object",
+      properties: {
+        servers: {
+          type: "object",
+          description:
+            "要添或改的服务：{ 名字: { command, args, cwd, env } 或 { url, headers, type }，另可带 disabled、autoApprove、readOnlyTools、timeout、load、note }"
+        },
+        remove: { type: "array", items: { type: "string" }, description: "要删去的服务名" },
+        reconnect: { type: "array", items: { type: "string" }, description: "要断开重连的服务名" },
+        reveal: { type: "boolean", description: "连密钥一起看；默认遮着" }
+      }
+    }
+  },
+
   // MCP 里工具多、定义重的服务按需给：模型只见目录，用时先查参数、再调用。{{directory}} 是各服务的目录
   mcp_describe: {
     description: "查 MCP 工具的说明与参数，调用前先查；可一次查几件。已接入、按需取用的服务与工具：\n{{directory}}",

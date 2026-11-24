@@ -6,7 +6,8 @@ import dns from "node:dns";
 import { gzipSync } from "node:zlib";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const { fetchPublicResponse, readLimitedBytes } = require("../../server/web.js");
+const { fetchPublicResponse, readLimitedBytes, assertPublicUrl } = require("../../server/web.js");
+const { jsonRoute } = require("../../server/http.js");
 const createPublicProxy = require("../../server/headless-proxy.js");
 const listen = async server => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -87,6 +88,73 @@ test("超量的响应及时取消，DNS 指向内网时在连接前拒绝", asyn
   }
 });
 
+test("本机与内网按档位：不给 allowPrivate 照拒，给了才连；拒时带 private 记号", async () => {
+  const server = http.createServer((req, res) => res.end("lan"));
+  const base = await listen(server);
+  try {
+    // 私网地址字面量：不给许可照旧拒，且带着记号——页面据此交审查、准了再带 allowPrivate 重发
+    await assert.rejects(
+      assertPublicUrl(new URL("http://10.1.2.3/")),
+      error => error.detail?.private === true && /内网/.test(error.message)
+    );
+    // http_request 那一路放行本机回环，但局域网仍拒
+    await assert.rejects(fetchPublicResponse("http://10.1.2.3:1/", { allowLoopback: true }), error => error.detail?.private === true);
+    // 回环：不给 allowPrivate（也不给 allowLoopback）时照旧拒
+    await assert.rejects(fetchPublicResponse(base), /本机或内网/);
+    const { response } = await fetchPublicResponse(base, { allowPrivate: true });
+    assert.equal(await response.text(), "lan");
+    assert.deepEqual(await assertPublicUrl(new URL(base), { allowPrivate: true }), [{ address: "127.0.0.1", family: 4 }]);
+  } finally {
+    await close(server);
+  }
+});
+
+test("公网地址跳到内网：拦下时带 sent 与要跟的地址，首跳只发一次", async () => {
+  let received = 0;
+  const server = http.createServer((req, res) => {
+    received++;
+    res.writeHead(302, { Location: "http://u:p@192.168.7.7/next?a=1" });
+    res.end();
+  });
+  const base = await listen(server);
+  try {
+    // 首跳是本机回环（allowLoopback 放行），它把请求转到局域网：第二跳在发出之前被拦
+    let caught = null;
+    try {
+      await fetchPublicResponse(base + "/start", { method: "POST", body: "x", allowLoopback: true });
+    } catch (error) {
+      caught = error;
+    }
+    assert.equal(received, 1, "只发出首跳那一次");
+    assert.equal(caught?.detail?.private, true);
+    assert.equal(caught?.detail?.sent, true, "告诉页面：此前已经发出过请求，不能重放");
+    assert.equal(caught?.detail?.at, "http://192.168.7.7/next?a=1", "交回要跟的地址，且剥掉 userinfo");
+    // 首跳即内网：一个字节都没发出去，没有 sent——页面照旧可以送审后重发
+    await assert.rejects(
+      fetchPublicResponse("http://192.168.7.7/next"),
+      error => error.detail?.private === true && !error.detail.sent && !error.detail.at
+    );
+  } finally {
+    await close(server);
+  }
+});
+
+test("撞上内网门禁时，接口回的 400 带 private 记号", async () => {
+  const server = http.createServer((req, res) =>
+    jsonRoute(async () => {
+      throw Object.assign(Error("不允许访问本机或内网地址"), { detail: { private: true } });
+    })(req, res)
+  );
+  const base = await listen(server);
+  try {
+    const answer = await fetch(base, { method: "POST", body: "{}" });
+    assert.equal(answer.status, 400);
+    assert.deepEqual(await answer.json(), { error: "不允许访问本机或内网地址", private: true });
+  } finally {
+    await close(server);
+  }
+});
+
 test("抓取浏览器代理：HTTP 与 CONNECT 只用已验的地址；默认拒绝回环", async () => {
   const target = http.createServer((req, res) => res.end(req.headers.host));
   const targetUrl = await listen(target),
@@ -133,5 +201,35 @@ test("抓取浏览器代理：HTTP 与 CONNECT 只用已验的地址；默认拒
     proxy.close();
     blocked.close();
     await close(target);
+  }
+});
+
+test("审准首跳不授权内网重定向，径行仍可访问", async () => {
+  let firstHits = 0,
+    otherHits = 0;
+  const other = http.createServer((req, res) => {
+    otherHits++;
+    res.end("other");
+  });
+  const target = await listen(other);
+  const first = http.createServer((req, res) => {
+    firstHits++;
+    res.writeHead(307, { Location: target + "/next" });
+    res.end();
+  });
+  const base = await listen(first);
+  try {
+    await assert.rejects(
+      fetchPublicResponse(base, { method: "POST", body: "x", allowLoopback: true, allowPrivateFirstHop: true }),
+      error => error.detail?.private === true && error.detail.sent === true && error.detail.at === target + "/next"
+    );
+    assert.equal(firstHits, 1);
+    assert.equal(otherHits, 0);
+    const { response } = await fetchPublicResponse(base, { allowPrivate: true });
+    assert.equal(await response.text(), "other");
+    assert.equal(otherHits, 1);
+  } finally {
+    await close(first);
+    await close(other);
   }
 });

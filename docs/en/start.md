@@ -60,6 +60,6 @@ Yan must be opened through the local bridge: run `start.cmd` (or `npm start`) an
 
 ## The local bridge
 
-`server.js` and `server/` are the local bridge (see [Code structure and development](development.md) for what each part does). It serves the page, forwards model requests, runs web search and page reading on the model's behalf (refusing local and private addresses, with IPv6 literals and IPv4-mapped addresses judged the same way; bodies are truncated while reading, at most 3 MB), and performs the agent's commands and file operations. Static files carry `ETag` validation, so changes take effect on reload; the console never shows API keys.
+`server.js` and `server/` are the local bridge (see [Code structure and development](development.md) for what each part does). It serves the page, forwards model requests, runs web search and page reading on the model's behalf (local and private addresses follow the permission level — Ask avoids them, Review sends them to the reviewer, Auto connects directly; IPv6 literals and IPv4-mapped addresses are judged the same way; bodies are truncated while reading, at most 3 MB), and performs the agent's commands and file operations. Static files carry `ETag` validation, so changes take effect on reload; the console never shows API keys.
 
 A single request carries at most 128 tool definitions; going over is an explicit error rather than silently dropping the rest.

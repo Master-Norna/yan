@@ -176,7 +176,8 @@ module.exports = function createFiles(work) {
       release();
     }
   }, failed);
-  // ---- download_file：把网上的文件存到文件工具允许的落点，缺省是工作目录。地址门禁与 http_request 同一套（本机回环放行，内网拒）；path 给目录或省略时按网址里的文件名存，
+  // ---- download_file：把网上的文件存到文件工具允许的落点，缺省是工作目录。地址门禁与 http_request 同一套（本机回环放行，
+  // 内网按页面给的档位：问而后行不碰，审而后行审准了带 allowPrivate；见 server/web.js 的 assertPublicUrl）；path 给目录或省略时按网址里的文件名存，
   // 已有同名文件就加 (2)；最多 64 MB
   const DOWNLOAD_LIMIT = 64 * 1024 * 1024;
   const handleWorkDownload = jsonRoute(async (body, req, res) => {
@@ -213,7 +214,12 @@ module.exports = function createFiles(work) {
       }
     }
     const started = Date.now(),
-      { response } = await fetchPublicResponse(url.href, { timeout: 120000, allowLoopback: true });
+      { response } = await fetchPublicResponse(url.href, {
+        timeout: 120000,
+        allowLoopback: true,
+        allowPrivate: body.allowPrivate === true,
+        allowPrivateFirstHop: body.allowPrivateFirstHop === true
+      });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       throw Error(`对方返回 ${response.status}`);

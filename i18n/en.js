@@ -920,6 +920,7 @@ var YAN_EN = {
   "「{0}」的 {1} 仍是遮蔽占位，原值已不可寻，请重填": '{1} of "{0}" is still a masked placeholder and the original is gone. Enter it again',
   '应是 { "mcpServers": { 名字: 配置 } }': 'Expected { "mcpServers": { name: config } }',
   "「{0}」要有 command（本机程序）或 url（远端服务）": '"{0}" needs a command (local program) or url (remote server)',
+  "服务名「{0}」不可用": 'The server name "{0}" is not available',
   "{0}第 {1} 行缺「{2}」：{3}": '{0}line {1} is missing "{2}": {3}',
   请填命令: "Enter a command",
   请填地址: "Enter a URL",

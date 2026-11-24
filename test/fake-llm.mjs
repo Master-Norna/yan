@@ -1,6 +1,10 @@
 // 假的 OpenAI 兼容接口：第一轮回 run_command 工具调用，收到 tool 结果后回正文；可通过 X-Mode 切换行为
 import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { shellCommand } from "./helpers/shell-command.mjs";
+// 仓库根：有的用例要让言去起 test/ 下的假服务（如 mcp_config 接一个本机 MCP）
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sse = (res, chunks, gap = 30) => {
   res.writeHead(200, { "Content-Type": "text/event-stream" });
   let i = 0;
@@ -1284,6 +1288,38 @@ http
         return sse(res, [
           delta({
             content: `MCPTEST|hint:${system.includes("FAKE-MCP-HINT")}|note:${system.includes("【web】USER-NOTE-WEB")}|inline:${names.filter(x => x.startsWith("mcp__")).join(",")}|lazy:${names.includes("mcp_call")}|dir:${/tool_39/.test(describe)}|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 80)).join(" ▸ ")}`
+          }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
+      // MCPCONF：让言自己改设置里的 MCP 配置——接一个本机 stdio 假服务（问而后行里写配置要先请示）；
+      // 下一问 MCPCONF2 报回这一问的工具表里有没有它的 echo
+      if (typeof lastUser === "string" && lastUser.includes("MCPCONF")) {
+        const names = (payload.tools || []).map(t => t.function.name);
+        if (lastUser.includes("MCPCONF2") || toolResults.length)
+          return sse(res, [
+            delta({
+              content: `MCPCONF|tools:${names.filter(name => name.startsWith("mcp__cfg")).join(",")}|${toolResults.map(t => String(t.content).replace(/\s+/g, " ").slice(0, 240)).join(" ▸ ")}`
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [
+          delta({
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_conf0",
+                type: "function",
+                function: {
+                  name: "mcp_config",
+                  arguments: JSON.stringify({
+                    servers: {
+                      cfg: { command: process.execPath, args: [path.join(ROOT, "test/fake-mcp.mjs")], readOnlyTools: ["echo"] }
+                    }
+                  })
+                }
+              }
+            ]
           }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
