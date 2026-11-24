@@ -84,9 +84,11 @@ const docTextCache = new Map(),
 // 原件的「这一份」记号：优先用桥接回的 ETag（带毫秒），其次「修改时刻 + 大小」。
 // 只有后两者时秒级不够——同一秒里改成长短一样的内容就看不出来，抽过的旧正文会再拿出来用。都取不到给空串，那份不进缓存、宁可重抽
 function stampFromHead(head) {
-  return head?.ok
-    ? head.headers.get("etag") || `${head.headers.get("last-modified") || ""}|${head.headers.get("content-length") || ""}`
-    : "";
+  if (!head?.ok) return "";
+  const etag = head.headers.get("etag"),
+    modified = head.headers.get("last-modified"),
+    size = head.headers.get("content-length");
+  return etag || (modified && size !== null ? `${modified}|${size}` : "");
 }
 async function stampOf(url) {
   const head = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
