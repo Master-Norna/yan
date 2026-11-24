@@ -82,6 +82,14 @@ function killGroup(child, signal = "SIGKILL") {
   }
 }
 
+// 下载源测速：curl 的可执行文件与丢弃输出的位置随平台走，免得 macOS 找不到 curl.exe。
+function curlProbe() {
+  return {
+    command: WIN ? "curl.exe" : MAC ? "/usr/bin/curl" : "curl",
+    output: WIN ? "NUL" : "/dev/null"
+  };
+}
+
 // 本机装的 Edge、Chrome 在哪（各列常见的几处，有一处在就算装了）
 function browserFiles() {
   if (MAC) {
@@ -128,4 +136,4 @@ function systemProxy() {
   return { HTTPS_PROXY: proxy, HTTP_PROXY: proxy, NO_PROXY: [...new Set(["localhost", "127.0.0.1", "::1", ...bypass])].join(",") };
 }
 
-module.exports = { openUrl, openPath, reveal, OWN_GROUP, killTree, killTreeSync, browserFiles, systemProxy };
+module.exports = { openUrl, openPath, reveal, OWN_GROUP, killTree, killTreeSync, curlProbe, browserFiles, systemProxy };

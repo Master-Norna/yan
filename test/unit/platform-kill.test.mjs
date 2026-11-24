@@ -78,3 +78,8 @@ test("已退出的不再去收", () => {
   platform.killTree({ ...fakeChild(), exitCode: 0 });
   assert.equal(calls.kill.length, 0);
 });
+
+test("下载测速：Windows 与 macOS 都选对 curl 与空设备", () => {
+  assert.deepEqual({ ...load("win32").platform.curlProbe() }, { command: "curl.exe", output: "NUL" });
+  assert.deepEqual({ ...load("darwin").platform.curlProbe() }, { command: "/usr/bin/curl", output: "/dev/null" });
+});
