@@ -38,6 +38,13 @@ test("搜索：目录里跳过的大件，点名把 path 指到它就能搜到",
     assert.equal(one.matches.length, 1);
     assert.equal(one.matches[0].line, 3001);
     assert.equal(one.large, undefined);
+    // 命中上限后不再扫描下一行；原本这行会导致灾难性正则回溯超时。
+    fs.writeFileSync(path.join(root, "needle.txt"), "Needle.(\n" + "a".repeat(12000) + "!");
+    const early = await post("/api/work/search", { workdir: root, path: "needle.txt", query: "Needle|(?:a+)+$", limit: 1 });
+    assert.equal(early.matches.length, 1);
+    assert.equal(early.matches[0].line, 1);
+    const literal = await post("/api/work/search", { workdir: root, path: "needle.txt", query: "needle.(", literal: true });
+    assert.equal(literal.matches.length, 1);
   } finally {
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });
