@@ -61,16 +61,30 @@ async function anchorPrints(conversation, keys, signal, cadence = "answer") {
     const [kind, value] = anchorParts(key),
       entry = ANCHOR_KINDS.get(kind);
     if (!entry || (cadence === "round" && entry.cadence !== "round")) continue;
-    groups.set(kind, [...(groups.get(kind) || []), value]);
+    if (!groups.has(kind)) groups.set(kind, new Set());
+    groups.get(kind).add(value);
   }
   /** @type {Record<string, string|null>} */
   const prints = {};
-  await Promise.all(
-    [...groups].map(async ([kind, values]) => {
-      const got = await ANCHOR_KINDS.get(kind).read(conversation, values, signal);
-      for (const [value, print] of Object.entries(got)) prints[`${kind}:${value}`] = print;
-    })
-  );
+  const add = (kind, got) => {
+    for (const [value, print] of Object.entries(got || {})) prints[`${kind}:${value}`] = print;
+  };
+  const paths = [...(groups.get("file") || [])],
+    dirs = [...(groups.get("dir") || [])];
+  groups.delete("file");
+  groups.delete("dir");
+  await Promise.all([
+    // 文件与目录一批交给桥接，重叠凭据才能共享同一批内容哈希。
+    ...(paths.length || dirs.length
+      ? [
+          bridge("/api/work/prints", { ...workScope(conversation), paths, dirs }, signal).then(data => {
+            add("file", data.prints);
+            add("dir", data.dirs);
+          })
+        ]
+      : []),
+    ...[...groups].map(async ([kind, values]) => add(kind, await ANCHOR_KINDS.get(kind).read(conversation, [...values], signal)))
+  ]);
   return prints;
 }
 
@@ -137,13 +151,19 @@ async function readAnchorCommands(conversation, values, signal, timeout, digest)
   const policy = commandPolicyOf(conversation),
     /** @type {Record<string, string|null>} */
     prints = {};
+  const pending = [...new Set(values)].filter(command => policy !== "ask" || isReadOnlyCommand(command));
+  // 同类凭据至多两条并跑；探针与测试的超时语义不同，不跨种类合并。
+  let cursor = 0;
   await Promise.all(
-    values.map(async command => {
-      if (policy === "ask" && !isReadOnlyCommand(command)) return;
-      try {
-        prints[command] = digest(await bridge("/api/work/run", { ...workScope(conversation), command, timeout }, signal));
-      } catch (error) {
-        if (error.name === "AbortError") throw error;
+    Array.from({ length: Math.min(2, pending.length) }, async () => {
+      while (cursor < pending.length) {
+        signal?.throwIfAborted();
+        const command = pending[cursor++];
+        try {
+          prints[command] = digest(await bridge("/api/work/run", { ...workScope(conversation), command, timeout }, signal));
+        } catch (error) {
+          if (error.name === "AbortError") throw error;
+        }
       }
     })
   );
