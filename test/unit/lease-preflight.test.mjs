@@ -252,3 +252,26 @@ test("认领别段收到远端重新持有，旧的松手跟读不能放行", as
   assert.equal(f.runningElsewhere("remote"), true);
   assert.deepEqual(watched, []);
 });
+
+test("共享目录认领超时或回执不完整不能冒充成功；本地离线仍可开工", async () => {
+  const f = load([
+    "claimConversation",
+    "leaseHold",
+    `setup: (online, request) => {
+      chatsOnline = () => online;
+      bridge = request;
+    }`
+  ]);
+  f.setup(true, async () => {
+    throw Error("timeout");
+  });
+  assert.equal(await f.claimConversation("c"), false);
+  assert.equal(f.leaseHold.has("c"), false);
+  f.setup(true, async () => ({}));
+  assert.equal(await f.claimConversation("c"), false);
+  assert.equal(f.leaseHold.has("c"), false);
+  f.setup(false, async () => {
+    throw Error("should not request");
+  });
+  assert.equal(await f.claimConversation("c"), true);
+});
