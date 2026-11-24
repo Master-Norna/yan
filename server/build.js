@@ -70,6 +70,8 @@ module.exports = {
   bundleScript,
   bundleStyles,
   stylesAt,
+  // 独立文档页借一段无闭包依赖的页面脚本，不带整份 support.js。
+  scriptAt: (/** @type {string} */ name) => fs.readFileSync(path.join(SRC, name), "utf8"),
   scriptParts: () => partsOf(SRC, ".js"),
   promptParts: () => partsOf(PROMPTS, ".js"),
   SCRIPT_HEAD,

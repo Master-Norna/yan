@@ -15,7 +15,7 @@ const path = require("node:path");
 const { fileURLToPath, pathToFileURL } = require("node:url");
 const { sendJson, readJson, openWithSystem, sendFile } = require("./http.js");
 const platform = require("./platform.js");
-const { stylesAt } = require("./build.js");
+const { scriptAt, stylesAt } = require("./build.js");
 
 // 参数里哪一项都没写调试口时的默认（见 docs/stage.md：避开常被端口转发占着的 9222 / 9223）
 const DEFAULT_PORT = 9288;
@@ -207,6 +207,8 @@ body.docpage { margin: 0; min-height: 100%; overflow: auto; background: var(--pa
 /* 工作表页签要真把别的表收起来：.hidden 那条规则在设置页那一片（styles/70-settings/30-panels.css），文档页没带它 */
 .docpage .hidden { display: none !important; }
 .docpage a { overflow-wrap: anywhere; }
+.docpage-paper:has(> .file-viewer-slides) { max-width: none; min-height: 0; padding: 16px clamp(12px, 4vw, 40px); background: none; }
+.docpage-paper > .file-viewer-slides { height: max(260px, calc(100dvh - 32px)); margin: 0 auto; }
 </style>
 </head>
 <body class="docpage">
@@ -214,14 +216,8 @@ body.docpage { margin: 0; min-height: 100%; overflow: auto; background: var(--pa
 ${body}
 </main>
 <script nonce="${nonce}">
-// 工作表的页签：文档页里没有预览浮层那套事件，就地绑一份（只这一件事，别的照旧不动）
-document.addEventListener("click", event => {
-  const tab = event.target.closest("[data-viewer-tab]");
-  if (!tab) return;
-  const box = tab.closest(".file-viewer-wide") || document;
-  for (const one of box.querySelectorAll("[data-viewer-tab]")) one.classList.toggle("active", one === tab);
-  for (const panel of box.querySelectorAll("[data-viewer-panel]")) panel.classList.toggle("hidden", panel.dataset.viewerPanel !== tab.dataset.viewerTab);
-});
+${scriptAt("13-files/19-doc-paging.js")}
+bindDocPreviewPaging(document);
 </script>
 </body>
 </html>

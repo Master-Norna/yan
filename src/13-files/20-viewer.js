@@ -181,6 +181,45 @@ function downloadViewerFile() {
     downloadHref(skillFileUrl(viewerSource, true), String(viewerSource.skillPath).split("/").pop() || "");
   } else if (viewerSource?.file) downloadFile(viewerSource.file);
 }
+// ODP 与旧附件只有 Markdown：只认抽取器写的页眉，不把正文里的二级标题另算一页。
+/** @param {string} text */
+function slidePagesFromText(text) {
+  return text.split(/^(?=## (?:第 \d+ 页|Page \d+)(?: · |\r?$))/m);
+}
+/** @param {string[]} source @param {number} [ratio] */
+function boundSlidePages(source, ratio = 16 / 9) {
+  const pages = [];
+  let left = MAX_EXTRACTED_CHARS;
+  for (const raw of source) {
+    const page = trimExtractedText(raw.slice(0, Math.max(0, left)));
+    if (page) pages.push(page);
+    if (raw.length > left) return { text: "", pages, ratio, cut: true };
+    left -= raw.length;
+  }
+  return { text: "", pages, ratio, cut: false };
+}
+/** @param {string[]} pages @param {number} ratio @param {string} note @param {"pptx"|"odp"} format */
+function slideViewerHtml(pages, ratio, note, format) {
+  const last = pages.length - 1,
+    step = (name, direction, glyph) =>
+      `<button type="button" data-viewer-slide-step="${direction}" aria-disabled="${direction === -1 || !last}" title="${name}" aria-label="${name}">${glyph}</button>`;
+  return `<div class="file-viewer-slides" data-slide-format="${format}" style="--slide-ratio:${Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9}">${note}<div class="viewer-slide-well"><div class="viewer-slide-stage">${pages
+    .map(
+      (part, i) =>
+        `<div class="viewer-slide markdown" data-viewer-slide-panel="${i}" tabindex="0"${i ? " hidden" : ""}>${renderMarkdown(part)}</div>`
+    )
+    .join(
+      ""
+    )}</div></div><nav class="viewer-slide-nav" aria-label="${t`演示页导航`}">${step(t`上一页`, -1, "‹")}<div class="viewer-slide-strip">${pages
+    .map(
+      (_, i) =>
+        `<button type="button" data-viewer-slide="${i}" aria-label="${t`第 ${i + 1} 页`}"${i ? ' tabindex="-1"' : ' aria-current="page"'}>${i + 1}</button>`
+    )
+    .join(
+      ""
+    )}</div>${step(t`下一页`, 1, "›")}<span class="viewer-slide-count" data-viewer-slide-count aria-live="polite">1 / ${pages.length}</span></nav></div>`;
+}
+
 async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   if (kind === "image") return `<img class="file-viewer-image" src="${escapeHtml(reader.url())}" alt="${escapeHtml(name)}">`;
   // PDF 交给浏览器自带的阅读器；卷宗的响应带 CSP: sandbox，脚本不会以本站身份运行
@@ -250,57 +289,58 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
     // 退回上传时抽下的那一份（附件有，卷宗里的没有）。文中的图照抽出的路再从原件里取（见 withZipImages）。
     // 原件照 Blob 读成字节直接用，不再经 data: URL 转一趟 base64（大文档编一遍解一遍，纯属白耗）。
     // 抽过的正文按原件的「修改时刻 + 大小」留几份：同一份再打开不必重抽，原件改过则照新抽
-    let text = "",
-      bytes = null;
-    const stamp = String(reader.stamp || ""),
-      // 名字不够：同名的两件（两层的 README.md）大小与时刻恰好一样也少见，但地址是各是各的
-      cacheKey = stamp ? `${reader.url?.() || name}|${stamp}` : "";
-    text = cacheKey ? docTextCache.get(cacheKey) || "" : "";
-    if (!text)
+    let bytes = null;
+    const sort = fileKind(name).name,
+      stamp = String(reader.stamp || ""),
+      // 名字不够：同名的两件（两层的 README.md）大小与时刻恰好一样也少见，但地址各有各的
+      cacheKey = stamp ? `${reader.url?.() || name}|${stamp}` : "",
+      cached = cacheKey ? docTextCache.get(cacheKey) : null,
+      readBytes = async () => new Uint8Array(await (await reader.blob()).arrayBuffer());
+    let doc = cached;
+    if (!doc)
       try {
-        bytes = new Uint8Array(await (await reader.blob()).arrayBuffer());
-        text = trimExtractedText(await extractDocumentText(name, bytes));
-        if (text && cacheKey) {
-          docTextCache.delete(cacheKey);
-          docTextCache.set(cacheKey, text);
+        bytes = await readBytes();
+        if (sort === "slides") {
+          if (fileExtension(name) === "pptx") {
+            const { pages, ratio } = await extractPptxSlides(bytes);
+            doc = boundSlidePages(pages, ratio);
+          } else doc = boundSlidePages(slidePagesFromText(await extractZipDocumentText("odp", bytes)));
+        } else doc = { text: trimExtractedText(await extractDocumentText(name, bytes)) };
+        if ((doc.text || doc.pages?.length) && cacheKey) {
+          docTextCache.set(cacheKey, doc);
           if (docTextCache.size > DOC_TEXT_CACHE_MAX) docTextCache.delete(docTextCache.keys().next().value);
         }
       } catch {}
-    // 缓存住的正文若带着图，仍得从原件里把图取出来（data-path 由 withZipImages 换掉）
-    if (text && !bytes && text.includes("data-path"))
-      bytes = await reader
-        .blob()
-        .then(blob => blob.arrayBuffer())
-        .then(buffer => new Uint8Array(buffer))
-        .catch(() => null);
-    if (!text) text = trimExtractedText(typeof reader.extracted === "function" ? await reader.extracted() : reader.extracted).trim();
-    if (!text)
+    if (!doc?.text && !doc?.pages?.length) {
+      const fallback = String((typeof reader.extracted === "function" ? await reader.extracted() : reader.extracted) || "");
+      // 上传时的旧正文可能已带截断尾注；照原字符上限取，尾注另写到页外，不交给 Markdown 分页。
+      doc = sort === "slides" ? boundSlidePages(slidePagesFromText(fallback)) : { text: trimExtractedText(fallback) };
+    }
+    if (!doc.text && !doc.pages?.length)
       return `<div class="file-viewer-empty">${t(`未能抽出正文`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;
-    const note = `<p class="file-viewer-note">${t(`本机按结构抽出，不含原排版 ·`)} <button type="button" class="viewer-open-link" data-viewer-open>${t(`以本机程序打开`)}</button></p>`,
-      sort = fileKind(name).name,
-      // 按「## 」分节：表格一张表一节，演示一页一节
-      sections = text.split(/^(?=## )/m).filter(part => part.trim());
-    if (sort === "sheet" && sections.length)
-      return withZipImages(
-        `<div class="file-viewer-text file-viewer-wide">${note}<div class="viewer-tabs">${sections
-          .map(
-            (part, i) =>
-              `<button type="button" class="${i ? "" : "active"}" data-viewer-tab="${i}">${escapeHtml(part.match(/^## (.*)/)?.[1] || t`工作表 ${i + 1}`)}</button>`
-          )
-          .join("")}</div>${sections
-          .map(
-            (part, i) =>
-              `<div class="viewer-sheet markdown${i ? " hidden" : ""}" data-viewer-panel="${i}">${renderMarkdown(part.replace(/^## .*\n+/, ""))}</div>`
-          )
-          .join("")}</div>`,
-        bytes
-      );
-    if (sort === "slides" && sections.length)
-      return withZipImages(
-        `<div class="file-viewer-slides">${note}${sections.map(part => `<div class="viewer-slide markdown">${renderMarkdown(part)}</div>`).join("")}</div>`,
-        bytes
-      );
-    return withZipImages(`<div class="file-viewer-text markdown">${note}${renderMarkdown(text)}</div>`, bytes);
+    const note = `<p class="file-viewer-note">${t(`本机按结构抽出，不含原排版 ·`)} <button type="button" class="viewer-open-link" data-viewer-open>${t(`以本机程序打开`)}</button>${doc.cut ? ` · ${t`内容过长，只解析了开头一段`}` : ""}</p>`;
+    let html;
+    if (doc.pages?.length) html = slideViewerHtml(doc.pages, doc.ratio, note, fileExtension(name) === "pptx" ? "pptx" : "odp");
+    else {
+      // 工作簿抽取器按「## 」一张表一节，其余文档不分页。
+      const sections = sort === "sheet" ? doc.text.split(/^(?=## )/m).filter(part => part.trim()) : [];
+      html = sections.length
+        ? `<div class="file-viewer-text file-viewer-wide">${note}<div class="viewer-tabs">${sections
+            .map(
+              (part, i) =>
+                `<button type="button" class="${i ? "" : "active"}" data-viewer-tab="${i}">${escapeHtml(part.match(/^## (.*)/)?.[1] || t`工作表 ${i + 1}`)}</button>`
+            )
+            .join("")}</div>${sections
+            .map(
+              (part, i) =>
+                `<div class="viewer-sheet markdown${i ? " hidden" : ""}" data-viewer-panel="${i}">${renderMarkdown(part.replace(/^## .*\n+/, ""))}</div>`
+            )
+            .join("")}</div>`
+        : `<div class="file-viewer-text markdown">${note}${renderMarkdown(doc.text)}</div>`;
+    }
+    // 缓存住的正文若带图，仍要从原件里取图（data-path 由 withZipImages 换掉）。
+    if (cached && html.includes("data-path")) bytes = await readBytes().catch(() => null);
+    return withZipImages(html, bytes);
   }
   // 只要开头这一段：几百 MB 的日志不整份取回来再切
   const text = await reader.text(VIEWER_TEXT_CHARS),
@@ -510,20 +550,12 @@ async function showImageAt(index, opening = false) {
 function bindViewerEvents() {
   $("#fileViewerClose").onclick = () => closeFileViewer(true);
   $("#fileViewerDownload").onclick = downloadViewerFile;
-  $("#fileViewer").addEventListener("click", e => {
+  const fileViewer = $("#fileViewer");
+  bindDocPreviewPaging(fileViewer, () => !!viewerSource && !isShown("#imageViewer"));
+  fileViewer.addEventListener("click", e => {
     if (e.target.closest("[data-viewer-download]")) return downloadViewerFile();
     if (e.target.closest("[data-viewer-open]")) return void openViewerWithSystem();
-    // 表格的页签：一张表一页
-    const tab = e.target.closest("[data-viewer-tab]");
-    if (tab) {
-      const stage = $("#fileViewerStage");
-      stage.querySelectorAll("[data-viewer-tab]").forEach(button => button.classList.toggle("active", button === tab));
-      stage
-        .querySelectorAll("[data-viewer-panel]")
-        .forEach(panel => panel.classList.toggle("hidden", panel.dataset.viewerPanel !== tab.dataset.viewerTab));
-      return;
-    }
-    if (e.target === $("#fileViewer") || e.target === $("#fileViewerStage")) closeFileViewer();
+    if (e.target === fileViewer || e.target === $("#fileViewerStage")) closeFileViewer();
   });
   // 媒体的 error 不冒泡，在捕获阶段接：浏览器放不了这种编码，就别留一个转不动的播放器。
   // 桥接能用 ffmpeg 时会尝试给不兼容的封装换壳（见 server/video.js）；仍播不了可能是编码不兼容，或工具不可用、转封装未成。

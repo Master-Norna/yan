@@ -1,0 +1,308 @@
+// 言 · 幻灯片：同一份结构供眼前逐页看、也供模型读。这里只复原阅读层次，不重画 Office 画布。
+
+// DrawingML 的软换行和单元格里各自独立的段落都不是相邻的字。
+const pptxParagraph = p =>
+  [...p.children]
+    .map(part =>
+      part.localName === "br"
+        ? "\n"
+        : xmlKids(part, "t")
+            .map(t => t.textContent)
+            .join("")
+    )
+    .join("")
+    .trim();
+// 备注只取 body 占位符；页码与缩略图不算。一份坏备注不该拖掉所有幻灯片正文。
+function pptxNotes(notesXml) {
+  if (notesXml === undefined) return [];
+  try {
+    return xmlDeep(parseXml(notesXml), "sp")
+      .filter(shape => /^body$/i.test(xmlDeep(shape, "ph")[0]?.getAttribute("type") || ""))
+      .flatMap(shape => xmlDeep(shape, "p"))
+      .map(pptxParagraph)
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+const pptxInline = (text, bold) => {
+  const plain = escapeHtml(text).replace(/\n/g, "<br>");
+  return bold ? `<strong>${plain}</strong>` : plain;
+};
+// 非阿拉伯式自动编号不能直接写成 Markdown 的 a. / iv.：marked 不认它们是列表。
+// 遇到这些编号时，仅把那一组要点写成安全的 HTML ol/ul；数字列表仍沿用原来的 Markdown 路。
+// ol 的 type/start 由浏览器负责显示 c.、IV. 等标记，不丢层级，也不自己拼一串容易出错的罗马数字。
+function pptxSpecialLists(lines) {
+  const roots = [],
+    parents = [];
+  for (const line of lines) {
+    let depth = Math.max(0, Math.min(line.depth, parents.length));
+    if (depth && !parents[depth - 1]) depth = 0;
+    const item = { ...line, children: [] };
+    if (depth) parents[depth - 1].children.push(item);
+    else roots.push(item);
+    parents.length = depth;
+    parents[depth] = item;
+  }
+  const typeOf = line => {
+    if (!line.ordered) return "ul";
+    const code = String(line.numberType || "");
+    if (/^alphaLc/.test(code)) return "a";
+    if (/^alphaUc/.test(code)) return "A";
+    if (/^romanLc/.test(code)) return "i";
+    if (/^romanUc/.test(code)) return "I";
+    return "1";
+  };
+  const render = items => {
+    let out = "",
+      group = [],
+      current = "";
+    const flush = () => {
+      if (!group.length) return;
+      const ordered = current !== "ul",
+        start = group[0].startAt || 1;
+      out += `<${ordered ? "ol" : "ul"}${ordered ? ` type="${current}" start="${start}"` : ""}>${group
+        .map(item => `<li>${pptxInline(item.text, item.bold)}${render(item.children)}</li>`)
+        .join("")}</${ordered ? "ol" : "ul"}>`;
+      group = [];
+    };
+    for (const item of items) {
+      if (item.plain) {
+        flush();
+        out += `<p>${pptxInline(item.text, item.bold)}</p>${render(item.children)}`;
+        continue;
+      }
+      const type = typeOf(item);
+      if (group.length && (type !== current || (item.startSpecified && item.startAt !== 1))) flush();
+      current = type;
+      group.push(item);
+    }
+    flush();
+    return out;
+  };
+  return render(roots);
+}
+// 坐标只用于找阅读顺序。同一行按左右，组内另用组自己的坐标，不将不同坐标系混排。
+function pptxPosition(shape) {
+  const props = [...shape.children].find(child => /^(?:spPr|grpSpPr|xfrm)$/.test(child.localName)),
+    transform = props?.localName === "xfrm" ? props : props && xmlKids(props, "xfrm")[0],
+    offset = transform && xmlKids(transform, "off")[0],
+    x = offset?.getAttribute("x"),
+    y = offset?.getAttribute("y");
+  return x != null && y != null && Number.isFinite(Number(x)) && Number.isFinite(Number(y)) ? { x: Number(x), y: Number(y) } : null;
+}
+function pptxReadingOrder(items, height) {
+  if (!(height > 0)) return items;
+  const positioned = items.filter(item => item.position).sort((a, b) => a.position.y - b.position.y),
+    rows = [];
+  for (let i = 0; i < positioned.length; ) {
+    const start = i++,
+      top = positioned[start].position.y;
+    while (i < positioned.length && positioned[i].position.y - top <= height * 0.008) i++;
+    rows.push(...positioned.slice(start, i).sort((a, b) => a.position.x - b.position.x));
+  }
+  // 继承版式而没有明确位置的框保留原有槽位，不猜在画面哪一侧。
+  let next = 0;
+  return items.map(item => (item.position ? rows[next++] : item));
+}
+function pptxTextBox(shape) {
+  const body = xmlKids(shape, "txBody")[0];
+  if (!body) return null;
+  const ph = xmlDeep(shape, "ph")[0],
+    kind = ph?.getAttribute("type") || (ph ? "obj" : ""),
+    style = xmlKids(body, "lstStyle")[0];
+  let size = 0;
+  const lines = xmlKids(body, "p").flatMap(p => {
+    const text = pptxParagraph(p);
+    if (!text) return [];
+    const direct = xmlKids(p, "pPr")[0],
+      depth = Math.max(0, Math.min(8, Number(direct?.getAttribute("lvl")) || 0)),
+      level = style && xmlKids(style, `lvl${depth + 1}pPr`)[0],
+      pick = pr => pr && [...pr.children].find(node => /^(?:buNone|buChar|buBlip|buAutoNum)$/.test(node.localName)),
+      bullet = pick(direct) || pick(level),
+      auto = bullet?.localName === "buAutoNum" ? bullet : null,
+      ownFont = direct && xmlKids(direct, "defRPr")[0],
+      levelFont = level && xmlKids(level, "defRPr")[0],
+      runs = [...p.children].filter(run => xmlKids(run, "t")[0]?.textContent.trim());
+    const fontOf = (run, key) =>
+      xmlKids(run, "rPr")[0]?.getAttribute(key) ?? ownFont?.getAttribute(key) ?? levelFont?.getAttribute(key) ?? "";
+    for (const run of runs) size = Math.max(size, Number(fontOf(run, "sz")) || 0);
+    return [
+      {
+        text,
+        depth,
+        bold: runs.length > 0 && runs.every(run => /^(?:1|true)$/.test(fontOf(run, "b"))),
+        ordered: !!auto,
+        numberType: auto?.getAttribute("type") || "",
+        startAt: Number(auto?.getAttribute("startAt")) || 1,
+        startSpecified: auto?.hasAttribute("startAt") || false,
+        // 普通文本框不是无序列表。正文占位符可能从版式继承项目符号，显式 buNone 优先。
+        plain: bullet ? bullet.localName === "buNone" : !depth && !/^(?:body|obj)$/.test(kind)
+      }
+    ];
+  });
+  return lines.length ? { kind, lines, size } : null;
+}
+function pptxTextBlocks(lines) {
+  if (lines.some(line => /^(?:alpha|roman)(?:Lc|Uc)/.test(line.numberType))) return [pptxSpecialLists(lines)];
+  const points = [],
+    counts = new Map(),
+    seen = [],
+    group = [],
+    flush = () => {
+      if (group.length) points.push(group.splice(0).join("\n"));
+    };
+  for (const line of lines) {
+    const text = line.bold ? [pptxInline(line.text, true)] : line.text.split("\n").map(mdLine);
+    if (line.plain) {
+      flush();
+      // 文本框中的字面围栏不是代码块，不能把下一框也卷进去。
+      points.push(text.map(part => part.replace(/^(\s*)(?=```|~~~)/, "$1\\")).join("\\\n"));
+      counts.clear();
+      seen.length = 0;
+      continue;
+    }
+    for (const key of counts.keys()) if (key > line.depth) counts.delete(key);
+    let mark = "- ";
+    if (line.ordered) {
+      const n = (counts.get(line.depth) ?? line.startAt - 1) + 1;
+      counts.set(line.depth, n);
+      mark = `${n}. `;
+    }
+    // 同 docx：子项缩进到父项记号之后那一列，段内换行留在同一项。
+    const indent = seen.slice(0, line.depth).reduce((spaces, width) => spaces + Math.max(2, width), 0);
+    seen[line.depth] = mark.length;
+    group.push(`${" ".repeat(indent)}${mark}${text.join(`\\\n${" ".repeat(indent + mark.length)}`)}`);
+  }
+  flush();
+  return points;
+}
+const PPTX_MC = "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  PPTX_SHAPE_NAMESPACES = new Set([
+    "http://schemas.openxmlformats.org/presentationml/2006/main",
+    "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "http://purl.oclc.org/ooxml/presentationml/main",
+    "http://purl.oclc.org/ooxml/drawingml/main"
+  ]);
+// 兼容包装不另建坐标系，只把可以读的那一支当作原位置上的孩子；不能把两支一同列出。
+/** @param {Element} root @returns {Element[]} */
+function pptxShapeChildren(root) {
+  return [...root.children].flatMap(child => {
+    if (child.namespaceURI !== PPTX_MC || child.localName !== "AlternateContent") return [child];
+    const branches = [...child.children].filter(branch => branch.namespaceURI === PPTX_MC),
+      selected =
+        branches.find(branch => {
+          const requires = branch.getAttribute("Requires")?.trim();
+          return (
+            branch.localName === "Choice" &&
+            requires &&
+            requires.split(/\s+/).every(prefix => PPTX_SHAPE_NAMESPACES.has(branch.lookupNamespaceURI(prefix)))
+          );
+        }) || branches.find(branch => branch.localName === "Fallback");
+    return selected ? pptxShapeChildren(selected) : [];
+  });
+}
+function pptxPage(xml, rels, notes, index, height) {
+  const tree = xmlDeep(parseXml(xml), "spTree")[0],
+    images = zipRels(rels, "ppt/slides");
+  const collect = (root, frameHeight) => {
+    const items = [];
+    for (const shape of pptxShapeChildren(root)) {
+      const position = pptxPosition(shape);
+      let box = null,
+        blocks = [];
+      if (shape.localName === "sp") box = pptxTextBox(shape);
+      if (shape.localName === "pic") blocks = [ooxmlImage(shape, images)].filter(Boolean);
+      if (shape.localName === "graphicFrame")
+        blocks = xmlDeep(shape, "tbl")
+          .map(table => mdTable(xmlKids(table, "tr").map(tr => xmlKids(tr, "tc").map(tc => xmlDeep(tc, "p").map(pptxParagraph).join(" ")))))
+          .filter(Boolean);
+      if (shape.localName === "grpSp") {
+        const props = xmlKids(shape, "grpSpPr")[0],
+          xfrm = props && xmlKids(props, "xfrm")[0],
+          extent = xfrm && xmlKids(xfrm, "chExt")[0];
+        blocks = collect(shape, Number(extent?.getAttribute("cy"))).flatMap(readBlocks);
+      }
+      if (box || blocks.length) items.push({ position, box, blocks });
+    }
+    return pptxReadingOrder(items, frameHeight);
+  };
+  const readBlocks = item => (item.box ? pptxTextBlocks(item.box.lines) : item.blocks),
+    items = tree ? collect(tree, height) : [],
+    titleOf = box => box.lines.map(line => line.text.replace(/\n/g, " ")).join(" "),
+    // 自由排版没有 title 占位符时，才在页上部取字号最大的短文本作题。
+    heading =
+      items.find(item => /^(?:title|ctrTitle)$/i.test(item.box?.kind || "")) ||
+      items
+        .filter(
+          item =>
+            item.box &&
+            !item.box.kind &&
+            item.box.lines.length === 1 &&
+            item.box.lines[0].plain &&
+            item.box.size >= 2000 &&
+            item.position?.y >= 0 &&
+            item.position.y <= height / 3 &&
+            titleOf(item.box).length <= 120
+        )
+        .sort((a, b) => b.box.size - a.box.size)[0],
+    title = heading ? titleOf(heading.box) : "",
+    said = pptxNotes(notes);
+  return [
+    t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`,
+    ...items.filter(item => item !== heading).flatMap(readBlocks),
+    said === null
+      ? t("（这一页的备注未能读出）")
+      : said.length
+        ? `**${t("备注")}**\n\n${said.map(line => `> ${line.split("\n").map(mdLine).join("\\\n> ")}`).join("\n>\n")}`
+        : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+/** @param {Uint8Array} bytes */
+async function extractPptxSlides(bytes) {
+  const index = await unzipDocument(bytes, name => name === "ppt/presentation.xml" || name === "ppt/_rels/presentation.xml.rels"),
+    manifest = index.get("ppt/presentation.xml"),
+    targets = zipRels(index.get("ppt/_rels/presentation.xml.rels"), "ppt", "slide"),
+    // 包内文件名不是页序。按 presentation.xml 的关系走，没清单的残缺件才沿用编号顺序。
+    presentation = manifest ? parseXml(manifest) : null,
+    size = presentation && xmlDeep(presentation, "sldSz")[0],
+    width = Number(size?.getAttribute("cx")),
+    height = Number(size?.getAttribute("cy")),
+    ratio = width / height,
+    order = presentation
+      ? xmlDeep(presentation, "sldIdLst")
+          .flatMap(list => xmlKids(list, "sldId"))
+          .map(id =>
+            targets.get(
+              id.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id") ||
+                id.getAttributeNS("http://purl.oclc.org/ooxml/officeDocument/relationships", "id")
+            )
+          )
+          .filter(Boolean)
+      : null,
+    wanted = order ? new Set(order.flatMap(name => [name, relsOf(name)])) : null,
+    entries = await unzipDocument(bytes, name =>
+      wanted ? wanted.has(name) : /^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$/.test(name)
+    ),
+    slides =
+      order ||
+      [...entries.keys()]
+        .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    parts = slides
+      .filter(name => entries.has(name))
+      .map(name => {
+        const rels = entries.get(relsOf(name)),
+          // 重排后备注仍跟着本页；备注编号与幻灯片编号无关。
+          note = zipRels(rels, "ppt/slides", "notesSlide").values().next().value;
+        return { xml: entries.get(name), rels, note };
+      }),
+    notes = new Set(parts.map(part => part.note).filter(Boolean)),
+    noteEntries = notes.size ? await unzipSelected(bytes, name => notes.has(name), { optional: true }) : new Map();
+  const pages = parts.map(({ xml, rels, note }, index) =>
+    pptxPage(xml, rels, note ? (noteEntries.get(note) ?? "") : undefined, index, height)
+  );
+  return { pages, ratio: width > 0 && height > 0 && Number.isFinite(ratio) ? ratio : 16 / 9 };
+}
