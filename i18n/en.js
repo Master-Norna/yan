@@ -541,6 +541,7 @@ var YAN_EN = {
   "（文档内部一份太大，未能列出：${name}）": "(A part was too large to display: ${name})",
   "（这一页的备注未能读出）": "(Could not read this slide’s notes)",
   "本机按结构抽出，不含原排版 ·": "Extracted locally by structure, original layout not kept ·",
+  "本机按文字位置排出，图形从简 ·": "Text placed locally where it sits; shapes kept simple ·",
   "[图片 {0} 预览不了]": "[Image {0} can't be previewed]",
   "工作表 {0}": "Sheet {0}",
   "## 第 {0} 页{1}": "## Page {0}{1}",

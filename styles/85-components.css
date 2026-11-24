@@ -701,6 +701,66 @@ button.source-local {
 .viewer-slide h2:first-child {
   margin-top: 0;
 }
+/* 画布：照原件的画面摆字。底色随这一页来，长短一律按纸宽折算（cqw），纸一缩字一起缩 */
+.viewer-slide-canvas {
+  container-type: size;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.2;
+  overflow: clip;
+  overflow-clip-margin: 8px;
+}
+.viewer-slide-canvas * {
+  box-sizing: border-box;
+}
+.viewer-slide-canvas .pv-text,
+.viewer-slide-canvas .pv-shape,
+.viewer-slide-canvas .pv-img,
+.viewer-slide-canvas .pv-table {
+  position: absolute;
+}
+.viewer-slide-canvas .pv-text {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.viewer-slide-canvas .pv-img {
+  object-fit: fill;
+}
+.viewer-slide-canvas .pv-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  overflow: hidden;
+}
+.viewer-slide-canvas .pv-table td {
+  padding: 0.3em 0.5em;
+  vertical-align: middle;
+  overflow: hidden;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+/* 连线：一条带色边的零高盒，按角度转；箭头用伪元素，随线一起转 */
+.viewer-slide-canvas .pv-line {
+  position: absolute;
+  height: 0;
+  transform-origin: 0 0;
+}
+.viewer-slide-canvas .pv-line[data-tail]::after,
+.viewer-slide-canvas .pv-line[data-head]::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  border: 0.9em solid transparent;
+}
+.viewer-slide-canvas .pv-line[data-tail]::after {
+  left: 100%;
+  border-left: 2.2em solid currentColor;
+}
+.viewer-slide-canvas .pv-line[data-head]::before {
+  left: -2.2em;
+  border-right: 2.2em solid currentColor;
+}
 /* PowerPoint 的文本框平铺成一段段字：略收段距，不缩字号、也不动正文或 ODP 的读法。 */
 .file-viewer-slides[data-slide-format="pptx"] .viewer-slide > p:not(:last-child) {
   margin-bottom: 0.4em;

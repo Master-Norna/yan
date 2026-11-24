@@ -151,6 +151,37 @@ writeFileSync(
     "ppt/notesSlides/notesSlide3.xml"
   )
 );
+// pptx 画布：每块都有坐标的一页。预览照画面位置摆字，不再把六个阶段的数字与标签拼成三段。
+// 16:9，标题 40 磅、正文 18 磅、一个圆、一条带箭头的横线、一张图——位置与字号都照原件的比例量。
+const CANVAS_SLIDE = `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="080D1D"/></a:solidFill></p:bgPr></p:bg><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="1219200" y="685800"/><a:ext cx="6096000" cy="1371600"/></a:xfrm><a:prstGeom prst="rect"/><a:noFill/></p:spPr><p:txBody><a:bodyPr anchor="ctr"/><a:p><a:r><a:rPr sz="4000" b="1"><a:solidFill><a:srgbClr val="F4F7FF"/></a:solidFill></a:rPr><a:t>版式标题</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="1219200" y="2743200"/><a:ext cx="6096000" cy="685800"/></a:xfrm><a:prstGeom prst="rect"/><a:noFill/></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1800"><a:solidFill><a:srgbClr val="A3B4CF"/></a:solidFill></a:rPr><a:t>正文一行</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="4" name="圆"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="8000000" y="2743200"/><a:ext cx="1000000" cy="1000000"/></a:xfrm><a:prstGeom prst="ellipse"/><a:solidFill><a:srgbClr val="172641"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="A78BFA"/></a:solidFill></a:ln></p:spPr></p:sp><p:sp><p:nvSpPr><p:cNvPr id="5" name="箭头"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="1000000" y="5000000"/><a:ext cx="4000000" cy="0"/></a:xfrm><a:prstGeom prst="line"/><a:noFill/><a:ln w="19050"><a:solidFill><a:srgbClr val="4DEBE4"/></a:solidFill><a:tailEnd type="triangle"/></a:ln></p:spPr></p:sp><p:pic><p:nvPicPr><p:cNvPr id="6" name="图" descr="示意"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill><p:spPr><a:xfrm><a:off x="6000000" y="5000000"/><a:ext cx="1000000" cy="1000000"/></a:xfrm></p:spPr></p:pic></p:spTree></p:cSld></p:sld>`;
+writeFileSync(
+  `${ARCHIVE}/版式.pptx`,
+  zip({
+    "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" rel:id="rId1"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`,
+    "ppt/_rels/presentation.xml.rels": rels({ rId1: ["slide", "slides/slide1.xml"] }),
+    "ppt/slides/slide1.xml": CANVAS_SLIDE,
+    "ppt/slides/_rels/slide1.xml.rels": rels({ rId2: ["image", "../media/image1.png"] }),
+    "ppt/media/image1.png": PNG
+  })
+);
+// 母版与版式：字号写在一级级继承里（母版 txStyles 标题 32 磅、正文 18 磅），页上只写位置。
+// 正文还带 normAutofit（缩到 92.5%、行距压 20%），另有一个 wrap="none" 的框——不读这些，字就偏大、行也松。
+const MASTER = `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"`,
+  r32 = `${MASTER} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`;
+writeFileSync(
+  `${ARCHIVE}/母版.pptx`,
+  zip({
+    "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" rel:id="rId1"/></p:sldIdLst><p:sldSz cx="9144000" cy="6858000"/></p:presentation>`,
+    "ppt/_rels/presentation.xml.rels": rels({ rId1: ["slide", "slides/slide1.xml"] }),
+    "ppt/slides/slide1.xml": `<p:sld ${r32}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>母版里定的标题</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr><a:normAutofit fontScale="92500" lnSpcReduction="20000"/></a:bodyPr><a:p><a:r><a:t>正文照母版 18 磅</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="4" name="不折行"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="3657600"/><a:ext cx="914400" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr wrap="none"><a:spAutoFit/></a:bodyPr><a:p><a:r><a:rPr sz="1800"/><a:t>这一行比框长也不折</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+    "ppt/slides/_rels/slide1.xml.rels": rels({ rId1: ["slideLayout", "../slideLayouts/slideLayout1.xml"] }),
+    // 版式只给正文的位置；标题的框与字号都在母版里
+    "ppt/slideLayouts/slideLayout1.xml": `<p:sldLayout ${MASTER}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/></p:txBody></p:sp></p:spTree></p:cSld></p:sldLayout>`,
+    "ppt/slideLayouts/_rels/slideLayout1.xml.rels": rels({ rId1: ["slideMaster", "../slideMasters/slideMaster1.xml"] }),
+    "ppt/slideMasters/slideMaster1.xml": `<p:sldMaster ${MASTER}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="274638"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr anchor="b"/></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="4525963"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/></p:txBody></p:sp></p:spTree></p:cSld><p:txStyles><p:titleStyle><a:lvl1pPr algn="l"><a:defRPr sz="3200"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle><a:lvl1pPr><a:defRPr sz="1800"/></a:lvl1pPr></p:bodyStyle><p:otherStyle><a:lvl1pPr><a:defRPr sz="1600"/></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>`,
+    "ppt/slideMasters/_rels/slideMaster1.xml.rels": rels({ rId1: ["theme", "../theme/theme1.xml"] })
+  })
+);
 // ipynb：Markdown 格、代码格、代码格的三种输出（stdout、结果、报错）与一张图；本体是 JSON，抽出来该是可读的 Markdown
 writeFileSync(
   `${ARCHIVE}/分析.ipynb`,
@@ -415,6 +446,93 @@ check(
       [...last.querySelectorAll(':scope > p')].find(p => p.textContent === "分段说明")?.nextElementSibling?.matches('ol[type="a"][start="2"]');
   })(document.querySelector("#fileViewerStage"))`)
 );
+await closeViewer();
+
+await open("版式.pptx");
+const side = JSON.parse(
+  await evalJs(`(() => {
+  const page = document.querySelector(".file-viewer-slides .viewer-slide"),
+    r = page.getBoundingClientRect(),
+    at = e => { const b = e.getBoundingClientRect(); return { l: +((b.left - r.left) / r.width).toFixed(3), t: +((b.top - r.top) / r.height).toFixed(3), w: +(b.width / r.width).toFixed(3), h: +(b.height / r.height).toFixed(3) }; },
+    texts = [...page.querySelectorAll(".pv-text")],
+    circle = page.querySelector(".pv-shape"),
+    line = page.querySelector(".pv-line");
+  return JSON.stringify({ cls: page.className, bg: getComputedStyle(page).backgroundColor, heads: page.querySelectorAll("h1,h2,h3").length,
+    texts: texts.map(e => ({ text: e.textContent, fs: +(parseFloat(getComputedStyle(e.querySelector("span")).fontSize) / r.width).toFixed(4), ...at(e) })),
+    circle: circle && { ...at(circle), radius: getComputedStyle(circle).borderRadius, fill: getComputedStyle(circle).backgroundColor },
+    line: line && { ...at(line), tail: line.hasAttribute("data-tail"), color: getComputedStyle(line).borderTopColor },
+    img: page.querySelector(".pv-img")?.getAttribute("src")?.slice(0, 14) });
+})()`)
+);
+check(
+  "pptx 有坐标的一页按画面位置摆字：不拼段落、不丢标题，底色随原件",
+  side.cls.includes("viewer-slide-canvas") &&
+    side.heads === 0 &&
+    side.texts.length === 2 &&
+    side.bg === "rgb(8, 13, 29)" &&
+    side.texts.map(t => t.text).join("/") === "版式标题/正文一行",
+  JSON.stringify(side)
+);
+check(
+  "pptx 画布：字落在原来的位置，字号照原件的比例（40 磅与 18 磅 vs 纸宽 960 磅）",
+  Math.abs(side.texts[0].l - 0.1) < 0.01 &&
+    Math.abs(side.texts[0].t - 0.1) < 0.01 &&
+    Math.abs(side.texts[0].w - 0.5) < 0.01 &&
+    Math.abs(side.texts[0].fs - 40 / 960) < 0.002 &&
+    Math.abs(side.texts[1].fs - 18 / 960) < 0.002,
+  JSON.stringify(side.texts)
+);
+check(
+  "pptx 画布：圆与连线照原坐标，填充、描边与箭头都在；图仍从原件取",
+  Math.abs(side.circle.l - 0.656) < 0.01 &&
+    Math.abs(side.circle.t - 0.4) < 0.01 &&
+    side.circle.radius === "50%" &&
+    side.circle.fill === "rgb(23, 38, 65)" &&
+    Math.abs(side.line.t - 0.729) < 0.01 &&
+    Math.abs(side.line.w - 0.328) < 0.01 &&
+    side.line.tail &&
+    side.img === "data:image/png",
+  JSON.stringify(side)
+);
+await open("母版.pptx");
+const inherited = JSON.parse(
+  await evalJs(`(() => {
+  const page = document.querySelector(".file-viewer-slides .viewer-slide"),
+    r = page.getBoundingClientRect(),
+    texts = [...page.querySelectorAll(".pv-text")],
+    box = e => { const b = e.getBoundingClientRect(); return { l: +((b.left - r.left) / r.width).toFixed(3), t: +((b.top - r.top) / r.height).toFixed(3), w: +(b.width / r.width).toFixed(3), h: +(b.height / r.height).toFixed(3) }; },
+    first = texts[0],
+    span = first && first.querySelector("span"),
+    bodySpan = texts[1] && texts[1].querySelector("span"),
+    para = texts[1] && texts[1].querySelector("p");
+  return JSON.stringify({
+    texts: texts.map(e => e.textContent),
+    titleFs: span ? +(parseFloat(getComputedStyle(span).fontSize) / r.width).toFixed(4) : 0,
+    titleColor: span ? getComputedStyle(span).color : "",
+    titleBox: first && box(first),
+    titleAnchor: first && getComputedStyle(first).justifyContent,
+    bodyFs: bodySpan ? +(parseFloat(getComputedStyle(bodySpan).fontSize) / r.width).toFixed(4) : 0,
+    lineRatio: para && bodySpan ? +(parseFloat(getComputedStyle(para).lineHeight) / parseFloat(getComputedStyle(bodySpan).fontSize)).toFixed(2) : 0,
+    nowrap: texts[2] ? getComputedStyle(texts[2]).whiteSpace : ""
+  });
+})()`)
+);
+check(
+  "pptx 画布：页上没写的位置与字号从版式、母版与 txStyles 继承（标题 32 磅、按母版底部对齐、颜色也照母版）",
+  Math.abs(inherited.titleFs - 32 / 720) < 0.002 &&
+    Math.abs(inherited.titleBox.l - 0.05) < 0.01 &&
+    Math.abs(inherited.titleBox.t - 0.04) < 0.01 &&
+    Math.abs(inherited.titleBox.h - 0.167) < 0.01 &&
+    (inherited.titleAnchor === "flex-end" || inherited.titleAnchor === "flow-end") &&
+    inherited.titleColor === "rgb(17, 34, 51)",
+  JSON.stringify(inherited)
+);
+check(
+  "pptx 画布：normAutofit 的缩字与压行距照原件（18 磅 × 92.5%，行距压两成）",
+  Math.abs(inherited.bodyFs - (18 * 0.925) / 720) < 0.002 && Math.abs(inherited.lineRatio - 0.96) < 0.03,
+  JSON.stringify(inherited)
+);
+check("pptx 画布：wrap=none 的框照一行排出去，不在框里折断", inherited.nowrap === "pre", JSON.stringify(inherited));
 await closeViewer();
 
 await open("说明.odt");
