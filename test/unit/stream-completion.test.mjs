@@ -147,14 +147,18 @@ test("上游事件转换：多行 JSON 可读，转换器内部异常不能静�
   const { translateSse } = createRequire(import.meta.url)("../../server/model/sse.js");
   const wire = 'event: sample\ndata: {"text":\ndata: "ok"}\n\n';
   const source = () => new Response(wire).body;
-  const translated = source().pipeThrough(translateSse("model", (out, data, name) => {
-    assert.equal(name, "sample");
-    out.chunk({ content: data.text });
-    out.done();
-  }));
+  const translated = source().pipeThrough(
+    translateSse("model", (out, data, name) => {
+      assert.equal(name, "sample");
+      out.chunk({ content: data.text });
+      out.done();
+    })
+  );
   assert.match(await new Response(translated).text(), /"content":"ok"/);
-  const failed = source().pipeThrough(translateSse("model", () => {
-    throw Error("converter failure");
-  }));
+  const failed = source().pipeThrough(
+    translateSse("model", () => {
+      throw Error("converter failure");
+    })
+  );
   await assert.rejects(new Response(failed).text(), /converter failure/);
 });
