@@ -246,8 +246,9 @@ async function bridgePrivate(path, payload, step, args, ctx) {
           display: "内网未连"
         }
       };
-    // 这一步已交审查准过（如网址里带一长串参数那一路）：不再问第二回
-    if (step.reviewed?.ok) return { data: await send(true) };
+    // 外发审查准的是外发，不等于准许访问内网：桥接直到此处才发现地址性质。
+    // 只复用明确审过内网的定夺；若此次审查失败，不可拿旧的外发定夺当通行证。
+    if (step.reviewed?.ok && step.reviewed.kind === "private-address") return { data: await send(true) };
     if (!reviewOn(ctx.conversation)) throw error;
     const denied = await reviewGate(step, args, ctx, {
       why: `要连本机或内网地址（${hostOfUrl(args.url)}）`,
@@ -256,7 +257,7 @@ async function bridgePrivate(path, payload, step, args, ctx) {
     });
     if (denied) return { denied };
     // 审查没成（连不上、没答准）：照没开审查的规矩，仍不连——审查只该让它更容易过，不该更容易（见 03-review.js 开头）
-    if (!step.reviewed?.ok)
+    if (!step.reviewed?.ok || step.reviewed.kind !== "private-address")
       return {
         denied: {
           ok: false,
