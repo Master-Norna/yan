@@ -60,7 +60,10 @@ test("审而后行：先不带；审准了带 allowPrivate 再发一次", async 
     globalThis.__calls.map(call => call.allowPrivate),
     [false, true]
   );
-  assert.deepEqual(globalThis.__calls.map(call => call.scoped), [false, true]);
+  assert.deepEqual(
+    globalThis.__calls.map(call => call.scoped),
+    [false, true]
+  );
 });
 
 test("审而后行：驳了不再发", async () => {
