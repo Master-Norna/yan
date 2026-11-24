@@ -1,7 +1,8 @@
-// 文档预览：docx / xlsx / pptx 按结构抽成 Markdown 再画——标题、加粗、列表、表格照原样，xlsx 一张表一页签，pptx 一页一张卡；
+// 文档预览：docx / xlsx / pptx 按结构抽成 Markdown 再画——标题、加粗、列表、表格照原样，xlsx 一张表一页签，pptx 按页翻看；
 // 认不得的格式给「以本机程序打开」。样本在这里现拼（只放解析要读的几份 XML，其中一份备注故意未压完）
 import { mkdirSync, writeFileSync } from "node:fs";
 import { crc32, deflateRawSync } from "node:zlib";
+import { pathToFileURL } from "node:url";
 import { connect, check, sleep, PAGE, ARCHIVE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 
@@ -108,19 +109,21 @@ writeFileSync(
     "xl/worksheets/sheet2.xml": `<worksheet ${S}><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>说明文字</t></is></c></row></sheetData></worksheet>`
   })
 );
-// pptx：两页，第一页有标题占位与两级要点
+// pptx：4:3，含自由排版文本框、显式标题和不同类型的列表
 const P = `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"`,
   shape = (ph, paragraphs) =>
     `<p:sp><p:nvSpPr><p:nvPr>${ph ? `<p:ph type="${ph}"/>` : ""}</p:nvPr></p:nvSpPr><p:txBody>${paragraphs.map(([text, lvl]) => `<a:p>${lvl ? `<a:pPr lvl="${lvl}"/>` : ""}<a:r><a:t>${text}</a:t></a:r></a:p>`).join("")}</p:txBody></p:sp>`;
+const floatBox = (x, y, size, text, bold = false) =>
+  `<p:sp><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:rPr sz="${size}" b="${Number(bold)}"/><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
 writeFileSync(
   `${ARCHIVE}/讲义.pptx`,
   zip(
     {
-      "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${[2, 1, 3, 4].map(i => `<p:sldId id="${255 + i}" rel:id="rId${i}"/>`).join("")}</p:sldIdLst></p:presentation>`,
+      "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${[2, 1, 3, 4].map(i => `<p:sldId id="${255 + i}" rel:id="rId${i}"/>`).join("")}</p:sldIdLst><p:sldSz cx="9600000" cy="7200000"/></p:presentation>`,
       "ppt/_rels/presentation.xml.rels": rels(Object.fromEntries([1, 2, 3, 4].map(i => [`rId${i}`, ["slide", `slides/slide${i}.xml`]]))),
       "ppt/slides/slide5.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["不在清单里的页"]])}</p:spTree></p:cSld></p:sld>`,
-      "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
-      "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${shape("title", [["小结"]])}${shape("", [["推导闭式解"]])}<p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
+      "ppt/slides/slide1.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["线性回归"]])}${shape("body", [["从最小二乘说起"], ["几何直观", 1]])}</p:spTree></p:cSld></p:sld>`,
+      "ppt/slides/slide2.xml": `<p:sld ${P} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>${floatBox(4700000, 2400000, 1600, "右栏说明")}${floatBox(0, 6800000, 1100, "页脚")}${floatBox(0, 300000, 900, "页眉")}${floatBox(500000, 900000, 3200, "小结")}${floatBox(500000, 2440000, 1700, "推导闭式解", true)}<p:grpSp><p:grpSpPr><a:xfrm><a:off x="500000" y="3200000"/><a:chExt cx="2000000" cy="2000000"/></a:xfrm></p:grpSpPr>${floatBox(0, 600000, 1600, "组内说明")}${floatBox(0, 30000, 1600, "组内题")}</p:grpSp><p:pic><p:nvPicPr><p:cNvPr id="3" name="图" descr="拟合直线"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`,
       // 第三页是有序的步骤：第一条从第 5 步起（接着上一页数），第二条降一层
       "ppt/slides/slide3.xml": `<p:sld ${P}><p:cSld><p:spTree>${shape("title", [["步骤"]])}<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:pPr><a:buAutoNum type="arabicPeriod" startAt="5"/></a:pPr><a:r><a:t>先归一化</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>补充</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>再拟合</a:t></a:r></a:p><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>## 这是正文</a:t></a:r><a:br/><a:r><a:t>不是新的一页</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
       // 字母和罗马数字：不是十进制列表，Markdown 原生不能表达其 marker，渲染时改用 ol[type]。
@@ -286,6 +289,32 @@ await closeViewer();
 
 await open("讲义.pptx");
 await shot("doc-preview-pptx.png");
+const slideState = () =>
+  evalJs(`(() => {
+  const deck = document.querySelector(".file-viewer-slides");
+  const visible = [...deck.querySelectorAll(".viewer-slide")].filter(s => s.getClientRects().length);
+  const page = visible[0].getBoundingClientRect(), nav = deck.querySelector(".viewer-slide-nav").getBoundingClientRect();
+  return { current: visible.map(s => s.querySelector("h2")?.textContent), ratio: page.width / page.height,
+    below: nav.top >= page.bottom, count: deck.querySelector("[data-viewer-slide-count]").textContent,
+    end: deck.querySelector('[data-viewer-slide-step="1"]').getAttribute("aria-disabled") };
+})()`);
+const first = await slideState();
+check(
+  "pptx shows only one centered slide at its 4:3 ratio, with navigation below",
+  first.current.join() === "第 1 页 · 小结" && Math.abs(first.ratio - 4 / 3) < 0.02 && first.below && first.count === "1 / 4",
+  JSON.stringify(first)
+);
+await evalJs(`document.querySelector('[data-viewer-slide="2"]').click(); true`);
+check("pptx page numbers jump directly to a slide", (await slideState()).count === "3 / 4");
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight" });
+await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight" });
+check("pptx keyboard navigation reaches the last slide and doesn't wrap", (await slideState()).end === "true");
+await evalJs(`document.querySelector('[data-viewer-slide-step="1"]').click(); true`);
+check("pptx next button at the end does not wrap", (await slideState()).count === "4 / 4");
+await evalJs(`document.querySelector('[data-viewer-slide-step="-1"]').click(); true`);
+check("pptx previous button changes the page", (await slideState()).count === "3 / 4");
+await evalJs(`document.querySelector('[data-viewer-slide="0"]').click(); true`);
+const deckHtml = await evalJs(`document.querySelector(".file-viewer-slides").outerHTML`);
 const slides = JSON.parse(
   await evalJs(
     `JSON.stringify([...document.querySelectorAll("#fileViewerStage .viewer-slide")].map(s => s.querySelector("h2")?.textContent + "|" + [...s.querySelectorAll("li")].map(li => li.firstChild.textContent.trim()).join("/") + [...s.querySelectorAll("img")].map(i => "|" + i.alt + ":" + i.src.slice(0, 14)).join("")))`
@@ -294,8 +323,14 @@ const slides = JSON.parse(
 check(
   "pptx follows presentation order, skips unused slides, keeps headings, levels and pictures",
   slides.join("#") ===
-    "第 1 页 · 小结|推导闭式解|拟合直线:data:image/png#第 2 页 · 线性回归|从最小二乘说起/几何直观#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲/说明下的子项/另一个文字框",
+    "第 1 页 · 小结||拟合直线:data:image/png#第 2 页 · 线性回归|从最小二乘说起/几何直观#第 3 页 · 步骤|先归一化/补充/再拟合#第 4 页 · 编号类型|第三项/第四项/子步骤四/罗马二/大写甲/说明下的子项",
   JSON.stringify(slides)
+);
+check(
+  "pptx: freeform title, reading order and grouped text; ordinary text boxes are not bullets",
+  await evalJs(
+    `(s => [...s.querySelectorAll(':scope > p')].map(p => p.textContent).slice(0, 6).join("|") === "页眉|推导闭式解|右栏说明|组内题|组内说明|页脚" && s.querySelector("p strong")?.textContent === "推导闭式解")(document.querySelector("#fileViewerStage .viewer-slide"))`
+  )
 );
 check(
   "pptx 里 PowerPoint 自动编号的那些要点也认得出是有序的（buAutoNum）",
@@ -399,4 +434,21 @@ check(
   JSON.stringify(plain)
 );
 await closeViewer();
+// 游目将同一份预览正文包进带 CSP 的 file: 页面；实际导航后再点页条，防止只验了 markup。
+const docPage = await evalJs(
+  `fetch('/api/stage/docpage', { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ name:"讲义.pptx", url:${JSON.stringify(pathToFileURL(`${ARCHIVE}/讲义.pptx`).href)}, body:${JSON.stringify(deckHtml)} }) }).then(r => r.json())`
+);
+if (docPage.url) {
+  await send("Page.navigate", { url: docPage.url });
+  await waitFor(`location.protocol === 'file:' && document.readyState === 'complete' && !!document.querySelector('.viewer-slide')`);
+  await evalJs(`document.querySelector('[data-viewer-slide-step="1"]').click(); true`);
+  const standAlone = await slideState();
+  check(
+    "pptx standalone docpage uses the same pager under its local-file CSP",
+    standAlone.current.join() === "第 2 页 · 线性回归" &&
+      standAlone.below &&
+      !!(await evalJs(`document.querySelector(".file-viewer-note a")?.href`)),
+    JSON.stringify(standAlone)
+  );
+} else check("pptx standalone docpage is generated", false, JSON.stringify(docPage));
 close();

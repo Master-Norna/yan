@@ -543,6 +543,10 @@ var YAN_EN = {
   "本机按结构抽出，不含原排版 ·": "Extracted locally by structure, original layout not kept ·",
   "[图片 {0} 预览不了]": "[Image {0} can't be previewed]",
   "工作表 {0}": "Sheet {0}",
+  "## 第 {0} 页{1}": "## Page {0}{1}",
+  演示页导航: "Slide navigation",
+  上一页: "Previous slide",
+  下一页: "Next slide",
   "仅显示前 20 万字": "Showing the first 200,000 characters",
   // 抽取失败时的那几句：进了附件的说明、预览的空态，英文界面也该看得懂（这几句出自 13-files/30-extract.js）
   "PDF 抽取库未能载入，原件照发": "The PDF library couldn't load; the original file is sent as is",
