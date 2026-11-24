@@ -202,9 +202,8 @@ function pptxShapeChildren(root) {
     return selected ? pptxShapeChildren(selected) : [];
   });
 }
-function pptxPage(xml, rels, notes, index, height) {
-  const tree = xmlDeep(parseXml(xml), "spTree")[0],
-    images = zipRels(rels, "ppt/slides");
+function pptxPage(tree, rels, notes, index, height) {
+  const images = zipRels(rels, "ppt/slides");
   const collect = (root, frameHeight) => {
     const items = [];
     for (const shape of pptxShapeChildren(root)) {
@@ -248,17 +247,22 @@ function pptxPage(xml, rels, notes, index, height) {
         .sort((a, b) => b.box.size - a.box.size)[0],
     title = heading ? titleOf(heading.box) : "",
     said = pptxNotes(notes);
-  return [
-    t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`,
-    ...items.filter(item => item !== heading).flatMap(readBlocks),
-    said === null
-      ? t("（这一页的备注未能读出）")
-      : said.length
-        ? `**${t("备注")}**\n\n${said.map(line => `> ${line.split("\n").map(mdLine).join("\\\n> ")}`).join("\n>\n")}`
-        : ""
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  return {
+    title,
+    // 讲者备注另带一份：画布页不复述 Markdown，但备注要能看
+    notes: Array.isArray(said) ? said : [],
+    text: [
+      t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`,
+      ...items.filter(item => item !== heading).flatMap(readBlocks),
+      said === null
+        ? t("（这一页的备注未能读出）")
+        : said.length
+          ? `**${t("备注")}**\n\n${said.map(line => `> ${line.split("\n").map(mdLine).join("\\\n> ")}`).join("\n>\n")}`
+          : ""
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+  };
 }
 /** @param {Uint8Array} bytes */
 async function extractPptxSlides(bytes) {
@@ -300,9 +304,76 @@ async function extractPptxSlides(bytes) {
         return { xml: entries.get(name), rels, note };
       }),
     notes = new Set(parts.map(part => part.note).filter(Boolean)),
-    noteEntries = notes.size ? await unzipSelected(bytes, name => notes.has(name), { optional: true }) : new Map();
-  const pages = parts.map(({ xml, rels, note }, index) =>
-    pptxPage(xml, rels, note ? (noteEntries.get(note) ?? "") : undefined, index, height)
-  );
-  return { pages, ratio: width > 0 && height > 0 && Number.isFinite(ratio) ? ratio : 16 / 9 };
+    noteEntries = notes.size ? await unzipSelected(bytes, name => notes.has(name), { optional: true }) : new Map(),
+    // 画布另要版式、母版与主题：只有占位符的字号、颜色、位置从那里来。没有也能排字，只是继承的取不到
+    support = await unzipSelected(
+      bytes,
+      name => /^ppt\/(?:slideLayouts|slideMasters|theme)\/(?:_rels\/)?[^/]+\.xml(?:\.rels)?$/.test(name),
+      { optional: true }
+    ).catch(() => new Map()),
+    frames = new Map(),
+    // 一页的版式 → {theme, ph}。同版式的页共用一份，几十页也只解析几回
+    frameOf = rels => {
+      const layout = zipRels(rels, "ppt/slides", "slideLayout").values().next().value || "";
+      if (frames.has(layout)) return frames.get(layout);
+      /** @type {{theme: Map<string,string>, ph: Map<string, any>, styles: Map<string, any>, bg: string}} */
+      let ctx = { theme: new Map(), ph: new Map(), styles: new Map(), bg: "" };
+      try {
+        const master = layout
+            ? zipRels(support.get(relsOf(layout)), layout.replace(/[^/]+$/, "").replace(/\/$/, ""), "slideMaster")
+                .values()
+                .next().value || ""
+            : "",
+          themePath = master
+            ? zipRels(support.get(relsOf(master)), master.replace(/[^/]+$/, "").replace(/\/$/, ""), "theme")
+                .values()
+                .next().value || ""
+            : "",
+          theme = pptxTheme(themePath ? support.get(themePath) : undefined),
+          masterPh = pptxPlaceholders(support.get(master), theme),
+          // 母版那套「标题 32 磅、正文 18 磅」的缺省，版式与页上都不写时才有用
+          styles = pptxTextStyles(support.get(master), theme),
+          // 底色多半写在版式或母版上：版式有就用版式的，否则用母版的
+          bg = pptxBackground(support.get(layout), theme) || pptxBackground(support.get(master), theme),
+          ph = new Map(masterPh);
+        // 版式优先、母版补缺：同一处字段按「有就用」合，别让空值盖掉继承来的
+        for (const [key, entry] of pptxPlaceholders(support.get(layout), theme)) {
+          const base = masterPh.get(key) || {};
+          ph.set(key, {
+            rect: entry.rect || base.rect || null,
+            s: entry.s || base.s || 0,
+            b: entry.b || base.b,
+            c: entry.c || base.c || "",
+            a: entry.a || base.a || "",
+            va: entry.va || base.va || ""
+          });
+        }
+        ctx = { theme, ph, styles, bg };
+      } catch {}
+      frames.set(layout, ctx);
+      return ctx;
+    };
+  const pages = [],
+    canvases = [];
+  parts.forEach(({ xml, rels, note }, index) => {
+    let doc = null;
+    try {
+      doc = parseXml(xml);
+    } catch {}
+    const tree = doc ? xmlDeep(doc, "spTree")[0] || null : null;
+    pages.push(pptxPage(tree, rels, note ? (noteEntries.get(note) ?? "") : undefined, index, height));
+    let canvas = null;
+    try {
+      canvas = tree ? pptxCanvas(doc, { W: width, H: height, images: zipRels(rels, "ppt/slides"), ...frameOf(rels) }) : null;
+    } catch {}
+    canvases.push(canvas);
+  });
+  return {
+    // 模型读的还是这份逐页的 Markdown；画布另一路，只给眼前看
+    pages: pages.map(page => page.text),
+    titles: pages.map(page => page.title),
+    notes: pages.map(page => page.notes),
+    canvases,
+    ratio: width > 0 && height > 0 && Number.isFinite(ratio) ? ratio : 16 / 9
+  };
 }
