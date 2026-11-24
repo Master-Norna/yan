@@ -173,12 +173,12 @@ writeFileSync(
   zip({
     "ppt/presentation.xml": `<p:presentation ${P} xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" rel:id="rId1"/></p:sldIdLst><p:sldSz cx="9144000" cy="6858000"/></p:presentation>`,
     "ppt/_rels/presentation.xml.rels": rels({ rId1: ["slide", "slides/slide1.xml"] }),
-    "ppt/slides/slide1.xml": `<p:sld ${r32}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>母版里定的标题</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr><a:normAutofit fontScale="92500" lnSpcReduction="20000"/></a:bodyPr><a:p><a:r><a:t>正文照母版 18 磅</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="4" name="不折行"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="3657600"/><a:ext cx="914400" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr wrap="none"><a:spAutoFit/></a:bodyPr><a:p><a:r><a:rPr sz="1800"/><a:t>这一行比框长也不折</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="图"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="5486400" y="4572000"/><a:ext cx="2286000" cy="1143000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId2"/></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
+    "ppt/slides/slide1.xml": `<p:sld ${r32}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>母版里定的标题</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr><a:normAutofit fontScale="92500" lnSpcReduction="20000"/></a:bodyPr><a:p><a:r><a:t>正文照母版 18 磅</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="4" name="不折行"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="3657600"/><a:ext cx="914400" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr wrap="none"><a:spAutoFit/></a:bodyPr><a:p><a:r><a:rPr sz="1800"/><a:t>这一行比框长也不折</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="图"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="5486400" y="4572000"/><a:ext cx="2286000" cy="1143000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId2"/></a:graphicData></a:graphic></p:graphicFrame><p:sp><p:nvSpPr><p:cNvPr id="7" name="编号"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="5943600"/><a:ext cx="3657600" cy="457200"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:p><a:pPr marL="457200"><a:buAutoNum type="alphaLcPeriod" startAt="3"/></a:pPr><a:r><a:rPr sz="1600"/><a:t>字母第三项</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="8" name="表"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="5029200" y="5486400"/><a:ext cx="3657600" cy="914400"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblGrid><a:gridCol w="1828800"/><a:gridCol w="1828800"/></a:tblGrid><a:tr h="457200"><a:tc><a:txBody><a:p><a:r><a:rPr sz="1200"/><a:t>格一</a:t></a:r></a:p><a:p><a:r><a:rPr sz="1200"/><a:t>续行</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:p><a:r><a:rPr sz="1200"/><a:t>格二</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
     "ppt/slides/_rels/slide1.xml.rels": rels({ rId1: ["slideLayout", "../slideLayouts/slideLayout1.xml"] }),
     // 版式只给正文的位置；标题的框与字号都在母版里
     "ppt/slideLayouts/slideLayout1.xml": `<p:sldLayout ${MASTER}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="1828800"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/></p:txBody></p:sp></p:spTree></p:cSld></p:sldLayout>`,
     "ppt/slideLayouts/_rels/slideLayout1.xml.rels": rels({ rId1: ["slideMaster", "../slideMasters/slideMaster1.xml"] }),
-    "ppt/slideMasters/slideMaster1.xml": `<p:sldMaster ${MASTER}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="274638"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr anchor="b"/></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="4525963"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/></p:txBody></p:sp></p:spTree></p:cSld><p:txStyles><p:titleStyle><a:lvl1pPr algn="l"><a:defRPr sz="3200"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle><a:lvl1pPr><a:defRPr sz="1800"/></a:lvl1pPr></p:bodyStyle><p:otherStyle><a:lvl1pPr><a:defRPr sz="1600"/></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>`,
+    "ppt/slideMasters/slideMaster1.xml": `<p:sldMaster ${MASTER}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"0A0B0C\"/></a:solidFill></p:bgPr></p:bg><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="标题"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="274638"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr anchor="b"/></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="正文"/><p:cNvSpPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="4525963"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/></p:txBody></p:sp></p:spTree></p:cSld><p:txStyles><p:titleStyle><a:lvl1pPr algn="l"><a:defRPr sz="3200"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle><a:lvl1pPr><a:defRPr sz="1800"/></a:lvl1pPr></p:bodyStyle><p:otherStyle><a:lvl1pPr><a:defRPr sz="1600"/></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>`,
     "ppt/slideMasters/_rels/slideMaster1.xml.rels": rels({ rId1: ["theme", "../theme/theme1.xml"] })
   })
 );
@@ -455,9 +455,10 @@ const side = JSON.parse(
     r = page.getBoundingClientRect(),
     at = e => { const b = e.getBoundingClientRect(); return { l: +((b.left - r.left) / r.width).toFixed(3), t: +((b.top - r.top) / r.height).toFixed(3), w: +(b.width / r.width).toFixed(3), h: +(b.height / r.height).toFixed(3) }; },
     texts = [...page.querySelectorAll(".pv-text")],
+    paper = page.querySelector(".pv-page"),
     circle = page.querySelector(".pv-shape"),
     line = page.querySelector(".pv-line");
-  return JSON.stringify({ cls: page.className, bg: getComputedStyle(page).backgroundColor, heads: page.querySelectorAll("h1,h2,h3").length,
+  return JSON.stringify({ cls: page.className, bg: getComputedStyle(paper).backgroundColor, heads: page.querySelectorAll("h1,h2,h3").length,
     texts: texts.map(e => ({ text: e.textContent, fs: +(parseFloat(getComputedStyle(e.querySelector("span")).fontSize) / r.width).toFixed(4), ...at(e) })),
     circle: circle && { ...at(circle), radius: getComputedStyle(circle).borderRadius, fill: getComputedStyle(circle).backgroundColor },
     line: line && { ...at(line), tail: line.hasAttribute("data-tail"), color: getComputedStyle(line).borderTopColor },
@@ -499,6 +500,7 @@ const inherited = JSON.parse(
   await evalJs(`(() => {
   const page = document.querySelector(".file-viewer-slides .viewer-slide"),
     r = page.getBoundingClientRect(),
+    paper = page.querySelector(".pv-page"),
     texts = [...page.querySelectorAll(".pv-text")],
     box = e => { const b = e.getBoundingClientRect(); return { l: +((b.left - r.left) / r.width).toFixed(3), t: +((b.top - r.top) / r.height).toFixed(3), w: +(b.width / r.width).toFixed(3), h: +(b.height / r.height).toFixed(3) }; },
     first = texts[0],
@@ -514,7 +516,13 @@ const inherited = JSON.parse(
     bodyFs: bodySpan ? +(parseFloat(getComputedStyle(bodySpan).fontSize) / r.width).toFixed(4) : 0,
     lineRatio: para && bodySpan ? +(parseFloat(getComputedStyle(para).lineHeight) / parseFloat(getComputedStyle(bodySpan).fontSize)).toFixed(2) : 0,
     nowrap: texts[2] ? getComputedStyle(texts[2]).whiteSpace : "",
-    blank: page.querySelector(".pv-blank") && { text: page.querySelector(".pv-blank").textContent, ...box(page.querySelector(".pv-blank")) }
+    blank: page.querySelector(".pv-blank") && { text: page.querySelector(".pv-blank").textContent, ...box(page.querySelector(".pv-blank")) },
+    bg: paper ? getComputedStyle(paper).backgroundColor : "",
+    paperStyle: paper ? paper.getAttribute("style") : "",
+    pad: first ? [getComputedStyle(first).paddingTop, getComputedStyle(first).paddingLeft].map(v => parseFloat(v)) : [],
+    numbered: texts.map(e => e.textContent).find(t => t.includes("字母第三项")) || "",
+    numberedLeft: (() => { const e = texts.find(t => t.textContent.includes("字母第三项")); return e ? +((e.getBoundingClientRect().left - r.left) / r.width).toFixed(3) : -1; })(),
+    cells: [...page.querySelectorAll(".pv-table td")].map(td => td.textContent)
   });
 })()`)
 );
@@ -530,10 +538,30 @@ check(
 );
 check(
   "pptx 画布：normAutofit 的缩字与压行距照原件（18 磅 × 92.5%，行距压两成）",
-  Math.abs(inherited.bodyFs - (18 * 0.925) / 720) < 0.002 && Math.abs(inherited.lineRatio - 0.96) < 0.03,
+  Math.abs(inherited.bodyFs - (18 * 0.925) / 720) < 0.002 && Math.abs(inherited.lineRatio - 1.04) < 0.03,
   JSON.stringify(inherited)
 );
 check("pptx 画布：wrap=none 的框照一行排出去，不在框里折断", inherited.nowrap === "pre", JSON.stringify(inherited));
+check(
+  "pptx 画布：页上没写底色时从版式、母版继承",
+  inherited.bg === "rgb(10, 11, 12)",
+  JSON.stringify({ bg: inherited.bg, dbg: inherited.dbg })
+);
+check(
+  "pptx 画布：内边距按上右下左（左右比上下宽，别把次序弄反）",
+  inherited.pad[1] > inherited.pad[0] * 1.5,
+  JSON.stringify(inherited.pad)
+);
+check(
+  "pptx 画布：自动编号照 startAt 与类型（字母第三项写作 c.），段左缩进按原件折算",
+  /^c\s*字母第三项/.test(inherited.numbered) && Math.abs(inherited.numberedLeft - 0.05) < 0.02,
+  JSON.stringify({ numbered: inherited.numbered, left: inherited.numberedLeft })
+);
+check(
+  "pptx 画布：一格里的两段拼成一行，不落成逗号",
+  inherited.cells[0] === "格一续行" && inherited.cells[1] === "格二",
+  JSON.stringify(inherited.cells)
+);
 check(
   "pptx 画布：画不出的图表留一块虚线框，位置照原框，不当作没这一块",
   !!inherited.blank &&

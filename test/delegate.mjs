@@ -51,13 +51,15 @@ for (let i = 0; i < 200; i++) {
       await evalJs(`[...document.querySelectorAll(".message.assistant .tool-step-delegate > .tool-step-head")].at(-1).click(); true`);
       panelOpened = true;
       if (cards >= 2) {
+        // 面板是点开差遣签之后才画的，等计数那颗按钮落定再点，别抢在中间
+        await waitFor(`!!document.querySelector('#helperNav [data-helper-list]')`, 8000);
         await evalJs(
           `document.querySelector('#helperNav [data-helper-list]').click(); window.__helperListRows = [...document.querySelectorAll('#helperList .helper-list-item')]; window.__helperListMeta = window.__helperListRows.map(row => row.textContent); true`
         );
         const at = await evalJs(
-          `(r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))(window.__helperListRows[0].getBoundingClientRect())`
+          `(r => (r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null))(window.__helperListRows?.[0]?.getBoundingClientRect())`
         );
-        await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at });
+        if (at) await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at });
       }
     }
   }

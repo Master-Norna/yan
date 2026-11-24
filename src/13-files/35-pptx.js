@@ -249,6 +249,8 @@ function pptxPage(tree, rels, notes, index, height) {
     said = pptxNotes(notes);
   return {
     title,
+    // 讲者备注另带一份：画布页不复述 Markdown，但备注要能看
+    notes: Array.isArray(said) ? said : [],
     text: [
       t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`,
       ...items.filter(item => item !== heading).flatMap(readBlocks),
@@ -314,8 +316,8 @@ async function extractPptxSlides(bytes) {
     frameOf = rels => {
       const layout = zipRels(rels, "ppt/slides", "slideLayout").values().next().value || "";
       if (frames.has(layout)) return frames.get(layout);
-      /** @type {{theme: Map<string,string>, ph: Map<string, any>, styles: Map<string, any>}} */
-      let ctx = { theme: new Map(), ph: new Map(), styles: new Map() };
+      /** @type {{theme: Map<string,string>, ph: Map<string, any>, styles: Map<string, any>, bg: string}} */
+      let ctx = { theme: new Map(), ph: new Map(), styles: new Map(), bg: "" };
       try {
         const master = layout
             ? zipRels(support.get(relsOf(layout)), layout.replace(/[^/]+$/, "").replace(/\/$/, ""), "slideMaster")
@@ -331,6 +333,8 @@ async function extractPptxSlides(bytes) {
           masterPh = pptxPlaceholders(support.get(master), theme),
           // 母版那套「标题 32 磅、正文 18 磅」的缺省，版式与页上都不写时才有用
           styles = pptxTextStyles(support.get(master), theme),
+          // 底色多半写在版式或母版上：版式有就用版式的，否则用母版的
+          bg = pptxBackground(support.get(layout), theme) || pptxBackground(support.get(master), theme),
           ph = new Map(masterPh);
         // 版式优先、母版补缺：同一处字段按「有就用」合，别让空值盖掉继承来的
         for (const [key, entry] of pptxPlaceholders(support.get(layout), theme)) {
@@ -344,7 +348,7 @@ async function extractPptxSlides(bytes) {
             va: entry.va || base.va || ""
           });
         }
-        ctx = { theme, ph, styles };
+        ctx = { theme, ph, styles, bg };
       } catch {}
       frames.set(layout, ctx);
       return ctx;
@@ -368,6 +372,7 @@ async function extractPptxSlides(bytes) {
     // 模型读的还是这份逐页的 Markdown；画布另一路，只给眼前看
     pages: pages.map(page => page.text),
     titles: pages.map(page => page.title),
+    notes: pages.map(page => page.notes),
     canvases,
     ratio: width > 0 && height > 0 && Number.isFinite(ratio) ? ratio : 16 / 9
   };

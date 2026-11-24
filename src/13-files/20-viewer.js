@@ -231,7 +231,8 @@ function pptxCanvasHtml(layout, ratio) {
         size = Math.max(0, ...para.r.map(run => run.s || 0));
       if (size) style.push(`font-size:${cqw(size)}`);
       if (alignOf[para.a]) style.push(`text-align:${alignOf[para.a]}`);
-      style.push(`line-height:${Math.round((para.ls || 1) * (shape?.lh || 1.2) * 100) / 100}`);
+      // 固定磅数的行距是长度，倍数行距才随字号走
+      style.push(`line-height:${para.lp ? cqw(para.lp) : Math.round((para.ls || 1) * (shape?.lh || 1.3) * 100) / 100}`);
       if (para.m) style.push(`margin-left:${cqw(para.m)}`);
       // 段前段后：原件里写的是「几磅」或「行高的百分之几」，到这里都已折成纸宽的比例
       if (para.mt) style.push(`margin-top:${cqw(para.mt)}`);
@@ -258,7 +259,15 @@ function pptxCanvasHtml(layout, ratio) {
             ? `<colgroup>${shape.cols.map(width => `<col style="width:${size(width)}%">`).join("")}</colgroup>`
             : "",
           rows = shape.rows
-            .map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell || "").replace(/\n/g, "<br>")}</td>`).join("")}</tr>`)
+            .map(
+              row =>
+                `<tr>${row
+                  .map(
+                    cell =>
+                      `<td>${escapeHtml((Array.isArray(cell) ? cell.filter(Boolean).join("\n") : String(cell || "")).trim()).replace(/\n/g, "<br>")}</td>`
+                  )
+                  .join("")}</tr>`
+            )
             .join("");
         return `<table class="pv-table" style="left:${pct(shape.x)};top:${vpct(shape.y)};width:${pct(shape.w)};height:${vpct(shape.h)};font-size:${cqw(shape.s || 140)}">${cols}<tbody>${rows}</tbody></table>`;
       }
@@ -291,7 +300,7 @@ function pptxCanvasHtml(layout, ratio) {
   return layout.shapes.map(shapeHtml).join("");
 }
 /** @param {string[]} pages @param {number} ratio @param {string} note @param {"pptx"|"odp"} format */
-function slideViewerHtml(pages, ratio, note, format, canvases = [], titles = []) {
+function slideViewerHtml(pages, ratio, note, format, canvases = [], titles = [], notes = []) {
   const last = pages.length - 1,
     step = (name, direction, glyph) =>
       `<button type="button" data-viewer-slide-step="${direction}" aria-disabled="${direction === -1 || !last}" title="${name}" aria-label="${name}">${glyph}</button>`,
@@ -305,7 +314,12 @@ function slideViewerHtml(pages, ratio, note, format, canvases = [], titles = [])
         // 没写颜色的字（表格、缺字色的框）随底色的明暗取墨或取白
         level = parseInt(bg, 16) || 0,
         ink = ((level >> 16) & 255) * 0.299 + ((level >> 8) & 255) * 0.587 + (level & 255) * 0.114 > 140 ? "#1a1a1a" : "#f5f5f5";
-      return `<div class="viewer-slide viewer-slide-canvas" data-viewer-slide-panel="${i}" tabindex="0" aria-label="${escapeHtml(label)}"${i ? " hidden" : ""} style="background:#${bg};color:${ink}">${pptxCanvasHtml(layout, ratio)}</div>`;
+      const said = (notes[i] || []).filter(Boolean);
+      return `<div class="viewer-slide viewer-slide-canvas" data-viewer-slide-panel="${i}" tabindex="0" aria-label="${escapeHtml(label)}"${i ? " hidden" : ""}><div class="pv-page" style="background:#${bg};color:${ink}">${pptxCanvasHtml(layout, ratio)}</div>${
+        said.length
+          ? `<details class="pv-notes"><summary>${t`备注`}</summary><div class="markdown">${renderMarkdown(said.join("\n\n"))}</div></details>`
+          : ""
+      }</div>`;
     };
   return `<div class="file-viewer-slides" data-slide-format="${format}" style="--slide-ratio:${Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9}">${note}<div class="viewer-slide-well"><div class="viewer-slide-stage">${pages
     .map(panel)
@@ -403,11 +417,12 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
         bytes = await readBytes();
         if (sort === "slides") {
           if (fileExtension(name) === "pptx") {
-            const { pages, ratio, canvases, titles } = await extractPptxSlides(bytes);
+            const { pages, ratio, canvases, titles, notes } = await extractPptxSlides(bytes);
             doc = boundSlidePages(pages, ratio);
             // 画布与页一一对：截了字就只留截得住的那几页
             doc.canvases = canvases.slice(0, doc.pages.length);
             doc.titles = titles.slice(0, doc.pages.length);
+            doc.notes = notes.slice(0, doc.pages.length);
           } else doc = boundSlidePages(slidePagesFromText(await extractZipDocumentText("odp", bytes)));
         } else doc = { text: trimExtractedText(await extractDocumentText(name, bytes)) };
         if ((doc.text || doc.pages?.length) && cacheKey) {
@@ -426,7 +441,15 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
     const note = `<p class="file-viewer-note">${doc.canvases?.some(Boolean) ? t(`本机按文字位置排出，图形从简 ·`) : t(`本机按结构抽出，不含原排版 ·`)} <button type="button" class="viewer-open-link" data-viewer-open>${t(`以本机程序打开`)}</button>${doc.cut ? ` · ${t`内容过长，只解析了开头一段`}` : ""}</p>`;
     let html;
     if (doc.pages?.length)
-      html = slideViewerHtml(doc.pages, doc.ratio, note, fileExtension(name) === "pptx" ? "pptx" : "odp", doc.canvases, doc.titles);
+      html = slideViewerHtml(
+        doc.pages,
+        doc.ratio,
+        note,
+        fileExtension(name) === "pptx" ? "pptx" : "odp",
+        doc.canvases,
+        doc.titles,
+        doc.notes
+      );
     else {
       // 工作簿抽取器按「## 」一张表一节，其余文档不分页。
       const sections = sort === "sheet" ? doc.text.split(/^(?=## )/m).filter(part => part.trim()) : [];

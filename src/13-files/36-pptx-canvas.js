@@ -4,6 +4,8 @@
 
 // 画面里的长度一律折成千分比（纸宽的千分之一）×10 交给 CSS，随纸缩放；EMU 只在这一层用。
 const PPTX_PERMILLE = 1000;
+// PowerPoint 的「单倍行距」取字体自己的行高：中日文字体约 1.3，按 1.2 排会一路往上漂
+const PPTX_LINE_HEIGHT = 1.3;
 const pptxKids = (node, name) => (node && node.children ? [...node.children].filter(child => child.localName === name) : []);
 const pptxDeep = (node, name) => (node && node.getElementsByTagNameNS ? [...node.getElementsByTagNameNS("*", name)] : []);
 // 取不到这个属性时要退回缺省：getAttribute 给的是 null，Number(null) 是 0，不能拿它当「写的就是 0」
@@ -128,9 +130,11 @@ function pptxCanvasText(shape, inherit, theme, styles) {
     let prefix = "";
     if (bullet?.localName === "buChar") prefix = `${bullet.getAttribute("char") || "•"} `;
     else if (bullet?.localName === "buAutoNum") {
-      const n = (counters.get(lvl) || 0) + 1;
+      // 编号从 startAt 起、样式照 type（1. / a. / IV. / 一、…）；不写就是 1
+      const start = pptxAttr(bullet, "startAt", 1) || 1,
+        n = (counters.get(lvl) ?? start - 1) + 1;
       counters.set(lvl, n);
-      prefix = `${n} `;
+      prefix = `${pptxNumberText(n, bullet.getAttribute("type") || "arabicPeriod")} `;
     }
     const runs = [];
     for (const part of p.children) {
@@ -169,9 +173,11 @@ function pptxCanvasText(shape, inherit, theme, styles) {
       return 0;
     };
     paragraphs.push({
-      a: pPr?.getAttribute("algn") || level?.getAttribute("algn") || placeholder.a || "",
+      a: pPr?.getAttribute("algn") || level?.getAttribute("algn") || placeholder.a || style?.a || "",
       m: pptxAttr(pPr, "marL"),
+      // 行距两种写法：spcPct 是倍数的百分之几，spcPts 是「固定多少磅」（百分之一磅）
       ls: pptxKids(pPr || {}, "lnSpc")[0] ? pptxAttr(pptxKids(pptxKids(pPr, "lnSpc")[0], "spcPct")[0], "val", 100000) / 100000 : 0,
+      lp: pptxAttr(pptxKids(pptxKids(pPr || {}, "lnSpc")[0] || {}, "spcPts")[0], "val"),
       bef: gapOf("spcBef"),
       aft: gapOf("spcAft"),
       r: runs
@@ -221,6 +227,8 @@ function pptxPlaceholders(xml, theme) {
       };
     map.set(`${type}|${idx}`, entry);
     if (!map.has(`${type}|*`)) map.set(`${type}|*`, entry);
+    // 页与版式是按 idx 配的（ECMA-376）：页上写 obj、版式写 body 也是同一处
+    if (idx && !map.has(`#${idx}`)) map.set(`#${idx}`, entry);
   }
   return map;
 }
@@ -262,7 +270,7 @@ function pptxPlaceholderOf(ph, map) {
   if (!ph || !map) return null;
   const idx = pptxAttr(ph, "idx"),
     type = ph.getAttribute("type") || (idx ? "body" : "obj"),
-    entry = map.get(`${type}|${idx}`) || map.get(`${type}|*`) || map.get(`*|${idx}`) || null;
+    entry = map.get(`${type}|${idx}`) || map.get(`${type}|*`) || (idx ? map.get(`#${idx}`) : null) || null;
   // 版式里查不到也把种类带上：母版 txStyles 还要按它取字号
   return entry ? { ...entry, kind: type } : { rect: null, s: 0, b: false, c: "", a: "", va: "", kind: type };
 }
@@ -285,7 +293,51 @@ const pptxCompose = (map, xfrm) => {
     sy = ch ? h / ch : 1;
   return (x, y, ww, hh) => map(x0 + (x - cx0) * sx, y0 + (y - cy0) * sy, ww * sx, hh * sy);
 };
+// 一页的底色：<p:bg><p:bgPr><a:solidFill> 里那一处颜色；没有就用版式、母版的
+function pptxBackground(source, theme) {
+  // 传进来的可能是已解析的文档（页），也可能是版式/母版那份 XML 原文
+  let root = null;
+  try {
+    root = typeof source === "string" ? (source ? parseXml(source) : null) : source;
+  } catch {
+    return "";
+  }
+  const node = pptxDeep(root, "bg")[0],
+    color = pptxColor(pptxKids(pptxKids(node, "bgPr")[0] || {}, "solidFill")[0], theme);
+  return color?.a ? color.c : "";
+}
 const PPTX_CANVAS_KIND = { rect: "rect", roundRect: "round", ellipse: "ellipse", line: "line" };
+// 自动编号的记号：阿拉伯、字母、罗马数字与中文数字；认不出的按阿拉伯数字
+function pptxNumberText(n, type) {
+  const roman = value => {
+    /** @type {[number, string][]} */
+    const table = [
+      [1000, "M"],
+      [900, "CM"],
+      [500, "D"],
+      [400, "CD"],
+      [100, "C"],
+      [90, "XC"],
+      [50, "L"],
+      [40, "XL"],
+      [10, "X"],
+      [9, "IX"],
+      [5, "V"],
+      [4, "IV"],
+      [1, "I"]
+    ];
+    let left = value,
+      out = "";
+    for (const [size, mark] of table) while (left >= size) (out += mark), (left -= size);
+    return out;
+  };
+  if (/^alphaLc/.test(type)) return String.fromCharCode(97 + ((n - 1) % 26));
+  if (/^alphaUc/.test(type)) return String.fromCharCode(65 + ((n - 1) % 26));
+  if (/^romanLc/.test(type)) return roman(n).toLowerCase();
+  if (/^romanUc/.test(type)) return roman(n);
+  if (/^eaNum|^chinese/i.test(type)) return ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][n - 1] || String(n);
+  return String(n);
+}
 // 一页画布。doc 是这一页的 p:sld；返回 {bg, shapes}，排不出位置时给 null
 function pptxCanvas(doc, ctx) {
   const { W, H, theme, images, ph, styles } = ctx,
@@ -310,11 +362,15 @@ function pptxCanvas(doc, ctx) {
     }
     return rect;
   };
-  const walk = (node, map) => {
+  const walk = (node, map, scale = 1) => {
     for (const shape of pptxShapeChildren(node)) {
       if (shape.localName === "grpSp") {
-        const xfrm = pptxKids(pptxKids(shape, "grpSpPr")[0] || {}, "xfrm")[0];
-        walk(shape, xfrm ? pptxCompose(map, xfrm) : map);
+        const xfrm = pptxKids(pptxKids(shape, "grpSpPr")[0] || {}, "xfrm")[0],
+          ext = xfrm && pptxKids(xfrm, "ext")[0],
+          chExt = xfrm && pptxKids(xfrm, "chExt")[0];
+        // 组放大缩小时，里面的字也跟着放大缩小：倍数由 ext / chExt 来
+        const inner = pptxAttr(chExt, "cx") > 0 ? scale * (pptxAttr(ext, "cx") / pptxAttr(chExt, "cx")) : scale;
+        walk(shape, xfrm ? pptxCompose(map, xfrm) : map, inner);
         continue;
       }
       const spPr = pptxKids(shape, "spPr")[0] || pptxKids(shape, "grpSpPr")[0] || {},
@@ -372,7 +428,8 @@ function pptxCanvas(doc, ctx) {
         continue;
       }
       const text = pptxCanvasText(shape, pptxPlaceholderOf(pptxDeep(shape, "ph")[0], ph), theme, styles),
-        kind = PPTX_CANVAS_KIND[prst] || "rect";
+        // 连接线本身就是一条线；表外的直线/折线连接符也照线画
+        kind = shape.localName === "cxnSp" || /Connector\d*$/i.test(prst) ? "line" : PPTX_CANVAS_KIND[prst] || "rect";
       if (!text && !fill && !stroke) continue;
       const box = boxOf(shape, map);
       if (!box || (box.w <= 0 && box.h <= 0)) {
@@ -415,29 +472,31 @@ function pptxCanvas(doc, ctx) {
       if (text) {
         // 字号在这一层折成纸宽的比例，渲染侧只管照数写；缩字比例与段前段后也在这里算好
         item.t = text.p.map(para => {
-          const runs = para.r.map(run => ({ ...run, s: pt(run.s * text.scale), k: run.k ? ptv(run.k * text.scale) : 0 })),
+          const runs = para.r.map(run => ({ ...run, s: pt(run.s * text.scale * scale), k: run.k ? ptv(run.k * text.scale * scale) : 0 })),
             size = runs[0]?.s || pt(1800),
             gap = value => (value?.v ? pt(value.v) : value?.r ? Math.round(value.r * size * 10) / 10 : 0);
-          return { ...para, r: runs, mt: gap(para.bef), mb: gap(para.aft) };
+          return { ...para, r: runs, mt: gap(para.bef), mb: gap(para.aft), m: unit(para.m), lp: para.lp ? pt(para.lp) : 0 };
         });
         if (text.anchor === "ctr") item.va = "c";
         else if (text.anchor === "b") item.va = "b";
         if (text.nowrap) item.nw = 1;
-        if (text.red) item.lh = Math.round(1.2 * (1 - text.red) * 1000) / 1000;
+        item.lh = Math.round(PPTX_LINE_HEIGHT * (1 - text.red) * 1000) / 1000;
         const bodyPr = pptxKids(pptxKids(shape, "txBody")[0] || {}, "bodyPr")[0];
+        // CSS 的 padding 是上、右、下、左
         item.in = [
-          Math.round(unit(pptxAttr(bodyPr, "lIns", 91440)) * 10) / 10,
           Math.round(unit(pptxAttr(bodyPr, "tIns", 45720)) * 10) / 10,
           Math.round(unit(pptxAttr(bodyPr, "rIns", 91440)) * 10) / 10,
-          Math.round(unit(pptxAttr(bodyPr, "bIns", 45720)) * 10) / 10
+          Math.round(unit(pptxAttr(bodyPr, "bIns", 45720)) * 10) / 10,
+          Math.round(unit(pptxAttr(bodyPr, "lIns", 91440)) * 10) / 10
         ];
       }
       shapes.push(item);
     }
   };
-  walk(root, (x, y, w, h) => ({ x, y, w, h }));
+  walk(root, (x, y, w, h) => ({ x, y, w, h }), 1);
   if (missing || !shapes.length) return null;
-  const bgNode = pptxDeep(doc, "bg")[0],
-    bg = pptxColor(pptxKids(pptxKids(bgNode, "bgPr")[0] || {}, "solidFill")[0], theme);
-  return { bg: bg?.a ? bg.c : "", shapes };
+  // 页上没写底色时，底色在版式或母版里
+  const own = pptxBackground(doc, theme),
+    bg = own || ctx.bg || "";
+  return { bg, shapes };
 }

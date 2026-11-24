@@ -709,8 +709,32 @@ button.source-local {
   color: var(--ink);
   font-size: 12px;
   line-height: 1.2;
+  overflow: auto;
+}
+/* 纸面单独一层：翻页时只换这一层，页下的备注留在原地 */
+.viewer-slide-canvas .pv-page {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--slide-ratio);
   overflow: clip;
   overflow-clip-margin: 8px;
+}
+/* 备注：收起时只占一行，点开才摊 */
+.viewer-slide-canvas .pv-notes {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-note);
+  color: var(--ink-2);
+}
+.viewer-slide-canvas .pv-notes summary {
+  cursor: pointer;
+  color: var(--ink-3);
+}
+.viewer-slide-canvas .pv-notes .markdown {
+  margin-top: 4px;
+  font-size: var(--fs-note);
+  line-height: 1.7;
 }
 .viewer-slide-canvas * {
   box-sizing: border-box;
