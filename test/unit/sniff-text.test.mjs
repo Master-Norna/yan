@@ -28,3 +28,12 @@ test("带色码的日志仍算文字", async () => {
   const line = "\u001b[32mok\u001b[0m  构建完成\n";
   assert.equal(await sniffText(new Blob([line.repeat(200)]), { type: "" }), true);
 });
+
+test("空文件与只含 UTF-8 BOM 的文件仍是文字", async () => {
+  assert.equal(await sniffText(new Blob([])), true);
+  assert.equal(await sniffText(new Blob([new Uint8Array([0xef, 0xbb, 0xbf])])), true);
+});
+
+test("整份文件末尾残缺的字节不能因流式解码被吞掉", async () => {
+  assert.equal(await sniffText(new Blob([new Uint8Array([0x41, 0xe4])])), false);
+});
