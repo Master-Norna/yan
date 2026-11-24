@@ -33,14 +33,14 @@ function decodeTextBytes(bytes) {
 async function sniffText(file) {
   const head = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
   if (head.includes(0)) return false;
-  let text = "";
+  let text = null;
   for (const label of ["utf-8", "gb18030"])
     try {
-      // stream：截到半个字的那一截不算错，留着尾巴不判
-      text = new TextDecoder(label, { fatal: true }).decode(head, { stream: true });
+      // 真的只取了一截才留着尾巴不判；整份文件末尾的残字仍算解码失败。
+      text = new TextDecoder(label, { fatal: true }).decode(head, { stream: file.size > head.length });
       break;
     } catch {}
-  if (!text) return false;
+  if (text === null) return false;
   let bad = 0;
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
