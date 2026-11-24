@@ -163,13 +163,16 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
     if (!entry) return sendJson(res, 409, { error: "总线未接通" });
     if (typeof id !== "string" || !id || typeof path !== "string" || !path.startsWith("/api/") || path.startsWith("/api/bus"))
       return sendJson(res, 400, { error: "请求无效" });
+    if (entry.jobs.has(id)) return sendJson(res, 409, { error: "请求标识已在使用" });
     sendJson(res, 202, { ok: true });
     const job = new BusResponse(entry.res, event => {
       if (entry.res.writableEnded || entry.res.destroyed) throw Error("总线已断开");
       return entry.res.write(`data: ${JSON.stringify({ id, ...event })}\n\n`);
     });
     entry.jobs.set(id, job);
-    job.on("close", () => entry.jobs.delete(id));
+    job.on("close", () => {
+      if (entry.jobs.get(id) === job) entry.jobs.delete(id);
+    });
     // 原请求的 Host、Origin 原样带上：交进分发后门禁照旧，总线不另开后门
     const headers = { ...req.headers, "content-type": "application/json" };
     delete headers["content-length"];

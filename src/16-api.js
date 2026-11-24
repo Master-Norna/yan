@@ -395,6 +395,7 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
   const reader = response.body.getReader(),
     decoder = new TextDecoder();
   let buffer = "",
+    dataLines = [],
     scheduled = false,
     ended = false,
     finishReason = "";
@@ -597,8 +598,13 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
         buffer = "";
       }
       for (const line of lines) {
+        if (!line) {
+          dataLines = [];
+          continue;
+        }
         if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
+        dataLines.push(line.slice(5).replace(/^ /, ""));
+        const data = dataLines.join("\n").trim();
         if (!data) continue;
         if (data === "[DONE]") {
           ended = true;
@@ -607,9 +613,16 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
           reader.cancel().catch(() => {});
           return;
         }
-        let failure = "";
+        let json;
         try {
-          const json = JSON.parse(data);
+          json = JSON.parse(data);
+        } catch {
+          // 一个事件的 JSON 可以分在几行 data:，等下一行。
+          continue;
+        }
+        dataLines = [];
+        let failure = "";
+        {
           // 流里夹着的报错（限流、上游掐线、桥接补的「连接中断」）：不能当没看见让半截话冒充写完了——按中断处理，已写的留着、可续写
           if (json.error && !json.choices)
             failure = (typeof json.error === "string" ? json.error : json.error?.message) || "接口在作答途中返回了错误";
@@ -652,7 +665,7 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
             refresh();
           }
           if (json.usage) assistant.usage = withCached(json.usage);
-        } catch {}
+        }
         if (failure) throw Error(failure);
       }
       if (done) break;
