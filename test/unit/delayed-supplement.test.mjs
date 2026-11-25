@@ -17,7 +17,9 @@ test("收尾排的补言在路径换版后放回草稿，不在旧版另起一�
   const assistant = { id: "a", status: "complete", steps: [{ id: "note" }] };
   const conversation = { id: "c", messages: [assistant] };
   let starts = 0;
-  f.setup(conversation, async () => { starts++; });
+  f.setup(conversation, async () => {
+    starts++;
+  });
   const job = { queue: [{ user: { content: "补充", attachments: [] }, step: { id: "note" } }] };
   assert.equal(f.settleSupplements(conversation, assistant, job, {}), true);
   conversation.messages = [{ id: "new", status: "complete" }];
