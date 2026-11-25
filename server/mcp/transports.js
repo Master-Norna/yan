@@ -12,7 +12,8 @@ const { OUTBOUND_MARK, readLimitedBytes, ERROR_BODY_LIMIT } = require("../web.js
 const fs = require("node:fs");
 const path = require("node:path");
 
-const STDERR_KEEP = 4000;
+const STDERR_KEEP = 4000,
+  CANCEL_POST_MS = 5000;
 // 出站请求一律带上「这是言自己转出去的」标记，桥接见到它就 403（见 server.js）。
 // MCP 服务是外来的：它能把回应 307 到 127.0.0.1 的受信接口，Node 的 fetch 默认会跟着跳、
 // 保留方法与正文，而这样发过去的请求没有 Origin、没有 Sec-Fetch-Site，桥接自己分不出来——
@@ -255,7 +256,11 @@ class HttpTransport {
   async send(message) {
     const abort = new AbortController();
     this.aborts.add(abort);
+    // 取消通知没有请求编号：自己限时，不能让超时的工具换来一个永久挂起的 POST。
+    const timer = message.method === "notifications/cancelled" ? setTimeout(() => abort.abort(), CANCEL_POST_MS) : null;
+    timer?.unref?.();
     const release = () => {
+      if (timer) clearTimeout(timer);
       this.aborts.delete(abort);
       if (message.id !== undefined && this.reads.get(message.id) === abort) this.reads.delete(message.id);
     };
@@ -280,7 +285,7 @@ class HttpTransport {
       }
       if (!response.ok) throw Object.assign(await httpError(response), { status: response.status });
       // 202 就是「收下了」：有正文也不用
-      if (response.status === 202) {
+      if (response.status === 202 || message.method === "notifications/cancelled") {
         await response.body?.cancel().catch(() => {});
         return;
       }
@@ -371,6 +376,8 @@ class SseTransport {
     this.connectionAbort.signal.throwIfAborted();
     const abort = new AbortController();
     this.posts.add(abort);
+    const timer = message.method === "notifications/cancelled" ? setTimeout(() => abort.abort(), CANCEL_POST_MS) : null;
+    timer?.unref?.();
     if (message.method && message.id !== undefined) this.reads.set(message.id, abort);
     try {
       const response = await fetch(this.endpoint, {
@@ -384,6 +391,7 @@ class SseTransport {
       // 旧式 SSE 的投递回执不采用正文（通行是 202 空体）：有也不读，当场取消
       await response.body?.cancel().catch(() => {});
     } finally {
+      if (timer) clearTimeout(timer);
       this.posts.delete(abort);
       if (this.reads.get(message.id) === abort) this.reads.delete(message.id);
     }
