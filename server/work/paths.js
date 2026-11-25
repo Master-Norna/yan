@@ -121,6 +121,21 @@ async function assertNoEscapingLink(workdir, target) {
     if (!pathIsInside(realRoot, real)) throw Error(`路径经过链接越出了工作目录：${relPath(workdir, current)}`);
   }
 }
+// 新文件取最近存在的父目录真实路径，再接回尚不存在的部分。
+async function canonicalPath(file) {
+  const rest = [];
+  for (let dir = file; ; ) {
+    try {
+      return path.join(await fs.promises.realpath(dir), ...rest);
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+      const up = path.dirname(dir);
+      if (up === dir) throw error;
+      rest.unshift(path.basename(dir));
+      dir = up;
+    }
+  }
+}
 function relPath(workdir, file) {
   return path.relative(workdir, file).split(path.sep).join("/");
 }
@@ -139,6 +154,7 @@ module.exports = {
   resolveInside,
   resolveTarget,
   assertReachable,
+  canonicalPath,
   assertNoEscapingLink,
   relPath
 };
