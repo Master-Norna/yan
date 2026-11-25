@@ -304,9 +304,9 @@ function readJsonFile(file, fallback = null) {
   }
 }
 // 一件文件内容的 SHA-1：边读边算，不把整份读进内存
-async function fileHash(file) {
+async function fileHash(file, signal = undefined) {
   const hash = crypto.createHash("sha1");
-  for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
+  for await (const chunk of fs.createReadStream(file, { signal })) hash.update(chunk);
   return hash.digest("hex");
 }
 module.exports = {

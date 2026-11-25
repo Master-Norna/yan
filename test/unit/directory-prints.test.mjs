@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 
 const createWork = createRequire(import.meta.url)("../../server/work/index.js");
@@ -154,6 +155,32 @@ test("凭据：目录内的链接失去目标时记为消失，而不是未知",
     assert.equal(after.prints["link/x"], null);
     assert.equal(after.dirs.link, null);
   } finally {
+    clean();
+  }
+});
+
+test("断开目录凭据请求时，停止当前文件读取及剩余目录遍历", async () => {
+  const { root, clean } = folder();
+  const work = createWork({ archiveHome: () => root, workHome: () => root, toolEnv: env => env });
+  const res = Object.assign(new EventEmitter(), { destroyed: false, writableEnded: false });
+  const original = fs.createReadStream;
+  const files = [];
+  let stream;
+  try {
+    for (const name of ["a", "b", "c"]) fs.writeFileSync(path.join(root, name), "content");
+    fs.createReadStream = function (file, options) {
+      files.push(file);
+      stream = original.call(this, file, options);
+      res.destroyed = true;
+      res.emit("close");
+      return stream;
+    };
+    const req = Readable.from([Buffer.from(JSON.stringify({ workdir: root, dirs: ["."] }))]);
+    await work.routes["POST /api/work/prints"](req, res);
+    assert.equal(files.length, 1, "取消后不得开始读取下一件");
+    assert.equal(stream.destroyed, true, "当前流也应被取消");
+  } finally {
+    fs.createReadStream = original;
     clean();
   }
 });
