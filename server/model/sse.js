@@ -67,7 +67,10 @@ function translateSse(model, handle) {
       }
     }
     if (!stopped && buffer.length + dataSize > limit) out.fail("单个模型事件超过大小限制");
-    if (stopped) { buffer = ""; dataLines = []; }
+    if (stopped) {
+      buffer = "";
+      dataLines = [];
+    }
   };
   return new TransformStream({
     transform(bytes, c) {
