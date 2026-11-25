@@ -17,7 +17,7 @@ test("无效草稿编号不能扩大清理范围", async () => {
   const clean = async body => {
     let status;
     await route(Readable.from([Buffer.from(JSON.stringify(body))]), {
-      writeHead(code) { status = code; },
+      writeHead: code => (status = code),
       end() {}
     });
     return status;
