@@ -76,7 +76,8 @@ defineTool({
       text = record ? (record.kind === "text" ? record.data : record.extractedText) || "" : "";
     }
     if (!text) return { ok: false, content: t("该文档无可读取的文本"), display: "无文本" };
-    const pages = splitPages(text),
+    const kind = fileKind(doc.name),
+      pages = splitPages(text, kind.extract === "pdf" ? "pdf" : kind.name === "slides" ? "slide" : "plain"),
       pageCount = pages.length;
     if (args.page) {
       const page = pages.find(p => p.page === Number(args.page));

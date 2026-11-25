@@ -184,7 +184,7 @@ function downloadViewerFile() {
 // ODP 与旧附件只有 Markdown：只认抽取器写的页眉，不把正文里的二级标题另算一页。
 /** @param {string} text */
 function slidePagesFromText(text) {
-  const pages = splitPages(text).map(item => item.text);
+  const pages = splitPages(text, "slide").map(item => item.text);
   return pages.length ? pages : [text];
 }
 /** @param {string[]} source @param {number} [ratio] */

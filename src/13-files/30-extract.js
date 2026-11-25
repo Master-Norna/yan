@@ -72,25 +72,27 @@ function pageHeading(page, { heading = false, title = "" } = {}) {
   return `${heading ? "## " : ""}${t`第 ${page} 页`}${title ? ` · ${title}` : ""}`;
 }
 /**
- * 把抽取器写下的页眉切成页。认四种写法：`## 第 n 页[ · 题]`、`## Page n[ · 题]`、`第 n 页`、`Page n`。
+ * 幻灯片只认 `##` 页眉（可带标题），PDF 只认裸页码行，其余文档沿用裸中文页码。
  * 页眉之前的零散文字（少见）接在第一页前，不丢。
  * @param {string} text
+ * @param {"slide" | "pdf" | "plain"} style
  * @returns {{ page: number, title: string, text: string }[]}
  */
-function splitPages(text) {
+function splitPages(text, style) {
   const pages = [],
-    before = [];
+    before = [],
+    slide = style === "slide";
   let current = null;
-  for (const line of String(text ?? "").split("\n")) {
-    const head = line.match(/^(?:## )?(?:第 (\d+) 页|Page (\d+))(?: · (.*))?$/);
-    if (head) {
-      current = { page: Number(head[1] || head[2]), title: head[3] || "", lines: [line] };
+  // 带着行尾切分，识别 LF / CRLF 的同时保留原文换行。
+  for (const line of String(text ?? "").split(/(?<=\n)/)) {
+    const head = line.match(/^(## )?(?:第 (\d+) 页|Page (\d+))(?: · (.*))?\r?\n?$/);
+    if (head && Boolean(head[1]) === slide && (slide || head[4] === undefined) && (style !== "plain" || head[2])) {
+      current = { page: Number(head[2] || head[3]), title: head[4] || "", lines: [line] };
       pages.push(current);
     } else if (current) current.lines.push(line);
     else if (line.trim()) before.push(line);
   }
-  if (before.length && pages.length) pages[0].lines.unshift(...before);
-  return pages.map(({ page, title, lines }) => ({ page, title, text: lines.join("\n") }));
+  return pages.map(({ page, title, lines }, i) => ({ page, title, text: (i ? "" : before.join("")) + lines.join("") }));
 }
 // data：置入的原件（Blob）、原件的字节（预览器现抽时用），或 data: URL（网页交回的 PDF）；不抽的类型不读
 /** @param {string} name @param {Blob|string|Uint8Array} data */
