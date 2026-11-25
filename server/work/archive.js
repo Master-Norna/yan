@@ -98,7 +98,8 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   // 清草稿：给了 id 只清那段对话的，否则整个 .草稿 目录
   const handleArchiveClean = jsonRoute(async body => {
     const root = await archiveRoot(body.root),
-      id = String(body.id || "").replace(/[^A-Za-z0-9_-]/g, "");
+      id = body.id === undefined ? "" : body.id;
+    if (typeof id !== "string" || (id !== "" && !/^[A-Za-z0-9_-]+$/.test(id))) throw Error("无效的草稿编号");
     const target = id ? path.join(root, SCRATCH_DIR, id) : path.join(root, SCRATCH_DIR);
     await fs.promises.rm(target, { recursive: true, force: true, maxRetries: 2 }).catch(error => {
       throw Error(describeFsError(error, SCRATCH_DIR));
