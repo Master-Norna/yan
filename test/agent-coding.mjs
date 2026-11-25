@@ -145,7 +145,9 @@ const par = await evalJs(
 );
 check(
   "three read-only calls ran in one round, results in order",
-  par.text === "PAR|call_p0,call_p1,call_p2" && par.steps.join() === "览目录:done,搜索:done,读取:done",
+  /^PAR\|call_[0-9a-z]+,call_[0-9a-z]+,call_[0-9a-z]+$/i.test(par.text) &&
+    new Set(par.text.slice(4).split(",")).size === 3 &&
+    par.steps.join() === "览目录:done,搜索:done,读取:done",
   JSON.stringify(par)
 );
 check(

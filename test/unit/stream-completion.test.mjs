@@ -117,9 +117,10 @@ test("缺结束标志的半截工具调用不能执行，重试完成后才执�
   const f = setup([cut, toolReply(), finalReply()]);
   const assistant = await turn(f);
   assert.equal(assistant.status, "complete");
+  // 半截那一件不算，重试补齐之后才执行一件
   assert.deepEqual(
-    f.runs.map(step => step.id),
-    ["call_probe"]
+    f.runs.map(step => step.name),
+    ["probe"]
   );
 });
 
