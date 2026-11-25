@@ -701,3 +701,38 @@ test("回收：普通文件与目录对象内容相同，仍遍历该目录的�
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("损坏的检查点文件对象不会覆盖正常文件", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"), home = path.join(base, "检查点"),
+    { post, close } = await serve(home), key = { root, conversation: "c1", answer: "m1" };
+  try {
+    write(root, "a.txt", "original");
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    const hash = createHash("sha1").update("original").digest("hex");
+    const code = fs.readdirSync(home)[0];
+    fs.writeFileSync(path.join(home, code, "对象", hash.slice(0, 2), hash.slice(2)), "corrupt");
+    write(root, "a.txt", "current");
+    const done = await post("/api/checkpoint/restore", key);
+    assert.equal(done.restored, 0);
+    assert.equal(done.failed.length, 1);
+    assert.equal(fs.readFileSync(path.join(root, "a.txt"), "utf8"), "current");
+  } finally { await close(); fs.rmSync(base, { recursive: true, force: true }); }
+});
+test("POSIX 模式单独改变也能退回，可执行权限不会丢", { skip: process.platform === "win32" }, async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"), { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" }, file = path.join(root, "a.sh");
+  try {
+    write(root, "a.sh", "original");
+    fs.chmodSync(file, 0o755);
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    fs.chmodSync(file, 0o644);
+    assert.equal((await post("/api/checkpoint/diff", key)).changes.length, 1);
+    assert.deepEqual((await post("/api/checkpoint/restore", key)).failed, []);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o755);
+    fs.unlinkSync(file);
+    assert.deepEqual((await post("/api/checkpoint/restore", key)).failed, []);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o755);
+  } finally { await close(); fs.rmSync(base, { recursive: true, force: true }); }
+});
