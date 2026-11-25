@@ -29,7 +29,9 @@ async function claimTurn(c, { quiet = false } = {}) {
     if (!quiet) toast(t(text));
     return false;
   };
-  if (runningElsewhere(c.id) || !(await claimConversation(c.id))) return denied("此对话正在另一页面作答，稍后再发");
+  if (rewindingOver(c)) return denied("正在退回目录，稍后再发");
+  if (runningElsewhere(c.id) || !(await claimConversation(c.id, workRoot(c))))
+    return denied("此对话或相交目录正在另一页面作答或退回，稍后再发");
   // 等的这一会儿，后台回报可能已在这段里另起了一答，这段也可能已被删掉。正退回目录的不开工：动手写下的会被退回盖掉
   const live = store.conversations.find(item => item.id === c.id) || c;
   return rewindingOver(live) ? denied("正在退回目录，稍后再发") : true;

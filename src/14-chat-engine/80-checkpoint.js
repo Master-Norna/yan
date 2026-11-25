@@ -87,8 +87,11 @@ async function rewindAnswer(c, message) {
   });
   if (!ok) return;
   if (workdirLocked(c) || rootBusyElsewhere(point.root, c.id)) return toast(t("作答中，稍后再退"));
+  if (leaseClaims.has(c.id)) return toast(t("作答中，稍后再退"));
   rewinding.add(c.id);
   try {
+    if (!(await claimConversation(c.id, point.root, true))) return toast(t("作答中，稍后再退"));
+    if (rootBusyElsewhere(point.root, c.id)) return toast(t("作答中，稍后再退"));
     const done = await bridge("/api/checkpoint/restore", key, AbortSignal.timeout(600000));
     message.rewound = [
       ...(message.rewound || []),
@@ -107,6 +110,9 @@ async function rewindAnswer(c, message) {
     toast(t`未能退回：${bridgeErrorText(String(error.message || error)).slice(0, 80)}`);
   } finally {
     rewinding.delete(c.id);
+    const scope = leaseScopes.get(c.id);
+    if (scope?.rewind) leaseScopes.set(c.id, { root: scope.root, rewind: false });
+    void syncLeases();
   }
 }
 // 退过的几回，按时刻排：退回之后的头一问冠上一句（与上一答的行迹同一个放法，见 historyForApi）。时刻定了句子就定了，前文不会因此改写

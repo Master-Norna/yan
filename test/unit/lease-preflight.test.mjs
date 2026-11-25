@@ -275,3 +275,26 @@ test("共享目录认领超时或回执不完整不能冒充成功；本地离�
   });
   assert.equal(await f.claimConversation("c"), true);
 });
+
+test("未绑定工作目录的对话认领卷宗目录", async () => {
+  const invoke = leaseServer();
+  const f = load([
+    "claimConversation",
+    `setup: fn => {
+      chatsOnline = () => true;
+      bridge = fn;
+      archiveDir = () => "/archive";
+      store.conversations = [{ id: "plain", messages: [] }];
+      renderHistory = renderSendButtons = () => {};
+    }`
+  ]);
+  f.setup((_path, body) => invoke(body));
+  assert.equal(await f.claimConversation("plain"), true);
+  const other = await invoke({
+    owner: "other",
+    ids: ["work"],
+    claim: "work",
+    scopes: { work: { root: "/archive", rewind: true } }
+  });
+  assert.equal(other.blocked, true);
+});
