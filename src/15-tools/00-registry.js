@@ -9,6 +9,7 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {Message} assistant 页面上的那一答（帮手的步骤也画在它的行迹里）
  * @property {AbortSignal} signal
  * @property {Set<string>} [offered] 这一轮交给模型的工具名：不在其中的一律不执行
+ * @property {Map<string, string>} [offeredMcp] 本答给出的 MCP 工具身份
  * @property {boolean} [lookup] 旁注：只查不改（按需给的 MCP 只放只读的几件）
  * @property {Map<string, string>} [memory] 主答已读到的各类记忆版本，随成功写入或冲突回话更新
  * @property {Map<string, string>} [memoryUpdates] 本批工具交回的版本，整批完成后才算模型读过
@@ -54,6 +55,7 @@ const MIN_TOOL_STATUS_MS = 240;
  * @property {boolean} [coda] 收尾前递的话（收尾前对照结论图）：它是这一答最后一步时（放了行、没再动手），之前那段话仍作答复，这一步画在它之后、不进行迹
  * @property {(step: Step) => Source[]} [sources] 答末「出处」里列的条目
  * @property {boolean} [mcp] 由 MCP 服务登记的（配置一变就整批换掉）
+ * @property {string} [mcpIdentity] MCP 原始身份与参数/权限语义
  */
 // 内置工具的分组：预设按组挑（一件件挑太碎），设置里照这个次序列
 const TOOL_GROUPS = {
@@ -68,6 +70,9 @@ const TOOL_GROUPS = {
 };
 /** @type {Map<string, Tool>} 按登记先后排，交给模型时也是这个次序 */
 const TOOLS = new Map();
+// 与本答的工具定义一起存活，不向模型发送内部身份，也不跨答积累。
+/** @type {WeakMap<object, string>} */
+const mcpOfferIdentity = new WeakMap();
 /** @param {Tool} tool */
 // 有副作用的必须留痕：下一问、续写时模型得知道自己已 POST 过、记过、传过话，不然再做一遍
 /** @param {Tool} tool */
@@ -116,10 +121,12 @@ function toolDefinitions(conversation, { sub = false, lookup = false, profile = 
       text = !ctx.work && spec.brief ? spec.brief : spec.description,
       // 外来工具自带的说明原样给，不当模板填（里头的 {{…}} 是人家的字）
       description = tool.schema ? text : fillTemplate(text, tool.vars?.(ctx));
-    tools.push({
+    const definition = {
       type: "function",
       function: { name: tool.name, description, parameters: tool.params ? tool.params(spec.parameters, ctx) : spec.parameters }
-    });
+    };
+    if (tool.mcpIdentity) mcpOfferIdentity.set(definition, tool.mcpIdentity);
+    tools.push(definition);
     ctx.offered.push(tool.name);
   }
   return tools.length ? tools : null;
@@ -145,6 +152,8 @@ async function runTool(step, ctx) {
     return step.scope && tool.mainOnly
       ? { ok: false, content: t`${step.name} 只有主模型可用；需要它做的事写进回报里，由主模型决定。`, display: "帮手无权" }
       : { ok: false, content: t`此处没有提供 ${step.name}，只能用这一轮给出的工具。`, display: "此处未提供" };
+  if (ctx.offeredMcp?.has(step.name) && ctx.offeredMcp.get(step.name) !== tool.mcpIdentity)
+    return { ok: false, content: t("MCP 工具定义已变，请重新发送这一问以刷新清单。"), display: "工具已变" };
   const parsed = parseToolArguments(step.arguments);
   if (!parsed.ok)
     return {
@@ -183,6 +192,8 @@ async function runTool(step, ctx) {
     if (tool.writes && !ctx.lookup && !(tool.name === "run_command" && isReadOnlyCommand(args.command))) await checkpointBefore(ctx);
     // 上面几处都要等（接回行迹、跑守的测试、审查、记检查点），等的工夫里点了「止」就到此为止，不再动手
     ctx.signal.throwIfAborted();
+    if (tool.mcpIdentity && TOOLS.get(step.name)?.mcpIdentity !== tool.mcpIdentity)
+      return { ok: false, content: t("MCP 工具定义已变，请重新发送这一问以刷新清单。"), display: "工具已变" };
     const outcome = await tool.run(step, args, ctx);
     return step.reviewed?.ok ? { ...outcome, display: [outcome.display, "审准"].filter(Boolean).join(" · ") } : outcome;
   } catch (error) {
@@ -235,12 +246,13 @@ function toolPresentation(step) {
  * @param {Message} assistant
  * @param {boolean} [lookup] 旁注：只查不改
  * @param {Map<string, string>} [memory]
+ * @param {Map<string, string>} [offeredMcp]
  */
-async function runSteps(steps, conversation, assistant, signal, toolCache, offered, lookup = false, memory = undefined) {
+async function runSteps(steps, conversation, assistant, signal, toolCache, offered, lookup = false, memory = undefined, offeredMcp = undefined) {
   const outcomes = new Map(),
     images = [],
     memoryUpdates = new Map(),
-    ctx = { conversation, assistant, signal, offered, lookup, memory, memoryUpdates };
+    ctx = { conversation, assistant, signal, offered, lookup, memory, memoryUpdates, offeredMcp };
   const runOne = async step => {
     // 一批里前一件跑着时按了停：后面排着的不再动手（写记忆、起请示都算动手）
     signal.throwIfAborted();
