@@ -90,7 +90,10 @@ async function rewindAnswer(c, message) {
   rewinding.add(c.id);
   try {
     const done = await bridge("/api/checkpoint/restore", key, AbortSignal.timeout(600000));
-    message.rewound = [...(message.rewound || []), { at: now(), restored: done.restored, removed: done.removed, failed: done.failed.length }];
+    message.rewound = [
+      ...(message.rewound || []),
+      { at: now(), restored: done.restored, removed: done.removed, failed: done.failed.length }
+    ];
     markDirty(c.id);
     saveStore();
     if (currentId === c.id && view === "chat") renderConversation(false);
