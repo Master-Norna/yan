@@ -336,21 +336,24 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
         ids = (Array.isArray(body.ids) ? body.ids : []).map(String).slice(0, 200),
         claim = String(body.claim || ""),
         now = Date.now();
-      const scopes = new Map(ids.map(id => {
-        const scope = body.scopes?.[id];
-        return [id, { root: scopeRoot(scope?.root), rewind: scope?.rewind === true }];
-      }));
+      const scopes = new Map(
+        ids.map(id => {
+          const scope = body.scopes?.[id];
+          return [id, { root: scopeRoot(scope?.root), rewind: scope?.rewind === true }];
+        })
+      );
       const claiming = scopes.get(claim),
         busy = new Set();
       let blocked = false;
       for (const [who, lease] of leases) {
         if (now - lease.at > LEASE_MS) leases.delete(who);
-        else for (const id of lease.ids) {
-          if (who !== owner) busy.add(id);
-          if (!claiming || (who === owner && id === claim)) continue;
-          const other = lease.scopes?.get(id);
-          if (other && (claiming.rewind || other.rewind) && overlapping(claiming.root, other.root)) blocked = true;
-        }
+        else
+          for (const id of lease.ids) {
+            if (who !== owner) busy.add(id);
+            if (!claiming || (who === owner && id === claim)) continue;
+            const other = lease.scopes?.get(id);
+            if (other && (claiming.rewind || other.rewind) && overlapping(claiming.root, other.root)) blocked = true;
+          }
       }
       // 开工前的认领（claim）：别处正握着这段就不给，这一页的报到也不记——两页同时开工，先到的得手
       if (claim && busy.has(claim)) return { busy: [...busy] };
