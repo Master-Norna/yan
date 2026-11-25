@@ -478,17 +478,11 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   if (kind === "markdown") return `<div class="file-viewer-text markdown">${renderMarkdown(text.slice(0, VIEWER_TEXT_CHARS))}${cut}</div>`;
   return `<div class="file-viewer-text"><pre class="file-viewer-code">${escapeHtml(text.slice(0, VIEWER_TEXT_CHARS))}</pre>${cut}</div>`;
 }
-// 像不像一段字：没有 NUL，坏字节与控制字符都少。压缩包、可执行文件开头一段就满是这些
+// 像不像一段字：与抽取器「闻」的是同一处判据（见 30-extract 的 textLooksBinary）——没有 NUL，控制字符与坏字不过 2%。
+// 压缩包、可执行文件开头一段就满是这些
 /** @param {string} text */
 function looksLikeText(text) {
-  if (!text || text.includes("\0")) return false;
-  let bad = 0;
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (code === 0xfffd || (code < 32 && code !== 9 && code !== 10 && code !== 13)) bad += 1;
-    if (bad > 8) return false;
-  }
-  return true;
+  return !!text && !text.includes("\0") && !textLooksBinary(text);
 }
 // CSV / TSV：引号里的换行仍属于同一个字段，显示上限按记录计。
 // open＝给进来的这一段是被截断的（字符先到顶），末条多半没写完，不算

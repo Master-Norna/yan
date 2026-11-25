@@ -30,6 +30,16 @@ function decodeTextBytes(bytes) {
 // 扩展名不在表里、浏览器也没报类型的（.vue、.kt、Dockerfile、.env……）：看开头 64KB，解得通、且不像二进制的当文字。
 // 只判「没有 NUL」不够：不少二进制本来就没有 NUL，GB18030 又几乎什么字节都解得出来——解出来的字还得干净。
 // 控制字符（\t \n \r \f 与 ESC 除外）与替换字符过 2% 的算二进制；ESC 留着，带色码的日志也算文字
+// 解出来的字像不像文字：控制字符（\t \n \r \f 与 ESC 除外）与替换字符过 2% 的算二进制。
+// ESC 留着，带色码的日志也算文字；预览那边「扩展名认不出」也照这一处判（见 20-viewer 的 looksLikeText）
+function textLooksBinary(text) {
+  let bad = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0xfffd || (code < 32 && code !== 9 && code !== 10 && code !== 13 && code !== 12 && code !== 27)) bad += 1;
+  }
+  return bad > text.length * 0.02;
+}
 async function sniffText(file) {
   const head = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
   if (head.includes(0)) return false;
@@ -40,13 +50,7 @@ async function sniffText(file) {
       text = new TextDecoder(label, { fatal: true }).decode(head, { stream: file.size > head.length });
       break;
     } catch {}
-  if (text === null) return false;
-  let bad = 0;
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (code === 0xfffd || (code < 32 && code !== 9 && code !== 10 && code !== 13 && code !== 12 && code !== 27)) bad += 1;
-  }
-  return bad <= text.length * 0.02;
+  return text !== null && !textLooksBinary(text);
 }
 function bytesFromDataUrl(value) {
   const encoded = String(value).slice(String(value).indexOf(",") + 1),
@@ -184,8 +188,9 @@ function parseXml(value) {
 // 只还原结构与图，不还原版式（字体、配色、图的位置大小、合并单元格）；要看原样，预览里「以本机程序打开」
 const MD_TABLE_ROWS = 500,
   MD_TABLE_COLS = 40;
-const xmlKids = (node, name) => [...node.children].filter(child => child.localName === name);
-const xmlDeep = (node, name) => [...node.getElementsByTagNameNS("*", name)];
+// 遍历 XML 的两件小工具：只在 children 里找、或整棵子树里找（取不到就回空数组，版式/母版里常有缺的节点）
+const xmlKids = (node, name) => (node && node.children ? [...node.children].filter(child => child.localName === name) : []);
+const xmlDeep = (node, name) => (node && node.getElementsByTagNameNS ? [...node.getElementsByTagNameNS("*", name)] : []);
 const mdCell = text =>
   String(text || "")
     .replace(/\s+/g, " ")
