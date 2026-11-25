@@ -19,7 +19,7 @@ test("草稿根或指定草稿经链接指向外部时不删原件", async () =>
   const clean = async body => {
     let status;
     await route(Readable.from([Buffer.from(JSON.stringify(body))]), {
-      writeHead(code) { status = code; },
+      writeHead: code => (status = code),
       end() {}
     });
     return status;
