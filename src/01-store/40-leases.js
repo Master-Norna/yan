@@ -2,7 +2,8 @@
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 const remoteBusy = new Set(),
   leaseHold = new Set(),
-  leaseClaims = new Map();
+  leaseClaims = new Map(),
+  leaseScopes = new Map();
 // ---------- 几处页面同开：谁在作答 ----------
 // 两个浏览器、VS Code 与浏览器同开同一个存储时，各页只知道自己在跑什么：那边正作答的一段，这边刷新后读到的是磁盘上「生成中」的快照，
 // 从前会当成页面刷新而中断、写回磁盘，两边轮流互盖，这边再点「继续生成」就成了两处同写一条回复。
@@ -24,6 +25,7 @@ function resetChatLeases() {
   remoteBusy.clear();
   leaseHold.clear();
   leaseClaims.clear();
+  leaseScopes.clear();
   leaseReleased.clear();
   leasePosting = leaseFollowing = null;
 }
@@ -33,11 +35,14 @@ function syncLeases() {
   if (leaseClaims.size) return Promise.all([...leaseClaims.values()]);
   if (leasePosting) return leasePosting;
   // 正作答的都算上（旁注的作业按它所在的对话记），后台还有帮手在做的也算；作答完了、最后一次存盘也落了地的松手
-  const running = new Set([...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys()].filter(Boolean));
+  const running = new Set([...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys(), ...rewinding].filter(Boolean));
   for (const id of running) leaseHold.add(id);
-  for (const id of [...leaseHold]) if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) leaseHold.delete(id);
+  for (const id of [...leaseHold]) if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) {
+    leaseHold.delete(id);
+    leaseScopes.delete(id);
+  }
   const scope = bootstrap.store;
-  leasePosting = bridge("/api/chats/lease", { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold] }, AbortSignal.timeout(5000))
+  leasePosting = bridge("/api/chats/lease", { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold], scopes: Object.fromEntries(leaseScopes) }, AbortSignal.timeout(5000))
     .then(({ busy } = {}) => {
       if (bootstrap.store !== scope || !Array.isArray(busy)) return false;
       const held = new Set(busy),
@@ -79,7 +84,7 @@ function syncLeases() {
 }
 // 开工前认领：报到每隔几秒才一次，两页几乎同时点发送时都以为没人在写。认领就是一次带上这段的报到，
 // 桥接一次只办一件，先到的那页记上了，后到的一页看见它已有主就让开。无共享目录时照旧放行；共享目录已接通但认领失败不放行
-function claimConversation(id) {
+function claimConversation(id, root = "", rewind = false) {
   if (leaseReleased.has(id)) return Promise.resolve(false);
   if (!chatsOnline()) return Promise.resolve(true);
   if (leaseClaims.has(id)) return leaseClaims.get(id);
@@ -90,27 +95,33 @@ function claimConversation(id) {
   const claiming = (async () => {
     await Promise.all(before);
     if (bootstrap.store !== scope || leaseReleased.has(id)) return false;
-    const held = leaseHold.has(id);
+    const held = leaseHold.has(id), previousScope = leaseScopes.get(id);
     leaseHold.add(id);
+    leaseScopes.set(id, { root, rewind });
+    const abandon = () => {
+      if (!held) leaseHold.delete(id);
+      if (previousScope) leaseScopes.set(id, previousScope);
+      else leaseScopes.delete(id);
+    };
     try {
-      const { busy } = await bridge(
+      const { busy, blocked } = await bridge(
         "/api/chats/lease",
-        { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold], claim: id },
+        { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold], claim: id, scopes: Object.fromEntries(leaseScopes) },
         AbortSignal.timeout(3000)
       );
       if (bootstrap.store !== scope) return false;
       // 认领别段时也会收到远端持有的正项：作废那些段尚在途的松手跟读。不从这里推断谁已松手。
       if (!Array.isArray(busy)) {
-        if (!held) leaseHold.delete(id);
+        abandon();
         return false;
       }
       noteRemoteLeases(busy);
-      if (!busy.includes(id)) return true;
-      if (!held) leaseHold.delete(id);
+      if (!blocked && !busy.includes(id)) return true;
+      abandon();
       return false;
     } catch {
       // 已连接的共享目录中，超时不是「没有别页」。不能凭未收到认领回执放行。
-      if (bootstrap.store === scope && !held) leaseHold.delete(id);
+      if (bootstrap.store === scope) abandon();
       return false;
     }
   })().finally(() => {
@@ -123,6 +134,7 @@ function claimConversation(id) {
 function releaseLeases() {
   if (!leaseHold.size) return;
   leaseHold.clear();
+  leaseScopes.clear();
   fetch(`/api/chats/lease`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
