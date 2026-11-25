@@ -50,7 +50,7 @@ test("整份回话：按字节限量，没超的原样交回", async () => {
 
 // 用假进程给真实的 stdout 处理器喂确定的块，不依赖 OS 管道如何合块。
 async function fakeStdio(limit) {
-  const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
   const got = [],
     errors = [],
     kills = [],
