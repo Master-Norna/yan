@@ -94,11 +94,10 @@ check(
   )
 );
 
+const openSidebarRename = `(() => { const id = __yanState().conversations[0].id, item = document.querySelector('[data-conversation="' + CSS.escape(id) + '"] .history-open'); item.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); return document.querySelector("#history .history-rename").value; })()`;
 // 侧栏重命名框同理：只打开、没输入，迟到的自动题不能被旧 value 在 focusout 时反盖。
 await begin("SIDEBAR");
-await evalJs(
-  `(() => { const id = __yanState().conversations[0].id, item = document.querySelector('[data-conversation="' + CSS.escape(id) + '"] .history-open'); item.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); return true; })()`
-);
+await evalJs(openSidebarRename);
 await waitFor(`!!document.querySelector("#history .history-rename")`, 2000);
 await waitFor(`__yanState().conversations[0].titled === true`, 5000);
 await evalJs(`document.querySelector("#history .history-rename").blur(); true`);
@@ -109,15 +108,28 @@ check(
   )
 );
 
+// 侧栏重画时要接回草稿，但不能把草稿当新初值，害真正改过的标题也不提交。
+await begin("SIDEBAR-MANUAL");
+await evalJs(openSidebarRename);
+await evalJs(
+  `(() => { const i = document.querySelector("#history .history-rename"); i.value = "侧栏定题"; i.dispatchEvent(new InputEvent("input", { bubbles: true })); return true; })()`
+);
+await waitFor(`__yanState().conversations[0].titled === true`, 5000);
+await evalJs(`document.querySelector("#history .history-rename").blur(); true`);
+check(
+  "sidebar rename still commits the input restored after the late auto title",
+  await evalJs(`__yanState().conversations[0].title === "侧栏定题" && __yanState().conversations[0].titleAuto === false`)
+);
+
 // 自动拟的题不限字数（40-title.js），手改才有 60 字上限：打开改名框又原样点走，算没改，
 // 不能被 renameConversation 的截断顺手改成手改的六十个字。
-await evalJs(`(() => { const c = __yanState().conversations[0]; c.title = "题".repeat(70); c.titleAuto = true; return true; })()`);
-const longId = await evalJs(`__yanState().conversations[0].id`);
-await evalJs(
-  `document.querySelector('#history [data-conversation="' + CSS.escape(${JSON.stringify(longId)}) + '"] .history-open').dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); true`
-);
-await waitFor(`!!document.querySelector("#history .history-rename")`, 2000);
-const longShown = await evalJs(`document.querySelector("#history .history-rename").value.length`);
+const showAutoTitle = async title => {
+  await evalJs(
+    `(() => { const c = __yanState().conversations[0]; c.title = ${JSON.stringify(title)}; c.titleAuto = true; return true; })()`
+  );
+  return evalJs(openSidebarRename);
+};
+const longShown = (await showAutoTitle("题".repeat(70))).length;
 await evalJs(`document.querySelector("#history .history-rename").blur(); true`);
 check(
   "sidebar rename without input leaves a long auto title untouched",
@@ -130,5 +142,23 @@ check(
       `({ shown: ${longShown}, title: __yanState().conversations[0].title.length, titleAuto: __yanState().conversations[0].titleAuto })`
     )
   )
+);
+// 自动题里的连续空格是原题的一部分；不敲字直接回车，也不是叫侧栏替它归一化。
+const spacedTitle = "测试  标题";
+const commitSidebar = `document.querySelector("#history .history-rename").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); true`;
+const spacedShown = await showAutoTitle(spacedTitle);
+await evalJs(commitSidebar);
+check(
+  "sidebar rename without input preserves consecutive spaces in an auto title",
+  spacedShown === spacedTitle &&
+    (await evalJs(
+      `__yanState().conversations[0].title === ${JSON.stringify(spacedTitle)} && __yanState().conversations[0].titleAuto === true`
+    ))
+);
+await showAutoTitle(spacedTitle);
+await evalJs(`document.querySelector("#history .history-rename").value = "改过的  题"; ${commitSidebar}`);
+check(
+  "sidebar rename still commits a changed value without an input event",
+  await evalJs(`__yanState().conversations[0].title === "改过的 题" && __yanState().conversations[0].titleAuto === false`)
 );
 close();

@@ -73,11 +73,11 @@ function renderHistory() {
     },
     typed =
       editing && renamingTyped && keyOf(editing) === renamingKey
-        ? { value: editing.value, start: editing.selectionStart, end: editing.selectionEnd }
+        ? { initial: editing.defaultValue, value: editing.value, start: editing.selectionStart, end: editing.selectionEnd }
         : null;
   const item = (c, inGroup = false) => {
     if (renamingKey === `chat:${c.id}`)
-      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed ? typed.value : c.title)}" maxlength="60" aria-label="${t(`重命名对话`)}"></div>`;
+      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(c.title)}" maxlength="60" aria-label="${t(`重命名对话`)}"></div>`;
     // 这一答写完了、帮手还在后台做，也算在忙；帮手的请示没有哪一答替它挂「等待确认」，按请示本身认
     const job = requestJob(c.id),
       running = !!job || crewRunning(c.id),
@@ -104,7 +104,7 @@ function renderHistory() {
       running = node.items.filter(c => requestJob(c.id)).length,
       renaming = renamingKey === node.dir,
       name = renaming
-        ? `<input class="history-rename group-rename" value="${escapeHtml(typed ? typed.value : title)}" maxlength="40" aria-label="${t(`组名`)}">`
+        ? `<input class="history-rename group-rename" value="${escapeHtml(title)}" maxlength="40" aria-label="${t(`组名`)}">`
         : `<span class="history-repo-name">${escapeHtml(title)}</span>`;
     return `<div class="history-repo-group${fold ? " collapsed" : ""}${here ? " holds-current" : ""}" data-repo="${escapeHtml(node.dir)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-repo-toggle="${escapeHtml(node.dir)}" title="${escapeHtml(node.dir)}\n${fold ? t("展开") : t("收起")}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">${t(`工`)}</span>${name}<small>${node.items.length}${fold && running ? t` · ${running} 生成中` : ""}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-history-workdir="${escapeHtml(node.dir)}" title="${t(`在此目录新建`)}">＋</button><button type="button" class="history-tool repo-new repo-more" data-repo-menu="${escapeHtml(node.dir)}" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(c => item(c)).join("")}</div>` : ""}</div>`;
   };
@@ -119,7 +119,7 @@ function renderHistory() {
       here = fold && items.some(c => c.id === currentId),
       renaming = renamingKey === key;
     const name = renaming
-      ? `<input class="history-rename group-rename" value="${escapeHtml(typed ? typed.value : group.name)}" maxlength="40" aria-label="${t(`分组改名`)}">`
+      ? `<input class="history-rename group-rename" value="${escapeHtml(group.name)}" maxlength="40" aria-label="${t(`分组改名`)}">`
       : `<span class="history-repo-name">${escapeHtml(group.name)}</span>`;
     return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}${here ? " holds-current" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">${t(`集`)}</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="${t(`在此组新建`)}">＋</button><button type="button" class="history-tool repo-new repo-more" data-group-menu="${escapeHtml(group.id)}" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(c => item(c, true)).join("")}</div>` : ""}</div>`;
   };
@@ -142,6 +142,9 @@ function renderHistory() {
     }
     const input = $("#history .history-rename");
     if (input) {
+      // 用单行输入框实际显示的初值作基准；重画时先续上初值，再放回改到一半的字。
+      input.defaultValue = typed ? typed.initial : input.value;
+      if (typed) input.value = typed.value;
       input.focus();
       if (typed) input.setSelectionRange(typed.start, typed.end);
       else input.select();

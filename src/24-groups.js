@@ -60,11 +60,14 @@ function cancelSideRename() {
   renamingTyped = false;
   renderHistory();
 }
-function commitSideRename(value) {
-  const key = renamingKey;
+/** @param {HTMLInputElement} input */
+function commitSideRename(input) {
+  const key = renamingKey,
+    value = input.value;
   renamingKey = null;
   renamingTyped = false;
-  if (!key) return renderHistory();
+  // 先比原值，再交给各路归一化：没改就不写；直接设置 value 也算改，不靠 input 事件判定。
+  if (!key || value === input.defaultValue) return renderHistory();
   if (key.startsWith("chat:")) renameConversation(key.slice(5), value);
   else if (key.startsWith("group:")) renameGroup(key.slice(6), value);
   else renameWorkdir(key, value);
@@ -442,7 +445,7 @@ $("#history").addEventListener("keydown", event => {
   if (!input.classList?.contains("history-rename")) return;
   if (event.key === "Enter") {
     event.preventDefault();
-    commitSideRename(input.value);
+    commitSideRename(input);
   } else if (event.key === "Escape") {
     event.stopPropagation();
     cancelSideRename();
@@ -457,7 +460,7 @@ $("#history").addEventListener(
   event => {
     const input = /** @type {HTMLInputElement} */ (event.target);
     // 侧栏重画时旧输入框被移走也会失焦：那不是改完了（重画已把敲的字接到新框里）
-    if (input.classList?.contains("history-rename") && renamingKey && !renderingHistory) commitSideRename(input.value);
+    if (input.classList?.contains("history-rename") && renamingKey && !renderingHistory) commitSideRename(input);
   },
   true
 );
