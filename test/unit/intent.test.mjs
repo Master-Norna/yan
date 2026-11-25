@@ -437,7 +437,9 @@ test("了结：只数开着的——旧事不撑上限、不算「另有根」�
   for (let i = 0; i < 20; i++)
     intent = f.applyIntentOps(intent, f.normalizeIntentOps(intent, finished(`旧${i}`)).ops, {
       at: `2026-11-${String(i + 1).padStart(2, "0")}`,
-      ask: "问"
+      ask: "问",
+      // 记下基准才算了结：取不到基准的凭据仍要继续采集
+      prints: { [`file:旧${i}.txt`]: `v${i}` }
     });
   assert.equal(Object.keys(intent.nodes).length, 40);
   assert.deepEqual(

@@ -389,7 +389,12 @@ function intentEvaluator(intent, now = {}, seen = new Set(), requirePrints = fal
     const node = intent.nodes[id];
     if (!node) return false;
     // 了结不再采集指纹；没记过基准的必要凭据尚不能退出采集。普通状态判定不受此条件影响。
-    if (requirePrints && SEALED.has(node.state) && node.seal && node.anchors.some(key => !keepHookAnchor(node, key) && !(key in node.seal.prints))) {
+    if (
+      requirePrints &&
+      SEALED.has(node.state) &&
+      node.seal &&
+      node.anchors.some(key => !keepHookAnchor(node, key) && !(key in node.seal.prints))
+    ) {
       memo.set(id, false);
       return false;
     }
