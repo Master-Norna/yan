@@ -58,6 +58,17 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       const why = sandbox.screenPath(relPath(workdir, target), { write });
       if (why) throw Error(why);
     }
+    // 字面路径过关不代表链接的实际目标也过关；存储根自身也可能是链接。
+    const real = await paths.canonicalPath(target),
+      storage = storeRoot(),
+      realStorage = storage ? await paths.canonicalPath(storage) : "";
+    const realGuard = sandbox.screenStorePath(real, storage) || sandbox.screenStorePath(real, realStorage);
+    if (realGuard) throw Error(realGuard);
+    if (boxed) {
+      const realRoot = await paths.canonicalPath(workdir),
+        why = sandbox.screenPath(relPath(realRoot, real), { write });
+      if (why) throw Error(why);
+    }
     return target;
   }
   // 路径不对时给一句线索，模型下一回就能找对，不必先列目录：同名的在目录里别处（多半记错了上一层），
