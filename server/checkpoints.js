@@ -348,8 +348,9 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
       if (unobserved(rel)) continue;
       const mode = then.modes.get(rel);
       if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash, mode });
-      else if (now.files.get(rel) !== hash || (mode !== undefined && now.modes.has(rel) && now.modes.get(rel) !== mode))
+      else if (now.files.get(rel) !== hash || (mode !== undefined && now.modes.has(rel) && now.modes.get(rel) !== mode)) {
         changes.push({ path: rel, kind: "changed", hash, mode });
+      }
     }
     // 那一刻读不了的（被占着的文件、进不去的夹）与忽略的，连同其下的，此刻有也不删
     const unclear = rel => {
@@ -430,7 +431,10 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
               fs.createWriteStream(temp, { flags: "wx", mode: 0o600 })
             );
             if (hash.digest("hex") !== change.hash) throw Error("检查点文件对象内容与编号不符");
-            if (process.platform !== "win32") fs.chmodSync(temp, change.mode ?? (stat?.isFile() ? stat.mode & 0o777 : 0o666 & ~process.umask()));
+            if (process.platform !== "win32") {
+              const fallbackMode = stat?.isFile() ? stat.mode & 0o777 : 0o666 & ~process.umask();
+              fs.chmodSync(temp, change.mode ?? fallbackMode);
+            }
             // 校验成功后才让原件让位；空夹之外的目录仍不动。
             if (stat?.isSymbolicLink()) fs.unlinkSync(target);
             else if (stat?.isDirectory()) fs.rmdirSync(target);
