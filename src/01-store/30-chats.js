@@ -192,6 +192,9 @@ function conversationsToSave() {
   for (const [key, job] of requestJobs) ids.add(job.conversationId || key);
   for (const id of titlingIds) ids.add(id);
   for (const id of compactingIds) ids.add(id);
+  // 帮手在后台做的那一段也要按节流落盘：主答收尾后 requestJobs 已撤、只剩 crews，
+  // 漏了它，帮手每步的结果只进内存（整页正常关闭另有 collectChatSpills 兜住，硬崩与 OOM 就丢了）
+  for (const id of crews.keys()) ids.add(id);
   return ids;
 }
 function nextChatStamp(id) {

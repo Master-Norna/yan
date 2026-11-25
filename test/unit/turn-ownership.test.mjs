@@ -45,14 +45,15 @@ test("合并：一页展开了较早的回复，另一页重答了后面的一�
   assert.equal(merged.forks.length, 1);
 });
 
-test("旁注与后台帮手也算这边正在写：同步不把它们手上的对象换掉", () => {
-  const { busyHere, requestJobs, crews } = load(["busyHere", "requestJobs", "crews"]);
+test("旁注与后台帮手也算这边正在写：同步不把它们手上的对象换掉，且帮手那一段按节流落盘", () => {
+  const { busyHere, conversationsToSave, requestJobs, crews } = load(["busyHere", "conversationsToSave", "requestJobs", "crews"]);
   assert.equal(busyHere("c"), false);
   requestJobs.set("side:t1", { conversationId: "c" });
   assert.equal(busyHere("c"), true);
   requestJobs.clear();
   crews.set("c", [{}]);
   assert.equal(busyHere("c"), true);
+  assert.ok(conversationsToSave().has("c"), "帮手在后台做的那一段也要进待存名单");
 });
 
 test("用量记在此刻表里的那份模型上：作答途中配置同步换过模型列表也不漏", () => {
