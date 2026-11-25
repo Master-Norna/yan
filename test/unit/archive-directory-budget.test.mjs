@@ -21,8 +21,8 @@ test("纯目录也受卷宗与草稿的遍历上限约束", async () => {
   const list = async () => {
     let status, data;
     await route(Readable.from([Buffer.from("{}")]), {
-      writeHead(code) { status = code; },
-      end(body) { data = JSON.parse(body); }
+      writeHead: code => (status = code),
+      end: body => (data = JSON.parse(body))
     });
     assert.equal(status, 200);
     return data;
