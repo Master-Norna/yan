@@ -499,7 +499,7 @@ function stageSaveDownloads() {
 function stageNoteDownload(name, path) {
   const item = stage.downloads.find(entry => !entry.path && (entry.name === name || path.endsWith(entry.name)));
   if (item) item.path = path;
-  else stage.downloads.unshift({ guid: uid(), name, url: "", total: 0, got: 0, state: "completed", at: Date.now(), path, by: t("执事") });
+  else stage.downloads.unshift({ guid: uid(), name, url: "", total: 0, got: 0, state: "completed", at: Date.now(), path, by: "执事" });
   stageSaveDownloads();
 }
 /** @param {HTMLElement} anchor */
@@ -520,7 +520,7 @@ function stageOpenDownloads(anchor) {
               ? t("已取消")
               : "✓",
         size = item.total ? formatFileSize(item.total) : "",
-        meta = [size, item.by || "", stageHost(item.url), stageAgo(item.at)].filter(Boolean).join(" · ");
+        meta = [size, tr(item.by || ""), stageHost(item.url), stageAgo(item.at)].filter(Boolean).join(" · ");
       return `<button type="button" class="stage-dl" data-stage-reveal="${escapeHtml(item.path || "")}" data-stage-name="${escapeHtml(item.name)}" title="${escapeHtml(item.path || item.url)}"><i class="stage-dl-file" style="--fc:${tone(item.name)}"></i><span class="stage-dl-name">${escapeHtml(item.name)}</span><span class="stage-dl-state${item.state === "canceled" ? " off" : ""}">${state}</span><span class="stage-dl-meta">${escapeHtml(meta)}</span></button>`;
     })
     .join("");
