@@ -21,6 +21,7 @@ const RETRY_MS = 5000;
 function validBook(saved) {
   return (
     Array.isArray(saved?.timers) &&
+    (typeof saved.seq === "number" || typeof saved.seq === "string") &&
     Number.isSafeInteger(Number(saved.seq)) &&
     Number(saved.seq) >= 0 &&
     saved.timers.every(
