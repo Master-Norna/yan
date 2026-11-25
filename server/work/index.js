@@ -161,17 +161,12 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
         if (res.destroyed) return;
         console.log(`${stamp()} $ （后台）${command.slice(0, 120)}`);
         const job = startBackground(command, workdir, boxed, seatbelt);
-        let delivered = false;
-        const disconnected = () => {
-          if (!delivered) discardBackground(job);
-        };
-        res.once("close", disconnected);
-        res.once("finish", () => {
-          delivered = true;
-          res.removeListener("close", disconnected);
+        // 编号交付前断开就撤掉这条后台记录与进程——与转入后台那一支同一个判据（见 server/http.js 的 onResponseSettled）
+        onResponseSettled(res, finished => {
+          if (!finished) discardBackground(job);
         });
         const report = await backgroundReport(job, 5000);
-        if (res.destroyed) return disconnected();
+        if (res.destroyed) return;
         return sendJson(res, 200, report);
       }
       console.log(`${stamp()} $ ${command.slice(0, 120)}`);
