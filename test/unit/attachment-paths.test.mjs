@@ -94,6 +94,26 @@ test("随问发来的图也给本机原件：只有 image_url，要嵌进文档�
   assert.match(latest, /本机原件：D:\\言\\附件\\i1\.png/);
 });
 
+test("批量没回、单件问到时也认：取到的按存储根记下，下一问不再问", async () => {
+  const calls = [],
+    f = load(["messageForApi", "attachmentPlaces", "setup:(fn,whole)=>{bridge=fn;getAttachment=whole;}"]);
+  f.setup(
+    async route => {
+      calls.push(route);
+      // 这一趟批量没回（原件刚到、或瞬时失败）：单件那口才有
+      return route === "/api/files/paths" ? { paths: {} } : { path: "D:\\言\\附件\\z1.zip" };
+    },
+    async () => ({ kind: "file", name: "包.zip", size: 8, data: "data:application/zip;base64,AAAA" })
+  );
+  const message = { id: "u4", role: "user", content: "看", attachments: [{ id: "z1", name: "包.zip", kind: "file", size: 8 }] },
+    places = await f.attachmentPlaces([message]);
+  assert.match(text(await f.messageForApi(message, true, 24000, true, places)), /本机原件路径：D:\\言\\附件\\z1\.zip/);
+  // 单件取到的也写回缓存：下一问不必再问桥接
+  const before = calls.length;
+  await f.attachmentPlaces([message]);
+  assert.equal(calls.length, before, "单件取到的路径也记进了缓存");
+});
+
 test("桥接：一批附件的原件路径，找不到的不回", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-paths-"));
   const { routes } = createFiles({ filesHome: () => root });

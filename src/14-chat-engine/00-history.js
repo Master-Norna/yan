@@ -165,6 +165,20 @@ async function attachmentPlaces(messages) {
   }
   return places;
 }
+// 一件附件的原件在哪：这一趟批量问来的（places）里没有，就单件再问一回——原件可能刚到、或那一趟瞬时失败。
+// 取到的按存储根记进缓存，往后同一件不必再问；取不到的把缘由交回调用方，说明里照实写
+/** @param {Attachment} metadata @param {Record<string, string>} places @returns {Promise<{ path: string, error?: string }>} */
+async function attachmentPlace(metadata, places) {
+  if (places[metadata.id]) return { path: places[metadata.id], error: "" };
+  try {
+    const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000)),
+      root = bootstrap.store?.root || "";
+    if (local?.path) attachmentPlaceCache.set(metadata.id, { root, path: String(local.path) });
+    return { path: String(local?.path || ""), error: "" };
+  } catch (error) {
+    return { path: "", error: String(error.message || error) };
+  }
+}
 // 一件附件写在说明里的后缀：本机原件在哪
 /** @param {Record<string, string>} places @param {{ id?: string }} file */
 function placeSuffix(places, file) {
@@ -224,15 +238,10 @@ async function messageForApi(message, latest, budget = inlineTextBudget(), image
     // 历史里的包也保留这条索引。先复制到工作目录再解压，来源在目录外时也不必放宽沙箱。
     // 没抽出正文、又大得不该整份送的文件同此：给路径，由模型用工具读
     if (fileKind(metadata.name).name === "archive") {
-      if (place)
-        notes += t`\n\n[压缩包：${metadata.name}；本机原件路径：${place}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`;
-      else
-        try {
-          const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
-          notes += t`\n\n[压缩包：${metadata.name}；本机原件路径：${local.path}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`;
-        } catch (error) {
-          notes += t`\n\n[压缩包 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}]`;
-        }
+      const at = place ? { path: place, error: "" } : await attachmentPlace(metadata, places);
+      notes += at.path
+        ? t`\n\n[压缩包：${metadata.name}；本机原件路径：${at.path}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]`
+        : t`\n\n[压缩包 ${metadata.name} 的本机原件暂不可用：${at.error}]`;
       continue;
     }
     // 早先消息里的图片只留一行占位，用不着原件：不必每问都把它从存储目录整份取回来。
@@ -248,16 +257,11 @@ async function messageForApi(message, latest, budget = inlineTextBudget(), image
       continue;
     }
     if (raw && metadata.size > INLINE_FILE_BYTES) {
-      const why = metadata.extractionError ? t`；本机没抽出正文：${metadata.extractionError}` : "";
-      if (place)
-        notes += t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${place}。需要时用工具读取，不要修改原件${why}]`;
-      else
-        try {
-          const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
-          notes += t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${local.path}。需要时用工具读取，不要修改原件${why}]`;
-        } catch (error) {
-          notes += t`\n\n[文件 ${metadata.name} 的本机原件暂不可用：${String(error.message || error)}${why}]`;
-        }
+      const why = metadata.extractionError ? t`；本机没抽出正文：${metadata.extractionError}` : "",
+        at = place ? { path: place, error: "" } : await attachmentPlace(metadata, places);
+      notes += at.path
+        ? t`\n\n[文件：${metadata.name}，${formatFileSize(metadata.size)}，过大未随消息附上；本机原件路径：${at.path}。需要时用工具读取，不要修改原件${why}]`
+        : t`\n\n[文件 ${metadata.name} 的本机原件暂不可用：${at.error}${why}]`;
       continue;
     }
     // 图片与要整份送的文件取原件；文本、抽出正文的只取正文
