@@ -30,7 +30,7 @@ function validBook(saved) {
         timer.id &&
         typeof timer.to === "string" &&
         timer.to &&
-        Number.isFinite(timer.created) &&
+        (timer.created === undefined || Number.isFinite(timer.created)) &&
         Number.isFinite(timer.due) &&
         (timer.every === undefined || (Number.isFinite(timer.every) && timer.every >= 1000))
     )
