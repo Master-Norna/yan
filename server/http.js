@@ -120,14 +120,19 @@ async function receiveUpload(req, limit, place) {
       }
       size += rest.length;
       if (size > limit) throw Object.assign(Error("请求内容过大"), { tooLarge: true });
-      if (rest.length) await out?.write(rest);
+      // FileHandle.write 可以短写，必须把这一块的剩余字节补全才能确认收到了 size 字节。
+      for (let offset = 0; offset < rest.length; ) {
+        const { bytesWritten } = await out.write(rest, offset, rest.length - offset);
+        if (!bytesWritten) throw Error("上传原件写盘没有进展");
+        offset += bytesWritten;
+      }
     }
     if (!out) throw Error("上传的内容不完整");
     await out.close();
     return { head: meta, file: temp, bytes: size };
   } catch (error) {
     await out?.close().catch(() => {});
-    if (temp) fs.rmSync(temp, { force: true });
+    if (out && temp) fs.rmSync(temp, { force: true });
     if (error.tooLarge) req.destroy();
     throw error;
   }
@@ -246,9 +251,12 @@ async function sendFile(req, res, file, { name, download = false }) {
   });
   if (req.method === "HEAD" || !size) return res.end();
   // 读到一半文件没了（预览途中被删、被移走）：头已发出，只能掐断这条连接，不然页面那头一直等着
-  fs.createReadStream(file, { start, end })
-    .on("error", () => res.destroy())
-    .pipe(res);
+  if (res.destroyed) return;
+  const source = fs.createReadStream(file, { start, end });
+  const stop = () => source.destroy();
+  res.once("close", stop);
+  source.once("close", () => res.removeListener("close", stop));
+  source.on("error", () => res.destroy()).pipe(res);
 }
 
 // 交给系统的默认程序打开一件文件（预览认不得、或只抽得出结构时，看原样）。
