@@ -133,77 +133,72 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       created: !existing
     };
   }, failed);
-  async function handleWorkRun(req, res) {
-    try {
-      const body = await readJson(req),
-        workdir = resolveWorkdir(body.workdir),
-        command = String(body.command || "").trim();
-      if (!command) throw Error("指令不能为空");
-      if (!fs.existsSync(workdir)) throw Error("工作目录已不存在，请重新发送以重建，或另起对话");
-      const guarded = sandbox.screenStoreCommand(command, storeRoot(), workdir);
-      if (guarded) throw Error(guarded);
-      const boxed = body.sandbox === true,
-        // 审而后行里规则拦下、审查模型照用户的原话准了的这一条：不再过宽的沙箱与审查规则（存储根那一道、调桥接与藏字仍守）
-        reviewed = body.permission === "review" && body.reviewed === true,
-        // macOS 上严档沙箱再加一道 seatbelt：静态筛查管不住脚本里现拼的写盘路径（见 server/work/shell.js）
-        seatbelt = strictBox(body);
-      const unreviewable = reviewed && sandbox.screenUnreviewable(command);
-      if (unreviewable) throw Error(`审查拒绝：${unreviewable}`);
-      if (boxed && !reviewed) {
-        const why = looseTier(body) ? sandbox.screenLoose(command) : sandbox.screenCommand(command, workdir);
-        if (why) throw Error(why);
-      }
-      if (body.permission === "review" && !reviewed) {
-        const why = sandbox.screenAutoReview(command, { workdir });
-        if (why) throw Error(why);
-      }
-      if (body.background === true) {
-        if (res.destroyed) return;
-        console.log(`${stamp()} $ （后台）${command.slice(0, 120)}`);
-        const job = startBackground(command, workdir, boxed, seatbelt);
-        let delivered = false;
-        const disconnected = () => {
-          if (!delivered) discardBackground(job);
-        };
-        res.once("close", disconnected);
-        res.once("finish", () => {
-          delivered = true;
-          res.removeListener("close", disconnected);
-        });
-        const report = await backgroundReport(job, 5000);
-        if (res.destroyed) return disconnected();
-        return sendJson(res, 200, report);
-      }
-      console.log(`${stamp()} $ ${command.slice(0, 120)}`);
-      // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉。指令不拿目录锁，见 locks.js
-      const signal = requestSignal(res);
-      // 模型的 run_command 带 ticket：到时不掐，转入后台接着跑（见 runForeground）。前台最多等十分钟——
-      // 指令能跑多久不受它限，只是模型不该被一条指令攥住十分钟以上（单位给错，60000 当毫秒，就是十几个小时）
-      if (body.ticket) {
-        const waitMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 600000),
-          { job, report } = await runForeground(command, workdir, boxed, waitMs, signal, String(body.ticket), seatbelt);
-        if (!report) return;
-        // 转入后台后直到响应写完仍可能断开。编号未交付就撤掉这条后台记录及进程。
-        if (report.handedOff)
-          onResponseSettled(res, finished => {
-            if (!finished) discardBackground(job);
-          });
-        if (res.destroyed) return;
-        return sendJson(res, 200, report);
-      }
-      // 探针、测试这类自己跑的：到时即掐。封顶在 2³¹−1 毫秒（约 24 天）只因 setTimeout 超过它会溢出、当作 1 毫秒
-      const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 2147483647);
-      // 守的钩子跑测试：将要做的那一步交给它（见 src/19-intent/10-store.js 的 keepHook）
-      const hook = body.hook && typeof body.hook === "object" ? body.hook : null,
-        env = hook ? { YAN_TOOL: String(hook.tool || ""), YAN_TARGET: String(hook.target || "") } : {};
-      const started = Date.now(),
-        result = await runShell(command, workdir, timeoutMs, signal, { boxed, env, seatbelt });
-      if (result.aborted) console.log(`${stamp()}   已中止：${command.slice(0, 80)}`);
-      if (!res.writableEnded && !res.destroyed) sendJson(res, 200, { ...result, durationMs: Date.now() - started });
-    } catch (error) {
-      sendJson(res, 400, { error: failed(error) });
+  const handleWorkRun = jsonRoute(async (body, req, res) => {
+    const workdir = resolveWorkdir(body.workdir),
+      command = String(body.command || "").trim();
+    if (!command) throw Error("指令不能为空");
+    if (!fs.existsSync(workdir)) throw Error("工作目录已不存在，请重新发送以重建，或另起对话");
+    const guarded = sandbox.screenStoreCommand(command, storeRoot(), workdir);
+    if (guarded) throw Error(guarded);
+    const boxed = body.sandbox === true,
+      // 审而后行里规则拦下、审查模型照用户的原话准了的这一条：不再过宽的沙箱与审查规则（存储根那一道、调桥接与藏字仍守）
+      reviewed = body.permission === "review" && body.reviewed === true,
+      // macOS 上严档沙箱再加一道 seatbelt：静态筛查管不住脚本里现拼的写盘路径（见 server/work/shell.js）
+      seatbelt = strictBox(body);
+    const unreviewable = reviewed && sandbox.screenUnreviewable(command);
+    if (unreviewable) throw Error(`审查拒绝：${unreviewable}`);
+    if (boxed && !reviewed) {
+      const why = looseTier(body) ? sandbox.screenLoose(command) : sandbox.screenCommand(command, workdir);
+      if (why) throw Error(why);
     }
-  }
+    if (body.permission === "review" && !reviewed) {
+      const why = sandbox.screenAutoReview(command, { workdir });
+      if (why) throw Error(why);
+    }
+    if (body.background === true) {
+      if (res.destroyed) return;
+      console.log(`${stamp()} $ （后台）${command.slice(0, 120)}`);
+      const job = startBackground(command, workdir, boxed, seatbelt);
+      let delivered = false;
+      const disconnected = () => {
+        if (!delivered) discardBackground(job);
+      };
+      res.once("close", disconnected);
+      res.once("finish", () => {
+        delivered = true;
+        res.removeListener("close", disconnected);
+      });
+      const report = await backgroundReport(job, 5000);
+      if (res.destroyed) return disconnected();
+      return report;
+    }
+    console.log(`${stamp()} $ ${command.slice(0, 120)}`);
+    // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉。指令不拿目录锁，见 locks.js
+    const signal = requestSignal(res);
+    // 模型的 run_command 带 ticket：到时不掐，转入后台接着跑（见 runForeground）。前台最多等十分钟——
+    // 指令能跑多久不受它限，只是模型不该被一条指令攥住十分钟以上（单位给错，60000 当毫秒，就是十几个小时）
+    if (body.ticket) {
+      const waitMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 600000),
+        { job, report } = await runForeground(command, workdir, boxed, waitMs, signal, String(body.ticket), seatbelt);
+      if (!report) return;
+      // 转入后台后直到响应写完仍可能断开。编号未交付就撤掉这条后台记录及进程。
+      if (report.handedOff)
+        onResponseSettled(res, finished => {
+          if (!finished) discardBackground(job);
+        });
+      if (res.destroyed) return;
+      return report;
+    }
+    // 探针、测试这类自己跑的：到时即掐。封顶在 2³¹−1 毫秒（约 24 天）只因 setTimeout 超过它会溢出、当作 1 毫秒
+    const timeoutMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 2147483647);
+    // 守的钩子跑测试：将要做的那一步交给它（见 src/19-intent/10-store.js 的 keepHook）
+    const hook = body.hook && typeof body.hook === "object" ? body.hook : null,
+      env = hook ? { YAN_TOOL: String(hook.tool || ""), YAN_TARGET: String(hook.target || "") } : {};
+    const started = Date.now(),
+      result = await runShell(command, workdir, timeoutMs, signal, { boxed, env, seatbelt });
+    if (result.aborted) console.log(`${stamp()}   已中止：${command.slice(0, 80)}`);
+    return { ...result, durationMs: Date.now() - started };
+  }, failed);
   // 页面说有话要递（用户补言、主模型递话给帮手）：那条前台指令转入后台，结果当即交回
   const handleWorkRelease = jsonRoute(async body => releaseForeground(body.ticket), failed);
   const handleWorkCheck = jsonRoute(
@@ -212,15 +207,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
     failed
   );
   // 等一条后台指令结束：请求一直挂着（走总线不占连接），结束了才回；页面停了、关了，请求随之作罢
-  async function handleWorkWatch(req, res) {
-    try {
-      const body = await readJson(req),
-        result = await watchBackground(body.id, body.key, requestSignal(res), res);
-      if (!res.writableEnded && !res.destroyed) sendJson(res, 200, result);
-    } catch (error) {
-      sendJson(res, 400, { error: failed(error) });
-    }
-  }
+  const handleWorkWatch = jsonRoute(async (body, req, res) => watchBackground(body.id, body.key, requestSignal(res), res), failed);
   // 发指令前先问一声会不会拦。问而后行（没说档位的也算）问严的沙箱——会拦的照样请示，用户批了这一条就出沙箱跑；
   // 审而后行问宽的沙箱、往外发的几样与审查规则——会拦的交专司里的审查模型再判（见 src/15-tools/03-review.js），
   // 准了即带 reviewed 来跑；审查也不放行的（调桥接、藏字）标 hard，不必去问。kind 只给审查算「同类外发做过没有」
