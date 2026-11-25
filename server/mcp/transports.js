@@ -243,7 +243,7 @@ class HttpTransport {
       this.aborts.delete(abort);
       if (message.id !== undefined && this.reads.get(message.id) === abort) this.reads.delete(message.id);
     };
-    if (message.id !== undefined) this.reads.set(message.id, abort);
+    if (message.method && message.id !== undefined) this.reads.set(message.id, abort);
     // 回复走事件流时 send 先返回、流还在读：这次请求的掐断开关要留到流读完，close() 才掐得到它
     let streaming = false;
     try {
@@ -278,7 +278,7 @@ class HttpTransport {
         })
           .catch(error => {
             // 自己 close() 掐的不算；流半路断了，告诉等这条回复的那一问，别让它干等到超时（已经回过的，上层认不出这个 id，自然不理）
-            if (!abort.signal.aborted && message.id !== undefined)
+            if (!abort.signal.aborted && message.method && message.id !== undefined)
               this.onmessage({ jsonrpc: "2.0", id: message.id, error: { message: `事件流中断：${error?.message || error}` } });
           })
           .finally(release);
@@ -320,18 +320,27 @@ class SseTransport {
     this.onmessage = () => {};
     /** @type {(error: Error) => void} */
     this.onclose = () => {};
-    this.abort = new AbortController();
+    this.connectionAbort = new AbortController();
+    this.posts = new Set();
+    this.reads = new Map();
   }
   async start() {
     const response = await fetch(this.url, {
       headers: { Accept: "text/event-stream", ...this.headers, ...OUTBOUND },
-      signal: this.abort.signal,
+      signal: this.connectionAbort.signal,
       redirect: "error"
     });
     if (!response.ok) throw await httpError(response);
     // 第一条 endpoint 事件告诉往哪里投递，此后的 message 事件都是回来的消息
     await new Promise((resolve, reject) => {
-      readEvents(response, (event, data) => {
+      const disconnected = error => {
+        reject(error); // 若还没收到 endpoint，握手也应立即失败。
+        if (this.connectionAbort.signal.aborted) return;
+        // GET 一断，这条会话的投递都不再等：无编号的通知不在上层 pending 里。
+        this.close(error);
+        this.onclose(error);
+      };
+      void readEvents(response, (event, data) => {
         if (event === "endpoint") {
           // 远端 MCP 不得借 endpoint 通知将用户的自定义头（凭据）送到另一来源。
           const endpoint = new URL(data, this.url);
@@ -339,27 +348,40 @@ class SseTransport {
           this.endpoint = endpoint.href;
           resolve();
         } else if (event === "message") this.onmessage(JSON.parse(data));
-      })
-        .then(() => this.onclose(Error("事件流已断开")))
-        .catch(error => {
-          reject(error);
-          this.onclose(error);
-        });
+      }).then(() => disconnected(Error("事件流已断开")), disconnected);
     });
   }
   async send(message) {
-    const response = await fetch(this.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...this.headers, ...OUTBOUND },
-      body: JSON.stringify(message),
-      redirect: "error"
-    });
-    if (!response.ok) throw await httpError(response);
-    // 旧式 SSE 的投递回执不采用正文（通行是 202 空体）：有也不读，当场取消
-    await response.body?.cancel().catch(() => {});
+    this.connectionAbort.signal.throwIfAborted();
+    const abort = new AbortController();
+    this.posts.add(abort);
+    if (message.method && message.id !== undefined) this.reads.set(message.id, abort);
+    try {
+      const response = await fetch(this.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.headers, ...OUTBOUND },
+        body: JSON.stringify(message),
+        signal: abort.signal,
+        redirect: "error"
+      });
+      if (!response.ok) throw await httpError(response);
+      // 旧式 SSE 的投递回执不采用正文（通行是 202 空体）：有也不读，当场取消
+      await response.body?.cancel().catch(() => {});
+    } finally {
+      this.posts.delete(abort);
+      if (this.reads.get(message.id) === abort) this.reads.delete(message.id);
+    }
   }
-  close() {
-    this.abort.abort();
+  abort(id) {
+    this.reads.get(id)?.abort();
+  }
+  /** @param {Error} [error] */
+  close(error) {
+    if (this.connectionAbort.signal.aborted) return;
+    this.connectionAbort.abort(error);
+    for (const abort of this.posts) abort.abort(error);
+    this.posts.clear();
+    this.reads.clear();
   }
 }
 

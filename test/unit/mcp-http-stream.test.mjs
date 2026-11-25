@@ -2,19 +2,41 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { Readable } from "node:stream";
 
 const require = createRequire(import.meta.url);
 const { createTransport, readEvents } = require("../../server/mcp/transports.js");
 const { McpClient } = require("../../server/mcp/client.js");
+const createMcp = require("../../server/mcp/index.js");
 const { OUTBOUND_MARK } = require("../../server/web.js");
 
-// 一个回事件流的假服务：流先不结束，由测试决定何时出错
-function fakeStream() {
+// 一个回事件流的假服务：流先不结束，由测试决定何时出错或收尾
+function fakeStream(signal) {
   let controller;
   const body = new ReadableStream({ start: c => (controller = c) });
   const response = new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
-  return { response, fail: error => controller.error(error) };
+  const abort = () => fail(signal.reason);
+  const fail = error => {
+    signal?.removeEventListener("abort", abort);
+    controller.error(error);
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  return {
+    response,
+    write: text => controller.enqueue(Buffer.from(text)),
+    end() {
+      signal?.removeEventListener("abort", abort);
+      controller.close();
+    },
+    fail
+  };
 }
+function legacyStream(signal) {
+  const stream = fakeStream(signal);
+  stream.write("event: endpoint\ndata: /messages\n\n");
+  return stream;
+}
+const waitForAbort = signal => new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 test("close() 掐断仍在读的事件流", async t => {
@@ -103,21 +125,19 @@ test("出站请求都带标记：MCP 服务借跳转盲打桥接受信接口的�
   const seen = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     seen.push({ url: String(url), headers: init?.headers || {} });
-    if (String(url).endsWith("/sse")) {
-      return new Response([Buffer.from("event: endpoint\ndata: /messages\n\n")], {
-        status: 200,
-        headers: { "content-type": "text/event-stream" }
-      });
-    }
+    if (String(url).endsWith("/sse")) return legacyStream(init.signal).response;
     return new Response("{}", { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "s1" } });
   });
   const http = createTransport({ url: "http://127.0.0.1:1/mcp" });
   await http.send({ jsonrpc: "2.0", id: 1, method: "initialize" });
   http.close();
   const sse = createTransport({ url: "http://127.0.0.1:1/sse", type: "sse" });
-  sse.onclose = () => {};
-  await sse.start();
-  await sse.send({ jsonrpc: "2.0", id: 2, method: "initialize" });
+  try {
+    await sse.start();
+    await sse.send({ jsonrpc: "2.0", id: 2, method: "initialize" });
+  } finally {
+    sse.close();
+  }
   assert.ok(seen.length >= 4, `出口没走全：${seen.map(item => item.url).join(" ")}`);
   for (const item of seen) assert.equal(item.headers[OUTBOUND_MARK], "1", `${item.url} 漏了标记`);
 });
@@ -150,3 +170,137 @@ test("旧式 SSE transport 的 abort 是 AbortController，超时不得把它当
   assert.equal(client.pending.size, 0, "超时应正常结清，而不是被 TypeError 打断");
   assert.equal(transport.abort.signal.aborted, false, "单条请求超时不能关闭整个 SSE 连接");
 });
+
+test("旧式 SSE：超时只取消本次 POST，关闭时取消其余投递和 GET", async t => {
+  const signals = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    signals.push(init.signal);
+    if (!init.method) return legacyStream(init.signal).response;
+    return waitForAbort(init.signal);
+  });
+  const transport = createTransport({ url: "http://127.0.0.1:1/sse", type: "sse" });
+  const closed = [];
+  transport.onclose = error => closed.push(error);
+  await transport.start();
+  const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+  client.transport = transport;
+  const other = transport.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  const otherRejected = assert.rejects(other, /aborted/i);
+  try {
+    await assert.rejects(client.request("tools/call", {}, 10), /超时/);
+    assert.equal(signals[2].aborted, true);
+    assert.equal(signals[1].aborted, false);
+    assert.equal(signals[0].aborted, false);
+  } finally {
+    transport.close();
+    await otherRejected;
+  }
+  transport.close();
+  await tick();
+  assert.equal(signals[0].aborted, true);
+  assert.equal(signals[1].aborted, true);
+  assert.deepEqual(closed, [], "主动关闭及其引起的读取错误不再回报断线");
+});
+
+test("旧式 SSE：未收到 endpoint 就结束时立即拒绝握手", async t => {
+  t.mock.method(globalThis, "fetch", async () => new Response(""));
+  const transport = createTransport({ url: "http://127.0.0.1:1/sse", type: "sse" });
+  await assert.rejects(transport.start(), /事件流已断开/);
+});
+
+for (const [mode, errorText] of [
+  ["GET 正常结束", "事件流已断开"],
+  ["GET 读取出错", "读取连接失败"],
+  ["POST 等到握手上限", "notifications/initialized 超时"]
+])
+  test(`旧式 SSE：${mode}时，结清所有投递并返回 MCP 清单`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const base = "http://127.0.0.1:1";
+    let stream, getSignal, status, result;
+    const posts = [];
+    t.mock.method(globalThis, "fetch", async (url, init) => {
+      if (url === `${base}/sse`) {
+        getSignal = init.signal;
+        return (stream = legacyStream(getSignal)).response;
+      }
+      const { id, method } = JSON.parse(init.body);
+      if (url === `${base}/http`) {
+        if (method === "notifications/initialized") return new Response(null, { status: 202 });
+        const result = method === "tools/list" ? { tools: [{ name: "read" }] } : { protocolVersion: "2025-06-18" };
+        return Response.json({ jsonrpc: "2.0", id, result });
+      }
+      posts.push({ method, signal: init.signal });
+      // initialize 的 RPC 回复已经从 GET 到达，但它的 POST 与无编号通知的 POST 都还没收到回执。
+      if (method === "initialize") {
+        const reply = { jsonrpc: "2.0", id, result: { protocolVersion: "2025-06-18" } };
+        stream.write(`event: message\ndata: ${JSON.stringify(reply)}\n\n`);
+      }
+      return waitForAbort(init.signal);
+    });
+    const { routes } = createMcp({ version: "0", toolEnv: env => env });
+    const list = (servers, res) => routes["POST /api/mcp/list"](Readable.from([Buffer.from(JSON.stringify({ servers }))]), res);
+    const res = {
+      writeHead(code) {
+        status = code;
+      },
+      end(text) {
+        result = JSON.parse(text);
+      }
+    };
+    const listing = list({ legacy: { url: `${base}/sse`, type: "sse" }, healthy: { url: `${base}/http` } }, res);
+    try {
+      await tick();
+      assert.deepEqual(
+        posts.map(post => post.method),
+        ["initialize", "notifications/initialized"]
+      );
+      assert.ok(!getSignal.aborted && posts.every(post => !post.signal.aborted));
+      assert.equal(status, undefined, "通知尚未收到回执，不能提前完成握手");
+      if (mode === "GET 正常结束") stream.end();
+      else if (mode === "GET 读取出错") stream.fail(Error(errorText));
+      else {
+        t.mock.timers.tick(59999);
+        await tick();
+        assert.equal(status, undefined, "通知享有同样的握手等待上限");
+        t.mock.timers.tick(1);
+      }
+      await tick();
+      assert.equal(status, 200, "断线或超时都须结清正在等待的 MCP 清单");
+      await listing;
+      assert.deepEqual(result.servers.legacy, { ok: false, error: errorText });
+      assert.equal(result.servers.healthy.tools[0].name, "read");
+      assert.equal(getSignal.aborted, true);
+      assert.ok(
+        posts.every(post => post.signal.aborted),
+        "无论 POST 是否有编号，都要收掉"
+      );
+    } finally {
+      await list({}, { writeHead() {}, end() {} });
+      await listing;
+    }
+  });
+
+for (const type of ["http", "sse"])
+  test(`MCP ${type}：服务端同编号请求的回执不占用本机请求的取消开关`, async t => {
+    const signals = [];
+    t.mock.method(globalThis, "fetch", async (_url, init) => {
+      if (!init.method) return legacyStream(init.signal).response;
+      signals.push(init.signal);
+      return waitForAbort(init.signal);
+    });
+    const transport = createTransport({ url: "http://127.0.0.1:1/mcp", type });
+    await transport.start();
+    const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+    client.transport = transport;
+    try {
+      const pending = client.request("tools/call", {}, 20, 17);
+      client.receive({ jsonrpc: "2.0", id: 17, method: "ping" });
+      await assert.rejects(pending, /超时/);
+      assert.equal(signals.length, 2);
+      assert.equal(signals[0].aborted, true);
+      assert.equal(signals[1].aborted, false);
+    } finally {
+      transport.close();
+    }
+    assert.equal(signals[1].aborted, true);
+  });
