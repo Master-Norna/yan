@@ -356,7 +356,7 @@ const look = await evalJs(
 );
 check(
   "side note ran a lookup round and answered from it",
-  look.text.endsWith("SIDELOOK|call_sl") && look.steps === "done",
+  /SIDELOOK\|call_[0-9a-z]+$/i.test(look.text) && look.steps === "done",
   JSON.stringify(look)
 );
 const lookCost = await evalJs(

@@ -133,26 +133,31 @@ test("整份答复里的 tool_calls 归位：照次序编上 index，两件各�
   const assistant = await turn(f);
   assert.equal(assistant.status, "complete");
   assert.deepEqual(
-    f.runs.map(step => [step.id, step.name, step.arguments]),
+    f.runs.map(step => [step.name, step.arguments]),
     [
-      ["call_a", "probe", '{"x":1}'],
-      ["call_b", "read_file", '{"path":"a.txt"}']
+      ["probe", '{"x":1}'],
+      ["read_file", '{"path":"a.txt"}']
     ]
   );
   const sent = assistantTurns(f.requests[1]);
   assert.deepEqual(
-    sent[0].tool_calls.map(item => [item.id, item.function.name, item.function.arguments]),
+    sent[0].tool_calls.map(item => [item.function.name, item.function.arguments]),
     [
-      ["call_a", "probe", '{"x":1}'],
-      ["call_b", "read_file", '{"path":"a.txt"}']
+      ["probe", '{"x":1}'],
+      ["read_file", '{"path":"a.txt"}']
     ]
   );
+  // 步骤编号由本地分配：两件各一个，历史里 tool_calls 与交回的 tool 消息用同一份
+  const callIds = sent[0].tool_calls.map(item => item.id);
+  assert.equal(new Set(callIds).size, 2);
+  const toolMsgs = f.requests[1].filter(item => item.role === "tool");
   assert.deepEqual(
-    f.requests[1].filter(item => item.role === "tool").map(item => [item.tool_call_id, item.content]),
-    [
-      ["call_a", "probe 已完成"],
-      ["call_b", "read_file 已完成"]
-    ]
+    toolMsgs.map(item => item.tool_call_id),
+    callIds
+  );
+  assert.deepEqual(
+    toolMsgs.map(item => item.content),
+    ["probe 已完成", "read_file 已完成"]
   );
 });
 
@@ -174,10 +179,10 @@ test("整份答复里两件都带 index: 0：位置才算数，仍是两件，�
   assert.equal(assistant.status, "complete");
   // 上游自带的 index 若盖掉位置，readSse 会把两件并成一格，参数拼成 {"x":1}{"x":2}，白跑一轮
   assert.deepEqual(
-    f.runs.map(step => [step.id, step.name, step.arguments]),
+    f.runs.map(step => [step.name, step.arguments]),
     [
-      ["call_a", "probe", '{"x":1}'],
-      ["call_b", "probe", '{"x":2}']
+      ["probe", '{"x":1}'],
+      ["probe", '{"x":2}']
     ]
   );
 });
