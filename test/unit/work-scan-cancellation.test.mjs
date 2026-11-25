@@ -26,8 +26,12 @@ test("cancelled list and search stop before scanning the next directory", async 
     const res = Object.assign(new EventEmitter(), {
       destroyed: false,
       writableEnded: false,
-      writeHead() { assert.fail("cancelled scan must not write a response"); },
-      end() { assert.fail("cancelled scan must not end a response"); }
+      writeHead() {
+        assert.fail("cancelled scan must not write a response");
+      },
+      end() {
+        assert.fail("cancelled scan must not end a response");
+      }
     });
     const original = fs.promises.readdir;
     let reads = 0;
