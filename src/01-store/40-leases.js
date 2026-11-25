@@ -35,8 +35,15 @@ function syncLeases() {
   if (leaseClaims.size) return Promise.all([...leaseClaims.values()]);
   if (leasePosting) return leasePosting;
   // 正作答的都算上（旁注的作业按它所在的对话记），后台还有帮手在做的也算；作答完了、最后一次存盘也落了地的松手
-  const running = new Set([...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys(), ...rewinding].filter(Boolean));
-  for (const id of running) leaseHold.add(id);
+  const activeJobs = [...requestJobs].map(([key, job]) => job.conversationId || key),
+    running = new Set([...activeJobs, ...crews.keys(), ...rewinding].filter(Boolean));
+  for (const id of running) {
+    leaseHold.add(id);
+    if (!leaseScopes.has(id)) {
+      const conversation = store.conversations.find(c => c.id === id);
+      leaseScopes.set(id, { root: workRoot(conversation), rewind: rewinding.has(id) });
+    }
+  }
   for (const id of [...leaseHold])
     if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) {
       leaseHold.delete(id);
@@ -89,7 +96,7 @@ function syncLeases() {
 }
 // 开工前认领：报到每隔几秒才一次，两页几乎同时点发送时都以为没人在写。认领就是一次带上这段的报到，
 // 桥接一次只办一件，先到的那页记上了，后到的一页看见它已有主就让开。无共享目录时照旧放行；共享目录已接通但认领失败不放行
-function claimConversation(id, root = "", rewind = false) {
+function claimConversation(id, root = workRoot(store.conversations.find(c => c.id === id)), rewind = false) {
   if (leaseReleased.has(id)) return Promise.resolve(false);
   if (!chatsOnline()) return Promise.resolve(true);
   if (leaseClaims.has(id)) return leaseClaims.get(id);
