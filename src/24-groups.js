@@ -4,8 +4,6 @@
 // 组能带的两样都只管新起的对话：预设（提示词、工具、模型、权限一并换上）与默认目录（绑上即为行）。
 // 组里的对话置顶，只在组内排到最前，不跳出组去。
 // 「工」组是同一套画法的另一头：它由对话的 workdir 派生，不另存实体，组首「⋯」只有改名（只改侧栏显示，不动真实目录）与删除（整组对话一并移除）
-/** @type {string|null} 侧栏里正在改名的那一段：键同 collapsedRepos——「集」组是 group:组 id，目录组是目录 */
-let renamingSection = null;
 /** @type {string|null} 分组页上点开的那一组；空即列表 */
 let groupPageId = null;
 
@@ -46,18 +44,31 @@ function newChatInGroup(id) {
   newChat();
 }
 function startGroupRename(id) {
-  startSectionRename(`group:${id}`);
+  startSideRename(`group:${id}`);
 }
-/** @param {string} key 侧栏里那一段的键：group:组 id，或目录 */
-function startSectionRename(key) {
-  // 对话条目的改名与这里同时只留一处（见 06-mode-welcome/30-history.js 的 startRename）
-  renamingId = null;
-  renamingDirty = false;
-  renamingSection = key;
+/** @param {string} key chat:对话 id、group:组 id，或目录 */
+function startSideRename(key) {
+  renamingKey = key;
+  renamingTyped = false;
   renderHistory();
-  const input = /** @type {HTMLInputElement|null} */ ($("#history .group-rename"));
+  const input = /** @type {HTMLInputElement|null} */ ($("#history .history-rename"));
   input?.focus();
   input?.select();
+}
+function cancelSideRename() {
+  renamingKey = null;
+  renamingTyped = false;
+  renderHistory();
+}
+function commitSideRename(value) {
+  const key = renamingKey;
+  renamingKey = null;
+  renamingTyped = false;
+  if (!key) return renderHistory();
+  if (key.startsWith("chat:")) renameConversation(key.slice(5), value);
+  else if (key.startsWith("group:")) renameGroup(key.slice(6), value);
+  else renameWorkdir(key, value);
+  renderHistory();
 }
 function renameGroup(id, value) {
   const group = groupsList().find(item => item.id === id),
@@ -95,14 +106,6 @@ function renameWorkdir(dir, value) {
     names[dir] = name;
   }
   saveStore();
-}
-function commitSectionRename(value) {
-  const key = renamingSection;
-  renamingSection = null;
-  if (!key) return renderHistory();
-  if (key.startsWith("group:")) renameGroup(key.slice(6), value);
-  else renameWorkdir(key, value);
-  renderHistory();
 }
 async function dissolveGroup(id) {
   const group = groupsList().find(item => item.id === id);
@@ -148,7 +151,7 @@ function openRepoMenu(dir, anchor) {
   openMenu(
     anchor,
     [
-      { id: "rename", label: t("改名"), run: () => startSectionRename(dir) },
+      { id: "rename", label: t("改名"), run: () => startSideRename(dir) },
       { id: "delete", label: t("删除"), danger: true, run: () => void removeWorkdirGroup(dir) }
     ],
     { kind: "group", key: dir }
@@ -427,8 +430,8 @@ $("#history").addEventListener("dblclick", event => {
     set = target.closest("[data-group-toggle]"),
     repo = set ? null : target.closest("[data-repo-toggle]");
   if (!set && !repo) return;
-  if (renamingSection) return;
-  startSectionRename(set ? `group:${set.dataset.groupToggle}` : repo.dataset.repoToggle);
+  if (renamingKey) return;
+  startSideRename(set ? `group:${set.dataset.groupToggle}` : repo.dataset.repoToggle);
 });
 $("#history").addEventListener("keydown", event => {
   const input = /** @type {HTMLInputElement} */ (event.target);
@@ -440,22 +443,25 @@ $("#history").addEventListener("keydown", event => {
     event.preventDefault();
     return input.click();
   }
-  if (!input.classList?.contains("group-rename")) return;
+  if (!input.classList?.contains("history-rename")) return;
   if (event.key === "Enter") {
     event.preventDefault();
-    commitSectionRename(input.value);
+    commitSideRename(input.value);
   } else if (event.key === "Escape") {
     event.stopPropagation();
-    renamingSection = null;
-    renderHistory();
+    cancelSideRename();
   }
+});
+$("#history").addEventListener("input", event => {
+  const input = /** @type {HTMLElement} */ (event.target);
+  if (input.classList?.contains("history-rename") && renamingKey) renamingTyped = true;
 });
 $("#history").addEventListener(
   "blur",
   event => {
     const input = /** @type {HTMLInputElement} */ (event.target);
     // 侧栏重画时旧输入框被移走也会失焦：那不是改完了（重画已把敲的字接到新框里）
-    if (input.classList?.contains("group-rename") && renamingSection && !renderingHistory) commitSectionRename(input.value);
+    if (input.classList?.contains("history-rename") && renamingKey && !renderingHistory) commitSideRename(input.value);
   },
   true
 );

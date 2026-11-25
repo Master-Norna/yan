@@ -11,7 +11,7 @@ function openHistoryMenu(id, anchor) {
     anchor,
     [
       { id: "pin", label: c.pinned ? t("取消置顶") : t("置顶"), run: () => togglePin(id) },
-      { id: "rename", label: t("改名"), run: () => startRename(id) },
+      { id: "rename", label: t("改名"), run: () => startSideRename(`chat:${id}`) },
       {
         id: "bind",
         label: isWork(c) ? t("更换目录") : t("绑定目录"),
@@ -126,21 +126,6 @@ function togglePin(id) {
   saveStore();
   renderHistory();
 }
-function startRename(id) {
-  // 两处改名同时只留一处：「集」「工」组首与对话条目共用侧栏里同一个改名框位（见 07-render/10-history.js 的 typed）
-  renamingSection = null;
-  renamingId = id;
-  renamingDirty = false;
-  renderHistory();
-}
-function commitRename(value) {
-  const id = renamingId;
-  renamingId = null;
-  const changed = renamingDirty;
-  renamingDirty = false;
-  if (id && changed) renameConversation(id, value);
-  else renderHistory();
-}
 function renameConversation(id, value) {
   const c = store.conversations.find(item => item.id === id),
     title = String(value || "")
@@ -217,7 +202,7 @@ function bindHistoryEvents() {
   $("#historySearchClose").onclick = () => toggleHistorySearch(false);
   $("#history").addEventListener("dblclick", e => {
     const item = e.target.closest("[data-conversation]");
-    if (item && !e.target.closest(".history-rename, [data-history-action]")) startRename(item.dataset.conversation);
+    if (item && !e.target.closest(".history-rename, [data-history-action]")) startSideRename(`chat:${item.dataset.conversation}`);
   });
   $("#history").addEventListener("click", e => {
     const toggle = e.target.closest("[data-repo-toggle]");
@@ -246,28 +231,6 @@ function bindHistoryEvents() {
       e.stopPropagation();
       openHistoryMenu(id, e.target.closest("[data-history-action]"));
     } else if (!e.target.closest(".history-rename")) openConversation(id);
-  });
-  $("#history").addEventListener("keydown", e => {
-    const input = e.target.closest(".history-rename");
-    if (!input) return;
-    if (e.key === "Enter") {
-      e.preventDefault();
-      // Enter 本身就是明确提交；也照顾脚本/输入法最后一拍尚未来得及冒 input 事件的情形。
-      renamingDirty = true;
-      commitRename(input.value);
-    } else if (e.key === "Escape") {
-      e.stopPropagation();
-      renamingId = null;
-      renamingDirty = false;
-      renderHistory();
-    }
-  });
-  $("#history").addEventListener("input", e => {
-    if (e.target.closest(".history-rename") && renamingId) renamingDirty = true;
-  });
-  $("#history").addEventListener("focusout", e => {
-    const input = e.target.closest(".history-rename");
-    if (input && renamingId && !renderingHistory) commitRename(input.value);
   });
   const title = $("#chatTitle");
   let titleDirty = false,

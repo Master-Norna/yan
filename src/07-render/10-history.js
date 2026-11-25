@@ -60,18 +60,24 @@ function renderHistory() {
   // 正改着名时侧栏也可能重画（别的对话拟好了题、后台一答收尾）：改到一半的字与光标得留住，不能被原标题冲掉
   // 改组名同理：「集」与「工」两处都认侧栏里那一段的键，同 collapsedRepos
   const editing = $("#history .history-rename"),
-    sectionOf = el => {
-      const set = el?.closest("[data-group]"),
-        repo = set ? null : el?.closest("[data-repo]");
-      return set ? `group:${set.dataset.group}` : repo ? repo.dataset.repo || "" : "";
+    keyOf = el => {
+      if (!el) return "";
+      // 组首的输入框：先认外层那一段的键（对话条目也在 data-group 里，故先看 group-rename）
+      if (el.classList.contains("group-rename")) {
+        const set = el.closest("[data-group]"),
+          repo = set ? null : el.closest("[data-repo]");
+        return set ? `group:${set.dataset.group}` : repo ? repo.dataset.repo || "" : "";
+      }
+      const id = el.closest("[data-conversation]")?.dataset.conversation;
+      return id ? `chat:${id}` : "";
     },
-    mine = editing?.classList.contains("group-rename")
-      ? !!renamingSection && sectionOf(editing) === renamingSection
-      : !!editing && !!renamingId && editing.closest("[data-conversation]")?.dataset.conversation === renamingId,
-    typed = mine ? { value: editing.value, start: editing.selectionStart, end: editing.selectionEnd } : null;
+    typed =
+      editing && renamingTyped && keyOf(editing) === renamingKey
+        ? { value: editing.value, start: editing.selectionStart, end: editing.selectionEnd }
+        : null;
   const item = (c, inGroup = false) => {
-    if (renamingId === c.id)
-      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed && renamingDirty ? typed.value : c.title)}" maxlength="60" aria-label="${t(`重命名对话`)}"></div>`;
+    if (renamingKey === `chat:${c.id}`)
+      return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(typed ? typed.value : c.title)}" maxlength="60" aria-label="${t(`重命名对话`)}"></div>`;
     // 这一答写完了、帮手还在后台做，也算在忙；帮手的请示没有哪一答替它挂「等待确认」，按请示本身认
     const job = requestJob(c.id),
       running = !!job || crewRunning(c.id),
@@ -96,7 +102,7 @@ function renderHistory() {
       shown = fold ? [] : node.items,
       here = fold && node.items.some(c => c.id === currentId),
       running = node.items.filter(c => requestJob(c.id)).length,
-      renaming = renamingSection === node.dir,
+      renaming = renamingKey === node.dir,
       name = renaming
         ? `<input class="history-rename group-rename" value="${escapeHtml(typed ? typed.value : title)}" maxlength="40" aria-label="${t(`组名`)}">`
         : `<span class="history-repo-name">${escapeHtml(title)}</span>`;
@@ -111,7 +117,7 @@ function renderHistory() {
       items = [...node.items].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
       shown = fold ? [] : items,
       here = fold && items.some(c => c.id === currentId),
-      renaming = renamingSection === key;
+      renaming = renamingKey === key;
     const name = renaming
       ? `<input class="history-rename group-rename" value="${escapeHtml(typed ? typed.value : group.name)}" maxlength="40" aria-label="${t(`分组改名`)}">`
       : `<span class="history-repo-name">${escapeHtml(group.name)}</span>`;
@@ -128,11 +134,11 @@ function renderHistory() {
         )
         .join("") || `<div class="history-empty">${query ? t("没有匹配的对话") : t("尚无旧墨")}</div>`;
     // 正改名的那一段这一回没画出来（被删、被搜掉、换进新版）：这次改名作罢。不然状态一直留着，
-    // 该段再出现时组名处凭空是个输入框，双击改名也被挡（见 24-groups.js 的 startSectionRename）
-    if (renamingSection && !$("#history .group-rename")) renamingSection = null;
-    if (renamingId && !$("#history .history-rename:not(.group-rename)")) {
-      renamingId = null;
-      renamingDirty = false;
+    // 该段再出现时组名处凭空是个输入框，双击改名也被挡（见 24-groups.js 的 startSideRename）
+    // 正改名的那一段这一回没画出来（被删、被搜掉、换进新版）：这次改名作罢
+    if (renamingKey && !$("#history .history-rename")) {
+      renamingKey = null;
+      renamingTyped = false;
     }
     const input = $("#history .history-rename");
     if (input) {

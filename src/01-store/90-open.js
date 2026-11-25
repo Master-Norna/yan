@@ -66,7 +66,7 @@ async function switchStoreRoot(data) {
     closeSidePanel();
     closeHelperPanel();
     scrollPositions.clear();
-    currentId = editingMessageId = renamingId = renamingSection = null;
+    currentId = editingMessageId = renamingKey = null;
     pendingAttachments = [];
     pendingProfileId = "";
     pendingQuote = null;
