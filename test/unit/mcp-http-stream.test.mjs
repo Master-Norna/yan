@@ -155,8 +155,9 @@ test("旧式 SSE：超时只取消本次 POST，关闭时取消其余投递和 G
   const signals = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     signals.push(init.signal);
-    if (!init.method)
+    if (!init.method) {
       return new Response("event: endpoint\ndata: /messages\n\n", { headers: { "content-type": "text/event-stream" } });
+    }
     return new Promise((resolve, reject) => {
       init.signal.addEventListener("abort", () => reject(Error("aborted")), { once: true });
     });
@@ -190,8 +191,9 @@ for (const type of ["http", "sse"])
   test(`MCP ${type}：服务端同编号请求的回执不占用本机请求的取消开关`, async t => {
     const signals = [];
     t.mock.method(globalThis, "fetch", async (_url, init) => {
-      if (!init.method)
+      if (!init.method) {
         return new Response("event: endpoint\ndata: /messages\n\n", { headers: { "content-type": "text/event-stream" } });
+      }
       signals.push(init.signal);
       return new Promise((resolve, reject) => {
         init.signal.addEventListener("abort", () => reject(Error("aborted")), { once: true });
