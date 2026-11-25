@@ -83,6 +83,14 @@ class StdioTransport {
       buffer = buffer.slice(start);
     });
     this.child.stderr.on("data", chunk => this.note(chunk));
+    const inputLost = error => {
+      if (broken) return;
+      broken = true;
+      this.onclose(error);
+      killTree(this.child, "SIGTERM");
+    };
+    this.child.stdin.on("error", inputLost);
+    this.child.stdin.once("close", () => inputLost(Error("MCP 标准输入已关闭")));
     return new Promise((resolve, reject) => {
       this.child.once("spawn", resolve);
       this.child.once("error", error => {
@@ -101,7 +109,14 @@ class StdioTransport {
     return lines ? `\n${lines}` : "";
   }
   async send(message) {
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    const input = this.child?.stdin;
+    if (!input || input.destroyed || input.writableEnded) throw Error("MCP 标准输入已关闭");
+    const line = `${JSON.stringify(message)}\n`;
+    if (input.writableLength && input.writableLength + Buffer.byteLength(line) > MESSAGE_LIMIT)
+      throw Error("MCP 标准输入待发送消息过多");
+    await new Promise((resolve, reject) => {
+      input.write(line, error => (error ? reject(error) : resolve(undefined)));
+    });
   }
   close() {
     const child = this.child;
