@@ -159,8 +159,7 @@ module.exports = function createFiles(work) {
       const occurrences = replaceAll ? count : 1,
         units = source.length + occurrences * (replacement.length - needle.length),
         maxBytes = 32 * 1024 * 1024;
-      if (units > maxBytes || (decoded.encoding.startsWith("utf-16") && units * 2 > maxBytes))
-        throw Error("单个文件不超过 32 MB");
+      if (units > maxBytes || (decoded.encoding.startsWith("utf-16") && units * 2 > maxBytes)) throw Error("单个文件不超过 32 MB");
       const result = replaceAll ? source.split(needle).join(replacement) : source.replace(needle, () => replacement);
       // 按原来的编码写回：UTF-16 的还是 UTF-16，带 BOM 的还带 BOM
       const output = encodeText(result, decoded.encoding);
