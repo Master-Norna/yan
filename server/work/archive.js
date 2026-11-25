@@ -19,7 +19,7 @@ const {
 
 module.exports = function createArchive({ archiveHome, playable, lockFile = createLocks().lockFile }) {
   const failed = error => errorText(error, 300);
-  // ---- 卷宗目录：页面上的卷宗即这一目录的视图。列出可见文件与子目录（跳过隐藏项、链接和 WORK_SKIP，受文件条目上限约束），收入 / 取出 / 挪动 / 移出都限定在目录内 ----
+  // ---- 卷宗目录：页面上的卷宗即这一目录的视图。列出可见文件与子目录（跳过隐藏项、链接和 WORK_SKIP，受文件与目录合计条目上限约束），收入 / 取出 / 挪动 / 移出都限定在目录内 ----
   const ARCHIVE_LIST_LIMIT = 3000,
     ARCHIVE_FILE_LIMIT = 256 * 1024 * 1024;
   // 卷宗根：请求里带 root 就用它（须是完整限定的绝对路径，与工作目录同一套规矩），否则默认位置。
@@ -43,7 +43,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   async function walkArchive(root, dir, out, dirs) {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
-      if (out.length >= ARCHIVE_LIST_LIMIT) return;
+      if (out.length + dirs.length >= ARCHIVE_LIST_LIMIT) return;
       if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -59,16 +59,22 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   }
   // 草稿占了多少：目录数与字节数，卷宗页上给用户一个数
   async function measureScratch(root) {
-    const base = path.join(root, SCRATCH_DIR),
-      dirs = await fs.promises.readdir(base, { withFileTypes: true }).catch(() => []);
+    const base = path.join(root, SCRATCH_DIR);
+    const limit = 5000;
     let bytes = 0,
-      files = 0;
-    const walk = async dir => {
+      files = 0,
+      count = 0,
+      visited = 0;
+    const walk = async (dir, top = false) => {
       for (const entry of await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [])) {
-        if (entry.isSymbolicLink() || files > 5000) continue;
+        if (visited >= limit) return;
+        if (entry.isSymbolicLink()) continue;
+        visited += 1;
         const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) await walk(full);
-        else {
+        if (entry.isDirectory()) {
+          if (top) count += 1;
+          if (visited < limit) await walk(full);
+        } else {
           files += 1;
           bytes += await fs.promises
             .stat(full)
@@ -77,8 +83,8 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
         }
       }
     };
-    await walk(base);
-    return { count: dirs.filter(d => d.isDirectory()).length, files, bytes };
+    await walk(base, true);
+    return { count, files, bytes, truncated: visited >= limit };
   }
   const handleArchiveList = jsonRoute(async body => {
     const root = await archiveRoot(body.root);
@@ -90,7 +96,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       archive: root,
       entries: out,
       dirs,
-      truncated: out.length >= ARCHIVE_LIST_LIMIT,
+      truncated: out.length + dirs.length >= ARCHIVE_LIST_LIMIT,
       // 只在明确不需要草稿统计时省去这一趟，响应也不带 scratch
       ...(body.scratch === false ? {} : { scratch: await measureScratch(root) })
     };
