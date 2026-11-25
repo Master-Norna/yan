@@ -90,7 +90,10 @@ async function rewindAnswer(c, message) {
   rewinding.add(c.id);
   try {
     const done = await bridge("/api/checkpoint/restore", key, AbortSignal.timeout(600000));
-    message.rewound = [...(message.rewound || []), { at: now(), restored: done.restored, removed: done.removed }];
+    message.rewound = [
+      ...(message.rewound || []),
+      { at: now(), restored: done.restored, removed: done.removed, failed: done.failed.length }
+    ];
     markDirty(c.id);
     saveStore();
     if (currentId === c.id && view === "chat") renderConversation(false);
@@ -117,7 +120,9 @@ function rewindNotes(source) {
         .slice(0, 40);
       return m.rewound.map(r => ({
         at: r.at,
-        text: t`［用户已把目录里的文件退回到回答「${asked}」那一答开工前（改回、补回 ${r.restored} 件，删去 ${r.removed} 件）：那一答及其后写下的改动都已不在］`
+        text: r.failed
+          ? t`［用户尝试把目录退回到回答「${asked}」那一答开工前（改回、补回 ${r.restored} 件，删去 ${r.removed} 件，${r.failed} 件失败）：仅部分恢复，请重新核对当前文件］`
+          : t`［用户已把目录里的文件退回到回答「${asked}」那一答开工前（改回、补回 ${r.restored} 件，删去 ${r.removed} 件）：那一答及其后写下的改动都已不在］`
       }));
     })
     .sort((a, b) => (a.at < b.at ? -1 : 1));

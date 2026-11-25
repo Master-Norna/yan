@@ -158,7 +158,7 @@
  * @property {boolean} [compacting]
  * @property {{ key: string, files?: { id: string, size: number }[], reasoningOnly?: boolean }} [cold] 收了尾，思绪与帮手的经过另存在对话目录的 行迹/ 里；files 是挪走的附件，reasoningOnly 表明无步骤、只另存了思绪
  * @property {{ root: string, at: string, files: number }} [checkpoint] 这一答头一回动手改文件前记下的目录（见 14-chat-engine/80-checkpoint.js）
- * @property {{ at: string, restored: number, removed: number }[]} [rewound] 人把目录退回到这一答开工前的几回
+ * @property {{ at: string, restored: number, removed: number, failed?: number }[]} [rewound] 人把目录退回到这一答开工前的几回
  */
 /** @typedef {{ at: string, why: string, auto?: boolean }} Break 途中断过的一回：何时、为何；auto 是自动接着写上了的。续写不清，查「为何总断」时翻它 */
 /** @typedef {{ id: string, parentId: string|null, messages: Message[], createdAt: string }} Fork 被换下来的一段尾巴 */
