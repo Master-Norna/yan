@@ -66,9 +66,8 @@ const MESSAGE_ACTIONS = {
     brush: "forward",
     run: async ({ c, message }) => {
       if (conversationDry(c)) return toast(t("余墨已尽，请调高上限或更换模型"));
-      const profile = activeProfile();
-      if (!profile) return openSettings("models");
-      if (quotaBlocked(profile)) return toast(t("余墨已尽，请调高上限或更换模型"));
+      const profile = composeProfile(c);
+      if (!profile) return;
       await resumeHelpers(c);
       await resumeAnswer(c, message, profile);
     }
@@ -111,9 +110,8 @@ async function regenerateAt({ c, index }) {
   if (conversationDry(c)) return toast(t("余墨已尽，请调高上限或更换模型"));
   const userIndex = [...c.messages.slice(0, index)].map(m => m.role).lastIndexOf("user");
   if (userIndex < 0) return;
-  const profile = activeProfile();
-  if (!profile) return openSettings("models");
-  if (quotaBlocked(profile)) return toast(t("余墨已尽，请调高上限或更换模型"));
+  const profile = composeProfile(c);
+  if (!profile) return;
   if (!(await preparing(() => prepareTurn(c)))) return;
   forkTail(c, userIndex + 1);
   const assistant = newAssistant(profile);
@@ -130,9 +128,8 @@ async function saveEditedMessage(conversation, index, value) {
     old = conversation.messages[index],
     attachments = (old.attachments || []).filter(file => !editingDropped.has(file.id));
   if (!text && !attachments.length) return toast(t("尚未落笔"));
-  const profile = activeProfile();
-  if (!profile) return openSettings("models");
-  if (quotaBlocked(profile)) return toast(t("余墨已尽，请调高上限或更换模型"));
+  const profile = composeProfile(conversation);
+  if (!profile) return;
   if (text === old.content && attachments.length === (old.attachments || []).length) {
     editingMessageId = null;
     renderConversation(false);
@@ -155,6 +152,21 @@ async function saveEditedMessage(conversation, index, value) {
   render(true);
   if (sidePanelOpen()) renderSidePanel();
   await streamReply(conversation, assistant, profile);
+}
+// 续答、重答、改问共用的开工前置：没有模型就开设置，这一段占了余量就照实说。
+// 余墨已尽的那一句仍由各入口自己先说（改问不看它，见 saveEditedMessage）
+/** @param {Conversation} c @returns {Profile|null} 不能开工时已提示或开了设置 */
+function composeProfile(c) {
+  const profile = activeProfile();
+  if (!profile) {
+    openSettings("models");
+    return null;
+  }
+  if (quotaBlocked(profile)) {
+    toast(t("余墨已尽，请调高上限或更换模型"));
+    return null;
+  }
+  return profile;
 }
 // 消息上的动作（复制、编辑、重答……）；编辑框里 Ctrl+Enter 保存
 function bindMessageActionEvents() {
