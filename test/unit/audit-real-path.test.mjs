@@ -8,8 +8,10 @@ import createWork from "../../server/work/index.js";
 
 test("文件工具不经目录链接触及机密文件或存储配置", async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-real-"));
-  const store = path.join(root, "store"), hidden = path.join(root, ".hidden");
-  fs.mkdirSync(store); fs.mkdirSync(hidden);
+  const store = path.join(root, "store"),
+    hidden = path.join(root, ".hidden");
+  fs.mkdirSync(store);
+  fs.mkdirSync(hidden);
   fs.writeFileSync(path.join(hidden, ".env"), "dummy");
   fs.writeFileSync(path.join(hidden, "public.txt"), "public");
   fs.writeFileSync(path.join(store, "配置.json"), "{}");
@@ -19,12 +21,16 @@ test("文件工具不经目录链接触及机密文件或存储配置", async t 
     fs.symlinkSync(hidden, path.join(root, "alias"), "junction");
     fs.symlinkSync(store, path.join(root, "storage-alias"), "junction");
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-    const read = (p, sandbox) => fetch(`http://127.0.0.1:${server.address().port}/api/work/read`, {method:"POST",body:JSON.stringify({workdir:root,path:p,sandbox})});
+    const read = (p, sandbox) =>
+      fetch(`http://127.0.0.1:${server.address().port}/api/work/read`, {
+        method: "POST",
+        body: JSON.stringify({ workdir: root, path: p, sandbox })
+      });
     assert.notEqual((await read("alias/.env", true)).status, 200);
     assert.notEqual((await read("storage-alias/配置.json", false)).status, 200);
     assert.equal((await read("alias/public.txt", true)).status, 200);
   } finally {
     if (server.listening) await new Promise(resolve => server.close(resolve));
-    fs.rmSync(root,{recursive:true,force:true});
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
