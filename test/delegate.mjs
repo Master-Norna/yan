@@ -48,11 +48,28 @@ for (let i = 0; i < 200; i++) {
   if (!panelOpened) {
     const cards = await evalJs(`document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length`);
     if (cards >= 2 || (cards >= 1 && i > 20)) {
-      await evalJs(`[...document.querySelectorAll(".message.assistant .tool-step-delegate > .tool-step-head")].at(-1).click(); true`);
+      // 面板是点开差遣签之后才画的：签刚画出来那会儿点下去未必就开（那一趟还没落定），点空了就再点一回
+      for (let k = 0; k < 25 && !(await evalJs(`!!document.querySelector("#helperModal:not(.hidden):not(.leaving)")`)); k++) {
+        await evalJs(`[...document.querySelectorAll(".message.assistant .tool-step-delegate > .tool-step-head")].at(-1)?.click(); true`);
+        await sleep(120);
+      }
       panelOpened = true;
       if (cards >= 2) {
-        // 面板是点开差遣签之后才画的，等计数那颗按钮落定再点，别抢在中间
-        await waitFor(`!!document.querySelector('#helperNav [data-helper-list]')`, 8000);
+        // 计数那颗钮是面板画出来之后才有的，等它落定再点，别抢在中间
+        try {
+          await waitFor(`!!document.querySelector('#helperNav [data-helper-list]')`, 12000);
+        } catch (error) {
+          // 等不到就把当时的现场写出来：面板开没开、几趟签、计数是几比几，下次偶发不必再猜
+          console.log(
+            "现场 " +
+              JSON.stringify(
+                await evalJs(
+                  `({ panel: document.querySelector("#helperModal")?.className || "无", cards: document.querySelectorAll(".message.assistant .tool-step-delegate").length, running: document.querySelectorAll('.message.assistant .tool-step-delegate[data-status="running"]').length, nav: document.querySelector("#helperNav")?.dataset.key || "无", count: !!document.querySelector("#helperNav [data-helper-list]") })`
+                )
+              )
+          );
+          throw error;
+        }
         await evalJs(
           `document.querySelector('#helperNav [data-helper-list]').click(); window.__helperListRows = [...document.querySelectorAll('#helperList .helper-list-item')]; window.__helperListMeta = window.__helperListRows.map(row => row.textContent); true`
         );
