@@ -110,12 +110,12 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   const taking = new Set();
   function serial(store, task) {
     const before = queues.get(store.dir) || Promise.resolve(),
-      run = before.catch(() => {}).then(task);
-    queues.set(
-      store.dir,
-      run.catch(() => {})
-    );
-    return run;
+      run = before.catch(() => {}).then(task),
+      tail = run.catch(() => {});
+    queues.set(store.dir, tail);
+    return run.finally(() => {
+      if (queues.get(store.dir) === tail) queues.delete(store.dir);
+    });
   }
   function putObject(store, text) {
     const hash = crypto.createHash("sha1").update(text).digest("hex"),
@@ -246,7 +246,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
           }
           next[rel] = [stat.size, stat.mtimeMs, hash, stat.ctimeMs];
           files += 1;
-          return ["f", name, hash, stat.size];
+          return ["f", name, hash, stat.size, ...(process.platform === "win32" ? [] : [stat.mode & 0o777])];
         } catch {
           return ["x", name];
         }
@@ -276,27 +276,35 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     if (!page?.tree) throw Error("这一答的检查点已不在");
     const files = new Map(),
       unknown = new Set(),
-      dirs = new Set();
+      dirs = new Set(),
+      modes = new Map();
     const read = (hash, rel) => {
-      const items = JSON.parse(fs.readFileSync(objectPath(store, hash), "utf8"));
-      for (const [kind, name, ref] of items) {
+      if (!/^[0-9a-f]{40}$/.test(hash)) throw Error("检查点目录对象编号无效");
+      const bytes = fs.readFileSync(objectPath(store, hash));
+      if (crypto.createHash("sha1").update(bytes).digest("hex") !== hash) throw Error("检查点目录对象内容与编号不符");
+      const items = JSON.parse(bytes.toString("utf8"));
+      for (const [kind, name, ref, , mode] of items) {
         const sub = rel ? `${rel}/${name}` : name;
         if (kind === "d") {
           dirs.add(sub);
           read(ref, sub);
-        } else if (kind === "f") files.set(sub, ref);
-        else unknown.add(sub);
+        } else if (kind === "f") {
+          if (!/^[0-9a-f]{40}$/.test(ref)) throw Error("检查点文件对象编号无效");
+          files.set(sub, ref);
+          if (Number.isInteger(mode) && mode >= 0 && mode <= 0o777) modes.set(sub, mode);
+        } else unknown.add(sub);
       }
     };
     read(page.tree, "");
-    return { files, unknown, dirs };
+    return { files, unknown, dirs, modes };
   }
   // 此刻的目录：路径 → 哈希（大小、时刻与索引对得上的不重读），连同此刻有哪些夹
   async function presentOf(store) {
     const index = readJsonFile(store.index, {}),
       files = new Map(),
       dirs = new Set(),
-      unknown = new Set();
+      unknown = new Set(),
+      modes = new Map();
     const tree = await walk(
       store.full,
       async (abs, rel, name) => {
@@ -307,6 +315,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
             rel,
             seen && seen[0] === stat.size && seen[1] === stat.mtimeMs && seen[3] === stat.ctimeMs ? seen[2] : await fileHash(abs)
           );
+          if (process.platform !== "win32") modes.set(rel, stat.mode & 0o777);
           return ["f", name];
         } catch {
           // 读不到是「不明」，不能当成内容变了或文件丢了。
@@ -326,7 +335,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
       }
     };
     collectDirs(tree, "");
-    return { files, dirs, unknown };
+    return { files, dirs, unknown, modes };
   }
   // 要动哪几件：changed 改回、removed（此刻没有）补回、added（那一刻没有）删去。
   // 夹只在底下一件文件也不牵涉时才单列（路径带 /）：空夹建了或删了，文件那几行管不到它
@@ -337,8 +346,10 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     const unobserved = rel => [...now.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
     for (const [rel, hash] of then.files) {
       if (unobserved(rel)) continue;
-      if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash });
-      else if (now.files.get(rel) !== hash) changes.push({ path: rel, kind: "changed", hash });
+      const mode = then.modes.get(rel);
+      if (!now.files.has(rel)) changes.push({ path: rel, kind: "removed", hash, mode });
+      else if (now.files.get(rel) !== hash || (mode !== undefined && now.modes.has(rel) && now.modes.get(rel) !== mode))
+        changes.push({ path: rel, kind: "changed", hash, mode });
     }
     // 那一刻读不了的（被占着的文件、进不去的夹）与忽略的，连同其下的，此刻有也不删
     const unclear = rel => {
@@ -406,17 +417,30 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
           } else {
             const parent = realParent(store.full, rel),
               stat = fs.lstatSync(target, { throwIfNoEntry: false });
+            temp = path.join(parent, `.yan-restore-${process.pid}-${crypto.randomBytes(8).toString("hex")}.tmp`);
+            const hash = crypto.createHash("sha1");
+            await pipeline(
+              fs.createReadStream(objectPath(store, change.hash)),
+              new Transform({
+                transform(chunk, _encoding, done) {
+                  hash.update(chunk);
+                  done(null, chunk);
+                }
+              }),
+              fs.createWriteStream(temp, { flags: "wx", mode: 0o600 })
+            );
+            if (hash.digest("hex") !== change.hash) throw Error("检查点文件对象内容与编号不符");
+            if (process.platform !== "win32")
+              fs.chmodSync(temp, change.mode ?? (stat?.isFile() ? stat.mode & 0o777 : 0o666 & ~process.umask()));
+            // 校验成功后才让原件让位；空夹之外的目录仍不动。
             if (stat?.isSymbolicLink()) fs.unlinkSync(target);
-            // 此刻成了夹：底下新出的已在上面删去，空了才让位；还剩东西（忽略的、读不了的）就不动它
             else if (stat?.isDirectory()) fs.rmdirSync(target);
-            temp = path.join(parent, `.${path.basename(target)}.yan-${process.pid}.tmp`);
-            fs.copyFileSync(objectPath(store, change.hash), temp);
             fs.renameSync(temp, target);
             temp = "";
             restored += 1;
           }
         } catch (error) {
-          if (temp) fs.rmSync(temp, { force: true });
+          if (temp) { try { fs.rmSync(temp, { force: true }); } catch {} }
           failed.push(`${change.path}：${errorText(error, 80)}`);
         }
       }
