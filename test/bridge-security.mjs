@@ -335,11 +335,7 @@ check(
   `${r.status} ${r.data?.error}`
 );
 r = await post("/api/archive/clean", { root: workdir, id: "../escape" });
-check(
-  "archive clean rejects invalid scratch ids",
-  r.status === 400 && existsSync(`${OUTSIDE}/secret.txt`),
-  `${r.status} ${r.data?.error}`
-);
+check("archive clean rejects invalid scratch ids", r.status === 400 && existsSync(`${OUTSIDE}/secret.txt`), `${r.status} ${r.data?.error}`);
 // ---- 工具定义过多不再静默截断
 r = await post("/api/chat", {
   profile: { source: "custom", baseUrl: "http://127.0.0.1:9/v1", model: "x", apiKey: "k" },
