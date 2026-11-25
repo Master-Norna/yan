@@ -1,7 +1,6 @@
 // 言 · 桥接 · 执事的写锁
 "use strict";
-const fs = require("node:fs");
-const path = require("node:path");
+const { canonicalPath } = require("./paths.js");
 
 // ---- 并行帮手共用一个目录时的写锁：同一文件的写入 / 修改按先后排队（edit 的读—改—写在锁内，不会互相覆盖），不同文件照常并行。
 // run_command 不拿锁：对谈的工作目录都是卷宗，一把整目录的锁会让所有对话、所有帮手的指令与写入排成一队，
@@ -51,20 +50,8 @@ module.exports = function createLocks() {
   // Windows 与 macOS 默认都不分大小写；分大小写的盘上只差大小写的两个文件多排一回队，无妨
   const lockKey = file => file.toLowerCase();
   // 同一个文件有几种写法（目录链接、junction、符号链接）：按真实路径认锁，不然两条路各拿一把、同时改同一份。
-  // 还不存在的文件取最深一层在的上级的真实路径，再把余下几段接回去
-  async function canonical(file) {
-    const rest = [];
-    for (let dir = file; ; ) {
-      try {
-        return path.join(await fs.promises.realpath(dir), ...rest);
-      } catch {
-        const up = path.dirname(dir);
-        if (up === dir) return file;
-        rest.unshift(path.basename(dir));
-        dir = up;
-      }
-    }
-  }
+  // 归一到最近存在的父目录由 paths.canonicalPath 一处负责；这里只为锁键取用，归一不了就退回字面路径
+  const canonical = file => canonicalPath(file).catch(() => file);
   // 写一个文件：该路径的独占锁；返回一次性的释放函数。没人握着、也没人排队的锁随手清掉
   async function lockFile(file, signal) {
     const key = lockKey(await canonical(file));
