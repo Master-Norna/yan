@@ -72,12 +72,12 @@ function commitSideRename(value) {
 }
 function renameGroup(id, value) {
   const group = groupsList().find(item => item.id === id),
-    name = String(value || "")
+    raw = String(value || "")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 40);
-  if (!group || !name || name === group.name) return;
-  group.name = name;
+      .trim();
+  // 先比后截：与人眼下看到的一样就算没改，别拿四十字上限把它截短
+  if (!group || !raw || raw === group.name) return;
+  group.name = raw.slice(0, 40);
   saveStore();
   renderWelcome();
 }
@@ -93,18 +93,14 @@ function workdirTitle(dir) {
 /** @param {string} dir @param {string} value 空、或与目录末段同名，即回到用目录名 */
 function renameWorkdir(dir, value) {
   const base = workdirBase(dir),
-    name = String(value || "")
+    raw = String(value || "")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 40),
+      .trim(),
     names = (store.settings.workdirNames ||= {});
-  if (!name || name === base) {
-    if (!(dir in names)) return;
-    delete names[dir];
-  } else {
-    if (names[dir] === name) return;
-    names[dir] = name;
-  }
+  // 与此刻显示的一样就算没改（自起的名字同样别被四十字上限截短）
+  if (raw === (names[dir] || base)) return;
+  if (!raw || raw === base) delete names[dir];
+  else names[dir] = raw.slice(0, 40);
   saveStore();
 }
 async function dissolveGroup(id) {

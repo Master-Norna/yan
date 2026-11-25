@@ -108,4 +108,27 @@ check(
     `__yanState().conversations[0].title === "测试标题" && __yanState().conversations[0].titleAuto === true && document.querySelector('#history [data-conversation="' + CSS.escape(__yanState().conversations[0].id) + '"]').textContent.includes("测试标题")`
   )
 );
+
+// 自动拟的题不限字数（40-title.js），手改才有 60 字上限：打开改名框又原样点走，算没改，
+// 不能被 renameConversation 的截断顺手改成手改的六十个字。
+await evalJs(`(() => { const c = __yanState().conversations[0]; c.title = "题".repeat(70); c.titleAuto = true; return true; })()`);
+const longId = await evalJs(`__yanState().conversations[0].id`);
+await evalJs(
+  `document.querySelector('#history [data-conversation="' + CSS.escape(${JSON.stringify(longId)}) + '"] .history-open').dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); true`
+);
+await waitFor(`!!document.querySelector("#history .history-rename")`, 2000);
+const longShown = await evalJs(`document.querySelector("#history .history-rename").value.length`);
+await evalJs(`document.querySelector("#history .history-rename").blur(); true`);
+check(
+  "sidebar rename without input leaves a long auto title untouched",
+  longShown === 70 &&
+    (await evalJs(
+      `(() => { const c = __yanState().conversations[0]; return c.title.length === 70 && c.titleAuto === true && !c.title.endsWith("…"); })()`
+    )),
+  JSON.stringify(
+    await evalJs(
+      `({ shown: ${longShown}, title: __yanState().conversations[0].title.length, titleAuto: __yanState().conversations[0].titleAuto })`
+    )
+  )
+);
 close();

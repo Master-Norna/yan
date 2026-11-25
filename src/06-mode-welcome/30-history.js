@@ -128,12 +128,12 @@ function togglePin(id) {
 }
 function renameConversation(id, value) {
   const c = store.conversations.find(item => item.id === id),
-    title = String(value || "")
+    raw = String(value || "")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 60);
-  if (c && title && title !== c.title) {
-    c.title = title;
+      .trim();
+  // 先比后截：自动拟的题不限字数（40-title.js 的 maybeAutoTitle），打开又原样点走不该被截成六十字、还标成手改
+  if (c && raw && raw !== c.title) {
+    c.title = raw.slice(0, 60);
     c.titleAuto = false;
     markDirty(id);
     saveStore();
