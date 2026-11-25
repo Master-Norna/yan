@@ -99,3 +99,41 @@ test("后台完成回报未写完即断开，重连仍能领取退出码", { tim
   assert.equal(done.reported, undefined);
   assert.equal((await post("/watch", identity)).reported, true);
 });
+
+test("前台转后台的编号写出途中断开：进程不会成为孤儿", { timeout: 15000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-fg-handoff-"));
+  const work = createWork({ archiveHome: () => root, workHome: () => root, toolEnv: env => env });
+  let handoff;
+  const server = http.createServer((req, res) => {
+    if (req.url === "/run")
+      res.end = function (body) {
+        handoff = JSON.parse(body);
+        this.destroy();
+        return this;
+      };
+    return work.routes[req.url === "/run" ? "POST /api/work/run" : "POST /api/work/watch"](req, res);
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const post = (route, body) =>
+    fetch(`http://127.0.0.1:${server.address().port}${route}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(res => res.json());
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
+  });
+  const command =
+    process.platform === "win32"
+      ? "Start-Sleep -Milliseconds 4000; Set-Content result.txt written"
+      : "sleep 4; printf written > result.txt";
+  await assert.rejects(post("/run", { workdir: root, command, ticket: "test-ticket", timeout: 1 }));
+  assert.equal(handoff.handedOff, "waited");
+  assert.ok(handoff.running && handoff.id);
+  const report = await post("/watch", { id: handoff.id, key: handoff.key });
+  assert.equal(report.lost, true, "未交付的后台编号应撤掉");
+  await sleep(4500);
+  assert.equal(fs.existsSync(path.join(root, "result.txt")), false, "孤儿进程不应再产生副作用");
+});
