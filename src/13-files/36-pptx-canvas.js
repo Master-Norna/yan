@@ -6,8 +6,6 @@
 const PPTX_PERMILLE = 1000;
 // PowerPoint 的「单倍行距」取字体自己的行高：中日文字体约 1.3，按 1.2 排会一路往上漂
 const PPTX_LINE_HEIGHT = 1.3;
-const pptxKids = (node, name) => (node && node.children ? [...node.children].filter(child => child.localName === name) : []);
-const pptxDeep = (node, name) => (node && node.getElementsByTagNameNS ? [...node.getElementsByTagNameNS("*", name)] : []);
 // 取不到这个属性时要退回缺省：getAttribute 给的是 null，Number(null) 是 0，不能拿它当「写的就是 0」
 const pptxAttr = (node, name, fallback = 0) => {
   const raw = node?.getAttribute?.(name);
@@ -24,7 +22,7 @@ function pptxTheme(xml) {
   } catch {
     return map;
   }
-  const scheme = root && pptxDeep(root, "clrScheme")[0];
+  const scheme = root && xmlDeep(root, "clrScheme")[0];
   for (const slot of scheme ? [...scheme.children] : []) {
     const color = [...slot.children].find(node => /Clr$/.test(node.localName)),
       value =
@@ -54,44 +52,44 @@ function pptxColor(fill, theme) {
           : "";
   if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
   const ratio = name => {
-    const value = Number(pptxKids(node, name)[0]?.getAttribute("val"));
+    const value = Number(xmlKids(node, name)[0]?.getAttribute("val"));
     return Number.isFinite(value) ? value / 100000 : 1;
   };
   const scale = ratio("lumMod") * ratio("shade"),
-    tint = pptxKids(node, "tint")[0] ? 1 - ratio("tint") : 0,
+    tint = xmlKids(node, "tint")[0] ? 1 - ratio("tint") : 0,
     rgb = [0, 2, 4].map(at => {
       let channel = parseInt(hex.slice(at, at + 2), 16) * scale;
       if (tint) channel += (255 - channel) * tint;
       return Math.max(0, Math.min(255, Math.round(channel)));
     }),
-    alpha = Number(pptxKids(node, "alpha")[0]?.getAttribute("val"));
+    alpha = Number(xmlKids(node, "alpha")[0]?.getAttribute("val"));
   return {
     c: rgb.map(value => value.toString(16).padStart(2, "0")).join(""),
     a: Number.isFinite(alpha) ? alpha / 1000 : 100
   };
 }
 function pptxFillOf(spPr, theme) {
-  const solid = pptxKids(spPr, "solidFill")[0];
+  const solid = xmlKids(spPr, "solidFill")[0];
   if (solid) return pptxColor(solid, theme);
   // 渐变只取第一处色标，够看出这块是深是浅
-  const stop = pptxDeep(pptxKids(spPr, "gradFill")[0] || { children: [] }, "gs")[0],
+  const stop = xmlDeep(xmlKids(spPr, "gradFill")[0] || { children: [] }, "gs")[0],
     pick = stop && [...stop.children].find(child => /Fill$/.test(child.localName));
   return pick ? pptxColor(pick, theme) : null;
 }
 function pptxStrokeOf(spPr, theme) {
-  const ln = pptxKids(spPr, "ln")[0];
+  const ln = xmlKids(spPr, "ln")[0];
   if (!ln) return null;
-  const color = pptxColor(pptxKids(ln, "solidFill")[0], theme);
+  const color = pptxColor(xmlKids(ln, "solidFill")[0], theme);
   if (!color || !color.a) return null;
   const arrow = name => {
-    const end = pptxKids(ln, name)[0];
+    const end = xmlKids(ln, name)[0];
     return !!end && end.getAttribute("type") !== "none";
   };
   return {
     c: color.c,
     a: color.a,
     w: Math.max(0.4, pptxAttr(ln, "w", 9525) / 12700),
-    dash: pptxKids(ln, "prstDash")[0]?.getAttribute("val") || "",
+    dash: xmlKids(ln, "prstDash")[0]?.getAttribute("val") || "",
     head: arrow("headEnd"),
     tail: arrow("tailEnd")
   };
@@ -99,31 +97,31 @@ function pptxStrokeOf(spPr, theme) {
 // 一页的文字：每段记对齐与行距，每一截字字号、颜色。
 // 字号缺省时按层往下取：这一截 → 这一段 → 这个框的 lstStyle → 版式占位符 → 母版 txStyles → 18 磅
 function pptxCanvasText(shape, inherit, theme, styles) {
-  const body = pptxKids(shape, "txBody")[0];
+  const body = xmlKids(shape, "txBody")[0];
   if (!body) return null;
-  const bodyPr = pptxKids(body, "bodyPr")[0],
-    lst = pptxKids(body, "lstStyle")[0],
+  const bodyPr = xmlKids(body, "bodyPr")[0],
+    lst = xmlKids(body, "lstStyle")[0],
     // 占位符的种类决定取母版哪一套样式：标题、正文、别的文本框各有一套
     kind = inherit?.kind || "",
     family = /^(?:title|ctrTitle)$/i.test(kind) ? "title" : /^(?:body|obj|subTitle)$/i.test(kind) ? "body" : "other",
     // 装不下时 PowerPoint 会整体缩字、压行距；这两个数不读，字就比原件大一圈、行也松一截
-    fit = pptxKids(bodyPr, "normAutofit")[0],
+    fit = xmlKids(bodyPr, "normAutofit")[0],
     scale = pptxAttr(fit, "fontScale", 100000) / 100000,
     red = pptxAttr(fit, "lnSpcReduction", 0) / 100000,
     counters = new Map(),
     paragraphs = [];
-  for (const p of pptxKids(body, "p")) {
-    const pPr = pptxKids(p, "pPr")[0],
+  for (const p of xmlKids(body, "p")) {
+    const pPr = xmlKids(p, "pPr")[0],
       lvl = Math.max(0, Math.min(8, pptxAttr(pPr, "lvl"))),
-      level = lst && (pptxKids(lst, `lvl${lvl + 1}pPr`)[0] || (lvl ? pptxKids(lst, "lvl1pPr")[0] : undefined)),
-      levelRPr = level && pptxKids(level, "defRPr")[0],
-      paraRPr = pPr && pptxKids(pPr, "defRPr")[0],
+      level = lst && (xmlKids(lst, `lvl${lvl + 1}pPr`)[0] || (lvl ? xmlKids(lst, "lvl1pPr")[0] : undefined)),
+      levelRPr = level && xmlKids(level, "defRPr")[0],
+      paraRPr = pPr && xmlKids(pPr, "defRPr")[0],
       style = (styles && styles.get(`@${family}|${lvl}`)) || null,
       placeholder = inherit || {},
       fallback = {
         s: pptxAttr(levelRPr, "sz", placeholder.s || style?.s || 1800),
         b: pptxOn(levelRPr?.getAttribute("b")) || !!placeholder.b || !!style?.b,
-        c: pptxColor(pptxKids(levelRPr || {}, "solidFill")[0], theme)?.c || placeholder.c || style?.c || theme.get("tx1") || "1a1a1a"
+        c: pptxColor(xmlKids(levelRPr || {}, "solidFill")[0], theme)?.c || placeholder.c || style?.c || theme.get("tx1") || "1a1a1a"
       },
       pick = node => node && [...node.children].find(child => /^(?:buNone|buChar|buBlip|buAutoNum)$/.test(child.localName)),
       bullet = pick(pPr) || pick(level);
@@ -143,12 +141,12 @@ function pptxCanvasText(shape, inherit, theme, styles) {
         continue;
       }
       if (part.localName !== "r" && part.localName !== "fld") continue;
-      const rPr = pptxKids(part, "rPr")[0],
-        text = pptxKids(part, "t")
+      const rPr = xmlKids(part, "rPr")[0],
+        text = xmlKids(part, "t")
           .map(node => node.textContent)
           .join("");
       if (!text) continue;
-      const color = pptxColor(pptxKids(rPr || {}, "solidFill")[0], theme),
+      const color = pptxColor(xmlKids(rPr || {}, "solidFill")[0], theme),
         boldValue = rPr?.getAttribute("b") ?? paraRPr?.getAttribute("b") ?? levelRPr?.getAttribute("b") ?? "";
       runs.push({
         t: text,
@@ -156,7 +154,7 @@ function pptxCanvasText(shape, inherit, theme, styles) {
         b: pptxOn(boldValue) || (!rPr?.hasAttribute("b") && fallback.b),
         i: pptxOn(rPr?.getAttribute("i")),
         u: /^(?:sng|dbl)$/.test(rPr?.getAttribute("u") || ""),
-        c: color?.c || pptxColor(pptxKids(paraRPr || {}, "solidFill")[0], theme)?.c || fallback.c,
+        c: color?.c || pptxColor(xmlKids(paraRPr || {}, "solidFill")[0], theme)?.c || fallback.c,
         k: pptxAttr(rPr, "spc") / 100
       });
     }
@@ -164,10 +162,10 @@ function pptxCanvasText(shape, inherit, theme, styles) {
     if (prefix) runs.unshift({ t: prefix });
     // 段前段后：spcPts 是百分之一磅，spcPct 是行高的百分之几
     const gapOf = name => {
-      const node = pptxKids(pPr || {}, name)[0];
+      const node = xmlKids(pPr || {}, name)[0];
       if (!node) return 0;
-      const pts = pptxKids(node, "spcPts")[0],
-        pct = pptxKids(node, "spcPct")[0];
+      const pts = xmlKids(node, "spcPts")[0],
+        pct = xmlKids(node, "spcPct")[0];
       if (pts) return { v: pptxAttr(pts, "val") };
       if (pct) return { r: pptxAttr(pct, "val") / 100000 };
       return 0;
@@ -176,8 +174,8 @@ function pptxCanvasText(shape, inherit, theme, styles) {
       a: pPr?.getAttribute("algn") || level?.getAttribute("algn") || placeholder.a || style?.a || "",
       m: pptxAttr(pPr, "marL"),
       // 行距两种写法：spcPct 是倍数的百分之几，spcPts 是「固定多少磅」（百分之一磅）
-      ls: pptxKids(pPr || {}, "lnSpc")[0] ? pptxAttr(pptxKids(pptxKids(pPr, "lnSpc")[0], "spcPct")[0], "val", 100000) / 100000 : 0,
-      lp: pptxAttr(pptxKids(pptxKids(pPr || {}, "lnSpc")[0] || {}, "spcPts")[0], "val"),
+      ls: xmlKids(pPr || {}, "lnSpc")[0] ? pptxAttr(xmlKids(xmlKids(pPr, "lnSpc")[0], "spcPct")[0], "val", 100000) / 100000 : 0,
+      lp: pptxAttr(xmlKids(xmlKids(pPr || {}, "lnSpc")[0] || {}, "spcPts")[0], "val"),
       bef: gapOf("spcBef"),
       aft: gapOf("spcAft"),
       r: runs
@@ -202,21 +200,21 @@ function pptxPlaceholders(xml, theme) {
   } catch {
     return map;
   }
-  for (const shape of root ? pptxDeep(root, "sp") : []) {
-    const ph = pptxDeep(shape, "ph")[0];
+  for (const shape of root ? xmlDeep(root, "sp") : []) {
+    const ph = xmlDeep(shape, "ph")[0];
     if (!ph) continue;
     const idx = pptxAttr(ph, "idx"),
       type = ph.getAttribute("type") || (idx ? "body" : "obj"),
-      spPr = pptxKids(shape, "spPr")[0],
-      xfrm = spPr && pptxKids(spPr, "xfrm")[0],
-      off = xfrm && pptxKids(xfrm, "off")[0],
-      ext = xfrm && pptxKids(xfrm, "ext")[0],
-      body = pptxKids(shape, "txBody")[0],
-      bodyPr = body && pptxKids(body, "bodyPr")[0],
-      lst = body && pptxKids(body, "lstStyle")[0],
-      lvl1 = lst && pptxKids(lst, "lvl1pPr")[0],
-      defRPr = lvl1 && pptxKids(lvl1, "defRPr")[0],
-      fill = pptxColor(pptxKids(defRPr || {}, "solidFill")[0], theme),
+      spPr = xmlKids(shape, "spPr")[0],
+      xfrm = spPr && xmlKids(spPr, "xfrm")[0],
+      off = xfrm && xmlKids(xfrm, "off")[0],
+      ext = xfrm && xmlKids(xfrm, "ext")[0],
+      body = xmlKids(shape, "txBody")[0],
+      bodyPr = body && xmlKids(body, "bodyPr")[0],
+      lst = body && xmlKids(body, "lstStyle")[0],
+      lvl1 = lst && xmlKids(lst, "lvl1pPr")[0],
+      defRPr = lvl1 && xmlKids(lvl1, "defRPr")[0],
+      fill = pptxColor(xmlKids(defRPr || {}, "solidFill")[0], theme),
       entry = {
         rect: off && ext ? { x: pptxAttr(off, "x"), y: pptxAttr(off, "y"), w: pptxAttr(ext, "cx"), h: pptxAttr(ext, "cy") } : null,
         s: pptxAttr(defRPr, "sz"),
@@ -242,20 +240,20 @@ function pptxTextStyles(xml, theme) {
   } catch {
     return map;
   }
-  const styles = root && pptxDeep(root, "txStyles")[0];
+  const styles = root && xmlDeep(root, "txStyles")[0];
   if (!styles) return map;
   for (const [name, family] of [
     ["titleStyle", "title"],
     ["bodyStyle", "body"],
     ["otherStyle", "other"]
   ]) {
-    const style = pptxKids(styles, name)[0];
+    const style = xmlKids(styles, name)[0];
     if (!style) continue;
     for (let lvl = 0; lvl < 9; lvl += 1) {
-      const level = pptxKids(style, `lvl${lvl + 1}pPr`)[0];
+      const level = xmlKids(style, `lvl${lvl + 1}pPr`)[0];
       if (!level) continue;
-      const defRPr = pptxKids(level, "defRPr")[0],
-        fill = pptxColor(pptxKids(defRPr || {}, "solidFill")[0], theme);
+      const defRPr = xmlKids(level, "defRPr")[0],
+        fill = pptxColor(xmlKids(defRPr || {}, "solidFill")[0], theme);
       map.set(`@${family}|${lvl}`, {
         s: pptxAttr(defRPr, "sz"),
         b: pptxOn(defRPr?.getAttribute("b")),
@@ -276,10 +274,10 @@ function pptxPlaceholderOf(ph, map) {
 }
 // 组的变换：子坐标先按 chOff/chExt 缩放，再落进 off/ext
 const pptxCompose = (map, xfrm) => {
-  const off = xfrm && pptxKids(xfrm, "off")[0],
-    ext = xfrm && pptxKids(xfrm, "ext")[0],
-    chOff = xfrm && pptxKids(xfrm, "chOff")[0],
-    chExt = xfrm && pptxKids(xfrm, "chExt")[0];
+  const off = xfrm && xmlKids(xfrm, "off")[0],
+    ext = xfrm && xmlKids(xfrm, "ext")[0],
+    chOff = xfrm && xmlKids(xfrm, "chOff")[0],
+    chExt = xfrm && xmlKids(xfrm, "chExt")[0];
   if (!off || !ext) return map;
   const x0 = pptxAttr(off, "x"),
     y0 = pptxAttr(off, "y"),
@@ -302,8 +300,8 @@ function pptxBackground(source, theme) {
   } catch {
     return "";
   }
-  const node = pptxDeep(root, "bg")[0],
-    color = pptxColor(pptxKids(pptxKids(node, "bgPr")[0] || {}, "solidFill")[0], theme);
+  const node = xmlDeep(root, "bg")[0],
+    color = pptxColor(xmlKids(xmlKids(node, "bgPr")[0] || {}, "solidFill")[0], theme);
   return color?.a ? color.c : "";
 }
 const PPTX_CANVAS_KIND = { rect: "rect", roundRect: "round", ellipse: "ellipse", line: "line" };
@@ -341,7 +339,7 @@ function pptxNumberText(n, type) {
 // 一页画布。doc 是这一页的 p:sld；返回 {bg, shapes}，排不出位置时给 null
 function pptxCanvas(doc, ctx) {
   const { W, H, theme, images, ph, styles } = ctx,
-    root = pptxDeep(doc, "spTree")[0];
+    root = xmlDeep(doc, "spTree")[0];
   if (!root || !(W > 0) || !(H > 0)) return null;
   const unit = value => Math.round((value / W) * PPTX_PERMILLE * 10) / 10,
     // 折成纸宽的千分之一：1 磅 = 12700 EMU。字号在 OOXML 里是百分之一磅，线宽与字距是实磅
@@ -351,13 +349,13 @@ function pptxCanvas(doc, ctx) {
   let missing = false,
     count = 0;
   const boxOf = (shape, map) => {
-    const spPr = pptxKids(shape, "spPr")[0] || pptxKids(shape, "grpSpPr")[0],
-      xfrm = spPr && pptxKids(spPr, "xfrm")[0],
-      off = xfrm && pptxKids(xfrm, "off")[0],
-      ext = xfrm && pptxKids(xfrm, "ext")[0];
+    const spPr = xmlKids(shape, "spPr")[0] || xmlKids(shape, "grpSpPr")[0],
+      xfrm = spPr && xmlKids(spPr, "xfrm")[0],
+      off = xfrm && xmlKids(xfrm, "off")[0],
+      ext = xfrm && xmlKids(xfrm, "ext")[0];
     let rect = off && ext ? map(pptxAttr(off, "x"), pptxAttr(off, "y"), pptxAttr(ext, "cx"), pptxAttr(ext, "cy")) : null;
     if (!rect) {
-      const inherited = pptxPlaceholderOf(pptxDeep(shape, "ph")[0], ph);
+      const inherited = pptxPlaceholderOf(xmlDeep(shape, "ph")[0], ph);
       if (inherited?.rect) rect = map(inherited.rect.x, inherited.rect.y, inherited.rect.w, inherited.rect.h);
     }
     return rect;
@@ -365,23 +363,23 @@ function pptxCanvas(doc, ctx) {
   const walk = (node, map, scale = 1) => {
     for (const shape of pptxShapeChildren(node)) {
       if (shape.localName === "grpSp") {
-        const xfrm = pptxKids(pptxKids(shape, "grpSpPr")[0] || {}, "xfrm")[0],
-          ext = xfrm && pptxKids(xfrm, "ext")[0],
-          chExt = xfrm && pptxKids(xfrm, "chExt")[0];
+        const xfrm = xmlKids(xmlKids(shape, "grpSpPr")[0] || {}, "xfrm")[0],
+          ext = xfrm && xmlKids(xfrm, "ext")[0],
+          chExt = xfrm && xmlKids(xfrm, "chExt")[0];
         // 组放大缩小时，里面的字也跟着放大缩小：倍数由 ext / chExt 来
         const inner = pptxAttr(chExt, "cx") > 0 ? scale * (pptxAttr(ext, "cx") / pptxAttr(chExt, "cx")) : scale;
         walk(shape, xfrm ? pptxCompose(map, xfrm) : map, inner);
         continue;
       }
-      const spPr = pptxKids(shape, "spPr")[0] || pptxKids(shape, "grpSpPr")[0] || {},
-        prst = pptxKids(spPr, "prstGeom")[0]?.getAttribute("prst") || "",
+      const spPr = xmlKids(shape, "spPr")[0] || xmlKids(shape, "grpSpPr")[0] || {},
+        prst = xmlKids(spPr, "prstGeom")[0]?.getAttribute("prst") || "",
         fill = pptxFillOf(spPr, theme),
         stroke = pptxStrokeOf(spPr, theme);
       if (shape.localName === "graphicFrame") {
-        const tbl = pptxDeep(shape, "tbl")[0],
-          xfrm = pptxKids(shape, "xfrm")[0],
-          off = xfrm && pptxKids(xfrm, "off")[0],
-          ext = xfrm && pptxKids(xfrm, "ext")[0];
+        const tbl = xmlDeep(shape, "tbl")[0],
+          xfrm = xmlKids(shape, "xfrm")[0],
+          off = xfrm && xmlKids(xfrm, "off")[0],
+          ext = xfrm && xmlKids(xfrm, "ext")[0];
         // 图表与智能图形画不出来：留一块淡淡的虚线框，好知道这里本来有东西
         if (!tbl && off && ext) {
           const box = map(pptxAttr(off, "x"), pptxAttr(off, "y"), pptxAttr(ext, "cx"), pptxAttr(ext, "cy"));
@@ -391,20 +389,20 @@ function pptxCanvas(doc, ctx) {
             w: unit(box.w),
             h: unit(box.h),
             g: "blank",
-            k: pptxDeep(shape, "chart")[0] ? "chart" : "diagram"
+            k: xmlDeep(shape, "chart")[0] ? "chart" : "diagram"
           });
           continue;
         }
         if (!tbl || !off || !ext) continue;
-        const rows = pptxKids(tbl, "tr")
-          .map(tr => pptxKids(tr, "tc").map(tc => pptxDeep(tc, "p").map(pptxParagraph)))
+        const rows = xmlKids(tbl, "tr")
+          .map(tr => xmlKids(tr, "tc").map(tc => xmlDeep(tc, "p").map(pptxParagraph)))
           .filter(row => row.length);
         if (!rows.length) continue;
         const box = map(pptxAttr(off, "x"), pptxAttr(off, "y"), pptxAttr(ext, "cx"), pptxAttr(ext, "cy")),
-          cols = pptxKids(pptxKids(tbl, "tblGrid")[0] || {}, "gridCol").map(col => pptxAttr(col, "w")),
+          cols = xmlKids(xmlKids(tbl, "tblGrid")[0] || {}, "gridCol").map(col => pptxAttr(col, "w")),
           total = cols.reduce((sum, w) => sum + w, 0) || 1,
           // 表里的字号照格里写的取，没有就按 18 磅
-          cellSizes = pptxDeep(tbl, "rPr")
+          cellSizes = xmlDeep(tbl, "rPr")
             .map(node => pptxAttr(node, "sz"))
             .filter(Boolean);
         shapes.push({
@@ -421,13 +419,13 @@ function pptxCanvas(doc, ctx) {
       }
       if (shape.localName === "pic") {
         const box = boxOf(shape, map),
-          blip = pptxDeep(shape, "blip")[0],
+          blip = xmlDeep(shape, "blip")[0],
           path = images.get(blip?.getAttribute("r:embed") || blip?.getAttribute("r:link"));
         if (!box || !path) continue;
         shapes.push({ x: unit(box.x), y: unit(box.y), w: unit(box.w), h: unit(box.h), g: "img", src: path });
         continue;
       }
-      const text = pptxCanvasText(shape, pptxPlaceholderOf(pptxDeep(shape, "ph")[0], ph), theme, styles),
+      const text = pptxCanvasText(shape, pptxPlaceholderOf(xmlDeep(shape, "ph")[0], ph), theme, styles),
         // 连接线本身就是一条线；表外的直线/折线连接符也照线画
         kind = shape.localName === "cxnSp" || /Connector\d*$/i.test(prst) ? "line" : PPTX_CANVAS_KIND[prst] || "rect";
       if (!text && !fill && !stroke) continue;
@@ -441,7 +439,7 @@ function pptxCanvas(doc, ctx) {
       const item = { x: unit(box.x), y: unit(box.y), w: unit(box.w), h: unit(box.h) };
       if (kind === "line") {
         if (!stroke) continue;
-        const xfrm = pptxKids(spPr, "xfrm")[0],
+        const xfrm = xmlKids(spPr, "xfrm")[0],
           flipH = pptxOn(xfrm?.getAttribute("flipH")),
           flipV = pptxOn(xfrm?.getAttribute("flipV"));
         item.g = "line";
@@ -481,7 +479,7 @@ function pptxCanvas(doc, ctx) {
         else if (text.anchor === "b") item.va = "b";
         if (text.nowrap) item.nw = 1;
         item.lh = Math.round(PPTX_LINE_HEIGHT * (1 - text.red) * 1000) / 1000;
-        const bodyPr = pptxKids(pptxKids(shape, "txBody")[0] || {}, "bodyPr")[0];
+        const bodyPr = xmlKids(xmlKids(shape, "txBody")[0] || {}, "bodyPr")[0];
         // CSS 的 padding 是上、右、下、左
         item.in = [
           Math.round(unit(pptxAttr(bodyPr, "tIns", 45720)) * 10) / 10,

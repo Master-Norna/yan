@@ -37,3 +37,17 @@ test("空文件与只含 UTF-8 BOM 的文件仍是文字", async () => {
 test("整份文件末尾残缺的字节不能因流式解码被吞掉", async () => {
   assert.equal(await sniffText(new Blob([new Uint8Array([0x41, 0xe4])])), false);
 });
+
+test("预览那边「像不像字」与这里同一处判据", () => {
+  const f = load(["textLooksBinary", "looksLikeText"]);
+  // 带色码的日志：置入算文字，预览也认
+  const log = "\u001b[32mok\u001b[0m 构建完成\n" + "正文\n".repeat(200);
+  assert.equal(f.textLooksBinary(log), false);
+  assert.equal(f.looksLikeText(log), true);
+  // 满是不良字节的：两边都算二进制
+  const bad = "a" + "\uFFFD".repeat(50) + "b" + "x".repeat(100);
+  assert.equal(f.textLooksBinary(bad), true);
+  assert.equal(f.looksLikeText(bad), false);
+  // NUL 一律不算文字
+  assert.equal(f.looksLikeText("a\0b"), false);
+});
