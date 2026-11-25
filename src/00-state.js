@@ -302,8 +302,11 @@ let view = "chat";
 let editingMessageId = null;
 // 改问时去掉的附件（id）：保存后新问不带它们，旧版本里原样留着
 let editingDropped = new Set();
-let renamingId = null,
-  renamingDirty = false,
+// 侧栏里正在改名的那一段：对话是 chat:对话 id，「集」组是 group:组 id，目录组是目录（同 collapsedRepos 的键）
+/** @type {string|null} */
+let renamingKey = null,
+  // 改过字没有：没改过时重画照新标题填，别拿旧框里的字把刚拟好的题盖回去
+  renamingTyped = false,
   renderingHistory = false;
 let historyQuery = "";
 /** @type {Attachment[]} 案上待发的附件 */
