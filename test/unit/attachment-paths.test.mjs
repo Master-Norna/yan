@@ -114,6 +114,56 @@ test("批量没回、单件问到时也认：取到的按存储根记下，下�
   assert.equal(calls.length, before, "单件取到的路径也记进了缓存");
 });
 
+test("单件兜底在同一存储根查不到大文件时，保留原件不可用和抽取失败的缘由", async () => {
+  const f = load(["messageForApi", "setBridge:fn=>{bridge=fn;}"]);
+  f.setBridge(async () => {
+    throw new Error("原件还未落盘");
+  });
+  const message = {
+    role: "user",
+    content: "看",
+    attachments: [{ id: "p1", name: "大件.pdf", kind: "file", size: 33 * 1024 * 1024, extractionError: "PDF 没有文字层" }]
+  };
+  const notes = text(await f.messageForApi(message, true));
+  assert.match(notes, /文件 大件\.pdf 的本机原件暂不可用：原件还未落盘；本机没抽出正文：PDF 没有文字层/);
+});
+
+for (const route of ["/api/files/path", "/api/files/paths"]) {
+  test(`${route}：桥接验过旧根、调用方收结果前换根，不交出旧路径，新根重新问`, async () => {
+    const calls = [],
+      f = load(["messageForApi", "attachmentPlaces", "setBridge:fn=>{bridge=fn;}", "setRoot:root=>{bootstrap.store={root};}"]),
+      message = { id: "u5", role: "user", content: "看", attachments: [{ id: "z1", name: "包.zip", kind: "file", size: 8 }] },
+      oldPath = "D:\\A\\附件\\z1.zip",
+      newPath = "D:\\B\\附件\\z1.zip";
+    const { promise, resolve } = Promise.withResolvers();
+    f.setRoot("A");
+    f.setBridge((path, body) => {
+      calls.push([path, body.root]);
+      return path === route && body.root === "A" ? promise : Promise.resolve({ paths: { z1: newPath } });
+    });
+    const pending = route === "/api/files/path" ? f.messageForApi(message, true) : f.attachmentPlaces([message]);
+    // 放行真实 storeBridge 的 await，再排换根；换根在它验完 scope 之后、调用方的 await 恢复之前。
+    resolve(route === "/api/files/path" ? { path: oldPath } : { paths: { z1: oldPath } });
+    queueMicrotask(() => f.setRoot("B"));
+    const stale = await pending,
+      fresh = await f.attachmentPlaces([message]);
+    assert.deepEqual(
+      { fresh, calls },
+      {
+        fresh: { z1: newPath },
+        calls: [
+          [route, "A"],
+          ["/api/files/paths", "B"]
+        ]
+      }
+    );
+    if (route === "/api/files/path") {
+      assert.match(text(stale), /压缩包 包\.zip 的本机原件暂不可用：存储位置已变化/);
+      assert.ok(!text(stale).includes(oldPath));
+    } else assert.deepEqual(stale, {});
+  });
+}
+
 test("桥接：一批附件的原件路径，找不到的不回", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-paths-"));
   const { routes } = createFiles({ filesHome: () => root });

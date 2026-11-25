@@ -144,19 +144,20 @@ async function supplementForApi(user, budget, { latest = false, steer = false } 
 const attachmentPlaceCache = new Map();
 /** @param {{ attachments?: Attachment[] }[]} messages @returns {Promise<Record<string, string>>} id → 本机原件的绝对路径 */
 async function attachmentPlaces(messages) {
-  const root = bootstrap.store?.root || "",
+  const scope = bootstrap.store,
+    root = scope?.root || "",
     ids = [...new Set(messages.flatMap(message => (message.attachments || []).map(file => file?.id).filter(Boolean)))],
     known = id => {
       const entry = attachmentPlaceCache.get(id);
       return entry && entry.root === root ? entry.path : "";
     },
     missing = ids.filter(id => !known(id));
-  if (missing.length)
-    try {
-      // 换根途中发出的这一问作废（storeBridge 会拒），下一问按新根重问，不把旧路径留给模型
-      const data = await storeBridge("/api/files/paths", { ids: missing }, AbortSignal.timeout(8000));
-      for (const id of missing) if (data?.paths?.[id]) attachmentPlaceCache.set(id, { root, path: String(data.paths[id]) });
-    } catch {}
+  if (missing.length) {
+    const data = await storeBridge("/api/files/paths", { ids: missing }, AbortSignal.timeout(8000)).catch(() => null);
+    // storeBridge 验完到调用方续跑之间也能换根；旧结果不入缓存，也不交给模型。
+    if (bootstrap.store !== scope) return {};
+    for (const id of missing) if (data?.paths?.[id]) attachmentPlaceCache.set(id, { root, path: String(data.paths[id]) });
+  }
   /** @type {Record<string, string>} */
   const places = {};
   for (const id of ids) {
@@ -170,14 +171,19 @@ async function attachmentPlaces(messages) {
 /** @param {Attachment} metadata @param {Record<string, string>} places @returns {Promise<{ path: string, error?: string }>} */
 async function attachmentPlace(metadata, places) {
   if (places[metadata.id]) return { path: places[metadata.id], error: "" };
+  const scope = bootstrap.store,
+    root = scope?.root || "";
+  let path = "",
+    error = "";
   try {
-    const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000)),
-      root = bootstrap.store?.root || "";
-    if (local?.path) attachmentPlaceCache.set(metadata.id, { root, path: String(local.path) });
-    return { path: String(local?.path || ""), error: "" };
-  } catch (error) {
-    return { path: "", error: String(error.message || error) };
+    const local = await storeBridge("/api/files/path", { id: metadata.id }, AbortSignal.timeout(8000));
+    path = String(local?.path || "");
+  } catch (cause) {
+    error = String(cause?.message || cause);
   }
+  if (bootstrap.store !== scope) return { path: "", error: "存储位置已变化" };
+  if (path) attachmentPlaceCache.set(metadata.id, { root, path });
+  return { path, error };
 }
 // 一件附件写在说明里的后缀：本机原件在哪
 /** @param {Record<string, string>} places @param {{ id?: string }} file */
