@@ -85,12 +85,7 @@ class McpClient {
     if (this.toolsChanged) this.tools = await this.listTools();
     if (signal?.aborted) throw Error("已停止");
     const id = nextId++;
-    const onAbort = () => {
-      this.settle(id, Error("已停止"));
-      void this.transport
-        .send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: "用户停止" } })
-        .catch(() => {});
-    };
+    const onAbort = () => this.cancelRequest(id, "已停止", "用户停止");
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
       return await this.request("tools/call", { name: tool, arguments: args, _meta: { progressToken: id } }, timeout, id);
@@ -112,13 +107,21 @@ class McpClient {
           const reason = absolute
             ? `${method} 超时：已达绝对时限（${Math.round((timeout * 2) / 1000)} 秒；距上次进度 ${entry.lastProgressAt === null ? "无记录" : `${Math.round((Date.now() - entry.lastProgressAt) / 1000)} 秒`}）`
             : `${method} 超时（${Math.round(timeout / 1000)} 秒没有回音）`;
-          this.settle(id, Error(reason));
+          if (method === "tools/call") this.cancelRequest(id, reason);
+          else this.settle(id, Error(reason));
         }, remaining);
       };
       entry.arm();
       this.pending.set(id, entry);
       this.transport.send({ jsonrpc: "2.0", id, method, params }).catch(error => this.settle(id, error));
     });
+  }
+  cancelRequest(id, reason, notificationReason = reason) {
+    if (!this.pending.has(id)) return;
+    this.settle(id, Error(reason));
+    void this.transport
+      .send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: notificationReason } })
+      .catch(() => {});
   }
   settle(id, error, result) {
     const entry = this.pending.get(id);
