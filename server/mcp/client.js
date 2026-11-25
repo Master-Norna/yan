@@ -52,7 +52,11 @@ class McpClient {
     if (transport.protocol !== undefined) transport.protocol = result.protocolVersion;
     this.instructions = result.instructions || "";
     this.server = result.serverInfo || {};
-    await transport.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    await withTimeout(
+      transport.send({ jsonrpc: "2.0", method: "notifications/initialized" }),
+      CONNECT_MS,
+      "notifications/initialized 超时"
+    );
   }
   async listTools() {
     const tools = [];

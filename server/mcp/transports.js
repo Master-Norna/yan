@@ -333,7 +333,14 @@ class SseTransport {
     if (!response.ok) throw await httpError(response);
     // 第一条 endpoint 事件告诉往哪里投递，此后的 message 事件都是回来的消息
     await new Promise((resolve, reject) => {
-      readEvents(response, (event, data) => {
+      const disconnected = error => {
+        reject(error); // 若还没收到 endpoint，握手也应立即失败。
+        if (this.connectionAbort.signal.aborted) return;
+        // GET 一断，这条会话的投递都不再等：无编号的通知不在上层 pending 里。
+        this.close(error);
+        this.onclose(error);
+      };
+      void readEvents(response, (event, data) => {
         if (event === "endpoint") {
           // 远端 MCP 不得借 endpoint 通知将用户的自定义头（凭据）送到另一来源。
           const endpoint = new URL(data, this.url);
@@ -341,19 +348,11 @@ class SseTransport {
           this.endpoint = endpoint.href;
           resolve();
         } else if (event === "message") this.onmessage(JSON.parse(data));
-      })
-        .then(() => {
-          const error = Error("事件流已断开");
-          reject(error); // 若还没收到 endpoint，握手也应立即失败。
-          this.onclose(error);
-        })
-        .catch(error => {
-          reject(error);
-          this.onclose(error);
-        });
+      }).then(() => disconnected(Error("事件流已断开")), disconnected);
     });
   }
   async send(message) {
+    this.connectionAbort.signal.throwIfAborted();
     const abort = new AbortController();
     this.posts.add(abort);
     if (message.method && message.id !== undefined) this.reads.set(message.id, abort);
@@ -376,9 +375,12 @@ class SseTransport {
   abort(id) {
     this.reads.get(id)?.abort();
   }
-  close() {
-    this.connectionAbort.abort();
-    for (const abort of this.posts) abort.abort();
+  /** @param {Error} [error] */
+  close(error) {
+    if (this.connectionAbort.signal.aborted) return;
+    this.connectionAbort.abort(error);
+    for (const abort of this.posts) abort.abort(error);
+    this.posts.clear();
     this.reads.clear();
   }
 }
