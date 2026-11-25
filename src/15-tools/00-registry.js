@@ -248,7 +248,17 @@ function toolPresentation(step) {
  * @param {Map<string, string>} [memory]
  * @param {Map<string, string>} [offeredMcp]
  */
-async function runSteps(steps, conversation, assistant, signal, toolCache, offered, lookup = false, memory = undefined, offeredMcp = undefined) {
+async function runSteps(
+  steps,
+  conversation,
+  assistant,
+  signal,
+  toolCache,
+  offered,
+  lookup = false,
+  memory = undefined,
+  offeredMcp = undefined
+) {
   const outcomes = new Map(),
     images = [],
     memoryUpdates = new Map(),

@@ -26,7 +26,13 @@ test("旧答的 MCP 身份与当前登记不同，不执行", async () => {
   });
   const outcome = await f.runTool(
     { id: "x", name, arguments: "{}" },
-    { conversation: { id: "c" }, assistant: {}, signal: new AbortController().signal, offered: new Set([name]), offeredMcp: new Map([[name, "old"]]) }
+    {
+      conversation: { id: "c" },
+      assistant: {},
+      signal: new AbortController().signal,
+      offered: new Set([name]),
+      offeredMcp: new Map([[name, "old"]])
+    }
   );
   assert.equal(outcome.ok, false);
   assert.equal(outcome.display, "工具已变");

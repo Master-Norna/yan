@@ -137,9 +137,21 @@ function mcpFunctionName(server, tool) {
   const clean = text => text.replace(/[^A-Za-z0-9_-]/g, "");
   const name = `mcp__${clean(server) || `s${nameHash(server)}`}__${clean(tool) || `t${nameHash(tool)}`}`;
   // 原名本来合规且无分隔歧义时保留旧名；否则在原始二元组上取指纹，不能在清洗过的名字上取。
-  if (name.length <= 64 && server === clean(server) && tool === clean(tool) && server && tool && !server.includes("__") && !tool.includes("__") && !server.endsWith("_") && !tool.startsWith("_"))
+  if (
+    name.length <= 64 &&
+    server === clean(server) &&
+    tool === clean(tool) &&
+    server &&
+    tool &&
+    !server.includes("__") &&
+    !tool.includes("__") &&
+    !server.endsWith("_") &&
+    !tool.startsWith("_")
+  )
     return name;
-  return `${name.slice(0, 55)}_${hashText(JSON.stringify([server, tool])).split(":")[1].padStart(8, "0")}`;
+  return `${name.slice(0, 55)}_${hashText(JSON.stringify([server, tool]))
+    .split(":")[1]
+    .padStart(8, "0")}`;
 }
 // 名字里用的短指纹：接口只认字母数字与 _-，hashText 带着「长度:」的前缀，只取后面的十六进制
 function nameHash(text) {
@@ -300,9 +312,12 @@ async function runMcpTool(step, server, tool, args, ctx) {
   }
   // 请示与审查可能等很久；清单已变就不拿旧的准许去调用新定义。
   const current = mcp.servers[server]?.tools?.find(item => item.name === tool);
-  if (!current || mcpConfigs()[server] !== config && JSON.stringify(mcpConfigs()[server]) !== JSON.stringify(config) ||
-      JSON.stringify([current.inputSchema, current.description, current.title, mcpReadOnly(current, server)]) !==
-      JSON.stringify([spec.inputSchema, spec.description, spec.title, readOnlyAtStart]))
+  if (
+    !current ||
+    (mcpConfigs()[server] !== config && JSON.stringify(mcpConfigs()[server]) !== JSON.stringify(config)) ||
+    JSON.stringify([current.inputSchema, current.description, current.title, mcpReadOnly(current, server)]) !==
+      JSON.stringify([spec.inputSchema, spec.description, spec.title, readOnlyAtStart])
+  )
     return { ok: false, content: t("MCP 工具定义或配置已变，请刷新后重试。"), display: "工具已变" };
   const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal)
     .catch(error => {
