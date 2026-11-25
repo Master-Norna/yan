@@ -2,7 +2,7 @@
 // 文件读写见 files.js，列与搜见 find.js，图与指纹见 intent.js，卷宗目录见 archive.js
 // 由 server.js 装配：require("./server/work/index.js")({ archiveHome, workHome, toolEnv })
 "use strict";
-const { sendJson, readJson, jsonRoute, requestSignal, stamp, errorText } = require("../http.js");
+const { sendJson, readJson, jsonRoute, requestSignal, onResponseSettled, stamp, errorText } = require("../http.js");
 const fs = require("node:fs");
 const path = require("node:path");
 const sandbox = require("../sandbox.js");
@@ -172,8 +172,12 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
         const waitMs = clampNumber(Number(body.timeout) * 1000, 120000, 1000, 600000),
           { job, report } = await runForeground(command, workdir, boxed, waitMs, signal, String(body.ticket), seatbelt);
         if (!report) return;
-        // 转入了后台、编号却没能交到页面：无人能再凭编号叫停它，收掉
-        if (res.destroyed) return report.running && discardBackground(job);
+        // 转入后台后直到响应写完仍可能断开。编号未交付就撤掉这条后台记录及进程。
+        if (report.handedOff)
+          onResponseSettled(res, finished => {
+            if (!finished) discardBackground(job);
+          });
+        if (res.destroyed) return;
         return sendJson(res, 200, report);
       }
       // 探针、测试这类自己跑的：到时即掐。封顶在 2³¹−1 毫秒（约 24 天）只因 setTimeout 超过它会溢出、当作 1 毫秒
