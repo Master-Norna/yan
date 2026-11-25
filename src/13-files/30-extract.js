@@ -65,6 +65,33 @@ function trimExtractedText(value) {
     ? t`${text.slice(0, MAX_EXTRACTED_CHARS)}\n\n[文档内容过长，已在本机截取前 ${MAX_EXTRACTED_CHARS} 个字符]`
     : text;
 }
+// 页眉与分页：抽取器写下、预览与 read_document 读回，只此一处。PDF 的页眉单独一行「第 n 页」，
+// 幻灯片写成「## 第 n 页 · 题」；英文界面里是 Page n（见 i18n/en.js 的「第 {0} 页」）
+/** @param {number} page @param {{ heading?: boolean, title?: string }} [options] */
+function pageHeading(page, { heading = false, title = "" } = {}) {
+  return `${heading ? "## " : ""}${t`第 ${page} 页`}${title ? ` · ${title}` : ""}`;
+}
+/**
+ * 把抽取器写下的页眉切成页。认四种写法：`## 第 n 页[ · 题]`、`## Page n[ · 题]`、`第 n 页`、`Page n`。
+ * 页眉之前的零散文字（少见）接在第一页前，不丢。
+ * @param {string} text
+ * @returns {{ page: number, title: string, text: string }[]}
+ */
+function splitPages(text) {
+  const pages = [],
+    before = [];
+  let current = null;
+  for (const line of String(text ?? "").split("\n")) {
+    const head = line.match(/^(?:## )?(?:第 (\d+) 页|Page (\d+))(?: · (.*))?$/);
+    if (head) {
+      current = { page: Number(head[1] || head[2]), title: head[3] || "", lines: [line] };
+      pages.push(current);
+    } else if (current) current.lines.push(line);
+    else if (line.trim()) before.push(line);
+  }
+  if (before.length && pages.length) pages[0].lines.unshift(...before);
+  return pages.map(({ page, title, lines }) => ({ page, title, text: lines.join("\n") }));
+}
 // data：置入的原件（Blob）、原件的字节（预览器现抽时用），或 data: URL（网页交回的 PDF）；不抽的类型不读
 /** @param {string} name @param {Blob|string|Uint8Array} data */
 async function extractDocumentText(name, data) {
@@ -107,7 +134,7 @@ async function extractPdfText(data) {
       }
       if (line) output.push(line);
       chars += output.join("").replace(/\s/g, "").length;
-      pages.push(t`第 ${pageNumber} 页\n${output.join("\n")}`);
+      pages.push(`${pageHeading(pageNumber)}\n${output.join("\n")}`);
       if (pages.join("\n\n").length >= MAX_EXTRACTED_CHARS) break;
     }
   } finally {
@@ -727,9 +754,9 @@ function odfMarkdown(contentXml) {
           );
       } else if (name === "page") {
         pages += 1;
-        out.push(
-          t`## 第 ${pages} 页${child.getAttribute("draw:name") && !/^page\d+$/i.test(child.getAttribute("draw:name")) ? ` · ${child.getAttribute("draw:name")}` : ""}`
-        );
+        const pageName = child.getAttribute("draw:name"),
+          pageTitle = pageName && !/^page\d+$/i.test(pageName) ? pageName : "";
+        out.push(pageHeading(pages, { heading: true, title: pageTitle }));
         walk(child, depth, inheritedListStyle);
       } else walk(child, depth, inheritedListStyle);
     }
