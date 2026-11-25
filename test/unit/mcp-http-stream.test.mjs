@@ -114,8 +114,9 @@ test("等回复的那一问超时了：传输把还在读的正文一并收掉�
   const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
   client.transport = transport;
   await assert.rejects(() => client.request("tools/call", {}, 20), /超时/);
-  assert.equal(signals.length, 1);
+  assert.equal(signals.length, 2);
   assert.equal(signals[0].aborted, true, "超时之后要掐掉还在读的正文");
+  transport.close();
 });
 
 test("出站请求都带标记：MCP 服务借跳转盲打桥接受信接口的路堵上", async t => {
@@ -148,7 +149,7 @@ test("MCP 工具持续发进度也不能跨过绝对超时上限", async t => {
   let id;
   client.transport = {
     send: async message => {
-      id = message.id;
+      if (message.id !== undefined) id = message.id;
     },
     abort() {}
   };
@@ -296,7 +297,7 @@ for (const type of ["http", "sse"])
       const pending = client.request("tools/call", {}, 20, 17);
       client.receive({ jsonrpc: "2.0", id: 17, method: "ping" });
       await assert.rejects(pending, /超时/);
-      assert.equal(signals.length, 2);
+      assert.equal(signals.length, 3);
       assert.equal(signals[0].aborted, true);
       assert.equal(signals[1].aborted, false);
     } finally {
