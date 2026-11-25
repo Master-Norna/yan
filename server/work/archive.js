@@ -100,6 +100,16 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     const root = await archiveRoot(body.root),
       id = String(body.id || "").replace(/[^A-Za-z0-9_-]/g, "");
     const target = id ? path.join(root, SCRATCH_DIR, id) : path.join(root, SCRATCH_DIR);
+    // 根或草稿目录尚不存在时仍是无害的清理；不应为了检查而建目录。
+    const scratch = path.join(root, SCRATCH_DIR);
+    const stat = await fs.promises.lstat(scratch).catch(error => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!stat) return { cleaned: id || SCRATCH_DIR };
+    // 草稿根不得借链接指向别处（即使仍在卷宗内，也不能当作草稿递归删）。
+    if (stat.isSymbolicLink()) throw Error("草稿目录不能是链接");
+    await assertNoEscapingLink(root, target);
     await fs.promises.rm(target, { recursive: true, force: true, maxRetries: 2 }).catch(error => {
       throw Error(describeFsError(error, SCRATCH_DIR));
     });
