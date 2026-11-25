@@ -159,7 +159,7 @@ function renderLibrary() {
   $("#libraryCountText").textContent = total ? t`现存 ${total} 件 · ${formatFileSize(bytes)}` : "";
   $("#libraryLead").innerHTML = `<span title="${escapeHtml(archiveDir())}">${escapeHtml(archiveDir())}</span>${
     archiveScratch?.count
-      ? `<span class="library-scratch">${t`草稿 ${archiveScratch.count} 处 · ${formatFileSize(archiveScratch.bytes)}`}<button type="button" id="libraryCleanScratch" title="${t`清理模型留下的脚本与中间文件（${escapeHtml(bootstrap.work?.scratch || ".草稿")}）`}">${t(`清理`)}</button></span>`
+      ? `<span class="library-scratch">${t`草稿 ${archiveScratch.count} 处 · ${formatFileSize(archiveScratch.bytes)}`}${archiveScratch.truncated ? t("（部分统计）") : ""}<button type="button" id="libraryCleanScratch" title="${t`清理模型留下的脚本与中间文件（${escapeHtml(bootstrap.work?.scratch || ".草稿")}）`}">${t(`清理`)}</button></span>`
       : ""
   }`;
   $("#libraryCleanScratch")?.addEventListener("click", () => void cleanScratch(null));

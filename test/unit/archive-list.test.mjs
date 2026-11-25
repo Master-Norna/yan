@@ -40,7 +40,7 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
   };
 
   const { scratch, ...visible } = await list({});
-  assert.deepEqual(scratch, { count: 1, files: 1, bytes: 3 });
+  assert.deepEqual(scratch, { count: 1, files: 1, bytes: 3, truncated: false });
   assert.ok(scanned.includes(scratchDir));
   assert.equal(visible.archive, root);
   assert.deepEqual(
