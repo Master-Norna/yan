@@ -13,6 +13,7 @@ function translateSse(model, handle) {
   let buffer = "",
     event = "",
     dataLines = [],
+    dataSize = 0,
     stopped = false,
     /** @type {TransformStreamDefaultController} */ controller;
   const send = text => controller.enqueue(encoder.encode(text));
@@ -36,12 +37,17 @@ function translateSse(model, handle) {
     buffer += text;
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || "";
+    const limit = 32 * 1024 * 1024;
     for (const line of lines) {
       if (stopped) return;
+      if (line.length > limit) return out.fail("单个模型事件超过大小限制");
       if (line.startsWith("event:")) {
         event = line.slice(6).trim();
         dataLines = [];
+        dataSize = 0;
       } else if (line.startsWith("data:")) {
+        dataSize += line.length + 1;
+        if (dataSize > limit) return out.fail("单个模型事件超过大小限制");
         dataLines.push(line.slice(5).replace(/^ /, ""));
         let data;
         try {
@@ -51,12 +57,19 @@ function translateSse(model, handle) {
           continue;
         }
         dataLines = [];
+        dataSize = 0;
         // 不把转换器自身的异常冒充 JSON 残片吞掉。
         handle(out, data, event || data?.type);
       } else if (!line) {
         event = "";
         dataLines = [];
+        dataSize = 0;
       }
+    }
+    if (!stopped && buffer.length + dataSize > limit) out.fail("单个模型事件超过大小限制");
+    if (stopped) {
+      buffer = "";
+      dataLines = [];
     }
   };
   return new TransformStream({

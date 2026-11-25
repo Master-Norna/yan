@@ -223,6 +223,7 @@ module.exports = function createFiles(work) {
     const started = Date.now(),
       { response } = await fetchPublicResponse(url.href, {
         timeout: 120000,
+        signal,
         allowLoopback: true,
         allowPrivate: body.allowPrivate === true,
         allowPrivateFirstHop: body.allowPrivateFirstHop === true
