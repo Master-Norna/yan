@@ -174,7 +174,7 @@ await waitFor(`${lastAssistant}?.dataset.status === "complete" && ${lastAssistan
   () => {}
 );
 const talk = await evalJs(
-  `(c => ({ text: document.querySelector("#messages").textContent, sub: c.messages.flatMap(m => m.steps || []).find(s => s.name === "delegate")?.sub, card: (d => d && { kind: d.dataset.kind, fresh: !!d.querySelector(".helper-fresh"), ref: d.dataset.ref, note: d.dataset.note, text: d.textContent })(document.querySelector('#messages .tool-step-delegate[data-kind="传话"]')) }))(${convOf("HELPERTALK")})`
+  `(c => { const d = document.querySelector('#messages .tool-step-delegate[data-kind="传话"]'); const del = c.messages.flatMap(m => m.steps || []).find(s => s.name === "delegate"); return { text: document.querySelector("#messages").textContent, sub: del?.sub, delegateId: del?.id, card: d && { kind: d.dataset.kind, fresh: !!d.querySelector(".helper-fresh"), ref: d.dataset.ref, note: d.dataset.note, text: d.textContent } } })(${convOf("HELPERTALK")})`
 );
 check(
   "main model's message reaches the running helper at a natural break, and it changes course",
@@ -183,7 +183,7 @@ check(
 );
 check(
   "the passed word is a card in the trail marked 已更新, pointing at the helper and the note",
-  talk.card?.fresh && talk.card.ref === "call_hp0" && !!talk.card.note && talk.card.text.includes("TALK-TEXT"),
+  talk.card?.fresh && !!talk.card.ref && talk.card.ref === talk.delegateId && !!talk.card.note && talk.card.text.includes("TALK-TEXT"),
   JSON.stringify(talk.card)
 );
 await evalJs(`document.querySelector('#messages .tool-step-delegate[data-kind="传话"] > .tool-step-head').click(); true`);
@@ -201,7 +201,7 @@ check(
   JSON.stringify(panelNote)
 );
 // 人亲手收起那一趟、合上窗，再点传话的签：那句话在收着的时间线里，仍要替人摊开、翻得到
-const hpTrail = `document.querySelector('#helperModal .helper-run[data-run="call_hp0"] > .sub-trail')`;
+const hpTrail = `document.querySelector('#helperModal .helper-run[data-run="${talk.card?.ref || ""}"] > .sub-trail')`;
 await evalJs(
   `(t => { if (t && !t.classList.contains("folded")) t.querySelector(":scope > .sub-fold")?.click(); return true })(${hpTrail})`
 );
