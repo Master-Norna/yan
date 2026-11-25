@@ -43,7 +43,10 @@ test("原件直传遇零字节写入，不报成功且清理半成品", async t 
     out.write = async () => ({ bytesWritten: 0 });
     return out;
   });
-  await assert.rejects(receiveUpload(upload(Buffer.from("data")), 1024, () => file), /没有进展/);
+  await assert.rejects(
+    receiveUpload(upload(Buffer.from("data")), 1024, () => file),
+    /没有进展/
+  );
   assert.equal(fs.existsSync(file), false);
 });
 
@@ -52,7 +55,10 @@ test("临时文件独占创建失败，不删除别人的既存文件", async t 
   const file = path.join(dir, "upload");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(file, "other");
-  await assert.rejects(receiveUpload(upload(Buffer.from("data")), 1024, () => file), { code: "EEXIST" });
+  await assert.rejects(
+    receiveUpload(upload(Buffer.from("data")), 1024, () => file),
+    { code: "EEXIST" }
+  );
   assert.equal(fs.readFileSync(file, "utf8"), "other");
 });
 

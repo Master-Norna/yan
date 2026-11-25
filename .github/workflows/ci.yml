@@ -28,10 +28,6 @@ jobs:
       - run: npm run unit
       - run: npm run check
       - run: npx --yes prettier@3.3.3 --check .
-      - if: ${{ failure() }}
-        run: |
-          npx --yes prettier@3.3.3 --write test/unit/file-transfer.test.mjs
-          git diff -- test/unit/file-transfer.test.mjs
 
   # 最低版本另在 Windows 上跑一遍：engines 写的是 >=22，macOS 那份跑的也是 22，但 macOS 走不到沙箱、任务栏、
   # .cmd 启动器这些只有 Windows 才有的路。只跑单测，不重跑端到端；名字不进分支保护，先作参考。
