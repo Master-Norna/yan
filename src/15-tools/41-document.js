@@ -76,13 +76,14 @@ defineTool({
       text = record ? (record.kind === "text" ? record.data : record.extractedText) || "" : "";
     }
     if (!text) return { ok: false, content: t("该文档无可读取的文本"), display: "无文本" };
-    const pages = text.split(/^(?=第 \d+ 页$)/m),
-      pageCount = pages.filter(p => /^第 \d+ 页$/m.test(p)).length;
+    const kind = fileKind(doc.name),
+      pages = splitPages(text, kind.extract === "pdf" ? "pdf" : kind.name === "slides" ? "slide" : "plain"),
+      pageCount = pages.length;
     if (args.page) {
-      const page = pages.find(p => p.startsWith(`第 ${args.page} 页`));
+      const page = pages.find(p => p.page === Number(args.page));
       if (!page) return { ok: false, content: t`没有第 ${args.page} 页，共 ${pageCount || 1} 页`, display: "页码超出" };
       step.note = noteOf(`第 ${args.page} 页`);
-      return { ok: true, content: noted(page.slice(0, 20000)), display: `第 ${args.page} 页 · ${page.length} 字` };
+      return { ok: true, content: noted(page.text.slice(0, 20000)), display: `第 ${args.page} 页 · ${page.text.length} 字` };
     }
     if (args.query) {
       const needle = args.query.toLowerCase(),

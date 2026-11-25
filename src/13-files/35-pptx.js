@@ -252,7 +252,7 @@ function pptxPage(tree, rels, notes, index, height) {
     // 讲者备注另带一份：画布页不复述 Markdown，但备注要能看
     notes: Array.isArray(said) ? said : [],
     text: [
-      t`## 第 ${index + 1} 页${title ? ` · ${title}` : ""}`,
+      pageHeading(index + 1, { heading: true, title }),
       ...items.filter(item => item !== heading).flatMap(readBlocks),
       said === null
         ? t("（这一页的备注未能读出）")
