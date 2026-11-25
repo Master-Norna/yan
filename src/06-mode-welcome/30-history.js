@@ -89,6 +89,8 @@ async function deleteConversation(id) {
 /** @param {Conversation} c @returns {[string, string[], () => Promise<void>]} */
 function detachConversation(c) {
   haltConversation(c.id, { removing: true });
+  intents.delete(c.id);
+  intentRejects.delete(c.id);
   if (currentId === c.id) closeSidePanel();
   const draftFiles = draftRecord(c.id).attachments.map(file => file.id);
   clearDraft(c.id);
