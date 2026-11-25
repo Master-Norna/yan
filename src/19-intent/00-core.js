@@ -227,7 +227,7 @@ function intentClosed(intent, before) {
   };
   const opened = new Set(),
     settled = new Set();
-  const holds = intentEvaluator(intent);
+  const holds = intentEvaluator(intent, {}, new Set(), true);
   for (const id of intentRoots(intent)) walk(id, holds(id) ? settled : opened);
   const closed = new Set([...settled].filter(id => !opened.has(id)));
   for (const id of Object.keys(intent.nodes)) if (intent.nodes[id].keep && closed.has(intent.nodes[id].in)) closed.add(id);
@@ -346,12 +346,15 @@ function intentStaleWhy(intent, id, now = {}) {
       if (!(need in seal.premises)) return t`前提「${need}」为后添`;
       if (seal.premises[need] !== intent.nodes[need].rev) return t`前提「${need}」说法已改`;
     }
-  const touched = Object.keys(seal.prints).filter(key => key in now && now[key] !== seal.prints[key]),
+  const anchors = node.anchors.filter(key => !keepHookAnchor(node, key)),
+    unbased = anchors.filter(key => !(key in seal.prints) && key in now && !(anchorParts(key)[0] === "test" && now[key] === "不过")),
+    touched = Object.keys(seal.prints).filter(key => key in now && now[key] !== seal.prints[key]),
     // 测试只比过没过：没过就直说没过——记下时就不过的也算，重记一回凭据抹不平
-    failing = Object.keys(seal.prints).filter(key => anchorParts(key)[0] === "test" && now[key] === "不过"),
+    failing = anchors.filter(key => anchorParts(key)[0] === "test" && now[key] === "不过"),
     changed = touched.filter(key => !failing.includes(key));
   return [
     failing.length ? t`${failing.map(anchorLabel).join("、")}不过` : "",
+    unbased.length ? t`凭据未记基准：${unbased.slice(0, 4).map(anchorLabel).join("、")}` : "",
     changed.length
       ? t`凭据已变：${changed.slice(0, 4).map(anchorLabel).join("、")}${changed.length > 4 ? t` 等 ${changed.length} 条` : ""}`
       : ""
@@ -371,7 +374,7 @@ function intentEstablished(intent, id, now = {}, seen = new Set()) {
 }
 // 一次求值共用结果，不跨图或指纹快照缓存。手编的环仍按当前路径判，不缓存遇环的结果。
 /** @param {Intent} intent @param {IntentPrints} [now] @param {Set<string>} [seen] */
-function intentEvaluator(intent, now = {}, seen = new Set()) {
+function intentEvaluator(intent, now = {}, seen = new Set(), requirePrints = false) {
   /** @type {Map<string, boolean>} */
   const memo = new Map(),
     visiting = new Set(seen);
@@ -385,6 +388,11 @@ function intentEvaluator(intent, now = {}, seen = new Set()) {
     if (memo.has(id)) return memo.get(id);
     const node = intent.nodes[id];
     if (!node) return false;
+    // 了结不再采集指纹；没记过基准的必要凭据尚不能退出采集。普通状态判定不受此条件影响。
+    if (requirePrints && SEALED.has(node.state) && node.seal && node.anchors.some(key => !keepHookAnchor(node, key) && !(key in node.seal.prints))) {
+      memo.set(id, false);
+      return false;
+    }
     const state = intentState(intent, id, now);
     if (state !== "done") {
       const result = state === "assumed";
@@ -417,13 +425,13 @@ function intentBorrowed(intent, id) {
   }
   return [...out];
 }
-/** 已成立、已假定各项记过指纹的凭据：读图时据此取一回此刻的；了结的不取 @param {Intent} intent @param {Set<string>} [closed] */
+/** 已成立、已假定各项声明的凭据（含尚未取得基准的）：读图时取一回此刻的；了结的不取 @param {Intent} intent @param {Set<string>} [closed] */
 function intentSealedAnchors(intent, closed = intentClosed(intent)) {
   return [
     ...new Set(
       Object.entries(intent.nodes)
         .filter(([id, node]) => SEALED.has(node.state) && node.seal && !closed.has(id))
-        .flatMap(([, node]) => Object.keys(node.seal.prints).filter(key => !keepHookAnchor(node, key)))
+        .flatMap(([, node]) => node.anchors.filter(key => !keepHookAnchor(node, key)))
     )
   ];
 }
@@ -750,7 +758,7 @@ function applyIntentOps(intent, ops, { at = "", conversation = "", ask = "", pri
     const id = op.rename && next.nodes[op.rename] ? op.rename : op.id,
       node = next.nodes[id];
     if (!intentReseals(op, node)) continue;
-    // 取不到指纹的凭据（探针这回没跑）不记：日后也不据它判
+    // 取不到的指纹不伪造基准：后续仍采集，取得读数时交给模型复核。
     node.seal = {
       rev: node.rev,
       anchors: [...node.anchors],
