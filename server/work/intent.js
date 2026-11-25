@@ -60,16 +60,18 @@ module.exports = function createIntent(work) {
   const PRINT_DIR_FILES = 2000,
     PRINT_DIR_BYTES = 32 * 1024 * 1024;
   const missing = error => error?.code === "ENOENT" || error?.code === "ENOTDIR" || error?.code === "EISDIR";
-  async function dirHash(dir, readDir, readStat, hashFile) {
+  async function dirHash(dir, readDir, readStat, hashFile, signal) {
     const files = [],
       directories = [];
     const walk = async at => {
+      signal.throwIfAborted();
       const entries = await readDir(at).catch(error => {
         // 根不存在才是整个目录消失；遍历途中某个子目录消失视为本次快照不完整。
         if (at === dir) throw error;
         throw Error(describeFsError(error, at));
       });
       for (const entry of entries) {
+        signal.throwIfAborted();
         const full = path.join(at, entry.name);
         if (
           entry.isDirectory() &&
@@ -89,6 +91,7 @@ module.exports = function createIntent(work) {
     for (const directory of directories.sort()) hash.update(`dir:${directory}\u0000\n`);
     let bytes = 0;
     for (const file of files) {
+      signal.throwIfAborted();
       const stat = await readStat(file).catch(error => {
         throw Error(describeFsError(error, file));
       });
@@ -119,10 +122,12 @@ module.exports = function createIntent(work) {
       dirs = Object.create(null),
       readDir = oncePerPath(at => fs.promises.readdir(at, { withFileTypes: true })),
       readStat = oncePerPath(file => fs.promises.stat(file)),
-      hashFile = oncePerPath(fileHash),
+      hashFile = oncePerPath(file => fileHash(file, signal)),
       take = async (given, into, read) => {
         try {
+          signal.throwIfAborted();
           const target = await targetOf(workdir, { ...body, path: given });
+          signal.throwIfAborted();
           into[given] = await read(target);
         } catch (error) {
           if (missing(error)) into[given] = null;
@@ -130,14 +135,13 @@ module.exports = function createIntent(work) {
       },
       jobs = [
         ...list("paths").map(given => () => take(given, prints, hashFile)),
-        ...list("dirs").map(given => () => take(given, dirs, dir => dirHash(dir, readDir, readStat, hashFile)))
+        ...list("dirs").map(given => () => take(given, dirs, dir => dirHash(dir, readDir, readStat, hashFile, signal)))
       ];
     // 限并发，避免 400 条凭据同时打开文件；目录内部仍顺序读取。
     let cursor = 0;
     await Promise.all(
       Array.from({ length: Math.min(8, jobs.length) }, async () => {
-        while (cursor < jobs.length) {
-          signal.throwIfAborted();
+        while (!signal.aborted && cursor < jobs.length) {
           await jobs[cursor++]();
         }
       })
