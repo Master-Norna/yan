@@ -61,7 +61,9 @@ for (const cancel of [true, false])
       await new Promise(resolve => server.close(resolve));
       if (path.dirname(fs.realpathSync(root)) !== parent || !path.basename(root).startsWith("yan-bg-delivery-"))
         throw Error("测试清理越界");
-      fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+      // 取消那一路拿不到编号，没法凭 watch 等它退：那条命令写完还要收尾，目录可能仍被它
+      // 占着作当前目录（Windows 上就是 EPERM/EBUSY），重试到它退出为止，不拿固定等待当判据
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
     }
   });
 
@@ -83,7 +85,7 @@ test("后台完成回报未写完即断开，重连仍能领取退出码", { tim
   t.after(async () => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
   });
   const post = (route, body) =>
     fetch(`http://127.0.0.1:${server.address().port}${route}`, {
@@ -123,7 +125,7 @@ test("前台转后台的编号写出途中断开：进程不会成为孤儿", { 
   t.after(async () => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
   });
   const command =
     process.platform === "win32"
