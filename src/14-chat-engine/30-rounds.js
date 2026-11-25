@@ -26,11 +26,8 @@ function usageSum(a, b) {
   for (const [key, value] of Object.entries(b)) sum[key] = Number(sum[key] || 0) + Number(value || 0);
   return sum;
 }
-// 一轮里的几件调用拟成步骤。id 是这批结果的唯一键（见 runSteps 里按 id 收的 outcomes），也是历史里
-// tool_calls 与 tool 消息配对的凭据：上游偶尔在同一轮的两件调用里给同一个 id（流里 index 分开、id 相同），
-// 照原样收，后一件的结果会盖掉前一件——模型拿着 A 的参数读到 B 的结果，静默错；同 id 的 tool_calls 还有上游直接拒。
-// 撞了就补个序号，两处（发给模型的调用与交回的 tool 消息）用的是同一份。同一答里先前几步的 id 也避开：
-// 行迹按 data-step-id 认那一步，撞了找到的是前一件
+// 工具调用的上游 id 不保证跨轮、跨对话或跨帮手唯一；审批表、行迹与候都需要本地唯一的 id。
+// 每步分配本地 id，送回历史的 tool_calls 与 tool 消息始终使用同一份。
 /**
  * @param {{ id?: string, name: string, arguments?: string }[]} calls
  * @param {Message|SubAgent} target
@@ -40,7 +37,7 @@ function usageSum(a, b) {
 function roundSteps(calls, target, scope) {
   const used = new Set((target.steps || []).map(step => step.id));
   return calls.map(call => {
-    const base = call.id || `call_${uid().slice(0, 8)}`;
+    const base = `call_${uid().replace(/-/g, "")}`;
     let id = base;
     for (let n = 2; used.has(id); n += 1) id = `${base}_${n}`;
     used.add(id);
