@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 
 const createCheckpoints = createRequire(import.meta.url)("../../server/checkpoints.js");
@@ -607,6 +608,95 @@ test("对照时现存文件读失败：标记未知，不误判修改或在恢�
     assert.equal(fs.readFileSync(path.join(root, "a.txt"), "utf8"), "after!");
   } finally {
     fs.promises.stat = original;
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("回收时有存活的册或目录对象读不出：保留对象，修好后仍能恢复", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    home = path.join(base, "检查点"),
+    { post, points, close } = await serve(home),
+    key = { root, conversation: "keep", answer: "m1" };
+  try {
+    write(root, "a.txt", "first");
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    const store = path.join(home, fs.readdirSync(home)[0]),
+      book = path.join(store, "册", "keep~m1.json"),
+      savedBook = fs.readFileSync(book),
+      hash = JSON.parse(savedBook.toString()).tree,
+      object = path.join(store, "对象", hash.slice(0, 2), hash.slice(2)),
+      savedObject = fs.readFileSync(object);
+    write(root, "a.txt", "second");
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "drop1", answer: "m2" })).status, 200);
+    fs.writeFileSync(book, "{");
+    await points.dropConversation("drop1");
+    fs.writeFileSync(book, savedBook);
+    assert.ok(fs.existsSync(object), "读不出仍存活的册时不得回收");
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "drop2", answer: "m3" })).status, 200);
+    fs.writeFileSync(object, "{");
+    await points.dropConversation("drop2");
+    fs.writeFileSync(object, savedObject);
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual(done.failed, []);
+    assert.equal(fs.readFileSync(path.join(root, "a.txt"), "utf8"), "first");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("回收：目录对象被换成合法的空目录，修回原件后仍能恢复文件", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    home = path.join(base, "检查点"),
+    { post, points, close } = await serve(home),
+    key = { root, conversation: "keep", answer: "m1" };
+  try {
+    write(root, "a.txt", "first");
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    const store = path.join(home, fs.readdirSync(home)[0]),
+      { tree: hash } = JSON.parse(fs.readFileSync(path.join(store, "册", "keep~m1.json"), "utf8")),
+      object = path.join(store, "对象", hash.slice(0, 2), hash.slice(2)),
+      saved = fs.readFileSync(object);
+    assert.equal(createHash("sha1").update(saved).digest("hex"), hash);
+    write(root, "a.txt", "second");
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "drop", answer: "m2" })).status, 200);
+
+    fs.writeFileSync(object, "[]");
+    await points.dropConversation("drop");
+    assert.equal(fs.existsSync(path.join(store, "册", "drop~m2.json")), false);
+    fs.writeFileSync(object, saved);
+
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([done.status, done.restored, done.failed], [200, 1, []]);
+    assert.equal(fs.readFileSync(path.join(root, "a.txt"), "utf8"), "first");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("回收：普通文件与目录对象内容相同，仍遍历该目录的子对象", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    home = path.join(base, "检查点"),
+    { post, points, close } = await serve(home),
+    key = { root, conversation: "keep", answer: "m1" };
+  try {
+    const content = "child",
+      hash = createHash("sha1").update(content).digest("hex");
+    write(root, "z/child.txt", content);
+    write(root, "a.json", JSON.stringify([["f", "child.txt", hash, content.length]]));
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    write(root, "z/child.txt", "new");
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "drop", answer: "m2" })).status, 200);
+    await points.dropConversation("drop");
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual(done.failed, []);
+    assert.equal(fs.readFileSync(path.join(root, "z/child.txt"), "utf8"), content);
+  } finally {
     await close();
     fs.rmSync(base, { recursive: true, force: true });
   }

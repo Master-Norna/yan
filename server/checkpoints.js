@@ -424,18 +424,46 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     });
   }
   // ---------- 清理：对话删了，它的几张册跟着删，没有册再用的对象删去 ----------
+  function bookEntries(store) {
+    try {
+      return fs.readdirSync(store.book);
+    } catch (error) {
+      if (error.code === "ENOENT") return []; // 册尚未建；其他读取失败不等于空册。
+      throw error;
+    }
+  }
   function collect(store) {
     const keep = new Set(),
+      visitedTrees = new Set(),
+      validHash = hash => typeof hash === "string" && /^[0-9a-f]{40}$/.test(hash),
       mark = hash => {
-        if (keep.has(hash)) return;
+        if (!validHash(hash)) throw Error("检查点目录对象编号无效");
+        if (visitedTrees.has(hash)) return;
+        visitedTrees.add(hash);
         keep.add(hash);
-        for (const item of readJsonFile(objectPath(store, hash), []))
+        const bytes = fs.readFileSync(objectPath(store, hash));
+        if (crypto.createHash("sha1").update(bytes).digest("hex") !== hash) throw Error("检查点目录对象内容与编号不符");
+        const items = JSON.parse(bytes.toString("utf8"));
+        if (!Array.isArray(items)) throw Error("检查点目录对象损坏");
+        for (const item of items) {
+          if (!Array.isArray(item) || !["d", "f", "x"].includes(item[0])) throw Error("检查点条目损坏");
           if (item[0] === "d") mark(item[2]);
-          else if (item[0] === "f") keep.add(item[2]);
+          else if (item[0] === "f") {
+            if (!validHash(item[2])) throw Error("检查点文件对象编号无效");
+            keep.add(item[2]);
+          }
+        }
       };
-    for (const name of fs.existsSync(store.book) ? fs.readdirSync(store.book) : []) {
-      const page = readJsonFile(path.join(store.book, name), null);
-      if (page?.tree) mark(page.tree);
+    // 只在所有仍存活的册及目录对象都能读全时才清理。暂时读不到不等于没人引用。
+    // 文件内容可能恰好等于目录对象 JSON，不能以 keep 判断子树已经遍历。
+    try {
+      for (const name of bookEntries(store)) {
+        if (!name.endsWith(".json")) continue;
+        const page = JSON.parse(fs.readFileSync(path.join(store.book, name), "utf8"));
+        mark(page?.tree);
+      }
+    } catch {
+      return;
     }
     for (const prefix of fs.existsSync(store.objects) ? fs.readdirSync(store.objects) : []) {
       const dir = path.join(store.objects, prefix);
@@ -454,7 +482,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
       const store = storeAt(path.join(home(), code));
       // 在途拍摄已标作废，由拍摄那边丢弃并回收；已落册的在同一目录队列中删册、回收，不和拍摄并发改对象。
       await serial(store, async () => {
-        const pages = fs.existsSync(store.book) ? fs.readdirSync(store.book).filter(name => name.startsWith(prefix)) : [];
+        const pages = bookEntries(store).filter(name => name.startsWith(prefix));
         if (!pages.length) return;
         for (const name of pages) fs.rmSync(path.join(store.book, name), { force: true });
         collect(store);
