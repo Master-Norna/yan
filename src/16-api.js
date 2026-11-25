@@ -597,7 +597,10 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
         lines.push(buffer);
         buffer = "";
       }
+      const eventLimit = 32 * 1024 * 1024;
+      if (buffer.length > eventLimit) throw Error("单个模型事件超过大小限制");
       for (const line of lines) {
+        if (line.length > eventLimit) throw Error("单个模型事件超过大小限制");
         if (!line) {
           dataLines = [];
           continue;
@@ -605,6 +608,7 @@ async function readSse(response, assistant, { onFrame = null, live = true } = {}
         if (!line.startsWith("data:")) continue;
         dataLines.push(line.slice(5).replace(/^ /, ""));
         const data = dataLines.join("\n").trim();
+        if (data.length > eventLimit) throw Error("单个模型事件超过大小限制");
         if (!data) continue;
         if (data === "[DONE]") {
           ended = true;
