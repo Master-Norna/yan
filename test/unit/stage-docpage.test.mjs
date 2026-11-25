@@ -8,12 +8,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { load } from "./harness.mjs";
 
-const { stageDocName, stageDocPage } = load(["stageDocName", "stageDocPage"]);
+const { stageDocName, stageDocPage, FILE_KINDS } = load(["stageDocName", "stageDocPage", "FILE_KINDS"]);
 const { docPageHtml, DOC_VIEWABLE, DOCPAGE_FILE, sweepOutputs } = createRequire(import.meta.url)("../../server/stage.js");
 
-test("能摊开的本机文档：抽得出正文的六种才认，旧格式与压缩包仍交本机程序", () => {
+test("能摊开的本机文档：抽得出正文的现代文档才认，旧格式与压缩包仍交本机程序", () => {
   const url = name => `file:///E:/%E6%A1%88/${encodeURIComponent(name)}`;
-  for (const name of ["报告.docx", "数据.xlsx", "讲义.pptx", "写作.odt", "账.ods", "简.odp"])
+  for (const name of ["报告.docx", "数据.xlsx", "讲义.pptx", "写作.odt", "账.ods", "简.odp", "笔记.ipynb"])
     assert.equal(stageDocName(url(name)), name, name);
   // 抽不出正文的一律不认：旧版 Office、压缩包、认得的别的格式
   for (const name of ["老稿.doc", "旧表.xls", "旧讲.ppt", "包.zip", "说明.txt", "图.png", "没扩展名"])
@@ -31,9 +31,10 @@ test("文件名里的转义照解：中文与空格、以及解不开的那种",
   assert.equal(stageDocName("file:///E:/a/%zz.docx"), "");
 });
 
-test("原件直取放行六种 Office/ODF 与 ipynb：旧格式与其他本机文件仍不许读", () => {
-  // ipynb 在 #169 登记为 view=doc；此处先让桥接接受，避免两个 PR 合并后前端摊开却被服务端拒绝
-  assert.deepEqual([...DOC_VIEWABLE].sort(), [".docx", ".ipynb", ".odp", ".ods", ".odt", ".pptx", ".xlsx"]);
+test("原件直取放行的扩展名跟着文件种类登记走：旧格式与其他本机文件仍不许读", () => {
+  // 不抄字面：以后在 FILE_KINDS 新添一份 view=doc、或改了一种扩展名，这里必须跟着对上（桥接放行、页面才会摊）
+  const docExts = FILE_KINDS.filter(kind => kind.view === "doc").flatMap(kind => kind.exts.map(ext => `.${ext}`));
+  assert.deepEqual([...DOC_VIEWABLE].sort(), [...new Set(docExts)].sort());
   for (const ext of [".env", ".json", ".txt", ".pdf", ".doc", ".zip"]) assert.equal(DOC_VIEWABLE.has(ext), false, ext);
 });
 

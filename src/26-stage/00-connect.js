@@ -48,8 +48,6 @@ const stage = {
   helperCtx: "",
   // 浏览器自家页的协议（edge:// 或 chrome://），连上时问一回
   scheme: "edge",
-  // 那个服务存下载的目录（桥接从参数里读的，设置 → 游目里给人看）
-  output: "",
   /** @type {{ width: number, height: number } | null} 正看的这一页视口被定死了多大；没定死是 null */
   pinned: null,
   // 执事亲手定过视口（browser_resize、setViewportSize）：「适应页面」只在这时才等它歇手后自动放开。
@@ -121,10 +119,9 @@ function stageLocate() {
       revision = stage.frontRevision;
       return bridge("/api/stage", stageService());
     })
-    .then(({ ws, front, marks, port, output }) => {
+    .then(({ ws, front, marks, port }) => {
       stage.marks = !!marks;
       stage.port = port;
-      stage.output = output || "";
       if (!stage.ws) return ws ? stageConnect(ws, front) : stageSync();
       if (revision === stage.frontRevision) {
         if (front && front !== stage.front && stage.tabs.has(front)) stageShow(front);

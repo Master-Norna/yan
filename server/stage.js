@@ -465,7 +465,7 @@ module.exports = function createStage({ root = () => "" } = {}) {
   async function locate(req, res) {
     const body = await readJson(req),
       service = serviceOf(body, root()),
-      { port, dir, output } = browserOf(service.args, service.cwd);
+      { port, dir } = browserOf(service.args, service.cwd);
     const marks = !!dir && fs.existsSync(bookmarksFile(dir));
     const get = path =>
       fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(1500) }).then(r => /** @type {any} */ (r.json()));
@@ -476,12 +476,11 @@ module.exports = function createStage({ root = () => "" } = {}) {
         ws: version.webSocketDebuggerUrl || "",
         front: list.find(t => t.type === "page")?.id || "",
         port,
-        marks,
-        output
+        marks
       });
     } catch {
       // 浏览器没开：不算错，页面等下一次
-      sendJson(res, 200, { ws: "", port, marks, output });
+      sendJson(res, 200, { ws: "", port, marks });
     }
   }
   // 只回 id、名字、网址与夹的层次（改收藏时按 id 认），读不到就是空的
