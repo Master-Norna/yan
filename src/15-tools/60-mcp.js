@@ -88,8 +88,8 @@ function registerMcpTools() {
     else
       for (const spec of uniqueBy(state.tools, spec => spec.name)) {
         const tool = mcpInlineTool(server, spec);
-        // 名字只留得下字母数字：read.file 与 readfile 会撞成同一个，后来的添个尾巴，不把先来的盖掉（不撞的名字照旧，旧行迹认得出）
-        if (TOOLS.has(tool.name)) tool.name = `${tool.name.slice(0, 57)}_${nameHash(`${server}:${spec.name}`)}`;
+        // 极少见的剩余哈希撞名也不覆盖已登记的工具；执行时另核对本答拿到的身份。
+        if (TOOLS.has(tool.name)) continue;
         defineTool(tool);
       }
   }
@@ -123,6 +123,7 @@ function mcpInlineTool(server, spec) {
     label: server,
     mcp: true,
     server,
+    mcpIdentity: JSON.stringify([server, spec.name, spec.inputSchema, spec.description, spec.title, readOnly]),
     schema: { description: spec.description || spec.title || spec.name, parameters: spec.inputSchema },
     lookup: readOnly,
     parallel: readOnly,
@@ -135,7 +136,10 @@ function mcpInlineTool(server, spec) {
 function mcpFunctionName(server, tool) {
   const clean = text => text.replace(/[^A-Za-z0-9_-]/g, "");
   const name = `mcp__${clean(server) || `s${nameHash(server)}`}__${clean(tool) || `t${nameHash(tool)}`}`;
-  return name.length <= 64 ? name : `${name.slice(0, 57)}_${nameHash(name)}`;
+  // 原名本来合规且无分隔歧义时保留旧名；否则在原始二元组上取指纹，不能在清洗过的名字上取。
+  if (name.length <= 64 && server === clean(server) && tool === clean(tool) && server && tool && !server.includes("__") && !tool.includes("__"))
+    return name;
+  return `${name.slice(0, 55)}_${hashText(JSON.stringify([server, tool])).split(":")[1].padStart(8, "0")}`;
 }
 // 名字里用的短指纹：接口只认字母数字与 _-，hashText 带着「长度:」的前缀，只取后面的十六进制
 function nameHash(text) {
