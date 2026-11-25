@@ -365,13 +365,24 @@ test("假定也挂凭据：所借的变了，同样转待复核，不再算立�
   assert.ok(!f.intentEstablished(intent, "上线", now));
 });
 
-test("照旧写 files 的也认作文件凭据；这一回取不到指纹的凭据不记，日后不据它判", () => {
+test("照旧写 files 的也认作文件凭据；取不到基准的凭据仍追踪，读到时复核", () => {
   const { ops } = f.normalizeIntentOps(empty(), [{ id: "甲", claim: "x", check: "y", files: ["a.js"] }]);
   assert.deepEqual(ops[0].anchors, ["file:a.js"]);
   let intent = f.applyIntentOps(empty(), [{ id: "甲", claim: "x", check: "y", anchors: ["file:a.js", "cmd:npm ls"] }]);
   intent = f.applyIntentOps(intent, [{ id: "甲", state: "done" }], { prints: { "file:a.js": "1" } });
   assert.deepEqual(Object.keys(intent.nodes["甲"].seal.prints), ["file:a.js"]);
-  assert.equal(f.intentState(intent, "甲", { "cmd:npm ls": "whatever" }), "done");
+  assert.equal(f.intentState(intent, "甲", {}), "done");
+  assert.deepEqual(f.intentSealedAnchors(intent, OPEN), ["file:a.js", "cmd:npm ls"]);
+  assert.equal(f.intentClosed(intent).has("甲"), false);
+  assert.equal(f.intentState(intent, "甲", { "cmd:npm ls": "whatever" }), "stale");
+});
+
+test("未取得初始指纹的测试后来明确失败，转待复核", () => {
+  let intent = f.applyIntentOps(empty(), [{ id: "甲", claim: "x", check: "y", anchors: ["test:node check.js"] }]);
+  intent = f.applyIntentOps(intent, [{ id: "甲", state: "done" }], { prints: {} });
+  assert.deepEqual(f.intentSealedAnchors(intent), ["test:node check.js"]);
+  assert.equal(f.intentState(intent, "甲", {}), "done");
+  assert.equal(f.intentState(intent, "甲", { "test:node check.js": "不过" }), "stale");
 });
 
 test("无主改动：改过而没有哪一项的凭据罩着的；文件、目录各自罩得住，弃了的不算，.yan 下不算", () => {
@@ -426,7 +437,9 @@ test("了结：只数开着的——旧事不撑上限、不算「另有根」�
   for (let i = 0; i < 20; i++)
     intent = f.applyIntentOps(intent, f.normalizeIntentOps(intent, finished(`旧${i}`)).ops, {
       at: `2026-11-${String(i + 1).padStart(2, "0")}`,
-      ask: "问"
+      ask: "问",
+      // 记下基准才算了结：取不到基准的凭据仍要继续采集
+      prints: { [`file:旧${i}.txt`]: `v${i}` }
     });
   assert.equal(Object.keys(intent.nodes).length, 40);
   assert.deepEqual(

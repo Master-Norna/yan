@@ -73,7 +73,7 @@ async function anchorPrints(conversation, keys, signal, cadence = "answer") {
     dirs = [...(groups.get("dir") || [])];
   groups.delete("file");
   groups.delete("dir");
-  await Promise.all([
+  const settled = await Promise.allSettled([
     // 文件与目录一批交给桥接，重叠凭据才能共享同一批内容哈希。
     ...(paths.length || dirs.length
       ? [
@@ -85,6 +85,8 @@ async function anchorPrints(conversation, keys, signal, cadence = "answer") {
       : []),
     ...[...groups].map(async ([kind, values]) => add(kind, await ANCHOR_KINDS.get(kind).read(conversation, [...values], signal)))
   ]);
+  signal?.throwIfAborted();
+  for (const result of settled) if (result.status === "rejected" && result.reason?.name === "AbortError") throw result.reason;
   return prints;
 }
 

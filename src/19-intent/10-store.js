@@ -183,16 +183,17 @@ function keepAnchors(intent, closed) {
 /** @param {Step} step @param {Record<string, any>} args @param {ToolContext} ctx @returns {Promise<ToolOutcome|null>} 拦下即交回这一步的结果 */
 async function keepHook(step, args, ctx) {
   const held = intents.get(ctx.conversation.id);
-  if (!held || step.name === "update_intent" || !sideEffectOf(TOOLS.get(step.name), args)) return null;
+  if (step.name === "update_intent" || !sideEffectOf(TOOLS.get(step.name), args)) return null;
   // 守是目录共用的：每一步动手前从盘上取最新的约束，不沿用开工时的图。
   // 只更新本步的判据，不覆盖这一答的指纹、收尾与已了结快照；读不到仍沿用旧图。
-  let intent = held.intent;
+  let intent = held?.intent;
   if (isWork(ctx.conversation))
     try {
       intent = (await readIntent(ctx.conversation, ctx.signal)).intent;
     } catch (error) {
       if (error.name === "AbortError") throw error;
     }
+  if (!intent) return null;
   const target = String(args.command ?? args.path ?? args.url ?? JSON.stringify(args)),
     policy = commandPolicyOf(ctx.conversation),
     hit = intentKeeps(intent, answerClosed(ctx.conversation, intent))
