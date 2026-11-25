@@ -430,8 +430,7 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
               fs.createWriteStream(temp, { flags: "wx", mode: 0o600 })
             );
             if (hash.digest("hex") !== change.hash) throw Error("检查点文件对象内容与编号不符");
-            if (process.platform !== "win32")
-              fs.chmodSync(temp, change.mode ?? (stat?.isFile() ? stat.mode & 0o777 : 0o666 & ~process.umask()));
+            if (process.platform !== "win32") fs.chmodSync(temp, change.mode ?? (stat?.isFile() ? stat.mode & 0o777 : 0o666 & ~process.umask()));
             // 校验成功后才让原件让位；空夹之外的目录仍不动。
             if (stat?.isSymbolicLink()) fs.unlinkSync(target);
             else if (stat?.isDirectory()) fs.rmdirSync(target);
@@ -440,7 +439,11 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
             restored += 1;
           }
         } catch (error) {
-          if (temp) { try { fs.rmSync(temp, { force: true }); } catch {} }
+          if (temp) {
+            try {
+              fs.rmSync(temp, { force: true });
+            } catch {}
+          }
           failed.push(`${change.path}：${errorText(error, 80)}`);
         }
       }
