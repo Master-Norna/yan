@@ -361,7 +361,17 @@ function settleSupplements(conversation, assistant, job, profile) {
       attachments: users.flatMap(u => u.attachments || []),
       ...(quote ? { quote } : {})
     };
-    setTimeout(() => void startTurn(conversation, user, profile, { follow: false }), 0);
+    setTimeout(() => {
+      const live = store.conversations.find(item => item.id === conversation.id);
+      // 删除不复活；换版、同步换对象、另一答开工或开始回退，都不能再往旧路径写。
+      if (!live) return;
+      if (live !== conversation || live.messages.at(-1) !== assistant || requestJob(live.id) || runningElsewhere(live.id) || rewindingOver(live)) {
+        putBack();
+        saveStore();
+        return;
+      }
+      void startTurn(live, user, profile, { follow: false });
+    }, 0);
     mail();
     return true;
   }
