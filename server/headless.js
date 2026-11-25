@@ -18,7 +18,8 @@ let home = () => null,
   starting = null,
   idleTimer = null,
   busy = 0;
-const waiting = [];
+const waiting = [],
+  ownedChildren = new Set(); // 桥接自己启动的进程：有 PID 即登记，不等它成为 current。
 
 function configure(options) {
   home = options.home;
@@ -162,6 +163,10 @@ async function launch() {
     ],
     { stdio: ["ignore", "ignore", "pipe"], windowsHide: true, ...OWN_GROUP }
   );
+  if (child.pid) {
+    ownedChildren.add(child);
+    child.once("exit", () => ownedChildren.delete(child));
+  }
   const endpoint = await new Promise((resolve, reject) => {
     let said = "",
       done = false;
@@ -230,7 +235,9 @@ function shutdown() {
     killTree(browser.child);
   }, 2000).unref?.();
 }
-process.on("exit", () => killTreeSync(current?.child));
+process.on("exit", () => {
+  for (const child of ownedChildren) killTreeSync(child);
+});
 
 // 至多同开三页；排着的直接接过腾出的那一格，不另计数
 async function acquire() {
