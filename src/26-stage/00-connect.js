@@ -313,7 +313,7 @@ function stagePageEvent(method, params) {
     stage.downloads = [
       {
         guid: params.guid,
-        name: params.suggestedFilename || "未命名",
+        name: params.suggestedFilename || t("未命名"),
         url: params.url || "",
         total: 0,
         got: 0,
