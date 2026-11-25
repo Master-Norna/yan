@@ -159,18 +159,11 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       if (res.destroyed) return;
       console.log(`${stamp()} $ （后台）${command.slice(0, 120)}`);
       const job = startBackground(command, workdir, boxed, seatbelt);
-      let delivered = false;
-      const disconnected = () => {
-        if (!delivered) discardBackground(job);
-      };
-      res.once("close", disconnected);
-      res.once("finish", () => {
-        delivered = true;
-        res.removeListener("close", disconnected);
+      // 编号交付前断开就撤掉这条后台记录与进程——与转入后台那一支用同一个判据。
+      onResponseSettled(res, finished => {
+        if (!finished) discardBackground(job);
       });
-      const report = await backgroundReport(job, 5000);
-      if (res.destroyed) return disconnected();
-      return report;
+      return backgroundReport(job, 5000);
     }
     console.log(`${stamp()} $ ${command.slice(0, 120)}`);
     // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉。指令不拿目录锁，见 locks.js
