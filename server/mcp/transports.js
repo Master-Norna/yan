@@ -112,8 +112,9 @@ class StdioTransport {
     const input = this.child?.stdin;
     if (!input || input.destroyed || input.writableEnded) throw Error("MCP 标准输入已关闭");
     const line = `${JSON.stringify(message)}\n`;
-    if (input.writableLength && input.writableLength + Buffer.byteLength(line) > MESSAGE_LIMIT)
+    if (input.writableLength && input.writableLength + Buffer.byteLength(line) > MESSAGE_LIMIT) {
       throw Error("MCP 标准输入待发送消息过多");
+    }
     await new Promise((resolve, reject) => {
       input.write(line, error => (error ? reject(error) : resolve(undefined)));
     });
