@@ -4,7 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { jsonRoute } = require("../http.js");
+const { jsonRoute, requestSignal } = require("../http.js");
 const sandbox = require("../sandbox.js");
 const { WORK_SKIP, clampNumber, relPath } = require("./paths.js");
 const { decodeText } = require("./text.js");
@@ -44,15 +44,17 @@ module.exports = function createFind(work) {
   }
   // 一层一层往下列（先列完浅的一层再往深处去）：条目到上限时丢的是最深处，不会因为头一个子目录很大，根目录下的文件全没列出来。
   // 列完按路径排好，同一目录的挨在一起。进不去的大目录（node_modules、dist……）照列它自己，标上「未展开」
-  async function listTree(base, depth, filter = null) {
+  async function listTree(base, depth, filter = null, signal = undefined) {
     const out = [];
     let level = [base];
     for (let d = 1; d <= depth && level.length && out.length < WORK_LIST_LIMIT; d++) {
       const next = [];
       for (const dir of level) {
+        signal?.throwIfAborted();
         const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
         entries.sort((a, b) => a.name.localeCompare(b.name));
         for (const entry of entries) {
+          signal?.throwIfAborted();
           if (out.length >= WORK_LIST_LIMIT) break;
           const full = path.join(dir, entry.name),
             rel = path.relative(base, full).split(path.sep).join("/");
@@ -77,7 +79,7 @@ module.exports = function createFind(work) {
     }
     return out.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0)).map(item => item.line);
   }
-  const handleWorkList = jsonRoute(async body => {
+  const handleWorkList = jsonRoute(async (body, req, res) => {
     const workdir = resolveWorkdir(body.workdir),
       dir = await targetOf(workdir, body);
     const stat = await fs.promises.stat(dir).catch(() => null);
@@ -87,7 +89,12 @@ module.exports = function createFind(work) {
       );
     const filter = globToRegExp(body.pattern);
     if (body.pattern && !filter) throw Error(`pattern 写得不完整（花括号没配对）：${body.pattern}`);
-    const out = await listTree(dir, Math.floor(clampNumber(body.depth, filter ? 8 : 2, 1, 8)), filter);
+    const signal = requestSignal(res);
+    const out = await listTree(dir, Math.floor(clampNumber(body.depth, filter ? 8 : 2, 1, 8)), filter, signal).catch(error => {
+      if (!signal.aborted) throw error;
+      return [];
+    });
+    if (signal.aborted) return;
     return { path: shownPath(workdir, dir) || ".", entries: out, truncated: out.length >= WORK_LIST_LIMIT };
   }, failed);
   // ---- search_files：在工作目录里按正则或原文逐行检索；跳过 node_modules 等目录与二进制、超大文件
@@ -128,8 +135,9 @@ module.exports = function createFind(work) {
     // 模型点名要搜的那一件（把它的路径当 path 给）：目录里顺手扫过的按上面那道，点名的放开到与写文件齐——
     // 只读这一件，且模型是照着结果的提示来点名的，卡住它就等于把那条提示写成死路
     SEARCH_ONE_BYTES = 32 * 1024 * 1024;
-  const handleWorkSearch = jsonRoute(async body => {
-    const workdir = resolveWorkdir(body.workdir),
+  const handleWorkSearch = jsonRoute(async (body, req, res) => {
+    const signal = requestSignal(res),
+      workdir = resolveWorkdir(body.workdir),
       dir = await targetOf(workdir, body),
       boxed = strictBox(body);
     const query = String(body.query || "");
@@ -168,6 +176,7 @@ module.exports = function createFind(work) {
       unread = 0;
     // 搜一件：rel 是它相对于搜索起点的路径（glob 与沙箱筛查按它认）；explicit＝模型点名只搜这一件
     const scanFile = async (full, rel, explicit = false) => {
+      signal.throwIfAborted();
       if (boxed && sandbox.screenPath(rel)) return; // 沙箱不借检索带出机密文件
       if (sandbox.screenStorePath(full, storeRoot())) return; // 存储根的配置与登录文件，不论档位
       if (++scanned > SEARCH_FILE_LIMIT) {
@@ -183,8 +192,9 @@ module.exports = function createFind(work) {
         large += 1;
         return;
       }
-      const buffer = await fs.promises.readFile(full).catch(() => null),
-        decoded = buffer && decodeText(buffer);
+      const buffer = await fs.promises.readFile(full, { signal }).catch(() => null);
+      signal.throwIfAborted();
+      const decoded = buffer && decodeText(buffer);
       if (!decoded) {
         if (buffer) binary += 1;
         else unread += 1;
@@ -201,10 +211,12 @@ module.exports = function createFind(work) {
       }
     };
     const walk = async current => {
+      signal.throwIfAborted();
       if (truncated) return;
       const entries = await fs.promises.readdir(current, { withFileTypes: true }).catch(() => []);
       entries.sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of entries) {
+        signal.throwIfAborted();
         if (truncated) return;
         const full = path.join(current, entry.name),
           rel = relPath(dir, full);
@@ -219,8 +231,14 @@ module.exports = function createFind(work) {
       }
     };
     // 给的是一件文件：就搜这一件（模型常把要查的那个文件当 path 给），不受目录里那道上限的约束
-    if (stat.isDirectory()) await walk(dir);
-    else await scanFile(dir, path.basename(dir), true);
+    try {
+      if (stat.isDirectory()) await walk(dir);
+      else await scanFile(dir, path.basename(dir), true);
+    } catch (error) {
+      if (!signal.aborted) throw error;
+      return;
+    }
+    if (signal.aborted) return;
     return {
       path: shownPath(workdir, dir) || ".",
       matches,
