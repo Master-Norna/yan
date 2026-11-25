@@ -116,8 +116,10 @@ defineTool({
     if (/^t\d+$/.test(id)) return checkTimer(step, id, stop, conversation, signal);
     const started = bgStepOf(conversation, id);
     step.title = `${id}${stop ? t(" · 结束") : ""}`;
+    if (!started) throw Error(t`当前对话没有编号为 ${id} 的后台指令`);
+    if (!started.bg?.key) throw Error(t`后台指令 ${id} 缺少身份凭据，不能安全操作`);
     // 带上开它时记下的 key：编号在桥接重启后会重数，只凭编号会读到、停掉同号的另一条（见 server/work/shell.js 的 checkBackground）
-    const data = await bridge("/api/work/check", { id, stop, wait: Number(args.wait) || 0, key: started?.bg?.key || "" }, signal);
+    const data = await bridge("/api/work/check", { id, stop, wait: Number(args.wait) || 0, key: started.bg.key }, signal);
     // 停止确认了才撤监听：请求失败、桥接没收到的话，后台照旧跑着，撤了就再没人叫醒（abort 之后不会重挂）。
     // 还跑着的（杀了还没落下）也别撤：签要等它真结束才收口，现在就撤的话它永远停在「进行中」，
     // 漏壶一直列着，等着它的帮手也一直睡着（见 watchBackground 的 finally）
