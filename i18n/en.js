@@ -479,6 +479,7 @@ var YAN_EN = {
   "{0} 夹": "{0} {0|folder|folders}",
   "现存 {0} 件 · {1}": "{0} {0|file|files} · {1}",
   "草稿 {0} 处 · {1}": "{0} {0|scratch folder|scratch folders} · {1}",
+  "（部分统计）": " (partial count)",
   "清理模型留下的脚本与中间文件（{0}）": "Clean up scripts and intermediate files left by the model ({0})",
   清理: "Clean up",
   名目: "Name",
