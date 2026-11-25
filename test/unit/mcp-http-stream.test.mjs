@@ -185,3 +185,31 @@ test("旧式 SSE：未收到 endpoint 就结束时立即拒绝握手", async t =
   const transport = createTransport({ url: "http://127.0.0.1:1/sse", type: "sse" });
   await assert.rejects(transport.start(), /事件流已断开/);
 });
+
+for (const type of ["http", "sse"])
+  test(`MCP ${type}：服务端同编号请求的回执不占用本机请求的取消开关`, async t => {
+    const signals = [];
+    t.mock.method(globalThis, "fetch", async (_url, init) => {
+      if (!init.method)
+        return new Response("event: endpoint\ndata: /messages\n\n", { headers: { "content-type": "text/event-stream" } });
+      signals.push(init.signal);
+      return new Promise((resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(Error("aborted")), { once: true });
+      });
+    });
+    const transport = createTransport({ url: "http://127.0.0.1:1/mcp", type });
+    await transport.start();
+    const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+    client.transport = transport;
+    try {
+      const pending = client.request("tools/call", {}, 20, 17);
+      client.receive({ jsonrpc: "2.0", id: 17, method: "ping" });
+      await assert.rejects(pending, /超时/);
+      assert.equal(signals.length, 2);
+      assert.equal(signals[0].aborted, true);
+      assert.equal(signals[1].aborted, false);
+    } finally {
+      transport.close();
+    }
+    assert.equal(signals[1].aborted, true);
+  });

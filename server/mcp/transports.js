@@ -243,7 +243,7 @@ class HttpTransport {
       this.aborts.delete(abort);
       if (message.id !== undefined && this.reads.get(message.id) === abort) this.reads.delete(message.id);
     };
-    if (message.id !== undefined) this.reads.set(message.id, abort);
+    if (message.method && message.id !== undefined) this.reads.set(message.id, abort);
     // 回复走事件流时 send 先返回、流还在读：这次请求的掐断开关要留到流读完，close() 才掐得到它
     let streaming = false;
     try {
@@ -278,7 +278,7 @@ class HttpTransport {
         })
           .catch(error => {
             // 自己 close() 掐的不算；流半路断了，告诉等这条回复的那一问，别让它干等到超时（已经回过的，上层认不出这个 id，自然不理）
-            if (!abort.signal.aborted && message.id !== undefined)
+            if (!abort.signal.aborted && message.method && message.id !== undefined)
               this.onmessage({ jsonrpc: "2.0", id: message.id, error: { message: `事件流中断：${error?.message || error}` } });
           })
           .finally(release);
@@ -356,7 +356,7 @@ class SseTransport {
   async send(message) {
     const abort = new AbortController();
     this.posts.add(abort);
-    if (message.id !== undefined) this.reads.set(message.id, abort);
+    if (message.method && message.id !== undefined) this.reads.set(message.id, abort);
     try {
       const response = await fetch(this.endpoint, {
         method: "POST",
