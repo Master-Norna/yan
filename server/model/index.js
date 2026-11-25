@@ -10,7 +10,7 @@
 //   needsBaseUrl              是否要填 Base URL（ChatGPT 订阅不用）
 const { Readable } = require("node:stream");
 const { finished } = require("node:stream/promises");
-const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
+const { sendJson, readJson, jsonRoute, requestSignal, stamp } = require("../http.js");
 const { readLimitedBytes, ERROR_BODY_LIMIT } = require("../web.js");
 const fetchUpstream = require("./upstream.js");
 const openai = require("./openai.js");
@@ -190,25 +190,16 @@ module.exports = function createModel({ home }) {
     return list && list.map(item => (typeof item === "string" ? item : item?.id || item?.name)).filter(Boolean);
   }
 
-  async function handleTest(req, res) {
-    const started = Date.now();
-    try {
-      const { config, provider } = resolveProfile((await readJson(req)).profile, true);
-      const list = await listModels(provider, config);
-      sendJson(res, 200, { ok: true, latencyMs: Date.now() - started, modelFound: !list || list.includes(config.model) });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
-    }
-  }
-  async function handleModels(req, res) {
-    try {
-      const body = await readJson(req),
-        { config, provider } = resolveProfile(body.profile, false);
-      sendJson(res, 200, { models: (await listModels(provider, config, String(body.kind || ""))) || [] });
-    } catch (error) {
-      sendJson(res, 400, { error: String(error.message || error).slice(0, 500) });
-    }
-  }
+  const handleTest = jsonRoute(async body => {
+    const started = Date.now(),
+      { config, provider } = resolveProfile(body.profile, true),
+      list = await listModels(provider, config);
+    return { ok: true, latencyMs: Date.now() - started, modelFound: !list || list.includes(config.model) };
+  });
+  const handleModels = jsonRoute(async body => {
+    const { config, provider } = resolveProfile(body.profile, false);
+    return { models: (await listModels(provider, config, String(body.kind || ""))) || [] };
+  });
   async function handleChat(req, res) {
     const meter = { model: "", opened: 0, last: 0, bytes: 0, finish: "" };
     try {
