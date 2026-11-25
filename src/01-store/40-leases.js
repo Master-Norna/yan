@@ -37,12 +37,17 @@ function syncLeases() {
   // 正作答的都算上（旁注的作业按它所在的对话记），后台还有帮手在做的也算；作答完了、最后一次存盘也落了地的松手
   const running = new Set([...[...requestJobs].map(([key, job]) => job.conversationId || key), ...crews.keys(), ...rewinding].filter(Boolean));
   for (const id of running) leaseHold.add(id);
-  for (const id of [...leaseHold]) if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) {
-    leaseHold.delete(id);
-    leaseScopes.delete(id);
-  }
+  for (const id of [...leaseHold])
+    if (!running.has(id) && !chatWritePromises.has(id) && !pendingChatWrites.has(id)) {
+      leaseHold.delete(id);
+      leaseScopes.delete(id);
+    }
   const scope = bootstrap.store;
-  leasePosting = bridge("/api/chats/lease", { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold], scopes: Object.fromEntries(leaseScopes) }, AbortSignal.timeout(5000))
+  leasePosting = bridge(
+    "/api/chats/lease",
+    { storeRoot: scope?.root, owner: PAGE_ID, ids: [...leaseHold], scopes: Object.fromEntries(leaseScopes) },
+    AbortSignal.timeout(5000)
+  )
     .then(({ busy } = {}) => {
       if (bootstrap.store !== scope || !Array.isArray(busy)) return false;
       const held = new Set(busy),
@@ -95,7 +100,8 @@ function claimConversation(id, root = "", rewind = false) {
   const claiming = (async () => {
     await Promise.all(before);
     if (bootstrap.store !== scope || leaseReleased.has(id)) return false;
-    const held = leaseHold.has(id), previousScope = leaseScopes.get(id);
+    const held = leaseHold.has(id),
+      previousScope = leaseScopes.get(id);
     leaseHold.add(id);
     leaseScopes.set(id, { root, rewind });
     const abandon = () => {
