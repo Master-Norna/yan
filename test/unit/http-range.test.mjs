@@ -30,7 +30,11 @@ test("file ranges cover full, suffix, empty and HEAD responses", async t => {
   const suffix = await get("full.txt", "bytes=-2");
   assert.equal(suffix.status, 206);
   assert.equal(await suffix.text(), "de");
-  for (const [file, range, size] of [["empty.txt", "bytes=0-", 0], ["full.txt", "bytes=-0", 5], ["full.txt", "bytes=5-", 5]]) {
+  for (const [file, range, size] of [
+    ["empty.txt", "bytes=0-", 0],
+    ["full.txt", "bytes=-0", 5],
+    ["full.txt", "bytes=5-", 5]
+  ]) {
     const res = await get(file, range);
     assert.equal(res.status, 416);
     assert.equal(res.headers.get("content-range"), `bytes */${size}`);
