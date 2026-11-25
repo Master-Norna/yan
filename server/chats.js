@@ -326,10 +326,27 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
     leases = new Map();
   const scopeRoot = raw => {
     if (typeof raw !== "string" || !raw) return "";
-    const normalized = path.normalize(raw).replace(/\\/g, "/").replace(/\/+$/, "");
+    // 现存目录按真实落点比较；未创建的目录也解析最近存在的父目录。
+    let dir = path.resolve(raw);
+    const rest = [];
+    for (;;) {
+      try {
+        dir = path.join(fs.realpathSync.native(dir), ...rest);
+        break;
+      } catch {
+        const parent = path.dirname(dir);
+        if (parent === dir) {
+          dir = path.resolve(raw);
+          break;
+        }
+        rest.unshift(path.basename(dir));
+        dir = parent;
+      }
+    }
+    const normalized = dir.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
     return process.platform === "win32" ? normalized.toLowerCase() : normalized;
   };
-  const overlapping = (a, b) => !!a && !!b && (a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`));
+  const overlapping = (a, b) => !!a && !!b && (a === b || a === "/" || b === "/" || a.startsWith(`${b}/`) || b.startsWith(`${a}/`));
   const handleLease = route(
     async body => {
       const owner = String(body.owner || "").slice(0, 80),
