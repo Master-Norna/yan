@@ -426,16 +426,34 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
   // ---------- 清理：对话删了，它的几张册跟着删，没有册再用的对象删去 ----------
   function collect(store) {
     const keep = new Set(),
+      visitedTrees = new Set(),
+      validHash = hash => typeof hash === "string" && /^[0-9a-f]{40}$/.test(hash),
       mark = hash => {
-        if (keep.has(hash)) return;
+        if (!validHash(hash)) throw Error("检查点目录对象编号无效");
+        if (visitedTrees.has(hash)) return;
+        visitedTrees.add(hash);
         keep.add(hash);
-        for (const item of readJsonFile(objectPath(store, hash), []))
+        const items = JSON.parse(fs.readFileSync(objectPath(store, hash), "utf8"));
+        if (!Array.isArray(items)) throw Error("检查点目录对象损坏");
+        for (const item of items) {
+          if (!Array.isArray(item) || !["d", "f", "x"].includes(item[0])) throw Error("检查点条目损坏");
           if (item[0] === "d") mark(item[2]);
-          else if (item[0] === "f") keep.add(item[2]);
+          else if (item[0] === "f") {
+            if (!validHash(item[2])) throw Error("检查点文件对象编号无效");
+            keep.add(item[2]);
+          }
+        }
       };
-    for (const name of fs.existsSync(store.book) ? fs.readdirSync(store.book) : []) {
-      const page = readJsonFile(path.join(store.book, name), null);
-      if (page?.tree) mark(page.tree);
+    // 只在所有仍存活的册及目录对象都能读全时才清理。暂时读不到不等于没人引用。
+    // 文件内容可能恰好等于目录对象 JSON，不能以 keep 判断子树已经遍历。
+    try {
+      for (const name of fs.existsSync(store.book) ? fs.readdirSync(store.book) : []) {
+        if (!name.endsWith(".json")) continue;
+        const page = JSON.parse(fs.readFileSync(path.join(store.book, name), "utf8"));
+        mark(page?.tree);
+      }
+    } catch {
+      return;
     }
     for (const prefix of fs.existsSync(store.objects) ? fs.readdirSync(store.objects) : []) {
       const dir = path.join(store.objects, prefix);
