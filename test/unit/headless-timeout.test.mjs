@@ -41,10 +41,7 @@ test("调试请求无回音时，释放同一连接上所有等待者", async ()
     const browser = await connecting;
     const first = browser.send("Page.navigate");
     const second = browser.send("Runtime.evaluate");
-    await Promise.all([
-      assert.rejects(first, /浏览器调试请求超时/),
-      assert.rejects(second, /浏览器调试请求超时/)
-    ]);
+    await Promise.all([assert.rejects(first, /浏览器调试请求超时/), assert.rejects(second, /浏览器调试请求超时/)]);
     assert.equal(SilentSocket.latest.readyState, 3);
     await assert.rejects(browser.send("Page.navigate"), /浏览器已断开/);
   } finally {
