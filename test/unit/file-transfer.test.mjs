@@ -63,7 +63,7 @@ test("预览或下载途中断开，关闭未读完的文件流", async t => {
   let source;
   const original = fs.createReadStream;
   t.mock.method(fs, "createReadStream", (...args) => (source = original(...args)));
-  const res = new Writable({ highWaterMark: 1, write(_chunk, _encoding, _done) {} });
+  const res = new Writable({ highWaterMark: 1, write: () => {} });
   res.writeHead = () => {};
   t.after(async () => {
     if (source && !source.closed) {
