@@ -7,6 +7,7 @@ defineTool({
   label: t("定时"),
   offer: ctx => ctx.files,
   mainOnly: true,
+  sideEffect: true,
   // 编号带给下一问：正文里没写出编号，下一问也认得「刚才那个定时」，看与取消都凭它
   digest: step =>
     step.timer

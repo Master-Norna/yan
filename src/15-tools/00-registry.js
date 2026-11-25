@@ -152,16 +152,16 @@ async function runTool(step, ctx) {
       content: t`调用 ${step.name} 的参数不是合法 JSON（${parsed.error}）。arguments 必须是一个 JSON 对象，不要加代码围栏、注释或多余的逗号，也不要把它再编码成字符串；内容过长时先精简再发。这件工具收的参数：${toolSchemaHint(step.name)}\n\n收到的原文（前 300 字）：${parsed.raw.slice(0, 300)}`,
       display: "参数解析失败"
     };
+  const { args, problems } = normalizeToolArguments(step.name, parsed.args);
+  // 这一步算不算动了手，按理顺后的参数定一次，记在步骤上：守、缓存作废、收尾重查都认这一个口径
+  step.effect = sideEffectOf(tool, args);
   // 截断的参数救回来也不能拿去写：内容已经不全，写下去就是把文件写坏
-  if (parsed.truncated && sideEffectOf(tool, parsed.args))
+  if (parsed.truncated && step.effect)
     return {
       ok: false,
       content: t`调用 ${step.name} 的参数 JSON 不完整（多半是输出被最大长度截断），为安全起见没有执行。请把内容精简或分成几次写入（大文件先 write_file 写开头，再用 edit_file 追加），确保 arguments 是完整的 JSON。这件工具收的参数：${toolSchemaHint(step.name)}\n\n收到的原文（末尾 200 字）：…${step.arguments.slice(-200)}`,
       display: "参数不完整"
     };
-  const { args, problems } = normalizeToolArguments(step.name, parsed.args);
-  // 这一步算不算动了手，按理顺后的参数定一次，记在步骤上：守、缓存作废、收尾重查都认这一个口径
-  step.effect = sideEffectOf(tool, args);
   if (problems.length)
     return {
       ok: false,
