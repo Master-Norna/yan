@@ -336,8 +336,8 @@ check(
 );
 r = await post("/api/archive/clean", { root: workdir, id: "../escape" });
 check(
-  "archive clean strips path characters from the id",
-  r.status === 200 && existsSync(`${OUTSIDE}/secret.txt`),
+  "archive clean rejects invalid scratch ids",
+  r.status === 400 && existsSync(`${OUTSIDE}/secret.txt`),
   `${r.status} ${r.data?.error}`
 );
 // ---- 工具定义过多不再静默截断
