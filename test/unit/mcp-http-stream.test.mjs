@@ -150,3 +150,38 @@ test("旧式 SSE transport 的 abort 是 AbortController，超时不得把它当
   assert.equal(client.pending.size, 0, "超时应正常结清，而不是被 TypeError 打断");
   assert.equal(transport.abort.signal.aborted, false, "单条请求超时不能关闭整个 SSE 连接");
 });
+
+test("旧式 SSE：超时只取消本次 POST，关闭时取消其余投递和 GET", async t => {
+  const signals = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    signals.push(init.signal);
+    if (!init.method)
+      return new Response("event: endpoint\ndata: /messages\n\n", { headers: { "content-type": "text/event-stream" } });
+    return new Promise((resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(Error("aborted")), { once: true });
+    });
+  });
+  const transport = createTransport({ url: "http://127.0.0.1:1/sse", type: "sse" });
+  await transport.start();
+  const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+  client.transport = transport;
+  const other = transport.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  const otherRejected = assert.rejects(other, /aborted/);
+  try {
+    await assert.rejects(client.request("tools/call", {}, 10), /超时/);
+    assert.equal(signals[2].aborted, true);
+    assert.equal(signals[1].aborted, false);
+    assert.equal(signals[0].aborted, false);
+  } finally {
+    transport.close();
+    await otherRejected;
+  }
+  assert.equal(signals[0].aborted, true);
+  assert.equal(signals[1].aborted, true);
+});
+
+test("旧式 SSE：未收到 endpoint 就结束时立即拒绝握手", async t => {
+  t.mock.method(globalThis, "fetch", async () => new Response(""));
+  const transport = createTransport({ url: "http://127.0.0.1:1/sse", type: "sse" });
+  await assert.rejects(transport.start(), /事件流已断开/);
+});

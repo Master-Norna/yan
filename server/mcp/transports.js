@@ -320,12 +320,14 @@ class SseTransport {
     this.onmessage = () => {};
     /** @type {(error: Error) => void} */
     this.onclose = () => {};
-    this.abort = new AbortController();
+    this.connectionAbort = new AbortController();
+    this.posts = new Set();
+    this.reads = new Map();
   }
   async start() {
     const response = await fetch(this.url, {
       headers: { Accept: "text/event-stream", ...this.headers, ...OUTBOUND },
-      signal: this.abort.signal,
+      signal: this.connectionAbort.signal,
       redirect: "error"
     });
     if (!response.ok) throw await httpError(response);
@@ -340,7 +342,11 @@ class SseTransport {
           resolve();
         } else if (event === "message") this.onmessage(JSON.parse(data));
       })
-        .then(() => this.onclose(Error("事件流已断开")))
+        .then(() => {
+          const error = Error("事件流已断开");
+          reject(error); // 若还没收到 endpoint，握手也应立即失败。
+          this.onclose(error);
+        })
         .catch(error => {
           reject(error);
           this.onclose(error);
@@ -348,18 +354,32 @@ class SseTransport {
     });
   }
   async send(message) {
-    const response = await fetch(this.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...this.headers, ...OUTBOUND },
-      body: JSON.stringify(message),
-      redirect: "error"
-    });
-    if (!response.ok) throw await httpError(response);
-    // 旧式 SSE 的投递回执不采用正文（通行是 202 空体）：有也不读，当场取消
-    await response.body?.cancel().catch(() => {});
+    const abort = new AbortController();
+    this.posts.add(abort);
+    if (message.id !== undefined) this.reads.set(message.id, abort);
+    try {
+      const response = await fetch(this.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.headers, ...OUTBOUND },
+        body: JSON.stringify(message),
+        signal: abort.signal,
+        redirect: "error"
+      });
+      if (!response.ok) throw await httpError(response);
+      // 旧式 SSE 的投递回执不采用正文（通行是 202 空体）：有也不读，当场取消
+      await response.body?.cancel().catch(() => {});
+    } finally {
+      this.posts.delete(abort);
+      if (this.reads.get(message.id) === abort) this.reads.delete(message.id);
+    }
+  }
+  abort(id) {
+    this.reads.get(id)?.abort();
   }
   close() {
-    this.abort.abort();
+    this.connectionAbort.abort();
+    for (const abort of this.posts) abort.abort();
+    this.reads.clear();
   }
 }
 
