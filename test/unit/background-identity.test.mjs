@@ -32,7 +32,7 @@ test("check_command 带上开它时记下的 key：桥接按 key 认身份，同
   assert.deepEqual(sent, [{ route: "/api/work/check", id: "bg1", stop: true, wait: 0, key: "old-boot-key" }]);
 });
 
-test("对话里没有这一条步骤时，照旧不带 key（桥接按编号认，不因缺步骤而拦）", async () => {
+test("对话里没有这一条步骤时，不向桥接发送请求", async () => {
   const f = load([
     "TOOLS",
     "store",
@@ -46,12 +46,26 @@ test("对话里没有这一条步骤时，照旧不带 key（桥接按编号认�
   const answer = { id: "answer", steps: [] };
   const conversation = { id: "conversation", messages: [answer] };
   f.store.conversations = [conversation];
-  await f.TOOLS.get("check_command").run(
-    { id: "check-step" },
-    { id: "bg9", wait: 2 },
-    { conversation, assistant: answer, signal: new AbortController().signal }
+  for (const stop of [false, true])
+    await assert.rejects(
+      f.TOOLS.get("check_command").run(
+        { id: "check-step" },
+        { id: "bg9", wait: 2, stop },
+        { conversation, assistant: answer, signal: new AbortController().signal }
+      ),
+      /当前对话没有编号为 bg9/
+    );
+  assert.deepEqual(sent, []);
+  answer.steps.push({ id: "legacy", name: "run_command", bg: { id: "bg9", state: "running" } });
+  await assert.rejects(
+    f.TOOLS.get("check_command").run(
+      { id: "check-step" },
+      { id: "bg9", stop: true },
+      { conversation, assistant: answer, signal: new AbortController().signal }
+    ),
+    /缺少身份凭据/
   );
-  assert.deepEqual(sent, [{ route: "/api/work/check", id: "bg9", stop: false, wait: 2, key: "" }]);
+  assert.deepEqual(sent, []);
 });
 
 test("帮手开的后台：步骤在 sub.steps 里，也照旧带上开它时的 key", async () => {
