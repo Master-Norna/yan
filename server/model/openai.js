@@ -33,6 +33,7 @@ function filePart(part) {
   return { type: "text", text: `[附件 ${name || "文件"}：此接口不接受该格式的原件]` };
 }
 module.exports = {
+  SILICONFLOW,
   url: config => endpoint(config.baseUrl),
   modelsUrl(config, kind) {
     const url = modelsUrl(config.baseUrl);

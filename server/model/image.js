@@ -4,8 +4,8 @@
 const { sendJson, readJson, requestSignal, stamp } = require("../http.js");
 const { readLimitedBytes, fetchPublicResponse } = require("../web.js");
 const fetchUpstream = require("./upstream.js");
+const openai = require("./openai.js");
 
-const SILICONFLOW = config => config.api === "siliconflow" || /siliconflow/i.test(config.baseUrl);
 const IMAGE_LIMIT = 40 * 1024 * 1024;
 // 整份回话的上限：图以 b64 交回时本就不小（一张 40 MB 的原件编码后约 54 MB），但也不能不设上限——
 // 接口源源不断地回，整份进内存就能把桥接撑死（与模型列表、MCP 消息同一个理由）
@@ -64,16 +64,13 @@ module.exports = function createImage({ resolveProfile, upstreamError }) {
       // 上游在本机（用户配的本地生图服务）：它交回的本机地址是正常的，取图时放行回环；
       // 公网中转交回本机、内网地址的一律不信——那是借桥接打本机
       const localUpstream = /^https?:\/\/(localhost|127\.|\[::1\]|0\.0\.0\.0)/i.test(String(config.baseUrl || "")),
-        request = SILICONFLOW(config)
+        request = openai.SILICONFLOW(config)
           ? { model: config.model, prompt, batch_size: 1, ...(size ? { image_size: size } : {}) }
           : { model: config.model, prompt, n: 1, ...(size ? { size } : {}) };
       console.log(`${stamp()} → ${config.model}：生图${size ? ` ${size}` : ""}`);
       const response = await fetchUpstream(imagesUrl(config.baseUrl), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
-        },
+        headers: openai.headers(config),
         body: JSON.stringify(request),
         signal: AbortSignal.any([gone, AbortSignal.timeout(300000)])
       }).catch(error => {
