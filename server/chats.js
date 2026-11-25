@@ -324,20 +324,38 @@ module.exports = function createChats({ chatsHome, route = jsonRoute, onDelete =
   // 只记在内存里：桥接重启，作答的请求也断了，没什么可记；十五秒没来报到的（页面关了、崩了）就算松手
   const LEASE_MS = 15000,
     leases = new Map();
+  const scopeRoot = raw => {
+    if (typeof raw !== "string" || !raw) return "";
+    const normalized = path.normalize(raw).replace(/\\/g, "/").replace(/\/+$/, "");
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  };
+  const overlapping = (a, b) => !!a && !!b && (a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`));
   const handleLease = route(
     async body => {
       const owner = String(body.owner || "").slice(0, 80),
         ids = (Array.isArray(body.ids) ? body.ids : []).map(String).slice(0, 200),
         claim = String(body.claim || ""),
         now = Date.now();
-      const busy = new Set();
+      const scopes = new Map(ids.map(id => {
+        const scope = body.scopes?.[id];
+        return [id, { root: scopeRoot(scope?.root), rewind: scope?.rewind === true }];
+      }));
+      const claiming = scopes.get(claim),
+        busy = new Set();
+      let blocked = false;
       for (const [who, lease] of leases) {
         if (now - lease.at > LEASE_MS) leases.delete(who);
-        else if (who !== owner) for (const id of lease.ids) busy.add(id);
+        else for (const id of lease.ids) {
+          if (who !== owner) busy.add(id);
+          if (!claiming || (who === owner && id === claim)) continue;
+          const other = lease.scopes?.get(id);
+          if (other && (claiming.rewind || other.rewind) && overlapping(claiming.root, other.root)) blocked = true;
+        }
       }
       // 开工前的认领（claim）：别处正握着这段就不给，这一页的报到也不记——两页同时开工，先到的得手
       if (claim && busy.has(claim)) return { busy: [...busy] };
-      if (owner && ids.length) leases.set(owner, { ids, at: now });
+      if (claim && blocked) return { busy: [...busy], blocked: true };
+      if (owner && ids.length) leases.set(owner, { ids, at: now, scopes });
       else if (owner) leases.delete(owner);
       return { busy: [...busy] };
     },
