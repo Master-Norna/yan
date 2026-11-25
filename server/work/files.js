@@ -46,8 +46,8 @@ module.exports = function createFiles(work) {
         previous = existed ? await fs.promises.readFile(file) : null;
       // 读过之后被别人改过：拿旧印象整份写回，别人的改动就悄悄没了。不写，回现状的指纹，页面据此查是谁改的、请它重读
       // 读后被清空也算被改过（空的也有指纹）：不比长度
-      if (typeof body.seen === "string" && previous && fingerprint(previous) !== body.seen)
-        return { stale: true, path: shownPath(workdir, file), sig: fingerprint(previous) };
+      if (typeof body.seen === "string" && (!previous || fingerprint(previous) !== body.seen))
+        return { stale: true, path: shownPath(workdir, file), sig: previous ? fingerprint(previous) : "", missing: !previous };
       const prior = previous ? decodeText(previous) : null,
         previousText = prior?.text ?? "",
         previousLines = previousText ? countLines(previousText) : 0;
@@ -154,9 +154,16 @@ module.exports = function createFiles(work) {
         );
       }
       if (count > 1 && !replaceAll) throw Error(`要替换的文本出现了 ${count} 处，请提供更长的唯一片段，或设置 replace_all`);
+      // 在构造结果前限制膨胀；按 UTF-16 code unit 先挡住明显过大的输出，
+      // 再按实际编码字节数校验（不会先分配无限大的字符串）。
+      const occurrences = replaceAll ? count : 1,
+        units = source.length + occurrences * (replacement.length - needle.length),
+        maxBytes = 32 * 1024 * 1024;
+      if (units > maxBytes || (decoded.encoding.startsWith("utf-16") && units * 2 > maxBytes)) throw Error("单个文件不超过 32 MB");
       const result = replaceAll ? source.split(needle).join(replacement) : source.replace(needle, () => replacement);
       // 按原来的编码写回：UTF-16 的还是 UTF-16，带 BOM 的还带 BOM
       const output = encodeText(result, decoded.encoding);
+      if (output.length > maxBytes) throw Error("单个文件不超过 32 MB");
       await writeTextAtomic(file, output, signal).catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });

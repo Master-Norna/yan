@@ -22,7 +22,9 @@ defineTool({
     if (data.stale)
       return {
         ok: false,
-        content: prompt("work.stale", { path: data.path, who: changedBy(conversation, step, data.sig) }),
+        content: data.missing
+          ? t`文件 ${data.path} 在读取后已被删除；请先确认现状，不要直接覆盖。`
+          : prompt("work.stale", { path: data.path, who: changedBy(conversation, step, data.sig) }),
         display: "读后已被改过"
       };
     step.sig = data.sig;
