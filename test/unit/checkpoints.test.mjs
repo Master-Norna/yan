@@ -647,6 +647,37 @@ test("回收时有存活的册或目录对象读不出：保留对象，修好�
   }
 });
 
+test("回收：目录对象被换成合法的空目录，修回原件后仍能恢复文件", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    home = path.join(base, "检查点"),
+    { post, points, close } = await serve(home),
+    key = { root, conversation: "keep", answer: "m1" };
+  try {
+    write(root, "a.txt", "first");
+    assert.equal((await post("/api/checkpoint/take", key)).status, 200);
+    const store = path.join(home, fs.readdirSync(home)[0]),
+      { tree: hash } = JSON.parse(fs.readFileSync(path.join(store, "册", "keep~m1.json"), "utf8")),
+      object = path.join(store, "对象", hash.slice(0, 2), hash.slice(2)),
+      saved = fs.readFileSync(object);
+    assert.equal(createHash("sha1").update(saved).digest("hex"), hash);
+    write(root, "a.txt", "second");
+    assert.equal((await post("/api/checkpoint/take", { root, conversation: "drop", answer: "m2" })).status, 200);
+
+    fs.writeFileSync(object, "[]");
+    await points.dropConversation("drop");
+    assert.equal(fs.existsSync(path.join(store, "册", "drop~m2.json")), false);
+    fs.writeFileSync(object, saved);
+
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([done.status, done.restored, done.failed], [200, 1, []]);
+    assert.equal(fs.readFileSync(path.join(root, "a.txt"), "utf8"), "first");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("回收：普通文件与目录对象内容相同，仍遍历该目录的子对象", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     root = path.join(base, "work"),
