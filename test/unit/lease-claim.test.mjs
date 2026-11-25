@@ -27,7 +27,8 @@ test("不同页面相交目录的退回与开工互斥，普通并行与不相�
   const lease = createChats({ chatsHome: () => "" }).routes["POST /api/chats/lease"];
   const server = http.createServer((req, res) => lease(req, res)).listen(0, "127.0.0.1");
   await new Promise(resolve => server.once("listening", resolve));
-  const post = body => fetch(`http://127.0.0.1:${server.address().port}/`, { method: "POST", body: JSON.stringify(body) }).then(r => r.json());
+  const post = body =>
+    fetch(`http://127.0.0.1:${server.address().port}/`, { method: "POST", body: JSON.stringify(body) }).then(r => r.json());
   const claim = (owner, id, root, rewind = false) => post({ owner, ids: [id], claim: id, scopes: { [id]: { root, rewind } } });
   try {
     assert.equal((await claim("A", "a", "/project")).blocked, undefined);
@@ -40,5 +41,7 @@ test("不同页面相交目录的退回与开工互斥，普通并行与不相�
     assert.equal((await claim("D", "d", "/project-other")).blocked, undefined, "不相交目录不拦");
     await post({ owner: "C", ids: [] });
     assert.equal((await claim("A", "a", "/project/sub")).blocked, undefined, "松手后可启动");
-  } finally { await new Promise(resolve => server.close(resolve)); }
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 });
