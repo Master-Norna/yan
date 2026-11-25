@@ -225,7 +225,9 @@ async function sendFile(req, res, file, { name, download = false }) {
     range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ""));
   let start = 0,
     end = size - 1;
-  if (range && size && (range[1] || range[2])) {
+  // Range 只对 GET 有意义；空文件上的任何有效字节范围都不可满足。
+  const partial = req.method === "GET" && Boolean(range && (range[1] || range[2]));
+  if (partial && range) {
     if (range[1]) {
       start = Number(range[1]);
       if (range[2]) end = Math.min(Number(range[2]), size - 1);
@@ -235,7 +237,6 @@ async function sendFile(req, res, file, { name, download = false }) {
       return res.end();
     }
   }
-  const partial = start > 0 || end < size - 1;
   res.writeHead(partial ? 206 : 200, {
     "Content-Type": fileMime(name),
     "Content-Length": size ? end - start + 1 : 0,
