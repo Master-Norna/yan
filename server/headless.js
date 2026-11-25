@@ -37,27 +37,62 @@ function available() {
 }
 
 // 一条连到浏览器的 WebSocket，各页以 flatten 的会话挂在上面
-function connect(endpoint) {
+function connect(endpoint, timeout = 20000) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(endpoint),
       pending = new Map(),
       listeners = new Map();
     let seq = 0;
+    const failPending = error => {
+      for (const call of pending.values()) {
+        clearTimeout(call.timer);
+        call.fail(error);
+      }
+      pending.clear();
+    };
+    const disconnect = error => {
+      clearTimeout(handshake);
+      reject(error);
+      failPending(error);
+      if (current?.ws === ws) current = null;
+      try {
+        ws.close();
+      } catch {}
+    };
+    const handshake = setTimeout(() => disconnect(Error("连接浏览器调试口超时")), timeout);
     const browser = {
       ws,
+      /** @type {(() => void) | undefined} */
+      onTimeout: undefined,
       send(method, params = {}, sessionId) {
         if (ws.readyState !== 1) return Promise.reject(Error("浏览器已断开"));
         const id = ++seq;
-        ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-        return new Promise((ok, fail) => pending.set(id, { ok, fail }));
+        return new Promise((ok, fail) => {
+          const timer = setTimeout(() => {
+            // 调试口不回音时，不能把页签配额永久扣住；丢掉这条连接，下回重新启动。
+            disconnect(Error(`浏览器调试请求超时：${method}`));
+            browser.onTimeout?.();
+          }, timeout);
+          pending.set(id, { ok, fail, timer });
+          try {
+            ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+          } catch (error) {
+            pending.delete(id);
+            clearTimeout(timer);
+            fail(error);
+          }
+        });
       },
       listen(sessionId, handler) {
         listeners.set(sessionId, handler);
         return () => listeners.delete(sessionId);
       }
     };
-    ws.onopen = () => resolve(browser);
-    ws.onerror = () => reject(Error("连不上浏览器的调试口"));
+    ws.onopen = () => {
+      clearTimeout(handshake);
+      resolve(browser);
+    };
+    ws.onerror = () => disconnect(Error("连不上浏览器的调试口"));
     ws.onmessage = ({ data }) => {
       let message;
       try {
@@ -68,6 +103,7 @@ function connect(endpoint) {
       if (message.id) {
         const call = pending.get(message.id);
         pending.delete(message.id);
+        if (call) clearTimeout(call.timer);
         if (message.error) call?.fail(Error(message.error.message));
         else call?.ok(message.result);
       } else if (message.sessionId)
@@ -76,8 +112,10 @@ function connect(endpoint) {
         } catch {}
     };
     ws.onclose = () => {
-      for (const call of pending.values()) call.fail(Error("浏览器已断开"));
-      pending.clear();
+      clearTimeout(handshake);
+      const error = Error("浏览器已断开");
+      reject(error);
+      failPending(error);
       if (current?.ws === ws) current = null;
     };
   });
@@ -153,17 +191,31 @@ async function launch() {
     killTree(child);
     throw error;
   });
+  browser.onTimeout = () => {
+    proxy.close();
+    killTree(child);
+  };
   child.once("exit", () => proxy.close());
   browser.ws.addEventListener("close", () => proxy.close());
   return Object.assign(browser, { child, proxy });
 }
 async function ensure() {
   if (current) return current;
-  starting ||= launch().finally(() => (starting = null));
-  current = await starting;
-  // 无头的 UA 里写着 HeadlessChrome，有的站一眼认出：换回平常的写法
-  current.userAgent ||= String((await current.send("Browser.getVersion")).userAgent).replace("HeadlessChrome", "Chrome");
-  return current;
+  starting ||= launch()
+    .then(async browser => {
+      // 无头的 UA 里写着 HeadlessChrome，有的站一眼认出：换回平常的写法。
+      // UA 就绪之后再交给所有排队的页面，避免并发请求拿到尚未初始化的浏览器。
+      try {
+        const userAgent = String((await browser.send("Browser.getVersion")).userAgent).replace("HeadlessChrome", "Chrome");
+        return (current = Object.assign(browser, { userAgent }));
+      } catch (error) {
+        browser.proxy.close();
+        killTree(browser.child);
+        throw error;
+      }
+    })
+    .finally(() => (starting = null));
+  return starting;
 }
 // 关之前先 Browser.close：让它把 Cookie 落了盘再走
 function shutdown() {
@@ -261,4 +313,4 @@ async function render(url, { gate, waitFor = "", timeout = 20000 } = {}) {
   }
 }
 
-module.exports = { configure, available, render };
+module.exports = { configure, available, render, connect };
