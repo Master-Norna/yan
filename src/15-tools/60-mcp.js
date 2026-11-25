@@ -137,7 +137,7 @@ function mcpFunctionName(server, tool) {
   const clean = text => text.replace(/[^A-Za-z0-9_-]/g, "");
   const name = `mcp__${clean(server) || `s${nameHash(server)}`}__${clean(tool) || `t${nameHash(tool)}`}`;
   // 原名本来合规且无分隔歧义时保留旧名；否则在原始二元组上取指纹，不能在清洗过的名字上取。
-  if (name.length <= 64 && server === clean(server) && tool === clean(tool) && server && tool && !server.includes("__") && !tool.includes("__"))
+  if (name.length <= 64 && server === clean(server) && tool === clean(tool) && server && tool && !server.includes("__") && !tool.includes("__") && !server.endsWith("_") && !tool.startsWith("_"))
     return name;
   return `${name.slice(0, 55)}_${hashText(JSON.stringify([server, tool])).split(":")[1].padStart(8, "0")}`;
 }
@@ -261,6 +261,7 @@ async function runMcpTool(step, server, tool, args, ctx) {
     spec = mcp.servers[server]?.tools?.find(item => item.name === tool);
   // 预设没挑这个服务：照着名字调来的也不跑
   if (!config || !spec || !presetAllows(presetOf(ctx.conversation), /** @type {Tool} */ ({ server }))) return mcpUnknown(server, tool);
+  const readOnlyAtStart = mcpReadOnly(spec, server);
   step.title ||= spec.title || tool;
   step.code = JSON.stringify(args, null, 2);
   // 守的关口刚批过这一步（见 keepHook）：不再另问
@@ -297,6 +298,12 @@ async function runMcpTool(step, server, tool, args, ctx) {
     const denied = flag && (await reviewGate(step, args, ctx, flag));
     if (denied) return denied;
   }
+  // 请示与审查可能等很久；清单已变就不拿旧的准许去调用新定义。
+  const current = mcp.servers[server]?.tools?.find(item => item.name === tool);
+  if (!current || mcpConfigs()[server] !== config && JSON.stringify(mcpConfigs()[server]) !== JSON.stringify(config) ||
+      JSON.stringify([current.inputSchema, current.description, current.title, mcpReadOnly(current, server)]) !==
+      JSON.stringify([spec.inputSchema, spec.description, spec.title, readOnlyAtStart]))
+    return { ok: false, content: t("MCP 工具定义或配置已变，请刷新后重试。"), display: "工具已变" };
   const data = await bridge("/api/mcp/call", { server, config, tool, arguments: args, timeout: config.timeout }, ctx.signal)
     .catch(error => {
       // 桥接按当前清单拒绝了旧工具：让下一问重新拉清单，不持续展示过期工具。
