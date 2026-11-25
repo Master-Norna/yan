@@ -111,7 +111,7 @@ function gistHtml(step) {
 function approveFrom(button) {
   const stepId = button.closest("[data-step-id]")?.dataset.stepId,
     c = currentConversation();
-  if (!stepId || !c || !settleApproval(stepId, button.dataset.approve !== "skip")) return;
+  if (!stepId || !c || pendingApprovals.get(stepId)?.conversationId !== c.id || !settleApproval(stepId, button.dataset.approve !== "skip")) return;
   if (button.dataset.approve === "auto") {
     c.commandPolicy = "auto";
     saveStore();
