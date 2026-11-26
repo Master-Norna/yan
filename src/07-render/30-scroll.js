@@ -5,17 +5,35 @@ function bindScrollEvents() {
   // 跟随的规矩：往下滚到离底不远就算到底、开始跟随（生成中内容一直在长，硬要滚到最后一像素常常追不上）；
   // 往上滚离底超过阈值才算离开。内容自己长高、缩短引起的滚动不算用户的意思。
   // 往上走的那一下不论离底多近都不重新跟随：平滑滚动与触控板的头一步只挪几像素，若当它「到底」，下一帧就被拽回底部
-  let lastScrollTop = 0;
+  // 「往上了」还要看这一下是不是人弄的：图片落定、内联作品撑开、浏览器把越界的位置夹回来，都会派发 scroll 事件，
+  // 位置变小而人没碰过；切走再切回、一版内容重排时若照 scrollTop 变小就判人往上翻，跟随会被悄悄关掉，看着像「回来就不跟随了」。
+  // 分两处看：内容高度变了的（重排、落定），人没动手就不算离开；高度没变的上移（点书眉、程序滚到顶、翻页键）照旧算离开
+  let lastScrollTop = 0,
+    lastScrollHeight = 0,
+    lastUserScrollAt = Number.NEGATIVE_INFINITY;
+  const markUserScroll = () => (lastUserScrollAt = performance.now());
+  document.addEventListener("keydown", event => {
+    if (!["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    // 在输入框、旁注、编辑器里按方向键是挪光标，不是翻正文
+    const field =
+      event.target instanceof Element
+        ? event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+        : null;
+    if (!field) markUserScroll();
+  });
   $("#chatScroll").addEventListener("scroll", () => {
     const el = $("#chatScroll"),
       gap = el.scrollHeight - el.scrollTop - el.clientHeight,
       down = el.scrollTop > lastScrollTop,
-      up = el.scrollTop < lastScrollTop;
+      up = el.scrollTop < lastScrollTop,
+      // 高度变了、八百毫秒内也没人动过手：这一下是内容重排挪的，不是人往上翻
+      relayout = el.scrollHeight !== lastScrollHeight && performance.now() - lastUserScrollAt > 800;
     lastScrollTop = el.scrollTop;
+    lastScrollHeight = el.scrollHeight;
     if ((!up && gap < 8) || (down && gap < FOLLOW_THRESHOLD)) {
       followBottom = true;
       autoScrolling = false;
-    } else if (!down && !autoScrolling && gap > FOLLOW_THRESHOLD) followBottom = false;
+    } else if (up && !autoScrolling && gap > FOLLOW_THRESHOLD && !relayout) followBottom = false;
     syncJumpBottom(gap);
     syncOutline();
     syncRunningHead();
@@ -49,7 +67,9 @@ function bindScrollEvents() {
   $("#chatScroll").addEventListener(
     "wheel",
     e => {
-      if (e.deltaY < 0 && !wheelScrollsInner(e)) followBottom = false;
+      if (wheelScrollsInner(e)) return;
+      markUserScroll();
+      if (e.deltaY < 0) followBottom = false;
     },
     { passive: true }
   );
@@ -57,6 +77,7 @@ function bindScrollEvents() {
     "pointerdown",
     () => {
       autoScrolling = false;
+      markUserScroll();
     },
     { passive: true }
   );

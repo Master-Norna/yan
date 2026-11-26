@@ -63,4 +63,42 @@ const pad = await evalJs(`(async () => {
   return Math.round(h.scrollHeight - h.scrollTop - h.clientHeight);
 })()`);
 check("touchpad-sized upward steps while streaming are not pulled back to the bottom", pad >= 30, `gap=${pad}`);
+
+// 内容自己长高、位置没动（图片落定、内联作品撑开）：跟随不该被关，长多少仍贴到底
+await evalJs(`document.querySelector("#jumpBottom").click(); true`);
+await sleep(900); // 让「人刚动过手」的窗口过去，下面两下都是程序弄的
+const addBlock = height =>
+  evalJs(
+    `(() => { const d = document.createElement("div"); d.style.height = "${height}px"; document.querySelector("#messages").appendChild(d); return true; })()`
+  );
+await addBlock(200);
+await sleep(600);
+const grew = await evalJs(gap);
+check("content growing below without a scroll does not stop following", grew < 8, `gap=${grew}`);
+
+// 一版内容重排：高度同时变了、位置也被挪小（浏览器把越界的位置夹回）。人没碰过，跟随仍不该被关，之后长高还贴底
+const shifted = await evalJs(
+  `(h => {
+     document.querySelector("#messages").insertAdjacentHTML("beforeend", '<div style="height:200px"></div>');
+     h.scrollTop = Math.max(0, h.scrollTop - 300);
+     return Math.round(h.scrollHeight - h.scrollTop - h.clientHeight);
+   })(document.querySelector("#chatScroll"))`
+);
+await addBlock(200);
+await sleep(600);
+const back = await evalJs(gap);
+check("a relayout shifting the view up does not stop following", shifted >= 300 && back < 8, `gap=${shifted} → ${back}`);
+
+// 切到卷宗页，这段在别处又长了一截：切回来仍该贴着底，不是停在离开时的位置
+await evalJs(`document.querySelector("#jumpBottom").click(); true`);
+await sleep(600);
+await evalJs(`document.querySelector("#openLibrary").onclick(); true`);
+await sleep(600);
+await evalJs(
+  `(() => { const c = __yanState().conversations.find(c => c.id === "follow"); const m = c.messages.at(-1); m.content += "\\n\\n" + ${JSON.stringify(filler)}; return m.content.length; })()`
+);
+await evalJs(`document.querySelector("#openLibrary").onclick(); true`);
+await sleep(800);
+const resumed = await evalJs(gap);
+check("coming back to a followed chat lands at the bottom, not where it was left", resumed < 8, `gap=${resumed}`);
 close();
