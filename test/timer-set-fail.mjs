@@ -5,21 +5,25 @@ import { mkdirSync } from "node:fs";
 import { connect, check, sleep, PAGE, WORK } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 // 页面的 set_timer 走总线：让这一次的总线回话读到完（桥接确实处理了），再把结果丢掉，模拟回执没到手。
+// 总线没连上时同一趟走直连 fetch（01-bridge.js 的 busReady 降级），因此两种发法都要认——
+// CI 的机器慢，EventSource 常在开页 3 秒窗口里没连上，这一趟就走了直连。
 // __timerHang：桥接收下补的那句撤约却一直不回话——回应只跟着 signal 断，正是卡住的那一头。
 // 开关存在 localStorage：开页对齐配置后会重载一回，放在 window 上的标志会被重置
 await send("Page.addScriptToEvaluateOnNewDocument", {
   source: `(() => {
     const real = window.fetch;
+    // 这一趟是不是往 path 去的：经总线时 url 是 /api/bus/send、真路径在 body 里；直连时 url 就是 path
+    const reaching = (url, body, path) => (url.includes("/api/bus/send") && body.includes(path)) || url.includes(path);
     window.fetch = async function (input, init) {
       const url = String(typeof input === "string" ? input : input?.url || "");
       const body = typeof init?.body === "string" ? init.body : "";
-      if (localStorage.getItem("__timerDrop") && url.includes("/api/bus/send") && body.includes("/api/timer/set")) {
+      if (localStorage.getItem("__timerDrop") && reaching(url, body, "/api/timer/set")) {
         localStorage.removeItem("__timerDrop"); // 只丢这一次
         const res = await real.call(this, input, init);
         await Promise.race([res.text().catch(() => ""), new Promise(done => setTimeout(done, 3000))]);
         throw new TypeError("Failed to fetch");
       }
-      if (localStorage.getItem("__timerHang") && url.includes("/api/bus/send") && body.includes("/api/timer/cancel")) {
+      if (localStorage.getItem("__timerHang") && reaching(url, body, "/api/timer/cancel")) {
         return new Promise((resolve, reject) => {
           const t = setTimeout(() => resolve({ ok: true, status: 200, json: async () => ({}), text: async () => "{}" }), 60000);
           init?.signal?.addEventListener("abort", () => {
