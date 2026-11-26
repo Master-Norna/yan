@@ -70,7 +70,7 @@ test("streamReply：工具在止之后才回来，排着的补言放回案上，
       document.documentElement.dataset.inkMotion = "off";
       document.hidden = true;
       saveStoreSoon = saveStore = renderSendButtons = renderHistory = setJobLabel =
-        refreshSteps = markDirty = accountUsage = renderQuota = restoreDraft = tickTrailClock = () => {};
+        refreshSteps = markDirty = spendTokens = accountUsage = renderQuota = restoreDraft = tickTrailClock = () => {};
       keepInWindow = mcpForTurn = refreshSkills = maybeAutoCompact = maybeAutoTitle = async () => {};
       loadLedger = loadIntent = warmConversation = async () => {};
       reserveTokens = () => () => {};
