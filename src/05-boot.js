@@ -86,6 +86,12 @@ async function boot() {
       void refreshConfigFromDisk();
       // 藏着时报到被浏览器节流，别处在这段里答完了也未必察觉：回到前台先跟上看着的这段，再往里说话
       if (currentId) void catchUpFromDisk([currentId]);
+      // 后台里这一答照旧在长（落墨、步骤、帮手回报），页面却排不上版：回来先贴一次底，别停在离开时的高度上；
+      // 图片、内联作品等随后才落定，再补一次
+      if (view === "chat" && currentId && followBottom) {
+        requestAnimationFrame(scrollBottom);
+        setTimeout(() => view === "chat" && currentId && followBottom && scrollBottom(), 200);
+      }
     }
   });
 }

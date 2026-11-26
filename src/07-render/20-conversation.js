@@ -22,10 +22,16 @@ function rememberScrollPosition() {
   if (snapshot && currentId) scrollPositions.set(currentId, snapshot);
 }
 // follow：连同跟随与否一起恢复。下一帧补的那一回只校位置——这一帧里别处（翻版本、点出处）刚改过跟随，不能被旧快照改回去
+// 跟着的时候恢复的是「跟到最新」，不是离开那一刻的坐标：这段在别处（后台、帮手、另一页）又长了一截，
+// 照坐标回去就停在半中间，看着像不跟随了
 function restoreScrollPosition(snapshot, { follow = true } = {}) {
   const host = $("#chatScroll");
   if (!host || !snapshot) return;
   if (follow) followBottom = !!snapshot.follow;
+  if (followBottom) {
+    host.scrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+    return;
+  }
   const anchor = snapshot.anchorId ? host.querySelector(`[data-message="${CSS.escape(snapshot.anchorId)}"]`) : null;
   if (anchor) host.scrollTop += anchor.getBoundingClientRect().top - host.getBoundingClientRect().top - snapshot.anchorOffset;
   else host.scrollTop = Math.min(snapshot.top, Math.max(0, host.scrollHeight - host.clientHeight));
