@@ -530,6 +530,7 @@ var YAN_EN = {
   "未能预览：{0}": "Can't preview: {0}",
   下载查看: "Download",
   以本机程序打开: "Open with system app",
+  本机打开: "Open with system app",
   已在本机程序中打开: "Opened in its app",
   "打开失败：{0}": "Open failed: {0}",
   此类文件无法在此预览: "This file type can't be previewed here",

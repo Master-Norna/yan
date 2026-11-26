@@ -475,7 +475,7 @@ button.source-local {
   background: var(--paper-2);
   color: var(--ink);
 }
-/* 下载只用一枚笔意小画（一笔竖落、两笔收成箭头，底下一道纸；src/03-brush.js 的 download），名字在 title 与 aria-label 里 */
+/* 本机打开只用一枚笔意小画（一页纸、一笔斜挑出去的箭；src/03-brush.js 的 open），名字在 title 与 aria-label 里 */
 .file-viewer-actions button.icon-cta {
   display: flex;
   align-items: center;
@@ -597,7 +597,8 @@ button.source-local {
   color: var(--ink-3);
   font-size: var(--fs-note);
 }
-/* 抽取说明在浮层里摆在顶栏：下载键的左边，一行小字、淡墨，长了截断。纸面那一份挪走、不删（独立文档页还要用） */
+/* 抽取说明在浮层里摆在顶栏：本机打开键的左边，一行小字、淡墨，长了截断。只说截断这一类话（「本机按…」与
+   「以本机程序打开」已由那枚小画与名字交代），纸面那一份挪走、不删（独立文档页还要用） */
 .file-viewer-head .file-viewer-note {
   margin: 0;
   min-width: 0;
@@ -849,41 +850,53 @@ button.source-local {
 .file-viewer-slides[data-slide-format="pptx"] .viewer-slide > p:not(:last-child) {
   margin-bottom: 0.4em;
 }
+/* 页码：不设盒子——纸下不另垫一条，只有两边的翻页、一排朱点与右端的「2 / 12」（设计稿/168 乙、丙二）。
+   点本身只七八像素，按钮留一圈透明的可点处；离当前越远越淡、越小，--d 由 13-files/19-doc-paging.js 换页时重记 */
 .viewer-slide-nav {
   justify-self: center;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 100%;
   min-width: 0;
-  padding: 2px 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-m);
-  background: color-mix(in srgb, var(--paper) 88%, transparent);
 }
 .viewer-slide-strip {
   min-width: 0;
-  gap: 4px;
-  padding: 4px 2px;
+  gap: 2px;
+  padding: 4px 0;
 }
 .viewer-slide-nav button {
   flex: none;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 5px;
-  border-radius: var(--radius-s);
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0 4px;
   color: var(--ink-2);
   font: var(--fs-note) var(--title);
   font-variant-numeric: tabular-nums;
 }
 .viewer-slide-nav button:hover:not([aria-disabled="true"]) {
-  background: var(--paper-2);
   color: var(--ink);
 }
-.viewer-slide-nav button[aria-current="page"] {
-  color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--ink-3);
-  background: var(--paper-2);
+.viewer-slide-strip button {
+  position: relative;
+  width: 14px;
+  min-width: 14px;
+  padding: 0;
+}
+.viewer-slide-strip button::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(8px - var(--d, 0) * 1px);
+  height: calc(8px - var(--d, 0) * 1px);
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: calc(1 - var(--d, 0) * 0.17);
+  transform: translate(-50%, -50%);
+}
+.viewer-slide-strip button:hover::before {
+  opacity: 1;
 }
 .viewer-slide-nav button[data-viewer-slide-step] {
   font-size: 20px;
