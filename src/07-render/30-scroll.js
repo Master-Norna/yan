@@ -26,15 +26,14 @@ function bindScrollEvents() {
       gap = el.scrollHeight - el.scrollTop - el.clientHeight,
       down = el.scrollTop > lastScrollTop,
       up = el.scrollTop < lastScrollTop,
-      relaid = el.scrollHeight !== lastScrollHeight;
+      // 高度变了、八百毫秒内也没人动过手：这一下是内容重排挪的，不是人往上翻
+      relayout = el.scrollHeight !== lastScrollHeight && performance.now() - lastUserScrollAt > 800;
     lastScrollTop = el.scrollTop;
     lastScrollHeight = el.scrollHeight;
     if ((!up && gap < 8) || (down && gap < FOLLOW_THRESHOLD)) {
       followBottom = true;
       autoScrolling = false;
-    } else if (up && !autoScrolling && gap > FOLLOW_THRESHOLD && !(relaid && performance.now() - lastUserScrollAt > 800))
-      // 高度变了、八百毫秒内也没人动过手：这一下是老版内容挪的，不是人往上翻
-      followBottom = false;
+    } else if (up && !autoScrolling && gap > FOLLOW_THRESHOLD && !relayout) followBottom = false;
     syncJumpBottom(gap);
     syncOutline();
     syncRunningHead();
