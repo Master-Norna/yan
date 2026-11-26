@@ -168,6 +168,28 @@ test("自动续写：开流却没报有效用量的请求才估算，正常末�
   assert.equal(assistant.usage.cached_tokens, 700);
 });
 
+test("上游把这一轮的用量报成 0：算报过、不拿估算替它，整答也不标含估算", async () => {
+  // 有的中转把计量抹成 0 回过来。估一份整历史替它，余墨会比实数多扣好几倍（见 delegate 那条端到端）。
+  const f = setup([lengthReply(), sse(event({ content: "等一等" }, "stop") + usageFrame(0, 0, 0) + done)]);
+  const assistant = await turn(f);
+  assert.equal(assistant.status, "complete");
+  assertCharges(f, assistant, [900], false);
+  assert.equal(assistant.usage.total_tokens, 900);
+});
+
+test("上游只报入、出两段、没有 total：合起来算这一轮的量", async () => {
+  const f = setup([
+    sse(
+      event({ content: "写完。" }, "stop") +
+        `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 900, completion_tokens: 30 } })}\n\n` +
+        done
+    )
+  ]);
+  const assistant = await turn(f);
+  assertCharges(f, assistant, [930], false);
+  assert.equal(assistant.usage.total_tokens, 930);
+});
+
 for (const ending of ["未收到用量", "已收到用量但未收到 DONE", "已收到 DONE"]) {
   test(`止：${ending}时，当前请求只结算一次`, async () => {
     const reported = ending !== "未收到用量",

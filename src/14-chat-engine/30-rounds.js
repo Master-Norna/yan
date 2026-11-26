@@ -81,19 +81,28 @@ async function runRounds(target, history, run) {
     retrying = true;
     status(t`网络不稳 · 再试第 ${n} 回`);
   };
-  // 结束标志之后也可能收到实数。只在读流退出时结算一次，只给开了流却未报有效用量的请求作估算。
+  // 结束标志之后也可能收到实数。只在读流退出时结算一次。
+  // 上游报了这一轮的量就照它记——报成 0 也算报过（有的中转不把计量回传，别拿估算替它）；
+  // 一个数都没给（不用 usage 的服务，或只回了个空对象）才按这一轮的输入与已写正文估，并给整答记上「含估算」。
   const settleRound = roundStart => {
-    let usage = target.usage;
-    const reported = Number(usage?.total_tokens);
-    if (!usage || !Number.isFinite(reported) || reported <= 0) {
+    const usage = target.usage,
+      count = key => (usage?.[key] == null ? NaN : Number(usage[key])),
+      total = count("total_tokens"),
+      prompt = count("prompt_tokens"),
+      completion = count("completion_tokens");
+    let settled = usage;
+    if (![total, prompt, completion].some(Number.isFinite)) {
       const prompt_tokens = estimateTokens(history),
         completion_tokens = estimateTokens([{ content: target.content.slice(roundStart) }]);
-      usage = { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens, cached_tokens: 0 };
+      settled = { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens, cached_tokens: 0 };
       tally.estimated = true;
+    } else if (!Number.isFinite(total)) {
+      // 只给了入、出两段：合起来算这一轮的量
+      settled = { ...usage, total_tokens: (Number.isFinite(prompt) ? prompt : 0) + (Number.isFinite(completion) ? completion : 0) };
     }
     tally.usageKnown = true;
-    for (const key of Object.keys(tally.usage)) tally.usage[key] += Number(usage[key] || 0);
-    spend(Number(usage.total_tokens));
+    for (const key of Object.keys(tally.usage)) tally.usage[key] += Number(settled[key] || 0);
+    spend(Number(settled.total_tokens));
   };
   for (;;) {
     // 开工前等着的那几步（装历史、起 MCP、断线稍候）里已按了停：中止在先，后面挂上的监听再也等不到，当场作罢
