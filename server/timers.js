@@ -300,7 +300,30 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
       } catch {} // 读不到凭据，不因此把仍在簿上的约说成已了结
     return timer;
   }
-  const handleSet = route(body => {
+  // 设约的回执没送到页面（点停止、断线、桥接被关）：编号只在这一份回执里，页面既不知道、
+  // 也没法撤——重答、切版都收不到它，周期还会照排下去。与后台指令编号未交付时同一判据：撤约，
+  // 已到点落盘、还没人认领的那一回也一并清掉（页面不知道编号，谁也领不走它）。
+  /** @param {Timer} timer */
+  function discardTimer(timer) {
+    const fired = firedFile(firedId(timer));
+    // 已有人凭编号认领、正本已改名作凭据（正常轮不到这里）：留着更安全
+    if (fs.existsSync(`${fired}.taken`) || completed.has(fired)) return;
+    let removed = false;
+    try {
+      // 周期的下一回编号与 created 都没变，一起撤
+      const still = book.timers.find(item => item.id === timer.id && item.created === timer.created);
+      if (still) {
+        save({ ...book, timers: book.timers.filter(item => item !== still) }, [still]);
+        arm();
+      }
+      removed = true;
+    } catch (error) {
+      // 约簿坏了撤不掉：原样留着等人修，别把到点那一回也抹掉
+      console.warn(`[${stamp()}] 候 · ${timer.id} 的回执未送达，撤约未成`, error);
+    }
+    if (removed && !reserved.has(fired)) forgetClaim(fired);
+  }
+  const handleSet = route((body, req, res) => {
     requireBook();
     const to = String(body.to || ""),
       due = Number(body.due),
@@ -320,13 +343,22 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
       };
     save({ seq, timers: [...book.timers, timer] });
     arm();
+    // 回执没写完就断开：页面拿不到编号，这一约当即撤去（见 discardTimer）
+    if (res) onResponseSettled(res, finished => finished || discardTimer(timer));
     return timer;
   });
-  // 取消簿上还排着的约定（包括周期约的下一回），不撤已经落盘的到点记录
+  // 取消簿上还排着的约定（包括周期约的下一回），不撤已经落盘的到点记录。
+  // 编号没到手时按对话与步骤撤，见 discardTimer 与 src/15-tools/23-timer.js：同一步骤只由那一页那一次设过
   const handleCancel = route(body => {
     requireBook();
     const id = String(body.id || ""),
-      timer = book.timers.find(item => item.id === id && (!body.to || item.to === body.to));
+      to = String(body.to || ""),
+      step = String(body.step || ""),
+      timer = id
+        ? book.timers.find(item => item.id === id && (!to || item.to === to))
+        : to && step
+          ? book.timers.filter(item => item.to === to && item.step === step).at(-1)
+          : undefined;
     const live = timer && liveTimer(timer);
     if (!live) return { found: false };
     save({ ...book, timers: book.timers.filter(item => item !== timer) }, [timer]);
