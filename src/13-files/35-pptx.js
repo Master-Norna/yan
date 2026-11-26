@@ -312,30 +312,41 @@ async function extractPptxSlides(bytes) {
       { optional: true }
     ).catch(() => new Map()),
     frames = new Map(),
-    // 一页的版式 → {theme, ph}。同版式的页共用一份，几十页也只解析几回
+    // 版式/母版那份 XML 的 spTree；解析不了就不画这一层装饰
+    treeOf = xml => {
+      try {
+        return (xml && xmlDeep(parseXml(xml), "spTree")[0]) || null;
+      } catch {
+        return null;
+      }
+    },
+    // 一页的版式 → {theme, ph, styles, bg, layers}。同版式的页共用一份，几十页也只解析几回
     frameOf = rels => {
       const layout = zipRels(rels, "ppt/slides", "slideLayout").values().next().value || "";
       if (frames.has(layout)) return frames.get(layout);
-      /** @type {{theme: Map<string,string>, ph: Map<string, any>, styles: Map<string, any>, bg: string}} */
-      let ctx = { theme: new Map(), ph: new Map(), styles: new Map(), bg: "" };
+      /** @type {{theme: Map<string,string>, ph: Map<string, any>, styles: Map<string, any>, bg: any, layers: {tree: Element, images: Map<string,string>}[]}} */
+      let ctx = { theme: new Map(), ph: new Map(), styles: new Map(), bg: null, layers: [] };
       try {
-        const master = layout
-            ? zipRels(support.get(relsOf(layout)), layout.replace(/[^/]+$/, "").replace(/\/$/, ""), "slideMaster")
-                .values()
-                .next().value || ""
-            : "",
-          themePath = master
-            ? zipRels(support.get(relsOf(master)), master.replace(/[^/]+$/, "").replace(/\/$/, ""), "theme")
-                .values()
-                .next().value || ""
-            : "",
+        const layoutBase = layout.replace(/[^/]+$/, "").replace(/\/$/, ""),
+          layoutRels = support.get(relsOf(layout)),
+          master = layout ? zipRels(layoutRels, layoutBase, "slideMaster").values().next().value || "" : "",
+          masterBase = master.replace(/[^/]+$/, "").replace(/\/$/, ""),
+          masterRels = support.get(relsOf(master)),
+          themePath = master ? zipRels(masterRels, masterBase, "theme").values().next().value || "" : "",
           theme = pptxTheme(themePath ? support.get(themePath) : undefined),
+          layoutImages = zipRels(layoutRels, layoutBase),
+          masterImages = zipRels(masterRels, masterBase),
           masterPh = pptxPlaceholders(support.get(master), theme),
           // 母版那套「标题 32 磅、正文 18 磅」的缺省，版式与页上都不写时才有用
           styles = pptxTextStyles(support.get(master), theme),
-          // 底色多半写在版式或母版上：版式有就用版式的，否则用母版的
-          bg = pptxBackground(support.get(layout), theme) || pptxBackground(support.get(master), theme),
-          ph = new Map(masterPh);
+          // 底色多半写在版式或母版上：版式有就用版式的，否则用母版的（纯色或一张铺满的图）
+          bg = pptxBackground(support.get(layout), theme, layoutImages) || pptxBackground(support.get(master), theme, masterImages),
+          ph = new Map(masterPh),
+          // 版式与母版上自己画的装饰（底纹、色块、圆标）：画在页的形状之下，占位符的空框不画
+          layers = [
+            { tree: treeOf(support.get(master)), images: masterImages },
+            { tree: treeOf(support.get(layout)), images: layoutImages }
+          ].filter(layer => layer.tree);
         // 版式优先、母版补缺：同一处字段按「有就用」合，别让空值盖掉继承来的
         for (const [key, entry] of pptxPlaceholders(support.get(layout), theme)) {
           const base = masterPh.get(key) || {};
@@ -348,7 +359,7 @@ async function extractPptxSlides(bytes) {
             va: entry.va || base.va || ""
           });
         }
-        ctx = { theme, ph, styles, bg };
+        ctx = { theme, ph, styles, bg, layers };
       } catch {}
       frames.set(layout, ctx);
       return ctx;

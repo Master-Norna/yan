@@ -275,22 +275,36 @@ function pptxCanvasHtml(layout, ratio) {
       // 图表、智能图形画不出来：一块淡虚线框，标一句这是什么
       if (shape.g === "blank")
         return `<i class="pv-blank" style="left:${pct(shape.x)};top:${vpct(shape.y)};width:${pct(shape.w)};height:${vpct(shape.h)}">${shape.k === "chart" ? t`图表` : t`图示`}</i>`;
-      if (shape.g === "img")
-        return `<img class="pv-img" data-path="${escapeHtml(shape.src)}" alt="" style="left:${pct(shape.x)};top:${vpct(shape.y)};width:${pct(shape.w)};height:${vpct(shape.h)}">`;
+      if (shape.g === "img") {
+        const box = `left:${pct(shape.x)};top:${vpct(shape.y)};width:${pct(shape.w)};height:${vpct(shape.h)}`;
+        // 裁过的图：容器照框大小裁齐，图放大到「剩下那部分正好盖满框」，再按裁掉的比例偏出去
+        if (shape.cr) {
+          const [l, t, r, b] = shape.cr,
+            rw = Math.max(0.01, 1 - l - r),
+            rh = Math.max(0.01, 1 - t - b),
+            inner = `left:${((-l / rw) * 100).toFixed(2)}%;top:${((-t / rh) * 100).toFixed(2)}%;width:${(100 / rw).toFixed(2)}%;height:${(100 / rh).toFixed(2)}%`;
+          return `<i class="pv-imgclip" style="${box}"><img data-path="${escapeHtml(shape.src)}" alt="" style="${inner}"></i>`;
+        }
+        return `<img class="pv-img" data-path="${escapeHtml(shape.src)}" alt="" style="${box}">`;
+      }
       const style = [`left:${pct(shape.x)}`, `top:${vpct(shape.y)}`, `width:${pct(shape.w)}`, `height:${vpct(shape.h)}`];
       if (shape.g === "ellipse") style.push("border-radius:50%");
       else if (shape.g === "round") style.push("border-radius:8%");
-      if (shape.f) style.push(`background:#${shape.f}${shape.fa != null ? alpha(shape.fa) : ""}`);
+      if (shape.fg) style.push(`background-image:${shape.fg}`);
+      else if (shape.f) style.push(`background:#${shape.f}${shape.fa != null ? alpha(shape.fa) : ""}`);
       if (shape.s)
         style.push(
           `border:${cqw(Math.max(shape.sw || 0.75, 0.4))} ${shape.sd === "dot" ? "dotted" : shape.sd === "dash" ? "dashed" : "solid"} #${shape.s}${shape.sa != null ? alpha(shape.sa) : ""}`
         );
       if (shape.t?.length) {
-        style.push(
-          "display:flex",
-          "flex-direction:column",
-          `justify-content:${shape.va === "c" ? "center" : shape.va === "b" ? "flex-end" : "flex-start"}`
-        );
+        // 竖排（东亚竖排）：字自上而下、行从右往左；flex 在竖排里换轴，干脆不设，照块排下去
+        if (shape.vr) style.push("writing-mode:vertical-rl");
+        else
+          style.push(
+            "display:flex",
+            "flex-direction:column",
+            `justify-content:${shape.va === "c" ? "center" : shape.va === "b" ? "flex-end" : "flex-start"}`
+          );
         // 原件写 wrap="none"：这一段就照一行排出去，不在框里折断
         if (shape.nw) style.push("white-space:pre");
         if (shape.in) style.push(`padding:${shape.in.map(cqw).join(" ")}`);
@@ -311,12 +325,16 @@ function slideViewerHtml(pages, ratio, note, format, canvases = [], titles = [],
       if (!layout)
         return `<div class="viewer-slide markdown" data-viewer-slide-panel="${i}" tabindex="0"${i ? " hidden" : ""}>${renderMarkdown(part)}</div>`;
       const label = titles[i] ? `${i + 1} / ${pages.length} · ${titles[i]}` : `${i + 1} / ${pages.length}`,
-        bg = layout.bg || "ffffff",
+        bg = layout.bg?.c || "ffffff",
+        // 底色是一张铺满的图（模板的雪景、底纹）：先铺图，字画在它上面
+        bgImg = layout.bg?.img || "",
         // 没写颜色的字（表格、缺字色的框）随底色的明暗取墨或取白
         level = parseInt(bg, 16) || 0,
         ink = ((level >> 16) & 255) * 0.299 + ((level >> 8) & 255) * 0.587 + (level & 255) * 0.114 > 140 ? "#1a1a1a" : "#f5f5f5";
       const said = (notes[i] || []).filter(Boolean);
-      return `<div class="viewer-slide viewer-slide-canvas" data-viewer-slide-panel="${i}" tabindex="0" aria-label="${escapeHtml(label)}"${i ? " hidden" : ""}><div class="pv-page" style="background:#${bg};color:${ink}">${pptxCanvasHtml(layout, ratio)}</div>${
+      return `<div class="viewer-slide viewer-slide-canvas" data-viewer-slide-panel="${i}" tabindex="0" aria-label="${escapeHtml(label)}"${i ? " hidden" : ""}><div class="pv-page" style="background:#${bg};color:${ink}">${
+        bgImg ? `<img class="pv-bg" data-path="${escapeHtml(bgImg)}" alt="">` : ""
+      }${pptxCanvasHtml(layout, ratio)}</div>${
         said.length
           ? `<details class="pv-notes"><summary>${t`备注`}</summary><div class="markdown">${renderMarkdown(said.join("\n\n"))}</div></details>`
           : ""

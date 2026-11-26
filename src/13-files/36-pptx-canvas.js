@@ -71,11 +71,28 @@ function pptxColor(fill, theme) {
 function pptxFillOf(spPr, theme) {
   const solid = xmlKids(spPr, "solidFill")[0];
   if (solid) return pptxColor(solid, theme);
-  // 渐变只取第一处色标，够看出这块是深是浅
-  const stop = xmlDeep(xmlKids(spPr, "gradFill")[0] || { children: [] }, "gs")[0],
-    pick = stop && [...stop.children].find(child => /Fill$/.test(child.localName));
-  return pick ? pptxColor(pick, theme) : null;
+  // 渐变照色标与角度画成 CSS 渐变：模板的装饰色块多半是半透明渐变，取一处色标画实心会盖错
+  const fill = xmlKids(spPr, "gradFill")[0],
+    stops = fill ? xmlKids(xmlKids(fill, "gsLst")[0] || {}, "gs") : [],
+    parts = stops.map(gs => {
+      const color = pptxColor(gs, theme);
+      // 认不出的色标整块不画：宁缺，不拿一处分不清的色冒充
+      return color ? `${cssColor(color.c, color.a)} ${Math.round(pptxAttr(gs, "pos") / 1000)}%` : null;
+    });
+  if (!parts.length || parts.some(part => !part)) return null;
+  // a:lin 的角度从「向右」顺时针算，CSS 从「向上」算：加 90° 即对齐
+  const angle = (pptxAttr(xmlKids(fill, "lin")[0], "ang") / 60000 + 90) % 360;
+  return { c: "", a: 100, grad: `linear-gradient(${Math.round(angle)}deg, ${parts.join(", ")})` };
 }
+// #rrggbb 加透明度：CSS 认八位十六进制
+const cssColor = (hex, alpha = 100) =>
+  `#${hex}${
+    alpha < 100
+      ? Math.round(alpha * 2.55)
+          .toString(16)
+          .padStart(2, "0")
+      : ""
+  }`;
 function pptxStrokeOf(spPr, theme) {
   const ln = xmlKids(spPr, "ln")[0];
   if (!ln) return null;
@@ -187,6 +204,8 @@ function pptxCanvasText(shape, inherit, theme, styles) {
     anchor: bodyPr?.getAttribute("anchor") || inherit?.va || "t",
     // wrap="none" 的框：PowerPoint 不折行，字照一行铺出框外
     nowrap: bodyPr?.getAttribute("wrap") === "none",
+    // 竖排（东亚竖排 eaVert、每行转 90° 的 vert）：字自上而下、行从右往左。画布用 writing-mode 近似
+    vert: /^(?:eaVert|vert|vert270|mongolianVert)$/.test(bodyPr?.getAttribute("vert") || ""),
     scale,
     red
   };
@@ -291,18 +310,24 @@ const pptxCompose = (map, xfrm) => {
     sy = ch ? h / ch : 1;
   return (x, y, ww, hh) => map(x0 + (x - cx0) * sx, y0 + (y - cy0) * sy, ww * sx, hh * sy);
 };
-// 一页的底色：<p:bg><p:bgPr><a:solidFill> 里那一处颜色；没有就用版式、母版的
-function pptxBackground(source, theme) {
+// 一页的底色：<p:bg><p:bgPr> 里那一处颜色，或一张铺满的图（模板的雪景、底纹多半是图）；没有就用版式、母版的。
+// images 是这份 XML 的 rId → 包内路径（zipRels 得来）：图填色只认得出路径，取不到就不画
+function pptxBackground(source, theme, images) {
   // 传进来的可能是已解析的文档（页），也可能是版式/母版那份 XML 原文
   let root = null;
   try {
     root = typeof source === "string" ? (source ? parseXml(source) : null) : source;
   } catch {
-    return "";
+    return null;
   }
   const node = xmlDeep(root, "bg")[0],
-    color = pptxColor(xmlKids(xmlKids(node, "bgPr")[0] || {}, "solidFill")[0], theme);
-  return color?.a ? color.c : "";
+    props = xmlKids(node, "bgPr")[0],
+    color = pptxColor(xmlKids(props || {}, "solidFill")[0], theme);
+  if (color?.a) return { c: color.c, img: "" };
+  const blip = xmlDeep(xmlKids(props || {}, "blipFill")[0] || {}, "blip")[0],
+    id = blip?.getAttribute("r:embed") || blip?.getAttribute("r:link"),
+    path = (id && images?.get(id)) || "";
+  return path ? { c: "", img: path } : null;
 }
 const PPTX_CANVAS_KIND = { rect: "rect", roundRect: "round", ellipse: "ellipse", line: "line" };
 // 自动编号的记号：阿拉伯、字母、罗马数字与中文数字；认不出的按阿拉伯数字
@@ -360,15 +385,13 @@ function pptxCanvas(doc, ctx) {
     }
     return rect;
   };
-  const walk = (node, map, scale = 1) => {
+  const walk = (node, map, skipPh = false) => {
     for (const shape of pptxShapeChildren(node)) {
+      // 版式、母版上的装饰只画自己画的；占位符的空框与「单击此处编辑」不是这一页的内容
+      if (skipPh && xmlDeep(shape, "ph")[0]) continue;
       if (shape.localName === "grpSp") {
-        const xfrm = xmlKids(xmlKids(shape, "grpSpPr")[0] || {}, "xfrm")[0],
-          ext = xfrm && xmlKids(xfrm, "ext")[0],
-          chExt = xfrm && xmlKids(xfrm, "chExt")[0];
-        // 组放大缩小时，里面的字也跟着放大缩小：倍数由 ext / chExt 来
-        const inner = pptxAttr(chExt, "cx") > 0 ? scale * (pptxAttr(ext, "cx") / pptxAttr(chExt, "cx")) : scale;
-        walk(shape, xfrm ? pptxCompose(map, xfrm) : map, inner);
+        const xfrm = xmlKids(xmlKids(shape, "grpSpPr")[0] || {}, "xfrm")[0];
+        walk(shape, xfrm ? pptxCompose(map, xfrm) : map, skipPh);
         continue;
       }
       const spPr = xmlKids(shape, "spPr")[0] || xmlKids(shape, "grpSpPr")[0] || {},
@@ -422,7 +445,12 @@ function pptxCanvas(doc, ctx) {
           blip = xmlDeep(shape, "blip")[0],
           path = images.get(blip?.getAttribute("r:embed") || blip?.getAttribute("r:link"));
         if (!box || !path) continue;
-        shapes.push({ x: unit(box.x), y: unit(box.y), w: unit(box.w), h: unit(box.h), g: "img", src: path });
+        const item = { x: unit(box.x), y: unit(box.y), w: unit(box.w), h: unit(box.h), g: "img", src: path },
+          // 图片被裁过（头像、截图取一角）：裁掉的比例照原样算，渲染侧把图放大后偏出去，别整张塞进框里
+          cut = xmlDeep(shape, "srcRect")[0],
+          fractions = cut && ["l", "t", "r", "b"].map(side => pptxAttr(cut, side) / 100000);
+        if (fractions && fractions.some(value => value > 0 && value < 1)) item.cr = fractions;
+        shapes.push(item);
         continue;
       }
       const text = pptxCanvasText(shape, pptxPlaceholderOf(xmlDeep(shape, "ph")[0], ph), theme, styles),
@@ -431,8 +459,8 @@ function pptxCanvas(doc, ctx) {
       if (!text && !fill && !stroke) continue;
       const box = boxOf(shape, map);
       if (!box || (box.w <= 0 && box.h <= 0)) {
-        // 有字却排不出位置：这一页整页退回逐段文字，不猜
-        if (text) missing = true;
+        // 有字却排不出位置：这一页整页退回逐段文字，不猜（版式上的装饰缺位置就不画，不拖累正文）
+        if (text && !skipPh) missing = true;
         continue;
       }
       if (++count > 1200) return;
@@ -457,7 +485,8 @@ function pptxCanvas(doc, ctx) {
         continue;
       }
       if (kind !== "rect") item.g = kind;
-      if (fill && fill.a) {
+      if (fill?.grad) item.fg = fill.grad;
+      else if (fill && fill.a) {
         item.f = fill.c;
         if (fill.a < 100) item.fa = Math.round(fill.a);
       }
@@ -468,9 +497,10 @@ function pptxCanvas(doc, ctx) {
         if (/dash|Dot/i.test(stroke.dash)) item.sd = /Dot/i.test(stroke.dash) ? "dot" : "dash";
       }
       if (text) {
-        // 字号在这一层折成纸宽的比例，渲染侧只管照数写；缩字比例与段前段后也在这里算好
+        // 字号在这一层折成纸宽的比例，渲染侧只管照数写；缩字比例与段前段后也在这里算好。
+        // 字号不随组合缩放走：组里的子坐标常是小单位（例如整组放大几百倍才还原），乘上去字会比纸还宽
         item.t = text.p.map(para => {
-          const runs = para.r.map(run => ({ ...run, s: pt(run.s * text.scale * scale), k: run.k ? ptv(run.k * text.scale * scale) : 0 })),
+          const runs = para.r.map(run => ({ ...run, s: pt(run.s * text.scale), k: run.k ? ptv(run.k * text.scale) : 0 })),
             size = runs[0]?.s || pt(1800),
             gap = value => (value?.v ? pt(value.v) : value?.r ? Math.round(value.r * size * 10) / 10 : 0);
           return { ...para, r: runs, mt: gap(para.bef), mb: gap(para.aft), m: unit(para.m), lp: para.lp ? pt(para.lp) : 0 };
@@ -478,6 +508,7 @@ function pptxCanvas(doc, ctx) {
         if (text.anchor === "ctr") item.va = "c";
         else if (text.anchor === "b") item.va = "b";
         if (text.nowrap) item.nw = 1;
+        if (text.vert) item.vr = 1;
         item.lh = Math.round(PPTX_LINE_HEIGHT * (1 - text.red) * 1000) / 1000;
         const bodyPr = xmlKids(xmlKids(shape, "txBody")[0] || {}, "bodyPr")[0];
         // CSS 的 padding 是上、右、下、左
@@ -491,10 +522,10 @@ function pptxCanvas(doc, ctx) {
       shapes.push(item);
     }
   };
-  walk(root, (x, y, w, h) => ({ x, y, w, h }), 1);
-  if (missing || !shapes.length) return null;
+  // 先画版式与母版的装饰（模板的底纹、色块、圆标大多在这一层），再画这一页自己的
+  for (const layer of ctx.layers || []) walk(layer.tree, (x, y, w, h) => ({ x, y, w, h }), true);
+  walk(root, (x, y, w, h) => ({ x, y, w, h }));
+  if (missing) return null;
   // 页上没写底色时，底色在版式或母版里
-  const own = pptxBackground(doc, theme),
-    bg = own || ctx.bg || "";
-  return { bg, shapes };
+  return { bg: pptxBackground(doc, theme, images) || ctx.bg || null, shapes };
 }
