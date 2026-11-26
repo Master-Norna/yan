@@ -17,6 +17,26 @@ const RETRY_MS = 5000;
 
 /** @typedef {{ id: string, to: string, step: string, note: string, due: number, every?: number, created: number }} Timer */
 /** @typedef {{ seq: number, timers: Timer[] }} Book */
+// JSON 能读不等于约簿完整：坏条目不得进入排程（null 会在算投递号时抛错，非法 due 会让 setTimeout 反复立即触发）。
+function validBook(saved) {
+  return (
+    Array.isArray(saved?.timers) &&
+    (typeof saved.seq === "number" || typeof saved.seq === "string") &&
+    Number.isSafeInteger(Number(saved.seq)) &&
+    Number(saved.seq) >= 0 &&
+    saved.timers.every(
+      timer =>
+        timer &&
+        typeof timer.id === "string" &&
+        timer.id &&
+        typeof timer.to === "string" &&
+        timer.to &&
+        (timer.created === undefined || Number.isFinite(timer.created)) &&
+        Number.isFinite(timer.due) &&
+        (timer.every === undefined || (Number.isFinite(timer.every) && timer.every >= 1000))
+    )
+  );
+}
 // 一约一时刻只有一个投递号；前缀与旧版的随机号区分，周期的不同次不会相撞。
 /** @param {Timer} timer */
 const firedId = ({ id, to, created, due }) =>
@@ -97,7 +117,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     for (const [file, { scope, id }] of completed) {
       try {
         const saved = readJsonFile(path.join(scope, "约.json")),
-          open = Array.isArray(saved?.timers) ? new Set(saved.timers.map(firedId)) : null,
+          open = validBook(saved) ? new Set(saved.timers.map(firedId)) : null,
           claimed = `${file}.taken`;
         fs.renameSync(file, claimed);
         if (open && !open.has(id)) forgetClaim(claimed);
@@ -139,7 +159,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     return { fired: home() === at ? (fired.length ? fired : fresh()) : [] };
   });
   const handleTake = route((body, req, res) => {
-    if (!bookCorrupt && fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers)) bookCorrupt = true;
+    if (!bookCorrupt && fs.existsSync(bookFile()) && !validBook(readJsonFile(bookFile()))) bookCorrupt = true;
     sync();
     const scope = home(),
       ids = Array.isArray(body.ids) ? body.ids.map(String) : [],
@@ -181,15 +201,15 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
     bookAt = bookFile();
     retryAt.clear();
     const saved = readJsonFile(bookAt);
-    bookCorrupt = fs.existsSync(bookAt) && !Array.isArray(saved?.timers);
+    bookCorrupt = fs.existsSync(bookAt) && !validBook(saved);
     if (bookCorrupt) {
       book = { seq: 0, timers: [] };
       clearTimeout(armed);
       for (const wake of [...waiters]) wake();
       return;
     }
-    book = Array.isArray(saved?.timers) ? { seq: Number(saved.seq) || 0, timers: saved.timers } : { seq: 0, timers: [] };
-    if (Array.isArray(saved?.timers)) {
+    book = validBook(saved) ? { seq: Number(saved.seq) || 0, timers: saved.timers } : { seq: 0, timers: [] };
+    if (validBook(saved)) {
       // 桥接也可能恰好退在约簿已写、旧凭据还没清的时候。只在确实读到了约簿时裁定。
       const open = new Set(book.timers.map(timer => `${firedId(timer)}.json.taken`));
       for (const name of firedNames())
@@ -206,7 +226,7 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   /** @param {Book} next @param {Timer[]} retired */
   function save(next, retired = []) {
     // 即使读入后有人在磁盘上改坏约簿，也不能静默把错误当作一份空簿覆盖。
-    if (bookCorrupt || (fs.existsSync(bookFile()) && !Array.isArray(readJsonFile(bookFile())?.timers))) {
+    if (bookCorrupt || (fs.existsSync(bookFile()) && !validBook(readJsonFile(bookFile())))) {
       bookCorrupt = true; // 修复原件后下一次必须重新读取，不得继续沿用旧内存簿。
       throw bookError();
     }

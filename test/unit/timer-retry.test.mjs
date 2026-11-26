@@ -305,6 +305,24 @@ test("刚启动时约簿正常、随后无写操作直接损坏：领取仍保�
   assert.ok(names().includes(`${notice.id}.json.taken`), "旧内存簿不能决定已损坏约簿的回执是否可清");
 });
 
+test("约簿序号为畸形 JSON 对象时仍可领取已投递回报", t => {
+  const { boot, bookFile, tick, pending, names } = fixture(t);
+  const call = boot();
+  call("set", { to: "c", due: start + 100, every: 1000 });
+  tick(100);
+  const [notice] = pending();
+  const invalid = JSON.stringify({ seq: { toString: null }, timers: [] });
+  fs.writeFileSync(bookFile, invalid);
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, [notice]);
+  assert.ok(names().includes(`${notice.id}.json.taken`));
+  assert.deepEqual(call("take", { ids: [notice.id] }).fired, []);
+  assert.throws(() => call("list"), /约簿损坏/);
+  assert.equal(fs.readFileSync(bookFile, "utf8"), invalid);
+  fs.writeFileSync(bookFile, JSON.stringify({ seq: 1, timers: [] }));
+  assert.deepEqual(call("list").timers, []);
+  assert.ok(!names().includes(`${notice.id}.json.taken`));
+});
+
 test("到点回报未写完就断线：原件仍在，下一页可重新认领", t => {
   const { boot, tick, pending } = fixture(t),
     call = boot();
