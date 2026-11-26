@@ -190,6 +190,14 @@ test("上游只报入、出两段、没有 total：合起来算这一轮的量",
   assert.equal(assistant.usage.total_tokens, 930);
 });
 
+test("整答各轮都报 0：开过流就按整份历史估一回，不白跑", async () => {
+  const f = setup([sse(event({ content: "写完。" }, "stop") + usageFrame(0, 0, 0) + done)]);
+  const assistant = await turn(f);
+  const estimate = f.estimateTokens(f.requests[0]) + f.estimateTokens([{ content: "写完。" }]);
+  assertCharges(f, assistant, [estimate], true);
+  assert.equal(assistant.usage.total_tokens, 0);
+});
+
 for (const ending of ["未收到用量", "已收到用量但未收到 DONE", "已收到 DONE"]) {
   test(`止：${ending}时，当前请求只结算一次`, async () => {
     const reported = ending !== "未收到用量",

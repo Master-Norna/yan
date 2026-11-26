@@ -514,21 +514,26 @@ async function requestPatiently(profile, history, signal, overrides) {
     await restFor(wait, signal, local);
   }
 }
-// 一答收尾（停了、断了也算）照 tally 写回用量，不再按整份历史估算。已当场扣掉的墨不再扣。
+// 一答收尾（停了、断了也算）照 tally 写回用量；各轮都没报实数时按整份历史估一回。已当场扣掉的墨不再扣。
 /**
  * @param {Profile} profile
  * @param {Message} assistant
  * @param {ReturnType<typeof newTally>} tally
  * @param {UsageKind} [kind]
  */
-function accountUsage(profile, assistant, _requestMessages, tally, kind = "main") {
+function accountUsage(profile, assistant, requestMessages, tally, kind = "main") {
   assistant.usage = tally.usageKnown ? tally.usage : null;
-  const consumed = tally.usage.total_tokens;
+  // 某几轮报 0、别轮有实数：那是上游在报，照实数记。
+  // 整答一分实数都没有（上游把每轮都报成 0，或只回空对象）而开过流：按整份历史估一回，不白跑——与早先「一次 usage 都没拿到」同口径。
+  const fellBack = !(tally.usage.total_tokens > 0) && tally.opened,
+    consumed = fellBack
+      ? estimateTokens(requestMessages) + estimateTokens([{ content: String(assistant.content || "") }])
+      : tally.usage.total_tokens;
   if (!(consumed > 0)) return;
   const remaining = consumed - tally.spent;
   const live = remaining > 0 ? spendTokens(profile, remaining, kind) : profiles().find(p => p.id === profile.id) || profile;
   assistant.tokenCount = consumed;
-  assistant.tokenEstimated = tally.estimated;
+  assistant.tokenEstimated = tally.estimated || fellBack;
   if (quotaExhausted(live)) toast(t("此答写毕，余墨已尽；换个模型可续"));
   renderQuota();
 }
