@@ -887,8 +887,10 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
-      // TIMERDROP：设约的回执被页面丢掉（桥接已经记下这一约）：这一步该失败，桥接那头也得跟着撤，别留下撤不掉的孤约
-      if (firstUser.includes("TIMERDROP")) {
+      // TIMERDROP / TIMERHANG：设约的回执被页面丢掉（桥接已经记下这一约）：这一步该失败，桥接那头也得跟着撤，别留下撤不掉的孤约。
+      // 两词的分别见 test/timer-set-fail.mjs：补的那句撤约送得回去 / 桥接收下却一直不回话
+      const timerDrop = firstUser.match(/TIMERDROP|TIMERHANG/)?.[0];
+      if (timerDrop) {
         if (firstTurn && !toolResults.length)
           return sse(res, [
             delta({
@@ -904,7 +906,7 @@ http
             delta({}, { usage: { total_tokens: 5 } })
           ]);
         return sse(res, [
-          delta({ content: `TIMERDROP 没约上｜${String(toolResults.at(-1)?.content || "").slice(0, 120)}` }),
+          delta({ content: `${timerDrop} 没约上｜${String(toolResults.at(-1)?.content || "").slice(0, 120)}` }),
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }

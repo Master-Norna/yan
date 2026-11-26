@@ -24,9 +24,11 @@ defineTool({
     try {
       timer = await storeBridge("/api/timer/set", { to: conversation.id, step: step.id, note, due: when.due, every }, signal);
     } catch (error) {
-      // 回执没到手（点停止、断线）：桥接可能已经记下这一约。补一句按对话与步骤撤，免得留下谁也撤不掉的孤约；
-      // 不带 signal——这一答已经中止，补的这句仍要发出去
-      await storeBridge("/api/timer/cancel", { to: conversation.id, step: step.id }).catch(() => {});
+      // 回执没到手（点停止、断线）：桥接可能已经记下这一约。补一句按对话与步骤撤，免得留下谁也撤不掉的孤约。
+      // 不带这一答的 signal（它已经中止了，这句仍要发得出去），也不等它回话：桥接要是卡着不回，等下去就把这一答的
+      // 收尾一并拖住——收尾不落，续写便一直等在那儿（见 20-stream.js 的 replySettlements）。自己半分钟作罢，
+      // 真卡死时这一笔总线占位也随之中止
+      void storeBridge("/api/timer/cancel", { to: conversation.id, step: step.id }, AbortSignal.timeout(30000)).catch(() => {});
       throw error;
     }
     step.timer = { id: timer.id, due: timer.due, ...(every ? { every } : {}), state: "waiting", created: timer.created };
