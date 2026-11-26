@@ -101,13 +101,28 @@ function libraryNameCell(item, where = "") {
     return `<span class="strip-name"><input class="strip-rename" value="${escapeHtml(item.name)}" maxlength="200" spellcheck="false" autocomplete="off" aria-label="${t(`新名称`)}"></span>`;
   return `<span class="strip-name"><strong title="${escapeHtml(item.path)}">${escapeHtml(item.name)}</strong>${where ? `<small>${escapeHtml(where)}</small>` : ""}</span>`;
 }
+// 条尾的几样动作各是一枚笔意小画，名字写在 title 与 aria-label 里；预览不另设一枚——点条子即是预览（图进看图，余者进预览器）
+const STRIP_ACTS = /** @type {Record<string, [string, string]>} */ ({
+  download: ["download", "下载"],
+  rename: ["edit", "改名"],
+  remove: ["strike", "删除"]
+});
+/** @param {string[]} actions */
+function stripActs(...actions) {
+  return `<span class="strip-acts">${actions
+    .map(action => {
+      const [icon, label] = STRIP_ACTS[action];
+      return `<button type="button"${action === "remove" ? ` class="danger"` : ""} data-library-action="${action}" title="${t(label)}" aria-label="${t(label)}">${brushIcon(icon)}</button>`;
+    })
+    .join("")}</span>`;
+}
 function libraryRowHtml(file, showDir = true) {
   const path = escapeHtml(file.path),
     renaming = libraryRenaming === file.path;
   return `<div class="strip file" data-library-disk="${path}" data-library-item="${path}" draggable="${!renaming}" tabindex="0"><span>${fileFigure(file.name, archiveFile(file.path))}</span>${libraryNameCell(
     file,
     showDir ? parentDir(file.path) : ""
-  )}<span>${formatFileSize(file.size)}</span><span class="strip-date"><span class="strip-when">${escapeHtml(formatDay(file.modifiedAt))}</span><span class="strip-acts"><button type="button" data-library-action="view">${t(`预览`)}</button><button type="button" data-library-action="download">${t(`下载`)}</button><button type="button" data-library-action="rename">${t(`改名`)}</button><button type="button" class="danger" data-library-action="remove">${t(`删除`)}</button></span></span></div>`;
+  )}<span>${formatFileSize(file.size)}</span><span class="strip-date"><span class="strip-when">${escapeHtml(formatDay(file.modifiedAt))}</span>${stripActs("download", "rename", "remove")}</span></span></div>`;
 }
 // 一个夹：里头共几件（连同更深的层）、有几个子夹、最近一件的日子
 function libraryFolderHtml(dir) {
@@ -117,7 +132,7 @@ function libraryFolderHtml(dir) {
     note = inside.length || subs ? [t`${inside.length} 件`, subs ? t`${subs} 夹` : ""].filter(Boolean).join(" · ") : t("空"),
     path = escapeHtml(dir.path),
     renaming = libraryRenaming === dir.path;
-  return `<div class="strip dir" role="button" tabindex="0" data-library-dir="${path}" data-library-item="${path}" draggable="${!renaming}" title="${t`打开 ${escapeHtml(dir.name)}`}"><span>${caseFigure()}</span>${libraryNameCell(dir)}<span class="strip-note">${note}</span><span class="strip-date"><span class="strip-when">${latest ? escapeHtml(formatDay(latest)) : ""}</span><span class="strip-acts"><button type="button" data-library-action="rename">${t(`改名`)}</button><button type="button" class="danger" data-library-action="remove">${t(`删除`)}</button></span></span></div>`;
+  return `<div class="strip dir" role="button" tabindex="0" data-library-dir="${path}" data-library-item="${path}" draggable="${!renaming}" title="${t`打开 ${escapeHtml(dir.name)}`}"><span>${caseFigure()}</span>${libraryNameCell(dir)}<span class="strip-note">${note}</span><span class="strip-date"><span class="strip-when">${latest ? escapeHtml(formatDay(latest)) : ""}</span>${stripActs("rename", "remove")}</span></span></div>`;
 }
 // 路径：卷宗 › 课程 › 深度学习。点哪一级回哪一级；各级也接得住拖来的条子（挪回上一层）
 function renderLibraryCrumbs(show) {
@@ -480,8 +495,7 @@ function bindLibraryEvents() {
     if (button && row) {
       const path = row.dataset.libraryItem,
         action = button.dataset.libraryAction;
-      if (action === "view") void openFileViewer({ file: archiveFile(path) }, "", button);
-      else if (action === "download") downloadFile(archiveFile(path));
+      if (action === "download") downloadFile(archiveFile(path));
       else if (action === "rename") startLibraryRename(path);
       else if (action === "remove") void removeArchiveItem(path);
       return;

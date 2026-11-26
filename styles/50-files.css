@@ -366,18 +366,39 @@
 .strip.dir {
   border-left: 5px solid var(--cloth);
 }
-/* 条尾：平时是日期，悬停或键盘停在条上时让位给几样动作 */
+/* 条尾：平时是日期，悬停或键盘停在条上时让位给几样动作——下载、改名的笔、删去的一划，
+   各是一枚笔意小画（同记忆页的改与删去），名字在 title 与 aria-label 里；预览不另设一枚，点条子即是预览 */
 .strip-acts {
   display: none;
-  gap: 12px;
+  align-items: center;
+  gap: 2px;
 }
 .strip-acts button {
-  padding: 2px 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-s);
   color: var(--ink-2);
-  font: var(--fs-small) var(--title);
+  transition: background var(--dur-quick);
 }
 .strip-acts button:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
   color: var(--ink);
+}
+.strip-acts .brush {
+  width: 15px;
+  height: 15px;
+}
+/* 小画随按钮的字色：平时淡、指上去浓；删去那一枚仍是朱的 */
+.strip-acts .brush .ink {
+  fill: currentColor;
+}
+.strip-acts .brush .ink2 {
+  fill: color-mix(in srgb, currentColor 75%, transparent);
+}
+.strip-acts .brush .wash {
+  fill: color-mix(in srgb, currentColor 14%, transparent);
 }
 .strip-acts .danger,
 .strip-acts .danger:hover {
