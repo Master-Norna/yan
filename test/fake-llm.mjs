@@ -887,6 +887,27 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      // TIMERDROP：设约的回执被页面丢掉（桥接已经记下这一约）：这一步该失败，桥接那头也得跟着撤，别留下撤不掉的孤约
+      if (firstUser.includes("TIMERDROP")) {
+        if (firstTurn && !toolResults.length)
+          return sse(res, [
+            delta({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_td0",
+                  type: "function",
+                  function: { name: "set_timer", arguments: JSON.stringify({ after: 600, every: 60, note: "丢掉回执" }) }
+                }
+              ]
+            }),
+            delta({}, { usage: { total_tokens: 5 } })
+          ]);
+        return sse(res, [
+          delta({ content: `TIMERDROP 没约上｜${String(toolResults.at(-1)?.content || "").slice(0, 120)}` }),
+          delta({}, { usage: { total_tokens: 5 } })
+        ]);
+      }
       // HELPERAGAIN：主模型差一名慢帮手，等它回报后续派它再做一回（它该记得上一回），两份回报都到了收尾
       if (firstUser.includes("HELPERAGAIN")) {
         const call = (id, name, args) =>

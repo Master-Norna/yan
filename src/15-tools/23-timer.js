@@ -20,7 +20,15 @@ defineTool({
     if (!note) return { ok: false, content: t("note 为空：写上到时给自己的话"), display: "缺 note" };
     if ("error" in when) return { ok: false, content: when.error, display: "时刻无效" };
     step.title = step.gist = note;
-    const timer = await storeBridge("/api/timer/set", { to: conversation.id, step: step.id, note, due: when.due, every }, signal);
+    let timer;
+    try {
+      timer = await storeBridge("/api/timer/set", { to: conversation.id, step: step.id, note, due: when.due, every }, signal);
+    } catch (error) {
+      // 回执没到手（点停止、断线）：桥接可能已经记下这一约。补一句按对话与步骤撤，免得留下谁也撤不掉的孤约；
+      // 不带 signal——这一答已经中止，补的这句仍要发出去
+      await storeBridge("/api/timer/cancel", { to: conversation.id, step: step.id }).catch(() => {});
+      throw error;
+    }
     step.timer = { id: timer.id, due: timer.due, ...(every ? { every } : {}), state: "waiting", created: timer.created };
     renderClepsydra();
     return {
