@@ -34,6 +34,13 @@ check(
   JSON.stringify(apps)
 );
 check("no mermaid / echarts is loaded into the page itself", await evalJs(`!window.mermaid && !window.echarts`));
+// 工具条的三枚都靠笔意小画说话，缺一枚就成了空白键：图标名在 BRUSH_ICONS 里找不到时 brushIcon 画的是空 svg
+check(
+  "every toolbar glyph on an inline work is actually drawn",
+  await evalJs(
+    `[...document.querySelectorAll(".html-app [data-app-restart], .html-app [data-app-download], .html-app [data-work-expand]")].every(b => (b.querySelector("svg")?.innerHTML || "").trim().length > 0)`
+  )
+);
 check(
   "each block takes the height of its content instead of a fixed box",
   apps.every(a => a.height > 40 && a.height < 520 && Math.abs(a.height - a.expectedHeight) < 1) &&

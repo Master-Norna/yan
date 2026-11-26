@@ -102,7 +102,7 @@ await shot("change-diff.png");
 check(
   "clicking a changed file shows its diff in the viewer",
   await evalJs(
-    `(v => !v.classList.contains("hidden") && v.querySelector("#fileViewerName").textContent.startsWith("src/a.js") && v.querySelector(".split-diff .d")?.textContent.includes("return 1") && v.querySelector(".split-diff .i")?.textContent.includes("return 2") && document.querySelector("#fileViewerDownload").classList.contains("hidden"))(document.querySelector("#fileViewer"))`
+    `(v => !v.classList.contains("hidden") && v.querySelector("#fileViewerName").textContent.startsWith("src/a.js") && v.querySelector(".split-diff .d")?.textContent.includes("return 1") && v.querySelector(".split-diff .i")?.textContent.includes("return 2") && document.querySelector("#fileViewerOpen").classList.contains("hidden"))(document.querySelector("#fileViewer"))`
   )
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);

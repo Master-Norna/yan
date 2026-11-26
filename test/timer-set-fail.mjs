@@ -4,15 +4,17 @@
 import { mkdirSync } from "node:fs";
 import { connect, check, sleep, PAGE, WORK } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
-// 页面的 set_timer 走总线：让这一次的总线回话读到完（桥接确实处理了），再把结果丢掉，模拟回执没到手。
-// 总线没连上时同一趟走直连 fetch（01-bridge.js 的 busReady 降级），因此两种发法都要认——
-// CI 的机器慢，EventSource 常在开页 3 秒窗口里没连上，这一趟就走了直连。
+// 让这一次的请求送到、桥接也照办了（约确实记下），再把回话丢掉，模拟回执没到手。
+// 这一趟刻意只走直连：开页时把 EventSource 摘掉，01-bridge.js 的 busConnect 见它不是函数就直接 fetch。
+// 走总线时办不成——「回执」由那条事件流另外送来，可能先于这次 POST 自己的回话到达页面，页面拿到编号就收工了，
+// 后一步的失败落在已经结算的 Promise 上，白丢；慢机上（CI 限速、冷启）十有八九是这么走的。直连只有一条回话，掐掉它就是真的收不到。
 // __timerHang：桥接收下补的那句撤约却一直不回话——回应只跟着 signal 断，正是卡住的那一头。
 // 开关存在 localStorage：开页对齐配置后会重载一回，放在 window 上的标志会被重置
 await send("Page.addScriptToEvaluateOnNewDocument", {
   source: `(() => {
+    window.EventSource = undefined; // 只走直连，见上
     const real = window.fetch;
-    // 这一趟是不是往 path 去的：经总线时 url 是 /api/bus/send、真路径在 body 里；直连时 url 就是 path
+    // 这一趟是不是往 path 去的：直连时 url 就是 path；经总线时 url 是 /api/bus/send、真路径在 body 里（留着，换回总线时不必再摸）
     const reaching = (url, body, path) => (url.includes("/api/bus/send") && body.includes(path)) || url.includes(path);
     window.fetch = async function (input, init) {
       const url = String(typeof input === "string" ? input : input?.url || "");

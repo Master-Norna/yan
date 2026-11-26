@@ -17,6 +17,8 @@ function bindDocPreviewPaging(root, keysActive = () => true) {
     current?.setAttribute("tabindex", "-1");
     mark.setAttribute("aria-current", "page");
     mark.removeAttribute("tabindex");
+    // 页码是一排朱点：离当前越远越淡、越小（设计稿/168 丙二），换页时重记这一串
+    marks.forEach((dot, i) => dot.style.setProperty("--d", String(Math.min(Math.abs(i - index), 4))));
     deck.querySelector('[data-viewer-slide-step="-1"]').setAttribute("aria-disabled", String(index === 0));
     deck.querySelector('[data-viewer-slide-step="1"]').setAttribute("aria-disabled", String(index === pages.length - 1));
     deck.querySelector("[data-viewer-slide-count]").textContent = `${index + 1} / ${pages.length}`;

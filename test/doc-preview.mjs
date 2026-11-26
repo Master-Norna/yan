@@ -345,6 +345,19 @@ check(
 );
 await evalJs(`document.querySelector('[data-viewer-slide="2"]').click(); true`);
 check("pptx page numbers jump directly to a slide", (await slideState()).count === "3 / 4");
+const dotsJumped = await evalJs(
+  `(() => { const marks = [...document.querySelectorAll(".viewer-slide-strip [data-viewer-slide]")]; return JSON.stringify({ d: marks.map(m => m.style.getPropertyValue("--d")).join(","), current: marks.findIndex(m => m.getAttribute("aria-current") === "page"), near: getComputedStyle(marks[2], "::before").width, far: getComputedStyle(marks[0], "::before").width, farFade: getComputedStyle(marks[0], "::before").opacity, nearFill: getComputedStyle(marks[2], "::before").backgroundColor }); })()`
+);
+check(
+  "页码是一排朱点：随换页重记明暗，离当前越远越淡、越小",
+  JSON.parse(dotsJumped).d === "2,1,0,1" &&
+    JSON.parse(dotsJumped).current === 2 &&
+    JSON.parse(dotsJumped).near === "8px" &&
+    JSON.parse(dotsJumped).far === "6px" &&
+    Number(JSON.parse(dotsJumped).farFade) < 1 &&
+    JSON.parse(dotsJumped).nearFill !== "rgba(0, 0, 0, 0)",
+  dotsJumped
+);
 await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight" });
 await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight" });
 check("pptx keyboard navigation reaches the last slide and doesn't wrap", (await slideState()).end === "true");
@@ -354,32 +367,43 @@ await evalJs(`document.querySelector('[data-viewer-slide-step="-1"]').click(); t
 check("pptx previous button changes the page", (await slideState()).count === "3 / 4");
 await evalJs(`document.querySelector('[data-viewer-slide="0"]').click(); true`);
 check(
-  "抽取说明摆在顶栏、纸面不再占一行（独立文档页仍带在纸上），下载是一枚笔意小画",
+  "抽取说明不再赘述：顶栏只留截断话，打开原件是一枚笔意小画，纸面那份留给独立文档页",
   await evalJs(`(() => {
     const head = document.querySelector("#fileViewerNote"),
       onPaper = document.querySelector("#fileViewerStage .file-viewer-note"),
-      cta = document.querySelector("#fileViewerDownload");
+      cta = document.querySelector("#fileViewerOpen"),
+      nav = document.querySelector(".viewer-slide-nav");
     return (
-      !!head && head.textContent.includes("本机按") && !!head.querySelector("[data-viewer-open]") &&
+      !!head && head.textContent.trim() === "" &&
       !!onPaper && getComputedStyle(onPaper).visibility === "hidden" && onPaper.getBoundingClientRect().height === 0 &&
+      onPaper.textContent.includes("本机按") && !!onPaper.querySelector("[data-viewer-open]") &&
       document.querySelector(".file-viewer-slides").outerHTML.includes('class="file-viewer-note moved"') &&
-      cta.textContent.trim() === "" && !!cta.querySelector("svg.brush path")
+      !!cta && cta.textContent.trim() === "" && !!cta.querySelector("svg.brush path") &&
+      !document.querySelector("#fileViewerDownload") &&
+      getComputedStyle(nav).borderTopWidth === "0px" && getComputedStyle(nav).backgroundColor === "rgba(0, 0, 0, 0)"
     );
   })()`),
   await evalJs(
     `(() => {
       const head = document.querySelector("#fileViewerNote"),
         onPaper = document.querySelector("#fileViewerStage .file-viewer-note"),
-        cta = document.querySelector("#fileViewerDownload");
+        cta = document.querySelector("#fileViewerOpen"),
+        nav = document.querySelector(".viewer-slide-nav"),
+        dots = [...document.querySelectorAll(".viewer-slide-strip [data-viewer-slide]")];
       return JSON.stringify({
         headText: head?.textContent || "",
-        headBtn: !!head?.querySelector("[data-viewer-open]"),
         paperFound: !!onPaper,
+        paperText: onPaper?.textContent.slice(0, 24) || "",
         paperVis: onPaper ? getComputedStyle(onPaper).visibility : "",
         paperH: onPaper ? onPaper.getBoundingClientRect().height : -1,
         deckNote: document.querySelector(".file-viewer-slides").outerHTML.includes('class="file-viewer-note moved"'),
         ctaText: cta?.textContent.trim() ?? "no cta",
-        ctaBrush: !!cta?.querySelector("svg.brush path")
+        ctaBrush: !!cta?.querySelector("svg.brush path"),
+        oldCta: !!document.querySelector("#fileViewerDownload"),
+        navBorder: getComputedStyle(nav).borderTopWidth,
+        navBg: getComputedStyle(nav).backgroundColor,
+        dotsText: dots.map(d => d.textContent.trim()).join(""),
+        dotsFill: dots[0] ? getComputedStyle(dots[0], "::before").backgroundColor : ""
       });
     })()`
   )

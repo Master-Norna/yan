@@ -142,7 +142,7 @@ async function openFileViewer(source, name = "", trigger = null) {
   revokeViewerUrls();
   showNow(viewer);
   setViewerSeal();
-  $("#fileViewerDownload").classList.remove("hidden");
+  $("#fileViewerOpen").classList.remove("hidden");
   $("#fileViewerName").textContent = title;
   $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = `<div class="file-viewer-empty">${t(`正在取出…`)}</div>`;
@@ -153,11 +153,12 @@ async function openFileViewer(source, name = "", trigger = null) {
     const html = await fileViewerBody(reader, title, kind, revision);
     if (revision !== viewerRevision) return;
     $("#fileViewerStage").innerHTML = html;
-    // 抽取说明挪到顶栏、下载键左边（Word、表格、文字都一样），纸上不再单占一行。
-    // 正文那一份只加「挪走」的记号、不删：独立文档页（游目里铺满整屏那份）没有顶栏，说明仍写在纸上
+    // 抽取说明挪到顶栏（Word、表格、文字都一样），纸上不再单占一行。文档那一份带 data-head：顶栏只取其中
+    // 「内容过长」这类截断话，前面的「本机按…」与打开原件的链接不再复述（2026-11-26 用户定）；表格、文字的小注没有这个记号，整句留着。
+    // 正文那一份只加「挪走」的记号、不删：独立文档页（游目里铺满整屏那份）没有顶栏，说明与打开原件的链接仍写在纸上
     const note = $("#fileViewerStage .file-viewer-note");
     if (note) {
-      $("#fileViewerNote").innerHTML = note.innerHTML;
+      $("#fileViewerNote").textContent = note.hasAttribute("data-head") ? note.dataset.head : note.textContent;
       note.classList.add("moved");
     }
     renderEnhancements($("#fileViewerStage"));
@@ -355,7 +356,8 @@ function slideViewerHtml(pages, ratio, note, format, canvases = [], titles = [],
     )}</div></div><nav class="viewer-slide-nav" aria-label="${t`演示页导航`}">${step(t`上一页`, -1, "‹")}<div class="viewer-slide-strip">${pages
     .map(
       (_, i) =>
-        `<button type="button" data-viewer-slide="${i}" aria-label="${t`第 ${i + 1} 页`}"${i ? ' tabindex="-1"' : ' aria-current="page"'}>${i + 1}</button>`
+        // 一页只一粒朱点，字收进 aria-label 与 title（设计稿/168 乙、丙二）；离当前越远越淡、越小，换页时换那一串 --d
+        `<button type="button" data-viewer-slide="${i}" aria-label="${t`第 ${i + 1} 页`}" title="${t`第 ${i + 1} 页`}" style="--d:${Math.min(i, 4)}"${i ? ' tabindex="-1"' : ' aria-current="page"'}>`
     )
     .join(
       ""
@@ -464,8 +466,10 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
     }
     if (!doc.text && !doc.pages?.length)
       return `<div class="file-viewer-empty">${t(`未能抽出正文`)}<br>${VIEWER_OPEN_BUTTON}<button type="button" class="outline-btn" data-viewer-download>${t(`下载`)}</button></div>`;
-    // 画布页不再说「不含原排版」：字的位置与大小照原件摆，只是图形从简
-    const note = `<p class="file-viewer-note">${doc.canvases?.some(Boolean) ? t(`本机按文字位置排出，图形从简 ·`) : t(`本机按结构抽出，不含原排版 ·`)} <button type="button" class="viewer-open-link" data-viewer-open>${t(`以本机程序打开`)}</button>${doc.cut ? ` · ${t`内容过长，只解析了开头一段`}` : ""}</p>`;
+    // 画布页不再说「不含原排版」：字的位置与大小照原件摆，只是图形从简。
+    // 顶栏只说哪一句另记在 data-head 上（见 openFileViewer 取用）；纸上那份连同说明与「以本机程序打开」留给独立文档页
+    const cut = doc.cut ? t`内容过长，只解析了开头一段` : "",
+      note = `<p class="file-viewer-note" data-head="${escapeHtml(cut)}">${doc.canvases?.some(Boolean) ? t(`本机按文字位置排出，图形从简 ·`) : t(`本机按结构抽出，不含原排版 ·`)} <button type="button" class="viewer-open-link" data-viewer-open>${t(`以本机程序打开`)}</button>${cut ? ` · ${cut}` : ""}</p>`;
     let html;
     if (doc.pages?.length)
       html = slideViewerHtml(
@@ -586,7 +590,7 @@ function showInFileViewer(title, html, trigger = null, seal = t("览")) {
   revokeViewerUrls();
   showNow($("#fileViewer"));
   setViewerSeal(seal);
-  $("#fileViewerDownload").classList.add("hidden");
+  $("#fileViewerOpen").classList.add("hidden");
   $("#fileViewerName").textContent = title;
   $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = html;
@@ -700,7 +704,11 @@ async function showImageAt(index, opening = false) {
 // 文件查看器与图片查看器
 function bindViewerEvents() {
   $("#fileViewerClose").onclick = () => closeFileViewer(true);
-  $("#fileViewerDownload").onclick = downloadViewerFile;
+  // 顶栏那枚小画的名字随语言走（index.html 里写的是中文原文）
+  const openButton = $("#fileViewerOpen");
+  openButton.setAttribute("title", t("本机打开"));
+  openButton.setAttribute("aria-label", t("本机打开"));
+  openButton.onclick = () => void openViewerWithSystem();
   const fileViewer = $("#fileViewer");
   bindDocPreviewPaging(fileViewer, () => !!viewerSource && !isShown("#imageViewer"));
   fileViewer.addEventListener("click", e => {
