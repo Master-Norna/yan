@@ -634,6 +634,10 @@ button:focus:not(:focus-visible) {
     border-radius: 0;
     border-left: 0;
   }
+  /* 窄屏顶栏放不下抽取说明：让给文件名 */
+  .file-viewer-head .file-viewer-note {
+    display: none;
+  }
   .side-panel {
     position: absolute;
     right: 0;

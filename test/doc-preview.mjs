@@ -353,6 +353,37 @@ check("pptx next button at the end does not wrap", (await slideState()).count ==
 await evalJs(`document.querySelector('[data-viewer-slide-step="-1"]').click(); true`);
 check("pptx previous button changes the page", (await slideState()).count === "3 / 4");
 await evalJs(`document.querySelector('[data-viewer-slide="0"]').click(); true`);
+check(
+  "抽取说明摆在顶栏、纸面不再占一行（独立文档页仍带在纸上），下载是一枚笔意小画",
+  await evalJs(`(() => {
+    const head = document.querySelector("#fileViewerNote"),
+      onPaper = document.querySelector("#fileViewerStage .file-viewer-note"),
+      cta = document.querySelector("#fileViewerDownload");
+    return (
+      !!head && head.textContent.includes("本机按") && !!head.querySelector("[data-viewer-open]") &&
+      !!onPaper && getComputedStyle(onPaper).visibility === "hidden" && onPaper.getBoundingClientRect().height === 0 &&
+      document.querySelector(".file-viewer-slides").outerHTML.includes('class="file-viewer-note moved"') &&
+      cta.textContent.trim() === "" && !!cta.querySelector("svg.brush path")
+    );
+  })()`),
+  await evalJs(
+    `(() => {
+      const head = document.querySelector("#fileViewerNote"),
+        onPaper = document.querySelector("#fileViewerStage .file-viewer-note"),
+        cta = document.querySelector("#fileViewerDownload");
+      return JSON.stringify({
+        headText: head?.textContent || "",
+        headBtn: !!head?.querySelector("[data-viewer-open]"),
+        paperFound: !!onPaper,
+        paperVis: onPaper ? getComputedStyle(onPaper).visibility : "",
+        paperH: onPaper ? onPaper.getBoundingClientRect().height : -1,
+        deckNote: document.querySelector(".file-viewer-slides").outerHTML.includes('class="file-viewer-note moved"'),
+        ctaText: cta?.textContent.trim() ?? "no cta",
+        ctaBrush: !!cta?.querySelector("svg.brush path")
+      });
+    })()`
+  )
+);
 const deckHtml = await evalJs(`document.querySelector(".file-viewer-slides").outerHTML`);
 const slides = JSON.parse(
   await evalJs(
@@ -633,10 +664,11 @@ if (docPage.url) {
   await evalJs(`document.querySelector('[data-viewer-slide-step="1"]').click(); true`);
   const standAlone = await slideState();
   check(
-    "pptx standalone docpage uses the same pager under its local-file CSP",
+    "pptx standalone docpage uses the same pager under its local-file CSP, and still carries the note on the paper",
     standAlone.current.join() === "第 2 页 · 线性回归" &&
       standAlone.below &&
-      !!(await evalJs(`document.querySelector(".file-viewer-note a")?.href`)),
+      !!(await evalJs(`document.querySelector(".file-viewer-note a")?.href`)) &&
+      (await evalJs(`getComputedStyle(document.querySelector(".file-viewer-note")).visibility !== "hidden"`)),
     JSON.stringify(standAlone)
   );
 } else check("pptx standalone docpage is generated", false, JSON.stringify(docPage));

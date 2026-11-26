@@ -475,6 +475,16 @@ button.source-local {
   background: var(--paper-2);
   color: var(--ink);
 }
+/* 下载只用一枚笔意小画（一笔竖落、两笔收成箭头，底下一道纸；src/03-brush.js 的 download），名字在 title 与 aria-label 里 */
+.file-viewer-actions button.icon-cta {
+  display: flex;
+  align-items: center;
+  padding: 4px 5px;
+}
+.file-viewer-actions .icon-cta .brush {
+  width: 19px;
+  height: 19px;
+}
 .file-viewer-close {
   width: 30px !important;
   height: 30px;
@@ -586,6 +596,28 @@ button.source-local {
   margin: 12px 0 0;
   color: var(--ink-3);
   font-size: var(--fs-note);
+}
+/* 抽取说明在浮层里摆在顶栏：下载键的左边，一行小字、淡墨，长了截断。纸面那一份挪走、不删（独立文档页还要用） */
+.file-viewer-head .file-viewer-note {
+  margin: 0;
+  min-width: 0;
+  max-width: 48%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.file-viewer-head .file-viewer-note .viewer-open-link {
+  text-decoration: underline dotted;
+}
+/* 纸面那一份挪走时不能 display:none——预览台的栅格按行的次序摆，抽掉一格会让纸落到说明那一行、高变成 0。
+   留在流里、高度收成 0：行还在，纸仍占中间那一行。只在浮层里如此：独立文档页（游目铺满整屏那份）没有顶栏，
+   说明仍写在纸上，而那一页也共用这份样式表 */
+#fileViewer .file-viewer-stage .file-viewer-slides > .file-viewer-note.moved {
+  visibility: hidden;
+  height: 0;
+  margin: 0;
+  overflow: hidden;
 }
 /* 文档按结构抽出后（见 13-files/30-extract.js 的 docxMarkdown 等）：一行小注在前，「以本机程序打开」看原样 */
 .file-viewer-text > .file-viewer-note:first-child,

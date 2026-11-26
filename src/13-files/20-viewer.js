@@ -144,6 +144,7 @@ async function openFileViewer(source, name = "", trigger = null) {
   setViewerSeal();
   $("#fileViewerDownload").classList.remove("hidden");
   $("#fileViewerName").textContent = title;
+  $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = `<div class="file-viewer-empty">${t(`正在取出…`)}</div>`;
   $("#fileViewerClose").focus();
   try {
@@ -152,6 +153,13 @@ async function openFileViewer(source, name = "", trigger = null) {
     const html = await fileViewerBody(reader, title, kind, revision);
     if (revision !== viewerRevision) return;
     $("#fileViewerStage").innerHTML = html;
+    // 抽取说明挪到顶栏、下载键左边（Word、表格、文字都一样），纸上不再单占一行。
+    // 正文那一份只加「挪走」的记号、不删：独立文档页（游目里铺满整屏那份）没有顶栏，说明仍写在纸上
+    const note = $("#fileViewerStage .file-viewer-note");
+    if (note) {
+      $("#fileViewerNote").innerHTML = note.innerHTML;
+      note.classList.add("moved");
+    }
     renderEnhancements($("#fileViewerStage"));
   } catch (error) {
     if (revision !== viewerRevision) return;
@@ -580,6 +588,7 @@ function showInFileViewer(title, html, trigger = null, seal = t("览")) {
   setViewerSeal(seal);
   $("#fileViewerDownload").classList.add("hidden");
   $("#fileViewerName").textContent = title;
+  $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = html;
   $("#fileViewerClose").focus();
 }
