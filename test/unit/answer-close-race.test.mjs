@@ -26,7 +26,7 @@ test("streamReply：收尾途中对话被删，不再在它上面起新答、拟
       document.documentElement.dataset.inkMotion = "off";
       document.hidden = true;
       saveStoreSoon = saveStore = renderSendButtons = renderHistory = setJobLabel =
-        refreshSteps = markDirty = accountUsage = renderQuota = restoreDraft = tickTrailClock = () => {};
+        refreshSteps = markDirty = spendTokens = accountUsage = renderQuota = restoreDraft = tickTrailClock = () => {};
       keepInWindow = mcpForTurn = refreshSkills = loadLedger = loadIntent = warmConversation = async () => {};
       reserveTokens = () => () => {};
       replyDeliverables = async () => [];

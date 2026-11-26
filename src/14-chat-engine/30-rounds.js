@@ -4,19 +4,16 @@
 // 请模型开口 → 有工具调用就记成步骤、执行、把结果交回 → 再开口，直到它不再调工具。写到一半断了稍候接着写（同一轮最多两回）；
 // 一轮既没说话也没调工具不算收尾；轮次到顶收回工具，请它就已有结果收尾。
 // 带收件口（inbox，即这一答的 job）的还收补言与后台帮手的回报：补言等落点停下这一轮递上；只剩等帮手时就收尾，回报到了另起一答。
-// 用量记在 tally 上——停了、断了也照样有——由调用方收尾时结算这一答的耗墨；余墨则每轮当场扣（spent），长活跑着右下角也在动
+// 每轮读完即记进 tally、扣进余墨；停了、断了也照记。整答收尾把汇总的耗墨写到消息上
 function newTally() {
   return {
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0 },
     usageKnown: false,
-    // 已当场扣进余墨的：收尾结算时只补其余（估算的那一截）
     spent: 0,
     opened: false,
-    roundOpen: false,
-    roundStart: 0,
     // 最后一段话从哪起：断线接着写的那几轮不算新起，帮手的回报从这里截
     replyStart: 0,
-    steered: false
+    estimated: false
   };
 }
 // 用量两份相加；都没有记作 null
@@ -84,24 +81,37 @@ async function runRounds(target, history, run) {
     retrying = true;
     status(t`网络不稳 · 再试第 ${n} 回`);
   };
-  // 这一轮开了头又没写完（断线、补言停下）：花的墨按估算记上
-  const chargePartial = said => {
-    if (!tally.roundOpen) return;
-    const spent = estimateTokens(history) + estimateTokens([{ content: said }]);
-    tally.usage.prompt_tokens += spent;
-    tally.usage.total_tokens += spent;
-    tally.usageKnown = tally.steered = true;
-    tally.roundOpen = false;
-    spend(spent);
+  // 结束标志之后也可能收到实数。只在读流退出时结算一次。
+  // 上游报了这一轮的量就照它记——报成 0 也算报过（有的中转不把计量回传，别拿估算替它）；
+  // 一个数都没给（不用 usage 的服务，或只回了个空对象）才按这一轮的输入与已写正文估，并给整答记上「含估算」。
+  const settleRound = roundStart => {
+    const usage = target.usage,
+      count = key => (usage?.[key] == null ? NaN : Number(usage[key])),
+      total = count("total_tokens"),
+      prompt = count("prompt_tokens"),
+      completion = count("completion_tokens");
+    let settled = usage;
+    if (![total, prompt, completion].some(Number.isFinite)) {
+      const prompt_tokens = estimateTokens(history),
+        completion_tokens = estimateTokens([{ content: target.content.slice(roundStart) }]);
+      settled = { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens, cached_tokens: 0 };
+      tally.estimated = true;
+    } else if (!Number.isFinite(total)) {
+      // 只给了入、出两段：合起来算这一轮的量
+      settled = { ...usage, total_tokens: (Number.isFinite(prompt) ? prompt : 0) + (Number.isFinite(completion) ? completion : 0) };
+    }
+    tally.usageKnown = true;
+    for (const key of Object.keys(tally.usage)) tally.usage[key] += Number(settled[key] || 0);
+    spend(Number(settled.total_tokens));
   };
   for (;;) {
     // 开工前等着的那几步（装历史、起 MCP、断线稍候）里已按了停：中止在先，后面挂上的监听再也等不到，当场作罢
     signal.throwIfAborted();
     target.toolCalls = null;
-    const roundStart = (tally.roundStart = target.content.length),
+    const roundStart = target.content.length,
       thoughtStart = String(target.reasoning || "").length;
     if (!resumed) tally.replyStart = roundStart;
-    tally.roundOpen = false;
+    let roundOpen = false;
     // 每一轮自己一个中止器：补言只停这一轮的流，整答的 signal 留给「停止」
     const round = new AbortController(),
       stopRound = () => round.abort();
@@ -120,12 +130,15 @@ async function runRounds(target, history, run) {
         target,
         false,
         () => {
-          tally.roundOpen = tally.opened = true;
+          roundOpen = tally.opened = true;
           if (retrying) status();
           retrying = false;
         },
         run.onFrame || null
-      );
+      ).finally(() => {
+        // 先结算，再改历史或开下一轮；下一次 readReply 会清掉当前的 usage。
+        if (roundOpen) settleRound(roundStart);
+      });
       // 每轮都要有新正文或工具调用；之前的进度说明不能让工具之后的空回复冒充收尾
       if (!target.content.slice(roundStart).trim() && !target.toolCalls?.some(call => call.name))
         throw Object.assign(Error("模型本轮未返回正文或工具调用，答复尚未写完"), { midStream: true });
@@ -135,7 +148,6 @@ async function runRounds(target, history, run) {
         resumed += 1;
         noteBreak(target, error.message, true);
         const said = target.content.slice(roundStart);
-        chargePartial(said);
         target.toolCalls = null;
         if (said.trim()) history.push({ role: "assistant", content: said }, { role: "user", content: prompt("assistant.resume") });
         status(error.finish === "length" ? t("写到输出上限 · 接着写") : t("网络不稳 · 稍候接着写"));
@@ -149,7 +161,6 @@ async function runRounds(target, history, run) {
       target.content = target.content.slice(0, roundStart) + said;
       // 退回去的是这一轮的话：落在这一轮里的递给帮手的话跟着前移（补言递上时自会挪到落点）；回报的那一步在别处，不动
       for (const { note } of inbox.queue) if (typeof note?.at === "number") note.at = Math.min(note.at, target.content.length);
-      chargePartial(said);
       target.toolCalls = null;
       if (said.trim()) history.push({ role: "assistant", content: said });
       await deliverSupplements(inbox, history, run.budget, host, { steer: true, target });
@@ -165,12 +176,6 @@ async function runRounds(target, history, run) {
       }
     }
     resumed = 0; // 接续的次数按轮算：长活跑上几百轮，前面断过两回不该让后面再断就没得接
-    if (target.usage) {
-      tally.usageKnown = true;
-      tally.roundOpen = false;
-      for (const key of Object.keys(tally.usage)) tally.usage[key] += Number(target.usage[key] || 0);
-      spend(Number(target.usage.total_tokens || 0));
-    }
     const calls = (target.toolCalls || []).filter(call => call.name);
     // 轮次到顶后模型仍要调工具（有的中转不认 tool_choice）：不再受理，就此收尾
     if (!calls.length || !overrides.tools || overrides.toolChoice === "none") {
@@ -509,10 +514,7 @@ async function requestPatiently(profile, history, signal, overrides) {
     await restFor(wait, signal, local);
   }
 }
-// 一答收尾（停了、断了也算）照 tally 结算：用量记到答上，耗墨补进余墨。
-// opened：接口至少接下过一次请求（没接下的——400、连不上——不花墨）；roundOpen：最后一轮开了头却没等到它的 usage（停止、断网），
-// 那一轮按估算补上——提示全文加上这一轮写出的字；一次 usage 都没拿到的（接口不回 usage）整答按估算。
-// spent：各轮已当场扣进余墨的（见 runRounds 的 spend），这里只补其余
+// 一答收尾（停了、断了也算）照 tally 写回用量；各轮都没报实数时按整份历史估一回。已当场扣掉的墨不再扣。
 /**
  * @param {Profile} profile
  * @param {Message} assistant
@@ -521,13 +523,17 @@ async function requestPatiently(profile, history, signal, overrides) {
  */
 function accountUsage(profile, assistant, requestMessages, tally, kind = "main") {
   assistant.usage = tally.usageKnown ? tally.usage : null;
-  const exact = Number(assistant.usage?.total_tokens || 0);
-  const estimate = from => estimateTokens(requestMessages) + estimateTokens([{ content: String(assistant.content || "").slice(from) }]);
-  const consumed = exact > 0 ? exact + (tally.roundOpen ? estimate(tally.roundStart) : 0) : tally.opened ? estimate(0) : 0;
+  // 某几轮报 0、别轮有实数：那是上游在报，照实数记。
+  // 整答一分实数都没有（上游把每轮都报成 0，或只回空对象）而开过流：按整份历史估一回，不白跑——与早先「一次 usage 都没拿到」同口径。
+  const fellBack = !(tally.usage.total_tokens > 0) && tally.opened,
+    consumed = fellBack
+      ? estimateTokens(requestMessages) + estimateTokens([{ content: String(assistant.content || "") }])
+      : tally.usage.total_tokens;
   if (!(consumed > 0)) return;
-  const live = spendTokens(profile, Math.max(0, consumed - tally.spent), kind);
+  const remaining = consumed - tally.spent;
+  const live = remaining > 0 ? spendTokens(profile, remaining, kind) : profiles().find(p => p.id === profile.id) || profile;
   assistant.tokenCount = consumed;
-  assistant.tokenEstimated = !(exact > 0) || tally.roundOpen || tally.steered;
+  assistant.tokenEstimated = tally.estimated || fellBack;
   if (quotaExhausted(live)) toast(t("此答写毕，余墨已尽；换个模型可续"));
   renderQuota();
 }

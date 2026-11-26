@@ -13,11 +13,14 @@ function setup(replies = []) {
   const f = load([
     "readSse",
     "streamReply",
-    `setup: (request, run) => {
+    "estimateTokens",
+    "requestJobs",
+    `setup: (request, run, recordUsage) => {
       document.documentElement.dataset.inkMotion = 'off';
       document.hidden = true;
       saveStoreSoon = saveStore = renderSendButtons = renderHistory =
-        setJobLabel = refreshSteps = markDirty = accountUsage = renderQuota = () => {};
+        setJobLabel = refreshSteps = markDirty = renderQuota = () => {};
+      noteUsage = recordUsage;
       keepInWindow = mcpForTurn = maybeAutoCompact = maybeAutoTitle = async () => {};
       reserveTokens = () => () => {};
       replyDeliverables = async () => [];
@@ -30,20 +33,26 @@ function setup(replies = []) {
     }`
   ]);
   const requests = [],
-    runs = [];
+    runs = [],
+    charges = [],
+    profile = { id: "p", tools: true };
   f.setup(
-    async (profile, history) => {
+    async (_profile, history, signal) => {
       requests.push(structuredClone(history));
       assert.ok(replies.length, "不应无限重试");
-      return replies.shift();
+      const reply = replies.shift();
+      return typeof reply === "function" ? reply(signal, () => f.requestJobs.get("c").controller.abort()) : reply;
     },
     async steps => {
       runs.push(...steps);
       for (const step of steps) step.status = "done";
       return { outcomes: new Map(steps.map(step => [step.id, "工具已完成"])), images: [] };
+    },
+    (kind, amount) => {
+      if (amount > 0) charges.push([kind, amount]);
     }
   );
-  return { ...f, requests, runs };
+  return { ...f, requests, runs, charges, profile };
 }
 
 test("SSE：没有结束标志的 EOF 不能冒充完成，已收到的文字保留", async () => {
@@ -88,9 +97,138 @@ const finalReply = () => sse(event({ content: "检查完成。" }, "stop") + "da
 async function turn(f) {
   const assistant = { id: "a", role: "assistant", content: "", status: "streaming" };
   const conversation = { id: "c", messages: [{ id: "u", role: "user", content: "检查一下" }, assistant] };
-  await f.streamReply(conversation, assistant, { id: "p", tools: true });
+  await f.streamReply(conversation, assistant, f.profile);
   return assistant;
 }
+
+const usageFrame = (prompt_tokens, completion_tokens, cached_tokens) =>
+  `data: ${JSON.stringify({
+    choices: [],
+    usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens, prompt_tokens_details: { cached_tokens } }
+  })}\n\n`;
+const done = "data: [DONE]\n\n";
+const lengthReply = () => sse(event({ content: "半句" }, "length") + usageFrame(800, 100, 700) + done);
+const exactReply = () => sse(event({ content: "写完。" }, "stop") + usageFrame(900, 30, 500) + done);
+
+function assertCharges(f, assistant, amounts, estimated) {
+  const total = amounts.reduce((sum, amount) => sum + amount, 0);
+  assert.equal(assistant.tokenCount, total);
+  assert.equal(assistant.tokenEstimated, estimated);
+  assert.equal(f.profile.usedTokens, total);
+  assert.deepEqual(
+    f.charges,
+    amounts.map(amount => ["main", amount])
+  );
+}
+
+// 只在读完上一块、准备读下一块时按止；不靠计时等帧。[DONE] 已到时，按止落在 reader.cancel（整答收尾之前）。
+const stopDuringRead = wire => (signal, stop) => {
+  let sent = false;
+  const body = new ReadableStream(
+    {
+      start: controller => signal.addEventListener("abort", () => controller.error(signal.reason), { once: true }),
+      pull(controller) {
+        if (sent) return stop();
+        sent = true;
+        controller.enqueue(new TextEncoder().encode(wire));
+      },
+      cancel: stop
+    },
+    { highWaterMark: 0 }
+  );
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
+};
+
+test("自动续写：长度结束标志后的用量与正常末轮的用量各扣一次，缓存也相加", async () => {
+  const f = setup([lengthReply(), exactReply()]);
+  const assistant = await turn(f);
+  assert.equal(assistant.status, "complete");
+  assert.equal(assistant.content, "半句写完。");
+  assert.equal(f.requests.length, 2);
+  assertCharges(f, assistant, [900, 930], false);
+  assert.deepEqual(assistant.usage, { prompt_tokens: 1700, completion_tokens: 130, total_tokens: 1830, cached_tokens: 1200 });
+});
+
+test("自动续写耗尽：最后一个中断请求已报的用量也只按实数记一次", async () => {
+  const f = setup([lengthReply(), lengthReply(), lengthReply()]);
+  const assistant = await turn(f);
+  assert.equal(assistant.status, "interrupted");
+  assert.equal(f.requests.length, 3);
+  assertCharges(f, assistant, [900, 900, 900], false);
+  assert.equal(assistant.usage.cached_tokens, 2100);
+});
+
+test("自动续写：开流却没报有效用量的请求才估算，正常末轮也不沿用前一轮用量", async () => {
+  const f = setup([lengthReply(), sse(event({ content: "没写完" })), sse(event({ content: "检查完成。" }, "stop", { usage: {} }) + done)]);
+  const assistant = await turn(f);
+  assert.equal(assistant.status, "complete");
+  assert.equal(f.requests.length, 3);
+  const estimate = (i, said) => f.estimateTokens(f.requests[i]) + f.estimateTokens([{ content: said }]);
+  assertCharges(f, assistant, [900, estimate(1, "没写完"), estimate(2, "检查完成。")], true);
+  assert.equal(assistant.usage.cached_tokens, 700);
+});
+
+test("上游把这一轮的用量报成 0：算报过、不拿估算替它，整答也不标含估算", async () => {
+  // 有的中转把计量抹成 0 回过来。估一份整历史替它，余墨会比实数多扣好几倍（见 delegate 那条端到端）。
+  const f = setup([lengthReply(), sse(event({ content: "等一等" }, "stop") + usageFrame(0, 0, 0) + done)]);
+  const assistant = await turn(f);
+  assert.equal(assistant.status, "complete");
+  assertCharges(f, assistant, [900], false);
+  assert.equal(assistant.usage.total_tokens, 900);
+});
+
+test("上游只报入、出两段、没有 total：合起来算这一轮的量", async () => {
+  const f = setup([
+    sse(
+      event({ content: "写完。" }, "stop") +
+        `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 900, completion_tokens: 30 } })}\n\n` +
+        done
+    )
+  ]);
+  const assistant = await turn(f);
+  assertCharges(f, assistant, [930], false);
+  assert.equal(assistant.usage.total_tokens, 930);
+});
+
+test("整答各轮都报 0：开过流就按整份历史估一回，不白跑", async () => {
+  const f = setup([sse(event({ content: "写完。" }, "stop") + usageFrame(0, 0, 0) + done)]);
+  const assistant = await turn(f);
+  const estimate = f.estimateTokens(f.requests[0]) + f.estimateTokens([{ content: "写完。" }]);
+  assertCharges(f, assistant, [estimate], true);
+  assert.equal(assistant.usage.total_tokens, 0);
+});
+
+for (const ending of ["未收到用量", "已收到用量但未收到 DONE", "已收到 DONE"]) {
+  test(`止：${ending}时，当前请求只结算一次`, async () => {
+    const reported = ending !== "未收到用量",
+      wire =
+        event({ content: "后半句" }, reported ? "stop" : null) +
+        (reported ? usageFrame(900, 30, 500) : "") +
+        (ending === "已收到 DONE" ? done : "");
+    const f = setup([lengthReply(), stopDuringRead(wire)]);
+    const assistant = await turn(f);
+    assert.equal(assistant.status, "stopped");
+    assert.equal(f.requests.length, 2);
+    const estimate = f.estimateTokens(f.requests[1]) + f.estimateTokens([{ content: "后半句" }]);
+    assertCharges(f, assistant, [900, reported ? 930 : estimate], !reported);
+    assert.equal(assistant.usage.cached_tokens, reported ? 1200 : 700);
+  });
+}
+
+test("止：接续的请求开流前就被取消，不估量也不重复扣上轮用量", async () => {
+  const f = setup([
+    lengthReply(),
+    (signal, stop) => {
+      stop();
+      signal.throwIfAborted();
+    }
+  ]);
+  const assistant = await turn(f);
+  assert.equal(assistant.status, "stopped");
+  assert.equal(f.requests.length, 2);
+  assertCharges(f, assistant, [900], false);
+  assert.equal(assistant.usage.cached_tokens, 700);
+});
 
 test("工具后空回复会重试，后续正文正常收尾且已完成工具只执行一次", async () => {
   const f = setup([toolReply(), emptyReply(), finalReply()]);

@@ -94,7 +94,10 @@ async function handleMessageAction(event) {
 // 续写一答：手点「继续生成」，或这一答断着时帮手回报到了（见 wakeWithReports）
 /** @param {Conversation} c @param {Message} message @param {Profile} profile */
 async function resumeAnswer(c, message, profile) {
-  if (!(await preparing(() => prepareTurn(c)))) return;
+  // 只等这一条消息的上一趟收尾，不占发送闸；人仍可去别的对话开工或切版本。
+  const settling = replySettlements.get(message);
+  if (settling) await settling.catch(() => {});
+  if (!c.messages.includes(message) || !(await preparing(() => prepareTurn(c))) || !c.messages.includes(message)) return;
   foldRelayTail(c, message);
   message.status = "streaming";
   message.error = "";
