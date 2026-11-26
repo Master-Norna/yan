@@ -328,7 +328,14 @@ class HttpTransport {
   close() {
     for (const abort of this.aborts) abort.abort();
     this.reads.clear();
-    if (this.session) void fetch(this.url, { method: "DELETE", headers: this.headersFor(), redirect: "error" }).catch(() => {});
+    if (!this.session) return;
+    const headers = this.headersFor();
+    // 关闭可能由配置变更、断线清理和进程退出重复触发；同一会话只发一次 DELETE。
+    this.session = "";
+    // 远端不回音也不能为已废弃的会话永久保留连接；回执的正文不使用，立即取消。
+    void fetch(this.url, { method: "DELETE", headers, redirect: "error", signal: AbortSignal.timeout(CANCEL_POST_MS) })
+      .then(response => response.body?.cancel())
+      .catch(() => {});
   }
 }
 
