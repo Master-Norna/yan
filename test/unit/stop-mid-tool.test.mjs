@@ -114,3 +114,66 @@ test("streamReply：工具在止之后才回来，排着的补言放回案上，
   assert.ok(!(assistant.steps || []).some(step => step.id === "n1"), "补言那一步从行迹里撤下，等放回案上");
   assert.match(String((f.drafts() || {})[f.draftKey("c")]?.text || ""), /查完再补一句/, "补言回到案上，不再丢在半路");
 });
+
+for (const replaced of [false, true])
+  test(`止后立即续写：${replaced ? "换下去的消息不再开工" : "旧答先结算，再续同一条消息"}`, async () => {
+    const f = load([
+      "streamReply",
+      "resumeAnswer",
+      "haltJob",
+      "requestJobs",
+      `setup: (c, rounds, charge) => {
+        store = { settings: {}, conversations: [c], drafts: {}, memory: { items: [] } };
+        saveStore = renderSendButtons = renderHistory = markDirty = tickTrailClock = () => {};
+        loadLedger = loadIntent = async () => {};
+        reserveTokens = () => () => {};
+        replyDeliverables = async () => [];
+        prepareTurn = async () => !requestJobs.has(c.id);
+        maybeAutoCompact = maybeAutoTitle = async () => {};
+        systemPrompt = ledgerNote = intentNote = () => "";
+        runRounds = rounds;
+        accountUsage = charge;
+      }`
+    ]);
+    const message = { id: "a", role: "assistant", content: "上一截", status: "streaming" },
+      c = { id: "c", messages: [{ id: "u", role: "user", content: "查一下" }, message] },
+      profile = { id: "p", tools: false },
+      events = [];
+    let release, entered;
+    const tool = new Promise(resolve => (release = resolve)),
+      firstRound = new Promise(resolve => (entered = resolve));
+    f.setup(
+      c,
+      async (assistant, history, { signal }) => {
+        if (!events.length) {
+          events.push("旧轮");
+          entered();
+          await tool;
+          signal.throwIfAborted();
+        } else {
+          events.push("新轮");
+          assistant.content += "和下一截";
+        }
+      },
+      (_profile, assistant) => {
+        events.push("结算");
+        assistant.tokenCount = 10;
+      }
+    );
+    const first = f.streamReply(c, message, profile);
+    await firstRound;
+    f.haltJob(c.id, f.requestJobs.get(c.id));
+    assert.equal(message.status, "stopped", "止立刻生效");
+    const resume = f.resumeAnswer(c, message, profile);
+    await new Promise(resolve => setImmediate(resolve));
+    const onHold = [...events];
+    if (replaced) c.messages.pop();
+    release();
+    await Promise.all([first, resume]);
+    assert.deepEqual(onHold, ["旧轮"], "上一趟还没收尾，不能开始新轮");
+    assert.deepEqual(events, replaced ? ["旧轮", "结算"] : ["旧轮", "结算", "新轮", "结算"]);
+    if (!replaced) {
+      assert.equal(message.status, "complete");
+      assert.equal(message.tokenCount, 20, "续写仍累加两次用量");
+    }
+  });

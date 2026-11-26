@@ -1,11 +1,20 @@
 // 言 · 对话引擎 · 作答：一答从开工到收尾
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
+// 「止」立刻撤下作业，但工具可能还在返回；就这一条消息续写时，须等上一趟写完状态与用量。
+/** @type {WeakMap<Message, Promise<void>>} */
+const replySettlements = new WeakMap();
+/** @param {Conversation} conversation @param {Message} assistant @param {Profile} profile */
+function streamReply(conversation, assistant, profile, options = {}) {
+  const pending = runStreamReply(conversation, assistant, profile, options).finally(() => replySettlements.delete(assistant));
+  replySettlements.set(assistant, pending);
+  return pending;
+}
 /**
  * @param {Conversation} conversation
  * @param {Message} assistant
  * @param {Profile} profile
  */
-async function streamReply(conversation, assistant, profile, { resume = false } = {}) {
+async function runStreamReply(conversation, assistant, profile, { resume = false } = {}) {
   // queue 是这一答的收件口：用户的补言（user）与帮手、后台指令及定时的回报（report）
   /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user?: Message, step: Step, report?: string }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number, promptTokens: number }} */
   const job = {
