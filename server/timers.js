@@ -196,16 +196,19 @@ module.exports = function createTimers({ home, known, route = jsonRoute }) {
   const retryAt = new Map();
   // 约.json 随存储根：换了存储位置，读那边的一份重排，不把这边的带过去盖掉它
   function sync() {
+    const file = bookFile(),
+      moved = bookAt !== file;
     // 已知损坏时允许下一回重读，以便用户修好文件后无需重启桥接。
-    if (bookAt === bookFile() && !bookCorrupt) return;
-    bookAt = bookFile();
+    if (!moved && !bookCorrupt) return;
+    bookAt = file;
     retryAt.clear();
     const saved = readJsonFile(bookAt);
     bookCorrupt = fs.existsSync(bookAt) && !validBook(saved);
     if (bookCorrupt) {
       book = { seq: 0, timers: [] };
       clearTimeout(armed);
-      for (const wake of [...waiters]) wake();
+      // 同根坏簿不影响已投递的回报，重读时不叫醒别页；换根仍须结束旧等待。
+      if (moved) for (const wake of [...waiters]) wake();
       return;
     }
     book = validBook(saved) ? { seq: Number(saved.seq) || 0, timers: saved.timers } : { seq: 0, timers: [] };
