@@ -4,31 +4,34 @@ let lastRenderedConvId = null,
   convergeTimer = null;
 const nodeSig = new WeakMap();
 let lastVizThemeKey = "";
+// 跟随时只记「贴底」，不为恢复时用不到的锚点量一遍旧消息。
+/** @typedef {{ follow: true } | { follow: false, top: number, anchorId: string, anchorOffset: number }} ScrollSnapshot */
+/** @returns {ScrollSnapshot | null} */
 function scrollSnapshot() {
   const host = $("#chatScroll");
   if (!host || !currentId || view !== "chat") return null;
-  const hostTop = host.getBoundingClientRect().top,
-    anchor = [...host.querySelectorAll("#messages [data-message]")].find(node => node.getBoundingClientRect().bottom > hostTop + 1);
-  return {
-    top: host.scrollTop,
-    gap: Math.max(0, host.scrollHeight - host.scrollTop - host.clientHeight),
-    follow: followBottom,
-    anchorId: anchor?.dataset.message || "",
-    anchorOffset: anchor ? anchor.getBoundingClientRect().top - hostTop : 0
-  };
+  if (followBottom) return { follow: true };
+  const top = host.scrollTop,
+    hostTop = host.getBoundingClientRect().top;
+  for (const node of host.querySelectorAll("#messages [data-message]")) {
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > hostTop + 1) return { follow: false, top, anchorId: node.dataset.message || "", anchorOffset: rect.top - hostTop };
+  }
+  return { follow: false, top, anchorId: "", anchorOffset: 0 };
 }
 function rememberScrollPosition() {
   const snapshot = scrollSnapshot();
   if (snapshot && currentId) scrollPositions.set(currentId, snapshot);
 }
-// follow：连同跟随与否一起恢复。下一帧补的那一回只校位置——这一帧里别处（翻版本、点出处）刚改过跟随，不能被旧快照改回去
-// 跟着的时候恢复的是「跟到最新」，不是离开那一刻的坐标：这段在别处（后台、帮手、另一页）又长了一截，
-// 照坐标回去就停在半中间，看着像不跟随了
+// 下一帧补校时，若别处已改了跟随（翻版本、点出处），不再套用旧快照。
+// 跟随恢复到最新，不回到离开时的坐标：这段在别处可能又长了一截。
+/** @param {ScrollSnapshot} snapshot */
 function restoreScrollPosition(snapshot, { follow = true } = {}) {
   const host = $("#chatScroll");
-  if (!host || !snapshot) return;
-  if (follow) followBottom = !!snapshot.follow;
-  if (followBottom) {
+  if (!host) return;
+  if (follow) followBottom = snapshot.follow;
+  else if (snapshot.follow !== followBottom) return;
+  if (snapshot.follow === true) {
     host.scrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
     return;
   }
