@@ -314,27 +314,49 @@ module.exports = function createShell({ toolEnv }) {
     return { released: !!release };
   }
   // 等到指令结束、输出停了一会儿（服务器起好了往往就不再出声）或时间到；交出去的是上次取过之后的新输出
-  async function backgroundReport(job, waitMs, consume = true) {
+  async function backgroundReport(job, waitMs, res, watchSeq = 0) {
     const start = Date.now(),
       until = start + waitMs;
-    while (Date.now() < until && job.exitCode === null && Date.now() - Math.max(job.grew, start) < 1500)
+    while (!res?.destroyed && Date.now() < until && job.exitCode === null && Date.now() - Math.max(job.grew, start) < 1500)
       await new Promise(resolve => setTimeout(resolve, 200));
-    const fresh = key => {
-      const text = job.text[key].slice(Math.max(0, job.read[key] - job.base[key]));
-      if (consume) job.read[key] = job.base[key] + job.text[key].length;
-      return text;
-    };
-    const out = fresh("out"),
-      err = fresh("err");
-    return {
+    if (res && job.reporting && !res.destroyed) {
+      let close;
+      const closed = new Promise(resolve => (close = resolve));
+      res.once("close", close);
+      try {
+        while (job.reporting && !res.destroyed) await Promise.race([job.reporting, closed]);
+      } finally {
+        res.removeListener("close", close);
+      }
+    }
+    if (res?.destroyed) return;
+    const fresh = key => job.text[key].slice(Math.max(0, job.read[key] - job.base[key]));
+    const report = {
       id: job.id,
       key: job.key,
       running: job.exitCode === null,
       exitCode: job.exitCode,
-      stdout: shownOutput(out),
-      stderr: shownOutput(err, true),
+      stdout: shownOutput(fresh("out")),
+      stderr: shownOutput(fresh("err"), true),
       durationMs: Date.now() - job.started
     };
+    const end = { out: job.base.out + job.text.out.length, err: job.base.err + job.text.err.length };
+    if (!res) job.read = end;
+    else {
+      // 查看与监听共用一份输出：一次只交一份，写完才推进到这份快照的末尾；断线就让下一请求照旧领取。
+      let release;
+      job.reporting = new Promise(resolve => (release = resolve));
+      onResponseSettled(res, finished => {
+        if (finished) {
+          job.read = end;
+          // 监听回报记下获选的序号，分清让位的旧监听与写回报时刚接入的新监听。
+          if (!report.running) job.reported ||= watchSeq || true;
+        }
+        job.reporting = null;
+        release();
+      });
+    }
+    return report;
   }
   // 尚未把编号交给页面便断开：无人能再凭编号叫停它，立即撤去并收掉进程。
   function discardBackground(job) {
@@ -345,7 +367,7 @@ module.exports = function createShell({ toolEnv }) {
   // 桥接退出（正常退与信号终止）时的收口在模块那层，见上面的 armExitHooks
   // check_command：取后台指令的新输出；stop 时先收掉它（最多等三秒）
   // key：页面收口时带上（编号在桥接重启后重数，不带 key 可能收到别的指令上）
-  async function checkBackground(id, stop, waitMs, key = "") {
+  async function checkBackground(id, stop, waitMs, key, res) {
     const job = backgroundJobs.get(String(id || ""));
     if (!job || (key && job.key !== key))
       throw Error(
@@ -365,45 +387,39 @@ module.exports = function createShell({ toolEnv }) {
         });
       });
     }
-    const report = await backgroundReport(job, waitMs);
-    // 模型自己看到它结束了：不必再叫醒一回
-    if (!report.running) job.reported = true;
-    return report;
+    return backgroundReport(job, waitMs, res);
   }
-  // 等后台指令结束再回话：页面据此叫醒模型，模型挂上就能收尾去睡，不必轮询。结束只报一回——
-  // 几处页面都在等、或刷新后重新等上的，后来的接手，先前的作罢（superseded）；报过的不再报（reported）；
-  // 记录不存在或 key 对不上时回 lost；若仍记得该编号曾被淘汰，也带 evicted
-  // 模型自己用 check_command 看到它结束了的，也算报过（reported，带上退出码，页面只把签改成已结束）
+  // 等后台指令结束再回话：页面据此叫醒模型，不必轮询。后挂的监听优先，先前的等到回报写完才作罢；
+  // 若优先的监听断开，由还在等的接替。模型自己用 check_command 看到它结束也算报过（页面只改签，不叫醒）。
   async function watchBackground(id, key, signal, res) {
     const job = backgroundJobs.get(String(id || ""));
     if (!job || (key && job.key !== key)) return { id, lost: true, ...(evictedJobs.has(String(id)) ? { evicted: true } : {}) };
-    if (job.reported) return { id, reported: true, exitCode: job.exitCode };
-    const ticket = (job.watchTicket = (job.watchTicket || 0) + 1);
-    let stop;
-    const aborted = new Promise(resolve => {
-      stop = () => resolve(null);
-      if (signal?.aborted) stop();
-      else signal?.addEventListener("abort", stop, { once: true });
-    });
-    const superseded = () => ticket !== job.watchTicket || signal?.aborted || res.destroyed;
+    const reported = () => ({ id, reported: true, exitCode: job.exitCode });
+    if (job.reported) return reported();
+    const watches = (job.watches ??= new Set()),
+      seq = (job.watchSeq = (job.watchSeq || 0) + 1);
+    let leave;
+    const gone = new Promise(resolve => (leave = resolve));
+    const stop = () => {
+      watches.delete(gone);
+      leave();
+    };
+    watches.add(gone);
+    if (signal?.aborted) stop();
+    else signal?.addEventListener("abort", stop, { once: true });
     try {
-      await Promise.race([job.ended, aborted]);
-      // 另一页的完成回报还在写：等它写完或断开再判断，不抢同一份输出。
-      while (job.reporting && !superseded()) await Promise.race([job.reporting, aborted]);
-      if (superseded()) return { id, superseded: true };
-      if (job.reported) return { id, reported: true, exitCode: job.exitCode };
-      let release;
-      job.reporting = new Promise(resolve => (release = resolve));
-      onResponseSettled(res, finished => {
-        if (finished) {
-          job.reported = true;
-          for (const key of ["out", "err"]) job.read[key] = job.base[key] + job.text[key].length;
-        }
-        job.reporting = null;
-        release();
-      });
-      return { ...(await backgroundReport(job, 0, false)), command: job.command, ...(job.stopped ? { stopped: true } : {}) };
+      await Promise.race([job.ended, gone]);
+      while (!signal?.aborted && !res.destroyed) {
+        if (job.reported) return typeof job.reported === "number" && job.reported > seq ? { id, superseded: true } : reported();
+        // 先等正在写的响应结清；否则等最后挂上的监听领取或离开。
+        const pending = job.reporting || [...watches].at(-1);
+        if (pending === gone)
+          return { ...(await backgroundReport(job, 0, res, seq)), command: job.command, ...(job.stopped ? { stopped: true } : {}) };
+        await Promise.race([pending, gone]);
+      }
+      return { id, superseded: true };
     } finally {
+      stop();
       signal?.removeEventListener("abort", stop);
     }
   }

@@ -195,8 +195,8 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
   // 页面说有话要递（用户补言、主模型递话给帮手）：那条前台指令转入后台，结果当即交回
   const handleWorkRelease = jsonRoute(async body => releaseForeground(body.ticket), failed);
   const handleWorkCheck = jsonRoute(
-    async body =>
-      await checkBackground(body.id, body.stop === true, clampNumber(Number(body.wait) * 1000, 0, 0, 120000), String(body.key || "")),
+    async (body, req, res) =>
+      checkBackground(body.id, body.stop === true, clampNumber(Number(body.wait) * 1000, 0, 0, 120000), String(body.key || ""), res),
     failed
   );
   // 等一条后台指令结束：请求一直挂着（走总线不占连接），结束了才回；页面停了、关了，请求随之作罢
