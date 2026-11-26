@@ -350,13 +350,26 @@ await waitFor(`!document.querySelector("#confirmModal").classList.contains("hidd
 await evalJs(`document.querySelector("#confirmOk").click(); true`);
 await waitFor(`!document.querySelector("#libraryCleanScratch")`);
 check("clean removes the scratch directories", !existsSync(`${ARCHIVE}/.草稿`) || readdirSync(`${ARCHIVE}/.草稿`).length === 0);
-// 卷宗的一条留 预览 / 下载 / 改名 / 删除；置于案上走输入框的「＋」→ 卷宗 选件
+// 卷宗的一条：条尾留下载 / 改名 / 删除三枚笔意小画，名字在 title 与 aria-label 里；预览不另设一枚——点条子即是预览
 check(
-  "library row offers preview / download / rename / delete",
-  (await evalJs(
-    `[...document.querySelectorAll('#libraryGrid [data-library-disk="报表.csv"] [data-library-action]')].map(b => b.textContent).join()`
-  )) === "预览,下载,改名,删除"
+  "library row offers download / rename / delete, each an icon",
+  await evalJs(`(() => {
+    const row = document.querySelector('#libraryGrid [data-library-disk="报表.csv"]');
+    const acts = [...row.querySelectorAll('[data-library-action]')];
+    return acts.map(button => button.dataset.libraryAction).join() === "download,rename,remove"
+      && acts.every(button => button.querySelector("svg") && !button.textContent.trim() && button.title === button.getAttribute("aria-label"))
+      && !row.querySelector('[data-library-action="view"]');
+  })()`)
 );
+check(
+  "clicking a row opens the preview without a preview button",
+  await evalJs(`(() => {
+    document.querySelector('#libraryGrid [data-library-disk="报表.csv"]').click();
+    return true;
+  })()`)
+);
+await waitFor(`!document.querySelector("#fileViewer").classList.contains("hidden")`, 8000);
+await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
 await evalJs(`document.querySelector("#newChat").click(); true`);
 await waitFor(`!document.querySelector("#welcome").classList.contains("hidden")`);
 await evalJs(`document.querySelector("#welcome .attach-trigger").click(); true`);
@@ -497,10 +510,8 @@ await evalJs(dropFolder);
 await waitFor(`!!document.querySelector('#libraryGrid [data-library-dir="课程/场景示例 (2)"]')`, 8000).catch(() => {});
 check("dropping it again makes a second folder instead of merging", existsSync(`${ARCHIVE}/课程/场景示例 (2)/图/a.txt`));
 await evalJs(`document.querySelector('#libraryGrid [data-library-dir="课程/场景示例"]').click(); true`);
-await waitFor(`!!document.querySelector('#libraryGrid [data-library-disk="课程/场景示例/读我.md"] [data-library-action="view"]')`, 8000);
-await evalJs(
-  `document.querySelector('#libraryGrid [data-library-disk="课程/场景示例/读我.md"] [data-library-action="view"]').click(); true`
-);
+await waitFor(`!!document.querySelector('#libraryGrid [data-library-disk="课程/场景示例/读我.md"]')`, 8000);
+await evalJs(`document.querySelector('#libraryGrid [data-library-disk="课程/场景示例/读我.md"]').click(); true`);
 await waitFor(`document.querySelectorAll("#fileViewerStage .markdown img").length === 3`, 8000).catch(() => {});
 await waitFor(`[...document.querySelectorAll("#fileViewerStage .markdown img")].every(img => img.complete)`, 8000).catch(() => {});
 check(
@@ -511,9 +522,7 @@ check(
   await evalJs(`[...document.querySelectorAll("#fileViewerStage .markdown img")].map(img => img.src + " " + img.naturalWidth).join(" | ")`)
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
-await evalJs(
-  `document.querySelector('#libraryGrid [data-library-disk="课程/场景示例/挪过.md"] [data-library-action="view"]').click(); true`
-);
+await evalJs(`document.querySelector('#libraryGrid [data-library-disk="课程/场景示例/挪过.md"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage .markdown img")?.naturalWidth === 1`, 8000).catch(() => {});
 check(
   "an image whose relative path went stale after a move is found by name near the document",
