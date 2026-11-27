@@ -2053,6 +2053,26 @@ http
           delta({}, { usage: { total_tokens: 5 } })
         ]);
       }
+      if (typeof lastUser === "string" && lastUser.includes("THOUGHTHANDOFF")) {
+        const n = toolResults.length,
+          call = delta({
+            tool_calls: [{ index: 0, id: `thought_${n}`, type: "function", function: { name: "run_js", arguments: '{"code":"return 1"}' } }]
+          });
+        // 首轮留出手动展开的窗口；次轮先接着想，再开口分出另一组。
+        if (n === 0) return sse(res, [delta({ reasoning_content: "先想一想。" }), delta({ reasoning_content: "还没想完。" }), call], 800);
+        if (n === 1)
+          return sse(
+            res,
+            [
+              delta({ reasoning_content: "接着原来的思路。" }),
+              delta({ content: "现在说话。" }),
+              delta({ reasoning_content: "另一段思绪。" }),
+              call
+            ],
+            450
+          );
+        return sse(res, [delta({ content: "想完了。" })]);
+      }
       // LONGTHINK：一长串思绪慢慢写（思绪框装不下、自己会滚），随后一句很短的正文就收尾
       if (typeof lastUser === "string" && lastUser.includes("LONGTHINK"))
         return sse(

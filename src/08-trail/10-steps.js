@@ -49,9 +49,15 @@ function plainStepHtml(step, title) {
     compactShots = compactTrail() && !!shots,
     foldable = !!body || compactShots,
     folded = foldable && (step.expanded === undefined ? true : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${compactShots ? " compact-shots" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? t("展开") : t("收起")}"` : ""}><span class="tool-label">${escapeHtml(step.label ? t(step.label) : toolLabel(step.name))}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(stepText(step.result) || t("工具执行失败")) : ""}">${status === "running" ? escapeHtml(TOOLS.get(step.name)?.busy || t("查阅中")) : status === "error" ? escapeHtml(stepText(step.result) || t("失败")) : escapeHtml(stepText(step.result) || "")}</span>${stepStateHtml(status)}</div>${shots}${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${compactShots ? " compact-shots" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`<span class="tool-label">${escapeHtml(step.label ? t(step.label) : toolLabel(step.name))}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(stepText(step.result) || t("工具执行失败")) : ""}">${status === "running" ? escapeHtml(TOOLS.get(step.name)?.busy || t("查阅中")) : status === "error" ? escapeHtml(stepText(step.result) || t("失败")) : escapeHtml(stepText(step.result) || "")}</span>${stepStateHtml(status)}`, foldable, folded)}${shots}${body}</div>`;
 }
-// 工具交回的画面（游目截图之类）：折起时也露着——画面就是这一步的结果；点开进图片查看器
+// 能开合的题头本身就是按钮：鼠标和键盘同走委托的 click，不另外安一个控件。
+function stepHeadHtml(inner, expandable, folded) {
+  return expandable
+    ? `<button type="button" class="tool-step-head" aria-expanded="${!folded}">${inner}</button>`
+    : `<div class="tool-step-head">${inner}</div>`;
+}
+// 工具交回的画面（游目截图之类）：普通模式折起时也露着；简约模式随详情开合。点开进图片查看器
 /** @param {Step} step */
 function stepShotsHtml(step) {
   const shots = (step.attachments || []).filter(file => file.kind === "image" && file.id);
@@ -204,7 +210,7 @@ function workStepHtml(step, title) {
     // 有红绿可看的（写入、修改）默认摊开，与文件大小无关；目录清单也摊开。其余折起
     openByDefault = !compactTrail() && status !== "error" && (!!parts || step.name === "list_files"),
     folded = foldable && (step.expanded === undefined ? !openByDefault : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? t("展开输出") : t("收起输出")}"` : ""}><span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command && !gist ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(gist || title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || t("执行失败")) : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`<span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command && !gist ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(gist || title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || t("执行失败")) : ""}">${meta}</span>${stepStateHtml(status)}`, foldable, folded)}${body}</div>`;
 }
 // 步骤有了变动（入册、跑完、请示、帮手有进展）：照这一答此刻的样子重画，工作条与差遣面板跟着更新
 /** @param {Message} assistant */
@@ -313,7 +319,7 @@ function bindTrailEvents() {
     }
     // 差遣的签不在此列：点它是去右侧开面板，不是折叠（见 openHelperPanel）
     const head = event.target.closest(".tool-step.foldable > .tool-step-head");
-    if (!head || event.target.closest("a, button")) return;
+    if (!head || event.target.closest("a, button") !== head) return;
     const el = head.parentElement,
       step = stepInView(el.dataset.stepId);
     // 指令输出默认折起，开合记在步骤上，重画不丢
@@ -323,7 +329,7 @@ function bindTrailEvents() {
       thawStep(step);
     }
     morphHeight(el, () => el.classList.toggle("folded", !wasFolded));
-    head.title = wasFolded ? t("收起输出") : t("展开输出");
+    head.setAttribute("aria-expanded", String(wasFolded));
     saveStoreSoon();
   };
   const showStepInFull = el => {

@@ -125,8 +125,11 @@ function paintBlock(block, message, o) {
     rcut = coda ? Math.max(trailReasoningBase(message), Number(coda.rat) || 0) : reasoning.length;
   /** @type {Part[]} */
   const parts = [];
+  // 首步使独立的思绪移入行迹：只在独立的块还在时，把手动选择交给承接原文的那一组。
+  const initialThoughtOpen =
+    work && message.reasoningTouched && block.firstElementChild?._part === "reasoning" ? !!message.reasoningOpen : undefined;
   const stack = message.steps?.length
-    ? stackPart(message, source, { streaming, visible, fresh, work, steps: o.steps, animate: o.animate })
+    ? stackPart(message, source, { streaming, visible, fresh, work, initialThoughtOpen, steps: o.steps, animate: o.animate })
     : null;
   // 执事的行迹在前：思绪各归各轮；做完后最后一轮的思绪落在行迹之后。对谈里思绪在前、行迹是折起的注脚
   if (work) {
@@ -305,7 +308,7 @@ function paintMarkdown(el, text, { streaming = false, fresh = [] } = {}) {
 /**
  * @param {Message} message
  * @param {Message} source 拆过 <think> 的样子
- * @param {{ streaming: boolean, visible: string, fresh: any[], work: boolean, steps: boolean, animate: boolean }} view
+ * @param {{ streaming: boolean, visible: string, fresh: any[], work: boolean, initialThoughtOpen?: boolean, steps: boolean, animate: boolean }} view
  */
 function stackPart(message, source, view) {
   return {
@@ -350,6 +353,7 @@ function paintStack(stack, message, source, view, created) {
       visible: view.visible,
       fresh: view.fresh,
       merge: true,
+      initialThoughtOpen: view.initialThoughtOpen,
       steps,
       animate: view.animate,
       seen
@@ -465,7 +469,7 @@ function syncStepRun(list, run, seen, animate) {
  * 主答的行迹与差遣面板里帮手的时间线都画在这里（helper：各轮的步骤折成一行，末尾那一轮的思绪写完也留在原处）
  * @param {Element} body
  * @param {Message|SubAgent} source
- * @param {{ live: boolean, visible: string, fresh?: any[], merge?: boolean, helper?: boolean, steps: boolean, animate: boolean, seen: Map<string, any> }} o
+ * @param {{ live: boolean, visible: string, fresh?: any[], merge?: boolean, initialThoughtOpen?: boolean, helper?: boolean, steps: boolean, animate: boolean, seen: Map<string, any> }} o
  *   merge：进行中那一轮还没开口、只是接着想时，思绪续进上一组那一块（「想一阵 → 调工具 → 再想」是同一段思路，不另起一枚签）
  */
 function paintTimeline(body, source, o) {
@@ -493,6 +497,7 @@ function paintTimeline(body, source, o) {
             at: group.at,
             thought: ownCopy(reasoning.slice(group.rfrom, tip && merged ? undefined : group.rat).trim()),
             thinking: tip && merged && thinking,
+            initialOpen: i === 0 && group.rat > 0 ? o.initialThoughtOpen : undefined,
             note: ownCopy(
               String(source.content || "")
                 .slice(group.from, group.at)
@@ -525,7 +530,7 @@ function paintTimeline(body, source, o) {
 /**
  * 一组：思绪、说的话、各步；末尾进行中的那一组另有正拟的调用、帮手的「正在凝神」
  * @param {Element} el
- * @param {{ tail?: boolean, at?: number, thought: string, thinking: boolean, note: string, steps?: Step[], drafting?: string, idle?: boolean }} g
+ * @param {{ tail?: boolean, at?: number, thought: string, thinking: boolean, note: string, steps?: Step[], drafting?: string, idle?: boolean, initialOpen?: boolean }} g
  * @param {Message|SubAgent} source
  */
 function paintTrailGroup(el, g, source, o) {
@@ -542,7 +547,7 @@ function paintTrailGroup(el, g, source, o) {
       sig: `${compactTrail()}|${o.live}|${g.thinking}|${g.thought}`,
       enter: tail,
       html: () =>
-        `<details class="reasoning trail-reasoning"${g.thinking && !compactTrail() ? " open" : ""} data-state="${g.thinking ? "live" : "done"}"><summary>${t(`思绪`)}</summary><div class="reasoning-body"></div></details>`,
+        `<details class="reasoning trail-reasoning"${(g.initialOpen ?? (g.thinking && !compactTrail())) ? " open" : ""}${g.initialOpen !== undefined ? ' data-touched="1"' : ""} data-state="${g.thinking ? "live" : "done"}"><summary>${t(`思绪`)}</summary><div class="reasoning-body"></div></details>`,
       // 写着的时候读者停在这块上就先不收；整段写完了不再等
       paint: node => paintThought(node, g.thought, g.thinking, { touched: !!node.dataset.touched, force: !o.live })
     });
