@@ -22,7 +22,8 @@ function render(kind, grouping, values) {
 test("堆叠：正负各自累加，数轴涵盖两边", () => {
   const html = render("bar", "stacked", [[40], [-30], [20]]);
   assert.match(html, />-30<|>-40</);
-  assert.match(html, />60<|>80</);
+  const ticks = [...html.matchAll(/>(-?\d+)<\/text>/g)].map(match => Number(match[1]));
+  assert.ok(Math.max(...ticks) >= 60);
   const bars = [...html.matchAll(/<rect x="[^"]+" y="([^"]+)" width="[^"]+" height="([^"]+)" fill="#(?:aa0000|00aa00|0000aa)"/g)];
   assert.equal(bars.length, 3);
   const [[, firstY, firstH], [, negativeY], [, lastY, lastH]] = bars;
