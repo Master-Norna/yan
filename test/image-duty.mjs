@@ -103,6 +103,21 @@ check(
   seen.marks === 4 && seen.on === 0 && seen.name.startsWith("墨猫甲"),
   JSON.stringify(seen)
 );
+// 顶栏只留一枚关闭：原图由点图本身换（键盘 Enter、空格同效），下载与「原图」两枚文字键撤去
+const chrome = () =>
+  evalJs(
+    `JSON.stringify({ buttons: [...document.querySelectorAll("#imageViewer .image-viewer-actions button")].map(b => b.id), actual: document.querySelector("#imageViewerStage").classList.contains("actual") })`
+  ).then(JSON.parse);
+let look = await chrome();
+check("看图顶栏只剩关闭一枚键", look.buttons.length === 1 && look.buttons[0] === "imageViewerClose", JSON.stringify(look));
+await evalJs(`document.querySelector("#imageViewerImage").click(); true`);
+look = await chrome();
+check("点图切到原图", look.actual, JSON.stringify(look));
+await evalJs(
+  `document.querySelector("#imageViewerImage").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); true`
+);
+look = await chrome();
+check("在图上按 Enter 回到适应窗口", !look.actual, JSON.stringify(look));
 await evalJs(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); true`);
 await waitFor(`document.querySelector("#imageViewerName").textContent.startsWith("墨猫乙")`, 5000).catch(() => {});
 seen = await viewed();
