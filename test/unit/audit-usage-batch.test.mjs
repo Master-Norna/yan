@@ -15,13 +15,14 @@ test("malformed usage entries do not discard valid coalesced entries", async t =
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });
   });
-  const post = (route, body) =>
-    fetch(`http://127.0.0.1:${server.address().port}/api/usage/${route}`, { method: "POST", body: JSON.stringify(body) });
+  const post = (route, body) => {
+    const url = `http://127.0.0.1:${server.address().port}/api/usage/${route}`;
+    return fetch(url, { method: "POST", body: JSON.stringify(body) });
+  };
   const day = "2026-01-01";
-  const responses = await Promise.all([
-    post("add", { batchId: "bad", items: [null, { day, kind: "main", amount: { toString: 0 } }, { day, kind: "main", amount: 7 }] }),
-    post("add", { batchId: "good", items: [{ day, kind: "main", amount: 11 }] })
-  ]);
+  const bad = { batchId: "bad", items: [null, { day, kind: "main", amount: { toString: 0 } }, { day, kind: "main", amount: 7 }] };
+  const good = { batchId: "good", items: [{ day, kind: "main", amount: 11 }] };
+  const responses = await Promise.all([post("add", bad), post("add", good)]);
   assert.deepEqual(responses.map(response => response.status), [200, 200]);
   await Promise.all(responses.map(response => response.json()));
   assert.equal((await (await post("read", {})).json()).days[day].main, 18);
