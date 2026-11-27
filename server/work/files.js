@@ -6,7 +6,6 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const { jsonRoute, requestSignal } = require("../http.js");
 const { fetchPublicResponse, readLimitedBytes } = require("../web.js");
-const sandbox = require("../sandbox.js");
 const { describeFsError, clampNumber } = require("./paths.js");
 const { decodeText, encodeText, countLines, splitLines, changeHunks, nearestPassage } = require("./text.js");
 const writeTextAtomic = require("./atomic.js");
