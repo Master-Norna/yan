@@ -62,7 +62,10 @@ check(
 );
 
 // 走层：点夹子下去，点路径回来
-await evalJs(`document.querySelector("#workStrips .strip.dir").click(); true`);
+check(
+  "换层时旧列表立即收起，不能拿新根拼旧文件名",
+  await evalJs(`document.querySelector("#workStrips .strip.dir").click(); !document.querySelector("#workStrips [data-work-file]")`)
+);
 await waitFor(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "深.md")`, 8000).catch(
   () => {}
 );

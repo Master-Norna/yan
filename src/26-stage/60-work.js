@@ -15,7 +15,7 @@ const work = {
   entries: [],
   /** @type {{ path: string, name: string }[]} 夹，同上 */
   dirs: [],
-  /** 查找时列整棵；改动只取对话触及的路径 */
+  /** 查找时已列整棵，或改动涉及的路径已查完 */
   full: false,
   /** @type {Map<string, { kind: string, size?: number, modifiedAt?: string } | null>} */
   changeEntries: new Map(),
