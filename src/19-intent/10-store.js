@@ -296,7 +296,10 @@ async function changeIntent(conversation, signal, change) {
       result = await change(intent);
     if (!result.next) return result;
     const data = await bridge("/api/work/intent", { ...workScope(conversation), data: result.next, base: version }, signal);
-    if (!data.conflict) return result;
+    if (!data.conflict) {
+      if (typeof data.version !== "string" || !data.version) throw Error(t("图被别处接连改动，没写成，稍后再试"));
+      return result;
+    }
   }
   throw Error(t("图被别处接连改动，没写成，稍后再试"));
 }

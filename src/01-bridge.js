@@ -184,7 +184,7 @@ function dataUrlBlob(dataUrl) {
 // 请求体已是 JSON 原文时（整段对话、一答的行迹）直接送：手上的串不必拆成对象再拼回去
 async function bridgeJson(path, body, signal) {
   const response = await bridgeFetch(path, body, signal);
-  const data = await response.json().catch(() => ({}));
+  const data = response.ok ? await response.json() : await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(Error(data.error || t`请求失败（${response.status}）`), { status: response.status, data });
   return data;
 }
