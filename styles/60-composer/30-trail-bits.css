@@ -143,6 +143,23 @@
   font: var(--fs-mark) var(--title);
   letter-spacing: 0.06em;
 }
+.tool-more-diff {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.tool-more-diff:before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.tool-more-diff[aria-expanded="true"]:before {
+  transform: rotate(-135deg) translate(-1px, -1px);
+}
 .tool-more:hover {
   color: var(--accent);
 }
