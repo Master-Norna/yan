@@ -90,7 +90,20 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     const root = await archiveRoot(body.root);
     const out = [],
       dirs = [];
-    await walkArchive(root, root, out, dirs);
+    // depth: 1 只列这一层（游目的工作区：看一处代码目录不必为看一层把整棵树都走一遍）。
+    // 路径仍相对根，这一层的就是名字本身
+    if (Number(body.depth) === 1) {
+      for (const entry of await fs.promises.readdir(root, { withFileTypes: true }).catch(() => [])) {
+        if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) {
+          if (!WORK_SKIP.has(entry.name)) dirs.push({ path: entry.name, name: entry.name });
+          continue;
+        }
+        const stat = await fs.promises.stat(path.join(root, entry.name)).catch(() => null);
+        if (stat) out.push({ path: entry.name, name: entry.name, size: stat.size, modifiedAt: stat.mtime.toISOString() });
+      }
+      dirs.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+    } else await walkArchive(root, root, out, dirs);
     out.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
     return {
       archive: root,
@@ -100,6 +113,15 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       // 只在明确不需要草稿统计时省去这一趟，响应也不带 scratch
       ...(body.scratch === false ? {} : { scratch: await measureScratch(root) })
     };
+  }, failed);
+  // 问一句这一处是什么：地址行里输的话（工作区、游目）据此决定是换到那一层、还是去开那一件。
+  // 只答一件事（目录 / 文件 / 没有），不列不读
+  const handleArchiveStat = jsonRoute(async body => {
+    const target = resolveFile(body.path),
+      stat = await fs.promises.stat(target).catch(() => null);
+    return stat
+      ? { kind: stat.isDirectory() ? "dir" : "file", path: target, name: path.basename(target), size: stat.size }
+      : { kind: "missing", path: target };
   }, failed);
   // 清草稿：给了 id 只清那段对话的，否则整个 .草稿 目录
   const handleArchiveClean = jsonRoute(async body => {
@@ -274,6 +296,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   }, failed);
   return {
     "POST /api/archive/list": handleArchiveList,
+    "POST /api/archive/stat": handleArchiveStat,
     "POST /api/archive/open": handleArchiveOpen,
     "POST /api/archive/put": handleArchivePut,
     "POST /api/archive/move": handleArchiveMove,

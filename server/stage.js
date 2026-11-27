@@ -162,9 +162,10 @@ function sweepOutputs(dir, pattern = AUTO_OUTPUT) {
 // 浏览器只会把 Office 文档当下载：人点开一个 docx，只落得本机 Word 弹出窗口，在游目里看不见内容。要看内容就得把言的抽取搬过来——
 // 页面取原件（raw）、用与预览同一套抽正文（src/13-files/30-extract.js），正文交给 docpage；这里包成一份自足的文档页落进 工作/，
 // 页面再以 file:// 打开。样式取自言自己的 styles/，与言里的预览同一副样子，改一处两处都变。
-// 只认下面六种：抽得出正文的现代 Office 与 ODF。旧格式 doc/xls/ppt 抽不出、压缩包也无正文，仍交本机程序。
-// raw 是个窄口——页面万一被人借手，也只读得走这六种，读不到密钥、配置这类东西
-const DOC_VIEWABLE = new Set([".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".ipynb"]),
+// 只认下面这几种：抽得出正文的现代 Office 与 ODF，另加 md（工作区里点开一份 md，排好的那一页由预览器那套渲染摊出来）。
+// 旧格式 doc/xls/ppt 抽不出、压缩包也无正文，仍交本机程序。
+// raw 是个窄口——页面万一被人借手，也只读得走这几种，读不到密钥、配置这类东西
+const DOC_VIEWABLE = new Set([".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".ipynb", ".md", ".markdown", ".mdx"]),
   DOCPAGE_STYLES = ["00-base.css", "30-chat/40-markdown.css", "85-components.css"],
   // 摊开的文档页的名字（docpage 写的那一份）。工作/ 里还落着模型给人起的名字（报告、截图），清理只认这一式
   DOCPAGE_FILE = /^view-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.html$/,
@@ -543,7 +544,7 @@ module.exports = function createStage({ root = () => "" } = {}) {
     if (!process.env.YAN_NO_EXTERNAL) platform.openUrl(url);
     sendJson(res, 200, { ok: true });
   }
-  // 原件直取：GET /api/stage/raw?url=file:///…，页面抽正文用。Office/ODF 六种加 ipynb（#169）、只认盘上的普通文件：
+  // 原件直取：GET /api/stage/raw?url=file:///…，页面抽正文用。Office/ODF 六种加 ipynb（#169）与 md、只认盘上的普通文件：
   // 路径从 file: 地址解出来；在碰文件系统前先挡掉远程主机与 UNC。
   async function raw(req, res) {
     let file = "";
