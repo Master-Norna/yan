@@ -694,7 +694,7 @@ var YAN_EN = {
   "落墨与天光、印章呼吸与开合过渡": "Ink and light effects, seal animations and transitions",
   随系统: "System",
   简约模式: "Compact mode",
-  "默认收起思绪与各步骤的详情": "Collapse thinking and individual step details by default",
+  默认收起思绪与各步骤的详情: "Collapse thinking and individual step details by default",
   印色: "Accent color",
   界面中的点睛之色: "The highlight color of the interface",
   混排: "Mixed",

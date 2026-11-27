@@ -248,8 +248,7 @@ function paintThought(details, text, live, { touched = false, force = false } = 
   if (touched) return;
   if (compactTrail()) {
     if (details.open || details._motionTarget === true) setProcessDetails(details, false);
-  }
-  else if (live) settleDetails(details, true);
+  } else if (live) settleDetails(details, true);
   else if (details.open) settleDetails(details, false, null, force);
 }
 /**

@@ -13,7 +13,10 @@ const on = `document.querySelector('[data-setting="compactTrail"][data-value="tr
   off = `document.querySelector('[data-setting="compactTrail"][data-value="false"]')`;
 check("compact mode is off by default", await evalJs(`${off}.classList.contains("active")`));
 await evalJs(`${on}.click(); true`);
-check("compact mode is selected and saved", await evalJs(`${on}.classList.contains("active") && __yanState().settings.compactTrail === true`));
+check(
+  "compact mode is selected and saved",
+  await evalJs(`${on}.classList.contains("active") && __yanState().settings.compactTrail === true`)
+);
 await shot("compact-trail-settings.png");
 await evalJs(`document.querySelector("#closeSettings").click(); true`);
 const last = `[...document.querySelectorAll('#messages .message.assistant')].at(-1)`,
@@ -65,7 +68,7 @@ await fetch(PAGE + "api/chats/save", {
               arguments: "{}",
               title: ".",
               status: "done",
-              output: "a.js\\nb.js",
+              output: "a.js\nb.js",
               result: "2 件"
             },
             {
@@ -91,11 +94,16 @@ const diff = `document.querySelector('[data-step-id="compact-diff"]')`,
   stack = `document.querySelector('[data-message="compact-a"] .tool-stack')`;
 check("compact mode persists on reload", await evalJs(`__yanState().settings.compactTrail === true`));
 check("the enclosing Steps timeline stays open", await evalJs(`${stack}.open`));
-check("diff and directory details default to closed", await evalJs(`${diff}.classList.contains("folded") && ${list}.classList.contains("folded")`));
+check(
+  "diff and directory details default to closed",
+  await evalJs(`${diff}.classList.contains("folded") && ${list}.classList.contains("folded")`)
+);
 check("plan is not folded", await evalJs(`!document.querySelector('[data-step-id="compact-plan"]').classList.contains("folded")`));
 await evalJs(`${diff}.querySelector(".tool-step-head").click(); true`);
 check("individual details can be expanded", await evalJs(`!${diff}.classList.contains("folded")`));
-await evalJs(`document.querySelector("#openSettings").click(); document.querySelector('[data-tab="appearance"]').click(); ${off}.click(); true`);
+await evalJs(
+  `document.querySelector("#openSettings").click(); document.querySelector('[data-tab="appearance"]').click(); ${off}.click(); true`
+);
 check("turning compact mode off restores normal defaults", await evalJs(`!${list}.classList.contains("folded") && ${stack}.open`));
 await close();
 process.exit(0);
