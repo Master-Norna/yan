@@ -371,14 +371,12 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
       const parents = new Set();
       for (const paths of [tree.files.keys(), tree.dirs])
         for (const rel of paths)
-          for (let dir = path.posix.dirname(rel); dir !== "." && !parents.has(dir); dir = path.posix.dirname(dir))
-            parents.add(dir);
+          for (let dir = path.posix.dirname(rel); dir !== "." && !parents.has(dir); dir = path.posix.dirname(dir)) parents.add(dir);
       return parents;
     };
     const thenParents = parentsOf(then),
       nowParents = parentsOf(now);
-    for (const dir of then.dirs)
-      if (!now.dirs.has(dir) && !thenParents.has(dir)) changes.push({ path: `${dir}/`, kind: "removed" });
+    for (const dir of then.dirs) if (!now.dirs.has(dir) && !thenParents.has(dir)) changes.push({ path: `${dir}/`, kind: "removed" });
     for (const dir of now.dirs)
       if (
         !then.dirs.has(dir) &&
