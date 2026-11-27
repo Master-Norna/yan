@@ -312,7 +312,9 @@ function stackPart(message, source, view) {
     always: true,
     enter: true,
     html: () => {
-      const open = message.steps.some(step => step.status === "pending") || (message.toolsTouched ? !!message.toolsOpen : view.streaming && !compactTrail());
+      const open =
+        message.steps.some(step => step.status === "pending") ||
+        (message.toolsTouched ? !!message.toolsOpen : view.streaming && !compactTrail());
       return `<details class="tool-stack${view.work ? " is-work" : ""}"${open ? " open" : ""} data-state="${escapeHtml(message.status || "complete")}"><summary><span class="tool-stack-label"></span><span class="tool-stack-meta"></span></summary><div class="tool-stack-body"></div></details>`;
     },
     paint: (el, created) => paintStack(el, message, source, view, created)
