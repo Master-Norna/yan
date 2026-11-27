@@ -1,17 +1,68 @@
 /* 工作区（设计稿/172）：舞台里的一层，簿录照卷宗那一套（styles/50-files.css）。
    与卷宗的不同只在：顶上一对「工作区 / 改动」、一条路径、不设分类签与收入改名。
    窄下来只收紧比例、不另画一套：名目让出宽度给大小与日期，四列始终四列 */
-.stage-view.work {
-  place-items: stretch;
+/* 浏览器与工作区是同级的区域；只有浏览器区域包含地址行与画面。 */
+.stage-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  container-type: inline-size;
 }
-.stage-view.work .stage-sheet,
-.stage-view.work > .stage-empty,
-.stage-view.work .stage-pick-at {
-  display: none;
+.stage-browser {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .work-page {
+  flex: 0 1 40%;
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
-  padding: 18px clamp(14px, 4cqi, 26px) 44px;
+  padding: 18px 14px 28px;
+  border-right: 1px solid var(--line);
+}
+.work-page:has(+ .stage-browser.hidden) {
+  flex: 1;
+  border-right: 0;
+}
+@container (max-width: 760px) {
+  .work-page {
+    flex-basis: 42%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .work-page:has(+ .stage-browser.hidden) {
+    border-bottom: 0;
+  }
+  .stage-browser {
+    flex: 1;
+  }
+}
+/* 断点由面板自己决定，而不是整张网页。 */
+.stage-body {
+  flex-wrap: wrap;
+}
+.stage-browser {
+  min-width: min(420px, 100%);
+}
+@container (max-width: 760px) {
+  .work-page,
+  .stage-browser {
+    flex-basis: 100%;
+  }
+  .work-page:not(:has(+ .stage-browser.hidden)) {
+    height: 42%;
+    flex: 0 0 100%;
+  }
+  .stage-browser {
+    height: 58%;
+    flex: 1 1 100%;
+  }
+  .work-page.hidden + .stage-browser {
+    height: 100%;
+  }
 }
 /* 宽窄照这一层自己的宽算（cqi），不照舞台 */
 .work-page .work-inner {
@@ -122,7 +173,8 @@
   max-width: 100%;
   min-width: 0;
   flex-wrap: nowrap;
-  overflow: hidden;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 /* 一级一枚键，不让它缩：缩了字就折行，一条路径占去三行。长名字截断、悬停看全 */
 .work-bar .library-crumbs button,

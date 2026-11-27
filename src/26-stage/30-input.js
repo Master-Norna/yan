@@ -59,11 +59,8 @@ function stageShortcut(e) {
     ctrl = e.ctrlKey || e.metaKey;
   if (key === "escape" && stage.pen) stageSetPen(false);
   else if ((ctrl && key === "l") || (e.altKey && key === "d") || key === "f6") stageEditUrl();
-  else if (ctrl && key === "f") {
-    // 工作区不另做查找，Ctrl+F 交回外层浏览器。
-    if (work.open) return false;
-    stageFindOpen();
-  } else if (ctrl && (key === "=" || key === "+" || key === "-" || key === "0")) stageZoomStep(key === "0" ? 0 : key === "-" ? -1 : 1);
+  else if (ctrl && key === "f") stageFindOpen();
+  else if (ctrl && (key === "=" || key === "+" || key === "-" || key === "0")) stageZoomStep(key === "0" ? 0 : key === "-" ? -1 : 1);
   else if (key === "f5" || (ctrl && key === "r")) {
     if (stage.session) void stageSend("Page.reload", { ignoreCache: e.shiftKey }, stage.session).catch(() => {});
   } else if (e.altKey && (key === "arrowleft" || key === "arrowright")) void stageTravel(key === "arrowleft" ? -1 : 1);
@@ -130,8 +127,6 @@ function stageCaretSoon() {
 }
 /** @param {string} raw */
 function stageGo(raw) {
-  // 工作区里输的一句话落到那一层目录或那一件文件（见 60-work.js）
-  if (work.open) return void workGo(raw);
   const url = stageUrlOf(raw);
   if (!url || !stage.ws) return;
   // 人开的 Office 文档浏览器只会当下载：先抽出正文摊成文档页，不直接把游目导航过去（见 stageShowDoc）
@@ -197,7 +192,7 @@ function stageDocSource(url) {
 }
 /** 地址行里那对「览 / 源」：本机的 md 与网页才有两种看法，别的（Office、图、PDF）只有一种 @param {string} [url] */
 function stageDocPair(url = stage.tabs.get(stage.current)?.url || "") {
-  if (!url || work.open) return null;
+  if (!url) return null;
   const viewed = url.startsWith("view-source:") ? url.slice("view-source:".length) : "",
     page = viewed ? "" : stageDocSources.has(url) ? url : "",
     src = page ? stageDocSources.get(page) : viewed || url;
@@ -413,11 +408,7 @@ function bindStage() {
   } catch {}
   bindStageFind();
   bindWork();
-  $("#stageNewTab").addEventListener("click", () => {
-    // 新开一页即回网页，别让工作区那一层压着新页
-    workHide();
-    stageNewTab();
-  });
+  $("#stageNewTab").addEventListener("click", stageNewTab);
   // 览 / 源：本机的 md、网页才有这一对（见 stageRenderDocMode）
   $("#stageDocMode").addEventListener("click", event => {
     const button = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest("[data-stage-doc]"));
@@ -459,25 +450,12 @@ function bindStage() {
     if (close) return void stageSend("Target.closeTarget", { targetId: close.dataset.stageClose }).catch(() => {});
     const tab = /** @type {HTMLElement | null} */ (target.closest("[data-stage-tab]"));
     if (!tab) return;
-    // 点签即回网页：工作区那一层收起（再点顶栏那一枚回原处，目录还在）
-    const wasWork = work.open;
-    workHide();
-    if (tab.dataset.stageTab === stage.current) {
-      if (wasWork) stageWake();
-      return;
-    }
+    if (tab.dataset.stageTab === stage.current) return;
     stageActivate(tab.dataset.stageTab || "");
   });
   for (const button of document.querySelectorAll("[data-stage-nav]"))
     button.addEventListener("click", () => {
       const action = /** @type {HTMLElement} */ (button).dataset.stageNav;
-      // 工作区里：后退即回上一层，重载即重新列一遍（前进在目录里没有去处）
-      if (work.open) {
-        const up = workUp(work.root);
-        if (action === "back" && up) void workEnterDir(up);
-        else if (action === "reload") void workRefresh();
-        return;
-      }
       if (!stage.session) return;
       // 前后按浏览器记的历史走，不经网页里的脚本（脚本卡住、出错页上也走得动）
       if (action === "reload") void stageSend("Page.reload", {}, stage.session).catch(() => {});

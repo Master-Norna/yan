@@ -8,7 +8,7 @@ function stageShown() {
 }
 // 开着且看得见：没被旁注挤开、言的页面不在后台
 function stageVisible() {
-  return stageShown() && $("#stageView").clientWidth > 0 && !document.hidden;
+  return stageShown() && $("#stageView").clientWidth > 0 && $("#stageView").clientHeight > 0 && !document.hidden;
 }
 // 看得见才收画面，看不见即停收、入口那一笔回来；回来再接上
 function stageWake() {
@@ -76,7 +76,7 @@ function stageActing() {
 function stageSync() {
   const pin = $("#stagePin"),
     acting = stageActing();
-  pin.classList.toggle("hidden", (!stage.ws && !stageServer()) || stageVisible());
+  pin.classList.toggle("hidden", (!stage.ws && !stageServer()) || (stageShown() && $("#stagePanel").clientWidth > 0 && !document.hidden));
   pin.dataset.state = acting ? "act" : stage.ws ? "open" : "off";
   // 地址行的「执事」：在用时挂着，指着浮出近几步
   $("#stageBusy").classList.toggle("hidden", !acting);
@@ -84,8 +84,8 @@ function stageSync() {
   clearTimeout(stage.actTimer);
   // 这一答何时收尾这里不知道：在用而没有在途调用时隔一会儿再看一回
   if (acting && !stage.busy) stage.actTimer = window.setTimeout(stageSync, 1500);
-  // 收藏：连上了就挂（收藏此页要它）；没连上时浏览器配置目录里有收藏也挂，点一条可开。工作区里没有「这一页」可收，收起
-  $("#stageMarks").classList.toggle("hidden", work.open || (!stage.ws && !stage.marks));
+  // 收藏：连上了就挂（收藏此页要它）；没连上时浏览器配置目录里有收藏也挂，点一条可开
+  $("#stageMarks").classList.toggle("hidden", !stage.ws && !stage.marks);
   stageRender();
 }
 // 接进来的浏览器类 MCP：工具里有 browser_navigate 的那个服务（playwright 即是）
@@ -577,8 +577,6 @@ function stageReadable(url) {
 // 地址行给人看的一句：域名 › 页题；本机的页不收短（localhost 写端口与路径、本机文件写文件名）。整串网址在 title 里，点它才露出可改
 /** @param {{ title: string, url: string } | undefined} tab */
 function stageAddrHtml(tab) {
-  // 工作区里地址行写的是这一层目录（点它可改，见 stageEditUrl）
-  if (work.open) return workAddrHtml();
   if (!tab?.url) return "";
   // 摊出来的那一页（md 排好的那份）写它的原件；看源码时也写那一份文件，别写 view-source:
   const text = stageReadable(stageDocSource(tab.url));
@@ -602,12 +600,12 @@ function stageAddrHtml(tab) {
     rest = local ? stageReadable(url.pathname + url.search + url.hash) : tab.title && tab.title !== tab.url ? tab.title : "";
   return `<b>${escapeHtml(local ? url.host : url.host.replace(/^www\./, ""))}</b>${rest && rest !== "/" ? `${sep}${escapeHtml(rest)}` : ""}`;
 }
-// 改网址：地址行换成输入框、整串选中（点地址行、Ctrl+L）；工作区里改的是这一层目录
+// 改网址：地址行换成输入框、整串选中（点地址行、Ctrl+L）
 function stageEditUrl() {
   const url = /** @type {HTMLInputElement} */ ($("#stageUrl"));
   $("#stageAddr").classList.add("hidden");
   url.classList.remove("hidden");
-  url.value = work.open ? workHere() : stageReadable(stage.tabs.get(stage.current)?.url || "");
+  url.value = stageReadable(stageDocSource(stage.tabs.get(stage.current)?.url || ""));
   url.focus();
   url.select();
 }
@@ -651,26 +649,26 @@ function stageRender() {
     addr = $("#stageAddr");
   if (document.activeElement !== $("#stageUrl")) {
     stageSetHtml(addr, stageAddrHtml(tab));
-    const title = work.open ? workHere() : tab?.url ? stageReadable(stageDocSource(tab.url)) : "";
+    const title = tab?.url ? stageReadable(stageDocSource(tab.url)) : "";
     if (addr.getAttribute("title") !== title) addr.title = title;
   }
-  const empty = work.open
-    ? ""
-    : stage.launching
-      ? stageEmptyHtml(t("正在打开浏览器…"))
-      : !stage.ws
-        ? stageEmptyHtml(
-            t("浏览器未开"),
-            stageServer() ? `<button type="button" class="stage-go" data-stage-launch>${t(`打开浏览器`)}</button>` : ""
-          )
-        : !tab
-          ? stageEmptyHtml(t("没有开着的页"), `<button type="button" class="stage-go" data-stage-new>${t(`新建标签页`)}</button>`)
-          : "";
+  // 未启动浏览器时，工作区独占内容区；新建标签或开文件仍走浏览器原有的启动入口。
+  $("#stageBrowser").classList.toggle("hidden", work.open && !stage.ws && !stage.launching);
+  const empty = stage.launching
+    ? stageEmptyHtml(t("正在打开浏览器…"))
+    : !stage.ws
+      ? stageEmptyHtml(
+          t("浏览器未开"),
+          stageServer() ? `<button type="button" class="stage-go" data-stage-launch>${t(`打开浏览器`)}</button>` : ""
+        )
+      : !tab
+        ? stageEmptyHtml(t("没有开着的页"), `<button type="button" class="stage-go" data-stage-new>${t(`新建标签页`)}</button>`)
+        : "";
   const emptyBox = $("#stageEmpty");
   stageSetHtml(emptyBox, empty);
   emptyBox.classList.toggle("hidden", !empty);
   $("#stageView").classList.toggle("empty", !!empty);
-  // 工作区那一层（簿录、改动、空态）另在 60-work.js；进了它，网页的画面就收起来
+  // 工作区是同级区域，绘制与网页互不接管
   workPaint();
 }
 /**

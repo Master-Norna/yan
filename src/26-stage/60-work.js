@@ -1,9 +1,9 @@
 // 言 · 游目 · 工作区：舞台上的一层，看某一处目录里的东西。
-// 簿录（列、件图、夹、路径）就是卷宗那一套（src/13-files/10-archive.js），这里只换三样：根可换（地址行里输路径，
+// 簿录（列、件图、夹、路径）就是卷宗那一套（src/13-files/10-archive.js），这里只换三样：根可换（路径末尾点选目录，
 // 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签；有对话目录则跟随，言模式沿用卷宗目录。
 // 点一件即开：夹往下走，件交给游目去开（Office 摊成文档页、md 排出来、网页直接开，见 30-input.js 的 stageGo）。
 // 「改动」那一面只看本段对话改过的件：不说增删改、也不写 +几 −几——件图本身换色（朱是删、泥金是改、石绿是增）。
-// 顶栏那一枚（#stageWorkBtn）只管进出、不表态；这一对（工作区 / 改动）里选着的那一枚才转朱，画面上任何时候只有一处朱。
+// 顶栏文件夹独立开合；工作区的路径、视图切换与浏览器导航互不接管。
 const work = {
   open: false,
   /** @type {string} 绑的目录，也是此刻站着的那一层（绝对路径，正斜杠） */
@@ -51,18 +51,6 @@ function workJoin(root, rel) {
 function workUp(path) {
   return workParts(path).length > 1 ? parentDir(slashed(path)) : "";
 }
-/** 地址行里写的那一句：这一层叫什么，前头是它所在的那一路 */
-function workAddrHtml() {
-  if (!work.root) return `<b>${t("选择文件夹…")}</b>`;
-  const parts = workParts(work.root),
-    here = parts.pop() || work.root,
-    rest = parts.join("/");
-  return `<b>${escapeHtml(here)}</b>${rest ? `<i aria-hidden="true">›</i>${escapeHtml(rest)}` : ""}`;
-}
-/** 这一层的路径（条子上的、地址行里改的，都用它） */
-function workHere() {
-  return work.root;
-}
 // 对话已有工作目录就用它，不另绑、不改对话；切换对话或重新绑定时才回到根。
 function workFollowConversation() {
   const c = currentConversation(),
@@ -79,33 +67,19 @@ function workFollowConversation() {
 // render() 在切换对话、绑定或解绑目录时都会走到这里；平时重画只比一个标记，不读盘。
 function workSyncConversation() {
   if (!work.open || !workFollowConversation()) return;
-  if (document.activeElement === $("#stageUrl")) $("#stageUrl").blur();
-  stageRender();
+  workPaint();
   if (work.root) void workRefresh();
 }
 function workEnter() {
   work.open = true;
   workFollowConversation();
-  // 进工作区先把画面收着：网页在屏幕外照旧开着，回网页时再接上
-  if (stage.session || stage.attached) void stageDetach();
-  workPaint();
   stageRender();
-  if (work.root) void workRefresh();
-}
-/** 收起这一层、回到网页；画面交给调用它的那一步去接（点签换页时自己会接，见 30-input.js） */
-function workHide() {
-  if (!work.open) return;
-  work.open = false;
-  // 前后两枚还原成浏览器记的那一份（见 00-connect.js 的 stageReadHistory）
-  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = !stage.back;
-  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=forward]")).disabled = !stage.forward;
-  workPaint();
-  stageRender();
+  void workRefresh();
 }
 function workLeave() {
   if (!work.open) return;
-  workHide();
-  stageWake();
+  work.open = false;
+  stageRender();
 }
 /** 选一处目录：系统的选夹子窗（与卷宗「收入文件」同一个口，见 server/work/picker.js） */
 async function workPick() {
@@ -118,7 +92,6 @@ async function workPick() {
     workResetRows();
     work.mode = "list";
     workPaint();
-    stageRender();
     await workRefresh();
   } catch (error) {
     toast(t`打开失败：${String(/** @type {any} */ (error).message || error).slice(0, 80)}`);
@@ -132,7 +105,6 @@ function workEnterDir(path) {
   workResetRows();
   work.mode = "list";
   workPaint();
-  stageRender();
   void workRefresh();
 }
 // ---------- 列 ----------
@@ -148,11 +120,11 @@ function workResetRows() {
 }
 // 一层只要一层（depth: 1）；改动直接查本段对话碰过的件。
 async function workRefresh() {
-  if (!work.root) return;
+  if (!work.root && work.mode !== "changes") return;
   const rev = ++work.rev;
   try {
     if (work.mode === "changes") {
-      const files = workChangedFiles().filter(file => relInside(work.root, file.path)),
+      const files = workChangedFiles(),
         entries = new Map();
       // 小批并行：不扫无关目录，也不一次发出无界数量的请求。
       for (let i = 0; i < files.length; i += 16) {
@@ -205,15 +177,15 @@ function workChangedFiles() {
 function workChangeRows() {
   if (!work.full) return [];
   const rows = [];
+  const base = slashed(currentConversation()?.workdir || archiveDir());
   for (const file of workChangedFiles()) {
-    const rel = relInside(work.root, file.path);
-    if (!rel) continue;
-    const entry = work.changeEntries.get(file.path),
+    const rel = base ? relInside(base, file.path) : "",
+      entry = work.changeEntries.get(file.path),
       cut = file.path.lastIndexOf("/");
     rows.push({
       dir: false,
       name: cut < 0 ? file.path : file.path.slice(cut + 1),
-      where: cut < 0 ? "" : parentDir(rel),
+      where: cut < 0 ? "" : parentDir(rel || file.path),
       path: file.path,
       size: entry ? entry.size : null,
       when: entry?.modifiedAt ? formatDay(entry.modifiedAt) : "",
@@ -259,14 +231,18 @@ function workEmptyHtml() {
 function workCrumbsHtml() {
   const parts = workParts(work.root),
     crumbs = [];
-  if (!parts.length) return `<span class="here" title="${escapeHtml(work.root)}">${escapeHtml(work.root)}</span>`;
+  if (work.mode === "changes") return "";
+  if (!parts.length) return "";
   if (parts.length > 4) crumbs.push({ name: parts[0], at: workAt(work.root, parts, 1) }, { name: "…", at: "" });
   for (let i = parts.length > 4 ? parts.length - 2 : 0; i < parts.length; i++)
     crumbs.push({ name: parts[i], at: workAt(work.root, parts, i + 1) });
   return crumbs
     .map((crumb, i) => {
       const sep = i ? `<span class="sep" aria-hidden="true">›</span>` : "";
-      if (i === crumbs.length - 1) return `${sep}<span class="here" title="${escapeHtml(crumb.at)}">${escapeHtml(crumb.name)}</span>`;
+      if (i === crumbs.length - 1)
+        return `${sep}<button type="button" class="here" data-work-pick title="${escapeHtml(crumb.at)}" aria-label="${t("选择文件夹…")}">${escapeHtml(crumb.name)}</button>`;
+      if (/^[a-z]:$/i.test(crumb.at) || (crumb.at.startsWith("//") && workParts(crumb.at).length < 2))
+        return `${sep}<span>${escapeHtml(crumb.name)}</span>`;
       if (!crumb.at) return `${sep}<span class="sep" aria-hidden="true">…</span>`;
       return `${sep}<button type="button" data-work-dir="${escapeHtml(crumb.at)}" title="${escapeHtml(crumb.at)}">${escapeHtml(crumb.name)}</button>`;
     })
@@ -282,24 +258,19 @@ function workRowHtml(row) {
   return `<div class="strip file" role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}"><span>${fileFigure(row.name, row.state === "del" ? "" : row.path, row.state)}</span><span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span><span>${size}</span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
 }
 function workPaint() {
-  const box = $("#stageWork"),
-    view = $("#stageView");
+  const box = $("#stageWork");
   if (!box) return;
-  view.classList.toggle("work", work.open);
+  $("#stageWorkBtn").setAttribute("aria-pressed", String(work.open));
   box.classList.toggle("hidden", !work.open);
   if (!work.open) {
     work.shape = "";
     return;
   }
-  const shape = work.root ? "list" : "empty";
+  const shape = work.root || work.mode === "changes" ? "list" : "empty";
   if (work.shape !== shape) {
     work.shape = shape;
     box.innerHTML = shape === "list" ? workShellHtml() : workEmptyHtml();
   }
-  // 工作区里前后按目录走：还有上一层就能退，前进没有去处（离开这一层时 workHide 按浏览器记的还原）
-  const up = workUp(work.root);
-  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = !up;
-  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=forward]")).disabled = true;
   if (shape !== "list") return;
   const rows = workRows();
   stageSetHtml($("#workCrumbs"), workCrumbsHtml());
@@ -320,52 +291,16 @@ function workPaint() {
   }
 }
 // ---------- 动手 ----------
-/** 点开一件：离开这一层交给游目去开（Office 摊文档、md 排出来、网页直接开，都是 stageGo 的老路） */
+/** 文件交给游目预览，工作区不收起；浏览器还没开时沿用现有启动流程。 */
 async function workOpenPath(path) {
   if (!path) return;
-  workHide();
+  const context = work.context;
   if (!stage.ws) {
     await stageLocate().catch(() => {});
-    if (!stage.ws) {
-      await stageLaunch();
-      if (!stage.ws) {
-        // 浏览器起不来：还留在原处，别把人晾在一片空白上
-        work.open = true;
-        workPaint();
-        stageRender();
-        return;
-      }
-    }
+    if (!stage.ws) await stageLaunch();
   }
+  if (!stage.ws || !work.open || work.context !== context) return;
   stageGo(path);
-}
-/** 地址行里输的一句话落到工作区：目录即换到那一层，件即交给游目去开；不像路径的仍照网址、搜索办 */
-async function workGo(raw) {
-  const text = String(raw || "").trim();
-  if (!text) return;
-  let path = "";
-  if (/^file:/i.test(text)) {
-    try {
-      path = decodeURIComponent(new URL(text).pathname).replace(/^\/([a-z]:)/i, "$1");
-    } catch {
-      path = "";
-    }
-  } else if (/^([a-z]:[\\/]|\/(?!\/))/i.test(text)) path = text;
-  if (!path) {
-    workLeave();
-    return void stageGo(text);
-  }
-  const context = work.context,
-    root = work.root;
-  try {
-    const info = await bridge("/api/archive/stat", { path: slashed(path) });
-    if (!work.open || work.context !== context || work.root !== root) return;
-    if (info.kind === "dir") return void workEnterDir(info.path);
-    if (info.kind === "file") return void workOpenPath(info.path);
-    toast(t`没有这一处：${path}`);
-  } catch (error) {
-    toast(t`打开失败：${String(/** @type {any} */ (error).message || error).slice(0, 80)}`);
-  }
 }
 function workSwitch(mode) {
   if (work.mode === mode) return;
