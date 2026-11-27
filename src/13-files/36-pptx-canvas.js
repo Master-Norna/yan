@@ -380,6 +380,10 @@ function pptxChartSpec(xml, theme, cx) {
           .map(item => item.textContent.trim())
           .join("");
       }
+      // 空单元格不写 c:pt，序号照旧跳号（0、2、3）：中间补成空串，别让稀疏数组漏出去——
+      // 图例按项取名字会撞上脏值，按项量宽度会得 NaN，整张图跟着挪到框外。
+      // 长度由上面 indexOf 的预算封顶（pointBudget），这里与它同阶。
+      for (let index = 0; index < out.length; index += 1) if (!(index in out)) out[index] = "";
       return out;
     },
     textOf = node =>
