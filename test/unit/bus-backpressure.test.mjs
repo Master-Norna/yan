@@ -217,3 +217,65 @@ test("总线：同一请求标识不能覆盖仍在途的作业", async t => {
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].destroyed, false);
 });
+
+test("总线：先取消后登记的请求不得进入分发", async t => {
+  let dispatched = 0;
+  const bus = createBus({ dispatch: () => dispatched++ });
+  const page = "earlycancel123";
+  const sse = new SlowResponse();
+  t.after(() => sse.destroy());
+  bus.routes["GET /api/bus"](Object.assign(Readable.from([]), { url: `/api/bus?page=${page}`, headers: {} }), sse);
+  const post = async (route, body) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: {} });
+    const ack = new SlowResponse();
+    await bus.routes[route](req, ack);
+    return ack.statusCode;
+  };
+  await post("POST /api/bus/cancel", { page, id: "early" });
+  assert.equal(await post("POST /api/bus/send", { page, id: "early", path: "/api/mock", body: "{}" }), 410);
+  assert.equal(dispatched, 0);
+});
+
+test("总线：记下取消之后这一页重连，迟到的 send 仍不分发", async t => {
+  let dispatched = 0;
+  const bus = createBus({ dispatch: () => dispatched++ });
+  const page = "reconnect123";
+  const open = () => {
+    const sse = new SlowResponse();
+    t.after(() => sse.destroy());
+    bus.routes["GET /api/bus"](Object.assign(Readable.from([]), { url: `/api/bus?page=${page}`, headers: {} }), sse);
+    return sse;
+  };
+  const post = async (route, body) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: {} });
+    const ack = new SlowResponse();
+    await bus.routes[route](req, ack);
+    return ack.statusCode;
+  };
+  open();
+  await post("POST /api/bus/cancel", { page, id: "late" });
+  // 取消与 send 之间流断了一次：同一页的早到取消要跟着这一页走，不能随旧 entry 丢掉
+  open();
+  assert.equal(await post("POST /api/bus/send", { page, id: "late", path: "/api/mock", body: "{}" }), 410);
+  assert.equal(dispatched, 0);
+});
+
+test("总线：取消照旧销毁已登记的作业，标识再长也一样", async t => {
+  const jobs = [];
+  const bus = createBus({ dispatch: (_req, res) => jobs.push(res) });
+  const page = "longcancel123";
+  const sse = new SlowResponse();
+  t.after(() => sse.destroy());
+  bus.routes["GET /api/bus"](Object.assign(Readable.from([]), { url: `/api/bus?page=${page}`, headers: {} }), sse);
+  const post = async (route, body) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: {} });
+    const ack = new SlowResponse();
+    await bus.routes[route](req, ack);
+    return ack.statusCode;
+  };
+  const id = "x".repeat(200);
+  assert.equal(await post("POST /api/bus/send", { page, id, path: "/api/mock", body: "{}" }), 202);
+  assert.equal(jobs.length, 1);
+  assert.equal(await post("POST /api/bus/cancel", { page, id }), 200);
+  assert.equal(jobs[0].destroyed, true);
+});
