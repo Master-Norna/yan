@@ -11,9 +11,9 @@ import { load } from "./harness.mjs";
 const { stageDocName, stageDocPage, FILE_KINDS } = load(["stageDocName", "stageDocPage", "FILE_KINDS"]);
 const { docPageHtml, DOC_VIEWABLE, DOCPAGE_FILE, sweepOutputs } = createRequire(import.meta.url)("../../server/stage.js");
 
-test("能摊开的本机文档：抽得出正文的现代文档才认，旧格式与压缩包仍交本机程序", () => {
+test("能摊开的本机文档：抽得出正文的现代文档与 md 才认，旧格式与压缩包仍交本机程序", () => {
   const url = name => `file:///E:/%E6%A1%88/${encodeURIComponent(name)}`;
-  for (const name of ["报告.docx", "数据.xlsx", "讲义.pptx", "写作.odt", "账.ods", "简.odp", "笔记.ipynb"])
+  for (const name of ["报告.docx", "数据.xlsx", "讲义.pptx", "写作.odt", "账.ods", "简.odp", "笔记.ipynb", "说明.md", "日记.markdown"])
     assert.equal(stageDocName(url(name)), name, name);
   // 抽不出正文的一律不认：旧版 Office、压缩包、认得的别的格式
   for (const name of ["老稿.doc", "旧表.xls", "旧讲.ppt", "包.zip", "说明.txt", "图.png", "没扩展名"])
@@ -32,8 +32,10 @@ test("文件名里的转义照解：中文与空格、以及解不开的那种",
 });
 
 test("原件直取放行的扩展名跟着文件种类登记走：旧格式与其他本机文件仍不许读", () => {
-  // 不抄字面：以后在 FILE_KINDS 新添一份 view=doc、或改了一种扩展名，这里必须跟着对上（桥接放行、页面才会摊）
-  const docExts = FILE_KINDS.filter(kind => kind.view === "doc").flatMap(kind => kind.exts.map(ext => `.${ext}`));
+  // 不抄字面：以后在 FILE_KINDS 新添一份 view=doc 或 view=markdown、或改了一种扩展名，这里必须跟着对上（桥接放行、页面才会摊）
+  const docExts = FILE_KINDS.filter(kind => kind.view === "doc" || kind.view === "markdown").flatMap(kind =>
+    kind.exts.map(ext => `.${ext}`)
+  );
   assert.deepEqual([...DOC_VIEWABLE].sort(), [...new Set(docExts)].sort());
   for (const ext of [".env", ".json", ".txt", ".pdf", ".doc", ".zip"]) assert.equal(DOC_VIEWABLE.has(ext), false, ext);
 });

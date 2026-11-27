@@ -63,12 +63,14 @@ const FIGURE_MARKS = {
   video: `<path class="f" d="M6.4 9.4L10.4 12.2L6.4 15ZM3 8h1.2v1.2H3zM3 10.9h1.2v1.2H3zM3 13.8h1.2v1.2H3zM12.1 8h1.2v1.2h-1.2zM12.1 10.9h1.2v1.2h-1.2zM12.1 13.8h1.2v1.2h-1.2z"/>`,
   zip: `<path class="m" d="M8.2 1.2V3M8.2 4.4V6.2M8.2 7.6V9.4M7 10.6H9.4V14.4H7Z"/>`
 };
-/** 一件的小图：图片就是它自己的缩略（file 是那件文件），别的按类画记号 */
-function fileFigure(name, file = "") {
-  const figure = fileKind(name).figure;
+/** 一件的小图：图片就是它自己的缩略（file 是那件文件），别的按类画记号。
+ * state 只在工作区「改动」那一面给：add / mod / del 换成石绿 / 泥金 / 朱（见 styles/56-stage/60-work.css） */
+function fileFigure(name, file = "", state = "") {
+  const figure = fileKind(name).figure,
+    mark = state ? ` data-state="${state}"` : "";
   if (figure === "image" && file)
-    return `<span class="fi fi-thumb" aria-hidden="true"><img src="${escapeHtml(localFileUrl(file))}" alt="" loading="lazy"></span>`;
-  return `<svg class="fi" data-figure="${figure}" viewBox="0 0 16 20" aria-hidden="true"><path class="body" d="M1 .5H11L15.5 5V19.5H1Z"/><path class="fold" d="M11 .5V5H15.5Z"/>${FIGURE_MARKS[figure] || ""}</svg>`;
+    return `<span class="fi fi-thumb"${mark} aria-hidden="true"><img src="${escapeHtml(localFileUrl(file))}" alt="" loading="lazy"></span>`;
+  return `<svg class="fi" data-figure="${figure}"${mark} viewBox="0 0 16 20" aria-hidden="true"><path class="body" d="M1 .5H11L15.5 5V19.5H1Z"/><path class="fold" d="M11 .5V5H15.5Z"/>${FIGURE_MARKS[figure] || ""}</svg>`;
 }
 function caseFigure() {
   return `<svg class="fi" viewBox="0 0 16 20" aria-hidden="true"><rect class="case" x="1" y=".5" width="14.5" height="19"/><rect class="slip" x="4" y="3" width="4" height="11.5"/></svg>`;

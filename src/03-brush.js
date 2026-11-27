@@ -237,6 +237,29 @@ const BRUSH_ICONS = {
     `<rect class="wash" x="7" y="6.6" width="10" height="10.6" rx=".4"/>` +
     brushStroke([7, 6.6, 7.2, 12, 7, 17.2], 1.6, { tail: 0.5 }) +
     brushStroke([7, 6.5, 12, 6.2, 17, 6.6], 1.6, { tail: 0.4 }),
+  // 改动：一页纸，右缘三粒点。点只点墨——那一眼里换色的是文件图（朱删、泥金改、石绿增），
+  // 没选着时图标上先挂一粒朱，就与「一处只一点朱」相冲（见 26-stage/60-work.js）
+  changes: () =>
+    `<rect class="wash" x="3.2" y="4" width="8.4" height="13" rx=".3"/>` +
+    brushStroke([3.2, 3.8, 3.4, 10.4, 3.2, 17], 1.4, { tail: 0.5 }) +
+    brushStroke([3.2, 17, 6.8, 16.6, 11.6, 16.9], 1.2, { tail: 0.4 }) +
+    brushStroke([3.3, 3.9, 6, 3.7, 8.8, 3.8], 1.1, { tone: "ink2", tail: 0.35 }) +
+    brushStroke([5.2, 8, 6.4, 7.8, 8.4, 7.9], 1.05, { tone: "ink2", tail: 0.3 }) +
+    brushDot(15, 5.6, 1.2, "ink2") +
+    brushDot(15, 10, 1.2, "ink2") +
+    brushDot(15, 14.4, 1.2, "ink2"),
+  // 预览：一页纸，纸上三行字——排好的那一眼
+  preview: () =>
+    `<rect class="wash" x="3.8" y="3.6" width="12.4" height="13.4" rx=".3"/>` +
+    brushStroke([3.8, 3.4, 4, 10, 3.8, 17], 1.5, { tail: 0.5 }) +
+    brushStroke([3.8, 17, 9, 16.6, 15.8, 16.9], 1.3, { tail: 0.4 }) +
+    brushStroke([3.9, 3.5, 9, 3.3, 16.1, 3.4], 1.3, { tail: 0.35 }) +
+    [7.2, 10.2, 13.2].map(y => brushStroke([6.2, y, 9, y - 0.2, 13.4, y + 0.1], 1.15, { tone: "ink2", tail: 0.3 })).join(""),
+  // 源码：两尖一撇。撇细一分、用淡墨——17px 下三笔才分得开
+  code: () =>
+    brushStroke([7, 4.9, 3, 10, 7.2, 15.1], 1.7, { tail: 0.5 }) +
+    brushStroke([11.6, 4.3, 10.3, 9.9, 9, 15.7], 1.15, { tone: "ink2", tail: 0.25 }) +
+    brushStroke([12.9, 4.9, 16.9, 10, 12.7, 15.1], 1.6, { tail: 0.35 }),
   // 旁注：左边三行字，右边一道夹批的竖笔
   note: () =>
     [5, 10, 15].map(y => brushStroke([2.8, y + 0.2, 6.4, y - 0.2, 10.2, y + 0.1], 1.3, { tone: "ink2", tail: 0.3 })).join("") +

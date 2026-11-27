@@ -1,0 +1,247 @@
+/* 工作区（设计稿/172）：舞台里的一层，簿录照卷宗那一套（styles/50-files.css）。
+   与卷宗的不同只在：顶上一对「工作区 / 改动」、一条路径与查找、不设分类签与收入改名。
+   窄下来只收紧比例、不另画一套：名目让出宽度给大小与日期，四列始终四列 */
+.stage-view.work {
+  place-items: stretch;
+}
+.stage-view.work .stage-sheet,
+.stage-view.work .stage-empty,
+.stage-view.work .stage-pick-at {
+  display: none;
+}
+.work-page {
+  overflow: auto;
+  padding: 18px clamp(14px, 4cqi, 26px) 44px;
+}
+/* 宽窄照这一层自己的宽算（cqi），不照舞台 */
+.work-page .work-inner {
+  width: 100%;
+  container-type: inline-size;
+  container-name: work;
+}
+/* 顶栏：工作区那一枚与网页那几件隔一道短丝栏。它只管进出、不表态——表态的是下面那一对 */
+.stage-tool-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 5px;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+/* 工作区 / 改动：一对，落在地址行下、路径行上（设计稿/172 甲）。
+   两页相叠＝工作区（整层），一页三粒点＝改动；选中的转朱、底上一层淡朱，任何时候只有一处朱 */
+.stage-views {
+  display: flex;
+  align-items: center;
+  margin: 0 0 9px;
+}
+.stage-views button {
+  width: 28px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+  transition: background var(--dur-quick);
+}
+.stage-views button:first-child {
+  border-radius: var(--radius-m) 0 0 var(--radius-m);
+}
+.stage-views button:last-child {
+  border-radius: 0 var(--radius-m) var(--radius-m) 0;
+}
+.stage-views button + button {
+  border-left: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.stage-views button .brush {
+  width: 17px;
+  height: 17px;
+  opacity: 0.42;
+  transition: opacity var(--dur-quick);
+}
+.stage-views button:hover .brush {
+  opacity: 0.72;
+}
+.stage-views button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.stage-views button[aria-pressed="true"] .brush {
+  opacity: 1;
+}
+.stage-views button[aria-pressed="true"] .brush .ink,
+.stage-views button[aria-pressed="true"] .brush .ink2 {
+  fill: var(--accent);
+}
+/* 地址行那对「览 / 源」：落在收藏左边，收藏的位置不动；与上面那一对同一副写法 */
+.stage-nav > .stage-docmode {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  margin-right: 4px;
+}
+.stage-nav > .stage-docmode.hidden {
+  display: none;
+}
+.stage-nav > .stage-docmode button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+  transition: background var(--dur-quick);
+}
+.stage-nav > .stage-docmode button:first-child {
+  border-radius: var(--radius-m) 0 0 var(--radius-m);
+}
+.stage-nav > .stage-docmode button:last-child {
+  border-radius: 0 var(--radius-m) var(--radius-m) 0;
+}
+.stage-nav > .stage-docmode button + button {
+  border-left: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.stage-nav > .stage-docmode button .brush {
+  width: 17px;
+  height: 17px;
+  opacity: 0.42;
+  transition: opacity var(--dur-quick);
+}
+.stage-nav > .stage-docmode button:hover .brush {
+  opacity: 0.72;
+}
+.stage-nav > .stage-docmode button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.stage-nav > .stage-docmode button[aria-pressed="true"] .brush {
+  opacity: 1;
+}
+.stage-nav > .stage-docmode button[aria-pressed="true"] .brush .ink,
+.stage-nav > .stage-docmode button[aria-pressed="true"] .brush .ink2 {
+  fill: var(--accent);
+}
+.stage-nav > .stage-docmode:not(.hidden) ~ #stageMarks {
+  margin-left: 0;
+}
+/* 一条路、一行小字、一枚查找：页头（大标题、图标、动作）整个省掉 */
+.work-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.work-bar .library-crumbs {
+  flex: 0 0 auto;
+  max-width: 62%;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+/* 一级一枚键，不让它缩：缩了字就折行，一条路径占去三行。长名字截断、悬停看全 */
+.work-bar .library-crumbs button,
+.work-bar .library-crumbs .here {
+  flex: none;
+  max-width: 12em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.work-facts {
+  flex: none;
+  color: var(--ink-3);
+  font: var(--fs-small) var(--title);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.work-bar .page-find {
+  flex: 1 1 120px;
+  width: auto;
+  max-width: 200px;
+  min-width: 80px;
+  margin-left: auto;
+}
+/* 还没绑目录：一句话、一枚字按钮，底下不画空簿录 */
+.work-empty {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  padding-top: 54px;
+}
+.work-empty p {
+  margin: 0;
+  color: var(--ink-2);
+  font: var(--fs-mid) var(--title);
+  letter-spacing: 0.06em;
+}
+.work-empty button {
+  padding: 0 2px 3px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 30%, transparent);
+  color: var(--ink);
+  font: var(--fs-small) var(--title);
+  letter-spacing: 0.08em;
+  transition:
+    color var(--dur-quick),
+    border-color var(--dur-quick);
+}
+.work-empty button:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.work-page .strips {
+  --cell: 12px;
+  --cols: 30px minmax(0, 1fr) 80px 116px;
+}
+.work-page .strip > span,
+.work-page .strip-cols > span {
+  padding: 0 var(--cell);
+}
+.work-page .strip > span:first-child,
+.work-page .strip-cols > span:first-child {
+  padding: 0;
+}
+.work-page .strip-name {
+  gap: 8px;
+}
+.work-page .strip-name .dir {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+/* 改动那一面：不写「增 / 改 / 删」，也不写 +几 −几——文件图本身换成那一色：
+   朱是删、泥金是改、石绿是增（与改动条的 ins / del 同一套，另补一个「改」的泥金） */
+.strips .fi[data-state="add"] {
+  --fc: var(--code-green);
+}
+.strips .fi[data-state="mod"] {
+  --fc: var(--gold);
+}
+.strips .fi[data-state="del"] {
+  --fc: var(--danger);
+}
+.strips .fi-thumb[data-state="add"] {
+  --fc: var(--code-green);
+}
+.strips .fi-thumb[data-state="mod"] {
+  --fc: var(--gold);
+}
+.strips .fi-thumb[data-state="del"] {
+  --fc: var(--danger);
+}
+.strips .fi-thumb[data-state] {
+  box-shadow: inset 0 0 0 1.5px var(--fc);
+}
+.strips .fi-thumb[data-state="del"] img {
+  opacity: 0.45;
+}
+@container work (max-width: 500px) {
+  .work-page .strips {
+    --cell: 8px;
+    --cols: 26px minmax(0, 1fr) 66px 96px;
+  }
+  .work-facts {
+    display: none;
+  }
+}
+@container work (max-width: 340px) {
+  .work-page .strips {
+    --cell: 6px;
+    --cols: 24px minmax(0, 1fr) 60px 84px;
+  }
+}

@@ -9,6 +9,8 @@ function stageShow(targetId) {
   if (stageVisible()) void stageAttach();
 }
 async function stageAttach() {
+  // 工作区那一层摊着时不必收网页的画面（回来时 stageWake 再接上）
+  if (work.open) return;
   const target = stage.current,
     ws = stage.ws;
   if (!stage.ws || !target || stage.attached === target) return;
