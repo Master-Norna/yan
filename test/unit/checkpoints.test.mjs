@@ -746,3 +746,10 @@ test("POSIX 模式单独改变也能退回，可执行权限不会丢", { skip: 
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("不合正则语法的忽略规则不妨碍其他规则", () => {
+  assert.equal(ignoreRule("[z-a]", ""), null);
+  const rules = ["[z-a]", "*.log"].map(line => ignoreRule(line, "")).filter(Boolean);
+  assert.equal(ignored(rules, "a.log", false), true);
+  assert.equal(ignored(rules, "a.txt", false), false);
+});
