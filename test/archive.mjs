@@ -58,13 +58,13 @@ check(
   (await evalJs(`document.querySelector(".message.assistant .deliver-bar .deliver-name")?.textContent`)) === "报表.csv"
 );
 check(
-  "deliverable row shows type, size and the two actions with 下载 last",
+  "deliverable row shows type, size and one download brush key; the row itself is pressable",
   await evalJs(
-    `(f => f.querySelector(".fi").dataset.figure === "table" && /B$/.test(f.querySelector("small").textContent) && [...f.querySelectorAll(".deliver-btn")].map(b => b.textContent).join(",") === "预览,下载")(document.querySelector(".message.assistant .deliver-file"))`
+    `(f => f.querySelector(".fi").dataset.figure === "table" && /B$/.test(f.querySelector("small").textContent) && f.getAttribute("role") === "button" && f.querySelectorAll(".deliver-btn").length === 1 && f.querySelector('.deliver-btn[data-deliver-action="download"] .brush').childElementCount > 0 && f.querySelector(".deliver-btn").getAttribute("aria-label") === "另存到本机")(document.querySelector(".message.assistant .deliver-file"))`
   )
 );
-// 「预览」：不必下载，就地预览
-await evalJs(`document.querySelector('.message.assistant .deliver-bar [data-deliver-action="view"]').click(); true`);
+// 点条目即预览：不必下载，就地预览
+await evalJs(`document.querySelector(".message.assistant .deliver-file").click(); true`);
 await waitFor(`!!document.querySelector("#fileViewerStage .file-viewer-table td")`, 8000);
 check(
   "preview opens the csv as a table without downloading",
@@ -117,7 +117,7 @@ check(
   "a deliverable in the hidden drafts folder is not marked as moved out, nor claimed to be in Files",
   (await evalJs(
     `(b => b.querySelectorAll(".deliver-gone").length + "|" + b.querySelectorAll(".deliver-btn").length + "|" + b.querySelector(".deliver-head").textContent)(document.querySelector(".message.assistant .deliver-bar"))`
-  )) === "0|2|成成品 1 件"
+  )) === "0|1|成成品 1 件"
 );
 await evalJs(`(m => { m.deliverables = m._kept; delete m._kept; })(__yanState().conversations[0].messages[1]); true`);
 await reopenDeliver();

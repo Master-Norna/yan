@@ -141,18 +141,18 @@ await evalJs(
 );
 await waitFor(`document.querySelectorAll(".message.assistant").length === 7 && ${lastAssistant}.dataset.status === "complete"`, 20000);
 await waitFor(`!!${lastAssistant}.querySelector(".deliver-bar")`, 5000);
-check("deliverable listed with actions", await evalJs(`${lastAssistant}.querySelectorAll(".deliver-btn").length === 2`));
+check("deliverable listed with a download key", await evalJs(`${lastAssistant}.querySelectorAll(".deliver-btn").length === 1`));
 unlinkSync(`${ARCHIVE}/报表.csv`);
 await evalJs(`document.querySelector("#openLibrary").click(); true`);
 await sleep(900);
 await evalJs(`document.querySelector("#openLibrary").click(); true`);
 await sleep(300);
 const gone = await evalJs(
-  `(f => ({ missing: f.classList.contains("missing"), note: f.querySelector(".deliver-gone")?.textContent || "", btns: f.querySelectorAll(".deliver-btn").length }))(${lastAssistant}.querySelector(".deliver-file"))`
+  `(f => ({ missing: f.classList.contains("missing"), note: f.querySelector(".deliver-gone")?.textContent || "", btns: f.querySelectorAll(".deliver-btn").length, role: f.getAttribute("role") }))(${lastAssistant}.querySelector(".deliver-file"))`
 );
 check(
-  "deleted deliverable is marked 已移出卷宗 without view / download",
-  gone.missing && gone.note === "已移出卷宗" && gone.btns === 0,
+  "deleted deliverable is marked 已移出卷宗, with no download key and not pressable",
+  gone.missing && gone.note === "已移出卷宗" && gone.btns === 0 && gone.role === null,
   JSON.stringify(gone)
 );
 await shot("robust-deliver-gone.png");
