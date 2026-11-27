@@ -1,5 +1,14 @@
 // 言 · 行迹 · 时间线：用了工具的答画成一条时间线——分组、题头与用时，帮手各轮的折叠
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
+function compactTrail() {
+  return store.settings.compactTrail === true;
+}
+// 重画可见回复，沿用原有就地更新，不重建正文或覆盖手动开合状态。
+function refreshTrailAppearance() {
+  renderConversation();
+  if (isShown("#sidePanel")) renderSidePanel();
+  if (helperPanelOpen()) renderHelperPanel();
+}
 function toolStackLabel() {
   return t("行迹");
 }
@@ -108,7 +117,7 @@ function subStepsMeta(sub, steps) {
 /** @param {SubAgent} sub */
 function subStepsShell(sub, steps) {
   const running = subStepsRunning(sub, steps);
-  return `<details class="tool-stack sub-steps"${sub.status === "streaming" ? " open" : ""} data-state="${running ? "streaming" : "complete"}"><summary><span class="tool-stack-label"></span><span class="tool-stack-meta"></span></summary><div class="tool-stack-body"><div class="tool-steps"></div></div></details>`;
+  return `<details class="tool-stack sub-steps"${sub.status === "streaming" && (!compactTrail() || steps.some(step => step.status === "pending")) ? " open" : ""} data-state="${running ? "streaming" : "complete"}"><summary><span class="tool-stack-label"></span><span class="tool-stack-meta"></span></summary><div class="tool-stack-body"><div class="tool-steps"></div></div></details>`;
 }
 // 一轮的折叠行就地更新：标题与计数跟着这一轮的步骤走；开合跟着整趟（见上）
 /** @param {SubAgent} sub */
@@ -119,8 +128,10 @@ function syncSubSteps(details, sub, steps) {
   const label = details.querySelector(":scope > summary > .tool-stack-label");
   if (label.textContent !== subStepsLabel(steps)) label.textContent = subStepsLabel(steps);
   rollText(details.querySelector(":scope > summary > .tool-stack-meta"), subStepsMeta(sub, steps));
+  if (compactTrail() && sub.status === "streaming" && steps.some(step => step.status === "pending")) return settleDetails(details, true);
   if (details.dataset.touched) return;
-  if (sub.status === "streaming") settleDetails(details, true);
+  if (compactTrail()) setProcessDetails(details, false);
+  else if (sub.status === "streaming") settleDetails(details, true);
   else settleDetails(details, false, null, true);
 }
 // 用时：不足一秒不写

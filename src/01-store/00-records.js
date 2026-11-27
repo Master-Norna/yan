@@ -23,6 +23,7 @@ const defaultStore = {
     name: t("访客"),
     theme: "light",
     inkMotion: "on",
+    compactTrail: false,
     font: "mixed",
     accent: "#9b5540",
     activeProfileId: "",
@@ -72,6 +73,7 @@ function normalizeStoreData(value) {
     // 不再有的东西：浏览器内的旧卷宗、旧版的对话 / 卷宗目录（都已迁进存储根）
     delete data.library;
     const settings = { ...defaultStore.settings, ...(data.settings || {}) };
+    settings.compactTrail = settings.compactTrail === true;
     settings.dutyReview = normalizeDuty(settings.dutyReview, "openai");
     // 旧专司开关迁到记忆页，保留开关选择；不再保留那份接口、密钥与模型。
     settings.memoryEnabled =

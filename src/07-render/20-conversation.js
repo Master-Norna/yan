@@ -185,7 +185,7 @@ function foldCompacted(c) {
 const UI_STATE_FIELDS = new Set(["toolsOpen", "toolsTouched", "reasoningOpen", "reasoningTouched", "showCompacted"]);
 /** @param {Message} message */
 function messageSig(message, branch) {
-  return `${branch ? `${branch.at}/${branch.total}|` : ""}${editingMessageId === message.id ? `e${editingDropped.size}|` : ""}${noteCounts.get(message.id) || 0}|${JSON.stringify(message, (key, value) => (UI_STATE_FIELDS.has(key) ? undefined : value))}`;
+  return `${message.role === "assistant" ? `${compactTrail()}|` : ""}${branch ? `${branch.at}/${branch.total}|` : ""}${editingMessageId === message.id ? `e${editingDropped.size}|` : ""}${noteCounts.get(message.id) || 0}|${JSON.stringify(message, (key, value) => (UI_STATE_FIELDS.has(key) ? undefined : value))}`;
 }
 /** @param {Conversation} c */
 function syncMessages(c, converged) {

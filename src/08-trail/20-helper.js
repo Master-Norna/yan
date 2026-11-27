@@ -203,7 +203,8 @@ let helperPeek = ""; // 传话的签点开时替人摊开的那一趟，合窗�
 function helperRunFolded(step) {
   // 传话替人摊开的那一趟压过人亲手收起的：不然那句话藏在收着的时间线里，翻不到
   if (step.id === helperPeek) return false;
-  return step.folded ?? !(step === openHelperRuns().at(-1) && step.status !== "done");
+  if (compactTrail() && step.sub?.steps.some(s => s.status === "pending")) return false;
+  return step.folded ?? (compactTrail() || !(step === openHelperRuns().at(-1) && step.status !== "done"));
 }
 /** @param {Step} step */
 function syncSubFold(trail, step) {
