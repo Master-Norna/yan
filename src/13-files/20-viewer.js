@@ -261,7 +261,7 @@ function pptxChartHtml(shape, ratio) {
     legendRows = legend === "b" || legend === "t" ? rowsOf(items, W - fs * 2) : [],
     legendHeight = legendRows.length ? legendRows.length * legendSize * 1.55 + legendSize * 0.35 : 0,
     legendBoxWidth =
-      legend === "r"
+      legend === "r" || legend === "l"
         ? Math.min(W * 0.46, chip + legendSize * 0.4 + Math.max(...items.map(item => textWidth(item.name, legendSize)))) + legendSize
         : 0,
     // topY 给了就把图例从那里往下排（顶部），不给就贴着框底
@@ -283,13 +283,13 @@ function pptxChartHtml(shape, ratio) {
       return html.join("");
     },
     legendColumnHtml = () => {
-      if (legend !== "r" || !items.length) return "";
+      if ((legend !== "r" && legend !== "l") || !items.length) return "";
       const widest = Math.max(...items.map(item => textWidth(item.name, legendSize))),
         // 名字太长时图例字收小：宁可小，也不让它捅出纸外
         size = Math.max(5, Math.min(legendSize, ((legendBoxWidth - chip - legendSize * 0.9) / widest) * legendSize)),
         step = Math.min(legendSize * 1.55, (H - legendSize * 0.5) / Math.max(1, items.length)),
         start = (H - step * items.length) / 2,
-        x = W - legendBoxWidth + legendSize * 0.2,
+        x = (legend === "l" ? 0 : W - legendBoxWidth) + legendSize * 0.2,
         html = [];
       items.forEach((item, index) => {
         const y = start + index * step + (step - chip) / 2;
@@ -338,8 +338,8 @@ function pptxChartHtml(shape, ratio) {
         count = Math.max(spec.cats.length, ...spec.sers.map(ser => ser.vals.length), 1),
         valueWidth = spec.val.labels ? Math.max(...range.ticks.map(tick => textWidth(tickText(tick), fs))) + fs * 0.7 : 0,
         catWidth = spec.cat.labels ? Math.max(...spec.cats.map(name => textWidth(name, fs)), 0) + fs * 0.8 : 0,
-        padL = horiz ? Math.min(catWidth, W * 0.42) : valueWidth + fs * 0.3,
-        padR = fs * 0.5,
+        padL = (horiz ? Math.min(catWidth, W * 0.42) : valueWidth + fs * 0.3) + (legend === "l" ? legendBoxWidth : 0),
+        padR = fs * 0.5 + (legend === "r" ? legendBoxWidth : 0),
         padT = fs * 0.7 + (legend === "t" ? legendHeight : 0),
         padB =
           (horiz ? (spec.val.labels ? fs * 1.6 : fs * 0.4) : spec.cat.labels ? fs * 1.6 : fs * 0.4) + (legend === "b" ? legendHeight : 0),
@@ -387,7 +387,7 @@ function pptxChartHtml(shape, ratio) {
     lineChart = () => {
       const plot = plotFrame(),
         html = plot.html,
-        legendHtml = legendRowHtml(legend === "t" ? 0 : null);
+        legendHtml = legendBoxWidth ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null);
       for (const ser of spec.sers) {
         const points = [];
         ser.vals.forEach((value, index) => {
@@ -445,7 +445,7 @@ function pptxChartHtml(shape, ratio) {
         positiveTops = new Array(count).fill(Math.max(0, plot.range.min)),
         negativeTops = new Array(count).fill(Math.min(0, plot.range.max)),
         zero = plot.valAt(stackBase),
-        legendHtml = legendRowHtml(legend === "t" ? 0 : null);
+        legendHtml = legendBoxWidth ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null);
       sers.forEach((ser, seriesIndex) => {
         for (let index = 0; index < count; index += 1) {
           const value = ser.vals[index];
@@ -482,7 +482,7 @@ function pptxChartHtml(shape, ratio) {
         total = values.reduce((sum, value) => sum + value, 0) || 1,
         availW = W - legendBoxWidth,
         availH = H - (legend === "b" || legend === "t" ? legendHeight : 0),
-        cx = availW / 2,
+        cx = (legend === "l" ? legendBoxWidth : 0) + availW / 2,
         cy = (legend === "t" ? legendHeight : 0) + availH / 2,
         radius = Math.max(2, Math.min(availW, availH) / 2 - fs * 0.8),
         inner = spec.kind === "doughnut" ? radius * Math.min(0.95, Math.max(0, spec.hole) / 100) : 0,
@@ -513,16 +513,16 @@ function pptxChartHtml(shape, ratio) {
         html.push(`<path d="${d}" fill="${colorOf(color)}"/>`);
         angle += sweep;
       });
-      return { html, legend: legend === "r" ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
+      return { html, legend: legendBoxWidth ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
     },
     // 雷达：同心多边形 + 从中心到顶点一圈辐条，各类一张面
     radarChart = () => {
       const range = rangeOf(),
         count = Math.max(spec.cats.length, ...spec.sers.map(ser => ser.vals.length), 3),
         availW = W - legendBoxWidth,
-        availH = H - (legend === "b" ? legendHeight : 0),
-        cx = availW / 2,
-        cy = availH / 2,
+        availH = H - (legend === "b" || legend === "t" ? legendHeight : 0),
+        cx = (legend === "l" ? legendBoxWidth : 0) + availW / 2,
+        cy = (legend === "t" ? legendHeight : 0) + availH / 2,
         radius = Math.max(2, Math.min(availW, availH) / 2 - fs * 2.2),
         angleOf = index => -Math.PI / 2 + (index * Math.PI * 2) / count,
         at = (index, value) => {
@@ -565,7 +565,7 @@ function pptxChartHtml(shape, ratio) {
               `<circle cx="${n(point[0])}" cy="${n(point[1])}" r="${n(Math.max(1.2, (ser.markerSize || fs * 0.55) / 2))}" fill="${colorOf(ser.color)}"/>`
             );
       }
-      return { html, legend: legend === "r" ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
+      return { html, legend: legendBoxWidth ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
     };
   let chart = null;
   if (spec.kind === "line" || spec.kind === "area") chart = lineChart();

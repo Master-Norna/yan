@@ -351,8 +351,11 @@ function pptxChartSpec(xml, theme, cx) {
     return null;
   }
   const plot = root && xmlDeep(root, "plotArea")[0],
-    chart = plot && [...plot.children].find(node => PPTX_CHART_KIND[node.localName]);
-  if (!chart || !(cx > 0)) return null;
+    // 组合图只画第一组会丢掉数据：暂不支持时照旧留虚线框。
+    // 没有系列的空组不算一组——生成器偶尔会写一个空壳，那不该把画得出来的那一组也拖下水。
+    charts = plot ? [...plot.children].filter(node => /Chart$/.test(node.localName) && xmlKids(node, "ser").length) : [],
+    chart = charts[0];
+  if (charts.length !== 1 || !PPTX_CHART_KIND[chart.localName] || !(cx > 0)) return null;
   // 缓存的 idx 来自包内 XML，不能用任意稀疏下标撑大数组与 SVG。
   const pointBudget = 50000;
   let invalidCache = false;
@@ -406,7 +409,7 @@ function pptxChartSpec(xml, theme, cx) {
         vals: pointsOf(xmlKids(ser, "val")[0]).map(value =>
           value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value)
         ),
-        marker: marker ? marker.getAttribute("symbol") || "circle" : "",
+        marker: marker ? xmlKids(marker, "symbol")[0]?.getAttribute("val") || "circle" : "",
         markerSize: pt(pptxAttr(xmlKids(marker || {}, "size")[0], "val", 5) * 100),
         lineWidth: length(pptxAttr(ln, "w", 25400))
       };
