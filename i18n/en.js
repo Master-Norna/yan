@@ -29,6 +29,7 @@ var YAN_EN = {
   "设置未能存下（浏览器存储已满），请先导出备份": "Settings could not be saved (browser storage is full). Export a backup first",
   "本机桥接响应超时，配置仍在本页，稍后自动重试": "The local bridge timed out. Settings are kept in this page and will be retried",
   "配置尚未写入存储目录，稍后重试：{0}": "Settings not yet written to the storage folder, will retry: {0}",
+  桥接的回执读不出: "The bridge's reply could not be read",
   "存储落在了 {0}，上回用的是 {1}；在设置 → 通用的「存储位置」填回去即可":
     "Storage is now at {0}, last time it was {1}. Set it back under Settings → General → Storage location",
   "配置未能与存储目录对齐：{0}": "Settings could not be synced with the storage folder: {0}",
@@ -1546,6 +1547,7 @@ var YAN_EN = {
   收尾前对照结论图: "Check intent before finishing",
   "已立 {0} / {1}": "Settled {0} / {1}",
   "图被别处接连改动，没写成，稍后再试": "Intent was changed elsewhere repeatedly; not saved. Try again later",
+  "图的回执读不出，可能已经写入，刷新后再看": "The intent receipt could not be read; it may already be saved. Refresh and check",
   已立: "Settled",
   "存疑 · 前提未立": "Doubtful · premises not settled",
   或: "or",

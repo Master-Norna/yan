@@ -129,10 +129,13 @@ function saveConfigNow({ force = false } = {}) {
     signal: unloading ? undefined : AbortSignal.timeout(20000)
   })
     .then(async response => {
-      const data = response.ok ? await response.json() : await response.json().catch(() => ({}));
+      // 桥接回了 200 但正文不是 JSON（写了一半、被截断）：原先当空对象、照旧算存住了。
+      // 单列一句，免得 SyntaxError 的英文原文冒到界面上
+      const data = await response.json().catch(() => null);
       if (bootstrap.store !== scope) return;
-      if (response.status === 409 && data.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
-      if (!response.ok) throw Error(data.error || t`请求失败（${response.status}）`);
+      if (response.ok && !data) throw Error(t("桥接的回执读不出"));
+      if (response.status === 409 && data?.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
+      if (!response.ok) throw Error(data?.error || t`请求失败（${response.status}）`);
       configSaveFailures = 0;
       // 路上已从别处认过更新的一份（对齐时认出了这份，或已合并了更新的）：基准不往回退
       const written = Number(data.savedAt) || savedAt;

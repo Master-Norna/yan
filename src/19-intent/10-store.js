@@ -297,7 +297,8 @@ async function changeIntent(conversation, signal, change) {
     if (!result.next) return result;
     const data = await bridge("/api/work/intent", { ...workScope(conversation), data: result.next, base: version }, signal);
     if (!data.conflict) {
-      if (typeof data.version !== "string" || !data.version) throw Error(t("图被别处接连改动，没写成，稍后再试"));
+      // 没带版本又没报冲突：多半是回执坏了，写入往往已经落地——别与真冲突同一句，模型分不出该重读还是该放弃
+      if (typeof data.version !== "string" || !data.version) throw Error(t("图的回执读不出，可能已经写入，刷新后再看"));
       return result;
     }
   }
