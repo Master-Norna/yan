@@ -54,7 +54,124 @@ function ignoreRule(line, base) {
     } else if (ch === "\\" && i + 1 < text.length) body += text[++i].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     else body += ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
   }
-  return { negate, dirOnly, base, test: new RegExp(anchored ? `^${body}$` : `^(?:.*/)?${body}$`) };
+  try {
+    return { negate, dirOnly, base, test: new RegExp(anchored ? `^${body}// 言 · 桥接的检查点：一答头一回动手改本地文件之前，把它的目录此刻的样子记下来，日后可整个退回到那一刻。
+// 由 server.js 装配：require("./server/checkpoints.js")({ home, skip, deleted })。不靠 git（目录不必是仓库，本机也不必装 git），自己存：
+//   检查点/<目录短码>/对象/ab/cdef…   文件内容按 SHA-1 存一份（同样的内容只存一回），目录也是一件对象：按名排好的 [类, 名, 哈希, 大小]
+//   检查点/<目录短码>/册/<对话>~<答>.json  一答一张：目录与那一刻的根对象。没变的子目录哈希不变、对象共用，一张册只几十字节
+//   检查点/<目录短码>/索引.json         上回见过的 路径 → [大小, 修改时刻, 哈希]：大小、时刻都没变的不重读，第二回起只读变了的
+// 不进的：列目录、检索也不钻的那几类（node_modules、.git、dist……，见 work/paths.js 的 WORK_SKIP），.gitignore 里写了的，链接，
+// 存储根本身（工作目录把它包在里面时）；.git/info/exclude 与 .gitignore 同样认。读不了的文件（被占着）记一笔「不明」，退回时不动它——不能因为没读到就当它不该在。
+// 忽略的也记一笔「不明」：这一答可能改了忽略规则，那一刻忽略的（.env、数据集）此刻露了出来，它们没进快照也恢复不了，不能当这一答新加的删掉。
+// 只一件例外：.yan/ 里的图（见 work/paths.js 的 INTENT_PATH）。仓库的 .gitignore 多写着 .yan/，可图是任务状态，
+// 退回代码时它得跟着退（10-31 定）；若 .yan/ 整棵被忽略，只下去收图，其他内容不进快照。改名前的 .yan/意.json 照收
+// 只管目录里的文件：指令写到目录之外的、MCP 改的远端，都退不了
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { pipeline } = require("node:stream/promises");
+const { Transform } = require("node:stream");
+const { jsonRoute, errorText, writeAtomic, readJsonFile, fileHash } = require("./http.js");
+const { WORK_SKIP, INTENT_PATH, INTENT_LEGACY_PATH } = require("./work/paths.js");
+
+const KEY = /^[\w-]{1,80}~[\w-]{1,80}$/;
+
+// ---------- .gitignore：常用的那些写法（注释、! 取反、末尾 / 只管目录、带 / 的从所在目录算起、* ? ** [..]） ----------
+function ignoreRule(line, base) {
+  let text = line.replace(/(?<!\\)\s+$/, "");
+  if (!text || text.startsWith("#")) return null;
+  const negate = text.startsWith("!");
+  if (negate) text = text.slice(1);
+  text = text.replace(/^\\([#!])/, "$1");
+  const dirOnly = text.endsWith("/");
+  if (dirOnly) text = text.slice(0, -1);
+  const anchored = text.includes("/");
+  text = text.replace(/^\//, "");
+  if (!text) return null;
+  let body = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "*" && text[i + 1] === "*") {
+      const slash = text[i + 2] === "/";
+      body += slash ? "(?:.*/)?" : ".*";
+      i += slash ? 2 : 1;
+    } else if (ch === "*") body += "[^/]*";
+    else if (ch === "?") body += "[^/]";
+    else if (ch === "[") {
+      const end = text.indexOf("]", i + 1);
+      if (end < 0) body += "\\[";
+      else {
+        body += `[${text
+          .slice(i + 1, end)
+          .replace(/^!/, "^")
+          .replace(/\\/g, "\\\\")}]`;
+        i = end;
+      }
+    } else if (ch === "\\" && i + 1 < text.length) body += text[++i].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    else body += ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  }
+ : `^(?:.*/)?${body}// 言 · 桥接的检查点：一答头一回动手改本地文件之前，把它的目录此刻的样子记下来，日后可整个退回到那一刻。
+// 由 server.js 装配：require("./server/checkpoints.js")({ home, skip, deleted })。不靠 git（目录不必是仓库，本机也不必装 git），自己存：
+//   检查点/<目录短码>/对象/ab/cdef…   文件内容按 SHA-1 存一份（同样的内容只存一回），目录也是一件对象：按名排好的 [类, 名, 哈希, 大小]
+//   检查点/<目录短码>/册/<对话>~<答>.json  一答一张：目录与那一刻的根对象。没变的子目录哈希不变、对象共用，一张册只几十字节
+//   检查点/<目录短码>/索引.json         上回见过的 路径 → [大小, 修改时刻, 哈希]：大小、时刻都没变的不重读，第二回起只读变了的
+// 不进的：列目录、检索也不钻的那几类（node_modules、.git、dist……，见 work/paths.js 的 WORK_SKIP），.gitignore 里写了的，链接，
+// 存储根本身（工作目录把它包在里面时）；.git/info/exclude 与 .gitignore 同样认。读不了的文件（被占着）记一笔「不明」，退回时不动它——不能因为没读到就当它不该在。
+// 忽略的也记一笔「不明」：这一答可能改了忽略规则，那一刻忽略的（.env、数据集）此刻露了出来，它们没进快照也恢复不了，不能当这一答新加的删掉。
+// 只一件例外：.yan/ 里的图（见 work/paths.js 的 INTENT_PATH）。仓库的 .gitignore 多写着 .yan/，可图是任务状态，
+// 退回代码时它得跟着退（10-31 定）；若 .yan/ 整棵被忽略，只下去收图，其他内容不进快照。改名前的 .yan/意.json 照收
+// 只管目录里的文件：指令写到目录之外的、MCP 改的远端，都退不了
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { pipeline } = require("node:stream/promises");
+const { Transform } = require("node:stream");
+const { jsonRoute, errorText, writeAtomic, readJsonFile, fileHash } = require("./http.js");
+const { WORK_SKIP, INTENT_PATH, INTENT_LEGACY_PATH } = require("./work/paths.js");
+
+const KEY = /^[\w-]{1,80}~[\w-]{1,80}$/;
+
+// ---------- .gitignore：常用的那些写法（注释、! 取反、末尾 / 只管目录、带 / 的从所在目录算起、* ? ** [..]） ----------
+function ignoreRule(line, base) {
+  let text = line.replace(/(?<!\\)\s+$/, "");
+  if (!text || text.startsWith("#")) return null;
+  const negate = text.startsWith("!");
+  if (negate) text = text.slice(1);
+  text = text.replace(/^\\([#!])/, "$1");
+  const dirOnly = text.endsWith("/");
+  if (dirOnly) text = text.slice(0, -1);
+  const anchored = text.includes("/");
+  text = text.replace(/^\//, "");
+  if (!text) return null;
+  let body = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "*" && text[i + 1] === "*") {
+      const slash = text[i + 2] === "/";
+      body += slash ? "(?:.*/)?" : ".*";
+      i += slash ? 2 : 1;
+    } else if (ch === "*") body += "[^/]*";
+    else if (ch === "?") body += "[^/]";
+    else if (ch === "[") {
+      const end = text.indexOf("]", i + 1);
+      if (end < 0) body += "\\[";
+      else {
+        body += `[${text
+          .slice(i + 1, end)
+          .replace(/^!/, "^")
+          .replace(/\\/g, "\\\\")}]`;
+        i = end;
+      }
+    } else if (ch === "\\" && i + 1 < text.length) body += text[++i].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    else body += ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  }
+) };
+  } catch {
+    // 不合 JS 正则语法的字符范围不应让整个目录无法记下检查点。
+    return null;
+  }
 }
 /** 这一层的 .gitignore 接在上层的规则后面；根上先读仓库自己的 .git/info/exclude（不随仓库走的那份，git 一样认） @param {string} abs @param {string} rel @param {any[]} rules */
 function rulesFor(abs, rel, rules) {
