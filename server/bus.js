@@ -122,7 +122,8 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
   function openStream(req, res) {
     const page = new URL(req.url, "http://127.0.0.1").searchParams.get("page") || "";
     if (!/^[\w-]{8,80}$/.test(page)) return sendJson(res, 400, { error: "缺少页面标识" });
-    // 同一页重连：旧流上的请求随旧流作废
+    // 同一页重连：旧流上的请求随旧流作废；但「先到的取消」还等着拦它那一条迟到的 send，随页带走
+    const pending = pages.get(page)?.cancelled;
     closePage(page);
     // 同一浏览器里已有五页各占一条事件流：这一页再占，六条连接就全满了，各页的普通请求都排着不动。
     // 不接，页面那头 EventSource 遇非 200 即关、不再重连，退回一请求一连接（见 src/01-bridge.js 的 bridgeFetch）。
@@ -136,7 +137,7 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
       "X-Accel-Buffering": "no"
     });
     res.write(": open\n\n");
-    const entry = { res, jobs: new Map(), cancelled: new Map(), agent };
+    const entry = { res, jobs: new Map(), cancelled: pending || new Map(), agent };
     pages.set(page, entry);
     onPages(pages.size);
     // 本机连接一般不会断；隔一阵写一行注释，中途有东西把连接掐了也能尽快发现
@@ -183,16 +184,16 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
   async function cancel(req, res) {
     const { page, id } = await readJson(req);
     const entry = pages.get(page);
-    if (entry && typeof id === "string" && id.length <= 128) {
-      const job = entry.jobs.get(id);
-      if (job) job.destroy();
-      else {
-        // 取消可能先于 send 的请求体解析完成。只在本页短暂记下尚未登记的请求。
-        const now = Date.now();
-        for (const [key, at] of entry.cancelled) if (now - at > 60000) entry.cancelled.delete(key);
-        entry.cancelled.set(id, now);
-        while (entry.cancelled.size > 256) entry.cancelled.delete(entry.cancelled.keys().next().value);
-      }
+    // 已登记的作业照旧销毁（长度不限，与没有这张表时一样）；没登记的才记下来等那条迟到的 send。
+    // 长度与条数只为给这张表封口，不挡销毁。
+    const job = entry?.jobs.get(id);
+    if (job) job.destroy();
+    else if (entry && typeof id === "string" && id.length <= 128) {
+      // 取消可能先于 send 的请求体解析完成。只在本页短暂记下尚未登记的请求。
+      const now = Date.now();
+      for (const [key, at] of entry.cancelled) if (now - at > 60000) entry.cancelled.delete(key);
+      entry.cancelled.set(id, now);
+      while (entry.cancelled.size > 256) entry.cancelled.delete(entry.cancelled.keys().next().value);
     }
     sendJson(res, 200, { ok: true });
   }
