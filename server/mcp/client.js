@@ -84,8 +84,7 @@ class McpClient {
     if (signal?.aborted) throw Error("已停止");
     if (this.toolsChanged) this.tools = await this.listTools();
     if (signal?.aborted) throw Error("已停止");
-    if (!this.tools.some(item => item.name === tool))
-      throw Object.assign(Error("MCP 工具未在当前服务清单中"), { toolsChanged: true });
+    if (!this.tools.some(item => item.name === tool)) throw Object.assign(Error("MCP 工具未在当前服务清单中"), { toolsChanged: true });
     const id = nextId++;
     const onAbort = () => this.cancelRequest(id, "已停止", "用户停止");
     signal?.addEventListener("abort", onAbort, { once: true });
