@@ -1006,6 +1006,11 @@ check(
 check("the address row names the folder", await evalJs(`document.querySelector("#stageAddr").textContent.includes("工作区-舞台")`));
 await waitFor(`__yanStage.state.session === ""`, 5000).catch(() => {});
 check("the screencast stops while the workspace is open", await evalJs(`__yanStage.state.session === ""`));
+await evalJs(`document.querySelector('[data-stage-tab="' + __yanStage.state.current + '"]').click(); true`);
+await waitFor(`!!__yanStage.state.session`, 5000).catch(() => {});
+check("clicking the current browser tab resumes the screencast", await evalJs(`!!__yanStage.state.session`));
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+await waitFor(`!!document.querySelector("#workStrips [data-work-file]")`, 8000).catch(() => {});
 await evalJs(`document.querySelector("#workStrips [data-work-file]").click(); true`);
 await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 25000).catch(() => {});
 const workDocUrl = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
@@ -1033,11 +1038,12 @@ check(
   "the pair says source is on",
   await evalJs(`document.querySelector('#stageDocMode [data-stage-doc="source"]').getAttribute("aria-pressed") === "true"`)
 );
+writeFileSync(`${workDir}/笔记.md`, "# 改过的笔记\n");
 await evalJs(`document.querySelector('#stageDocMode [data-stage-doc="preview"]').click(); true`);
 await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 20000).catch(() => {});
 check(
-  "preview flips back to the laid-out page",
-  await evalJs(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`)
+  "preview regenerates the laid-out page after an external edit",
+  await evalJs(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-") && __yanStage.state.tabs.get(__yanStage.state.current)?.url !== ${JSON.stringify(workDocUrl)}`)
 );
 await browserSend("Target.closeTarget", { targetId });
 await waitFor(`!__yanStage.state.tabs.has(${JSON.stringify(targetId)})`);

@@ -94,6 +94,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     // 路径仍相对根，这一层的就是名字本身
     if (Number(body.depth) === 1) {
       for (const entry of await fs.promises.readdir(root, { withFileTypes: true }).catch(() => [])) {
+        if (out.length + dirs.length >= ARCHIVE_LIST_LIMIT) break;
         if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
         if (entry.isDirectory()) {
           if (!WORK_SKIP.has(entry.name)) dirs.push({ path: entry.name, name: entry.name });
@@ -117,11 +118,21 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   // 问一句这一处是什么：地址行里输的话（工作区、游目）据此决定是换到那一层、还是去开那一件。
   // 只答一件事（目录 / 文件 / 没有），不列不读
   const handleArchiveStat = jsonRoute(async body => {
-    const target = resolveFile(body.path),
-      stat = await fs.promises.stat(target).catch(() => null);
-    return stat
-      ? { kind: stat.isDirectory() ? "dir" : "file", path: target, name: path.basename(target), size: stat.size }
-      : { kind: "missing", path: target };
+    const target = resolveFile(body.path);
+    try {
+      const stat = await fs.promises.stat(target);
+      return {
+        kind: stat.isDirectory() ? "dir" : "file",
+        path: target,
+        name: path.basename(target),
+        size: stat.size,
+        modifiedAt: stat.mtime.toISOString()
+      };
+    } catch (error) {
+      // 没有权限等错误不是文件已被删除；只有路径不存在才报 missing。
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return { kind: "missing", path: target };
+      throw error;
+    }
   }, failed);
   // 清草稿：给了 id 只清那段对话的，否则整个 .草稿 目录
   const handleArchiveClean = jsonRoute(async body => {

@@ -59,3 +59,26 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
   );
   for (const value of [true, null, 0, "false"]) assert.deepEqual(await list({ scratch: value }), { ...visible, scratch });
 });
+
+test("改动所及的隐藏文件直接 stat，不依赖卷宗的扫描结果", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-work-stat-")),
+    route = createArchive({ archiveHome: () => root })["POST /api/archive/stat"];
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, ".gitignore");
+  fs.writeFileSync(file, "abc");
+  const stat = async target => {
+    let status, data;
+    await route(Readable.from([Buffer.from(JSON.stringify({ path: target }))]), {
+      writeHead: code => (status = code),
+      end: body => (data = JSON.parse(body))
+    });
+    assert.equal(status, 200);
+    return data;
+  };
+  const present = await stat(file);
+  assert.equal(present.kind, "file");
+  assert.equal(present.size, 3);
+  assert.ok(present.modifiedAt);
+  assert.equal((await stat(path.join(root, "missing.md"))).kind, "missing");
+  assert.equal((await stat(root)).kind, "dir");
+});

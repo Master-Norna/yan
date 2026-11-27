@@ -18,9 +18,9 @@ async function makeDirs(root, count) {
 test("纯目录也受卷宗与草稿的遍历上限约束", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "yan-archive-budget-"));
   const route = createArchive({ archiveHome: () => root })["POST /api/archive/list"];
-  const list = async () => {
+  const list = async (options = {}) => {
     let status, data;
-    await route(Readable.from([Buffer.from("{}")]), {
+    await route(Readable.from([Buffer.from(JSON.stringify(options))]), {
       writeHead: code => (status = code),
       end: body => (data = JSON.parse(body))
     });
@@ -38,6 +38,9 @@ test("纯目录也受卷宗与草稿的遍历上限约束", async () => {
     assert.equal(data.scratch.count, 5000);
     assert.equal(data.scratch.files, 0);
     assert.equal(data.scratch.truncated, true);
+    const shallow = await list({ depth: 1, scratch: false });
+    assert.equal(shallow.entries.length + shallow.dirs.length, 3000);
+    assert.equal(shallow.truncated, true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

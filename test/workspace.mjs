@@ -133,6 +133,7 @@ await evalJs(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape
 
 // 改动那一面：本段对话改过的件，件图自己换色——石绿新建、泥金改、朱删（盘上已经没有的那件）
 writeFileSync(`${ROOT}/新建.md`, "# 新建\n");
+writeFileSync(`${ROOT}/.gitignore`, "dist\n");
 await fetch(`${PAGE}api/chats/save`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -172,9 +173,9 @@ await fetch(`${PAGE}api/chats/save`, {
               arguments: "{}",
               status: "done",
               at: 2,
-              title: "笔记.md",
+              title: ".gitignore",
               result: "已修改",
-              change: { path: `${ROOT}/笔记.md`, added: 2, removed: 1 }
+              change: { path: `${ROOT}/.gitignore`, added: 2, removed: 1 }
             },
             {
               id: "c3",

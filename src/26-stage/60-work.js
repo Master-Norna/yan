@@ -15,8 +15,10 @@ const work = {
   entries: [],
   /** @type {{ path: string, name: string }[]} 夹，同上 */
   dirs: [],
-  /** 这一趟列的是整棵：查找、改动要跨层 */
+  /** 查找时列整棵；改动只取对话触及的路径 */
   full: false,
+  /** @type {Map<string, { kind: string, size?: number, modifiedAt?: string } | null>} */
+  changeEntries: new Map(),
   truncated: false,
   error: "",
   /** 画着的是哪一副样子（""/list/empty）：壳子只在换样子时重画，查找框里写到一半的字才不会被冲掉 */
@@ -102,6 +104,7 @@ async function workPick() {
     const { paths } = await bridge("/api/work/pick", {});
     if (!paths?.[0]) return;
     work.root = slashed(paths[0]);
+    workResetRows();
     work.query = "";
     work.mode = "list";
     try {
@@ -119,6 +122,7 @@ function workEnterDir(path) {
   const root = slashed(String(path || ""));
   if (!root || root === work.root) return;
   work.root = root;
+  workResetRows();
   work.query = "";
   work.mode = "list";
   const field = /** @type {HTMLInputElement|null} */ ($("#workFind"));
@@ -131,12 +135,43 @@ function workEnterDir(path) {
   void workRefresh();
 }
 // ---------- 列 ----------
-// 一层只要一层（depth: 1）：不必为看一层把整棵树都走一遍；查找与改动才要整棵（跨层找、判哪件已不在）
+// 换根或换面时，旧列表不可拿新根拼路径；在发出新请求前就使旧请求失效。
+function workResetRows() {
+  ++work.rev;
+  clearTimeout(work.findTimer);
+  work.entries = [];
+  work.dirs = [];
+  work.changeEntries.clear();
+  work.full = false;
+  work.truncated = false;
+  work.error = "";
+}
+// 一层只要一层（depth: 1），查找才取整棵；改动直接查本段对话碰过的件。
 async function workRefresh() {
   if (!work.root) return;
   const rev = ++work.rev,
     deep = work.mode === "changes" || !!work.query.trim();
   try {
+    if (work.mode === "changes") {
+      const files = workChangedFiles().filter(file => relInside(work.root, file.path)),
+        entries = new Map();
+      // 小批并行：不扫无关目录，也不一次发出无界数量的请求。
+      for (let i = 0; i < files.length; i += 16) {
+        await Promise.all(
+          files.slice(i, i + 16).map(async file => {
+            const info = await bridge("/api/archive/stat", { path: file.path }, AbortSignal.timeout(8000)).catch(() => null);
+            entries.set(file.path, info);
+          })
+        );
+        if (rev !== work.rev) return;
+      }
+      if (rev !== work.rev) return;
+      work.changeEntries = entries;
+      work.full = true;
+      work.error = "";
+      workPaint();
+      return;
+    }
     const data = await bridge(
       "/api/archive/list",
       { root: work.root, scratch: false, ...(deep ? {} : { depth: 1 }) },
@@ -174,12 +209,11 @@ function workChangedFiles() {
 /** 改动那一面的条子：新建的是石绿、还在的是泥金、盘上已经没有的是朱（大小、日子照现有那一份，删掉的留空） @returns {WorkRow[]} */
 function workChangeRows() {
   if (!work.full) return [];
-  const tree = new Map(work.entries.map(entry => [entry.path.toLowerCase(), entry])),
-    rows = [];
+  const rows = [];
   for (const file of workChangedFiles()) {
     const rel = relInside(work.root, file.path);
     if (!rel) continue;
-    const entry = tree.get(rel.toLowerCase()),
+    const entry = work.changeEntries.get(file.path),
       cut = file.path.lastIndexOf("/");
     rows.push({
       dir: false,
@@ -187,8 +221,8 @@ function workChangeRows() {
       where: cut < 0 ? "" : parentDir(rel),
       path: file.path,
       size: entry ? entry.size : null,
-      when: entry ? formatDay(entry.modifiedAt) : "",
-      state: !entry ? "del" : file.created ? "add" : "mod"
+      when: entry?.modifiedAt ? formatDay(entry.modifiedAt) : "",
+      state: entry?.kind === "missing" ? "del" : entry?.kind === "file" ? (file.created ? "add" : "mod") : ""
     });
   }
   return rows.sort((a, b) => `${a.where}/${a.name}`.localeCompare(`${b.where}/${b.name}`, "zh-CN"));
@@ -371,6 +405,7 @@ async function workGo(raw) {
 function workSwitch(mode) {
   if (work.mode === mode) return;
   work.mode = mode;
+  workResetRows();
   work.query = "";
   const field = /** @type {HTMLInputElement|null} */ ($("#workFind"));
   if (field) field.value = "";
@@ -378,6 +413,7 @@ function workSwitch(mode) {
   void workRefresh();
 }
 function workFind(value) {
+  if (work.mode === "changes") return;
   work.query = String(value || "");
   workPaint();
   clearTimeout(work.findTimer);

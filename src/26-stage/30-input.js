@@ -192,8 +192,7 @@ function stageDocName(url) {
   return view === "doc" || view === "markdown" ? name : "";
 }
 // 摊过的本机文档：原件与排好的那一页各记一头。地址行写原件，览 / 源在两者之间翻（见 stageDocPair）
-const stageDocPages = new Map(),
-  stageDocSources = new Map();
+const stageDocSources = new Map();
 /** 这一页是哪一件文件的看法：摊出来的写原件，看源码时也写原件，别写 view-source: @param {string} url */
 function stageDocSource(url) {
   const raw = String(url || "");
@@ -214,8 +213,7 @@ function stageDocPair(url = stage.tabs.get(stage.current)?.url || "") {
   }
   const view = name ? fileKind(name).view : "";
   if (view === "markdown") {
-    const ready = page || stageDocPages.get(src) || "";
-    return { src, preview: ready, source: src, at: page ? "preview" : "source" };
+    return { src, preview: "", source: src, at: page ? "preview" : "source" };
   }
   // 网页：预览就是浏览器自己开的那一页，源码是浏览器自带的 view-source
   if (view === "html") return { src, preview: src, source: `view-source:${src}`, at: viewed ? "source" : "preview" };
@@ -232,7 +230,7 @@ function stageRenderDocMode() {
     `<button type="button" data-stage-doc="preview" aria-pressed="${pair.at === "preview"}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-stage-doc="source" aria-pressed="${pair.at === "source"}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>`
   );
 }
-/** 览 ↔ 源：来回都是换一次导航；md 头一回翻到「览」时现摊一份（摊过的记在 stageDocPages 里，再翻不再摊）
+/** 览 ↔ 源：来回都是换一次导航；md 每次翻到「览」时现摊一份，避免把执事改过的原件看成旧稿。
  * 翻到「源」不能走 stageGo：那会把 md 又摊成文档页，就来回打转了 @param {"preview"|"source"} to */
 function stageDocToggle(to) {
   const pair = stageDocPair();
@@ -269,7 +267,6 @@ async function stageShowDoc(url) {
     if (!body.startsWith('<div class="file-viewer-empty')) {
       const { url: page } = await bridge("/api/stage/docpage", { name, url, body });
       if (!mine()) return;
-      stageDocPages.set(url, page);
       stageDocSources.set(page, url);
       return void stageNavigate(page, from);
     }
@@ -466,8 +463,12 @@ function bindStage() {
     const tab = /** @type {HTMLElement | null} */ (target.closest("[data-stage-tab]"));
     if (!tab) return;
     // 点签即回网页：工作区那一层收起（再点顶栏那一枚回原处，目录与查找词都还在）
+    const wasWork = work.open;
     workHide();
-    if (tab.dataset.stageTab === stage.current) return;
+    if (tab.dataset.stageTab === stage.current) {
+      if (wasWork) stageWake();
+      return;
+    }
     stageActivate(tab.dataset.stageTab || "");
   });
   for (const button of document.querySelectorAll("[data-stage-nav]"))
