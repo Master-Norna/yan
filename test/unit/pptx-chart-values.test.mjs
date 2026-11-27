@@ -1,0 +1,54 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { load } from "./harness.mjs";
+
+const { pptxChartHtml } = load(["pptxChartHtml"]);
+function render(kind, grouping, values, val = {}) {
+  const ch = {
+    kind,
+    grouping,
+    cats: ["A"],
+    sers: values.map((vals, i) => ({ vals, colors: [], color: ["aa0000", "00aa00", "0000aa"][i], name: String(i) })),
+    accents: [],
+    cat: { labels: true },
+    val: { labels: true, grid: {}, ...val },
+    gap: 150,
+    overlap: 100,
+    hole: 50
+  };
+  return pptxChartHtml({ x: 0, y: 0, w: 1000, h: 600, ch }, 1);
+}
+
+test("堆叠：正负各自累加，数轴涵盖两边", () => {
+  const html = render("bar", "stacked", [[40], [-30], [20]]);
+  assert.match(html, />-30<|>-40</);
+  const ticks = [...html.matchAll(/>(-?\d+)<\/text>/g)].map(match => Number(match[1]));
+  assert.ok(Math.max(...ticks) >= 60);
+  const bars = [...html.matchAll(/<rect x="[^"]+" y="([^"]+)" width="[^"]+" height="([^"]+)" fill="#(?:aa0000|00aa00|0000aa)"/g)];
+  assert.equal(bars.length, 3);
+  const [[, firstY, firstH], [, negativeY], [, lastY, lastH]] = bars;
+  assert.ok(Math.abs(Number(firstY) + Number(firstH) - Number(negativeY)) < 0.3);
+  assert.ok(Math.abs(Number(lastY) + Number(lastH) - Number(firstY)) < 0.3);
+});
+
+test("堆叠：作者把数轴起点调高过时，柱子仍落在绘图区里", () => {
+  const html = render("bar", "stacked", [[30], [40]], { min: 10, max: 100 });
+  const bars = [...html.matchAll(/<rect x="[^"]+" y="([^"]+)" width="[^"]+" height="([^"]+)" fill="#(?:aa0000|00aa00|0000aa)"/g)];
+  assert.equal(bars.length, 2);
+  // 从数值 0 起画会让柱底落到 0 的位置（框外），把类别字盖住
+  for (const [, y, height] of bars)
+    assert.ok(Number(y) + Number(height) <= 600 + 0.1, `柱底 ${Number(y) + Number(height)} 越出 600 高的框`);
+});
+
+test("百分比堆叠：负值不翻成正值", () => {
+  const html = render("bar", "percentStacked", [[50], [-50]]);
+  assert.match(html, />-100</);
+  assert.match(html, />100</);
+});
+
+for (const kind of ["pie", "doughnut"])
+  test(`${kind}：单个非零扇形画完整圆`, () => {
+    const html = render(kind, "", [[10]]);
+    const d = /<path d="([^"]+)"/.exec(html)?.[1] || "";
+    assert.equal((d.match(/ A/g) || []).length, kind === "pie" ? 2 : 4);
+  });
