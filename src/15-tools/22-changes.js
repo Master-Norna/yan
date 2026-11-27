@@ -502,7 +502,8 @@ function changeSummaryInner(message, open) {
 }
 // 成品：这一答的答复里链到的本机文件（模型写「[报告](报告.md)」「![图](图.png)」）。列哪几件由模型定：交给人看的核心文件才写成链接，
 // 解压出的一堆、顺手改的代码不列，别的对话与人同时放进卷宗的也混不进来。收尾时按这段对话的落脚处认路（见 refTarget），
-// 在的记下路与大小。存下的是相对的路：落在卷宗里的只记卷宗里的路，存储目录搬了家也认得；别处的另记所在的根。一件一行：件图、文件名、大小，右侧「预览」与「下载」
+// 在的记下路与大小。存下的是相对的路：落在卷宗里的只记卷宗里的路，存储目录搬了家也认得；别处的另记所在的根。
+// 一件一行：件图、文件名、大小，条尾一枚下载的笔意小画——点条目即预览，与卷宗点条子、正文里那个链接同一条路，不另设「预览」一枚
 /** @param {Conversation} conversation @param {string} content @returns {Promise<Deliverable[]>} */
 async function replyDeliverables(conversation, content) {
   /** @type {string[]} */
@@ -549,10 +550,14 @@ function deliverableMissing(f) {
 /** @param {Deliverable} f */
 function deliverableFileHtml(f, extra = false) {
   const missing = deliverableMissing(f);
-  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(deliverableFile(f))}">${fileFigure(f.name, deliverableFile(f))}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
+  // 点条目即预览（同卷宗点条子、同正文里那个链接），不另设「预览」一枚；条尾只留下载一笔，名字写在 title 与 aria-label 里。
+  // 卷宗里已删掉的那件不可点，一句话代替按键
+  return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(deliverableFile(f))}"${
+    missing ? "" : ` role="button" tabindex="0" title="${t(`预览`)}"`
+  }>${fileFigure(f.name, deliverableFile(f))}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
     missing
       ? `<span class="deliver-gone">${t(`已移出卷宗`)}</span>`
-      : `<button type="button" class="deliver-btn" data-deliver-action="view" title="${t(`预览`)}">${t(`预览`)}</button><button type="button" class="deliver-btn" data-deliver-action="download" title="${t(`另存到本机`)}">${t(`下载`)}</button>`
+      : `<button type="button" class="deliver-btn" data-deliver-action="download" title="${t(`另存到本机`)}" aria-label="${t(`另存到本机`)}">${brushIcon("download")}</button>`
   }</div>`;
 }
 // 成品多了只摊前四件，余下的折进末行一句「余 n 件」（五件以内照旧全摊）；点开的记在本页、不存进消息，重画时照旧开着（设计稿/108 甲）

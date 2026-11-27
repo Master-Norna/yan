@@ -634,13 +634,20 @@ function bindLibraryEvents() {
   $("#messages").addEventListener("click", event => {
     const more = event.target.closest(".deliver-more");
     if (more) return toggleDeliverables(more);
-    const button = event.target.closest("[data-deliver-action]");
-    if (!button) return;
-    const row = /** @type {HTMLElement|null} */ (button.closest("[data-deliver]")),
+    // 成品条：点条目即预览（同卷宗点条子、同正文里那个链接），条尾那一枚只管另存；卷宗里已删掉的那件点不得
+    const row = /** @type {HTMLElement|null} */ (event.target.closest(".deliver-file[data-deliver]")),
       file = row?.dataset.deliver;
-    if (!file) return;
+    if (!row || !file) return;
     if (row.classList.contains("missing")) return toast(t("这件已从卷宗移除"));
-    if (button.dataset.deliverAction === "download") downloadFile(file);
-    else void openFileViewer({ file }, "", button);
+    if (event.target.closest("[data-deliver-action]")) return downloadFile(file);
+    void openFileViewer({ file }, "", row);
+  });
+  // 条目是 role="button"：Enter 或空格即预览；那枚下载另有它自己的点击
+  $("#messages").addEventListener("keydown", event => {
+    const row = event.target instanceof HTMLElement && event.target.matches(".deliver-file[role=button]") ? event.target : null,
+      file = row?.dataset.deliver;
+    if (!row || !file || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    void openFileViewer({ file }, "", row);
   });
 }
