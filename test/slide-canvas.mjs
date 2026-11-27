@@ -76,6 +76,62 @@ const LAYOUT = `<p:sldLayout ${P}><p:cSld><p:bg><p:bgPr><a:blipFill><a:blip r:em
   <p:sp><p:nvSpPr><p:cNvPr id="3" name="标题占位符"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="600000" y="400000"/><a:ext cx="6000000" cy="900000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/></p:txBody></p:sp>
 </p:spTree></p:cSld></p:sldLayout>`;
 
+// 图表的样本：数按 PowerPoint 的写法放在缓存里（strCache / numCache），颜色写在 dPt 的 idx 上
+const C =
+  'xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
+const LINE_CHART = `<c:chartSpace ${C}><c:chart><c:plotArea><c:layout/>
+  <c:lineChart><c:ser>
+    <c:idx val="0"/><c:order val="0"/>
+    <c:tx><c:strRef><c:f>Sheet1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>甲线</c:v></c:pt></c:strCache></c:strRef></c:tx>
+    <c:spPr><a:ln w="25400"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln></c:spPr>
+    <c:marker><c:symbol val="circle"/><c:size val="6"/></c:marker>
+    <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$4</c:f><c:strCache><c:ptCount val="3"/><c:pt idx="0"><c:v>一</c:v></c:pt><c:pt idx="1"><c:v>二</c:v></c:pt><c:pt idx="2"><c:v>三</c:v></c:pt></c:strCache></c:strRef></c:cat>
+    <c:val><c:numRef><c:f>Sheet1!$B$2:$B$4</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="3"/><c:pt idx="0"><c:v>5</c:v></c:pt><c:pt idx="1"><c:v>15</c:v></c:pt><c:pt idx="2"><c:v>10</c:v></c:pt></c:numCache></c:numRef></c:val>
+  </c:ser></c:lineChart>
+  <c:catAx><c:axId val="1"/><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx>
+  <c:valAx><c:axId val="2"/><c:scaling><c:max val="20"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln w="12700"><a:solidFill><a:srgbClr val="CCCCCC"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:majorUnit val="10"/><c:crossAx val="1"/></c:valAx>
+</c:plotArea><c:legend><c:legendPos val="b"/></c:legend></c:chart></c:chartSpace>`;
+const DOUGHNUT_CHART = `<c:chartSpace ${C}><c:chart><c:plotArea><c:layout/>
+  <c:doughnutChart><c:varyColors val="1"/><c:ser>
+    <c:idx val="0"/><c:order val="0"/>
+    <c:tx><c:strRef><c:f>Sheet1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>份额</c:v></c:pt></c:strCache></c:strRef></c:tx>
+    <c:spPr><a:solidFill><a:srgbClr val="999999"/></a:solidFill></c:spPr>
+    <c:dPt><c:idx val="0"/><c:spPr><a:solidFill><a:srgbClr val="112233"/></a:solidFill></c:spPr></c:dPt>
+    <c:dPt><c:idx val="1"/><c:spPr><a:solidFill><a:srgbClr val="445566"/></a:solidFill></c:spPr></c:dPt>
+    <c:dPt><c:idx val="2"/><c:spPr><a:solidFill><a:srgbClr val="778899"/></a:solidFill></c:spPr></c:dPt>
+    <c:dPt><c:idx val="3"/><c:spPr><a:solidFill><a:srgbClr val="AABBCC"/></a:solidFill></c:spPr></c:dPt>
+    <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$5</c:f><c:strCache><c:ptCount val="4"/><c:pt idx="0"><c:v>甲</c:v></c:pt><c:pt idx="1"><c:v>乙</c:v></c:pt><c:pt idx="2"><c:v>丙</c:v></c:pt><c:pt idx="3"><c:v>丁</c:v></c:pt></c:strCache></c:strRef></c:cat>
+    <c:val><c:numRef><c:f>Sheet1!$B$2:$B$5</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="4"/><c:pt idx="0"><c:v>70</c:v></c:pt><c:pt idx="1"><c:v>20</c:v></c:pt><c:pt idx="2"><c:v>6</c:v></c:pt><c:pt idx="3"><c:v>4</c:v></c:pt></c:numCache></c:numRef></c:val>
+  </c:ser><c:holeSize val="60"/></c:doughnutChart>
+  <c:catAx><c:axId val="1"/><c:delete val="1"/></c:catAx><c:valAx><c:axId val="2"/><c:delete val="1"/></c:valAx>
+</c:plotArea><c:legend><c:legendPos val="r"/></c:legend></c:chart></c:chartSpace>`;
+const STOCK_CHART = `<c:chartSpace ${C}><c:chart><c:plotArea><c:layout/><c:stockChart><c:ser><c:idx val="0"/><c:order val="0"/><c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f><c:numCache><c:ptCount val="2"/><c:pt idx="0"><c:v>1</c:v></c:pt><c:pt idx="1"><c:v>2</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser></c:stockChart>
+  <c:catAx><c:axId val="1"/><c:delete val="0"/></c:catAx><c:valAx><c:axId val="2"/><c:delete val="0"/></c:valAx></c:plotArea></c:chart></c:chartSpace>`;
+// 堆叠柱：不写 max / majorUnit，刻度要照各段之和（40、60）取，而不是单系列的最大值 40
+const STACK_CHART = `<c:chartSpace ${C}><c:chart><c:plotArea><c:layout/>
+  <c:barChart><c:barDir val="col"/><c:grouping val="stacked"/><c:overlap val="100"/>
+    <c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>Sheet1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>甲</c:v></c:pt></c:strCache></c:strRef></c:tx>
+      <c:spPr><a:solidFill><a:srgbClr val="010203"/></a:solidFill></c:spPr>
+      <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$3</c:f><c:strCache><c:ptCount val="2"/><c:pt idx="0"><c:v>前</c:v></c:pt><c:pt idx="1"><c:v>后</c:v></c:pt></c:strCache></c:strRef></c:cat>
+      <c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f><c:numCache><c:ptCount val="2"/><c:pt idx="0"><c:v>10</c:v></c:pt><c:pt idx="1"><c:v>20</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>
+    <c:ser><c:idx val="1"/><c:order val="1"/><c:tx><c:strRef><c:f>Sheet1!$C$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>乙</c:v></c:pt></c:strCache></c:strRef></c:tx>
+      <c:spPr><a:solidFill><a:srgbClr val="040506"/></a:solidFill></c:spPr>
+      <c:val><c:numRef><c:f>Sheet1!$C$2:$C$3</c:f><c:numCache><c:ptCount val="2"/><c:pt idx="0"><c:v>30</c:v></c:pt><c:pt idx="1"><c:v>40</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>
+  </c:barChart>
+  <c:catAx><c:axId val="1"/><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx>
+  <c:valAx><c:axId val="2"/><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln w="12700"><a:solidFill><a:srgbClr val="CCCCCC"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:crossAx val="1"/></c:valAx>
+</c:plotArea><c:legend><c:legendPos val="b"/></c:legend></c:chart></c:chartSpace>`;
+const frame = (id, x, y, w, h, rid) =>
+  `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="图表${id}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart r:id="${rid}"/></a:graphicData></a:graphic></p:graphicFrame>`;
+// 第二页：一张折线、一张环形；另两张一张认不出（股价图）、一张在包里取不到，都该退回虚线框
+const SLIDE2 = `<p:sld ${P} xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+  ${frame(30, 400000, 1500000, 5000000, 3000000, "rId5")}
+  ${frame(31, 5700000, 1500000, 3000000, 1600000, "rId6")}
+  ${frame(32, 400000, 4800000, 3000000, 1500000, "rId7")}
+  ${frame(33, 5700000, 4800000, 3000000, 1500000, "rId8")}
+  ${frame(34, 5700000, 3400000, 3000000, 1200000, "rId9")}
+</p:spTree></p:cSld></p:sld>`;
+
 const MASTER = `<p:sldMaster ${P}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
   <p:sp><p:nvSpPr><p:cNvPr id="2" name="标题占位符"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="600000" y="400000"/><a:ext cx="6000000" cy="900000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr anchor="b"/></p:txBody></p:sp>
 </p:spTree></p:cSld><p:txStyles><p:titleStyle><a:lvl1pPr algn="l"><a:defRPr sz="3200"/></a:lvl1pPr></p:titleStyle><p:bodyStyle><a:lvl1pPr><a:defRPr sz="1800"/></a:lvl1pPr></p:bodyStyle><p:otherStyle><a:lvl1pPr><a:defRPr sz="1600"/></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>`;
@@ -86,13 +142,27 @@ mkdirSync(ARCHIVE, { recursive: true });
 writeFileSync(
   `${ARCHIVE}/版式.pptx`,
   zip({
-    "ppt/presentation.xml": `<p:presentation ${P}><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`,
-    "ppt/_rels/presentation.xml.rels": rels({ rId1: ["slide", "slides/slide1.xml"] }),
+    "ppt/presentation.xml": `<p:presentation ${P}><p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`,
+    "ppt/_rels/presentation.xml.rels": rels({ rId1: ["slide", "slides/slide1.xml"], rId2: ["slide", "slides/slide2.xml"] }),
     "ppt/slides/slide1.xml": SLIDE,
+    "ppt/slides/slide2.xml": SLIDE2,
     "ppt/slides/_rels/slide1.xml.rels": rels({
       rId1: ["slideLayout", "../slideLayouts/slideLayout1.xml"],
       rId9: ["image", "../media/image1.png"]
     }),
+    // 第四张指向包里没有的一份：取不到图表的数，就该留虚线框
+    "ppt/slides/_rels/slide2.xml.rels": rels({
+      rId1: ["slideLayout", "../slideLayouts/slideLayout1.xml"],
+      rId5: ["chart", "../charts/chart1.xml"],
+      rId6: ["chart", "../charts/chart2.xml"],
+      rId7: ["chart", "../charts/chart3.xml"],
+      rId8: ["chart", "../charts/chart4.xml"],
+      rId9: ["chart", "../charts/chart5.xml"]
+    }),
+    "ppt/charts/chart1.xml": LINE_CHART,
+    "ppt/charts/chart2.xml": DOUGHNUT_CHART,
+    "ppt/charts/chart3.xml": STOCK_CHART,
+    "ppt/charts/chart5.xml": STACK_CHART,
     "ppt/slideLayouts/slideLayout1.xml": LAYOUT,
     "ppt/slideLayouts/_rels/slideLayout1.xml.rels": rels({
       rId1: ["slideMaster", "../slideMasters/slideMaster1.xml"],
@@ -162,6 +232,45 @@ check(
 );
 const clipped = seen.shapes.find(s => s.img > 0);
 check("裁过的图：外框照裁后的矩形，里面的图放大后偏出去", clipped && clipped.img > clipped.w, JSON.stringify(clipped));
+
+// 第二页：图表照包里的数据缓存重画（一张折线、一张环形），认不出的类型与取不到的那份仍留虚线框
+await evalJs(`document.querySelector('[data-viewer-slide="1"]').click(); true`);
+await waitFor(`!document.querySelector('[data-viewer-slide-panel="1"]').hasAttribute("hidden")`);
+await sleep(300);
+const charts = JSON.parse(
+  await evalJs(`(() => {
+  const panel = document.querySelector('[data-viewer-slide-panel="1"]'),
+    svgs = [...panel.querySelectorAll("svg.pv-chart")],
+    polylines = svg => [...svg.querySelectorAll("polyline")];
+  return JSON.stringify({
+    count: svgs.length,
+    blanks: panel.querySelectorAll(".pv-blank").length,
+    strokes: svgs.map(svg => polylines(svg).map(node => node.getAttribute("stroke"))),
+    points: svgs.map(svg => polylines(svg).map(node => node.getAttribute("points").trim().split(/ +/).length)),
+    fills: svgs.map(svg => [...svg.querySelectorAll("path")].map(node => node.getAttribute("fill"))),
+    texts: svgs.map(svg => [...svg.querySelectorAll("text")].map(node => node.textContent))
+  });
+})()`)
+);
+check("图表照包里那份数据缓存重画成 SVG（折线、环形、堆叠柱各一枚）", charts.count === 3, JSON.stringify(charts.count));
+check("折线的颜色取自图表 XML，不按主题猜", charts.strokes[0]?.[0] === "#ff0000", JSON.stringify(charts.strokes));
+check("折线的点数与 c:pt 一致", charts.points[0]?.[0] === 3, JSON.stringify(charts.points));
+check(
+  "数值轴照 majorUnit 写刻度",
+  ["0", "10", "20"].every(text => (charts.texts[0] || []).includes(text)),
+  JSON.stringify(charts.texts[0])
+);
+check(
+  "环形图每段取 dPt 里的颜色（四段）",
+  charts.fills[1]?.length === 4 && charts.fills[1][0] === "#112233" && charts.fills[1][3] === "#aabbcc",
+  JSON.stringify(charts.fills[1])
+);
+check(
+  "堆叠柱的刻度照各段之和取（40、60，不是单系列的最大值 40）",
+  Math.max(...(charts.texts[2] || []).map(Number).filter(Number.isFinite)) >= 60,
+  JSON.stringify(charts.texts[2])
+);
+check("认不出的图表与取不到的图表仍留虚线框", charts.blanks === 2, String(charts.blanks));
 
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
 await close();
