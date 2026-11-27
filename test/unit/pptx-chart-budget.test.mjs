@@ -2,18 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
 
-const f = load([
-  "pptxChartSpec",
-  `setup: root => {
-    parseXml = () => root;
-    xmlKids = (node, name) => (node?.children || []).filter(child => child.localName === name);
-    xmlDeep = (node, name) => (node?.children || []).flatMap(child => [
-      ...(child.localName === name ? [child] : []), ...xmlDeep(child, name)
-    ]);
+const f = load(["pptxChartSpec", "setup: root => { parseXml = () => root; }"]);
   }`
 ]);
 function node(localName, attrs = {}, children = [], textContent = "") {
-  return { localName, children, textContent, getAttribute: name => attrs[name] ?? null };
+  return {
+    localName,
+    children,
+    textContent,
+    getAttribute: name => attrs[name] ?? null,
+    getElementsByTagNameNS: (_ns, name) =>
+      children.flatMap(child => [...(child.localName === name ? [child] : []), ...child.getElementsByTagNameNS(_ns, name)])
+  };
 }
 function chart(index) {
   const pt = node("pt", { idx: index }, [node("v", {}, [], "42")]);
