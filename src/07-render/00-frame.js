@@ -32,6 +32,7 @@ function render(shouldScroll = false) {
   renderSendButtons();
   renderApprovalBar();
   renderHelperBar();
+  workSyncConversation();
   requestAnimationFrame(syncChatScrollGrabber);
 }
 function renderHeader() {

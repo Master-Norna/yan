@@ -201,11 +201,18 @@ await evalJs(
   `window.__yanExceptions = []; window.addEventListener("error", e => window.__yanExceptions.push(String(e.error || e.message))); window.addEventListener("unhandledrejection", e => window.__yanExceptions.push(String(e.reason))); true`
 );
 await waitFor(`!!document.querySelector('[data-conversation="work-changes"]')`, 10000).catch(() => {});
-await evalJs(`document.querySelector('[data-conversation="work-changes"] .history-open').click(); true`);
+await evalJs(
+  `localStorage.setItem("yan-work-root", ${JSON.stringify(`${ROOT}/子夹`)}); document.querySelector('[data-conversation="work-changes"] .history-open').click(); true`
+);
 await waitFor(`__yanState().conversations.length === 1`, 8000).catch(() => {});
 await evalJs(`document.querySelector("#stagePin").click(); true`);
 await sleep(300);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+await waitFor(`document.querySelector("#stageAddr").title === ${JSON.stringify(ROOT)}`, 8000).catch(() => {});
+check(
+  "对话已绑目录时优先跟随它，不用本机记着的旧目录",
+  await evalJs(`document.querySelector("#stageAddr").title === ${JSON.stringify(ROOT)}`)
+);
 await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').click(); true`);
 await waitFor(`document.querySelectorAll("#workStrips .strip").length === 3`, 8000).catch(() => {});
 const states = await evalJs(`[...document.querySelectorAll("#workStrips .fi[data-state]")].map(el => el.dataset.state).sort()`);

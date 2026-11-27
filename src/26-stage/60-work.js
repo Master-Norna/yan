@@ -1,6 +1,6 @@
 // 言 · 游目 · 工作区：舞台上的一层，看某一处目录里的东西。
 // 簿录（列、件图、夹、路径、查找）就是卷宗那一套（src/13-files/10-archive.js），这里只换三样：根可换（地址行里输路径，
-// 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签、位置记在本机（yan-work-root），再进时仍开那一处。
+// 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签；有对话目录则跟随，未绑时沿用本机记的 yan-work-root。
 // 点一件即开：夹往下走，件交给游目去开（Office 摊成文档页、md 排出来、网页直接开，见 30-input.js 的 stageGo）。
 // 「改动」那一面只看本段对话改过的件：不说增删改、也不写 +几 −几——件图本身换色（朱是删、泥金是改、石绿是增）。
 // 顶栏那一枚（#stageWorkBtn）只管进出、不表态；这一对（工作区 / 改动）里选着的那一枚才转朱，画面上任何时候只有一处朱。
@@ -8,6 +8,9 @@ const work = {
   open: false,
   /** @type {string} 绑的目录，也是此刻站着的那一层（绝对路径，正斜杠） */
   root: "",
+  /** @type {string|null} 当前对话及其绑定目录的标记；同一段里走层不重置 */
+  context: null,
+  bound: "",
   /** @type {"list"|"changes"} */
   mode: "list",
   query: "",
@@ -73,9 +76,31 @@ function workAddrHtml() {
 function workHere() {
   return work.root;
 }
+// 对话已有工作目录就用它，不另绑、不改对话；切换对话或重新绑定时才回到根。
+function workFollowConversation() {
+  const c = currentConversation(),
+    bound = slashed(c?.workdir || ""),
+    context = JSON.stringify([c?.id || "", bound]);
+  if (work.context === context) return false;
+  work.context = context;
+  work.bound = bound;
+  work.root = bound || workStored();
+  workResetRows();
+  work.query = "";
+  work.mode = "list";
+  work.shape = "";
+  return true;
+}
+// render() 在切换对话、绑定或解绑目录时都会走到这里；平时重画只比一个标记，不读盘。
+function workSyncConversation() {
+  if (!work.open || !workFollowConversation()) return;
+  if (document.activeElement === $("#stageUrl")) $("#stageUrl").blur();
+  stageRender();
+  if (work.root) void workRefresh();
+}
 function workEnter() {
   work.open = true;
-  work.root = work.root || workStored();
+  workFollowConversation();
   // 进工作区先把画面收着：网页在屏幕外照旧开着，回网页时再接上
   if (stage.session || stage.attached) void stageDetach();
   workPaint();
@@ -100,16 +125,16 @@ function workLeave() {
 }
 /** 选一处目录：系统的选夹子窗（与卷宗「收入文件」同一个口，见 server/work/picker.js） */
 async function workPick() {
+  const context = work.context,
+    root = work.root;
   try {
     const { paths } = await bridge("/api/work/pick", {});
-    if (!paths?.[0]) return;
+    if (!paths?.[0] || !work.open || work.context !== context || work.root !== root) return;
     work.root = slashed(paths[0]);
     workResetRows();
     work.query = "";
     work.mode = "list";
-    try {
-      localStorage.setItem("yan-work-root", work.root);
-    } catch {}
+    workRemember();
     workPaint();
     stageRender();
     await workRefresh();
@@ -127,12 +152,17 @@ function workEnterDir(path) {
   work.mode = "list";
   const field = /** @type {HTMLInputElement|null} */ ($("#workFind"));
   if (field) field.value = "";
-  try {
-    localStorage.setItem("yan-work-root", root);
-  } catch {}
+  workRemember();
   workPaint();
   stageRender();
   void workRefresh();
+}
+// 本机记的只是未绑定对话时的浏览位置，不能被另一段对话的目录覆盖。
+function workRemember() {
+  if (work.bound) return;
+  try {
+    localStorage.setItem("yan-work-root", work.root);
+  } catch {}
 }
 // ---------- 列 ----------
 // 换根或换面时，旧列表不可拿新根拼路径；在发出新请求前就使旧请求失效。
@@ -393,8 +423,11 @@ async function workGo(raw) {
     workLeave();
     return void stageGo(text);
   }
+  const context = work.context,
+    root = work.root;
   try {
     const info = await bridge("/api/archive/stat", { path: slashed(path) });
+    if (!work.open || work.context !== context || work.root !== root) return;
     if (info.kind === "dir") return void workEnterDir(info.path);
     if (info.kind === "file") return void workOpenPath(info.path);
     toast(t`没有这一处：${path}`);
