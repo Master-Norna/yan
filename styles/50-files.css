@@ -425,7 +425,10 @@
 }
 .strip.drop-over,
 .strip-back.drop-over,
-.library-crumbs button.drop-over {
+.library-crumbs button.drop-over,
+#openLibrary.drop-over,
+#newChat.drop-over,
+.history-item.drop-over {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }

@@ -676,4 +676,25 @@ check("deleting a folder says what goes with it", /连同其中/.test(await eval
 await evalJs(`document.querySelector("#confirmOk").click(); true`);
 await waitFor(`!document.querySelector('#libraryGrid [data-library-dir="课程"]')`, 8000);
 check("the folder and everything in it is gone from disk", !existsSync(`${ARCHIVE}/课程`));
+// 页内附件、卷宗与侧栏：用实际来源发起拖动；复制不移除原件。
+const dragBetween = (source, target) =>
+  evalJs(
+    `(() => { const dt = new DataTransfer(), fire = (type, node) => node.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })),
+      from = document.querySelector(${JSON.stringify(source)}), to = document.querySelector(${JSON.stringify(target)});
+      fire("dragstart", from); fire("dragover", to); const lit = to.classList.contains("drop-over"); fire("drop", to); fire("dragend", from); return lit; })()`
+  );
+check("a Files row can be copied to a new draft", await dragBetween('#libraryGrid [data-library-disk="讲义一.txt"]', "#newChat"));
+await waitFor(`!!document.querySelector("#welcomeAttachments .attachment-card[data-name='讲义一.txt']")`, 8000);
+check("copying keeps the archive original", existsSync(`${ARCHIVE}/讲义一.txt`));
+await evalJs(
+  `(() => { const dt = new DataTransfer(); dt.items.add(new File(["drag"], "拖拽附件.txt", { type: "text/plain" })); window.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt })); })(); true`
+);
+await waitFor(`!!document.querySelector("#welcomeAttachments .attachment-card[data-name='拖拽附件.txt']")`, 8000);
+check(
+  "an attachment lights up the Files entry when dragged onto it",
+  await dragBetween('#welcomeAttachments .attachment-card[data-name="拖拽附件.txt"]', "#openLibrary")
+);
+await evalJs(`document.querySelector("#openLibrary").click(); true`);
+await waitFor(`!!document.querySelector('#libraryGrid [data-library-disk="拖拽附件.txt"]')`, 8000);
+check("dragging the attachment saves its original bytes", readFileSync(`${ARCHIVE}/拖拽附件.txt`, "utf8") === "drag");
 close();

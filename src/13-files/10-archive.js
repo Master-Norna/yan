@@ -14,7 +14,8 @@ let archiveEntries = null,
   libraryDir = "",
   // 正在就地改名的那一项（文件或夹的路径）；空即没有
   libraryRenaming = "";
-const ARCHIVE_DRAG = "application/x-yan-archive";
+const ARCHIVE_DRAG = "application/x-yan-archive",
+  ATTACHMENT_DRAG = "application/x-yan-attachment";
 function parentDir(path) {
   const at = String(path).lastIndexOf("/");
   return at < 0 ? "" : path.slice(0, at);
@@ -358,10 +359,9 @@ async function folderChildren(entry) {
 const entryFile = entry => new Promise((resolve, reject) => entry.file(resolve, reject));
 // 收进卷宗：夹照原样建（同名的另取名，与文件一样不覆盖），文件落进各自的夹。点开头的（.git、.DS_Store）跳过——卷宗里它们本就是藏着的
 /** @param {FileSystemEntry[]} entries */
-async function addLibraryEntries(entries) {
+async function addLibraryEntries(entries, targetDir = libraryDir) {
   // 一批拖入固定落点；枚举目录、读取文件期间，人可以继续翻卷宗或更换存储位置。
-  const root = archiveDir(),
-    targetDir = libraryDir;
+  const root = archiveDir();
   /** @type {{ file: File, dir: string }[]} */
   const items = [];
   let folders = 0;
@@ -381,7 +381,8 @@ async function addLibraryEntries(entries) {
 }
 // 附件上的「藏」：原件落进卷宗目录
 async function saveToLibrary(id) {
-  const metadata =
+  const root = archiveDir(),
+    metadata =
     pendingAttachments.find(file => file.id === id) ||
     store.conversations
       .flatMap(allMessages)
@@ -390,7 +391,7 @@ async function saveToLibrary(id) {
   const body = metadata && (await attachmentBody(id));
   if (!body) return toast(t("附件原件已找不到"));
   try {
-    const saved = await putArchiveFile(metadata.name, body);
+    const saved = await putArchiveFile(metadata.name, body, "", root);
     void refreshArchive();
     toast(t`${saved.name} 已收入卷宗`);
   } catch (error) {
@@ -429,22 +430,24 @@ function canPlaceAttachment(size, attachments = pendingAttachments) {
 }
 // 磁盘上的卷宗置于案上：取回原件，按普通附件收进浏览器（图片、可提取的文档照常处理）
 async function placeFromArchive(path) {
+  const key = draftKey(),
+    sourceView = view,
+    root = archiveDir();
   let entry = (archiveEntries || []).find(file => file.path === path);
   if (!entry) {
     await refreshArchive();
     entry = (archiveEntries || []).find(file => file.path === path);
   }
   if (!entry) return toast(t("卷宗里已没有这件"));
-  if (!canPlaceAttachment(entry.size)) return;
-  const key = draftKey();
+  if (!canPlaceAttachment(entry.size, draftKey() === key ? pendingAttachments : draftRecord(key).attachments)) return;
   try {
-    const response = await fetch(localFileUrl(archiveFile(path)), { signal: AbortSignal.timeout(60000) });
+    const response = await fetch(localFileUrl(joinFile(root, path)), { signal: AbortSignal.timeout(60000) });
     if (!response.ok) throw Error(t("取回失败"));
     const blob = await response.blob(),
       file = new File([blob], entry.name, { type: blob.type || "", lastModified: Date.parse(entry.modifiedAt) || Date.now() });
     if (!placeAttachment(key, await ingestFile(file))) return;
+    if (draftKey() !== key || view !== sourceView) return toast(t`${entry.name} 已置于原对话的案上`);
     persistDraft();
-    if (draftKey() !== key) return toast(t`${entry.name} 已置于原对话的案上`);
     closeLibrary();
     toast(t`${entry.name} 已置于案上`);
     setTimeout(() => (currentConversation() ? $("#chatInput") : $("#welcomeInput")).focus(), 0);
@@ -547,7 +550,7 @@ function bindLibraryEvents() {
     const row = event.target.closest?.("[data-library-item]");
     if (!row) return;
     event.dataTransfer.setData(ARCHIVE_DRAG, row.dataset.libraryItem);
-    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.effectAllowed = row.dataset.libraryDisk === undefined ? "move" : "copyMove";
   });
   library.addEventListener("dragover", event => {
     const target = dropTarget(event);
@@ -571,13 +574,59 @@ function bindLibraryEvents() {
     event.preventDefault();
     void moveArchiveItem(event.dataTransfer.getData(ARCHIVE_DRAG), target.dataset.libraryDir);
   });
+  // 页内拖动只认自己的来源和明确落点，不把浏览器原生图片拖动误认成外部文件。
   let dragHideTimer = null,
+    dragFromPage = false,
+    draggedAttachment = "",
+    draggedArchiveFile = "";
+  /** @type {Element|null} */
+  let markedTarget = null;
+  /** @param {DragEvent} event */
+  const closest = (event, selector) => (event.target instanceof Element ? event.target.closest(selector) : null);
+  /** @param {Element|null} target */
+  const markTarget = target => {
+    if (markedTarget === target) return;
+    markedTarget?.classList.remove("drop-over");
+    markedTarget = target;
+    markedTarget?.classList.add("drop-over");
+  };
+  const hideDropVeil = () => {
+    clearTimeout(dragHideTimer);
+    $("#dropVeil").classList.add("hidden");
+    markTarget(null);
+  };
+  const clearFileDrag = () => {
     dragFromPage = false;
-  // 拖的是页面里自己的东西（卷宗里的图、案上的附件、答里的图片）时浏览器也会把它当文件拖入：
-  // 松手就又收一份进卷宗。页内起手的拖动一概不接——卷宗可能绑着用户自己的目录，里面本就允许有重样的文件，不能靠查重来挡
-  window.addEventListener("dragstart", () => (dragFromPage = true));
-  window.addEventListener("dragend", () => (dragFromPage = false));
-  const hasDraggedFiles = event => !dragFromPage && Array.from(event.dataTransfer?.types || []).includes("Files");
+    draggedAttachment = "";
+    draggedArchiveFile = "";
+    hideDropVeil();
+  };
+  window.addEventListener("dragstart", event => {
+    dragFromPage = true;
+    const attachment = /** @type {HTMLElement|null} */ (closest(event, ".attachment-card[data-drag-attachment]")),
+      archive = /** @type {HTMLElement|null} */ (closest(event, "#library [data-library-disk][draggable=true]"));
+    draggedAttachment = attachment?.dataset.dragAttachment || "";
+    draggedArchiveFile = archive?.dataset.libraryDisk || "";
+    if (draggedAttachment && event.dataTransfer) {
+      event.dataTransfer.setData(ATTACHMENT_DRAG, draggedAttachment);
+      event.dataTransfer.effectAllowed = "copy";
+    }
+  });
+  window.addEventListener("dragend", clearFileDrag);
+  /** @param {DragEvent} event */
+  const types = event => Array.from(event.dataTransfer?.types || []);
+  /** @param {DragEvent} event */
+  const hasDraggedFiles = event => !dragFromPage && types(event).includes("Files");
+  // 卷宗的入口接附件；卷宗文件可交给侧栏的一段对话或翻页（只置于案上，不发送）。
+  /** @param {DragEvent} event */
+  const internalTarget = event => {
+    if (!dragFromPage) return null;
+    if (draggedAttachment && types(event).includes(ATTACHMENT_DRAG)) return closest(event, "#openLibrary");
+    if (draggedArchiveFile && types(event).includes(ARCHIVE_DRAG)) return closest(event, "#history [data-conversation], #newChat");
+    return null;
+  };
+  /** @param {DragEvent} event */
+  const externalTarget = event => closest(event, "#openLibrary, #library [data-library-dir]");
   const showDropVeil = () => {
     clearTimeout(dragHideTimer);
     const toLibrary = view === "library";
@@ -589,31 +638,52 @@ function bindLibraryEvents() {
       : t`图片、文档与代码文件 · 单件 ${limitLabel(MAX_FILE_BYTES)}`;
     $("#dropVeil").classList.remove("hidden");
   };
-  const hideDropVeil = () => {
+  /** @param {DragEvent} event */
+  const indicateDrop = event => {
+    const external = hasDraggedFiles(event),
+      target = external ? externalTarget(event) : internalTarget(event);
+    if (!external && !target) {
+      if (markedTarget) hideDropVeil();
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
     clearTimeout(dragHideTimer);
-    $("#dropVeil").classList.add("hidden");
+    markTarget(target);
+    if (target) $("#dropVeil").classList.add("hidden");
+    else showDropVeil();
   };
-  window.addEventListener("dragenter", event => {
-    if (!hasDraggedFiles(event)) return;
-    event.preventDefault();
-    showDropVeil();
-  });
-  window.addEventListener("dragover", event => {
-    if (!hasDraggedFiles(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    showDropVeil();
-  });
+  window.addEventListener("dragenter", indicateDrop);
+  window.addEventListener("dragover", indicateDrop);
   window.addEventListener("dragleave", event => {
-    if (!hasDraggedFiles(event)) return;
+    if (!hasDraggedFiles(event) && !markedTarget) return;
+    clearTimeout(dragHideTimer);
     dragHideTimer = setTimeout(hideDropVeil, 80);
   });
   window.addEventListener("drop", event => {
-    if (!hasDraggedFiles(event)) return;
+    const target = /** @type {HTMLElement|null} */ (internalTarget(event)),
+      attachment = draggedAttachment,
+      path = draggedArchiveFile,
+      external = hasDraggedFiles(event);
+    if (target) {
+      event.preventDefault();
+      clearFileDrag();
+      if (attachment) return void saveToLibrary(attachment);
+      if (target.id === "newChat") newChat();
+      else if (store.conversations.some(c => c.id === target.dataset.conversation)) openConversation(target.dataset.conversation);
+      else return;
+      return void placeFromArchive(path);
+    }
+    if (!external) {
+      clearFileDrag();
+      return;
+    }
     event.preventDefault();
-    hideDropVeil();
-    const entries = droppedEntries(event.dataTransfer);
-    if (view === "library") return void (entries.length ? addLibraryEntries(entries) : addLibraryFiles(event.dataTransfer.files));
+    const dest = /** @type {HTMLElement|null} */ (externalTarget(event)),
+      entries = droppedEntries(event.dataTransfer),
+      dir = dest?.id === "openLibrary" ? "" : (dest?.dataset.libraryDir ?? libraryDir);
+    clearFileDrag();
+    if (dest || view === "library") return void (entries.length ? addLibraryEntries(entries, dir) : addLibraryFiles(event.dataTransfer.files, dir));
     // 案上只放文件：拖来的夹不展开（一个夹动辄几百件），请它进卷宗
     const folders = entries.filter(entry => entry.isDirectory);
     if (folders.length) toast(t("文件夹请拖进卷宗：案上只放文件"));

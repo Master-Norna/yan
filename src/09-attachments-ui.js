@@ -22,6 +22,7 @@ function attachmentCard(file, index, sent = false, drop = false) {
       ? `<span class="fi fi-thumb" aria-hidden="true"><img class="attachment-thumb" data-thumb="${escapeHtml(file.id)}" alt=""></span>`
       : fileFigure(file.name);
   const body = `${figure}<span class="attachment-name">${escapeHtml(file.skill || file.name)}</span><span class="attachment-size">${formatFileSize(file.size)}</span>`;
+  const drag = file.id ? ` draggable="true" data-drag-attachment="${escapeHtml(file.id)}"` : "";
   const save = file.id
     ? `<button class="attachment-tool attachment-save" data-save-attachment="${escapeHtml(file.id)}" title="${t(`收入卷宗`)}" aria-label="${t(`收入卷宗`)}">${t(`藏`)}</button>`
     : "";
@@ -35,14 +36,14 @@ function attachmentCard(file, index, sent = false, drop = false) {
         : "";
   if (sent && file.id) {
     const action = view || t`data-download-attachment="${escapeHtml(file.id)}" title="下载 ${escapeHtml(title)}"`;
-    return `<div class="attachment-card sent" role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}${save}</div>`;
+    return `<div class="attachment-card sent"${drag} role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}${save}</div>`;
   }
   const remove = drop
     ? `data-action="drop-attachment" data-file="${escapeHtml(file.id)}"`
     : index !== null
       ? `data-remove-attachment="${index}"`
       : "";
-  return `<div class="attachment-card pending" data-kind="${file.kind}" ${view ? `role="button" tabindex="0" ${view}` : `title="${escapeHtml(title)}"`}>${body}${save}${remove ? `<button class="attachment-tool attachment-remove" ${remove} title="${t`移除 ${escapeHtml(file.name)}`}" aria-label="${t`移除 ${escapeHtml(file.name)}`}">×</button>` : ""}</div>`;
+  return `<div class="attachment-card pending"${drag} data-kind="${file.kind}" ${view ? `role="button" tabindex="0" ${view}` : `title="${escapeHtml(title)}"`}>${body}${save}${remove ? `<button class="attachment-tool attachment-remove" ${remove} title="${t`移除 ${escapeHtml(file.name)}`}" aria-label="${t`移除 ${escapeHtml(file.name)}`}">×</button>` : ""}</div>`;
 }
 // 随引文的那幅画面画在引文里，不进附件栏（序号仍按 pendingAttachments 算，移除时对得上）
 function renderAttachments() {
