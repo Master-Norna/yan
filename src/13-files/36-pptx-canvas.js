@@ -1,5 +1,6 @@
 // 言 · 幻灯片画布：按画面位置把字与基本形状摆回原处，看得出一页的结构。
-// 只做「字在哪儿、多大、什么颜色」与矩形/圆/线的轮廓、填充；不重绘主题效果、图表与动画，图片照包里的原件取。
+// 只做「字在哪儿、多大、什么颜色」与矩形/圆/线/表的轮廓、填充；不重绘主题效果、艺术字与动画，图片照包里的原件取。
+// 图表照包里带着的数据缓存重画（折线、面积、柱、饼、环形、雷达），智能图形仍留虚线框。
 // 一页里但凡有一个字找不到位置（版式里也没有），这一页就退回逐段文字——宁可按段落排，也不猜它该在哪儿。
 
 // 画面里的长度一律折成千分比（纸宽的千分之一）×10 交给 CSS，随纸缩放；EMU 只在这一层用。
@@ -330,6 +331,129 @@ function pptxBackground(source, theme, images) {
   return path ? { c: "", img: path } : null;
 }
 const PPTX_CANVAS_KIND = { rect: "rect", roundRect: "round", ellipse: "ellipse", line: "line" };
+// 图表：数就带在包里（strCache / numCache / multiLvlStrCache），照它重画，不必读 Excel、不必请 Office。
+// 折线、面积、柱（含堆叠与横向）、饼、环形、雷达画得出；曲面、股价、树图这类认不出的，仍留给虚线框。
+const PPTX_CHART_KIND = {
+  lineChart: "line",
+  areaChart: "area",
+  barChart: "bar",
+  pieChart: "pie",
+  doughnutChart: "doughnut",
+  radarChart: "radar"
+};
+// 图表的字号与线宽：原件写的是百分之一磅与 EMU，折成「框宽算作 1000」里的长度——图放在小框里，字也跟着小。
+// 这一层只认数与色，怎么摆由预览那一侧画。
+function pptxChartSpec(xml, theme, cx) {
+  let root = null;
+  try {
+    root = xml ? parseXml(xml) : null;
+  } catch {
+    return null;
+  }
+  const plot = root && xmlDeep(root, "plotArea")[0],
+    chart = plot && [...plot.children].find(node => PPTX_CHART_KIND[node.localName]);
+  if (!chart || !(cx > 0)) return null;
+  const pt = value => Math.round(((value / 100) * 12700 * 1000 * 100) / cx) / 100,
+    length = value => Math.round((value * 1000 * 100) / cx) / 100,
+    solid = node => pptxColor(xmlKids(node || {}, "solidFill")[0], theme)?.c || "",
+    accents = ["accent1", "accent2", "accent3", "accent4", "accent5", "accent6"].map(name => theme.get(name)).filter(Boolean),
+    // 一处数据缓存：c:pt 按 idx 摆位，取最内一层（多级类别时 c:lvl 从内往外排）
+    pointsOf = holder => {
+      if (!holder) return [];
+      const level = xmlDeep(holder, "lvl")[0] || holder,
+        out = [];
+      for (const node of xmlDeep(level, "pt"))
+        out[Math.round(pptxAttr(node, "idx"))] = xmlDeep(node, "v")
+          .map(item => item.textContent.trim())
+          .join("");
+      return out;
+    },
+    textOf = node =>
+      node
+        ? xmlDeep(node, "v")
+            .map(item => item.textContent.trim())
+            .filter(Boolean)
+            .join(" ")
+        : "",
+    sers = xmlKids(chart, "ser").map((ser, index) => {
+      const spPr = xmlKids(ser, "spPr")[0],
+        ln = xmlKids(spPr || {}, "ln")[0],
+        marker = xmlKids(ser, "marker")[0],
+        colors = [];
+      // 每一段的颜色在 c:dPt 里：序号写在 c:dPt/c:idx@val 上，不是 dPt 自己的属性
+      for (const point of xmlKids(ser, "dPt"))
+        colors[Math.round(pptxAttr(xmlKids(point, "idx")[0], "val"))] = solid(xmlKids(point, "spPr")[0]);
+      return {
+        name: textOf(xmlKids(ser, "tx")[0]),
+        // 折线与雷达的色常写在 ln 上，柱与饼写在 spPr 的填充上；都没写按主题的 accent 轮转
+        color: solid(spPr) || solid(ln) || accents[index % (accents.length || 1)] || "4f7bff",
+        colors,
+        cats: pointsOf(xmlKids(ser, "cat")[0]),
+        vals: pointsOf(xmlKids(ser, "val")[0]).map(value =>
+          value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value)
+        ),
+        marker: marker ? marker.getAttribute("symbol") || "circle" : "",
+        markerSize: pt(pptxAttr(xmlKids(marker || {}, "size")[0], "val", 5) * 100),
+        lineWidth: length(pptxAttr(ln, "w", 25400))
+      };
+    });
+  if (!sers.length) return null;
+  const axisOf = name => [...plot.children].find(node => node.localName === name),
+    catAx = axisOf("catAx"),
+    valAx = axisOf("valAx"),
+    off = node => pptxOn(xmlKids(node || {}, "delete")[0]?.getAttribute("val")),
+    labelPos = node => xmlKids(node || {}, "tickLblPos")[0]?.getAttribute("val") || "nextTo",
+    txStyle = node => {
+      const font = xmlDeep(xmlKids(node || {}, "txPr")[0], "defRPr")[0];
+      return { size: pptxAttr(font, "sz"), color: solid(font) };
+    },
+    lineOf = node => {
+      const ln = xmlKids(xmlKids(node || {}, "spPr")[0] || {}, "ln")[0];
+      return { color: solid(ln), width: length(pptxAttr(ln, "w", 12700)) };
+    },
+    gridOf = node => {
+      const ln = xmlKids(xmlKids(xmlKids(node || {}, "majorGridlines")[0] || {}, "spPr")[0] || {}, "ln")[0];
+      return { color: solid(ln), width: length(pptxAttr(ln, "w", 12700)) };
+    },
+    scaling = xmlKids(valAx || {}, "scaling")[0],
+    chartNode = xmlDeep(root, "chart")[0],
+    legendNode = xmlKids(chartNode || {}, "legend")[0],
+    legendFont = txStyle(legendNode),
+    spaceFont = xmlDeep(xmlKids(xmlKids(root, "chartSpace")[0] || root, "txPr")[0], "defRPr")[0],
+    textColor = solid(spaceFont) || txStyle(catAx).color || txStyle(valAx).color || txStyle(legendNode).color || theme.get("tx1") || "",
+    fontSize = pptxAttr(spaceFont, "sz") || txStyle(catAx).size || txStyle(valAx).size || 1000;
+  return {
+    kind: PPTX_CHART_KIND[chart.localName],
+    cats: sers.find(ser => ser.cats.length)?.cats || [],
+    sers,
+    accents,
+    font: pt(fontSize),
+    legendFont: pt(legendFont.size || fontSize),
+    text: textColor,
+    // 图例的位置与有无：c:legendPos 是 b / t / l / r / tr；不写 legend 元素就是不要图例
+    legend: legendNode ? xmlKids(legendNode, "legendPos")[0]?.getAttribute("val") || "r" : "",
+    cat: { show: !!catAx && !off(catAx), labels: !!catAx && labelPos(catAx) !== "none", ...lineOf(catAx) },
+    val: {
+      show: !!valAx && !off(valAx),
+      labels: !!valAx && labelPos(valAx) !== "none",
+      min: pptxAttr(xmlKids(scaling || {}, "min")[0], "val", NaN),
+      max: pptxAttr(xmlKids(scaling || {}, "max")[0], "val", NaN),
+      unit: pptxAttr(xmlKids(valAx || {}, "majorUnit")[0], "val", NaN),
+      grid: gridOf(valAx),
+      ...lineOf(valAx)
+    },
+    // 柱：直着放还是横着放、聚成一组还是堆叠、柱间留多宽（不写 overlap 时 Office 的缺省是 -27，柱间留一丝缝）
+    barDir: xmlKids(chart, "barDir")[0]?.getAttribute("val") || "col",
+    grouping: xmlKids(chart, "grouping")[0]?.getAttribute("val") || "clustered",
+    gap: pptxAttr(xmlKids(chart, "gapWidth")[0], "val", 150),
+    overlap: pptxAttr(xmlKids(chart, "overlap")[0], "val", -27),
+    // 环形：中间空多大、从几点钟起画
+    hole: pptxAttr(xmlKids(chart, "holeSize")[0], "val", 50),
+    angle: pptxAttr(xmlKids(chart, "firstSliceAng")[0], "val", 0),
+    // 雷达：只认 standard / marker / filled 三种，别的照 standard 画
+    filled: /filled/.test(xmlKids(chart, "radarStyle")[0]?.getAttribute("val") || "")
+  };
+}
 // 自动编号的记号：阿拉伯、字母、罗马数字与中文数字；认不出的按阿拉伯数字
 function pptxNumberText(n, type) {
   const roman = value => {
@@ -362,8 +486,9 @@ function pptxNumberText(n, type) {
   return String(n);
 }
 // 一页画布。doc 是这一页的 p:sld；返回 {bg, shapes}，排不出位置时给 null
+// charts 是这一页 rels 的 rId → 包内路，chartFiles 是路 → 图表 XML：图形框里是图表时照数据缓存重画
 function pptxCanvas(doc, ctx) {
-  const { W, H, theme, images, ph, styles } = ctx,
+  const { W, H, theme, images, ph, styles, charts, chartFiles } = ctx,
     root = xmlDeep(doc, "spTree")[0];
   if (!root || !(W > 0) || !(H > 0)) return null;
   const unit = value => Math.round((value / W) * PPTX_PERMILLE * 10) / 10,
@@ -403,16 +528,18 @@ function pptxCanvas(doc, ctx) {
           xfrm = xmlKids(shape, "xfrm")[0],
           off = xfrm && xmlKids(xfrm, "off")[0],
           ext = xfrm && xmlKids(xfrm, "ext")[0];
-        // 图表与智能图形画不出来：留一块淡淡的虚线框，好知道这里本来有东西
+        // 图表照包里的数据缓存重画；认不出类型的与智能图形仍留一块淡淡的虚线框
         if (!tbl && off && ext) {
-          const box = map(pptxAttr(off, "x"), pptxAttr(off, "y"), pptxAttr(ext, "cx"), pptxAttr(ext, "cy"));
+          const box = map(pptxAttr(off, "x"), pptxAttr(off, "y"), pptxAttr(ext, "cx"), pptxAttr(ext, "cy")),
+            chartId = xmlDeep(shape, "chart")[0]?.getAttribute("r:id"),
+            chartXml = chartId && chartFiles ? chartFiles.get(charts?.get(chartId)) : "",
+            chart = chartXml ? pptxChartSpec(chartXml, theme, box.w) : null;
           shapes.push({
             x: unit(box.x),
             y: unit(box.y),
             w: unit(box.w),
             h: unit(box.h),
-            g: "blank",
-            k: xmlDeep(shape, "chart")[0] ? "chart" : "diagram"
+            ...(chart ? { g: "chart", ch: chart } : { g: "blank", k: chartId ? "chart" : "diagram" })
           });
           continue;
         }

@@ -208,8 +208,359 @@ function boundSlidePages(source, ratio = 16 / 9) {
   }
   return { text: "", pages, ratio, cut: false };
 }
+// 图表：照包里那份数据缓存重画一张 SVG——折线、面积、柱（含堆叠与横向）、饼、环形、雷达。
+// 坐标一律按「框宽 1000」算，随纸一起缩放；字号、线宽在画布那一层已按框宽折好，这里只管摆。
+// 画法与整页画布同一取舍：看得出结构与数就好，不求与 Office 逐像素相同；认不出的类型在画布那层已退回虚线框。
+function pptxChartHtml(shape, ratio) {
+  const spec = shape.ch,
+    W = 1000,
+    H = Math.max(60, Math.round((shape.h / shape.w) * W)),
+    esc = escapeHtml,
+    n = value => String(Math.round(value * 10) / 10),
+    fs = Math.max(6, Math.min(H / 2.4, spec.font || 12)),
+    legendSize = Math.max(5, spec.legendFont || fs),
+    text = spec.text ? `#${spec.text}` : "currentColor",
+    colorOf = (value, fallback) => `#${value || fallback || "666666"}`,
+    // 一截字大约多宽：汉字一个字宽，其余的按五成六
+    textWidth = (value, size) => [...String(value ?? "")].reduce((sum, ch) => sum + (/[\u2e80-\uffff]/.test(ch) ? 1 : 0.56), 0) * size,
+    line = (x1, y1, x2, y2, color, width) =>
+      `<line x1="${n(x1)}" y1="${n(y1)}" x2="${n(x2)}" y2="${n(y2)}" stroke="${color}" stroke-width="${n(Math.max(0.4, width || 1))}"/>`,
+    label = (x, y, value, anchor = "middle", baseline = "middle", size = fs) =>
+      `<text x="${n(x)}" y="${n(y)}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-size="${n(size)}" fill="${text}">${esc(value)}</text>`,
+    tickText = value => String(Math.round(value * 1000) / 1000),
+    draw = [],
+    // 图例：饼、环按段列（每段一色），其余按系列列
+    items =
+      spec.kind === "pie" || spec.kind === "doughnut"
+        ? (spec.sers[0]?.vals || []).map((value, i) => ({
+            name: spec.cats[i] ?? String(i + 1),
+            color: spec.sers[0]?.colors[i] || spec.accents[i % (spec.accents.length || 1)] || spec.sers[0]?.color
+          }))
+        : spec.sers.map(ser => ({ name: ser.name, color: ser.color })),
+    legend = spec.legend && items.length > 1 ? (/^tr$/.test(spec.legend) ? "r" : spec.legend) : "",
+    chip = legendSize * 0.72,
+    // 底部、顶部图例折行排；一行放不下就换一行
+    rowsOf = (list, maxWidth) => {
+      const gap = legendSize * 1.5,
+        rows = [];
+      let row = [],
+        width = 0;
+      for (const item of list) {
+        const itemWidth = chip + legendSize * 0.38 + textWidth(item.name, legendSize);
+        if (row.length && width + gap + itemWidth > maxWidth) {
+          rows.push({ row, width });
+          row = [];
+          width = 0;
+        }
+        width += (row.length ? gap : 0) + itemWidth;
+        row.push({ item, itemWidth });
+      }
+      if (row.length) rows.push({ row, width });
+      return rows;
+    },
+    legendRows = legend === "b" || legend === "t" ? rowsOf(items, W - fs * 2) : [],
+    legendHeight = legendRows.length ? legendRows.length * legendSize * 1.55 + legendSize * 0.35 : 0,
+    legendBoxWidth =
+      legend === "r"
+        ? Math.min(W * 0.46, chip + legendSize * 0.4 + Math.max(...items.map(item => textWidth(item.name, legendSize)))) + legendSize
+        : 0,
+    // topY 给了就把图例从那里往下排（顶部），不给就贴着框底
+    legendRowHtml = topY => {
+      if (!legendRows.length) return "";
+      const html = [];
+      legendRows.forEach((row, index) => {
+        const y = (topY ?? H - legendHeight) + legendSize * 0.35 + index * legendSize * 1.55,
+          x = (W - row.width) / 2;
+        let at = x;
+        for (const { item, itemWidth } of row.row) {
+          html.push(
+            `<rect x="${n(at)}" y="${n(y)}" width="${n(chip)}" height="${n(chip)}" rx="${n(chip * 0.24)}" fill="${colorOf(item.color)}"/>`,
+            label(at + chip + legendSize * 0.38, y + chip / 2, item.name, "start", "middle", legendSize)
+          );
+          at += itemWidth + legendSize * 1.5;
+        }
+      });
+      return html.join("");
+    },
+    legendColumnHtml = () => {
+      if (legend !== "r" || !items.length) return "";
+      const widest = Math.max(...items.map(item => textWidth(item.name, legendSize))),
+        // 名字太长时图例字收小：宁可小，也不让它捅出纸外
+        size = Math.max(5, Math.min(legendSize, ((legendBoxWidth - chip - legendSize * 0.9) / widest) * legendSize)),
+        step = Math.min(legendSize * 1.55, (H - legendSize * 0.5) / Math.max(1, items.length)),
+        start = (H - step * items.length) / 2,
+        x = W - legendBoxWidth + legendSize * 0.2,
+        html = [];
+      items.forEach((item, index) => {
+        const y = start + index * step + (step - chip) / 2;
+        html.push(
+          `<rect x="${n(x)}" y="${n(y)}" width="${n(chip)}" height="${n(chip)}" rx="${n(chip * 0.24)}" fill="${colorOf(item.color)}"/>`,
+          label(x + chip + legendSize * 0.38, y + chip / 2, item.name, "start", "middle", size)
+        );
+      });
+      return html.join("");
+    },
+    // 数值轴的刻度：写了 max / unit 就照写，没写按数据取整到看得懂的间隔。
+    // stack 为真时按每类各段之和取（堆叠柱的顶是各段相加，不能只看单个系列的最大值）
+    rangeOf = stack => {
+      let values = spec.sers.flatMap(ser => ser.vals).filter(value => value != null);
+      if (stack) {
+        const sums = [];
+        for (const ser of spec.sers)
+          ser.vals.forEach((value, index) => {
+            if (value != null) sums[index] = (sums[index] || 0) + value;
+          });
+        values = sums.filter(value => value != null);
+      }
+      const min = Number.isFinite(spec.val.min) ? spec.val.min : Math.min(0, ...(values.length ? values : [0]));
+      let max = Number.isFinite(spec.val.max) ? spec.val.max : Math.max(...(values.length ? values : [1]), min + 1),
+        unit = spec.val.unit;
+      if (!(unit > 0)) {
+        const rough = (max - min) / 4 || 1,
+          mag = Math.pow(10, Math.floor(Math.log10(Math.abs(rough) || 1))),
+          scale = [1, 2, 2.5, 5, 10].find(mult => mult * mag >= rough) || 10;
+        unit = scale * mag;
+      }
+      if (!Number.isFinite(spec.val.max)) max = Math.ceil(max / unit - 1e-9) * unit;
+      if (!(max > min)) max = min + unit;
+      const ticks = [];
+      for (let value = min; value <= max + unit * 1e-6 && ticks.length < 14; value += unit) ticks.push(Math.round(value * 1e6) / 1e6);
+      return { min, max, unit, ticks };
+    },
+    // 直角坐标：折线、面积、柱共用一套摆法；横柱只是把两个轴换个方向。
+    // given 可以给一份现成的刻度（百分比堆叠固定 0–100），也可以给 true（按各段之和取刻度）
+    plotFrame = given => {
+      const range = given && typeof given === "object" ? given : rangeOf(given === true),
+        horiz = spec.kind === "bar" && spec.barDir === "bar",
+        count = Math.max(spec.cats.length, ...spec.sers.map(ser => ser.vals.length), 1),
+        valueWidth = spec.val.labels ? Math.max(...range.ticks.map(tick => textWidth(tickText(tick), fs))) + fs * 0.7 : 0,
+        catWidth = spec.cat.labels ? Math.max(...spec.cats.map(name => textWidth(name, fs)), 0) + fs * 0.8 : 0,
+        padL = horiz ? Math.min(catWidth, W * 0.42) : valueWidth + fs * 0.3,
+        padR = fs * 0.5,
+        padT = fs * 0.7 + (legend === "t" ? legendHeight : 0),
+        padB =
+          (horiz ? (spec.val.labels ? fs * 1.6 : fs * 0.4) : spec.cat.labels ? fs * 1.6 : fs * 0.4) + (legend === "b" ? legendHeight : 0),
+        pw = Math.max(1, W - padL - padR),
+        ph = Math.max(1, H - padT - padB),
+        catAt = index => (horiz ? padT + ((index + 0.5) * ph) / count : padL + ((index + 0.5) * pw) / count),
+        valAt = value =>
+          horiz ? padL + (pw * (value - range.min)) / (range.max - range.min) : padT + (ph * (range.max - value)) / (range.max - range.min),
+        html = [];
+      // 网格与数值：网格线用原件里那层灰蓝，轴标签比它再淡一点
+      if (spec.val.grid.color) {
+        for (const tick of range.ticks)
+          if (horiz) html.push(line(valAt(tick), padT, valAt(tick), padT + ph, `#${spec.val.grid.color}`, spec.val.grid.width || 1));
+          else html.push(line(padL, valAt(tick), padL + pw, valAt(tick), `#${spec.val.grid.color}`, spec.val.grid.width || 1));
+      }
+      if (spec.val.labels) {
+        for (const tick of range.ticks)
+          if (horiz) html.push(label(valAt(tick), padT + ph + fs * 0.95, tickText(tick), "middle"));
+          else html.push(label(padL - fs * 0.4, valAt(tick), tickText(tick), "end"));
+      }
+      // 两条轴：横柱时纵轴在左、横轴在底；纵柱时数值轴在左
+      if (spec.val.show || spec.val.color)
+        html.push(
+          horiz
+            ? line(padL, padT + ph, padL + pw, padT + ph, colorOf(spec.val.color, "888888"), spec.val.width || 1)
+            : line(padL, padT, padL, padT + ph, colorOf(spec.val.color, "888888"), spec.val.width || 1)
+        );
+      html.push(
+        horiz
+          ? line(padL, padT, padL, padT + ph, colorOf(spec.cat.color, "888888"), spec.cat.width || 1)
+          : line(padL, padT + ph, padL + pw, padT + ph, colorOf(spec.cat.color, "888888"), spec.cat.width || 1)
+      );
+      // 类别标签：太密时隔几个写一个，首尾不动（PowerPoint 也这么做）
+      if (spec.cat.labels) {
+        const gap = horiz ? ph / count : pw / count,
+          stride = Math.max(1, Math.ceil((Math.max(...spec.cats.map(name => textWidth(name, fs)), 0) + fs * 0.6) / gap));
+        spec.cats.forEach((name, index) => {
+          if (index % stride && index !== count - 1) return;
+          html.push(horiz ? label(padL - fs * 0.4, catAt(index), name, "end") : label(catAt(index), padT + ph + fs * 0.95, name));
+        });
+      }
+      return { html, horiz, count, range, padL, padR, padT, padB, pw, ph, catAt, valAt };
+    },
+    // 折线、面积
+    lineChart = () => {
+      const plot = plotFrame(),
+        html = plot.html,
+        legendHtml = legendRowHtml(legend === "t" ? 0 : null);
+      for (const ser of spec.sers) {
+        const points = [];
+        ser.vals.forEach((value, index) => {
+          if (value != null) points.push([plot.catAt(index), plot.valAt(value)]);
+        });
+        if (!points.length) continue;
+        if (spec.kind === "area") {
+          const base = plot.valAt(Math.max(0, plot.range.min)),
+            area = `M${n(points[0][0])},${n(base)} L${points.map(point => `${n(point[0])},${n(point[1])}`).join(" L")} L${n(points[points.length - 1][0])},${n(base)} Z`;
+          html.push(`<path d="${area}" fill="${colorOf(ser.color)}" fill-opacity="0.18" stroke="none"/>`);
+        }
+        html.push(
+          `<polyline points="${points.map(point => `${n(point[0])},${n(point[1])}`).join(" ")}" fill="none" stroke="${colorOf(ser.color)}" stroke-width="${n(Math.max(1, ser.lineWidth || fs * 0.18))}" stroke-linejoin="round" stroke-linecap="round"/>`
+        );
+        if (ser.marker && ser.marker !== "none")
+          for (const point of points)
+            html.push(
+              `<circle cx="${n(point[0])}" cy="${n(point[1])}" r="${n(Math.max(1.2, (ser.markerSize || fs * 0.55) / 2))}" fill="${colorOf(ser.color)}"/>`
+            );
+      }
+      return { html, legend: legendHtml };
+    },
+    // 柱：直放与横放、聚组与堆叠，间距照 gapWidth / overlap 算
+    barChart = () => {
+      const percent = spec.grouping === "percentStacked",
+        stacked = spec.grouping === "stacked" || percent,
+        totals = [];
+      const sers = spec.sers.map(ser => ({
+        ...ser,
+        vals: ser.vals.map((value, index) => {
+          if (percent) totals[index] = (totals[index] || 0) + Math.abs(value || 0);
+          return value;
+        })
+      }));
+      if (percent)
+        for (const ser of sers)
+          ser.vals = ser.vals.map((value, index) => (value == null ? null : (Math.abs(value) / (totals[index] || 1)) * 100));
+      const plot = plotFrame(percent ? { min: 0, max: 100, unit: 25, ticks: [0, 25, 50, 75, 100] } : stacked),
+        html = plot.html,
+        count = plot.count,
+        span = plot.horiz ? plot.ph : plot.pw,
+        barWidth = span / count / (1 + Math.max(0, spec.gap) / 100),
+        overlap = Math.max(-100, Math.min(100, spec.overlap)) / 100,
+        seriesCount = sers.length,
+        subWidth = barWidth / Math.max(1, seriesCount - overlap * (seriesCount - 1)),
+        step = subWidth * (1 - overlap),
+        offset = -barWidth / 2 + (barWidth - (subWidth + step * (seriesCount - 1))) / 2,
+        stackBase = Math.max(0, plot.range.min),
+        stackTops = new Array(count).fill(stackBase),
+        zero = plot.valAt(stackBase),
+        legendHtml = legendRowHtml(legend === "t" ? 0 : null);
+      sers.forEach((ser, seriesIndex) => {
+        for (let index = 0; index < count; index += 1) {
+          const value = ser.vals[index];
+          if (value == null) continue;
+          const color = colorOf(ser.colors[index] || ser.color);
+          if (stacked) {
+            const from = stackTops[index],
+              to = from + value;
+            stackTops[index] = to;
+            html.push(
+              plot.horiz
+                ? `<rect x="${n(plot.valAt(Math.min(from, to)))}" y="${n(plot.catAt(index) - barWidth / 2)}" width="${n(Math.abs(plot.valAt(to) - plot.valAt(from)))}" height="${n(barWidth)}" fill="${color}"/>`
+                : `<rect x="${n(plot.catAt(index) - barWidth / 2)}" y="${n(plot.valAt(Math.max(from, to)))}" width="${n(barWidth)}" height="${n(Math.abs(plot.valAt(to) - plot.valAt(from)))}" fill="${color}"/>`
+            );
+          } else if (plot.horiz) {
+            const center = plot.catAt(index) + offset + seriesIndex * step + subWidth / 2;
+            html.push(
+              `<rect x="${n(Math.min(zero, plot.valAt(value)))}" y="${n(center - subWidth / 2)}" width="${n(Math.abs(plot.valAt(value) - zero))}" height="${n(subWidth)}" fill="${color}"/>`
+            );
+          } else {
+            const center = plot.catAt(index) + offset + seriesIndex * step + subWidth / 2;
+            html.push(
+              `<rect x="${n(center - subWidth / 2)}" y="${n(Math.min(zero, plot.valAt(value)))}" width="${n(subWidth)}" height="${n(Math.abs(zero - plot.valAt(value)))}" fill="${color}"/>`
+            );
+          }
+        }
+      });
+      return { html, legend: legendHtml };
+    },
+    // 饼与环：一段一个扇形，环形把中间挖空；角度从十二点起、顺时针
+    pieChart = () => {
+      const values = (spec.sers[0]?.vals || []).map(value => Math.abs(value || 0)),
+        total = values.reduce((sum, value) => sum + value, 0) || 1,
+        availW = W - legendBoxWidth,
+        availH = H - (legend === "b" || legend === "t" ? legendHeight : 0),
+        cx = availW / 2,
+        cy = (legend === "t" ? legendHeight : 0) + availH / 2,
+        radius = Math.max(2, Math.min(availW, availH) / 2 - fs * 0.8),
+        inner = spec.kind === "doughnut" ? radius * Math.min(0.95, Math.max(0, spec.hole) / 100) : 0,
+        point = (r, angle) => [cx + r * Math.cos(angle), cy + r * Math.sin(angle)],
+        slice = (a0, a1) => {
+          const large = a1 - a0 > Math.PI ? 1 : 0,
+            [x1, y1] = point(radius, a0),
+            [x2, y2] = point(radius, a1),
+            [x3, y3] = point(inner, a1),
+            [x4, y4] = point(inner, a0);
+          return inner > 0
+            ? `M${n(x1)},${n(y1)} A${n(radius)},${n(radius)} 0 ${large} 1 ${n(x2)},${n(y2)} L${n(x3)},${n(y3)} A${n(inner)},${n(inner)} 0 ${large} 0 ${n(x4)},${n(y4)} Z`
+            : `M${n(cx)},${n(cy)} L${n(x1)},${n(y1)} A${n(radius)},${n(radius)} 0 ${large} 1 ${n(x2)},${n(y2)} Z`;
+        },
+        html = [];
+      let angle = -Math.PI / 2 + ((Number(spec.angle) || 0) * Math.PI) / 180;
+      values.forEach((value, index) => {
+        const sweep = (value / total) * Math.PI * 2;
+        if (sweep <= 0) return;
+        const color = spec.sers[0]?.colors[index] || spec.accents[index % (spec.accents.length || 1)] || spec.sers[0]?.color;
+        html.push(`<path d="${slice(angle, angle + sweep)}" fill="${colorOf(color)}"/>`);
+        angle += sweep;
+      });
+      return { html, legend: legend === "r" ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
+    },
+    // 雷达：同心多边形 + 从中心到顶点一圈辐条，各类一张面
+    radarChart = () => {
+      const range = rangeOf(),
+        count = Math.max(spec.cats.length, ...spec.sers.map(ser => ser.vals.length), 3),
+        availW = W - legendBoxWidth,
+        availH = H - (legend === "b" ? legendHeight : 0),
+        cx = availW / 2,
+        cy = availH / 2,
+        radius = Math.max(2, Math.min(availW, availH) / 2 - fs * 2.2),
+        angleOf = index => -Math.PI / 2 + (index * Math.PI * 2) / count,
+        at = (index, value) => {
+          const ratio = Math.max(0, Math.min(1, (value - range.min) / (range.max - range.min))),
+            angle = angleOf(index);
+          return [cx + radius * ratio * Math.cos(angle), cy + radius * ratio * Math.sin(angle)];
+        },
+        gridColor = spec.val.grid.color ? `#${spec.val.grid.color}` : text,
+        html = [];
+      for (const tick of range.ticks) {
+        if (tick === range.min) continue;
+        const ring = [];
+        for (let index = 0; index < count; index += 1) ring.push(at(index, tick));
+        html.push(
+          `<polygon points="${ring.map(point => `${n(point[0])},${n(point[1])}`).join(" ")}" fill="none" stroke="${gridColor}" stroke-width="${n(Math.max(0.4, spec.val.grid.width || 1))}"/>`
+        );
+      }
+      for (let index = 0; index < count; index += 1) {
+        const [x, y] = at(index, range.max);
+        html.push(line(cx, cy, x, y, gridColor, 0.8));
+      }
+      // 各类的名放在顶点外
+      spec.cats.forEach((name, index) => {
+        const angle = angleOf(index),
+          x = cx + (radius + fs * 0.55) * Math.cos(angle),
+          y = cy + (radius + fs * 0.55) * Math.sin(angle),
+          cos = Math.cos(angle);
+        html.push(label(x, y, name, Math.abs(cos) < 0.25 ? "middle" : cos > 0 ? "start" : "end"));
+      });
+      for (const ser of spec.sers) {
+        const points = [];
+        for (let index = 0; index < count; index += 1) if (ser.vals[index] != null) points.push(at(index, ser.vals[index]));
+        if (points.length < 3) continue;
+        html.push(
+          `<polygon points="${points.map(point => `${n(point[0])},${n(point[1])}`).join(" ")}" fill="${colorOf(ser.color)}" fill-opacity="${spec.filled ? 0.32 : 0.16}" stroke="${colorOf(ser.color)}" stroke-width="${n(Math.max(1, ser.lineWidth || fs * 0.16))}" stroke-linejoin="round"/>`
+        );
+        if (ser.marker && ser.marker !== "none")
+          for (const point of points)
+            html.push(
+              `<circle cx="${n(point[0])}" cy="${n(point[1])}" r="${n(Math.max(1.2, (ser.markerSize || fs * 0.55) / 2))}" fill="${colorOf(ser.color)}"/>`
+            );
+      }
+      return { html, legend: legend === "r" ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
+    };
+  let chart = null;
+  if (spec.kind === "line" || spec.kind === "area") chart = lineChart();
+  else if (spec.kind === "bar") chart = barChart();
+  else if (spec.kind === "pie" || spec.kind === "doughnut") chart = pieChart();
+  else if (spec.kind === "radar") chart = radarChart();
+  if (!chart)
+    return `<i class="pv-blank" style="left:${shape.x / 10}%;top:${(shape.y * ratio) / 10}%;width:${shape.w / 10}%;height:${(shape.h * ratio) / 10}%">${t`图表`}</i>`;
+  return `<svg class="pv-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="left:${shape.x / 10}%;top:${(shape.y * ratio) / 10}%;width:${shape.w / 10}%;height:${(shape.h * ratio) / 10}%" role="img">${chart.html.join("")}${chart.legend}</svg>`;
+}
+
 // 幻灯片画布：一页一张定位好的纸。长短一律折成纸宽的百分之一（cqw），字号、边距、纸一起缩放。
-// 只摆字与基本形状；画不出的（图表、艺术字、渐变填充）宁可不画，也不拿别的东西冒充。
+// 只摆字、基本形状、表与图表；画不出的（智能图形、艺术字）宁可不画，也不拿别的东西冒充。
 function pptxCanvasHtml(layout, ratio) {
   const size = value => {
       const text = (Number(value) || 0).toFixed(3);
@@ -250,6 +601,7 @@ function pptxCanvasHtml(layout, ratio) {
       return `<p style="${style.join(";")}">${para.r.map(runHtml).join("")}</p>`;
     },
     shapeHtml = shape => {
+      if (shape.g === "chart") return pptxChartHtml(shape, ratio);
       if (shape.g === "line") {
         const length = Math.hypot(shape.w, shape.h) / 10,
           angle = Math.round(((Math.atan2(shape.h, shape.w) * 180) / Math.PI) * 100) / 100,

@@ -777,8 +777,14 @@ button.source-local {
 .viewer-slide-canvas .pv-shape,
 .viewer-slide-canvas .pv-img,
 .viewer-slide-canvas .pv-imgclip,
-.viewer-slide-canvas .pv-table {
+.viewer-slide-canvas .pv-table,
+.viewer-slide-canvas .pv-chart {
   position: absolute;
+}
+/* 图表：照包里的数据缓存重画的一张 SVG（折线、柱、饼、环形、雷达），尺寸由那一层的 viewBox 定 */
+.viewer-slide-canvas .pv-chart {
+  display: block;
+  overflow: visible;
 }
 .viewer-slide-canvas .pv-text {
   overflow: visible;
@@ -803,7 +809,7 @@ button.source-local {
   width: 100%;
   height: 100%;
 }
-/* 图表、智能图形只留一块淡虚线框，写着这里本来是什么 */
+/* 智能图形与认不出的图表只留一块淡虚线框，写着这里本来是什么 */
 .viewer-slide-canvas .pv-blank {
   position: absolute;
   display: flex;

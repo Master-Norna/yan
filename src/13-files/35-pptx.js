@@ -311,6 +311,8 @@ async function extractPptxSlides(bytes) {
       name => /^ppt\/(?:slideLayouts|slideMasters|theme)\/(?:_rels\/)?[^/]+\.xml(?:\.rels)?$/.test(name),
       { optional: true }
     ).catch(() => new Map()),
+    // 图表的数与样式都在 ppt/charts/*.xml 里以缓存形式带着：取齐一次，交给画布照着重画
+    chartFiles = await unzipSelected(bytes, name => /^ppt\/charts\/[^/]+\.xml$/.test(name), { optional: true }).catch(() => new Map()),
     frames = new Map(),
     // 版式/母版那份 XML 的 spTree；解析不了就不画这一层装饰
     treeOf = xml => {
@@ -375,7 +377,16 @@ async function extractPptxSlides(bytes) {
     pages.push(pptxPage(tree, rels, note ? (noteEntries.get(note) ?? "") : undefined, index, height));
     let canvas = null;
     try {
-      canvas = tree ? pptxCanvas(doc, { W: width, H: height, images: zipRels(rels, "ppt/slides"), ...frameOf(rels) }) : null;
+      canvas = tree
+        ? pptxCanvas(doc, {
+            W: width,
+            H: height,
+            images: zipRels(rels, "ppt/slides"),
+            charts: zipRels(rels, "ppt/slides", "chart"),
+            chartFiles,
+            ...frameOf(rels)
+          })
+        : null;
     } catch {}
     canvases.push(canvas);
   });
