@@ -473,6 +473,13 @@ function bindStage() {
   for (const button of document.querySelectorAll("[data-stage-nav]"))
     button.addEventListener("click", () => {
       const action = /** @type {HTMLElement} */ (button).dataset.stageNav;
+      // 工作区里：后退即回上一层，重载即重新列一遍（前进在目录里没有去处）
+      if (work.open) {
+        const here = workParts(work.root);
+        if (action === "back" && here.length > 1) void workEnterDir(parentDir(work.root));
+        else if (action === "reload") void workRefresh();
+        return;
+      }
       if (!stage.session) return;
       // 前后按浏览器记的历史走，不经网页里的脚本（脚本卡住、出错页上也走得动）
       if (action === "reload") void stageSend("Page.reload", {}, stage.session).catch(() => {});

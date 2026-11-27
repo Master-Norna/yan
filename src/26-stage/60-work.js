@@ -63,6 +63,9 @@ function workEnter() {
 function workHide() {
   if (!work.open) return;
   work.open = false;
+  // 前后两枚还原成浏览器记的那一份（见 00-connect.js 的 stageReadHistory）
+  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = !stage.back;
+  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=forward]")).disabled = !stage.forward;
   workPaint();
   stageRender();
 }
@@ -260,6 +263,9 @@ function workPaint() {
     return;
   }
   if (shape !== "list") return;
+  // 工作区里前后按目录走：还有上一层就能退，前进没有去处（离开这一层时 workHide 按浏览器记的还原）
+  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = workParts(work.root).length <= 1;
+  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=forward]")).disabled = true;
   const rows = workRows(),
     files = rows.filter(row => !row.dir),
     bytes = files.reduce((sum, row) => sum + Number(row.size || 0), 0),
