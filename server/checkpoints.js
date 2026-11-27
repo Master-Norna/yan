@@ -343,7 +343,14 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     const then = snapshotOf(store, key),
       now = await presentOf(store),
       changes = [];
-    const unobserved = rel => [...now.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+    // 路径集合已在内存：沿祖先查不明项，不必为每件文件重扫整张表。
+    const under = (paths, rel) => {
+      for (let at = rel; at !== "."; at = path.posix.dirname(at)) {
+        if (paths.has(at)) return true;
+      }
+      return false;
+    };
+    const unobserved = rel => under(now.unknown, rel);
     for (const [rel, hash] of then.files) {
       if (unobserved(rel)) continue;
       const mode = then.modes.get(rel);
@@ -356,19 +363,25 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     const unclear = rel => {
       // 确实读过 .yan 这一层、图也没有单独记作不明：它的缺席是已知的，不能被父层的不明盖住。
       if (isIntent(rel) && then.dirs.has(INTENT_DIR) && !then.unknown.has(rel)) return false;
-      return [...then.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+      return under(then.unknown, rel);
     };
     for (const rel of now.files.keys()) if (!then.files.has(rel) && !unclear(rel)) changes.push({ path: rel, kind: "added" });
-    const holds = (paths, dir) => [...paths].some(rel => rel.startsWith(`${dir}/`));
-    for (const dir of then.dirs)
-      if (!now.dirs.has(dir) && !holds(then.files.keys(), dir) && !holds(then.dirs, dir))
-        changes.push({ path: `${dir}/`, kind: "removed" });
+    // 每棵树只索引一回有后代的夹；共享祖先已有记录时即可停。
+    const parentsOf = tree => {
+      const parents = new Set();
+      for (const paths of [tree.files.keys(), tree.dirs])
+        for (const rel of paths)
+          for (let dir = path.posix.dirname(rel); dir !== "." && !parents.has(dir); dir = path.posix.dirname(dir)) parents.add(dir);
+      return parents;
+    };
+    const thenParents = parentsOf(then),
+      nowParents = parentsOf(now);
+    for (const dir of then.dirs) if (!now.dirs.has(dir) && !thenParents.has(dir)) changes.push({ path: `${dir}/`, kind: "removed" });
     for (const dir of now.dirs)
       if (
         !then.dirs.has(dir) &&
         !unclear(dir) &&
-        !holds(now.files.keys(), dir) &&
-        !holds(now.dirs, dir) &&
+        !nowParents.has(dir) &&
         // 底下只有忽略的（node_modules、.gitignore 写了的）不算空夹，删不得
         !fs.readdirSync(path.join(store.full, ...dir.split("/"))).length
       )
