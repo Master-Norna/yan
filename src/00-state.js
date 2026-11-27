@@ -225,7 +225,7 @@
  * @property {"light"|"dark"|"system"} theme
  * @property {"zh"|"en"} [language] 界面语言；没选过的随浏览器
  * @property {"on"|"off"|"system"} inkMotion
- * @property {boolean} compactTrail 默认收起行迹、思绪与步骤输出
+ * @property {boolean} compactTrail 默认收起思绪与各步骤输出，不改变整段行迹的开合
  * @property {"sans"|"serif"|"mixed"|"kai"|"fangsong"} font
  * @property {string} accent
  * @property {string} activeProfileId 默认模型：新对话起手用它；只在设置里「设为默认」时改，打开旧对话、在菜单里换模型都不动它

@@ -116,9 +116,8 @@ function subStepsMeta(sub, steps) {
 // 折叠行的外壳：标题、计数与各步由 syncSubSteps 与 syncStepList 填
 /** @param {SubAgent} sub */
 function subStepsShell(sub, steps) {
-  const running = subStepsRunning(sub, steps),
-    open = sub.status === "streaming" && (!compactTrail() || steps.some(step => step.status === "pending"));
-  return `<details class="tool-stack sub-steps"${open ? " open" : ""} data-state="${running ? "streaming" : "complete"}"><summary><span class="tool-stack-label"></span><span class="tool-stack-meta"></span></summary><div class="tool-stack-body"><div class="tool-steps"></div></div></details>`;
+  const running = subStepsRunning(sub, steps);
+  return `<details class="tool-stack sub-steps"${sub.status === "streaming" ? " open" : ""} data-state="${running ? "streaming" : "complete"}"><summary><span class="tool-stack-label"></span><span class="tool-stack-meta"></span></summary><div class="tool-stack-body"><div class="tool-steps"></div></div></details>`;
 }
 // 一轮的折叠行就地更新：标题与计数跟着这一轮的步骤走；开合跟着整趟（见上）
 /** @param {SubAgent} sub */
@@ -129,10 +128,8 @@ function syncSubSteps(details, sub, steps) {
   const label = details.querySelector(":scope > summary > .tool-stack-label");
   if (label.textContent !== subStepsLabel(steps)) label.textContent = subStepsLabel(steps);
   rollText(details.querySelector(":scope > summary > .tool-stack-meta"), subStepsMeta(sub, steps));
-  if (compactTrail() && sub.status === "streaming" && steps.some(step => step.status === "pending")) return settleDetails(details, true);
   if (details.dataset.touched) return;
-  if (compactTrail()) setProcessDetails(details, false);
-  else if (sub.status === "streaming") settleDetails(details, true);
+  if (sub.status === "streaming") settleDetails(details, true);
   else settleDetails(details, false, null, true);
 }
 // 用时：不足一秒不写

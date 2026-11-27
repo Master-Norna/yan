@@ -246,7 +246,9 @@ function paintThought(details, text, live, { touched = false, force = false } = 
   }
   details.dataset.state = live ? "live" : "done";
   if (touched) return;
-  if (compactTrail()) setProcessDetails(details, false);
+  if (compactTrail()) {
+    if (details.open || details._motionTarget === true) setProcessDetails(details, false);
+  }
   else if (live) settleDetails(details, true);
   else if (details.open) settleDetails(details, false, null, force);
 }
@@ -312,9 +314,7 @@ function stackPart(message, source, view) {
     always: true,
     enter: true,
     html: () => {
-      const open =
-        message.steps.some(step => step.status === "pending") ||
-        (message.toolsTouched ? !!message.toolsOpen : view.streaming && !compactTrail());
+      const open = message.steps.some(step => step.status === "pending") || (message.toolsTouched ? !!message.toolsOpen : view.streaming);
       return `<details class="tool-stack${view.work ? " is-work" : ""}"${open ? " open" : ""} data-state="${escapeHtml(message.status || "complete")}"><summary><span class="tool-stack-label"></span><span class="tool-stack-meta"></span></summary><div class="tool-stack-body"></div></details>`;
     },
     paint: (el, created) => paintStack(el, message, source, view, created)
@@ -366,10 +366,7 @@ function paintStack(stack, message, source, view, created) {
   const was = stack._status;
   stack._status = message.status;
   if (view.streaming) {
-    if (message.steps.some(step => step.status === "pending")) settleDetails(stack, true);
-    else if (compactTrail()) {
-      if (!message.toolsTouched || !message.toolsOpen) setProcessDetails(stack, false);
-    } else if (!message.toolsTouched) settleDetails(stack, true);
+    if (message.steps.some(step => step.status === "pending") || !message.toolsTouched) settleDetails(stack, true);
   } else if (was === "streaming")
     settleDetails(
       stack,

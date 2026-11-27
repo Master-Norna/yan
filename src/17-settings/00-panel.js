@@ -150,7 +150,7 @@ function appearanceSettingsHtml() {
     s.inkMotion || "on"
   )}${segmentRow(
     t("简约模式"),
-    t("默认收起行迹、思绪与步骤输出"),
+    t("默认收起思绪与各步骤的详情"),
     "compactTrail",
     [
       [true, t("开")],

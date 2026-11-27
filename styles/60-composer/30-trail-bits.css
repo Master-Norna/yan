@@ -132,7 +132,8 @@
   background: color-mix(in srgb, var(--ink) 3%, transparent);
   border-radius: var(--radius-m);
 }
-.tool-step.folded > :not(.tool-step-head, .tool-shots) {
+.tool-step.folded > :not(.tool-step-head, .tool-shots),
+.tool-step.folded.compact-shots > .tool-shots {
   display: none;
 }
 .tool-more {

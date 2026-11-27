@@ -27,5 +27,75 @@ await evalJs(`${reasoning}.querySelector("summary").click(); true`);
 check("manual expansion works", await evalJs(`${reasoning}.open`));
 await waitFor(`${last}?.dataset.status === "complete"`, 20000);
 check("manual expansion survives subsequent updates", await evalJs(`${reasoning}.open`));
+// 同一份行迹：整段保持摊开，原先自动摊开的文件差异与目录清单收起，计划卡不变。
+await fetch(PAGE + "api/chats/save", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    savedAt: Date.now(),
+    conversation: {
+      id: "compact-fixture",
+      title: "简约行迹",
+      createdAt: "2026-09-28",
+      updatedAt: new Date().toISOString(),
+      forks: [],
+      threads: [],
+      messages: [
+        { id: "compact-u", role: "user", content: "修改文件并查看目录", timestamp: "2026-09-28" },
+        {
+          id: "compact-a",
+          role: "assistant",
+          content: "已完成。",
+          status: "complete",
+          timestamp: "2026-09-28",
+          toolsTouched: true,
+          toolsOpen: true,
+          steps: [
+            {
+              id: "compact-diff",
+              name: "edit_file",
+              arguments: JSON.stringify({ path: "a.js", old: "let a = 1;", new: "let a = 2;" }),
+              title: "a.js",
+              status: "done",
+              result: "已修改"
+            },
+            {
+              id: "compact-list",
+              name: "list_files",
+              arguments: "{}",
+              title: ".",
+              status: "done",
+              output: "a.js\\nb.js",
+              result: "2 件"
+            },
+            {
+              id: "compact-plan",
+              name: "update_plan",
+              arguments: "{}",
+              title: "计划",
+              status: "done",
+              plan: [{ text: "修改文件", status: "done" }]
+            }
+          ]
+        }
+      ]
+    }
+  })
+});
+await send("Page.navigate", { url: PAGE });
+await waitFor(`!!document.querySelector('[data-conversation="compact-fixture"]')`, 10000);
+await evalJs(`document.querySelector('[data-conversation="compact-fixture"] .history-open').click(); true`);
+await waitFor(`!!document.querySelector('[data-step-id="compact-diff"]')`, 8000);
+const diff = `document.querySelector('[data-step-id="compact-diff"]')`,
+  list = `document.querySelector('[data-step-id="compact-list"]')`,
+  stack = `document.querySelector('[data-message="compact-a"] .tool-stack')`;
+check("compact mode persists on reload", await evalJs(`__yanState().settings.compactTrail === true`));
+check("the enclosing Steps timeline stays open", await evalJs(`${stack}.open`));
+check("diff and directory details default to closed", await evalJs(`${diff}.classList.contains("folded") && ${list}.classList.contains("folded")`));
+check("plan is not folded", await evalJs(`!document.querySelector('[data-step-id="compact-plan"]').classList.contains("folded")`));
+await evalJs(`${diff}.querySelector(".tool-step-head").click(); true`);
+check("individual details can be expanded", await evalJs(`!${diff}.classList.contains("folded")`));
+await evalJs(`document.querySelector("#openSettings").click(); document.querySelector('[data-tab="appearance"]').click(); ${off}.click(); true`);
+check("turning compact mode off restores normal defaults", await evalJs(`!${list}.classList.contains("folded") && ${stack}.open`));
 await close();
 process.exit(0);
