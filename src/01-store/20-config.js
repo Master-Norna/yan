@@ -129,7 +129,7 @@ function saveConfigNow({ force = false } = {}) {
     signal: unloading ? undefined : AbortSignal.timeout(20000)
   })
     .then(async response => {
-      const data = await response.json().catch(() => ({}));
+      const data = response.ok ? await response.json() : await response.json().catch(() => ({}));
       if (bootstrap.store !== scope) return;
       if (response.status === 409 && data.config) return reconcileConfig(data.config, Number(data.savedAt) || 0);
       if (!response.ok) throw Error(data.error || t`请求失败（${response.status}）`);
