@@ -353,7 +353,15 @@ function pptxChartSpec(xml, theme, cx) {
   const plot = root && xmlDeep(root, "plotArea")[0],
     chart = plot && [...plot.children].find(node => PPTX_CHART_KIND[node.localName]);
   if (!chart || !(cx > 0)) return null;
-  const pt = value => Math.round(((value / 100) * 12700 * 1000 * 100) / cx) / 100,
+  // 缓存的 idx 来自包内 XML，不能用任意稀疏下标撑大数组与 SVG。
+  const pointBudget = 50000;
+  let invalidCache = false;
+  const indexOf = (node, attr) => {
+      const index = pptxAttr(node, attr, NaN);
+      if (!Number.isInteger(index) || index < 0 || index >= pointBudget) invalidCache = true;
+      return index;
+    },
+    pt = value => Math.round(((value / 100) * 12700 * 1000 * 100) / cx) / 100,
     length = value => Math.round((value * 1000 * 100) / cx) / 100,
     solid = node => pptxColor(xmlKids(node || {}, "solidFill")[0], theme)?.c || "",
     accents = ["accent1", "accent2", "accent3", "accent4", "accent5", "accent6"].map(name => theme.get(name)).filter(Boolean),
@@ -362,10 +370,13 @@ function pptxChartSpec(xml, theme, cx) {
       if (!holder) return [];
       const level = xmlDeep(holder, "lvl")[0] || holder,
         out = [];
-      for (const node of xmlDeep(level, "pt"))
-        out[Math.round(pptxAttr(node, "idx"))] = xmlDeep(node, "v")
+      for (const node of xmlDeep(level, "pt")) {
+        const index = indexOf(node, "idx");
+        if (invalidCache) return [];
+        out[index] = xmlDeep(node, "v")
           .map(item => item.textContent.trim())
           .join("");
+      }
       return out;
     },
     textOf = node =>
@@ -381,8 +392,11 @@ function pptxChartSpec(xml, theme, cx) {
         marker = xmlKids(ser, "marker")[0],
         colors = [];
       // 每一段的颜色在 c:dPt 里：序号写在 c:dPt/c:idx@val 上，不是 dPt 自己的属性
-      for (const point of xmlKids(ser, "dPt"))
-        colors[Math.round(pptxAttr(xmlKids(point, "idx")[0], "val"))] = solid(xmlKids(point, "spPr")[0]);
+      for (const point of xmlKids(ser, "dPt")) {
+        const index = indexOf(xmlKids(point, "idx")[0], "val");
+        if (invalidCache) break;
+        colors[index] = solid(xmlKids(point, "spPr")[0]);
+      }
       return {
         name: textOf(xmlKids(ser, "tx")[0]),
         // 折线与雷达的色常写在 ln 上，柱与饼写在 spPr 的填充上；都没写按主题的 accent 轮转
@@ -397,7 +411,15 @@ function pptxChartSpec(xml, theme, cx) {
         lineWidth: length(pptxAttr(ln, "w", 25400))
       };
     });
-  if (!sers.length) return null;
+  if (invalidCache || !sers.length) return null;
+  let slots = 0,
+    longest = 0;
+  for (const ser of sers) {
+    slots += ser.vals.length + ser.cats.length + ser.colors.length;
+    longest = Math.max(longest, ser.vals.length, ser.cats.length);
+  }
+  // 柱与雷达按每类、每系列遍历；不只限制单个缓存的长度。
+  if (slots > pointBudget || longest * sers.length > pointBudget) return null;
   const axisOf = name => [...plot.children].find(node => node.localName === name),
     catAx = axisOf("catAx"),
     valAx = axisOf("valAx"),
