@@ -19,58 +19,34 @@
   container-type: inline-size;
   container-name: work;
 }
-/* 顶栏：工作区那一枚与网页那几件隔一道短丝栏。它只管进出、不表态——表态的是下面那一对 */
-.stage-tool-sep {
-  flex: none;
-  width: 1px;
-  height: 14px;
-  margin: 0 5px;
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
-}
-/* 工作区 / 改动：一对，落在地址行下、路径行上（设计稿/172 甲）。
-   两页相叠＝工作区（整层），一页三粒点＝改动；选中的转朱、底上一层淡朱，任何时候只有一处朱 */
+/* 工作区内部的文字页签：不占浏览器导航栏，不另画按钮框；一笔朱线标出眼下这一面。 */
 .stage-views {
   display: flex;
   align-items: center;
-  margin: 0 0 9px;
+  gap: 18px;
+  margin: 0 0 12px;
 }
 .stage-views button {
-  width: 28px;
-  height: 26px;
-  display: grid;
-  place-items: center;
+  flex: none;
+  padding: 5px 1px 7px;
   border-radius: 0;
-  transition: background var(--dur-quick);
+  border-bottom: 1px solid transparent;
+  color: var(--ink-3);
+  font: var(--fs-small) var(--title);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transition:
+    color var(--dur-quick),
+    border-color var(--dur-quick);
 }
-.stage-views button:first-child {
-  border-radius: var(--radius-m) 0 0 var(--radius-m);
-}
-.stage-views button:last-child {
-  border-radius: 0 var(--radius-m) var(--radius-m) 0;
-}
-.stage-views button + button {
-  border-left: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-}
-.stage-views button .brush {
-  width: 17px;
-  height: 17px;
-  opacity: 0.42;
-  transition: opacity var(--dur-quick);
-}
-.stage-views button:hover .brush {
-  opacity: 0.72;
+.stage-views button:hover {
+  color: var(--ink);
 }
 .stage-views button[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
-.stage-views button[aria-pressed="true"] .brush {
-  opacity: 1;
-}
-.stage-views button[aria-pressed="true"] .brush .ink,
-.stage-views button[aria-pressed="true"] .brush .ink2 {
-  fill: var(--accent);
-}
-/* 地址行那对「览 / 源」：落在收藏左边，收藏的位置不动；与上面那一对同一副写法 */
+/* 地址行那对「览 / 源」：落在收藏左边，收藏的位置不动；只在有两种看法时挂出 */
 .stage-nav > .stage-docmode {
   display: flex;
   align-items: center;

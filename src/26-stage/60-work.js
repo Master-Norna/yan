@@ -296,7 +296,7 @@ function workRows() {
 }
 // ---------- 画 ----------
 function workViewsHtml() {
-  return `<div class="stage-views" role="group" aria-label="${t("看整层还是看改动")}"><button type="button" data-work-mode="list" aria-pressed="${work.mode === "list"}" title="${t("工作区：这一层的东西")}" aria-label="${t("工作区")}">${brushIcon("copy")}</button><button type="button" data-work-mode="changes" aria-pressed="${work.mode === "changes"}" title="${t("改动：本段对话改过的")}" aria-label="${t("改动")}">${brushIcon("changes")}</button></div>`;
+  return `<div class="stage-views" role="group" aria-label="${t("看整层还是看改动")}"><button type="button" data-work-mode="list" aria-pressed="${work.mode === "list"}" title="${t("工作区：这一层的东西")}" aria-label="${t("工作区")}">${t("工作区")}</button><button type="button" data-work-mode="changes" aria-pressed="${work.mode === "changes"}" title="${t("改动：本段对话改过的")}" aria-label="${t("改动")}">${t("改动")}</button></div>`;
 }
 function workShellHtml() {
   return `<div class="work-inner">${workViewsHtml()}<div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><span id="workFacts" class="work-facts"></span><input id="workFind" class="page-find" placeholder="${t("按文件名查找")}" aria-label="${t("按文件名查找")}" spellcheck="false" autocomplete="off"></div><div id="workStrips" class="strips"></div></div>`;

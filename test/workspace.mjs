@@ -52,6 +52,12 @@ await waitFor(`document.querySelectorAll("#workStrips .strip").length >= 3`, 800
 const names = await evalJs(`[...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent)`);
 check("工作区列出这一层：夹在前、件在后", JSON.stringify(names) === JSON.stringify(["子夹", "一页.txt", "笔记.md"]), JSON.stringify(names));
 check("地址行写这一层目录", await evalJs(`document.querySelector("#stageAddr").textContent.includes("工作区")`));
+check(
+  "工作区用文字页签、文件夹入口，顶栏不添分隔线",
+  await evalJs(
+    `document.querySelector('#stageWorkBtn svg').dataset.brush === 'folder' && !document.querySelector('.stage-tool-sep') && [...document.querySelectorAll('#stageWork [data-work-mode]')].map(b => b.textContent.trim()).join('/') === '工作区/改动'`
+  )
+);
 check("件数与小计在路径行上", await evalJs(`/\\d+ 件 · /.test(document.querySelector("#workFacts").textContent)`));
 check("工作区里不挂收藏（没有「这一页」可收）", await evalJs(`document.querySelector("#stageMarks").classList.contains("hidden")`));
 check(

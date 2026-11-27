@@ -219,7 +219,7 @@ function stageDocPair(url = stage.tabs.get(stage.current)?.url || "") {
   if (view === "html") return { src, preview: src, source: `view-source:${src}`, at: viewed ? "source" : "preview" };
   return null;
 }
-// 地址行里那两枚（览 / 源）：只在这件本机文件有两种看法时挂出来；选着的那一枚转朱，与工作区那一对同一副写法
+// 地址行里那两枚（览 / 源）：只在这件本机文件有两种看法时挂出来；选着的那一枚转朱
 function stageRenderDocMode() {
   const box = $("#stageDocMode"),
     pair = stageDocPair();
