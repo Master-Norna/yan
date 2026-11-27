@@ -4,18 +4,20 @@ import { load } from "./harness.mjs";
 
 const page = { type: "page", targetId: "main", url: "https://example.com/one", title: '甲 & "乙"' };
 function stageFixture(ctx) {
-  const f = load(["document", "stage", "stageRender", "stageEditUrl", "stageMessage"]),
+  const f = load(["document", "stage", "stageRender", "stageEditUrl", "stageMessage", "work"]),
     { document } = f,
     query = document.querySelector,
     active = document.activeElement,
     nodes = new Map();
   document.querySelector = selector => {
     if (!nodes.has(selector)) {
-      const classes = new Set();
+      const classes = new Set(),
+        attributes = new Map();
       nodes.set(selector, {
         writes: [],
         title: null,
-        getAttribute: key => (key === "title" ? nodes.get(selector).title : null),
+        getAttribute: key => (key === "title" ? nodes.get(selector).title : (attributes.get(key) ?? null)),
+        setAttribute: (key, value) => attributes.set(key, String(value)),
         classList: {
           contains: name => classes.has(name),
           add: name => classes.add(name),
@@ -57,6 +59,7 @@ test("游目相同标签和地址不换节点；目标地址或标签状态真�
     tabs = node("#stageTabs"),
     addr = node("#stageAddr");
   update();
+  assert.equal(node("#stageWorkBtn").getAttribute("aria-pressed"), "false");
   const closeButton = tabs.child,
     addrChild = addr.child;
   document.activeElement = closeButton;
@@ -135,4 +138,23 @@ test("游目地址编辑保留输入与焦点；退出编辑、收起重开后�
   update();
   assert.equal(empty.writes.at(-1), "");
   assert.equal(empty.classList.contains("hidden"), true);
+});
+
+test("工作区开合不改浏览器地址，文件夹显示选中态", ctx => {
+  const { stage, work, stageRender, node, update } = stageFixture(ctx);
+  update();
+  const addr = node("#stageAddr"),
+    child = addr.child;
+  work.open = true;
+  stageRender();
+  assert.equal(node("#stageWorkBtn").getAttribute("aria-pressed"), "true");
+  assert.equal(node("#stageBrowser").classList.contains("hidden"), false);
+  assert.equal(addr.child, child);
+  stage.ws = null;
+  stageRender();
+  assert.equal(node("#stageBrowser").classList.contains("hidden"), true);
+  work.open = false;
+  stageRender();
+  assert.equal(node("#stageWorkBtn").getAttribute("aria-pressed"), "false");
+  assert.equal(node("#stageBrowser").classList.contains("hidden"), false);
 });
