@@ -1,4 +1,4 @@
-/* 成品卡：言里做出的文件挂在答末，一件一行——类型、文件名、大小，右侧「看」与「下载」 */
+/* 成品卡：言里做出的文件挂在答末，一件一行——类型、文件名、大小，条尾一枚下载的笔意小画 */
 .deliver-bar {
   margin-top: 10px;
   padding: 4px 6px 6px;
@@ -45,10 +45,14 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: var(--fs-small);
 }
-/* 右侧三样：大小离按钮远一点，「预览」「下载」挨得近一点——大小是说明，两枚按钮是一对 */
+/* 点条目即预览——与卷宗点条子、正文里那个链接同一条路；卷宗里已删掉的那件不可点 */
+.deliver-file[role="button"] {
+  cursor: pointer;
+}
+/* 右侧两样：大小是说明，离那枚小画远一点；下载一枚比照卷宗条尾（22px 的格子、15px 的画幅，随字色浓淡） */
 .deliver-file small {
   flex: none;
-  margin-right: 10px;
+  margin-right: 6px;
   color: var(--ink-3);
   font: var(--fs-mark) var(--title);
   letter-spacing: 0.04em;
@@ -56,18 +60,33 @@
 }
 .deliver-btn {
   flex: none;
-  padding: 4px 10px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-s);
   color: var(--ink-3);
-  font: var(--fs-note) var(--title);
-  letter-spacing: 0.1em;
-  transition: color var(--dur-quick);
+  transition:
+    background var(--dur-quick),
+    color var(--dur-quick);
 }
-.deliver-btn + .deliver-btn {
-  margin-left: -8px;
+.deliver-btn:hover,
+.deliver-btn:focus-visible {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink);
 }
-/* 悬停只变朱字、不描框——与请示条那一组同是只用字 */
-.deliver-btn:hover {
-  color: var(--accent);
+.deliver-btn .brush {
+  width: 15px;
+  height: 15px;
+}
+.deliver-btn .brush .ink {
+  fill: currentColor;
+}
+.deliver-btn .brush .ink2 {
+  fill: color-mix(in srgb, currentColor 75%, transparent);
+}
+.deliver-btn .brush .wash {
+  fill: color-mix(in srgb, currentColor 14%, transparent);
 }
 /* 卷宗里已删掉的成品：条目留着，名字变淡，右侧一句「已移出卷宗」代替按钮 */
 .deliver-file.missing .deliver-name,

@@ -1,4 +1,4 @@
-// 行里的成品：答复里链到的工作目录文件挂在答末，点「预览」就地看；写了却没链的、链了却不存在的都不列。
+// 行里的成品：答复里链到的工作目录文件挂在答末，点条目就地看；写了却没链的、链了却不存在的都不列。
 // 图片的件图照它自己的根取；预览里 Markdown 的相对链接照那份文件所在的那一层开
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -45,7 +45,7 @@ check(
     () => false
   )
 );
-await evalJs(`document.querySelector('.message.assistant .deliver-bar [data-deliver-action="view"]').click(); true`);
+await evalJs(`document.querySelector('.message.assistant .deliver-bar .deliver-file[data-deliver$="报告.md"]').click(); true`);
 await waitFor(`/结论在此/.test(document.querySelector("#fileViewerStage")?.textContent || "")`, 8000);
 check(
   "preview reads the file from the working folder",
