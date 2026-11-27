@@ -53,9 +53,9 @@ const names = await evalJs(`[...document.querySelectorAll("#workStrips .strip-na
 check("工作区列出这一层：夹在前、件在后", JSON.stringify(names) === JSON.stringify(["子夹", "一页.txt", "笔记.md"]), JSON.stringify(names));
 check("地址行写这一层目录", await evalJs(`document.querySelector("#stageAddr").textContent.includes("工作区")`));
 check(
-  "工作区用文字页签、文件夹入口，顶栏不添分隔线",
+  "工作区的图形切换在路径工具行，文件夹入口不添分隔线",
   await evalJs(
-    `document.querySelector('#stageWorkBtn svg').dataset.brush === 'folder' && !document.querySelector('.stage-tool-sep') && [...document.querySelectorAll('#stageWork [data-work-mode]')].map(b => b.textContent.trim()).join('/') === '工作区/改动'`
+    `document.querySelector('#stageWorkBtn svg').dataset.brush === 'folder' && !document.querySelector('.stage-tool-sep') && document.querySelectorAll('#stageWork .work-bar [data-work-mode] svg').length === 2 && [...document.querySelectorAll('#stageWork [data-work-mode]')].every(b => !b.textContent.trim() && b.getAttribute('aria-label'))`
   )
 );
 check("件数与小计在路径行上", await evalJs(`/\\d+ 件 · /.test(document.querySelector("#workFacts").textContent)`));
@@ -226,6 +226,12 @@ check(
   "改动那一面：三件各按新建 / 改 / 删上色",
   JSON.stringify(states) === JSON.stringify(["add", "del", "mod"]),
   `${JSON.stringify(states)} · ${await workState()}`
+);
+check(
+  "改动条左缘着色与件图一致，改动面不显示无效查找",
+  await evalJs(
+    `[...document.querySelectorAll('#workStrips .strip[data-change]')].length === 3 && [...document.querySelectorAll('#workStrips .strip[data-change]')].every(row => row.dataset.change === row.querySelector('.fi').dataset.state && getComputedStyle(row).boxShadow !== 'none') && document.querySelector('#workFind').disabled`
+  )
 );
 check(
   "改动那一面不写字（没有增删改、也没有 +几 −几）",

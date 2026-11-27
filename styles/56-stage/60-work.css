@@ -19,32 +19,42 @@
   container-type: inline-size;
   container-name: work;
 }
-/* 工作区内部的文字页签：不占浏览器导航栏，不另画按钮框；一笔朱线标出眼下这一面。 */
+/* 目录树 / 差异：路径工具行右端的一对小画，不另占一层，也不混进浏览器导航。 */
 .stage-views {
   display: flex;
   align-items: center;
-  gap: 18px;
-  margin: 0 0 12px;
+  justify-self: end;
+  gap: 3px;
 }
 .stage-views button {
-  flex: none;
-  padding: 5px 1px 7px;
-  border-radius: 0;
-  border-bottom: 1px solid transparent;
-  color: var(--ink-3);
-  font: var(--fs-small) var(--title);
-  letter-spacing: 0.06em;
-  white-space: nowrap;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
   transition:
-    color var(--dur-quick),
+    background var(--dur-quick),
     border-color var(--dur-quick);
 }
+.stage-views button .brush {
+  width: 19px;
+  height: 19px;
+  opacity: 0.6;
+}
 .stage-views button:hover {
-  color: var(--ink);
+  background: var(--paper-3);
 }
 .stage-views button[aria-pressed="true"] {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.stage-views button[aria-pressed="true"] .brush {
+  opacity: 1;
+}
+.stage-views button[aria-pressed="true"] .brush .ink {
+  fill: var(--accent);
 }
 /* 地址行那对「览 / 源」：落在收藏左边，收藏的位置不动；只在有两种看法时挂出 */
 .stage-nav > .stage-docmode {
@@ -97,16 +107,16 @@
 }
 /* 一条路、一行小字、一枚查找：页头（大标题、图标、动作）整个省掉 */
 .work-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(80px, 160px) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding-bottom: 11px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 12px;
 }
 .work-bar .library-crumbs {
-  flex: 0 0 auto;
-  max-width: 62%;
+  max-width: 100%;
   min-width: 0;
   flex-wrap: nowrap;
   overflow: hidden;
@@ -128,11 +138,16 @@
   white-space: nowrap;
 }
 .work-bar .page-find {
-  flex: 1 1 120px;
-  width: auto;
-  max-width: 200px;
-  min-width: 80px;
-  margin-left: auto;
+  width: 100%;
+  min-width: 0;
+}
+.work-bar .page-find:disabled {
+  visibility: hidden;
+}
+/* 空态也留着同一处切换。 */
+.work-bar-empty {
+  display: flex;
+  justify-content: flex-end;
 }
 /* 还没绑目录：一句话、一枚字按钮，底下不画空簿录 */
 .work-empty {
@@ -180,31 +195,42 @@
   color: var(--ink-3);
   font-weight: 400;
 }
-/* 改动那一面：不写「增 / 改 / 删」，也不写 +几 −几——文件图本身换成那一色：
-   朱是删、泥金是改、石绿是增（与改动条的 ins / del 同一套，另补一个「改」的泥金） */
-.strips .fi[data-state="add"] {
-  --fc: var(--code-green);
+/* 改动用更分明的石绿、琥珀、朱红。件图着色更实，条首一道窄色线；不改卷宗的普通件图。 */
+.work-page {
+  --work-add: #21764c;
+  --work-mod: #a66b13;
+  --work-del: #b83b3b;
 }
-.strips .fi[data-state="mod"] {
-  --fc: var(--gold);
+:root[data-theme="dark"] .work-page {
+  --work-add: #66c890;
+  --work-mod: #e6b459;
+  --work-del: #f07979;
 }
-.strips .fi[data-state="del"] {
-  --fc: var(--danger);
+.work-page .strip[data-change="add"] {
+  --change: var(--work-add);
 }
-.strips .fi-thumb[data-state="add"] {
-  --fc: var(--code-green);
+.work-page .strip[data-change="mod"] {
+  --change: var(--work-mod);
 }
-.strips .fi-thumb[data-state="mod"] {
-  --fc: var(--gold);
+.work-page .strip[data-change="del"] {
+  --change: var(--work-del);
 }
-.strips .fi-thumb[data-state="del"] {
-  --fc: var(--danger);
+.work-page .strip[data-change] {
+  box-shadow: inset 3px 0 0 var(--change);
 }
-.strips .fi-thumb[data-state] {
-  box-shadow: inset 0 0 0 1.5px var(--fc);
+.work-page .fi[data-state] {
+  --fc: var(--change);
 }
-.strips .fi-thumb[data-state="del"] img {
-  opacity: 0.45;
+.work-page .fi[data-state] .body {
+  fill: color-mix(in srgb, var(--fc) 25%, var(--paper));
+  stroke: var(--fc);
+}
+.work-page .fi[data-state] .fold {
+  fill: color-mix(in srgb, var(--fc) 55%, var(--paper));
+  stroke: var(--fc);
+}
+.work-page .fi-thumb[data-state] {
+  box-shadow: inset 0 0 0 2px var(--fc);
 }
 @container work (max-width: 500px) {
   .work-page .strips {
@@ -212,6 +238,21 @@
     --cols: 26px minmax(0, 1fr) 66px 96px;
   }
   .work-facts {
+    display: none;
+  }
+  .work-bar:not(.work-bar-empty) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+  .work-bar .stage-views {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .work-bar .page-find {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .work-bar .page-find:disabled {
     display: none;
   }
 }

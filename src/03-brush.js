@@ -242,6 +242,16 @@ const BRUSH_ICONS = {
     `<path class="wash" d="M2.5 5H8L10 7H17.5V16H2.5Z"/>` +
     brushStroke([2.5, 16, 2.4, 10.5, 2.5, 5, 5.3, 4.9, 8, 5, 9, 6, 10, 7, 13.7, 6.9, 17.5, 7], 1.5, { tail: 0.1 }) +
     brushStroke([17.5, 7, 17.6, 11.5, 17.5, 16, 10, 16.2, 2.5, 16], 1.5, { tail: 0.15 }),
+  // 工作区视图：目录树与差异。前者用一根枝与三级条目，后者用加减两行，不再借复制的图。
+  worktree: () =>
+    brushStroke([4, 3.8, 4, 10, 4, 16], 1.4, { tail: 0.12 }) +
+    [4, 10, 16].map(y => brushStroke([4, y, 6, y, 8, y], 1.4, { tail: 0.12 })).join("") +
+    [4, 10, 16].map(y => brushStroke([10, y, 13.5, y, 17, y], 1.7, { tail: 0.12 })).join(""),
+  workdiff: () =>
+    brushStroke([2.5, 6, 5, 6, 7.5, 6], 1.55, { tail: 0.08 }) +
+    brushStroke([5, 3.5, 5, 6, 5, 8.5], 1.55, { tail: 0.08 }) +
+    brushStroke([2.5, 14, 5, 14, 7.5, 14], 1.55, { tail: 0.08 }) +
+    [6, 14].map(y => brushStroke([10, y, 13.7, y, 17.5, y], 1.65, { tail: 0.08 })).join(""),
   // 预览：一页纸，纸上三行字——排好的那一眼
   preview: () =>
     `<rect class="wash" x="3.8" y="3.6" width="12.4" height="13.4" rx=".3"/>` +

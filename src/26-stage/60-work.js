@@ -296,13 +296,13 @@ function workRows() {
 }
 // ---------- 画 ----------
 function workViewsHtml() {
-  return `<div class="stage-views" role="group" aria-label="${t("看整层还是看改动")}"><button type="button" data-work-mode="list" aria-pressed="${work.mode === "list"}" title="${t("工作区：这一层的东西")}" aria-label="${t("工作区")}">${t("工作区")}</button><button type="button" data-work-mode="changes" aria-pressed="${work.mode === "changes"}" title="${t("改动：本段对话改过的")}" aria-label="${t("改动")}">${t("改动")}</button></div>`;
+  return `<div class="stage-views" role="group" aria-label="${t("看整层还是看改动")}"><button type="button" data-work-mode="list" aria-pressed="${work.mode === "list"}" title="${t("工作区：这一层的东西")}" aria-label="${t("工作区")}">${brushIcon("worktree")}</button><button type="button" data-work-mode="changes" aria-pressed="${work.mode === "changes"}" title="${t("改动：本段对话改过的")}" aria-label="${t("改动")}">${brushIcon("workdiff")}</button></div>`;
 }
 function workShellHtml() {
-  return `<div class="work-inner">${workViewsHtml()}<div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><span id="workFacts" class="work-facts"></span><input id="workFind" class="page-find" placeholder="${t("按文件名查找")}" aria-label="${t("按文件名查找")}" spellcheck="false" autocomplete="off"></div><div id="workStrips" class="strips"></div></div>`;
+  return `<div class="work-inner"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><span id="workFacts" class="work-facts"></span><input id="workFind" class="page-find" placeholder="${t("按文件名查找")}" aria-label="${t("按文件名查找")}" spellcheck="false" autocomplete="off">${workViewsHtml()}</div><div id="workStrips" class="strips"></div></div>`;
 }
 function workEmptyHtml() {
-  return `<div class="work-inner">${workViewsHtml()}<div class="work-empty"><p>${t("这一处还没有绑目录")}</p><button type="button" data-work-pick>${t("选择文件夹…")}</button></div></div>`;
+  return `<div class="work-inner"><div class="work-bar work-bar-empty">${workViewsHtml()}</div><div class="work-empty"><p>${t("这一处还没有绑目录")}</p><button type="button" data-work-pick>${t("选择文件夹…")}</button></div></div>`;
 }
 /** 路径：一层一枚键，点哪一级去哪一级（整条是绝对路径，越出原先那一处也只是换根，仍是这一层）。
  * 超过四级的，中间并成一枚「…」：窄到三百来像素时，开头与末尾仍看得见 */
@@ -329,7 +329,7 @@ function workRowHtml(row) {
   const where = row.where ? `<span class="dir">${escapeHtml(row.where)}/</span>` : "",
     size = row.size === null || row.size === undefined ? "" : escapeHtml(formatFileSize(row.size));
   // 删掉的件不再向盘上取缩略（取也取不到），只留那一片换过色的纸
-  return `<div class="strip file" role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}"><span>${fileFigure(row.name, row.state === "del" ? "" : row.path, row.state)}</span><span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span><span>${size}</span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
+  return `<div class="strip file"${row.state ? ` data-change="${row.state}"` : ""} role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}"><span>${fileFigure(row.name, row.state === "del" ? "" : row.path, row.state)}</span><span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span><span>${size}</span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
 }
 function workPaint() {
   const box = $("#stageWork"),
@@ -354,6 +354,8 @@ function workPaint() {
   const up = workUp(work.root);
   /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = !up;
   /** @type {HTMLButtonElement} */ ($("[data-stage-nav=forward]")).disabled = true;
+  const find = /** @type {HTMLInputElement} */ ($("#workFind"));
+  find.disabled = work.mode === "changes";
   const rows = workRows(),
     files = rows.filter(row => !row.dir),
     bytes = files.reduce((sum, row) => sum + Number(row.size || 0), 0),
