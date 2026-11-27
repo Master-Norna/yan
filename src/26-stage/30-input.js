@@ -475,8 +475,8 @@ function bindStage() {
       const action = /** @type {HTMLElement} */ (button).dataset.stageNav;
       // 工作区里：后退即回上一层，重载即重新列一遍（前进在目录里没有去处）
       if (work.open) {
-        const here = workParts(work.root);
-        if (action === "back" && here.length > 1) void workEnterDir(parentDir(work.root));
+        const up = workUp(work.root);
+        if (action === "back" && up) void workEnterDir(up);
         else if (action === "reload") void workRefresh();
         return;
       }

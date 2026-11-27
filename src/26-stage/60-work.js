@@ -33,9 +33,29 @@ function workStored() {
     return "";
   }
 }
+/** 开头的斜杠：POSIX 的根（/Users/…）、UNC 的 //host，不算一级，拼回去时要留在前头；Windows 的 E:/ 归第一级自己带着 */
+function workLead(path) {
+  const lead = /^\/+/.exec(slashed(path));
+  return lead ? lead[0] : "";
+}
 /** 路径按层拆开：E:/项目/Note → E: › 项目 › Note */
 function workParts(path) {
-  return slashed(path).split("/").filter(Boolean);
+  const text = slashed(path),
+    lead = workLead(text);
+  return text.slice(lead.length).split("/").filter(Boolean);
+}
+/** 前 end 级拼回去：POSIX 上丢了开头那一道斜杠就成了相对路径，下一趟列目录会落到桥接的工作目录去 */
+function workAt(path, parts, end) {
+  return workLead(path) + parts.slice(0, end).join("/");
+}
+/** 根与一条相对的路拼起来：根是 / 时不写成一加一的后斜杠 */
+function workJoin(root, rel) {
+  const base = slashed(root);
+  return base.endsWith("/") ? `${base}${rel}` : `${base}/${rel}`;
+}
+/** 上一层：第一级不再往上（/ 与盘符都不能当工作目录，去了只会报错）；POSIX 开头那一道斜杠由 parentDir 原样留着 */
+function workUp(path) {
+  return workParts(path).length > 1 ? parentDir(slashed(path)) : "";
 }
 /** 地址行里写的那一句：这一层叫什么，前头是它所在的那一路 */
 function workAddrHtml() {
@@ -181,14 +201,14 @@ function workRows() {
     return [
       ...work.dirs
         .filter(dir => level(dir.path))
-        .map(dir => ({ dir: true, name: dir.name, path: `${work.root}/${dir.path}`, note: "", when: "" }))
+        .map(dir => ({ dir: true, name: dir.name, path: workJoin(work.root, dir.path), note: "", when: "" }))
         .sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
       ...work.entries
         .filter(entry => level(entry.path))
         .map(entry => ({
           dir: false,
           name: entry.name,
-          path: `${work.root}/${entry.path}`,
+          path: workJoin(work.root, entry.path),
           where: "",
           size: entry.size,
           when: formatDay(entry.modifiedAt),
@@ -201,7 +221,7 @@ function workRows() {
     .map(entry => ({
       dir: false,
       name: entry.name,
-      path: `${work.root}/${entry.path}`,
+      path: workJoin(work.root, entry.path),
       where: parentDir(entry.path),
       size: entry.size,
       when: formatDay(entry.modifiedAt),
@@ -223,9 +243,10 @@ function workEmptyHtml() {
 function workCrumbsHtml() {
   const parts = workParts(work.root),
     crumbs = [];
-  if (parts.length > 4) crumbs.push({ name: parts[0], at: parts[0] }, { name: "…", at: "" });
+  if (!parts.length) return `<span class="here" title="${escapeHtml(work.root)}">${escapeHtml(work.root)}</span>`;
+  if (parts.length > 4) crumbs.push({ name: parts[0], at: workAt(work.root, parts, 1) }, { name: "…", at: "" });
   for (let i = parts.length > 4 ? parts.length - 2 : 0; i < parts.length; i++)
-    crumbs.push({ name: parts[i], at: parts.slice(0, i + 1).join("/") });
+    crumbs.push({ name: parts[i], at: workAt(work.root, parts, i + 1) });
   return crumbs
     .map((crumb, i) => {
       const sep = i ? `<span class="sep" aria-hidden="true">›</span>` : "";
@@ -264,7 +285,8 @@ function workPaint() {
   }
   if (shape !== "list") return;
   // 工作区里前后按目录走：还有上一层就能退，前进没有去处（离开这一层时 workHide 按浏览器记的还原）
-  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = workParts(work.root).length <= 1;
+  const up = workUp(work.root);
+  /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = !up;
   /** @type {HTMLButtonElement} */ ($("[data-stage-nav=forward]")).disabled = true;
   const rows = workRows(),
     files = rows.filter(row => !row.dir),
@@ -280,10 +302,9 @@ function workPaint() {
     factsBox = $("#workFacts");
   stageSetHtml($("#workCrumbs"), workCrumbsHtml());
   if (factsBox && factsBox.textContent !== facts) factsBox.textContent = facts;
-  const back =
-      workParts(work.root).length > 1
-        ? `<button type="button" class="strip-back" data-work-dir="${escapeHtml(parentDir(work.root))}" title="${t("回上一层")}" aria-label="${t("回上一层")}">‹</button>`
-        : "",
+  const back = up
+      ? `<button type="button" class="strip-back" data-work-dir="${escapeHtml(up)}" title="${t("回上一层")}" aria-label="${t("回上一层")}">‹</button>`
+      : "",
     empty = work.error
       ? t`目录不可用：${work.error}`
       : work.mode === "changes" && !work.full

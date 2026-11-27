@@ -3,6 +3,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
+// 工作区的实情（页面脚本包在闭包里读不到变量，只好看 DOM 与本机记下的那一份）：断言不过时一并写出来，省得再猜
+const workState = () =>
+  evalJs(
+    `JSON.stringify({ stored: localStorage.getItem("yan-work-root") || "", crumbs: document.querySelector("#workCrumbs")?.textContent || "", facts: document.querySelector("#workFacts")?.textContent || "", rows: [...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent), said: document.querySelector("#workStrips").textContent.trim().slice(0, 90), hidden: document.querySelector("#stageWork").classList.contains("hidden") })`
+  );
 
 const ROOT = `${TMP}/工作区`,
   HOME_SETTINGS = {
@@ -66,9 +71,16 @@ check(
   await evalJs(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "深.md")`)
 );
 check("路径里多了一级", await evalJs(`document.querySelector("#workCrumbs .here").textContent === "子夹"`));
+// 那一级要写整条绝对路径：POSIX 上丢了开头的 / 就成了相对路径，点下去整块工作区空掉（macOS 上踩过）
+const crumbAt = await evalJs(
+  `[...document.querySelectorAll('#workCrumbs [data-work-dir]')].find(b => b.textContent === '工作区')?.dataset.workDir || ""`
+);
+check("路径里那一级写的是整条绝对路径", crumbAt === ROOT, `${JSON.stringify(crumbAt)} vs ${JSON.stringify(ROOT)}`);
 await evalJs(`[...document.querySelectorAll('#workCrumbs [data-work-dir]')].find(b => b.textContent === '工作区').click(); true`);
 await waitFor(`document.querySelector("#workCrumbs .here")?.textContent === "工作区"`, 8000).catch(() => {});
 check("点路径回到上一层", await evalJs(`document.querySelector("#workCrumbs .here").textContent === "工作区"`));
+await waitFor(`document.querySelectorAll("#workStrips .strip").length >= 3`, 8000).catch(() => {});
+check("回到上一层，簿录又是这一层的三件", await evalJs(`document.querySelectorAll("#workStrips .strip").length >= 3`), await workState());
 
 // 查找：跨层平铺，没了的夹子不再列
 await evalJs(
@@ -79,7 +91,7 @@ const found = await evalJs(`[...document.querySelectorAll("#workStrips .strip-na
 check(
   "查找跨层：深处那一件也找得到，名字前注着它所在的层",
   JSON.stringify(found) === JSON.stringify(["子夹/深.md"]),
-  JSON.stringify(found)
+  `${JSON.stringify(found)} · ${await workState()}`
 );
 await evalJs(
   `(() => { const field = document.querySelector("#workFind"); field.value = ""; field.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`
@@ -88,7 +100,11 @@ await evalJs(
 // 改动那一面：没有对话，也就没有改过的件；两枚里仍只有一枚朱
 await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').click(); true`);
 await waitFor(`/还没改过文件/.test(document.querySelector("#workStrips").textContent)`, 8000).catch(() => {});
-check("改动那一面此时空着", await evalJs(`/还没改过文件/.test(document.querySelector("#workStrips").textContent)`));
+check(
+  "改动那一面此时空着",
+  await evalJs(`/还没改过文件/.test(document.querySelector("#workStrips").textContent)`),
+  `${await evalJs('document.querySelector("#workStrips").textContent.slice(0, 80)')} · ${await workState()}`
+);
 check(
   "切到改动：仍只有一枚选着",
   await evalJs(
@@ -97,11 +113,16 @@ check(
 );
 await evalJs(`document.querySelector('#stageWork [data-work-mode="list"]').click(); true`);
 await waitFor(`document.querySelectorAll("#workStrips .strip").length >= 3`, 8000).catch(() => {});
-check("再点第一枚回到整层", await evalJs(`document.querySelectorAll("#workStrips .strip").length >= 3`));
+check("再点第一枚回到整层", await evalJs(`document.querySelectorAll("#workStrips .strip").length >= 3`), await workState());
 
 // 地址行：点开即改，写着这一层的整条路径
 await evalJs(`document.querySelector("#stageAddr").click(); true`);
-check("地址行里写的是这一层的整条路径", (await evalJs(`document.querySelector("#stageUrl").value`)) === ROOT);
+const addrValue = await evalJs(`document.querySelector("#stageUrl").value`);
+check(
+  "地址行里写的是这一层的整条路径",
+  addrValue === ROOT,
+  `${JSON.stringify(addrValue)} vs ${JSON.stringify(ROOT)} · ${await workState()}`
+);
 await evalJs(`document.querySelector("#stageUrl").blur(); true`);
 
 // 调律那张纸签里不再有「打开本机文件」
@@ -184,14 +205,22 @@ await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').click(); true`);
 await waitFor(`document.querySelectorAll("#workStrips .strip").length === 3`, 8000).catch(() => {});
 const states = await evalJs(`[...document.querySelectorAll("#workStrips .fi[data-state]")].map(el => el.dataset.state).sort()`);
-check("改动那一面：三件各按新建 / 改 / 删上色", JSON.stringify(states) === JSON.stringify(["add", "del", "mod"]), JSON.stringify(states));
+check(
+  "改动那一面：三件各按新建 / 改 / 删上色",
+  JSON.stringify(states) === JSON.stringify(["add", "del", "mod"]),
+  `${JSON.stringify(states)} · ${await workState()}`
+);
 check(
   "改动那一面不写字（没有增删改、也没有 +几 −几）",
   await evalJs(
     `!/[+−]\\d/.test(document.querySelector("#workStrips").textContent) && !/增|删 |改 /.test(document.querySelector("#workStrips").textContent)`
   )
 );
-check("件数与小注写的是本段对话改过", await evalJs(`/本段对话改过/.test(document.querySelector("#workFacts").textContent)`));
+check(
+  "件数与小注写的是本段对话改过",
+  await evalJs(`/本段对话改过/.test(document.querySelector("#workFacts").textContent)`),
+  `${await evalJs('document.querySelector("#workFacts").textContent')} · ${await workState()}`
+);
 
 check("全程没有页面异常", await evalJs(`window.__yanExceptions.length === 0`), await evalJs(`JSON.stringify(window.__yanExceptions)`));
 close();
