@@ -2,19 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
 
-const f = load([
-  "pptxChartSpec",
-  "pptxChartHtml",
-  `setup: root => {
-    parseXml = () => root;
-    xmlKids = (node, name) => (node?.children || []).filter(child => child.localName === name);
-    xmlDeep = (node, name) => (node?.children || []).flatMap(child => [
-      ...(child.localName === name ? [child] : []), ...xmlDeep(child, name)
-    ]);
+const f = load(["pptxChartSpec", "pptxChartHtml", "setup: root => { parseXml = () => root; }"]);
   }`
 ]);
 function node(localName, attrs = {}, children = [], textContent = "") {
-  return { localName, children, textContent, getAttribute: name => attrs[name] ?? null };
+  return {
+    localName,
+    children,
+    textContent,
+    getAttribute: name => attrs[name] ?? null,
+    getElementsByTagNameNS: (_ns, name) =>
+      children.flatMap(child => [...(child.localName === name ? [child] : []), ...child.getElementsByTagNameNS(_ns, name)])
+  };
 }
 
 test("组合图：不能把第一组单独当作完整图表", () => {
@@ -34,6 +33,7 @@ for (const legend of ["l", "r"])
       kind: "line",
       legend,
       cats: ["A", "B"],
+      accents: [],
       sers: ["First", "Second"].map(name => ({ name, color: "112233", vals: [1, 2] })),
       cat: {},
       val: { grid: {} }
