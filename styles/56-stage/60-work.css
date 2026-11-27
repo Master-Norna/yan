@@ -1,5 +1,5 @@
 /* 工作区（设计稿/172）：舞台里的一层，簿录照卷宗那一套（styles/50-files.css）。
-   与卷宗的不同只在：顶上一对「工作区 / 改动」、一条路径与查找、不设分类签与收入改名。
+   与卷宗的不同只在：顶上一对「工作区 / 改动」、一条路径、不设分类签与收入改名。
    窄下来只收紧比例、不另画一套：名目让出宽度给大小与日期，四列始终四列 */
 .stage-view.work {
   place-items: stretch;
@@ -105,10 +105,10 @@
 .stage-nav > .stage-docmode:not(.hidden) ~ #stageMarks {
   margin-left: 0;
 }
-/* 一条路、一行小字、一枚查找：页头（大标题、图标、动作）整个省掉 */
+/* 路径和右端的切换：不另设统计与查找。 */
 .work-bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(80px, 160px) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding-bottom: 11px;
@@ -129,20 +129,6 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.work-facts {
-  flex: none;
-  color: var(--ink-3);
-  font: var(--fs-small) var(--title);
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-.work-bar .page-find {
-  width: 100%;
-  min-width: 0;
-}
-.work-bar .page-find:disabled {
-  visibility: hidden;
 }
 /* 空态也留着同一处切换。 */
 .work-bar-empty {
@@ -195,7 +181,7 @@
   color: var(--ink-3);
   font-weight: 400;
 }
-/* 改动用更分明的石绿、琥珀、朱红。件图着色更实，条首一道窄色线；不改卷宗的普通件图。 */
+/* 只换件图已有的色值；沿用卷宗的纸形、笔画、缩略图样式。 */
 .work-page {
   --work-add: #21764c;
   --work-mod: #a66b13;
@@ -206,54 +192,28 @@
   --work-mod: #e6b459;
   --work-del: #f07979;
 }
-.work-page .strip[data-change="add"] {
-  --change: var(--work-add);
+.work-page .fi[data-state="add"],
+.work-page .fi-thumb[data-state="add"] {
+  --fc: var(--work-add);
 }
-.work-page .strip[data-change="mod"] {
-  --change: var(--work-mod);
+.work-page .fi[data-state="mod"],
+.work-page .fi-thumb[data-state="mod"] {
+  --fc: var(--work-mod);
 }
-.work-page .strip[data-change="del"] {
-  --change: var(--work-del);
-}
-.work-page .strip[data-change] {
-  box-shadow: inset 3px 0 0 var(--change);
-}
-.work-page .fi[data-state] {
-  --fc: var(--change);
-}
-.work-page .fi[data-state] .body {
-  fill: color-mix(in srgb, var(--fc) 25%, var(--paper));
-  stroke: var(--fc);
-}
-.work-page .fi[data-state] .fold {
-  fill: color-mix(in srgb, var(--fc) 55%, var(--paper));
-  stroke: var(--fc);
+.work-page .fi[data-state="del"],
+.work-page .fi-thumb[data-state="del"] {
+  --fc: var(--work-del);
 }
 .work-page .fi-thumb[data-state] {
-  box-shadow: inset 0 0 0 2px var(--fc);
+  box-shadow: inset 0 0 0 1.5px var(--fc);
+}
+.work-page .fi-thumb[data-state="del"] img {
+  opacity: 0.45;
 }
 @container work (max-width: 500px) {
   .work-page .strips {
     --cell: 8px;
     --cols: 26px minmax(0, 1fr) 66px 96px;
-  }
-  .work-facts {
-    display: none;
-  }
-  .work-bar:not(.work-bar-empty) {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px 10px;
-  }
-  .work-bar .stage-views {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .work-bar .page-find {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-  .work-bar .page-find:disabled {
-    display: none;
   }
 }
 @container work (max-width: 340px) {

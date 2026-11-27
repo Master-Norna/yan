@@ -1,4 +1,4 @@
-// 工作区：游目里的一层，看某一处目录——簿录、走层、查找、路径、空态，以及顶栏那一枚与地址行下那一对的分工。
+// 工作区：游目里的一层，看某一处目录——簿录、走层、路径、空态，以及顶栏那一枚与地址行下那一对的分工。
 // 不含「点一件去开」那一段（要真浏览器，见 test/stage.mjs）；也不碰系统的选夹子窗：进来之前先把绑过的目录写进 localStorage。
 import { mkdirSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
@@ -6,7 +6,7 @@ const { send, evalJs, waitFor, close } = await connect();
 // 工作区的实情（页面脚本包在闭包里读不到变量，只好看 DOM 与本机记下的那一份）：断言不过时一并写出来，省得再猜
 const workState = () =>
   evalJs(
-    `JSON.stringify({ stored: localStorage.getItem("yan-work-root") || "", crumbs: document.querySelector("#workCrumbs")?.textContent || "", facts: document.querySelector("#workFacts")?.textContent || "", rows: [...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent), said: document.querySelector("#workStrips").textContent.trim().slice(0, 90), hidden: document.querySelector("#stageWork").classList.contains("hidden") })`
+    `JSON.stringify({ stored: localStorage.getItem("yan-work-root") || "", crumbs: document.querySelector("#workCrumbs")?.textContent || "", rows: [...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent), said: document.querySelector("#workStrips").textContent.trim().slice(0, 90), hidden: document.querySelector("#stageWork").classList.contains("hidden") })`
   );
 
 const ROOT = `${TMP}/工作区`,
@@ -58,7 +58,7 @@ check(
     `document.querySelector('#stageWorkBtn svg').dataset.brush === 'folder' && !document.querySelector('.stage-tool-sep') && document.querySelectorAll('#stageWork .work-bar [data-work-mode] svg').length === 2 && [...document.querySelectorAll('#stageWork [data-work-mode]')].every(b => !b.textContent.trim() && b.getAttribute('aria-label'))`
   )
 );
-check("件数与小计在路径行上", await evalJs(`/\\d+ 件 · /.test(document.querySelector("#workFacts").textContent)`));
+check("路径行只留路径和切换，不另列查找与统计", await evalJs(`!document.querySelector("#workFind, #workFacts")`));
 check("工作区里不挂收藏（没有「这一页」可收）", await evalJs(`document.querySelector("#stageMarks").classList.contains("hidden")`));
 check(
   "顶栏那一枚不表态，表态的是地址行下那一对",
@@ -90,21 +90,6 @@ await waitFor(`document.querySelector("#workCrumbs .here")?.textContent === "工
 check("点路径回到上一层", await evalJs(`document.querySelector("#workCrumbs .here").textContent === "工作区"`));
 await waitFor(`document.querySelectorAll("#workStrips .strip").length >= 3`, 8000).catch(() => {});
 check("回到上一层，簿录又是这一层的三件", await evalJs(`document.querySelectorAll("#workStrips .strip").length >= 3`), await workState());
-
-// 查找：跨层平铺，没了的夹子不再列
-await evalJs(
-  `(() => { const field = document.querySelector("#workFind"); field.value = "深"; field.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`
-);
-await waitFor(`document.querySelectorAll("#workStrips .strip").length === 1`, 8000).catch(() => {});
-const found = await evalJs(`[...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent)`);
-check(
-  "查找跨层：深处那一件也找得到，名字前注着它所在的层",
-  JSON.stringify(found) === JSON.stringify(["子夹/深.md"]),
-  `${JSON.stringify(found)} · ${await workState()}`
-);
-await evalJs(
-  `(() => { const field = document.querySelector("#workFind"); field.value = ""; field.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`
-);
 
 // 改动那一面：没有对话，也就没有改过的件；两枚里仍只有一枚朱
 await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').click(); true`);
@@ -228,9 +213,9 @@ check(
   `${JSON.stringify(states)} · ${await workState()}`
 );
 check(
-  "改动条左缘着色与件图一致，改动面不显示无效查找",
+  "改动沿用件图着色，无额外条首色线",
   await evalJs(
-    `[...document.querySelectorAll('#workStrips .strip[data-change]')].length === 3 && [...document.querySelectorAll('#workStrips .strip[data-change]')].every(row => row.dataset.change === row.querySelector('.fi').dataset.state && getComputedStyle(row).boxShadow !== 'none') && document.querySelector('#workFind').disabled`
+    `new Set([...document.querySelectorAll('#workStrips .fi[data-state]')].map(el => getComputedStyle(el).getPropertyValue('--fc').trim())).size === 3 && !document.querySelector('#workStrips [data-change]')`
   )
 );
 check(
@@ -239,12 +224,6 @@ check(
     `!/[+−]\\d/.test(document.querySelector("#workStrips").textContent) && !/增|删 |改 /.test(document.querySelector("#workStrips").textContent)`
   )
 );
-check(
-  "件数与小注写的是本段对话改过",
-  await evalJs(`/本段对话改过/.test(document.querySelector("#workFacts").textContent)`),
-  `${await evalJs('document.querySelector("#workFacts").textContent')} · ${await workState()}`
-);
-
 check("全程没有页面异常", await evalJs(`window.__yanExceptions.length === 0`), await evalJs(`JSON.stringify(window.__yanExceptions)`));
 close();
 process.exit(0);
