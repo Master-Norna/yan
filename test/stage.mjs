@@ -80,7 +80,8 @@ for (const { targetId: id, type } of (await browserSend("Target.getTargets")).ta
   if (type === "page" && id !== targetId) await browserSend("Target.closeTarget", { targetId: id });
 await sleep(800);
 
-check("no pin before the browser is found", await evalJs(`document.querySelector("#stagePin").classList.contains("hidden")`));
+await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`);
+check("workspace entry is available before the browser is found", await evalJs(`!document.querySelector("#stagePin").classList.contains("hidden")`));
 writeConfig(new URL(MODEL_DEBUG).port);
 await evalJs(`__yanStage.locate().then(() => true)`);
 await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`, 8000);
@@ -995,10 +996,9 @@ const workDir = `${ARCHIVE}/工作区-舞台`;
 mkdirSync(workDir, { recursive: true });
 writeFileSync(`${workDir}/笔记.md`, "# 笔记\n\n这一层只在工作区里看。\n");
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
-await waitFor(`[...document.querySelectorAll("#workStrips .strip.dir")].some(el => el.querySelector("strong")?.textContent === "工作区-舞台")`);
-await evalJs(
-  `[...document.querySelectorAll("#workStrips .strip.dir")].find(el => el.querySelector("strong")?.textContent === "工作区-舞台").click(); true`
-);
+const workFolder = `document.querySelector('[data-work-dir="${workDir}"]')`;
+await waitFor(`!!${workFolder}`);
+await evalJs(`${workFolder}.click(); true`);
 await waitFor(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "笔记.md")`, 8000).catch(
   () => {}
 );

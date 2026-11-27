@@ -97,7 +97,7 @@ async function workPick() {
     toast(t`打开失败：${String(/** @type {any} */ (error).message || error).slice(0, 80)}`);
   }
 }
-/** 去某一层：点路径里的一级、点回上一层、地址行里输的，都走这一条 */
+/** 点路径里的一级或子目录，都走这一条 */
 function workEnterDir(path) {
   const root = slashed(String(path || ""));
   if (!root || root === work.root) return;
@@ -252,7 +252,7 @@ function workCrumbsHtml() {
 function workRowHtml(row) {
   if (row.dir)
     return `<div class="strip dir" role="button" tabindex="0" data-work-dir="${escapeHtml(row.path)}" title="${t`打开 ${escapeHtml(row.name)}`}"><span>${caseFigure()}</span><span class="strip-name"><strong>${escapeHtml(row.name)}</strong></span><span class="strip-note">${escapeHtml(row.note || "")}</span><span class="strip-date"><span class="strip-when"></span></span></div>`;
-  const where = row.where ? `<span class="dir">${escapeHtml(row.where)}/</span>` : "",
+  const where = row.where ? `<span class="dir">${escapeHtml(row.where.replace(/\/$/, ""))}/</span>` : "",
     size = row.size === null || row.size === undefined ? "" : escapeHtml(formatFileSize(row.size));
   // 删掉的件不再向盘上取缩略（取也取不到），只留那一片换过色的纸
   return `<div class="strip file" role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}"><span>${fileFigure(row.name, row.state === "del" ? "" : row.path, row.state)}</span><span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span><span>${size}</span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
@@ -303,7 +303,7 @@ async function workOpenPath(path) {
   stageGo(path);
 }
 function workSwitch(mode) {
-  if (work.mode === mode) return;
+  if (work.mode === mode) return void workRefresh();
   work.mode = mode;
   workResetRows();
   workPaint();

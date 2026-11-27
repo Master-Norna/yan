@@ -72,11 +72,12 @@ function stageActing() {
   for (const id of stage.usedBy) if (!requestJobs.has(id) && !crews.has(id)) stage.usedBy.delete(id);
   return stage.busy > 0 || stage.usedBy.size > 0 || Date.now() - stage.lastAct < 8000;
 }
-// 入口：接了浏览器类的 MCP（或浏览器已开着）、游目收着（或被旁注挤开）时自页顶垂下；未开卷着，开着展开，在用轻摆
+// 入口：有工作目录或浏览器时可进游目；游目收着（或被旁注挤开）时自页顶垂下，在用轻摆
 function stageSync() {
   const pin = $("#stagePin"),
-    acting = stageActing();
-  pin.classList.toggle("hidden", (!stage.ws && !stageServer()) || (stageShown() && $("#stagePanel").clientWidth > 0 && !document.hidden));
+    acting = stageActing(),
+    visible = stageShown() && $("#stagePanel").clientWidth > 0 && !document.hidden;
+  pin.classList.toggle("hidden", visible || (!stage.ws && !stageServer() && !archiveDir() && !currentConversation()?.workdir));
   pin.dataset.state = acting ? "act" : stage.ws ? "open" : "off";
   // 地址行的「执事」：在用时挂着，指着浮出近几步
   $("#stageBusy").classList.toggle("hidden", !acting);
