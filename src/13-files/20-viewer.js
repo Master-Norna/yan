@@ -504,9 +504,9 @@ function pptxChartHtml(shape, ratio) {
         if (sweep <= 0) return;
         const color = spec.sers[0]?.colors[index] || spec.accents[index % (spec.accents.length || 1)] || spec.sers[0]?.color;
         // 整圆的 SVG 圆弧不能起止于同一点；拆成两个半圆，环形同理。
-        if (sweep >= Math.PI * 2 - 1e-10)
-          html.push(`<path d="${slice(angle, angle + Math.PI)} ${slice(angle + Math.PI, angle + sweep)}" fill="${colorOf(color)}"/>`);
-        else html.push(`<path d="${slice(angle, angle + sweep)}" fill="${colorOf(color)}"/>`);
+        const d =
+          sweep >= Math.PI * 2 - 1e-10 ? `${slice(angle, angle + Math.PI)} ${slice(angle + Math.PI, angle + sweep)}` : slice(angle, angle + sweep);
+        html.push(`<path d="${d}" fill="${colorOf(color)}"/>`);
         angle += sweep;
       });
       return { html, legend: legend === "r" ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
