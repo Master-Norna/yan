@@ -32,12 +32,10 @@ function anthropicGeneration(model) {
 }
 // Base URL 可以填到根、到 /v1 或到 /v1/messages，都归到根再拼
 function anthropicEndpoint(baseUrl, suffix = "/v1/messages") {
-  const url = String(baseUrl || "")
-    .trim()
-    .replace(/\/+$/, "")
-    .replace(/\/v1(\/messages)?$/i, "");
-  if (!/^https?:\/\//i.test(url)) throw Error("Base URL 只支持 http 或 https");
-  return `${url}${suffix}`;
+  const url = new URL(String(baseUrl || "").trim());
+  if (!/^https?:$/.test(url.protocol)) throw Error("Base URL 只支持 http 或 https");
+  url.pathname = `${url.pathname.replace(/\/+$/, "").replace(/\/v1(\/messages)?$/i, "")}${suffix}`;
+  return url.href;
 }
 function anthropicHeaders(apiKey) {
   return { "Content-Type": "application/json", "x-api-key": String(apiKey || ""), "anthropic-version": ANTHROPIC_VERSION };
