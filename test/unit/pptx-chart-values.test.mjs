@@ -52,3 +52,16 @@ for (const kind of ["pie", "doughnut"])
     const d = /<path d="([^"]+)"/.exec(html)?.[1] || "";
     assert.equal((d.match(/ A/g) || []).length, kind === "pie" ? 2 : 4);
   });
+
+test("堆叠：数据全负时数轴仍含 0，柱子看得见", () => {
+  // 柱从数值 0 起画；自动数轴若不含 0（全负时曾只取到数据最大值 -10），整根柱就跑到框外
+  const html = render("bar", "stacked", [[-10], [-20]]);
+  const ticks = [...html.matchAll(/>(-?\d+)<\/text>/g)].map(match => Number(match[1]));
+  assert.ok(ticks.includes(0), `数轴里没有 0：${ticks.join(" / ")}`);
+  const bars = [...html.matchAll(/<rect x="[^"]+" y="([^"]+)" width="[^"]+" height="([^"]+)" fill="#(?:aa0000|00aa00|0000aa)"/g)];
+  assert.equal(bars.length, 2);
+  for (const [, y, height] of bars) {
+    assert.ok(Number(height) > 1, `柱高 ${height} 等于没有`);
+    assert.ok(Number(y) + Number(height) <= 600 + 0.1, `柱底 ${Number(y) + Number(height)} 越出 600 高的框`);
+  }
+});
