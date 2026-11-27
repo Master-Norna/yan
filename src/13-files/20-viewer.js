@@ -305,12 +305,15 @@ function pptxChartHtml(shape, ratio) {
     rangeOf = stack => {
       let values = spec.sers.flatMap(ser => ser.vals).filter(value => value != null);
       if (stack) {
-        const sums = [];
+        const positive = [],
+          negative = [];
         for (const ser of spec.sers)
           ser.vals.forEach((value, index) => {
-            if (value != null) sums[index] = (sums[index] || 0) + value;
+            if (value == null) return;
+            const sums = value < 0 ? negative : positive;
+            sums[index] = (sums[index] || 0) + value;
           });
-        values = sums.filter(value => value != null);
+        values = [...positive, ...negative].filter(value => value != null);
       }
       const min = Number.isFinite(spec.val.min) ? spec.val.min : Math.min(0, ...(values.length ? values : [0]));
       let max = Number.isFinite(spec.val.max) ? spec.val.max : Math.max(...(values.length ? values : [1]), min + 1),
@@ -421,8 +424,14 @@ function pptxChartHtml(shape, ratio) {
       }));
       if (percent)
         for (const ser of sers)
-          ser.vals = ser.vals.map((value, index) => (value == null ? null : (Math.abs(value) / (totals[index] || 1)) * 100));
-      const plot = plotFrame(percent ? { min: 0, max: 100, unit: 25, ticks: [0, 25, 50, 75, 100] } : stacked),
+          ser.vals = ser.vals.map((value, index) => (value == null ? null : (value / (totals[index] || 1)) * 100));
+      const hasNegative = sers.some(ser => ser.vals.some(value => value < 0)),
+        hasPositive = sers.some(ser => ser.vals.some(value => value > 0)),
+        percentMin = hasNegative ? -100 : 0,
+        percentMax = hasNegative && !hasPositive ? 0 : 100,
+        percentTicks = [];
+      for (let tick = percentMin; tick <= percentMax; tick += 25) percentTicks.push(tick);
+      const plot = plotFrame(percent ? { min: percentMin, max: percentMax, unit: 25, ticks: percentTicks } : stacked),
         html = plot.html,
         count = plot.count,
         span = plot.horiz ? plot.ph : plot.pw,
@@ -432,8 +441,9 @@ function pptxChartHtml(shape, ratio) {
         subWidth = barWidth / Math.max(1, seriesCount - overlap * (seriesCount - 1)),
         step = subWidth * (1 - overlap),
         offset = -barWidth / 2 + (barWidth - (subWidth + step * (seriesCount - 1))) / 2,
-        stackBase = Math.max(0, plot.range.min),
-        stackTops = new Array(count).fill(stackBase),
+        stackBase = Math.max(plot.range.min, Math.min(0, plot.range.max)),
+        positiveTops = new Array(count).fill(0),
+        negativeTops = new Array(count).fill(0),
         zero = plot.valAt(stackBase),
         legendHtml = legendRowHtml(legend === "t" ? 0 : null);
       sers.forEach((ser, seriesIndex) => {
@@ -442,9 +452,10 @@ function pptxChartHtml(shape, ratio) {
           if (value == null) continue;
           const color = colorOf(ser.colors[index] || ser.color);
           if (stacked) {
-            const from = stackTops[index],
+            const tops = value < 0 ? negativeTops : positiveTops,
+              from = tops[index],
               to = from + value;
-            stackTops[index] = to;
+            tops[index] = to;
             html.push(
               plot.horiz
                 ? `<rect x="${n(plot.valAt(Math.min(from, to)))}" y="${n(plot.catAt(index) - barWidth / 2)}" width="${n(Math.abs(plot.valAt(to) - plot.valAt(from)))}" height="${n(barWidth)}" fill="${color}"/>`
@@ -492,7 +503,10 @@ function pptxChartHtml(shape, ratio) {
         const sweep = (value / total) * Math.PI * 2;
         if (sweep <= 0) return;
         const color = spec.sers[0]?.colors[index] || spec.accents[index % (spec.accents.length || 1)] || spec.sers[0]?.color;
-        html.push(`<path d="${slice(angle, angle + sweep)}" fill="${colorOf(color)}"/>`);
+        // 整圆的 SVG 圆弧不能起止于同一点；拆成两个半圆，环形同理。
+        if (sweep >= Math.PI * 2 - 1e-10)
+          html.push(`<path d="${slice(angle, angle + Math.PI)} ${slice(angle + Math.PI, angle + sweep)}" fill="${colorOf(color)}"/>`);
+        else html.push(`<path d="${slice(angle, angle + sweep)}" fill="${colorOf(color)}"/>`);
         angle += sweep;
       });
       return { html, legend: legend === "r" ? legendColumnHtml() : legendRowHtml(legend === "t" ? 0 : null) };
