@@ -174,7 +174,7 @@ async function bridgeUpload(path, head, body, signal) {
       body: new Blob([json, body]),
       signal
     });
-  const data = await response.json().catch(() => ({}));
+  const data = response.ok ? await response.json() : await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(Error(data.error || t`请求失败（${response.status}）`), { status: response.status, data });
   return data;
 }
