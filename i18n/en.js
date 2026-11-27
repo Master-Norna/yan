@@ -561,9 +561,8 @@ var YAN_EN = {
   "文档内部有一份太大（{0}），本机没能抽出正文": "A part inside the document is too large ({0}); the text couldn't be extracted",
   "（空表）": "(empty sheet)",
   图片预览: "Image preview",
-  原图: "Original size",
+  切换原图: "Toggle original size",
   "此视频浏览器放不了，可交本机程序打开": "The browser can't play this video. Open it with a system app",
-  适应: "Fit",
   图片原件已找不到: "Original image not found",
   图片读取失败: "Failed to read image",
 

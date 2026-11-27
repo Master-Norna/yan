@@ -948,10 +948,7 @@ function showInFileViewer(title, html, trigger = null, seal = t("览")) {
   $("#fileViewerStage").innerHTML = html;
   $("#fileViewerClose").focus();
 }
-/** @type {{ src: string, name: string, url: string } | null} 正看的是取来的外链图 */
-let imageViewerRemote = null;
-let imageViewerFile = null,
-  imageViewerRevision = 0;
+let imageViewerRevision = 0;
 // 卷宗里的图；paths 是同看的一组（卷宗此刻列着的图），看图框底下排成一条小样、左右翻
 function openArchiveImage(path, trigger = null, paths = [path]) {
   openImageSet(
@@ -1034,9 +1031,6 @@ async function showImageAt(index, opening = false) {
     label = entry ? `${entry.name} · ${formatFileSize(entry.size || 0)}` : item.file.split("/").pop();
   }
   imageViewerIndex = index;
-  imageViewerAttachmentId = item.id || null;
-  imageViewerFile = item.file || null;
-  imageViewerRemote = item.src ? { src: item.src, name: item.name || "", url: item.url || "" } : null;
   $("#imageViewerName").textContent = label;
   const image = $("#imageViewerImage");
   // 取不回来就摘掉 src：这一枚是复用的，不能换成别的节点（否则后再看别的图就指不到它了）
@@ -1080,20 +1074,17 @@ function bindViewerEvents() {
     true
   );
   $("#imageViewerClose").onclick = closeImageViewer;
-  $("#imageViewerDownload").onclick = () => {
-    if (imageViewerAttachmentId) void downloadAttachment(imageViewerAttachmentId);
-    else if (imageViewerFile) downloadFile(imageViewerFile);
-    else if (imageViewerRemote) {
-      let name = imageViewerRemote.url.split(/[?#]/)[0].split("/").pop() || "";
-      try {
-        name = decodeURIComponent(name);
-      } catch {}
-      downloadHref(imageViewerRemote.src, name || imageViewerRemote.name || t("图片"));
-    }
-  };
-  $("#imageViewerZoom").onclick = toggleImageViewerZoom;
+  // 顶栏只留关闭：原图与适应窗口由点图本身换；图也能聚焦（index.html 里的 tabindex），Enter、空格同效。
+  // 下载不在这设：附件条、卷宗条尾本就有下载的入口。
+  const image = $("#imageViewerImage");
+  image.setAttribute("title", t("切换原图"));
+  image.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    toggleImageViewerZoom();
+  });
   $("#imageViewerStage").addEventListener("click", e => {
-    if (e.target === $("#imageViewerImage")) toggleImageViewerZoom();
+    if (e.target === image) toggleImageViewerZoom();
     else if (e.target === $("#imageViewerStage")) closeImageViewer();
   });
   // 一组里：点小样换那幅，← → 翻上一幅、下一幅，到头不绕回
@@ -1112,14 +1103,11 @@ function bindViewerEvents() {
 function toggleImageViewerZoom() {
   setImageViewerZoom(!$("#imageViewerStage").classList.contains("actual"));
 }
-// 原图大小还是适应窗口；按钮写的是点了换成哪样
+// 原图大小还是适应窗口；点图本身换，顶栏不另设按钮
 function setImageViewerZoom(actual) {
   $("#imageViewerStage").classList.toggle("actual", actual);
-  $("#imageViewerZoom").textContent = actual ? t("适应") : t("原图");
-  $("#imageViewerZoom").setAttribute("aria-pressed", String(actual));
 }
-let imageViewerAttachmentId = null,
-  imageViewerReturnFocus = null;
+let imageViewerReturnFocus = null;
 function closeImageViewer() {
   const revision = ++imageViewerRevision;
   const viewer = $("#imageViewer");
@@ -1133,7 +1121,6 @@ function closeImageViewer() {
     setImageViewerZoom(false);
   }, 180);
   imageViewerSet = [];
-  imageViewerAttachmentId = null;
   const target = imageViewerReturnFocus;
   imageViewerReturnFocus = null;
   returnFocus(target);

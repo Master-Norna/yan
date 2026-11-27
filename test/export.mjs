@@ -84,13 +84,13 @@ for (let i = 0; i < 100 && !readdirSync(ARCHIVE).includes("导出回归 (2).md")
 const second = readFileSync(`${ARCHIVE}/导出回归 (2).md`, "utf8");
 check("duplicate export links to its own renamed assets", second.includes(encodeURIComponent("导出回归-可视化-1 (2).html")));
 
-// 卷宗里的导出作品也能重新预览。
+// 卷宗里的导出作品也能重新预览：点条子即是预览（条尾不另设预览一枚）
 await evalJs(`document.querySelector('#openLibrary').click(); true`);
 await waitFor(`!!document.querySelector('[data-path="${files[0]}"]')`, 5000).catch(() => {});
 const opened = await evalJs(
-  `(() => { const card = [...document.querySelectorAll('#libraryGrid .strip')].find(c=>c.textContent.includes(${JSON.stringify(files[0])})); const b=card?.querySelector('[data-library-action="view"]'); b?.click(); return !!b; })()`
+  `(() => { const card = [...document.querySelectorAll('#libraryGrid .strip')].find(c => c.textContent.includes(${JSON.stringify(files[0])})); card?.click(); return !!card; })()`
 );
-check("exported HTML has an archive preview action", opened);
+check("clicking the exported HTML's row opens it in the archive preview", opened);
 await sleep(800);
 
 // file:// 打开并断网：文件内只读 DOM 取证，不依赖本机服务或外部 CDN。
