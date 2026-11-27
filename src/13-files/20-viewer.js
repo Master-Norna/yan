@@ -423,8 +423,7 @@ function pptxChartHtml(shape, ratio) {
         })
       }));
       if (percent)
-        for (const ser of sers)
-          ser.vals = ser.vals.map((value, index) => (value == null ? null : (value / (totals[index] || 1)) * 100));
+        for (const ser of sers) ser.vals = ser.vals.map((value, index) => (value == null ? null : (value / (totals[index] || 1)) * 100));
       const hasNegative = sers.some(ser => ser.vals.some(value => value < 0)),
         hasPositive = sers.some(ser => ser.vals.some(value => value > 0)),
         percentMin = hasNegative ? -100 : 0,
