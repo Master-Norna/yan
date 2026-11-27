@@ -146,7 +146,11 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
       }
       // 校验登记过的配置后仍沿用 ensure() 的断线重连语义。
       const client = await ensure(body.server, body.config).ready;
-      // 调用处重拉、核对清单后直接发出，避免在核对后又重拉一份而未复核。
+      // 清单未变时在路由先拦；有变更时由调用处重拉一次并核对最新清单。
+      if (!client.toolsChanged && !client.tools.some(item => item.name === body.tool)) {
+        sendJson(res, 409, { error: "MCP 工具未在当前服务清单中", toolsChanged: true });
+        return;
+      }
       const result = await client.call(body.tool, body.arguments || {}, {
         // setTimeout 超过 2^31-1 毫秒会溢出成立刻到时：封顶
         timeout: Number(body.timeout) > 0 ? Math.min(Number(body.timeout) * 1000, 2 ** 31 - 1) : undefined,
