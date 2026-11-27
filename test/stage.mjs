@@ -81,7 +81,10 @@ for (const { targetId: id, type } of (await browserSend("Target.getTargets")).ta
 await sleep(800);
 
 await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`);
-check("workspace entry is available before the browser is found", await evalJs(`!document.querySelector("#stagePin").classList.contains("hidden")`));
+check(
+  "workspace entry is available before the browser is found",
+  await evalJs(`!document.querySelector("#stagePin").classList.contains("hidden")`)
+);
 writeConfig(new URL(MODEL_DEBUG).port);
 await evalJs(`__yanStage.locate().then(() => true)`);
 await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`, 8000);

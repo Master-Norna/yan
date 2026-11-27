@@ -71,10 +71,7 @@ check(
   )
 );
 check("路径行只留路径和切换，不另列查找与统计", await evalJs(`!document.querySelector("#workFind, #workFacts")`));
-check(
-  "浏览器未开时工作区独占，浏览器导航不出现",
-  await evalJs(`document.querySelector("#stageBrowser").classList.contains("hidden")`)
-);
+check("浏览器未开时工作区独占，浏览器导航不出现", await evalJs(`document.querySelector("#stageBrowser").classList.contains("hidden")`));
 check(
   "顶栏文件夹显示打开，路径行只选中一种视图",
   await evalJs(
@@ -219,10 +216,7 @@ await evalJs(`document.querySelector("#stagePin").click(); true`);
 await sleep(300);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await waitFor(`document.querySelector("#workCrumbs .here")?.title === ${JSON.stringify(ROOT)}`, 8000).catch(() => {});
-check(
-  "对话已绑目录时跟随它，而不是卷宗",
-  await evalJs(`document.querySelector("#workCrumbs .here")?.title === ${JSON.stringify(ROOT)}`)
-);
+check("对话已绑目录时跟随它，而不是卷宗", await evalJs(`document.querySelector("#workCrumbs .here")?.title === ${JSON.stringify(ROOT)}`));
 await waitDir("空夹");
 await openDir("空夹");
 await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').click(); true`);
