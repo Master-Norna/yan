@@ -150,9 +150,11 @@ html.work-mode .chat-scroll-grabber {
 .ub-fold {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
   margin: 2px -4px -4px auto;
-  padding: 1px 4px;
+  padding: 4px;
   border-radius: var(--radius-s);
   color: var(--ink-3);
   font: var(--fs-mark) var(--title);
@@ -162,8 +164,8 @@ html.work-mode .chat-scroll-grabber {
 }
 .ub-fold:before {
   content: "";
-  width: 5px;
-  height: 5px;
+  width: 7px;
+  height: 7px;
   border-right: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
   transform: rotate(45deg) translate(-1px, -1px);
