@@ -316,7 +316,8 @@ function pptxChartHtml(shape, ratio) {
         values = [...positive, ...negative].filter(value => value != null);
       }
       const min = Number.isFinite(spec.val.min) ? spec.val.min : Math.min(0, ...(values.length ? values : [0]));
-      let max = Number.isFinite(spec.val.max) ? spec.val.max : Math.max(...(values.length ? values : [1]), min + 1),
+      // 自动上界也含 0：柱从数值 0 起画，数据全负时若上界跟着数据走（-10 之类），整根柱就落到框外看不见了
+      let max = Number.isFinite(spec.val.max) ? spec.val.max : Math.max(0, ...(values.length ? values : [1]), min + 1),
         unit = spec.val.unit;
       if (!(unit > 0)) {
         const rough = (max - min) / 4 || 1,
