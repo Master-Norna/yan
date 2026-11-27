@@ -441,8 +441,9 @@ function pptxChartHtml(shape, ratio) {
         step = subWidth * (1 - overlap),
         offset = -barWidth / 2 + (barWidth - (subWidth + step * (seriesCount - 1))) / 2,
         stackBase = Math.max(plot.range.min, Math.min(0, plot.range.max)),
-        positiveTops = new Array(count).fill(0),
-        negativeTops = new Array(count).fill(0),
+        // 叠柱从数轴的下界（或上界）起，不从数值 0 起：作者把数轴起点调高过时，0 已经在框外
+        positiveTops = new Array(count).fill(Math.max(0, plot.range.min)),
+        negativeTops = new Array(count).fill(Math.min(0, plot.range.max)),
         zero = plot.valAt(stackBase),
         legendHtml = legendRowHtml(legend === "t" ? 0 : null);
       sers.forEach((ser, seriesIndex) => {
