@@ -16,7 +16,8 @@ const SILICONFLOW_BUDGETS = { minimal: 1024, low: 4096, medium: 8192, high: 1638
 function endpoint(baseUrl) {
   const url = new URL(String(baseUrl || "").trim());
   if (!/^https?:$/.test(url.protocol)) throw Error("Base URL 只支持 http 或 https");
-  return /\/chat\/completions\/?$/.test(url.pathname) ? url.href : `${url.href.replace(/\/$/, "")}/chat/completions`;
+  if (!/\/chat\/completions\/?$/i.test(url.pathname)) url.pathname = `${url.pathname.replace(/\/$/, "")}/chat/completions`;
+  return url.href;
 }
 function modelsUrl(baseUrl) {
   const url = new URL(baseUrl);

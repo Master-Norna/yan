@@ -55,9 +55,13 @@ module.exports = function createUsage({ file }) {
     const batchId = typeof body.batchId === "string" && /^[\w-]{1,100}$/.test(body.batchId) ? body.batchId : "";
     if (batchId && state.batches.includes(batchId)) return { changed: false, duplicate: true };
     let changed = false;
-    for (const { day, kind, amount } of Array.isArray(body.items) ? body.items : []) {
+    for (const item of Array.isArray(body.items) ? body.items : []) {
+      if (!item || typeof item !== "object") continue;
+      const { day, kind, amount } = item;
+      if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !KINDS.includes(kind)) continue;
+      if (typeof amount !== "number" && typeof amount !== "string") continue;
       const n = Math.round(Number(amount));
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day)) || !KINDS.includes(kind) || !(n > 0) || n > 1e10) continue;
+      if (!(n > 0) || n > 1e10) continue;
       const row = (days[day] ||= {});
       row[kind] = (Number(row[kind]) || 0) + n;
       changed = true;
@@ -69,6 +73,7 @@ module.exports = function createUsage({ file }) {
   const handleAdd = jsonRoute(
     body =>
       new Promise((resolve, reject) => {
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw Error("缺少用量批次");
         const target = file();
         let group = pending.get(target);
         if (!group) {

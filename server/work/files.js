@@ -56,6 +56,7 @@ module.exports = function createFiles(work) {
         lf = (previousText.match(/\n/g) || []).length,
         text = crlf && crlf * 2 >= lf && !content.includes("\r\n") ? content.replace(/\n/g, "\r\n") : content,
         output = (prior && encodeText(text, prior.encoding)) || Buffer.from(text, "utf8");
+      if (output.length > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
       await writeTextAtomic(file, output, signal).catch(error => {
         throw Error(describeFsError(error, String(body.path)));
       });

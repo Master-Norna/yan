@@ -21,6 +21,58 @@ const { WORK_SKIP, INTENT_PATH, INTENT_LEGACY_PATH } = require("./work/paths.js"
 const KEY = /^[\w-]{1,80}~[\w-]{1,80}$/;
 
 // ---------- .gitignore：常用的那些写法（注释、! 取反、末尾 / 只管目录、带 / 的从所在目录算起、* ? ** [..]） ----------
+// Git 的通配按字节走；用 Latin-1 把 UTF-8 的每个字节映到一个正则字符，ASCII 不必转换。
+const globBytes = text => (/[^\x00-\x7f]/.test(text) ? Buffer.from(text, "utf8").toString("latin1") : text);
+const byteAtom = ch => `\\x${ch.charCodeAt(0).toString(16).padStart(2, "0")}`;
+const POSIX_CLASSES = new Map([
+  ["alnum", "0-9A-Za-z"],
+  ["alpha", "A-Za-z"],
+  ["blank", "\\x09\\x20"],
+  ["cntrl", "\\x00-\\x1f\\x7f"],
+  ["digit", "0-9"],
+  ["graph", "\\x21-\\x7e"],
+  ["lower", "a-z"],
+  ["print", "\\x20-\\x7e"],
+  ["punct", "\\x21-\\x2f\\x3a-\\x40\\x5b-\\x60\\x7b-\\x7e"],
+  ["space", "\\x09-\\x0d\\x20"],
+  ["upper", "A-Z"],
+  ["xdigit", "0-9A-Fa-f"]
+]);
+// Git 先把区间起点当作成员读一遍，因此 [z-a] 仍匹配 z；转义的连字符只作字面量。
+// 逐个生成正则原子，类本身不能跨目录分隔符。
+function ignoreClass(text, start) {
+  const negate = text[start] === "!" || text[start] === "^";
+  let i = start + Number(negate),
+    members = "",
+    previous = "";
+  do {
+    let ch = text[i];
+    if (!ch) return null; // 没有闭合，Git 也不会匹配这条通配
+    if (ch === "\\") {
+      ch = text[++i];
+      if (!ch) return null;
+      members += byteAtom(ch);
+    } else if (ch === "-" && previous && text[i + 1] && text[i + 1] !== "]") {
+      let end = text[++i];
+      if (end === "\\") end = text[++i];
+      if (!end) return null;
+      if (previous <= end) members += `${byteAtom(previous)}-${byteAtom(end)}`;
+      ch = "";
+    } else if (ch === "[" && text[i + 1] === ":") {
+      const end = text.indexOf("]", i + 2);
+      if (end < 0) return null;
+      if (end > i + 2 && text[end - 1] === ":") {
+        const set = POSIX_CLASSES.get(text.slice(i + 2, end - 1));
+        if (!set) return null; // Git 不匹配未知的 POSIX 字符类
+        members += set;
+        i = end;
+        ch = "";
+      } else members += byteAtom(ch);
+    } else members += byteAtom(ch);
+    previous = ch;
+  } while (text[++i] !== "]");
+  return { end: i, body: `(?!/)[${negate ? "^" : ""}${members}]` };
+}
 function ignoreRule(line, base) {
   let text = line.replace(/(?<!\\)\s+$/, "");
   if (!text || text.startsWith("#")) return null;
@@ -32,6 +84,7 @@ function ignoreRule(line, base) {
   const anchored = text.includes("/");
   text = text.replace(/^\//, "");
   if (!text) return null;
+  text = globBytes(text);
   let body = "";
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -42,24 +95,14 @@ function ignoreRule(line, base) {
     } else if (ch === "*") body += "[^/]*";
     else if (ch === "?") body += "[^/]";
     else if (ch === "[") {
-      const end = text.indexOf("]", i + 1);
-      if (end < 0) body += "\\[";
-      else {
-        body += `[${text
-          .slice(i + 1, end)
-          .replace(/^!/, "^")
-          .replace(/\\/g, "\\\\")}]`;
-        i = end;
-      }
+      const set = ignoreClass(text, i + 1);
+      if (!set) return null;
+      body += set.body;
+      i = set.end;
     } else if (ch === "\\" && i + 1 < text.length) body += text[++i].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     else body += ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
   }
-  try {
-    return { negate, dirOnly, base, test: new RegExp(anchored ? `^${body}$` : `^(?:.*/)?${body}$`) };
-  } catch {
-    // 不合 JS 正则语法的字符范围不应让整个目录无法记下检查点。
-    return null;
-  }
+  return { negate, dirOnly, base: globBytes(base), test: new RegExp(anchored ? `^${body}$` : `^(?:.*/)?${body}$`, "s") };
 }
 /** 这一层的 .gitignore 接在上层的规则后面；根上先读仓库自己的 .git/info/exclude（不随仓库走的那份，git 一样认） @param {string} abs @param {string} rel @param {any[]} rules */
 function rulesFor(abs, rel, rules) {
@@ -82,6 +125,8 @@ function rulesIn(file, rel, rules) {
 }
 // 后写的规则盖过先写的（git 的规矩）；规则里的路径从写它的那一层算起
 function ignored(rules, rel, dir) {
+  if (!rules.length) return false;
+  rel = globBytes(rel);
   let out = false;
   for (const rule of rules) {
     if (rule.dirOnly && !dir) continue;
@@ -348,7 +393,14 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     const then = snapshotOf(store, key),
       now = await presentOf(store),
       changes = [];
-    const unobserved = rel => [...now.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+    // 路径集合已在内存：沿祖先查不明项，不必为每件文件重扫整张表。
+    const under = (paths, rel) => {
+      for (let at = rel; at !== "."; at = path.posix.dirname(at)) {
+        if (paths.has(at)) return true;
+      }
+      return false;
+    };
+    const unobserved = rel => under(now.unknown, rel);
     for (const [rel, hash] of then.files) {
       if (unobserved(rel)) continue;
       const mode = then.modes.get(rel);
@@ -361,19 +413,25 @@ module.exports = function createCheckpoints({ home, skip = () => [], deleted = (
     const unclear = rel => {
       // 确实读过 .yan 这一层、图也没有单独记作不明：它的缺席是已知的，不能被父层的不明盖住。
       if (isIntent(rel) && then.dirs.has(INTENT_DIR) && !then.unknown.has(rel)) return false;
-      return [...then.unknown].some(item => rel === item || rel.startsWith(`${item}/`));
+      return under(then.unknown, rel);
     };
     for (const rel of now.files.keys()) if (!then.files.has(rel) && !unclear(rel)) changes.push({ path: rel, kind: "added" });
-    const holds = (paths, dir) => [...paths].some(rel => rel.startsWith(`${dir}/`));
-    for (const dir of then.dirs)
-      if (!now.dirs.has(dir) && !holds(then.files.keys(), dir) && !holds(then.dirs, dir))
-        changes.push({ path: `${dir}/`, kind: "removed" });
+    // 每棵树只索引一回有后代的夹；共享祖先已有记录时即可停。
+    const parentsOf = tree => {
+      const parents = new Set();
+      for (const paths of [tree.files.keys(), tree.dirs])
+        for (const rel of paths)
+          for (let dir = path.posix.dirname(rel); dir !== "." && !parents.has(dir); dir = path.posix.dirname(dir)) parents.add(dir);
+      return parents;
+    };
+    const thenParents = parentsOf(then),
+      nowParents = parentsOf(now);
+    for (const dir of then.dirs) if (!now.dirs.has(dir) && !thenParents.has(dir)) changes.push({ path: `${dir}/`, kind: "removed" });
     for (const dir of now.dirs)
       if (
         !then.dirs.has(dir) &&
         !unclear(dir) &&
-        !holds(now.files.keys(), dir) &&
-        !holds(now.dirs, dir) &&
+        !nowParents.has(dir) &&
         // 底下只有忽略的（node_modules、.gitignore 写了的）不算空夹，删不得
         !fs.readdirSync(path.join(store.full, ...dir.split("/"))).length
       )

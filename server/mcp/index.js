@@ -146,10 +146,8 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
       }
       // 校验登记过的配置后仍沿用 ensure() 的断线重连语义。
       const client = await ensure(body.server, body.config).ready;
-      // 服务发过 list_changed 时，先核对变后的清单；客户端的 toolsChanged 标记
-      // 仍由 /api/mcp/list 负责清除，避免页面错过这一回的工具变更。
-      if (client.toolsChanged) client.tools = await client.listTools();
-      if (!client.tools.some(item => item.name === body.tool)) {
+      // 清单未变时在路由先拦；有变更时由调用处重拉一次并核对最新清单。
+      if (!client.toolsChanged && !client.tools.some(item => item.name === body.tool)) {
         sendJson(res, 409, { error: "MCP 工具未在当前服务清单中", toolsChanged: true });
         return;
       }
@@ -163,7 +161,11 @@ module.exports = function createMcp({ version, toolEnv, prepare = config => conf
       await attachLinkedImages(result, client.config);
       sendJson(res, 200, { result, toolsChanged: client.toolsChanged });
     } catch (error) {
-      if (!res.destroyed) sendJson(res, 400, { error: String(error.message || error) });
+      if (!res.destroyed)
+        sendJson(res, error.toolsChanged ? 409 : 400, {
+          error: String(error.message || error),
+          ...(error.toolsChanged ? { toolsChanged: true } : {})
+        });
     }
   }
 

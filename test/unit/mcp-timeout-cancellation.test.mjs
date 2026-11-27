@@ -7,6 +7,7 @@ const { createTransport } = require("../../server/mcp/transports.js");
 
 test("工具超时与主动停止各发送一次对应的取消通知", async () => {
   const client = new McpClient({ name: "test", config: {}, version: "0", toolEnv: env => env });
+  client.tools = [{ name: "read" }];
   const sent = [];
   client.transport = {
     send: async message => {
