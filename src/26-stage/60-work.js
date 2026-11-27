@@ -25,10 +25,12 @@ const work = {
   findTimer: 0
 };
 
-/** 绑过的目录记在本机（同侧栏宽窄、缩放：不随备份走） */
+/** 绑过的目录记在本机（同侧栏宽窄、缩放：不随备份走）。从前那一版在 POSIX 上会把根写成相对的（点路径里的一级），
+ * 那样的留着也列不出来，当作没绑，请人重选一处 */
 function workStored() {
   try {
-    return slashed(localStorage.getItem("yan-work-root") || "");
+    const root = slashed(localStorage.getItem("yan-work-root") || "");
+    return /^([a-z]:\/|\/)/i.test(root) ? root : "";
   } catch {
     return "";
   }
