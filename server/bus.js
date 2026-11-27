@@ -136,7 +136,7 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
       "X-Accel-Buffering": "no"
     });
     res.write(": open\n\n");
-    const entry = { res, jobs: new Map(), agent };
+    const entry = { res, jobs: new Map(), cancelled: new Map(), agent };
     pages.set(page, entry);
     onPages(pages.size);
     // 本机连接一般不会断；隔一阵写一行注释，中途有东西把连接掐了也能尽快发现
@@ -164,6 +164,7 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
     if (typeof id !== "string" || !id || typeof path !== "string" || !path.startsWith("/api/") || path.startsWith("/api/bus"))
       return sendJson(res, 400, { error: "请求无效" });
     if (entry.jobs.has(id)) return sendJson(res, 409, { error: "请求标识已在使用" });
+    if (entry.cancelled.delete(id)) return sendJson(res, 410, { error: "已停止" });
     sendJson(res, 202, { ok: true });
     const job = new BusResponse(entry.res, event => {
       if (entry.res.writableEnded || entry.res.destroyed) throw Error("总线已断开");
@@ -181,7 +182,18 @@ module.exports = function createBus({ dispatch, onPages = () => {} }) {
   }
   async function cancel(req, res) {
     const { page, id } = await readJson(req);
-    pages.get(page)?.jobs.get(id)?.destroy();
+    const entry = pages.get(page);
+    if (entry && typeof id === "string" && id.length <= 128) {
+      const job = entry.jobs.get(id);
+      if (job) job.destroy();
+      else {
+        // 取消可能先于 send 的请求体解析完成。只在本页短暂记下尚未登记的请求。
+        const now = Date.now();
+        for (const [key, at] of entry.cancelled) if (now - at > 60000) entry.cancelled.delete(key);
+        entry.cancelled.set(id, now);
+        while (entry.cancelled.size > 256) entry.cancelled.delete(entry.cancelled.keys().next().value);
+      }
+    }
     sendJson(res, 200, { ok: true });
   }
 

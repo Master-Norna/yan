@@ -105,8 +105,10 @@ async function bridgeFetch(path, body, signal) {
     /** @type {ReadableStreamDefaultController<Uint8Array>} */
     let stream;
     // 停了（signal 中止，或读的人不读了）：告诉桥接那头作废，接口从 close 事件知道
+    let stopped = false;
     const stop = () => {
       if (!busJobs.has(id)) return false;
+      stopped = true;
       busJobs.delete(id);
       signal?.removeEventListener("abort", abort);
       void post("/api/bus/cancel", { page: PAGE_ID, id }).catch(() => {});
@@ -140,6 +142,8 @@ async function bridgeFetch(path, body, signal) {
     busJobs.set(id, job);
     post("/api/bus/send", { page: PAGE_ID, id, path, body }).then(
       ({ ok, status, data }) => {
+        // 若早到的取消未被旧连接接住，登记回执到达后再取消一次。
+        if (ok && stopped) void post("/api/bus/cancel", { page: PAGE_ID, id }).catch(() => {});
         if (ok || !busJobs.has(id)) return;
         finish();
         // 桥接那头这一页的流恰好断了：这一次改为直接 fetch

@@ -217,3 +217,21 @@ test("总线：同一请求标识不能覆盖仍在途的作业", async t => {
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].destroyed, false);
 });
+
+test("总线：先取消后登记的请求不得进入分发", async t => {
+  let dispatched = 0;
+  const bus = createBus({ dispatch: () => dispatched++ });
+  const page = "earlycancel123";
+  const sse = new SlowResponse();
+  t.after(() => sse.destroy());
+  bus.routes["GET /api/bus"](Object.assign(Readable.from([]), { url: `/api/bus?page=${page}`, headers: {} }), sse);
+  const post = async (route, body) => {
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: {} });
+    const ack = new SlowResponse();
+    await bus.routes[route](req, ack);
+    return ack.statusCode;
+  };
+  await post("POST /api/bus/cancel", { page, id: "early" });
+  assert.equal(await post("POST /api/bus/send", { page, id: "early", path: "/api/mock", body: "{}" }), 410);
+  assert.equal(dispatched, 0);
+});
