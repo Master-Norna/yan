@@ -59,8 +59,14 @@ function stageShortcut(e) {
     ctrl = e.ctrlKey || e.metaKey;
   if (key === "escape" && stage.pen) stageSetPen(false);
   else if ((ctrl && key === "l") || (e.altKey && key === "d") || key === "f6") stageEditUrl();
-  else if (ctrl && key === "f") stageFindOpen();
-  else if (ctrl && (key === "=" || key === "+" || key === "-" || key === "0")) stageZoomStep(key === "0" ? 0 : key === "-" ? -1 : 1);
+  else if (ctrl && key === "f") {
+    // 工作区里没有「这一页」可找：Ctrl+F 落到这一层自己的查找上
+    const field = /** @type {HTMLInputElement|null} */ ($("#workFind"));
+    if (work.open && field) {
+      field.focus();
+      field.select();
+    } else stageFindOpen();
+  } else if (ctrl && (key === "=" || key === "+" || key === "-" || key === "0")) stageZoomStep(key === "0" ? 0 : key === "-" ? -1 : 1);
   else if (key === "f5" || (ctrl && key === "r")) {
     if (stage.session) void stageSend("Page.reload", { ignoreCache: e.shiftKey }, stage.session).catch(() => {});
   } else if (e.altKey && (key === "arrowleft" || key === "arrowright")) void stageTravel(key === "arrowleft" ? -1 : 1);
