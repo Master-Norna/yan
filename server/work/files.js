@@ -6,8 +6,7 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const { jsonRoute, requestSignal } = require("../http.js");
 const { fetchPublicResponse, readLimitedBytes } = require("../web.js");
-const sandbox = require("../sandbox.js");
-const { describeFsError, clampNumber, relPath } = require("./paths.js");
+const { describeFsError, clampNumber } = require("./paths.js");
 const { decodeText, encodeText, countLines, splitLines, changeHunks, nearestPassage } = require("./text.js");
 const writeTextAtomic = require("./atomic.js");
 // 读一回最多交出多少字
@@ -215,10 +214,7 @@ module.exports = function createFiles(work) {
         .replace(/[<>:"|?*\u0000-\u001f]/g, "_")
         .trim();
       target = path.join(target, base && base !== "." && base !== ".." ? base : "下载文件");
-      if (strictBox(body)) {
-        const why = sandbox.screenPath(relPath(workdir, target), { write: true });
-        if (why) throw Error(why);
-      }
+      target = await targetOf(workdir, { ...body, path: target }, { write: true });
     }
     const started = Date.now(),
       { response } = await fetchPublicResponse(url.href, {
@@ -248,6 +244,9 @@ module.exports = function createFiles(work) {
       let file = target;
       for (let n = 2; ; n++)
         try {
+          // 顺延的名字也是实际写入的落点，照常走完整路径门禁。
+          file = await targetOf(workdir, { ...body, path: file }, { write: true });
+          signal.throwIfAborted();
           await fs.promises.writeFile(file, buffer, { flag: "wx" });
           break;
         } catch (error) {
