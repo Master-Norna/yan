@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
 
 const f = load(["pptxChartSpec", "setup: root => { parseXml = () => root; }"]);
-  }`
-]);
 function node(localName, attrs = {}, children = [], textContent = "") {
   return {
     localName,
