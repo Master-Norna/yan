@@ -760,7 +760,10 @@ test("检查点对照：路径前缀相似的兄弟夹不会被认成祖先", as
     fs.mkdirSync(path.join(root, "bar"));
     write(root, "barista/child/b.txt", "new");
     const { changes } = await post("/api/checkpoint/diff", key);
-    assert.deepEqual(changes.map(c => `${c.kind} ${c.path}`), ["added bar/", "added barista/child/b.txt", "removed foo/"]);
+    assert.deepEqual(
+      changes.map(c => `${c.kind} ${c.path}`),
+      ["added bar/", "added barista/child/b.txt", "removed foo/"]
+    );
   } finally {
     await close();
     fs.rmSync(base, { recursive: true, force: true });
