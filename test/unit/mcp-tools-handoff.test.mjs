@@ -43,7 +43,7 @@ test("客户端：调用时内部重拉不清标记——页面拿到新表才�
   client.request = async method => (method === "tools/list" ? { tools: [{ name: "new_tool" }] } : { content: [] });
   client.tools = [{ name: "old_tool" }];
   client.toolsChanged = true;
-  await client.call("some_tool", {});
+  await client.call("new_tool", {});
   assert.deepEqual(
     client.tools.map(tool => tool.name),
     ["new_tool"],
