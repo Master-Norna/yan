@@ -561,6 +561,73 @@ test(".gitignore：取反、只管目录、带 / 的从所在层算起、**", ()
   assert.equal(ignored(nested, "only.txt", false), false);
 });
 
+test("忽略规则的字符类按 Git 通配语法匹配", () => {
+  for (const [pattern, match, noMatch] of [
+    ["[z-a]", "z", "a"],
+    ["[a-c]", "b", "z"],
+    ["[a-b-c]", "-", "d"],
+    [String.raw`report[a\-0].log`, "report-.log", "report9.log"],
+    [String.raw`[a-\c]`, "b", "-"],
+    [String.raw`[a\]]`, "]", "["],
+    ["[]a]", "]", "b"],
+    ["[!z-a]", "a", "z"],
+    ["[^a-c]", "z", "b"],
+    ["[A[:digit:]]", "8", "b"],
+    ["[é][é]", "é", "à"],
+    ["?é", "aé", "好é"],
+    ["a[!x]b/c", "ayb/c", "a/b/c"],
+    ["a[.-0]b/c", "a0b/c", "a/b/c"]
+  ]) {
+    const rules = [ignoreRule(pattern, "")];
+    assert.equal(ignored(rules, match, false), true, `${pattern} → ${match}`);
+    assert.equal(ignored(rules, noMatch, false), false, `${pattern} → ${noMatch}`);
+  }
+  const nested = [ignoreRule("/[z-a].log", "资料")];
+  assert.equal(ignored(nested, "资料/z.log", false), true);
+  assert.equal(ignored(nested, "资料/下层/z.log", false), false);
+  assert.equal(ignoreRule("[unterminated", ""), null);
+  assert.equal(ignoreRule("[[:unknown:]]", ""), null);
+});
+
+test("检查点拍摄、对照、退回都不碰被字符类规则忽略的文件", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
+    root = path.join(base, "work"),
+    { post, close } = await serve(path.join(base, "检查点")),
+    key = { root, conversation: "c1", answer: "m1" },
+    ignoredFiles = ["z.log", "资料/report-.log", "7.tmp"],
+    newIgnored = ["later/z.log", "资料/later/report-.log", "later/8.tmp"];
+  try {
+    write(root, ".gitignore", "[z-a].log\n[unterminated\n");
+    write(root, "资料/.gitignore", String.raw`report[a\-0].log` + "\n");
+    write(root, ".git/info/exclude", "[[:digit:]].tmp\n");
+    write(root, "a.log", "普通文件原件");
+    for (const file of ignoredFiles) write(root, file, "忽略原件");
+    const took = await post("/api/checkpoint/take", key);
+    assert.equal(took.status, 200, JSON.stringify(took));
+    assert.equal(took.files, 3, "只拍两份 .gitignore 和一件普通文件");
+
+    write(root, "a.log", "普通文件改过");
+    write(root, "later/a.log", "普通文件新增");
+    for (const file of ignoredFiles) write(root, file, "忽略文件改过");
+    for (const file of newIgnored) write(root, file, "忽略文件新增");
+    const diff = await post("/api/checkpoint/diff", key);
+    assert.equal(diff.status, 200, JSON.stringify(diff));
+    assert.deepEqual(
+      diff.changes.map(c => `${c.kind} ${c.path}`),
+      ["changed a.log", "added later/a.log"]
+    );
+    const done = await post("/api/checkpoint/restore", key);
+    assert.deepEqual([done.status, done.restored, done.removed, done.failed], [200, 1, 1, []]);
+    assert.equal(fs.readFileSync(path.join(root, "a.log"), "utf8"), "普通文件原件");
+    assert.equal(fs.existsSync(path.join(root, "later/a.log")), false);
+    for (const file of ignoredFiles) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), "忽略文件改过");
+    for (const file of newIgnored) assert.equal(fs.readFileSync(path.join(root, file), "utf8"), "忽略文件新增");
+  } finally {
+    await close();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("同大小且 mtime 被恢复的编辑仍应被检查点发现", async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "yan-point-")),
     root = path.join(base, "work"),
