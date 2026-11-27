@@ -351,8 +351,10 @@ function pptxChartSpec(xml, theme, cx) {
     return null;
   }
   const plot = root && xmlDeep(root, "plotArea")[0],
-    chart = plot && [...plot.children].find(node => PPTX_CHART_KIND[node.localName]);
-  if (!chart || !(cx > 0)) return null;
+    charts = plot ? [...plot.children].filter(node => /Chart$/.test(node.localName)) : [],
+    chart = charts[0];
+  // 组合图只画第一组会丢掉数据：暂不支持时照旧留虚线框。
+  if (charts.length !== 1 || !PPTX_CHART_KIND[chart.localName] || !(cx > 0)) return null;
   const pt = value => Math.round(((value / 100) * 12700 * 1000 * 100) / cx) / 100,
     length = value => Math.round((value * 1000 * 100) / cx) / 100,
     solid = node => pptxColor(xmlKids(node || {}, "solidFill")[0], theme)?.c || "",
@@ -392,7 +394,7 @@ function pptxChartSpec(xml, theme, cx) {
         vals: pointsOf(xmlKids(ser, "val")[0]).map(value =>
           value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value)
         ),
-        marker: marker ? marker.getAttribute("symbol") || "circle" : "",
+        marker: marker ? xmlKids(marker, "symbol")[0]?.getAttribute("val") || "circle" : "",
         markerSize: pt(pptxAttr(xmlKids(marker || {}, "size")[0], "val", 5) * 100),
         lineWidth: length(pptxAttr(ln, "w", 25400))
       };
