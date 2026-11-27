@@ -1043,7 +1043,9 @@ await evalJs(`document.querySelector('#stageDocMode [data-stage-doc="preview"]')
 await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 20000).catch(() => {});
 check(
   "preview regenerates the laid-out page after an external edit",
-  await evalJs(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-") && __yanStage.state.tabs.get(__yanStage.state.current)?.url !== ${JSON.stringify(workDocUrl)}`)
+  await evalJs(
+    `(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-") && __yanStage.state.tabs.get(__yanStage.state.current)?.url !== ${JSON.stringify(workDocUrl)}`
+  )
 );
 await browserSend("Target.closeTarget", { targetId });
 await waitFor(`!__yanStage.state.tabs.has(${JSON.stringify(targetId)})`);

@@ -193,11 +193,7 @@ async function workRefresh() {
       workPaint();
       return;
     }
-    const data = await bridge(
-      "/api/archive/list",
-      { root: work.root, scratch: false, depth: 1 },
-      AbortSignal.timeout(8000)
-    );
+    const data = await bridge("/api/archive/list", { root: work.root, scratch: false, depth: 1 }, AbortSignal.timeout(8000));
     if (rev !== work.rev) return;
     work.entries = data.entries || [];
     work.dirs = data.dirs || [];
