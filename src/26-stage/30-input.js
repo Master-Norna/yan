@@ -459,7 +459,7 @@ function bindStage() {
     if (close) return void stageSend("Target.closeTarget", { targetId: close.dataset.stageClose }).catch(() => {});
     const tab = /** @type {HTMLElement | null} */ (target.closest("[data-stage-tab]"));
     if (!tab) return;
-    // 点签即回网页：工作区那一层收起（再点顶栏那一枚回原处，目录与查找词都还在）
+    // 点签即回网页：工作区那一层收起（再点顶栏那一枚回原处，目录还在）
     const wasWork = work.open;
     workHide();
     if (tab.dataset.stageTab === stage.current) {

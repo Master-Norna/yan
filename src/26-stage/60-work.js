@@ -1,6 +1,6 @@
 // 言 · 游目 · 工作区：舞台上的一层，看某一处目录里的东西。
 // 簿录（列、件图、夹、路径）就是卷宗那一套（src/13-files/10-archive.js），这里只换三样：根可换（地址行里输路径，
-// 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签；有对话目录则跟随，未绑时沿用本机记的 yan-work-root。
+// 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签；有对话目录则跟随，言模式沿用卷宗目录。
 // 点一件即开：夹往下走，件交给游目去开（Office 摊成文档页、md 排出来、网页直接开，见 30-input.js 的 stageGo）。
 // 「改动」那一面只看本段对话改过的件：不说增删改、也不写 +几 −几——件图本身换色（朱是删、泥金是改、石绿是增）。
 // 顶栏那一枚（#stageWorkBtn）只管进出、不表态；这一对（工作区 / 改动）里选着的那一枚才转朱，画面上任何时候只有一处朱。
@@ -10,14 +10,13 @@ const work = {
   root: "",
   /** @type {string|null} 当前对话及其绑定目录的标记；同一段里走层不重置 */
   context: null,
-  bound: "",
   /** @type {"list"|"changes"} */
   mode: "list",
   /** @type {{ path: string, name: string, size: number, modifiedAt: string }[]} 这一层的件，路径相对根 */
   entries: [],
   /** @type {{ path: string, name: string }[]} 夹，同上 */
   dirs: [],
-  /** 改动涉及的路径已查完 */
+  /** 当前目录或改动路径已查完 */
   full: false,
   /** @type {Map<string, { kind: string, size?: number, modifiedAt?: string } | null>} */
   changeEntries: new Map(),
@@ -28,16 +27,6 @@ const work = {
   rev: 0
 };
 
-/** 绑过的目录记在本机（同侧栏宽窄、缩放：不随备份走）。从前那一版在 POSIX 上会把根写成相对的（点路径里的一级），
- * 那样的留着也列不出来，当作没绑，请人重选一处 */
-function workStored() {
-  try {
-    const root = slashed(localStorage.getItem("yan-work-root") || "");
-    return /^([a-z]:\/|\/)/i.test(root) ? root : "";
-  } catch {
-    return "";
-  }
-}
 /** 开头的斜杠：POSIX 的根（/Users/…）、UNC 的 //host，不算一级，拼回去时要留在前头；Windows 的 E:/ 归第一级自己带着 */
 function workLead(path) {
   const lead = /^\/+/.exec(slashed(path));
@@ -64,7 +53,7 @@ function workUp(path) {
 }
 /** 地址行里写的那一句：这一层叫什么，前头是它所在的那一路 */
 function workAddrHtml() {
-  if (!work.root) return `<b>${t("尚未绑目录")}</b>`;
+  if (!work.root) return `<b>${t("选择文件夹…")}</b>`;
   const parts = workParts(work.root),
     here = parts.pop() || work.root,
     rest = parts.join("/");
@@ -77,12 +66,11 @@ function workHere() {
 // 对话已有工作目录就用它，不另绑、不改对话；切换对话或重新绑定时才回到根。
 function workFollowConversation() {
   const c = currentConversation(),
-    bound = slashed(c?.workdir || ""),
-    context = JSON.stringify([c?.id || "", bound]);
+    root = slashed(c?.workdir || archiveDir()),
+    context = JSON.stringify([c?.id || "", root]);
   if (work.context === context) return false;
   work.context = context;
-  work.bound = bound;
-  work.root = bound || workStored();
+  work.root = root;
   workResetRows();
   work.mode = "list";
   work.shape = "";
@@ -103,7 +91,6 @@ function workEnter() {
   workPaint();
   stageRender();
   if (work.root) void workRefresh();
-  else void workPick();
 }
 /** 收起这一层、回到网页；画面交给调用它的那一步去接（点签换页时自己会接，见 30-input.js） */
 function workHide() {
@@ -130,7 +117,6 @@ async function workPick() {
     work.root = slashed(paths[0]);
     workResetRows();
     work.mode = "list";
-    workRemember();
     workPaint();
     stageRender();
     await workRefresh();
@@ -145,17 +131,9 @@ function workEnterDir(path) {
   work.root = root;
   workResetRows();
   work.mode = "list";
-  workRemember();
   workPaint();
   stageRender();
   void workRefresh();
-}
-// 本机记的只是未绑定对话时的浏览位置，不能被另一段对话的目录覆盖。
-function workRemember() {
-  if (work.bound) return;
-  try {
-    localStorage.setItem("yan-work-root", work.root);
-  } catch {}
 }
 // ---------- 列 ----------
 // 换根或换面时，旧列表不可拿新根拼路径；在发出新请求前就使旧请求失效。
@@ -198,6 +176,7 @@ async function workRefresh() {
     work.entries = data.entries || [];
     work.dirs = data.dirs || [];
     work.truncated = !!data.truncated;
+    work.full = true;
     work.error = "";
   } catch (error) {
     if (rev !== work.rev) return;
@@ -268,8 +247,12 @@ function workViewsHtml() {
 function workShellHtml() {
   return `<div class="work-inner"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div>${workViewsHtml()}</div><div id="workStrips" class="strips"></div></div>`;
 }
+// 空簿录沿用游目空台的居中排法，只换成文件夹小画。
+function workEmptyBody(text, action = "") {
+  return `<div class="stage-empty work-empty">${brushIcon("folder", "work-leaf")}${text ? `<span>${escapeHtml(text)}</span>` : ""}${action}</div>`;
+}
 function workEmptyHtml() {
-  return `<div class="work-inner"><div class="work-bar work-bar-empty">${workViewsHtml()}</div><div class="work-empty"><p>${t("这一处还没有绑目录")}</p><button type="button" data-work-pick>${t("选择文件夹…")}</button></div></div>`;
+  return `<div class="work-inner"><div class="strips">${workEmptyBody("", `<button type="button" class="stage-go" data-work-pick>${t("选择文件夹…")}</button>`)}</div></div>`;
 }
 /** 路径：一层一枚键，点哪一级去哪一级（整条是绝对路径，越出原先那一处也只是换根，仍是这一层）。
  * 超过四级的，中间并成一枚「…」：窄到三百来像素时，开头与末尾仍看得见 */
@@ -312,28 +295,24 @@ function workPaint() {
   if (work.shape !== shape) {
     work.shape = shape;
     box.innerHTML = shape === "list" ? workShellHtml() : workEmptyHtml();
-    return;
   }
-  if (shape !== "list") return;
   // 工作区里前后按目录走：还有上一层就能退，前进没有去处（离开这一层时 workHide 按浏览器记的还原）
   const up = workUp(work.root);
   /** @type {HTMLButtonElement} */ ($("[data-stage-nav=back]")).disabled = !up;
   /** @type {HTMLButtonElement} */ ($("[data-stage-nav=forward]")).disabled = true;
+  if (shape !== "list") return;
   const rows = workRows();
   stageSetHtml($("#workCrumbs"), workCrumbsHtml());
-  const back = up
-      ? `<button type="button" class="strip-back" data-work-dir="${escapeHtml(up)}" title="${t("回上一层")}" aria-label="${t("回上一层")}">‹</button>`
-      : "",
-    empty = work.error
+  const empty = work.error
       ? t`目录不可用：${work.error}`
-      : work.mode === "changes" && !work.full
+      : !work.full
         ? t("正在翻…")
         : work.mode === "changes"
           ? t("本段对话还没改过文件")
           : t("此层尚空"),
     body = rows.length
-      ? `<div class="strip-cols"><span>${back}</span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
-      : `${back ? `<div class="strip-cols"><span>${back}</span></div>` : ""}<div class="library-empty">${escapeHtml(empty)}</div>`;
+      ? `<div class="strip-cols"><span></span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
+      : workEmptyBody(empty);
   stageSetHtml($("#workStrips"), body);
   for (const button of document.querySelectorAll("#workCrumbs [data-work-dir], #stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);

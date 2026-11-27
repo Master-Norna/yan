@@ -1,15 +1,15 @@
 // 工作区：游目里的一层，看某一处目录——簿录、走层、路径、空态，以及顶栏那一枚与地址行下那一对的分工。
-// 不含「点一件去开」那一段（要真浏览器，见 test/stage.mjs）；也不碰系统的选夹子窗：进来之前先把绑过的目录写进 localStorage。
+// 不含「点一件去开」那一段（要真浏览器，见 test/stage.mjs）；言模式从卷宗进入，沿路径走到测试目录。
 import { mkdirSync, writeFileSync } from "node:fs";
-import { connect, check, sleep, PAGE, TMP } from "./lib.mjs";
+import { connect, check, sleep, PAGE, ARCHIVE } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
-// 工作区的实情（页面脚本包在闭包里读不到变量，只好看 DOM 与本机记下的那一份）：断言不过时一并写出来，省得再猜
+// 工作区的实情（页面脚本包在闭包里读不到变量，只好看 DOM）：断言不过时一并写出来，省得再猜
 const workState = () =>
   evalJs(
-    `JSON.stringify({ stored: localStorage.getItem("yan-work-root") || "", crumbs: document.querySelector("#workCrumbs")?.textContent || "", rows: [...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent), said: document.querySelector("#workStrips").textContent.trim().slice(0, 90), hidden: document.querySelector("#stageWork").classList.contains("hidden") })`
+    `JSON.stringify({ crumbs: document.querySelector("#workCrumbs")?.textContent || "", rows: [...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent), said: document.querySelector("#workStrips").textContent.trim().slice(0, 90), hidden: document.querySelector("#stageWork").classList.contains("hidden") })`
   );
 
-const ROOT = `${TMP}/工作区`,
+const ROOT = `${ARCHIVE}/工作区`,
   HOME_SETTINGS = {
     version: 5,
     settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false, mcpServers: {} },
@@ -38,7 +38,7 @@ writeFileSync(`${ROOT}/子夹/深.md`, "# 深一层\n");
 await send("Page.navigate", { url: `${PAGE}preview.html` });
 await sleep(400);
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", ${JSON.stringify(JSON.stringify(HOME_SETTINGS))}); localStorage.setItem("yan-work-root", ${JSON.stringify(ROOT)}); true`
+  `localStorage.setItem("yan-chat-v1", ${JSON.stringify(JSON.stringify(HOME_SETTINGS))}); true`
 );
 await send("Page.navigate", { url: PAGE });
 await evalJs(
@@ -47,6 +47,9 @@ await evalJs(
 
 // 打开游目（没有浏览器，入口那一笔是藏着的；点它照旧开面板），再点顶栏那一枚
 await evalJs(`document.querySelector("#stagePin").click(); document.querySelector("#stageWorkBtn").click(); true`);
+await waitFor(`[...document.querySelectorAll("#workStrips .strip.dir")].some(el => el.querySelector("strong")?.textContent === "工作区")`);
+check("言模式默认打开卷宗", await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "卷宗"`));
+await evalJs(`[...document.querySelectorAll("#workStrips .strip.dir")].find(el => el.querySelector("strong")?.textContent === "工作区").click(); true`);
 await waitFor(`document.querySelectorAll("#workStrips .strip").length >= 3`, 8000).catch(() => {});
 
 const names = await evalJs(`[...document.querySelectorAll("#workStrips .strip-name strong")].map(el => el.textContent)`);
@@ -90,6 +93,16 @@ await waitFor(`document.querySelector("#workCrumbs .here")?.textContent === "工
 check("点路径回到上一层", await evalJs(`document.querySelector("#workCrumbs .here").textContent === "工作区"`));
 await waitFor(`document.querySelectorAll("#workStrips .strip").length >= 3`, 8000).catch(() => {});
 check("回到上一层，簿录又是这一层的三件", await evalJs(`document.querySelectorAll("#workStrips .strip").length >= 3`), await workState());
+
+// 空目录用游目空台样式，没有重复的返回箭头。
+mkdirSync(`${ROOT}/空夹`, { recursive: true });
+await evalJs(`document.querySelector('[data-stage-nav="reload"]').click(); true`);
+await waitFor(`[...document.querySelectorAll("#workStrips .strip.dir")].some(el => el.querySelector("strong")?.textContent === "空夹")`);
+await evalJs(`[...document.querySelectorAll("#workStrips .strip.dir")].find(el => el.querySelector("strong")?.textContent === "空夹").click(); true`);
+await waitFor(`document.querySelector("#workStrips .work-empty")?.textContent.includes("此层尚空")`);
+check("空目录居中件图、只保留上方返回", await evalJs(`!!document.querySelector("#workStrips .stage-empty .work-leaf") && !document.querySelector("#workStrips .strip-back")`));
+await evalJs(`document.querySelector('[data-stage-nav="back"]').click(); true`);
+await waitFor(`document.querySelector("#workCrumbs .here")?.textContent === "工作区"`);
 
 // 改动那一面：没有对话，也就没有改过的件；两枚里仍只有一枚朱
 await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').click(); true`);
@@ -193,7 +206,7 @@ await evalJs(
 );
 await waitFor(`!!document.querySelector('[data-conversation="work-changes"]')`, 10000).catch(() => {});
 await evalJs(
-  `localStorage.setItem("yan-work-root", ${JSON.stringify(`${ROOT}/子夹`)}); document.querySelector('[data-conversation="work-changes"] .history-open').click(); true`
+  `document.querySelector('[data-conversation="work-changes"] .history-open').click(); true`
 );
 await waitFor(`__yanState().conversations.length === 1`, 8000).catch(() => {});
 await evalJs(`document.querySelector("#stagePin").click(); true`);
@@ -201,7 +214,7 @@ await sleep(300);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await waitFor(`document.querySelector("#stageAddr").title === ${JSON.stringify(ROOT)}`, 8000).catch(() => {});
 check(
-  "对话已绑目录时优先跟随它，不用本机记着的旧目录",
+  "对话已绑目录时跟随它，而不是卷宗",
   await evalJs(`document.querySelector("#stageAddr").title === ${JSON.stringify(ROOT)}`)
 );
 await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').click(); true`);

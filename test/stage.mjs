@@ -994,8 +994,10 @@ await evalJs(`document.querySelector("#stagePin").click(); true`);
 const workDir = `${TMP}/工作区-舞台`;
 mkdirSync(workDir, { recursive: true });
 writeFileSync(`${workDir}/笔记.md`, "# 笔记\n\n这一层只在工作区里看。\n");
-await evalJs(`localStorage.setItem("yan-work-root", ${JSON.stringify(workDir)}); true`);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+await evalJs(
+  `document.querySelector("#stageAddr").click(); document.querySelector("#stageUrl").value = ${JSON.stringify(workDir)}; document.querySelector("#stageUrl").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); true`
+);
 await waitFor(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "笔记.md")`, 8000).catch(
   () => {}
 );

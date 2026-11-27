@@ -32,28 +32,24 @@ test("Windows 与 UNC 照旧", () => {
   assert.equal(f.workUp(unc), "//nas/share");
 });
 
-test("工作区跟随对话绑定，普通重画不打断走层，未绑定时仍用本机目录", () => {
+test("工作区跟随对话绑定，普通重画不打断走层，未绑定时跟随卷宗", () => {
   const f = load([
     "work",
     "workFollowConversation",
-    "workRemember",
     `setup: () => {
-      let c = null, stored = "/fallback";
+      let c = null, archive = "/archive";
       currentConversation = () => c;
-      localStorage.getItem = () => stored;
-      localStorage.setItem = (_key, value) => { stored = value; };
-      return { set: value => { c = value; }, stored: () => stored };
+      archiveDir = () => archive;
+      return { set: value => { c = value; }, setArchive: value => { archive = value; } };
     }`
   ]);
   const chat = f.setup();
   assert.equal(f.workFollowConversation(), true);
-  assert.equal(f.work.root, "/fallback");
+  assert.equal(f.work.root, "/archive");
   chat.set({ id: "a", workdir: "/project/a" });
   assert.equal(f.workFollowConversation(), true);
   assert.equal(f.work.root, "/project/a");
   f.work.root = "/project/a/sub";
-  f.workRemember();
-  assert.equal(chat.stored(), "/fallback");
   assert.equal(f.workFollowConversation(), false);
   assert.equal(f.work.root, "/project/a/sub");
   chat.set({ id: "b", workdir: "/project/b" });
@@ -64,5 +60,8 @@ test("工作区跟随对话绑定，普通重画不打断走层，未绑定时�
   assert.equal(f.work.root, "E:/new");
   chat.set({ id: "b", workdir: "" });
   assert.equal(f.workFollowConversation(), true);
-  assert.equal(f.work.root, "/fallback");
+  assert.equal(f.work.root, "/archive");
+  chat.setArchive("/new-archive");
+  assert.equal(f.workFollowConversation(), true);
+  assert.equal(f.work.root, "/new-archive");
 });

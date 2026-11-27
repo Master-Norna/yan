@@ -5,7 +5,7 @@
   place-items: stretch;
 }
 .stage-view.work .stage-sheet,
-.stage-view.work .stage-empty,
+.stage-view.work > .stage-empty,
 .stage-view.work .stage-pick-at {
   display: none;
 }
@@ -16,6 +16,9 @@
 /* 宽窄照这一层自己的宽算（cqi），不照舞台 */
 .work-page .work-inner {
   width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
   container-type: inline-size;
   container-name: work;
 }
@@ -130,37 +133,16 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* 空态也留着同一处切换。 */
-.work-bar-empty {
-  display: flex;
-  justify-content: flex-end;
+/* 空簿录：沿用 .stage-empty / .stage-go，不再另写文字和按钮的一套。 */
+.work-page .strips {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
 }
-/* 还没绑目录：一句话、一枚字按钮，底下不画空簿录 */
-.work-empty {
-  display: grid;
-  justify-items: start;
-  gap: 14px;
-  padding-top: 54px;
-}
-.work-empty p {
-  margin: 0;
-  color: var(--ink-2);
-  font: var(--fs-mid) var(--title);
-  letter-spacing: 0.06em;
-}
-.work-empty button {
-  padding: 0 2px 3px;
-  border-bottom: 1px solid color-mix(in srgb, var(--ink) 30%, transparent);
-  color: var(--ink);
-  font: var(--fs-small) var(--title);
-  letter-spacing: 0.08em;
-  transition:
-    color var(--dur-quick),
-    border-color var(--dur-quick);
-}
-.work-empty button:hover {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+.work-empty .work-leaf {
+  width: 72px;
+  height: 72px;
+  opacity: 0.7;
 }
 .work-page .strips {
   --cell: 12px;
