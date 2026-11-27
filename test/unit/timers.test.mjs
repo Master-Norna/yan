@@ -62,7 +62,8 @@ test("周期的排到下一回；取消了的不再叫；对话已删的连同�
   const { post, close } = await serve(home);
   try {
     const every = await post("/api/timer/set", { to: "c1", step: "s2", note: "周期", due: soon(), every: 60000 });
-    const gone = await post("/api/timer/set", { to: "c1", step: "s3", note: "取消的", due: soon() });
+    // 这一条要在三次往返之后才被撤掉：与 t1 同一个 150ms，慢机上撤之前就已到点，found 成了 false
+    const gone = await post("/api/timer/set", { to: "c1", step: "s3", note: "取消的", due: Date.now() + 3000 });
     await post("/api/timer/set", { to: "deleted", step: "s4", note: "对话已删", due: soon(), every: 60000 });
     assert.deepEqual([every.id, gone.id], ["t1", "t2"]);
     assert.equal((await post("/api/timer/cancel", { id: "t2" })).found, true);
