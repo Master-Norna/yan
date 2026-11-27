@@ -351,9 +351,10 @@ function pptxChartSpec(xml, theme, cx) {
     return null;
   }
   const plot = root && xmlDeep(root, "plotArea")[0],
-    charts = plot ? [...plot.children].filter(node => /Chart$/.test(node.localName)) : [],
+    // 组合图只画第一组会丢掉数据：暂不支持时照旧留虚线框。
+    // 没有系列的空组不算一组——生成器偶尔会写一个空壳，那不该把画得出来的那一组也拖下水。
+    charts = plot ? [...plot.children].filter(node => /Chart$/.test(node.localName) && xmlKids(node, "ser").length) : [],
     chart = charts[0];
-  // 组合图只画第一组会丢掉数据：暂不支持时照旧留虚线框。
   if (charts.length !== 1 || !PPTX_CHART_KIND[chart.localName] || !(cx > 0)) return null;
   const pt = value => Math.round(((value / 100) * 12700 * 1000 * 100) / cx) / 100,
     length = value => Math.round((value * 1000 * 100) / cx) / 100,
