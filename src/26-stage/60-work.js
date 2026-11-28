@@ -609,9 +609,10 @@ function workPaintTabs() {
     active && !active.diff && !editing && (kind === "markdown" || kind === "html")
       ? `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>`
       : "";
-  const edit = workCanEdit(active)
-    ? `<button type="button" data-work-edit aria-pressed="${!!editing}" title="${t("编辑")} · Ctrl/⌘+S" aria-label="${t("编辑")}">${brushIcon("edit")}</button>`
-    : "";
+  const edit =
+    workCanEdit(active)
+      ? `<button type="button" data-work-edit aria-pressed="${!!editing}" title="${t("编辑")} · Ctrl/⌘+S" aria-label="${t("编辑")}">${brushIcon("edit")}</button>`
+      : "";
   stageSetHtml(mode, views + edit);
 }
 function workPaint() {
