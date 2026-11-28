@@ -22,6 +22,18 @@ class JobMap extends Map {
   }
 }
 const requestJobs = new JobMap();
+// 主答与帮手共用轮次循环的收件口；每趟持有独立的队列和中止器。
+function createRoundInbox() {
+  return {
+    controller: new AbortController(),
+    queue: [],
+    /** @type {AbortController|null} */
+    round: null,
+    reading: false,
+    roundStart: 0,
+    steerTimer: 0
+  };
+}
 // 各段对话在后台做着的帮手（对话 id → 一名一个收件口，见 90-delegate.js）。帮手不随派它的那一答收尾：主答只剩等待就收尾，
 // 回报到了另起一答。所以它与作答一样要攥锁防冻、要报到（别处不该把这段当成没人管）
 const crews = new JobMap();
