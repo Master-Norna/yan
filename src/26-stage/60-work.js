@@ -240,8 +240,10 @@ function workCrumbsHtml() {
   const parts = workParts(work.root),
     crumbs = [];
   if (work.mode === "changes") return "";
-  if (!parts.length)
-    return work.root === "/" ? `<button type="button" class="here" data-work-pick title="/" aria-label="${t("选择文件夹…")}">/</button>` : "";
+  if (!parts.length) {
+    if (work.root !== "/") return "";
+    return `<button type="button" class="here" data-work-pick title="/" aria-label="${t("选择文件夹…")}">/</button>`;
+  }
   if (work.root.startsWith("/") && !work.root.startsWith("//")) crumbs.push({ name: "/", at: "/" });
   if (parts.length > 4) crumbs.push({ name: parts[0], at: workAt(work.root, parts, 1) }, { name: "…", at: "" });
   for (let i = parts.length > 4 ? parts.length - 2 : 0; i < parts.length; i++)
