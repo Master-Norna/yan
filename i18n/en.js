@@ -555,6 +555,7 @@ var YAN_EN = {
   上一页: "Previous slide",
   下一页: "Next slide",
   "仅显示前 20 万字": "Showing the first 200,000 characters",
+  "网页过大，仅显示前 20 万字源码": "Web page too large — showing the first 200,000 characters of source",
   // 抽取失败时的那几句：进了附件的说明、预览的空态，英文界面也该看得懂（这几句出自 13-files/30-extract.js）
   "PDF 抽取库未能载入，原件照发": "The PDF library couldn't load; the original file is sent as is",
   "PDF 没有文字层（多半是扫描件），原件照发": "This PDF has no text layer (likely a scan); the original file is sent as is",

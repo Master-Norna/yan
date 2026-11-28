@@ -752,7 +752,11 @@ async function fileViewerBody(reader, name, kind, revision = viewerRevision) {
   }
   // 网页放进与页内 ```html 同一个隔离沙箱：不能读本站的存储，也不能联网
   if (kind === "html") {
-    let source = await reader.text();
+    // 大型网页不整份读入，更不将截断的脚本交给交互运行时。
+    const htmlLimit = 2000000;
+    let source = await reader.text(htmlLimit);
+    if (source.length > htmlLimit)
+      return `<div class="file-viewer-text"><p class="file-viewer-note">${t("网页过大，仅显示前 20 万字源码")}</p><pre class="file-viewer-code">${escapeHtml(source.slice(0, VIEWER_TEXT_CHARS))}</pre></div>`;
     let theme = vizTheme();
     // 自带运行时的导出作品：在言里重新打开时取出原始源码，仍用当前的隔离预览，不嵌套导出外壳。
     const outer = new DOMParser().parseFromString(source, "text/html"),
