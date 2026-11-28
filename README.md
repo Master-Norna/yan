@@ -70,7 +70,7 @@
 <img src="assets/readme/ink-appearance.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-presets.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-scroll.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-theme.svg" alt="" width="52" height="52">
 </div>
 
-笔意图标、朱印反馈、墨历与天光主题构成统一的交互视觉语言。 用量化作余墨，使用记录落成墨历；寄出是一方朱印，明暗随天光流转。
+清简纸墨贯穿界面与交互：以笔意作图标，以朱印示反馈，以墨历记使用，明暗随天光流转。
 
 ## 模型自主与开放生态
 
@@ -96,7 +96,6 @@ npm start
 
 浏览器打开 `http://127.0.0.1:8787`，在「设置 → 模型」接入一个模型，即可落笔。`start.cmd` 打开的窗口是本机桥接，用时须开着。VS Code 内使用、环境变量、macOS 上的差别，见 [启动与运行](docs/start.md)。
 
-
 ## 文档
 
 界面里的用法在「设置 → 文档」；各处的细节与做法见 [docs](docs/README.md)。
@@ -111,10 +110,8 @@ npm start
 
 ## 开源贡献
 
-维护者与 Agent 账号参与的上游开源贡献，其中包含由言辅助完成的工作。卡片自动更新自公开已合并的 PR，不将全部贡献归因于 Agent。
+言在开源协作中持续成长。下方收录言与项目维护者参与的上游贡献，依据 GitHub 公开记录自动更新，包含共同署名的成果。
 
 <p align="center">
-  <a href="https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md"><img src="https://raw.githubusercontent.com/Master-Norna/yan/readme-contributions/assets/readme/contributions.svg" alt="上游已合并 PR 的循环展示" width="100%"></a>
+  <img src="https://raw.githubusercontent.com/Master-Norna/yan/readme-contributions/assets/readme/contributions.svg" alt="开源贡献" width="100%">
 </p>
-
-[查看完整贡献记录](https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md)

@@ -96,7 +96,6 @@ npm start
 
 Your browser opens `http://127.0.0.1:8787`. Add a model in **Settings → Model** and start writing; switch the interface to English in **Settings → General → Language**. The window opened by `start.cmd` is the local bridge and must stay open while you use Yan. For use inside VS Code, environment variables and macOS differences, see [Getting started](docs/en/start.md).
 
-
 ## Docs
 
 In-app usage is under **Settings → Docs**; details and how things work are in the [docs](docs/en/README.md).
@@ -111,10 +110,8 @@ Released under Apache-2.0; see `LICENSE`. Open-source libraries shipped with the
 
 ## Open-source contributions
 
-Upstream contributions from the maintainer and agent accounts, including work assisted by Yan. The feed is refreshed from public merged pull requests; it does not attribute every PR to the agent.
+Yan grows through real work in the open-source community. Contributions from Agent-Yan and the project maintainer are collected from public GitHub records, including jointly authored commits.
 
 <p align="center">
-  <a href="https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md"><img src="https://raw.githubusercontent.com/Master-Norna/yan/readme-contributions/assets/readme/contributions.svg" alt="Rolling selection of merged upstream pull requests" width="100%"></a>
+  <img src="https://raw.githubusercontent.com/Master-Norna/yan/readme-contributions/assets/readme/contributions.svg" alt="Upstream open-source contributions" width="100%">
 </p>
-
-[Browse the contribution record](https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md)
