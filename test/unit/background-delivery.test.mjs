@@ -13,9 +13,16 @@ for (const cancel of [true, false])
     const parent = fs.realpathSync(os.tmpdir()),
       root = fs.mkdtempSync(path.join(parent, "yan-bg-delivery-"));
     const work = createWork({ archiveHome: () => root, workHome: () => root, toolEnv: env => env });
-    const server = http.createServer((req, res) =>
-      (req.url === "/watch" ? work.routes["POST /api/work/watch"] : work.routes["POST /api/work/run"])(req, res)
-    );
+    const server = http.createServer((req, res) => {
+      // 后台首报可能比慢机器上的 PowerShell 起进程还早。取消用例刻意扣住响应，
+      // 直到真实客户端断线；否则测到的只是 CI 负载，并非「编号尚未交付」。
+      if (cancel && req.url !== "/watch") {
+        res.end = function () {
+          return this;
+        };
+      }
+      return (req.url === "/watch" ? work.routes["POST /api/work/watch"] : work.routes["POST /api/work/run"])(req, res);
+    });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const controller = new AbortController();
     let report;
@@ -32,7 +39,7 @@ for (const cancel of [true, false])
       });
       if (cancel) {
         const caught = request.catch(error => error);
-        for (let i = 0; i < 50 && !fs.existsSync(path.join(root, "ready.txt")); i++) await sleep(50);
+        for (let i = 0; i < 100 && !fs.existsSync(path.join(root, "ready.txt")); i++) await sleep(50);
         assert.ok(fs.existsSync(path.join(root, "ready.txt")));
         controller.abort();
         assert.equal((await caught).name, "AbortError");
