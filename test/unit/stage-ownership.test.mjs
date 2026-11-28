@@ -16,9 +16,14 @@ function stageFixture(reply) {
       "stageAttach",
       "stageWake",
       "stage",
+      "workEnter",
+      "work",
       `setup: (reply, calls, visibility) => {
         stage.ws = {}; stage.current = 'A';
-        stageVisible = () => visibility.shown;
+        stageVisible = () => visibility.shown && !work.open;
+        workFollowConversation = () => false;
+        stageRender = () => {};
+        workRefresh = async () => {};
         stageSync = stageResetPage = stageReadHistory = stageFit = stageFrame = () => {};
         stageInkAttach = async () => {};
         stageSend = async (method, params, session) => {
@@ -122,4 +127,16 @@ test("游目连接本身出错：不留已连着的空壳，同一页还能再�
   await f.stageAttach();
   assert.equal(f.stage.session, "session-A");
   assert.ok(f.calls.some(call => call.method === "Page.startScreencast" && call.session === "session-A"));
+});
+
+test("切入工作区即停推流，不等 ResizeObserver 通知", async () => {
+  const f = stageFixture(async () => {});
+  await f.stageAttach();
+  assert.equal(f.stage.session, "session-A");
+  f.workEnter();
+  assert.equal(f.work.open, true);
+  assert.equal(f.stage.session, "");
+  assert.equal(f.stage.attached, "");
+  await tick();
+  assert.ok(f.calls.some(call => call.method === "Page.stopScreencast"));
 });
