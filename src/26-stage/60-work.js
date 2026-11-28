@@ -69,7 +69,7 @@ function workRenderEditor(tab, trigger = null) {
       tab.path.split("/").pop(),
       '<div class="work-office-editor"><p>' +
         escapeHtml(t("仅可修改列出的文字与单元格；公式、复杂结构及其他内容保持原样。")) +
-        '</p>' +
+        "</p>" +
         draft.office.labels
           .map(
             (label, index) =>

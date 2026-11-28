@@ -45,12 +45,13 @@ writeFileSync(`${ROOT}/子夹/深.md`, "# 深一层\n");
 
 const wordNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const sheetNS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-const wordPart = '<w:document xmlns:w="' + wordNS + '"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>原文字</w:t></w:r></w:p></w:body></w:document>';
-const sheetPart = '<worksheet xmlns="' + sheetNS + '"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1"><f>1+1</f><v>2</v></c><c r="D1"><v>10</v></c></row></sheetData></worksheet>';
+const wordPart =
+  '<w:document xmlns:w="' + wordNS + '"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>原文字</w:t></w:r></w:p></w:body></w:document>';
+const sheetPart =
+  '<worksheet xmlns="' + sheetNS + '"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1"><f>1+1</f><v>2</v></c><c r="D1"><v>10</v></c></row></sheetData></worksheet>';
 const sharedPart = '<sst xmlns="' + sheetNS + '" count="2" uniqueCount="1"><si><t>共享原值</t></si></sst>';
 writeFileSync(ROOT + "/编辑.docx", officeZipFixture({ "word/document.xml": wordPart, "word/styles.xml": "<styles/>" }));
 writeFileSync(ROOT + "/编辑.xlsx", officeZipFixture({ "xl/worksheets/sheet1.xml": sheetPart, "xl/sharedStrings.xml": sharedPart }));
-
 
 await send("Page.navigate", { url: `${PAGE}preview.html` });
 await sleep(400);
@@ -305,17 +306,25 @@ check(
 );
 
 const officeOpen = async name => {
-  await evalJs('document.querySelector(' + JSON.stringify('[data-work-file$="/' + name + '"]') + ').click(); true');
+  await evalJs("document.querySelector(" + JSON.stringify('[data-work-file$="/' + name + '"]') + ").click(); true");
   await waitFor('!!document.querySelector("[data-work-edit]")');
   await evalJs('document.querySelector("[data-work-edit]").click(); true');
   await waitFor('!!document.querySelector("[data-office-field]")');
 };
 const officeSet = async (index, value) => {
-  await evalJs('(() => {const el=document.querySelectorAll("[data-office-field]")[' + index + ']; el.value=' + JSON.stringify(value) + '; el.dispatchEvent(new Event("input",{bubbles:true})); return true;})()');
+  await evalJs(
+    '(() => {const el=document.querySelectorAll("[data-office-field]")[' +
+      index +
+      "]; el.value=" +
+      JSON.stringify(value) +
+      '; el.dispatchEvent(new Event("input",{bubbles:true})); return true;})()'
+  );
 };
 const officeSave = async () => {
   check("未保存有圆点", await evalJs('!!document.querySelector(".work-tab.on .work-dirty-dot")'));
-  await evalJs('document.querySelector("[data-office-field]").dispatchEvent(new KeyboardEvent("keydown",{key:"s",ctrlKey:true,bubbles:true,cancelable:true})); true');
+  await evalJs(
+    'document.querySelector("[data-office-field]").dispatchEvent(new KeyboardEvent("keydown",{key:"s",ctrlKey:true,bubbles:true,cancelable:true})); true'
+  );
   await waitFor('!document.querySelector(".work-tab.on .work-dirty-dot")');
 };
 await officeOpen("编辑.docx");
@@ -330,14 +339,20 @@ await officeSet(0, "独立新值");
 await officeSet(2, "42");
 await officeSave();
 const book = readOffice("编辑.xlsx", readFileSync(ROOT + "/编辑.xlsx"));
-check("Excel 独立字符串与数字保存，不改共享索引、公式", book["xl/worksheets/sheet1.xml"].includes("独立新值") &&
-  book["xl/worksheets/sheet1.xml"].includes('<c r="B1" t="s"><v>0</v></c>') &&
-  book["xl/worksheets/sheet1.xml"].includes("<f>1+1</f>") &&
-  book["xl/worksheets/sheet1.xml"].includes("<v>42</v>") &&
-  book["xl/sharedStrings.xml"].includes("共享原值"));
+check(
+  "Excel 独立字符串与数字保存，不改共享索引、公式",
+  book["xl/worksheets/sheet1.xml"].includes("独立新值") &&
+    book["xl/worksheets/sheet1.xml"].includes('<c r="B1" t="s"><v>0</v></c>') &&
+    book["xl/worksheets/sheet1.xml"].includes("<f>1+1</f>") &&
+    book["xl/worksheets/sheet1.xml"].includes("<v>42</v>") &&
+    book["xl/sharedStrings.xml"].includes("共享原值")
+);
 await officeSet(0, "共享原值");
 await officeSave();
-check("同一编辑态再次保存及回改有效", readOffice("编辑.xlsx", readFileSync(ROOT + "/编辑.xlsx"))["xl/worksheets/sheet1.xml"].includes('<c r="A1" t="s"><v>0</v></c>'));
+check(
+  "同一编辑态再次保存及回改有效",
+  readOffice("编辑.xlsx", readFileSync(ROOT + "/编辑.xlsx"))["xl/worksheets/sheet1.xml"].includes('<c r="A1" t="s"><v>0</v></c>')
+);
 
 check("全程没有页面异常", await evalJs(`window.__yanExceptions.length === 0`), await evalJs(`JSON.stringify(window.__yanExceptions)`));
 close();

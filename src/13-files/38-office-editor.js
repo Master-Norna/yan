@@ -18,8 +18,7 @@ function officeEditorModel(parts, extension) {
     node.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
   };
   const inside = (node, names) => {
-    for (let parent = node.parentElement; parent; parent = parent.parentElement)
-      if (names.includes(parent.localName)) return true;
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) if (names.includes(parent.localName)) return true;
     return false;
   };
   const number = value => /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value) && Number.isFinite(Number(value));
@@ -109,39 +108,64 @@ function officeEditorModel(parts, extension) {
           kind = cell.getAttribute("t") || "n",
           v = xmlKids(cell, "v")[0];
         if (
-          cell.namespaceURI !== ns || cell.parentElement?.localName !== "row" || !ref || !/^[A-Z]+[1-9]\d*$/.test(ref) ||
-          xmlKids(cell, "f").length || xmlKids(cell, "extLst").length || cell.hasAttribute("cm") || cell.hasAttribute("vm")
-        ) continue;
+          cell.namespaceURI !== ns ||
+          cell.parentElement?.localName !== "row" ||
+          !ref ||
+          !/^[A-Z]+[1-9]\d*$/.test(ref) ||
+          xmlKids(cell, "f").length ||
+          xmlKids(cell, "extLst").length ||
+          cell.hasAttribute("cm") ||
+          cell.hasAttribute("vm")
+        )
+          continue;
         const label = (names.get(part) || part.split("/").pop()) + " · " + ref;
         if (kind === "n" && v && simpleText(v) && number(v.textContent)) {
-          add(part, label, v.textContent, value => {
-            v.textContent = requireNumber(value);
-            recalc();
-          }, related);
+          add(
+            part,
+            label,
+            v.textContent,
+            value => {
+              v.textContent = requireNumber(value);
+              recalc();
+            },
+            related
+          );
         } else if (kind === "s" && v && /^\d+$/.test(v.textContent)) {
           const item = strings[Number(v.textContent)],
             node = item && xmlKids(item, "t")[0];
           if (!item || item.children.length !== 1 || !simpleText(node)) continue;
-          add(part, label, node.textContent, value => {
-            const inline = doc.createElementNS(ns, cell.prefix ? cell.prefix + ":is" : "is"),
-              text = doc.createElementNS(ns, cell.prefix ? cell.prefix + ":t" : "t");
-            replaceText(text, value);
-            inline.appendChild(text);
-            cell.replaceChild(inline, v);
-            cell.setAttribute("t", "inlineStr");
-            // 两个计数都是可选的；转换为独立字符串后移除旧计数，不改任何其他单元格的共享索引。
-            shared.documentElement.removeAttribute("count");
-            shared.documentElement.removeAttribute("uniqueCount");
-            recalc();
-          }, [...related, sharedPart]);
+          add(
+            part,
+            label,
+            node.textContent,
+            value => {
+              const inline = doc.createElementNS(ns, cell.prefix ? cell.prefix + ":is" : "is"),
+                text = doc.createElementNS(ns, cell.prefix ? cell.prefix + ":t" : "t");
+              replaceText(text, value);
+              inline.appendChild(text);
+              cell.replaceChild(inline, v);
+              cell.setAttribute("t", "inlineStr");
+              // 两个计数都是可选的；转换为独立字符串后移除旧计数，不改任何其他单元格的共享索引。
+              shared.documentElement.removeAttribute("count");
+              shared.documentElement.removeAttribute("uniqueCount");
+              recalc();
+            },
+            [...related, sharedPart]
+          );
         } else if (kind === "inlineStr") {
           const item = xmlKids(cell, "is")[0],
             node = item && xmlKids(item, "t")[0];
           if (item?.children.length === 1 && simpleText(node))
-            add(part, label, node.textContent, value => {
-              replaceText(node, value);
-              recalc();
-            }, related);
+            add(
+              part,
+              label,
+              node.textContent,
+              value => {
+                replaceText(node, value);
+                recalc();
+              },
+              related
+            );
         }
       }
     }
@@ -158,7 +182,9 @@ function officeEditorModel(parts, extension) {
       const paragraphs = [...body.getElementsByTagNameNS(textNS, "*")].filter(node => ["p", "h"].includes(node.localName));
       for (const [i, node] of paragraphs.entries()) {
         if (simpleText(node) && !inside(node, ["tracked-changes", "annotation", "section"]))
-          add(part, t("段落") + " " + (i + 1), node.textContent, value => { node.textContent = value; });
+          add(part, t("段落") + " " + (i + 1), node.textContent, value => {
+            node.textContent = value;
+          });
       }
     } else {
       for (const table of body.getElementsByTagNameNS(tableNS, "table")) {
@@ -169,18 +195,28 @@ function officeEditorModel(parts, extension) {
           const repeated = Number(row.getAttributeNS(tableNS, "number-rows-repeated") || 1);
           if (!Number.isSafeInteger(repeated) || repeated < 1 || r + repeated > 1048576) break;
           let c = 0;
-          for (const cell of [...row.children].filter(node => node.namespaceURI === tableNS &&
-            ["table-cell", "covered-table-cell"].includes(node.localName))) {
+          for (const cell of [...row.children].filter(
+            node => node.namespaceURI === tableNS && ["table-cell", "covered-table-cell"].includes(node.localName)
+          )) {
             const count = Number(cell.getAttributeNS(tableNS, "number-columns-repeated") || 1),
               node = cell.getElementsByTagNameNS(textNS, "p")[0],
               kind = cell.getAttributeNS(officeNS, "value-type");
             if (!Number.isSafeInteger(count) || count < 1 || c + count > 16384) break;
-            if (repeated === 1 && count === 1 && cell.localName === "table-cell" && !cell.hasAttributeNS(tableNS, "formula") &&
-                !cell.hasAttributeNS(tableNS, "number-columns-spanned") && !cell.hasAttributeNS(tableNS, "number-rows-spanned") &&
-                cell.children.length === 1 && simpleText(node)) {
+            if (
+              repeated === 1 &&
+              count === 1 &&
+              cell.localName === "table-cell" &&
+              !cell.hasAttributeNS(tableNS, "formula") &&
+              !cell.hasAttributeNS(tableNS, "number-columns-spanned") &&
+              !cell.hasAttributeNS(tableNS, "number-rows-spanned") &&
+              cell.children.length === 1 &&
+              simpleText(node)
+            ) {
               const label = (table.getAttributeNS(tableNS, "name") || "") + " · " + xlsxRef(c, r);
               if (kind === "string" && !cell.hasAttributeNS(officeNS, "string-value"))
-                add(part, label, node.textContent, value => { node.textContent = value; });
+                add(part, label, node.textContent, value => {
+                  node.textContent = value;
+                });
               else if (kind === "float" && number(node.textContent) && node.textContent === cell.getAttributeNS(officeNS, "value"))
                 add(part, label, node.textContent, value => {
                   node.textContent = requireNumber(value);

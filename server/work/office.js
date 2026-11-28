@@ -27,8 +27,13 @@ function officeZip(buffer) {
   if (end < 0) throw invalid();
   const count = buffer.readUInt16LE(end + 10),
     start = buffer.readUInt32LE(end + 16);
-  if (buffer.readUInt32LE(end + 4) || buffer.readUInt16LE(end + 8) !== count || count > 4096 ||
-      start + buffer.readUInt32LE(end + 12) !== end) throw invalid();
+  if (
+    buffer.readUInt32LE(end + 4) ||
+    buffer.readUInt16LE(end + 8) !== count ||
+    count > 4096 ||
+    start + buffer.readUInt32LE(end + 12) !== end
+  )
+    throw invalid();
   const records = [],
     names = new Set();
   let at = start;
@@ -41,16 +46,30 @@ function officeZip(buffer) {
       nameLen = buffer.readUInt16LE(at + 28),
       offset = buffer.readUInt32LE(at + 42),
       next = at + 46 + nameLen + buffer.readUInt16LE(at + 30) + buffer.readUInt16LE(at + 32);
-    if (next > end || offset + 30 > start || buffer.readUInt32LE(offset) !== 0x04034b50 ||
-        flags & 0x2041 || buffer.readUInt16LE(at + 34) || size === 0xffffffff || plain === 0xffffffff) throw invalid();
+    if (
+      next > end ||
+      offset + 30 > start ||
+      buffer.readUInt32LE(offset) !== 0x04034b50 ||
+      flags & 0x2041 ||
+      buffer.readUInt16LE(at + 34) ||
+      size === 0xffffffff ||
+      plain === 0xffffffff
+    )
+      throw invalid();
     const label = buffer.subarray(at + 46, at + 46 + nameLen),
       name = label.toString("utf8"),
       localName = buffer.readUInt16LE(offset + 26),
       data = offset + 30 + localName + buffer.readUInt16LE(offset + 28);
-    if (names.has(name) || !isUtf8(label) || localName !== nameLen ||
-        !label.equals(buffer.subarray(offset + 30, offset + 30 + localName)) ||
-        buffer.readUInt16LE(offset + 6) !== flags || buffer.readUInt16LE(offset + 8) !== method ||
-        data + size > start || /(^|\/)(?:_xmlsignatures|documentsignatures\.xml|macrosignatures\.xml)(\/|$)/i.test(name))
+    if (
+      names.has(name) ||
+      !isUtf8(label) ||
+      localName !== nameLen ||
+      !label.equals(buffer.subarray(offset + 30, offset + 30 + localName)) ||
+      buffer.readUInt16LE(offset + 6) !== flags ||
+      buffer.readUInt16LE(offset + 8) !== method ||
+      data + size > start ||
+      /(^|\/)(?:_xmlsignatures|documentsignatures\.xml|macrosignatures\.xml)(\/|$)/i.test(name)
+    )
       throw invalid();
     names.add(name);
     records.push({ name, flags, method, size, plain, offset, data, central: buffer.subarray(at, next), end: 0 });
