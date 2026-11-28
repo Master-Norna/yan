@@ -430,9 +430,9 @@ function bindTrailEvents() {
     const summary = event.target.closest(".change-summary");
     if (!summary) return;
     const files = summary.parentElement.querySelector(".change-files"),
-      closed = files.classList.toggle("hidden");
-    files.classList.toggle("opening", !closed);
-    summary.setAttribute("aria-expanded", String(!closed));
+      open = files.classList.contains("hidden");
+    morphHeight(summary.parentElement, () => files.classList.toggle("hidden", !open));
+    summary.setAttribute("aria-expanded", String(open));
   });
   // 思绪与行迹的开合：正文、旁注面板与差遣面板同一套——用户亲手开合的记在消息上，流式期间的自动开合就不再替他动
   const onProcessToggle = event => {

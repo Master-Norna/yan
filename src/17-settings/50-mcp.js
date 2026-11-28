@@ -251,6 +251,7 @@ function bindMcpEvents() {
   $("#mcpJson").addEventListener("click", () => {
     mcpJsonOpen = !mcpJsonOpen;
     $("#mcpJsonBox").classList.toggle("hidden", !mcpJsonOpen);
+    $("#mcpJsonBox").inert = !mcpJsonOpen;
     $("#mcpJson").textContent = mcpJsonOpen ? t("收起 JSON") : t("以 JSON 编辑");
   });
   // 整页一个委托：设置页每画一回，这一页连同监听一起换新

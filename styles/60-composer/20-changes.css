@@ -152,32 +152,6 @@
   color: var(--ink-3);
   opacity: 0.5;
 }
-/* 点开时清单轻轻浮起、各行依次落定；生成中清单整段重画不重放（只有点开那一下带 .opening） */
-.change-files.opening {
-  animation: changeFilesRise 0.22s var(--ease-ink);
-}
-.change-files.opening > button {
-  animation: changeFileIn 0.28s var(--ease-ink) both;
-  animation-delay: calc(var(--i, 0) * 18ms);
-}
-@keyframes changeFilesRise {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-@keyframes changeFileIn {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .change-files.opening,
-  .change-files.opening > button {
-    animation: none;
-  }
-}
 .helper-bar .change-files {
   border: 1px solid var(--line);
   border-radius: var(--radius-m);

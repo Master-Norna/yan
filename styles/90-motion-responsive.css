@@ -174,6 +174,44 @@
   ) {
   animation: none !important;
 }
+/* 两面只切换内容，不让网页推流或工作区的重画重复播放。 */
+:is(.stage-browser, .work-page):not(.hidden) {
+  animation: fadeIn var(--dur-rise) ease;
+}
+/* 普通开合区仍用 hidden 表达状态；支持内在高度插值的浏览器才平滑开合。 */
+@supports (interpolate-size: allow-keywords) {
+  :is(.history-search-wrap, #mcpJsonBox) {
+    interpolate-size: allow-keywords;
+    block-size: auto;
+    overflow: clip;
+    transition:
+      block-size var(--dur-lay) var(--ease-lay),
+      margin-block var(--dur-lay) var(--ease-lay),
+      opacity var(--dur-rise) ease,
+      display var(--dur-lay) allow-discrete;
+  }
+  :is(.history-search-wrap, #mcpJsonBox).hidden {
+    block-size: 0;
+    margin-block: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  @starting-style {
+    :is(.history-search-wrap, #mcpJsonBox):not(.hidden) {
+      block-size: 0;
+      margin-block: 0;
+      opacity: 0;
+    }
+  }
+}
+:root[data-ink-motion="off"] :is(.sidebar, .sidebar .wide, .sidebar .collapse-btn, .sidebar .rail-btn, .sidebar .settings-open),
+:root[data-ink-motion="off"] :is(.history-search-wrap, #mcpJsonBox, .work-explorer, .work-resize, .work-terminal, .work-tabbar),
+:root[data-ink-motion="off"] :is(.stage-views button, .stage-views button .brush) {
+  transition: none !important;
+}
+:root[data-ink-motion="off"] :is(.stage-browser, .work-page, .sidebar-scrim) {
+  animation: none !important;
+}
 /* 展开与收起一律同一种：高度从零滑开、内容淡入，曲线与时长同思绪、行迹（setProcessDetails）。
    思绪、行迹、出处由脚本动（流式里自动开合要能半途掉头），这里不叠第二层；不是 details 的（侧栏的组、图的簿录）走 morphHeight */
 @supports selector(details::details-content) {
@@ -592,6 +630,9 @@ button:focus:not(:focus-visible) {
   .side-panel,
   .stage-panel,
   .history-search-wrap,
+  .sidebar-scrim,
+  .stage-browser,
+  .work-page,
   .chat:not(.hidden),
   .library-page:not(.hidden),
   .welcome:not(.hidden),
@@ -601,7 +642,10 @@ button:focus:not(:focus-visible) {
   details::details-content {
     transition: none !important;
   }
-  .chat-scroll {
+  .chat-scroll,
+  :is(.sidebar, .sidebar .wide, .sidebar .collapse-btn, .sidebar .rail-btn, .sidebar .settings-open),
+  :is(.history-search-wrap, #mcpJsonBox, .work-explorer, .work-resize, .work-terminal, .work-tabbar),
+  :is(.stage-views button, .stage-views button .brush) {
     transition: none !important;
   }
   .send-btn:active,

@@ -1,4 +1,15 @@
 /* 工作区独立于卷宗。栏顶工作区、网页签共享；内容内部各自滚动。 */
+/* 只缓动开合的比例，不缓动实际尺寸；拖动分隔线、调整窗口时仍立即跟手。 */
+@property --work-pane-open {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --work-terminal-max {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
 .stage-body,
 .stage-browser {
   flex: 1;
@@ -67,11 +78,15 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-s);
+  transition:
+    background var(--dur-quick),
+    border-color var(--dur-quick);
 }
 .stage-views button .brush {
   width: 19px;
   height: 19px;
   opacity: 0.65;
+  transition: opacity var(--dur-quick);
 }
 .stage-views button:hover {
   background: var(--paper-3);
@@ -91,7 +106,9 @@
 }
 .work-explorer {
   flex: 0 0 auto;
-  width: clamp(112px, var(--work-tree-width, 215px), 42cqi);
+  --work-pane-open: 1;
+  width: calc(clamp(112px, var(--work-tree-width, 215px), 42cqi) * var(--work-pane-open));
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -99,17 +116,25 @@
   background: var(--paper-2);
 }
 .work-resize {
-  flex: 0 0 5px;
+  --work-pane-open: 1;
+  flex: 0 0 calc(5px * var(--work-pane-open));
   cursor: col-resize;
-  border-left: 1px solid var(--line);
+  box-shadow: inset 1px 0 var(--line);
   touch-action: none;
 }
 .work-resize:hover,
 .work-resize:active {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
+.work-page :is(.work-explorer, .work-resize) {
+  transition:
+    --work-pane-open var(--dur-lay) var(--ease-lay),
+    visibility var(--dur-lay) allow-discrete;
+}
 .work-collapsed :is(.work-explorer, .work-resize) {
-  display: none;
+  --work-pane-open: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 .work-bar {
   display: flex;
@@ -168,6 +193,9 @@
   flex: none;
   color: var(--ink-3);
   text-align: center;
+}
+.work-row[aria-expanded="true"] .work-chevron {
+  transform: rotate(90deg);
 }
 .work-row .fi,
 .work-tab .fi {
@@ -374,8 +402,16 @@
 }
 .work-terminal {
   position: relative;
-  flex: 0 0 clamp(112px, var(--work-terminal-height, 185px), 75%);
+  --work-pane-open: 1;
+  --work-terminal-max: 0;
+  --work-terminal-base: clamp(112px, var(--work-terminal-height, 185px), 75%);
+  flex: 0 0 calc((var(--work-terminal-base) + (100% - var(--work-terminal-base)) * var(--work-terminal-max)) * var(--work-pane-open));
   min-height: 0;
+  overflow: clip;
+  transition:
+    --work-pane-open var(--dur-lay) var(--ease-lay),
+    --work-terminal-max var(--dur-lay) var(--ease-lay),
+    display var(--dur-lay) allow-discrete;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--line);
@@ -384,7 +420,7 @@
 .work-terminal-grip {
   position: absolute;
   z-index: 2;
-  top: -3px;
+  top: 0;
   left: 0;
   right: 0;
   height: 6px;
@@ -483,13 +519,33 @@
   caret-color: var(--accent);
   font: inherit;
 }
-.work-terminal-wide #workContent,
-.work-terminal-wide .work-tabbar,
+.work-terminal.hidden {
+  --work-pane-open: 0;
+  pointer-events: none;
+}
+@starting-style {
+  .work-terminal:not(.hidden) {
+    --work-pane-open: 0;
+  }
+}
 .work-terminal-wide .work-terminal-grip {
   display: none;
 }
+.work-tabbar {
+  --work-terminal-max: 0;
+  height: calc(var(--stage-row-height) * (1 - var(--work-terminal-max)));
+  overflow: clip;
+  transition:
+    --work-terminal-max var(--dur-lay) var(--ease-lay),
+    visibility var(--dur-lay) allow-discrete;
+}
+.work-terminal-wide .work-tabbar {
+  --work-terminal-max: 1;
+  border-bottom-width: 0;
+  visibility: hidden;
+}
 .work-terminal-wide .work-terminal {
-  flex: 1;
+  --work-terminal-max: 1;
 }
 .work-page .hidden {
   display: none !important;

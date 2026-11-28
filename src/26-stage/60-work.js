@@ -277,7 +277,7 @@ function workResetWorkspace() {
   if (input) input.value = "";
 }
 // 仅展开时读取这一层；换根后迟到的结果不再生效。
-async function workLoadBranch(path) {
+async function workLoadBranch(path, animate = false) {
   // 刷新时保留上一趟成功的目录快照，直到新结果到齐，避免切面或工具刷新时文件行突然消失。
   const previous = work.branches.get(path),
     request = { loading: true, entries: [], dirs: [], truncated: false, error: "", ready: false };
@@ -288,7 +288,8 @@ async function workLoadBranch(path) {
     request.ready = true;
   }
   work.branches.set(path, request);
-  workPaint();
+  if (animate) workPaintBranch(path);
+  else workPaint();
   try {
     const data = await bridge("/api/archive/list", { root: path, scratch: false, depth: 1, workspace: true }, AbortSignal.timeout(8000));
     if (work.branches.get(path) !== request) return;
@@ -303,12 +304,32 @@ async function workLoadBranch(path) {
     request.truncated = false;
     request.error = String(error.message || error).slice(0, 160);
   }
-  workPaint();
+  if (animate && !previous?.ready && work.open && work.mode === "list" && work.expanded.has(path)) workPaintBranch(path);
+  else workPaint();
+}
+// 仅点开的这一夹开合；后台刷新仍直接画，不让整棵树跟着动。
+function workPaintBranch(path) {
+  const find = () => $(`#workStrips [data-work-branch="${CSS.escape(path)}"]`),
+    before = find(),
+    row = before?.querySelector(".work-row"),
+    focused = row && document.activeElement === row,
+    expanded = row?.getAttribute("aria-expanded");
+  morphHeight(before, workPaint, 300, find);
+  const next = find()?.querySelector(".work-row");
+  if (focused) next?.focus({ preventScroll: true });
+  if (!inkMotionOff() && next && expanded !== next.getAttribute("aria-expanded")) {
+    const arrow = next.querySelector(".work-chevron"),
+      open = next.getAttribute("aria-expanded") === "true";
+    arrow?.animate([{ transform: `rotate(${open ? 0 : 90}deg)` }, { transform: `rotate(${open ? 90 : 0}deg)` }], {
+      duration: 160,
+      easing: "ease"
+    });
+  }
 }
 function workToggleDir(path) {
-  if (work.expanded.delete(path)) return workPaint();
+  if (work.expanded.delete(path)) return workPaintBranch(path);
   work.expanded.add(path);
-  void workLoadBranch(path);
+  void workLoadBranch(path, true);
 }
 async function workSearch(query) {
   work.search = String(query || "").trim();
@@ -580,7 +601,7 @@ function workRowHtml(row, depth = 0) {
         children = rows.map(child => workRowHtml(child, depth + 1)).join("") || t("此层尚空");
       }
     }
-    return `<div class="work-row" role="button" tabindex="0" data-work-dir="${path}" aria-expanded="${expanded}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron">${expanded ? "⌄" : "›"}</span><span>${caseFigure()}</span><strong>${name}</strong></div>${expanded ? `<div class="work-children">${children}${branch?.truncated ? `<small>${t("目录列表已截断")}</small>` : ""}</div>` : ""}`;
+    return `<div data-work-branch="${path}"><div class="work-row" role="button" tabindex="0" data-work-dir="${path}" aria-expanded="${expanded}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron">›</span><span>${caseFigure()}</span><strong>${name}</strong></div>${expanded ? `<div class="work-children">${children}${branch?.truncated ? `<small>${t("目录列表已截断")}</small>` : ""}</div>` : ""}</div>`;
   }
   return `<div class="work-row" role="button" tabindex="0" data-work-file="${path}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron"></span><span>${fileFigure(row.name, "", row.state)}</span><span class="work-name"><strong>${name}</strong>${row.where ? `<small>${escapeHtml(row.where)}</small>` : ""}${work.mode === "search" && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</span></div>`;
 }
@@ -620,6 +641,8 @@ function workPaint() {
   if (!work.open) return;
   if (!$("#workContent")) box.innerHTML = workShellHtml();
   box.classList.toggle("work-collapsed", work.collapsed);
+  $(".work-explorer").inert = work.collapsed;
+  $(".work-resize").inert = work.collapsed;
   box.classList.toggle("work-find-mode", work.mode !== "list");
   stageSetHtml($("#workCrumbs"), workCrumbsHtml());
   $("#workFind").classList.toggle("hidden", work.mode !== "search");
@@ -740,8 +763,13 @@ function workTerminalPromptText() {
 }
 function workTerminalPaint() {
   $(".work-rail [data-work-terminal]").setAttribute("aria-pressed", String(work.terminal));
-  $("#workTerminal").classList.toggle("hidden", !work.terminal);
-  $("#stageWork").classList.toggle("work-terminal-wide", work.terminal && work.terminalWide);
+  const terminal = $("#workTerminal"),
+    wide = work.terminal && work.terminalWide;
+  terminal.classList.toggle("hidden", !work.terminal);
+  terminal.inert = !work.terminal;
+  $("#stageWork").classList.toggle("work-terminal-wide", wide);
+  $("#workContent").inert = wide;
+  $(".work-tabbar").inert = wide;
   const shell = $("#workTerminalShell");
   shell.textContent = bootstrap.work?.shell || t("终端");
   const output = $("#workTerminalOutput"),

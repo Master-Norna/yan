@@ -269,7 +269,7 @@ function stageMarksHtml() {
   /** @param {StageMark} node @param {boolean} [fixed] */
   const dir = (node, fixed = false) => {
     const closed = shut.has(node.id);
-    return `<div class="stage-mark-dir${closed ? " shut" : ""}"><button type="button" class="stage-mark-fold" data-mark-fold="${escapeHtml(node.id)}" aria-expanded="${!closed}"><i class="stage-mark-chev" aria-hidden="true"></i>${box}<span>${escapeHtml(node.name)}</span><small>${stageMarkFlat(node.children || []).length}</small></button>${fixed ? "" : ops(node)}</div>${closed ? "" : `<div class="stage-mark-group">${list(node.children || [])}</div>`}`;
+    return `<div data-mark-branch="${escapeHtml(node.id)}"><div class="stage-mark-dir${closed ? " shut" : ""}"><button type="button" class="stage-mark-fold" data-mark-fold="${escapeHtml(node.id)}" aria-expanded="${!closed}"><i class="stage-mark-chev" aria-hidden="true"></i>${box}<span>${escapeHtml(node.name)}</span><small>${stageMarkFlat(node.children || []).length}</small></button>${fixed ? "" : ops(node)}</div>${closed ? "" : `<div class="stage-mark-group">${list(node.children || [])}</div>`}</div>`;
   };
   /** @param {StageMark[]} nodes @returns {string} */
   const list = nodes =>
@@ -320,7 +320,11 @@ async function stageMarksClick(pop, target) {
       try {
         localStorage.setItem("yan-stage-marks-shut", JSON.stringify([...shut]));
       } catch {}
-      return stageMarksRefresh(pop);
+      const find = () => pop.querySelector(`[data-mark-branch="${CSS.escape(id)}"]`),
+        focused = document.activeElement === fold;
+      morphHeight(find(), () => stageMarksRefresh(pop), 300, find);
+      if (focused) find()?.querySelector("button")?.focus({ preventScroll: true });
+      return;
     }
     if (hit("data-mark-manage")) {
       closeChipPop();
