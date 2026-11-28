@@ -10,8 +10,21 @@
   flex-direction: column;
 }
 .stage-head > #stageWorkBtn {
+  position: relative;
   flex: none;
   margin-right: 12px;
+}
+/* 工作区与网页签分属两面；在原有间距里留一道短丝栏，不增加栏顶宽度。 */
+.stage-head > #stageWorkBtn::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  width: 1px;
+  height: 18px;
+  transform: translateY(-50%);
+  background: color-mix(in srgb, var(--ink-3) 55%, transparent);
+  pointer-events: none;
 }
 .stage-head:has(#stageWorkBtn[aria-pressed="true"]) :is(#stageMenuBtn, #stagePen) {
   display: none;
