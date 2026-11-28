@@ -21,7 +21,7 @@ function pendingGroup() {
 function groupMembers(id) {
   return store.conversations
     .filter(c => c.groupId === id)
-    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
+    .sort(compareHistoryMembers);
 }
 function createGroup(name = t("新分组")) {
   const group = { id: uid(), name, createdAt: now(), presetId: "", workdir: "" };
@@ -157,26 +157,29 @@ function openRepoMenu(dir, anchor) {
   );
 }
 // 删除一整组：组里的对话连同附件一并移除（目录里的文件一个不碰）。别的页面正写着的那几段跳过，不硬删。
-// 「组里」与侧栏共用 historyPlacement：绑着同一个目录的置顶、集组成员也不一定属于这个「工」组。
+// 「组里」与侧栏共用 historyPlacement；置顶仍留组内，但批量删除继续保护置顶对话。
 /** @param {string} dir */
 async function removeWorkdirGroup(dir) {
   const atDir = store.conversations.filter(c => isWork(c) && c.workdir === dir),
     members = atDir.filter(c => historyPlacement(c) === "repo"),
-    busy = members.filter(c => runningElsewhere(c.id)),
-    targets = members.filter(c => !busy.includes(c)),
+    unpinned = members.filter(c => !c.pinned),
+    busy = unpinned.filter(c => runningElsewhere(c.id)),
+    targets = unpinned.filter(c => !busy.includes(c)),
+    pinned = members.length - unpinned.length,
     outside = atDir.length - members.length,
     name = workdirTitle(dir);
-  if (!targets.length) return toast(busy.length ? t("此组正在另一页面作答，暂不能删除") : t("这一组已没有对话"));
+  if (!targets.length) return toast(busy.length ? t("此组正在另一页面作答，暂不能删除") : pinned ? t("此组只有置顶对话，暂不删除") : t("这一组已没有对话"));
   const notes = [
     t`组里的 ${targets.length} 段对话将连同附件一并移除，目录里的文件不动，无法撤销。`,
     busy.length ? t`另有 ${busy.length} 段正在另一页面作答，这回不动。` : "",
-    outside ? t`另有 ${outside} 段置顶或已归入分组的对话，不在此组，也不动。` : ""
+    pinned ? t`另有 ${pinned} 段组内置顶对话，这回不动。` : "",
+    outside ? t`另有 ${outside} 段已归入分组的对话，不在此组，也不动。` : ""
   ].filter(Boolean);
   if (!(await askConfirm({ title: t`删除「${name}」这一组？`, body: notes.join("\n"), ok: t("删除") }))) return;
   // 确认期间别处仍可接手作答、改归组或换进新版：只删原先选中、现在仍属于这一组且未被别页占用的记录。
   const confirmed = new Set(targets.map(c => c.id)),
     removing = store.conversations.filter(
-      c => confirmed.has(c.id) && c.workdir === dir && historyPlacement(c) === "repo" && !runningElsewhere(c.id)
+      c => confirmed.has(c.id) && c.workdir === dir && historyPlacement(c) === "repo" && !c.pinned && !runningElsewhere(c.id)
     );
   // 一条也没剩下：别报「已删除 0 段对话」，照实说这一回没动
   if (!removing.length) {
