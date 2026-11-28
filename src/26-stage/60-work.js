@@ -400,7 +400,8 @@ function workShellHtml() {
   return `<div class="work-inner"><div class="work-rail">${workViewsHtml()}</div><div class="work-explorer"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><button type="button" data-work-pick title="${t("选择文件夹…")}" aria-label="${t("选择文件夹…")}">${brushIcon("folder")}</button></div><form id="workFind" class="hidden"><input type="search" aria-label="${t("搜索文件内容")}" placeholder="${t("搜索文件内容")}" maxlength="200"><button type="submit" title="${t("搜索")}" aria-label="${t("搜索")}">${brushIcon("search")}</button></form><div id="workStrips" class="work-tree"></div></div><div class="work-resize" role="separator" aria-orientation="vertical" aria-label="${t("调整目录栏宽度")}" tabindex="0"></div><section class="work-editor"><div class="work-tabbar"><div id="workTabs" class="work-tabs" role="tablist"></div><div id="workDocMode" class="work-docmode stage-views"></div></div><div id="workContent" class="work-content">${workEmptyBody(t("选择文件以查看"))}</div>${workTerminalHtml()}</section></div>`;
 }
 function workTerminalHtml() {
-  const button = (action, label, icon) => `<button type="button" data-work-${action} title="${t(label)}" aria-label="${t(label)}">${brushIcon(icon)}</button>`;
+  const button = (action, label, icon) =>
+    `<button type="button" data-work-${action} title="${t(label)}" aria-label="${t(label)}">${brushIcon(icon)}</button>`;
   return `<section id="workTerminal" class="work-terminal hidden"><div class="work-terminal-grip" role="separator" aria-orientation="horizontal" aria-label="${t("调整终端高度")}" tabindex="0"></div><div class="work-terminal-head"><span id="workTerminalShell"></span><span class="work-terminal-actions">${button("stop", "停止", "stop")}${button("clear", "清空终端", "strike")}${button("terminal-wide", "展开终端", "wide")}<button type="button" data-work-terminal title="${t("关闭")}" aria-label="${t("关闭")}">×</button></span></div><div id="workTerminalBody" class="work-terminal-body"><pre id="workTerminalOutput"></pre><form id="workCommand"><span id="workTerminalPrompt"></span><input aria-label="${t("输入指令")}" autocomplete="off" spellcheck="false"><button type="submit" title="${t("运行")}" aria-label="${t("运行")}">${brushIcon("play")}</button></form></div></section>`;
 }
 function workEmptyBody(text) {
@@ -595,7 +596,8 @@ function workTerminalPaint() {
   $("#stageWork").classList.toggle("work-terminal-wide", work.terminal && work.terminalWide);
   const shell = $("#workTerminalShell");
   shell.textContent = bootstrap.work?.shell || t("终端");
-  const output = $("#workTerminalOutput"), body = $("#workTerminalBody"),
+  const output = $("#workTerminalOutput"),
+    body = $("#workTerminalBody"),
     follow = body.scrollHeight - body.scrollTop - body.clientHeight < 32;
   if (output.textContent !== work.terminalText) {
     output.textContent = work.terminalText;
@@ -665,21 +667,36 @@ async function workRunCommand(command) {
   try {
     const cd = workTerminalCd(command);
     if (cd !== null) {
-      const result = await bridge("/api/work/terminal-dir", { workdir: cwd, path: cd }, AbortSignal.any([signal, AbortSignal.timeout(8000)]));
+      const result = await bridge(
+        "/api/work/terminal-dir",
+        { workdir: cwd, path: cd },
+        AbortSignal.any([signal, AbortSignal.timeout(8000)])
+      );
       if (work.command === state) work.terminalDir = slashed(result.workdir);
       return;
     }
-    let result = await bridge("/api/work/run", { workdir: cwd, command, background: true, terminal: true, sandbox: false }, AbortSignal.any([signal, AbortSignal.timeout(8000)]));
+    let result = await bridge(
+      "/api/work/run",
+      { workdir: cwd, command, background: true, terminal: true, sandbox: false },
+      AbortSignal.any([signal, AbortSignal.timeout(8000)])
+    );
     if (result.id && result.key) state.job = { id: result.id, key: result.key };
     if (work.command !== state) {
-      if (state.job && result.running) void bridge("/api/work/check", { ...state.job, stop: true }, AbortSignal.timeout(8000)).catch(() => {});
+      if (state.job && result.running)
+        void bridge("/api/work/check", { ...state.job, stop: true }, AbortSignal.timeout(8000)).catch(() => {});
       return;
     }
     for (;;) {
-      workTerminalAppend((result.stdout || "") + (result.stdout && result.stderr && !result.stdout.endsWith("\n") ? "\n" : "") + (result.stderr || ""));
+      workTerminalAppend(
+        (result.stdout || "") + (result.stdout && result.stderr && !result.stdout.endsWith("\n") ? "\n" : "") + (result.stderr || "")
+      );
       if (!result.running) break;
       if (!state.job) throw Error(t("终端指令编号已失效"));
-      result = await bridge("/api/work/check", { ...state.job, stop: state.stopping, wait: state.stopping ? 0 : 1 }, AbortSignal.any([signal, AbortSignal.timeout(8000)]));
+      result = await bridge(
+        "/api/work/check",
+        { ...state.job, stop: state.stopping, wait: state.stopping ? 0 : 1 },
+        AbortSignal.any([signal, AbortSignal.timeout(8000)])
+      );
       if (work.command !== state) return;
     }
     const status = state.stopping ? t("已停止") : result.timedOut ? t("执行超时") : t`退出码：${result.exitCode}`;
@@ -754,7 +771,11 @@ function bindWork() {
     const start = vertical ? event.clientY : event.clientX,
       width = vertical ? $("#workTerminal").getBoundingClientRect().height : $(".work-explorer").getBoundingClientRect().width;
     target.setPointerCapture(event.pointerId);
-    const move = e => box.style.setProperty(vertical ? "--work-terminal-height" : "--work-tree-width", Math.max(112, width + (vertical ? start - e.clientY : e.clientX - start)) + "px");
+    const move = e =>
+      box.style.setProperty(
+        vertical ? "--work-terminal-height" : "--work-tree-width",
+        Math.max(112, width + (vertical ? start - e.clientY : e.clientX - start)) + "px"
+      );
     const end = () => {
       target.removeEventListener("pointermove", move);
       target.removeEventListener("lostpointercapture", end);
@@ -783,10 +804,23 @@ function bindWork() {
     const input = /** @type {HTMLInputElement} */ (event.target);
     if (event.isComposing) return;
     if (input.matches("#workCommand input")) {
-      if (event.ctrlKey && event.key.toLowerCase() === "c" && work.command && input.selectionStart === input.selectionEnd && !window.getSelection()?.toString()) {
+      if (
+        event.ctrlKey &&
+        event.key.toLowerCase() === "c" &&
+        work.command &&
+        input.selectionStart === input.selectionEnd &&
+        !window.getSelection()?.toString()
+      ) {
         event.preventDefault();
         workTerminalStop();
-      } else if (!work.command && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+      } else if (
+        !work.command &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        ["ArrowUp", "ArrowDown"].includes(event.key)
+      ) {
         event.preventDefault();
         workTerminalRecall(event.key === "ArrowUp" ? -1 : 1, input);
       } else if (event.ctrlKey && event.key.toLowerCase() === "l") {
@@ -798,7 +832,10 @@ function bindWork() {
     }
     if (input.classList.contains("work-terminal-grip") && ["ArrowUp", "ArrowDown"].includes(event.key) && !work.terminalWide) {
       event.preventDefault();
-      box.style.setProperty("--work-terminal-height", Math.max(112, $("#workTerminal").getBoundingClientRect().height + (event.key === "ArrowUp" ? 16 : -16)) + "px");
+      box.style.setProperty(
+        "--work-terminal-height",
+        Math.max(112, $("#workTerminal").getBoundingClientRect().height + (event.key === "ArrowUp" ? 16 : -16)) + "px"
+      );
       return;
     }
     if (["ArrowLeft", "ArrowRight"].includes(event.key) && /** @type {HTMLElement} */ (event.target).classList.contains("work-resize")) {
