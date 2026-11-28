@@ -65,6 +65,8 @@ function workEnter() {
   work.open = true;
   workFollowConversation();
   stageRender();
+  // 切面立即停推流：同一帧内网页与工作区来回切换时，尺寸观察可能合并掉中间变化。
+  stageWake();
   void workRefresh();
 }
 function workLeave() {
@@ -346,7 +348,11 @@ function workSwitch(mode) {
   void workRefresh();
 }
 function bindWork() {
-  $("#stageWorkBtn").addEventListener("click", () => (work.open ? workLeave() : workEnter()));
+  $("#stageWorkBtn").addEventListener("click", () => {
+    if (!work.open) return workEnter();
+    workLeave();
+    stageWake();
+  });
   const box = $("#stageWork");
   box.addEventListener("click", event => {
     const target = /** @type {HTMLElement} */ (event.target),

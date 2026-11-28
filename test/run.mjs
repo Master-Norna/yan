@@ -16,6 +16,15 @@ const BRIDGE_PORT = 8799,
   SECURITY_PORT = 8797,
   DEBUG_PORT = 9333;
 const only = process.argv.slice(2);
+// CI 的各分片在独立 runner 上执行；本地默认整套，仍可按文件名筛选。
+const shard = /^(\d+)\/(\d+)$/.exec(process.env.YAN_TEST_SHARD || "1/1"),
+  shardIndex = Number(shard?.[1]),
+  shardCount = Number(shard?.[2]);
+if (!Number.isSafeInteger(shardIndex) || !Number.isSafeInteger(shardCount) || shardIndex < 1 || shardIndex > shardCount) {
+  console.error("YAN_TEST_SHARD 应为 1/2 这样的分片编号/总数");
+  process.exit(2);
+}
+const inShard = index => index % shardCount === shardIndex - 1;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const browsers =
   process.platform === "win32"
@@ -186,7 +195,7 @@ mkdirSync(TMP, { recursive: true });
 try {
   const wants = name => !only.length || only.some(o => name.includes(o));
   // 桥接安全检查：单独一个桥接实例，不需要浏览器
-  if (wants("bridge-security")) {
+  if (wants("bridge-security") && inShard(0)) {
     // 这一路的存储根在 TMP/security，不在下面统一清的 TMP/.yan 里：上一回留的配置会让 savedAt 接着往上加，断言对不上
     rmSync(path.join(TMP, "security"), { recursive: true, force: true });
     start(process.execPath, ["server.js"], {
@@ -211,7 +220,9 @@ try {
         !["run.mjs", "lib.mjs", "fake-llm.mjs", "fake-mcp.mjs", "bridge-security.mjs", "sandbox-replay.mjs"].includes(f)
     )
     .filter(wants)
-    .sort();
+    .sort()
+    // 第零项留给独立的桥接安全用例，其他文件按排序后的序号轮流分配。
+    .filter((_, index) => inShard(index + 1));
   // 看台用例的模型浏览器：单独一个实例，模型页与 fresh 才会落在同一个窗口里。
   // 言的页面留在主测试浏览器中，不进入模型的标签列表，也不会因模型换页被切到后台。
   if (specs.includes("stage.mjs")) {
@@ -271,5 +282,5 @@ try {
   await sleep(300);
   tryRm(path.join(TMP, "work"));
 }
-console.log(`\n共 ${passed} 过 / ${failed} 败`);
+console.log(`\n共 ${passed} 过 / ${failed} 败（分片 ${shardIndex}/${shardCount}）`);
 process.exit(failed ? 1 : 0);
