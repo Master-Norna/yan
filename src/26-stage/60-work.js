@@ -3,8 +3,9 @@
 // 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签；有对话目录则跟随，言模式沿用卷宗目录。
 // 点一件即开：夹往下走，件交给全屏预览器（与卷宗同路），不动浏览器。
 // 「改动」那一面只看本段对话改过的件：不说增删改、也不写 +几 −几——件图本身换色（朱是删、泥金是改、石绿是增）。
-// 顶栏文件夹独立开合；工作区的路径、视图切换与浏览器导航互不接管。
+// 顶栏文件夹与网页签切换两面；工作区的路径、视图切换与浏览器导航互不接管。
 const work = {
+  // true 时舞台显示工作区，false 时显示浏览器；并非两个同时展开的区域。
   open: false,
   /** @type {string} 绑的目录，也是此刻站着的那一层（绝对路径，正斜杠） */
   root: "",
@@ -268,10 +269,7 @@ function workPaint() {
   if (!box) return;
   $("#stageWorkBtn").setAttribute("aria-pressed", String(work.open));
   box.classList.toggle("hidden", !work.open);
-  if (!work.open) {
-    work.shape = "";
-    return;
-  }
+  if (!work.open) return;
   const shape = work.root || work.mode === "changes" ? "list" : "empty";
   if (work.shape !== shape) {
     work.shape = shape;

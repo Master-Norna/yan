@@ -150,6 +150,12 @@ check("收起后文件夹取消选中", await evalJs(`document.querySelector("#s
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await waitFor(`document.querySelector("#workCrumbs .here")?.textContent === "工作区"`);
 
+// 工作区只留共享按钮，浏览器调律和圈点归浏览器那一面。
+check(
+  "工作区不露出浏览器调律与圈点",
+  await evalJs(`["#stageMenuBtn", "#stagePen"].every(id => getComputedStyle(document.querySelector(id)).display === "none")`)
+);
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 // 调律那张纸签里不再有「打开本机文件」
 await evalJs(`document.querySelector("#stageMenuBtn").click(); true`);
 await sleep(300);

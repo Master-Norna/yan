@@ -8,7 +8,7 @@ function stageShown() {
 }
 // 开着且看得见：没被旁注挤开、言的页面不在后台
 function stageVisible() {
-  return stageShown() && $("#stageView").clientWidth > 0 && $("#stageView").clientHeight > 0 && !document.hidden;
+  return !work.open && stageShown() && $("#stageView").clientWidth > 0 && $("#stageView").clientHeight > 0 && !document.hidden;
 }
 // 看得见才收画面，看不见即停收、入口那一笔回来；回来再接上
 function stageWake() {
@@ -148,6 +148,7 @@ async function stageLaunchBrowser(server) {
   }
 }
 function stageNewTab() {
+  workLeave();
   if (!stage.ws) return void stageLaunch();
   // 新开的一页由 targetCreated 报来，看台跟过去；地址栏等着输网址
   void stageSend("Target.createTarget", { url: "about:blank" })
@@ -607,6 +608,7 @@ function stageAddrHtml(tab) {
 }
 // 改网址：地址行换成输入框、整串选中（点地址行、Ctrl+L）
 function stageEditUrl() {
+  if (work.open) return;
   const url = /** @type {HTMLInputElement} */ ($("#stageUrl"));
   $("#stageAddr").classList.add("hidden");
   url.classList.remove("hidden");
@@ -644,7 +646,7 @@ function stageRender() {
   const tabs = [...stage.tabs]
     .map(
       ([id, tab]) =>
-        `<div class="stage-tab${id === stage.current ? " on" : ""}" role="tab" aria-selected="${id === stage.current}" data-stage-tab="${escapeHtml(id)}" title="${escapeHtml(tab.title || tab.url)}"><span class="stage-tab-name">${escapeHtml(stageTitle(tab))}</span>${acting && id === stage.front ? `<span class="stage-tab-live" title="${t(`执事在这一页`)}"></span>` : ""}<button type="button" class="stage-tab-x" data-stage-close="${escapeHtml(id)}" title="${t(`关闭此页`)}" aria-label="${t(`关闭此页`)}">×</button>${id === stage.current ? `<svg class="stage-tab-under" viewBox="0 0 18 5" aria-hidden="true">${under}</svg>` : ""}</div>`
+        `<div class="stage-tab${!work.open && id === stage.current ? " on" : ""}" role="tab" aria-selected="${!work.open && id === stage.current}" data-stage-tab="${escapeHtml(id)}" title="${escapeHtml(tab.title || tab.url)}"><span class="stage-tab-name">${escapeHtml(stageTitle(tab))}</span>${acting && id === stage.front ? `<span class="stage-tab-live" title="${t(`执事在这一页`)}"></span>` : ""}<button type="button" class="stage-tab-x" data-stage-close="${escapeHtml(id)}" title="${t(`关闭此页`)}" aria-label="${t(`关闭此页`)}">×</button>${!work.open && id === stage.current ? `<svg class="stage-tab-under" viewBox="0 0 18 5" aria-hidden="true">${under}</svg>` : ""}</div>`
     )
     .join("");
   stageSetHtml($("#stageTabs"), tabs);
@@ -657,8 +659,8 @@ function stageRender() {
     const title = tab?.url ? stageReadable(stageDocSource(tab.url)) : "";
     if (addr.getAttribute("title") !== title) addr.title = title;
   }
-  // 未启动浏览器时，工作区独占内容区；新建浏览器标签仍走浏览器原有的启动入口。
-  $("#stageBrowser").classList.toggle("hidden", work.open && !stage.ws && !stage.launching);
+  // 两个页面共用栏顶，各自铺满内容区；浏览器连接状态不决定正在看哪一面。
+  $("#stageBrowser").classList.toggle("hidden", work.open);
   const empty = stage.launching
     ? stageEmptyHtml(t("正在打开浏览器…"))
     : !stage.ws

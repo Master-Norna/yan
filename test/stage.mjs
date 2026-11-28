@@ -993,7 +993,7 @@ check(
 );
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 600, y: 400 });
 check("screencast stops when closed", await evalJs(`__yanStage.state.session === ""`));
-// 工作区与浏览器并存时，点件进全屏预览，不改浏览器页；显式从地址栏开 md 仍可览 / 源。
+// 工作区与浏览器各占一面，切换不改网页；点件进全屏预览，显式从地址栏开 md 仍可览 / 源。
 await evalJs(`document.querySelector("#stagePin").click(); true`);
 const workDir = `${ARCHIVE}/工作区-舞台`;
 mkdirSync(workDir, { recursive: true });
@@ -1010,13 +1010,25 @@ check(
   await evalJs(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "笔记.md")`)
 );
 check("the workspace path names the folder", await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`));
-await waitFor(`!!__yanStage.state.session`, 5000).catch(() => {});
-check("the browser keeps streaming beside the workspace", await evalJs(`!!__yanStage.state.session`));
-await evalJs(`document.querySelector('[data-stage-tab="' + __yanStage.state.current + '"]').click(); true`);
+await waitFor(`!__yanStage.state.session`);
 check(
-  "clicking a browser tab does not close the workspace",
-  await evalJs(`document.querySelector("#stageWorkBtn").getAttribute("aria-pressed") === "true" && !!__yanStage.state.session`)
+  "workspace fills the stage and browser streaming stops while tabs remain",
+  await evalJs(
+    `(() => { const w = document.querySelector("#stageWork"), b = document.querySelector(".stage-body"); return document.querySelector("#stageBrowser").classList.contains("hidden") && Math.abs(w.getBoundingClientRect().width - b.getBoundingClientRect().width) < 1 && !!document.querySelector("[data-stage-tab]") && !document.querySelector('[data-stage-tab][aria-selected="true"]'); })()`
+  )
 );
+const savedTab = await evalJs(`__yanStage.state.current`);
+const savedUrl = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
+await evalJs(`document.querySelector('[data-stage-tab="' + __yanStage.state.current + '"]').click(); true`);
+await waitFor(`!!__yanStage.state.session`);
+check(
+  "clicking even the current browser tab switches to its unchanged page",
+  await evalJs(
+    `document.querySelector("#stageWork").classList.contains("hidden") && !document.querySelector("#stageBrowser").classList.contains("hidden") && __yanStage.state.current === ${JSON.stringify(savedTab)} && __yanStage.state.tabs.get(__yanStage.state.current)?.url === ${JSON.stringify(savedUrl)}`
+  )
+);
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+await waitFor(`!__yanStage.state.session && document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`);
 await waitFor(`!!document.querySelector("#workStrips [data-work-file]")`, 8000).catch(() => {});
 const beforeWorkFile = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
 await evalJs(`document.querySelector("#workStrips [data-work-file]").click(); true`);
@@ -1033,14 +1045,16 @@ check(
   "closing the preview returns to the same folder",
   await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`)
 );
-// 地址栏仍可显式打开本机文档，保留浏览器独有的览 / 源。
+// 切回浏览器后，地址栏仍可显式打开本机文档，保留浏览器独有的览 / 源。
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+await waitFor(`!!__yanStage.state.session`);
 await evalJs(
   `(() => { document.querySelector("#stageAddr").click(); const input = document.querySelector("#stageUrl"); input.value = ${JSON.stringify(`${workDir}/笔记.md`)}; input.dispatchEvent(new KeyboardEvent("keydown", {key:"Enter", bubbles:true})); return true; })()`
 );
 await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 25000).catch(() => {});
 const workDocUrl = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
 check("explicit address navigation opens the laid-out md in the browser", workDocUrl.includes("view-"), workDocUrl);
-check("file preview keeps the workspace open", await evalJs(`!document.querySelector("#stageWork").classList.contains("hidden")`));
+check("explicit browser navigation leaves the workspace hidden", await evalJs(`document.querySelector("#stageWork").classList.contains("hidden")`));
 check(
   "the address row writes the original, not the laid-out page",
   await evalJs(`document.querySelector("#stageAddr").textContent.includes("笔记.md")`)
@@ -1073,7 +1087,6 @@ check(
     `(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-") && __yanStage.state.tabs.get(__yanStage.state.current)?.url !== ${JSON.stringify(workDocUrl)}`
   )
 );
-await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await browserSend("Target.closeTarget", { targetId });
 await waitFor(`!__yanStage.state.tabs.has(${JSON.stringify(targetId)})`);
 check("closed page leaves the tabs", true);

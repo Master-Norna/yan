@@ -137,6 +137,7 @@ function stageLocate() {
 // 换到后台的那一页：先请到前台，不然它不重绘、没有画面
 /** @param {string} id */
 function stageActivate(id) {
+  workLeave();
   const activating = stageSend("Target.activateTarget", { targetId: id })
     .catch(() => {})
     .finally(() => {

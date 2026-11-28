@@ -1,13 +1,11 @@
 /* 工作区（设计稿/172）：舞台里的一层，簿录照卷宗那一套（styles/50-files.css）。
    与卷宗的不同只在：顶上一对「工作区 / 改动」、一条路径、不设分类签与收入改名。
    窄下来只收紧比例、不另画一套：名目让出宽度给大小与日期，四列始终四列 */
-/* 浏览器与工作区是同级的区域；只有浏览器区域包含地址行与画面。 */
+/* 两面互斥，各自占满游目内容区；栏顶网页签与文件夹入口不随页面隐藏。 */
 .stage-body {
   flex: 1;
   min-height: 0;
   display: flex;
-  flex-wrap: wrap;
-  container-type: inline-size;
 }
 .stage-browser {
   flex: 1;
@@ -17,32 +15,16 @@
   flex-direction: column;
 }
 .work-page {
-  flex: 0 0 40%;
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: 18px 14px 28px;
-  border-right: 1px solid var(--line);
 }
-.work-page:has(+ .stage-browser.hidden) {
-  flex: 1;
-  border: 0;
-}
-/* 窄栏上下分，任一区域单独打开时仍铺满。 */
-@container (max-width: 760px) {
-  .work-page:not(:has(+ .stage-browser.hidden)) {
-    flex: 0 0 100%;
-    height: 42%;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .stage-browser {
-    flex: 1 1 100%;
-    height: 58%;
-  }
-  .work-page.hidden + .stage-browser {
-    height: 100%;
-  }
+/* 调律、圈点属于浏览器；阔、收起及页签始终可用。 */
+#stageWorkBtn[aria-pressed="true"] ~ #stageMenuBtn,
+#stageWorkBtn[aria-pressed="true"] ~ #stagePen {
+  display: none;
 }
 /* 宽窄照这一层自己的宽算（cqi），不照舞台 */
 .work-page .work-inner {
