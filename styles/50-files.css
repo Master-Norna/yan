@@ -186,23 +186,6 @@
   padding-top: 8px;
   margin-bottom: 10px;
 }
-/* 分类：字加一道朱线，不用胶囊分段 */
-.library-kinds {
-  display: flex;
-  gap: 4px;
-}
-.library-kinds button {
-  padding: 2px 4px;
-  color: var(--ink-3);
-  font: var(--fs-small) var(--title);
-}
-.library-kinds button:hover,
-.library-kinds button.active {
-  color: var(--ink);
-}
-.library-kinds button.active {
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
 /* 查找：一道底线 */
 .page-find {
   width: 200px;

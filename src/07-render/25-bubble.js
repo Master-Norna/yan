@@ -26,7 +26,11 @@ function measureBubble(bubble) {
   const more = text.scrollHeight > text.clientHeight + 1;
   if (more === bubble.classList.contains("more")) return;
   bubble.classList.toggle("more", more);
-  if (more) bubble.insertAdjacentHTML("beforeend", `<button type="button" class="ub-fold" aria-expanded="false">${t("展开")}</button>`);
+  if (more)
+    bubble.insertAdjacentHTML(
+      "beforeend",
+      `<button type="button" class="ub-fold" aria-expanded="false" title="${t("展开")}" aria-label="${t("展开")}"></button>`
+    );
   else bubble.querySelector(":scope > .ub-fold")?.remove();
 }
 // 字换了（帮手的命就地更新）：退回收着，重量
@@ -51,7 +55,9 @@ function toggleBubble(bubble, open = !bubble.classList.contains("open")) {
   const from = text.getBoundingClientRect().height;
   text._bubbleFold?.cancel();
   bubble.classList.toggle("open", open);
-  button.textContent = open ? t("收起") : t("展开");
+  const label = open ? t("收起") : t("展开");
+  button.setAttribute("title", label);
+  button.setAttribute("aria-label", label);
   button.setAttribute("aria-expanded", String(open));
   const to = text.getBoundingClientRect().height,
     settle = () => {

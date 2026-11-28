@@ -1,8 +1,8 @@
-// 言 · 文件 · 种类：一种文件一份登记——卷宗的件图与筛选、预览器怎么看、附件当不当文字读、文档的正文怎么抽，都照这张表认
+// 言 · 文件 · 种类：一种文件一份登记——卷宗的件图、预览器怎么看、附件当不当文字读、文档的正文怎么抽，都照这张表认
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // 一份登记：
 //   exts     认哪些扩展名
-//   group    大类：image / audio / video / text / file——卷宗页按它筛，image 点开进看图，text 的当文字读（附件原样带给模型）
+//   group    大类：image / audio / video / text / file——image 点开进看图，text 的当文字读（附件原样带给模型）
 //   figure   卷宗里的件图（见 10-archive.js 的 FIGURE_MARKS）
 //   view     预览器怎么看：image / pdf / audio / video / html / table / markdown / doc / text；不给即预览不了（见 20-viewer.js）
 //   extract  正文怎么抽：pdf 交给 pdf.js，zip 是 Office / ODF 一类压缩包里的 XML，ipynb 是笔记本那份 JSON（见 30-extract.js）

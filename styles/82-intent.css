@@ -143,6 +143,16 @@
   color: var(--gold);
 }
 /* 墨痕只为查考，用墨不用朱；开着时字下一道朱线（与卷宗分类同一写法） */
+.intent-page-head .page-acts button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.intent-page-head .page-acts .brush {
+  flex: none;
+  width: 17px;
+  height: 17px;
+}
 .intent-page-head .page-acts button:first-child {
   color: var(--ink-2);
 }

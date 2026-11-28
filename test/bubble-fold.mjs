@@ -39,7 +39,7 @@ await waitFor(`!!document.querySelector('[data-message="u1"] .user-bubble.more')
 const bubble = `document.querySelector('[data-message="u1"] .user-bubble')`;
 const state = () =>
   evalJs(
-    `(b => ({ more: b.classList.contains("more"), open: b.classList.contains("open"), lines: Math.round(b.querySelector(".ub-text").clientHeight / parseFloat(getComputedStyle(b.querySelector(".ub-text")).lineHeight)), fold: b.querySelector(".ub-fold")?.textContent || "" }))(${bubble})`
+    `(b => ({ more: b.classList.contains("more"), open: b.classList.contains("open"), lines: Math.round(b.querySelector(".ub-text").clientHeight / parseFloat(getComputedStyle(b.querySelector(".ub-text")).lineHeight)), fold: b.querySelector(".ub-fold")?.getAttribute("aria-label") || "" }))(${bubble})`
   );
 let s = await state();
 check("a long question shows four lines and offers to expand", s.more && !s.open && s.lines === 4 && s.fold === "展开", JSON.stringify(s));

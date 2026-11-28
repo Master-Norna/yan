@@ -407,12 +407,13 @@ function intentCardHtml(intent, now, { selected = "", level = "", name = "", ink
     seen = (!level && past) || closed.has(level) ? {} : now,
     { svg, order } = intentGraphSvg(intent, seen, selected, level, past),
     inked = ink && intent.log.length > 0,
-    /** @param {string} attr @param {boolean} on @param {string} text */
-    act = (attr, on, text) => `<button type="button" ${attr} aria-pressed="${on}"${on ? ` class="on"` : ""}>${text}</button>`,
+    /** @param {string} attr @param {boolean} on @param {string} icon @param {number} count @param {string} label */
+    act = (attr, on, icon, count, label) =>
+      `<button type="button" ${attr} aria-pressed="${on}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"${on ? ` class="on"` : ""}>${brushIcon(icon)}<span>${count}</span></button>`,
     // 没有开着的事时这一页就是了结的那几件，无可切换
     acts = [
-      live && settled ? act("data-intent-past", past && !inked, t`往事 ${settled}`) : "",
-      intent.log.length ? act("data-intent-ink", inked, t`墨痕 ${intent.log.length}`) : ""
+      live && settled ? act("data-intent-past", past && !inked, "history", settled, t`往事 ${settled}`) : "",
+      intent.log.length ? act("data-intent-ink", inked, "guide", intent.log.length, t`墨痕 ${intent.log.length}`) : ""
     ].join("");
   // 页头：目录名、一行事实，右端墨痕。原问不上卡片，它是给模型对照用的
   const facts = [
