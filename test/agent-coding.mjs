@@ -96,13 +96,13 @@ check(
   )
 );
 // 点清单里的一件：预览浮层里摊开这件在这一答里的改动（改文件那步的红绿两段），没有下载键
-await evalJs(`document.querySelector('.message.assistant .change-files [data-change-path="src/a.js"]').click(); true`);
+await evalJs(`document.querySelector('.message.assistant .change-files [data-change-path$="src/a.js"]').click(); true`);
 await sleep(150);
 await shot("change-diff.png");
 check(
   "clicking a changed file shows its diff in the viewer",
   await evalJs(
-    `(v => !v.classList.contains("hidden") && v.querySelector("#fileViewerName").textContent.startsWith("src/a.js") && v.querySelector(".split-diff .d")?.textContent.includes("return 1") && v.querySelector(".split-diff .i")?.textContent.includes("return 2") && document.querySelector("#fileViewerOpen").classList.contains("hidden"))(document.querySelector("#fileViewer"))`
+    `(v => !v.classList.contains("hidden") && v.querySelector("#fileViewerName").textContent.includes("src/a.js") && v.querySelector(".split-diff .d")?.textContent.includes("return 1") && v.querySelector(".split-diff .i")?.textContent.includes("return 2") && document.querySelector("#fileViewerOpen").classList.contains("hidden"))(document.querySelector("#fileViewer"))`
   )
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
@@ -194,14 +194,14 @@ await waitFor(
   15000
 );
 const rows = await evalJs(
-  `[...[...document.querySelectorAll('.message.assistant')].at(-1).querySelectorAll('.change-files > button')].map(b => b.dataset.changePath + " " + b.querySelector('.ins').textContent + " " + b.querySelector('.del').textContent)`
+  `[...[...document.querySelectorAll('.message.assistant')].at(-1).querySelectorAll('.change-files > button')].map(b => b.dataset.changePath.slice(b.dataset.changePath.lastIndexOf("src/")) + " " + b.querySelector('.ins').textContent + " " + b.querySelector('.del').textContent)`
 );
 check(
   "an overwrite counts only the lines it really changed; a file made here only adds",
   rows.join("|") === "src/a.js +2 −1|src/c.js +3 −0",
   JSON.stringify(rows)
 );
-await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector('[data-change-path="src/a.js"]').click(); true`);
+await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector('[data-change-path$="src/a.js"]').click(); true`);
 await sleep(150);
 await shot("change-overwrite.png");
 check(
@@ -211,7 +211,7 @@ check(
   )
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
-await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector('[data-change-path="src/c.js"]').click(); true`);
+await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector('[data-change-path$="src/c.js"]').click(); true`);
 await sleep(150);
 check(
   "a file made in this answer opens on its final version only",

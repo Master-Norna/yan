@@ -40,6 +40,8 @@ const work = {
   changeEntries: new Map(),
   /** @type {{ path: string, created: boolean }[]} 与 changeEntries 是同一趟取的快照 */
   changeFiles: [],
+  /** @type {string|null} 改动面所属答复 */
+  changeReply: null,
   truncated: false,
   error: "",
   /** 画着的是哪一副样子（""/list/empty）：壳子只在换样子时重画 */
@@ -73,13 +75,19 @@ function workFollowConversation() {
 }
 // render() 在切换对话、绑定或解绑目录时都会走到这里；平时重画只比一个标记，不读盘。
 function workSyncConversation() {
-  if (!work.open || !workFollowConversation()) return;
-  workPaint();
-  if (work.root) void workRefresh();
+  if (!work.open) return;
+  if (workFollowConversation()) {
+    workPaint();
+    if (work.root) void workRefresh();
+  } else if (workSyncChangeReply() && work.mode === "changes") {
+    workPaint();
+    void workRefresh();
+  }
 }
 function workEnter() {
   work.open = true;
   workFollowConversation();
+  workSyncChangeReply();
   stageRender();
   // 切面立即停推流：同一帧内网页与工作区来回切换时，尺寸观察可能合并掉中间变化。
   stageWake();
@@ -134,6 +142,7 @@ function workResetWorkspace() {
   work.branches.clear();
   work.tabs = [];
   work.active = -1;
+  work.changeReply = null;
   work.search = "";
   work.searchRows = [];
   work.searchStatus = "";
@@ -220,8 +229,21 @@ function workResetRows() {
   work.truncated = false;
   work.error = "";
 }
-// 一层只要一层（depth: 1）；改动直接查本段对话碰过的件。
+// 新答开始就撤去旧答的 diff 页签和列表，不动普通文件页签。
+function workSyncChangeReply() {
+  const id = latestChangeReply(currentConversation())?.id || null;
+  if (work.changeReply === id) return false;
+  work.changeReply = id;
+  const active = work.tabs[work.active];
+  if (active?.diff) workCloseViewer();
+  work.tabs = work.tabs.filter(tab => !tab.diff);
+  work.active = active && !active.diff ? work.tabs.indexOf(active) : -1;
+  if (work.mode === "changes") workResetRows();
+  return true;
+}
+// 一层只要一层（depth: 1）；改动直接查这一答碰过的件。
 async function workRefresh() {
+  workSyncChangeReply();
   if (work.mode === "search") return;
   if (!work.root && work.mode !== "changes") return;
   const rev = ++work.rev;
@@ -233,7 +255,7 @@ async function workRefresh() {
       for (let i = 0; i < files.length; i += 16) {
         await Promise.all(
           files.slice(i, i + 16).map(async file => {
-            const info = await bridge("/api/archive/stat", { path: file.path }, AbortSignal.timeout(8000)).catch(() => null);
+            const info = changeAbsPath(file.path, "") ? await bridge("/api/archive/stat", { path: file.path }, AbortSignal.timeout(8000)).catch(() => null) : null;
             entries.set(file.path, info);
           })
         );
@@ -296,40 +318,13 @@ function workRefreshAfterTools(conversation, steps) {
     workQueueRefresh(conversation);
 }
 /** 一条簿录 @typedef {{ dir: boolean, name: string, path: string, where?: string, note?: string, size?: number|null, when?: string, state?: string }} WorkRow */
-/** 改动路径按原步骤落脚处归并；缺少来源的旧相对路不猜。 @param {string} raw @param {string} root */
-function workAbsPath(raw, root) {
-  const text = slashed(raw),
-    base = slashed(root);
-  if (!text) return "";
-  if (/^(?:[a-z]:\/|\/)/i.test(text)) return absJoin(text, "");
-  return /^(?:[a-z]:\/|\/)/i.test(base) && !/^[a-z][\w+.-]*:/i.test(text) ? absJoin(base, text) : "";
-}
-/** 本段对话改过的件：按路径并成一份，新建过的记着 */
+/** 这一答的改动与改动条共用统计口径。 */
 function workChangedFiles() {
-  const files = new Map(),
-    /** @type {Conversation|null} */
-    conversation = currentConversation?.() || null;
-  for (const message of conversation?.messages || [])
-    for (const step of allSteps(message)) {
-      if (!step.change || step.status !== "done") continue;
-      const path = workAbsPath(step.change.path, step.root || "");
-      if (!path) continue;
-      const entry = files.get(path) || { path, created: false };
-      entry.created ||= !!step.change.created;
-      files.set(path, entry);
-    }
-  return [...files.values()];
+  return changeStats(latestChangeReply(currentConversation())).files.map(({ path, created }) => ({ path, created }));
 }
-/** 一件在本段对话里的改动：按条按步的先后排在一起，与行迹里点改动同一套画法。
- * 每一步的路也按同一口径归成绝对路，免得「.yan/报告.md」与「E:/…/.yan/报告.md」配不上 @param {Conversation} conversation @param {string} path */
-function workDiffHtml(conversation, path) {
-  /** @type {Step[]} */
-  const steps = [];
-  for (const message of conversation?.messages || [])
-    for (const step of allSteps(message))
-      if (step.change && step.status === "done" && workAbsPath(step.change.path, step.root || "") === path) steps.push(step);
-  if (!steps.length) return `<div class="file-viewer-text change-diff"><p class="file-viewer-note">${t("此件没有记下改动")}</p></div>`;
-  return changeDiffStepsHtml(steps).replace(
+/** @param {Message} message @param {string} path */
+function workDiffHtml(message, path) {
+  return changeDiffHtml(message, path).replace(
     '<div class="file-viewer-text change-diff">',
     `<div class="file-viewer-text change-diff"><div class="work-diff-head"><span>${t("改动前")}</span><span>${t("改动后")}</span></div>`
   );
@@ -495,7 +490,7 @@ function workPaint() {
   else if (work.error) empty = t`目录不可用：${work.error}`;
   else if (!work.root && work.mode === "list") empty = t("选择文件夹…");
   else if (!work.full) empty = t("正在翻…");
-  else if (work.mode === "changes") empty = t("本段对话还没改过文件");
+  else if (work.mode === "changes") empty = t("这一答还没改过文件");
   const body = rows.length ? rows.map(row => workRowHtml(row)).join("") : `<small class="work-tree-note">${escapeHtml(empty)}</small>`;
   let notice = "";
   if (work.mode === "list" && work.truncated) notice = t("目录列表已截断");
@@ -520,9 +515,9 @@ function workActivate(index, trigger = null) {
   work.active = index;
   workPaint();
   if (tab.diff) {
-    const conversation = currentConversation?.() || null;
-    if (!conversation) return;
-    showInFileViewer(t`${tab.path} · 本段改动`, workDiffHtml(conversation, tab.path), trigger, t("览"), "stage");
+    const message = latestChangeReply(currentConversation());
+    if (!message) return;
+    showInFileViewer(t`${tab.path} · 这一答的改动`, workDiffHtml(message, tab.path), trigger, t("览"), "stage");
   } else void openFileViewer({ file: tab.path }, "", trigger, "stage", tab.raw);
 }
 // 单击只占一张临时页签；双击固定后，才为下一次查看留出新的临时页签。

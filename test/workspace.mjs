@@ -174,7 +174,7 @@ check(
 );
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 
-// 改动那一面：本段对话改过的件，件图自己换色——石绿新建、泥金改、朱删（盘上已经没有的那件）
+// 改动那一面：这一答改过的件，件图自己换色——石绿新建、泥金改、朱删（盘上已经没有的那件）
 writeFileSync(`${ROOT}/新建.md`, "# 新建\n");
 writeFileSync(`${ROOT}/.gitignore`, "dist\n");
 await fetch(`${PAGE}api/chats/save`, {
@@ -191,6 +191,8 @@ await fetch(`${PAGE}api/chats/save`, {
       forks: [],
       threads: [],
       messages: [
+        { id: "previous-user", role: "user", content: "之前的一答。", timestamp: "2026-11-27" },
+        { id: "previous-answer", role: "assistant", content: "之前改过。", status: "complete", timestamp: "2026-11-27", steps: [{ id: "old", name: "write_file", status: "done", arguments: "{}", change: { path: `${ROOT}/历史.md`, added: 1, removed: 0 } }] },
         { id: "u", role: "user", content: "改一改这三件。", timestamp: "2026-11-27" },
         {
           id: "a",
@@ -275,12 +277,12 @@ await evalJs(
   `[...document.querySelectorAll("#workStrips [data-work-file]")].find(el => el.dataset.workFile.endsWith("/新建.md")).click(); true`
 );
 await waitFor(
-  `!document.querySelector("#fileViewer").classList.contains("hidden") && /本段改动/.test(document.querySelector("#fileViewerName").textContent)`
+  `!document.querySelector("#fileViewer").classList.contains("hidden") && /这一答的改动/.test(document.querySelector("#fileViewerName").textContent)`
 );
 check(
-  "改动里的相对路也能看本段改动，不是打开原件",
+  "改动里的相对路也能看这一答的改动，不是打开原件",
   await evalJs(
-    `/本段改动/.test(document.querySelector("#fileViewerName").textContent) && !!document.querySelector("#fileViewerStage .split-diff") && document.querySelector("#fileViewerStage .work-diff-head").children.length===2 && document.querySelector("#fileViewer").classList.contains("in-stage")`
+    `/这一答的改动/.test(document.querySelector("#fileViewerName").textContent) && !!document.querySelector("#fileViewerStage .split-diff") && document.querySelector("#fileViewerStage .work-diff-head").children.length===2 && document.querySelector("#fileViewer").classList.contains("in-stage")`
   )
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
