@@ -2294,8 +2294,7 @@ http
         // 这一问自行做完十二轮，再正常收尾。
         const lastUserIndex = msgs.findLastIndex(m => m.role === "user"),
           turnToolResults = msgs.slice(lastUserIndex + 1).filter(m => m.role === "tool");
-        if (turnToolResults.length >= 12)
-          return sse(res, [delta({ content: "十二轮完成" }), delta({}, { usage: { total_tokens: 5 } })]);
+        if (turnToolResults.length >= 12) return sse(res, [delta({ content: "十二轮完成" }), delta({}, { usage: { total_tokens: 5 } })]);
         return sse(res, [
           delta({ content: `第 ${turnToolResults.length + 1} 轮。` }),
           delta({ tool_calls: [{ index: 0, id: `call_${calls}`, type: "function", function: { name: "list_files", arguments: "{}" } }] }),
