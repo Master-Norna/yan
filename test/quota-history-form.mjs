@@ -124,9 +124,9 @@ check(
   )
 );
 check(
-  "work badge hidden inside folder groups",
+  "work badge removed from history rows",
   await evalJs(
-    `getComputedStyle(document.querySelector("#history .history-repo-items .history-item.is-work .history-open"), "::before").display === "none"`
+    `!document.querySelector("#history .history-item.is-work") && getComputedStyle(document.querySelector("#history .history-repo-items .history-open"), "::before").content === "none"`
   )
 );
 // 收起 / 展开
@@ -198,7 +198,7 @@ await evalJs(`document.querySelector('.chip-pop[data-kind=history] [data-menu="p
 await sleep(200);
 check(
   "pin from the menu pins the row and closes the menu",
-  await evalJs(`!document.querySelector(".chip-pop") && __yanState().conversations.find(c => c.id === "w2").pinned === true`)
+  await evalJs(`!document.querySelector(".chip-pop") && __yanState().conversations.find(c => c.id === "w2").pinned === true && !!document.querySelector(\'#history [data-repo] [data-conversation="w2"] .history-state.pinned\')`)
 );
 await evalJs(`document.querySelector('#history [data-conversation="w2"] .history-more').click(); true`);
 await sleep(150);
