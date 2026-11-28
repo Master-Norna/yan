@@ -197,11 +197,11 @@
   fill: color-mix(in srgb, currentColor 12%, transparent);
 }
 /* 指令事由只是经过，不与正文争墨；请示、失败仍清楚，指上或键盘聚焦可细读。 */
-.tool-step:not([data-status="pending"], [data-status="error"]) > .tool-step-head:has(.trail-kind-label) .tool-title {
+.tool-step:not([data-status="pending"], [data-status="error"]) > .tool-step-head:has(.trail-kind-label:not(.trail-kind-special)) .tool-title {
   color: color-mix(in srgb, var(--ink-3) 92%, var(--paper));
 }
-.tool-step > .tool-step-head:has(.trail-kind-label):is(:hover, :focus-visible) .tool-title,
-.tool-step:is([data-status="pending"], [data-status="error"]) > .tool-step-head:has(.trail-kind-label) .tool-title {
+.tool-step > .tool-step-head:has(.trail-kind-label:not(.trail-kind-special)):is(:hover, :focus-visible) .tool-title,
+.tool-step:is([data-status="pending"], [data-status="error"]) > .tool-step-head:has(.trail-kind-label:not(.trail-kind-special)) .tool-title {
   color: var(--ink-2);
 }
 .tool-meta {
