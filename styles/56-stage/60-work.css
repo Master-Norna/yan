@@ -1,111 +1,69 @@
-/* 工作区（设计稿/172）：舞台里的一层，簿录照卷宗那一套（styles/50-files.css）。
-   与卷宗的不同只在：顶上一对「工作区 / 改动」、一条路径、不设分类签与收入改名。
-   窄下来只收紧比例、不另画一套：名目让出宽度给大小与日期，四列始终四列 */
-/* 两面互斥，各自占满游目内容区；栏顶网页签与文件夹入口不随页面隐藏。 */
-.stage-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-/* 工作区里点开的件与改动：同一套预览器（#fileViewer）落进工作区这一层，铺满内容区、不盖栏顶与正文。
-   定位靠 #stageWork（下面加了 position: relative，与 .stage-body 的 flex 同层）；z-index 压在拖宽手柄之下，预览开着仍能拖左缘调宽窄。
-   预览开着时不随簿录滚（overflow: hidden）：它是盖在簿录上的一层，不是簿录的一行。
-   窄栏里照栏宽收：顶栏与游目栏顶同高，纸面内边距收一点，图、视频、PDF 按面板高度收而不按整窗。 */
-#stageWork {
-  position: relative;
-}
-#stageWork:has(> .file-viewer.in-stage) {
-  overflow: hidden;
-}
-#stageWork > .file-viewer.in-stage {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-}
-#stageWork > .file-viewer.in-stage .file-viewer-head {
-  height: 44px;
-  padding: 0 12px;
-  gap: 8px;
-}
-#stageWork > .file-viewer.in-stage .file-viewer-stage {
-  padding: 16px;
-}
-#stageWork > .file-viewer.in-stage .file-viewer-image,
-#stageWork > .file-viewer.in-stage .file-viewer-media video {
-  max-height: 100%;
-}
-#stageWork > .file-viewer.in-stage .file-viewer-frame {
-  width: 100%;
-  height: 100%;
-}
-#stageWork > .file-viewer.in-stage .file-viewer-text {
-  padding: 20px 22px;
-}
-.stage-browser {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.work-page {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 18px 14px 28px;
-}
-/* 调律、圈点属于浏览器；阔、收起及页签始终可用。 */
-#stageWorkBtn[aria-pressed="true"] ~ #stageMenuBtn,
-#stageWorkBtn[aria-pressed="true"] ~ #stagePen {
-  display: none;
-}
-/* 宽窄照这一层自己的宽算（cqi），不照舞台 */
-.work-page .work-inner {
-  width: 100%;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  container-type: inline-size;
-  container-name: work;
-}
-/* 目录树 / 差异：路径工具行右端的一对小画，不另占一层，也不混进浏览器导航。 */
-.stage-views {
-  display: flex;
-  align-items: center;
-  justify-self: end;
-  gap: 3px;
-}
-.stage-views button {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-s);
-  transition:
-    background var(--dur-quick),
-    border-color var(--dur-quick);
-}
-.stage-views button .brush {
-  width: 19px;
-  height: 19px;
-  opacity: 0.6;
-}
-.stage-views button:hover {
-  background: var(--paper-3);
-}
-.stage-views button[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.stage-views button[aria-pressed="true"] .brush {
-  opacity: 1;
-}
-.stage-views button[aria-pressed="true"] .brush .ink {
-  fill: var(--accent);
-}
+/* 工作区独立于卷宗。栏顶工作区、网页签共享；内容内部各自滚动。 */
+.stage-body, .stage-browser { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.stage-browser { flex-direction: column; }
+.stage-head > #stageWorkBtn { flex: none; margin-right: 12px; }
+.stage-head:has(#stageWorkBtn[aria-pressed="true"]) :is(#stageMenuBtn, #stagePen) { display: none; }
+.work-page { flex: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; }
+.work-page .work-inner { flex: 1; min-width: 0; min-height: 0; display: flex; container-type: inline-size; }
+.work-rail { flex: 0 0 43px; border-right: 1px solid var(--line); background: var(--paper-2); }
+.stage-views { display: flex; align-items: center; gap: 3px; }
+.work-rail .stage-views { height: 100%; flex-direction: column; padding: 8px 0; }
+.stage-views button { display: grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-s); }
+.stage-views button .brush { width: 19px; height: 19px; opacity: .65; }
+.stage-views button:hover { background: var(--paper-3); }
+.stage-views button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 9%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.stage-views button[aria-pressed="true"] .brush { opacity: 1; }
+.stage-views button[aria-pressed="true"] .brush .ink { fill: var(--accent); }
+.work-rail [data-work-terminal] { margin-top: auto; }
+.work-explorer { flex: 0 0 auto; width: clamp(112px, var(--work-tree-width, 215px), 42cqi); min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--paper-2); }
+.work-resize { flex: 0 0 5px; cursor: col-resize; border-left: 1px solid var(--line); touch-action: none; }
+.work-resize:hover, .work-resize:active { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.work-collapsed :is(.work-explorer, .work-resize) { display: none; }
+.work-bar { display: flex; align-items: center; gap: 6px; min-height: 39px; padding: 0 8px; border-bottom: 1px solid var(--line); }
+.work-bar .library-crumbs { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; flex-wrap: nowrap; scrollbar-width: none; font-size: var(--fs-note); }
+.work-bar .library-crumbs > * { flex: none; }
+.work-bar button .brush, #workFind button .brush { width: 17px; height: 17px; }
+.work-tree { flex: 1; min-height: 0; overflow: auto; padding: 7px 4px; }
+.work-row { display: flex; align-items: center; gap: 5px; min-height: 27px; padding: 3px 5px 3px calc(3px + var(--work-indent)); border-radius: var(--radius-s); cursor: pointer; font-size: var(--fs-small); }
+.work-row:hover { background: var(--paper-3); }
+.work-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.work-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.work-chevron { width: 12px; flex: none; color: var(--ink-3); text-align: center; }
+.work-row .fi, .work-tab .fi { width: 17px; height: 19px; flex: none; }
+.work-row strong, .work-name, .work-name small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.work-name { display: grid; gap: 2px; }
+.work-name small, .work-tree-note, .work-children > small { color: var(--ink-3); font-size: var(--fs-note); }
+.work-tree-note, .work-children > small { display: block; padding: 8px; }
+#workFind { display: flex; gap: 4px; padding: 6px; }
+#workFind input, #workCommand input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-s); padding: 5px; background: var(--paper); color: var(--ink); font: inherit; }
+.work-editor { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--paper); }
+.work-tabbar { flex: none; min-height: 39px; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.work-tabs { flex: 1; min-width: 0; display: flex; overflow-x: auto; scrollbar-width: thin; }
+.work-tab { display: flex; align-items: center; flex: none; min-width: 0; max-width: 180px; height: 38px; padding: 0 4px; border-right: 1px solid var(--line); color: var(--ink-3); }
+.work-tab.on { color: var(--ink); box-shadow: inset 0 -2px var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.work-tab > [data-work-tab] { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 0 4px; font-size: var(--fs-small); }
+.work-tab > [data-work-tab] span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-tab .brush { width: 17px; height: 17px; flex: none; }
+.work-tab > [data-work-tab-close] { flex: none; width: 21px; height: 25px; font-size: 15px; }
+.work-tab > [data-work-tab-close]:hover { background: var(--paper-3); }
+.work-docmode { padding: 0 5px; flex: none; }
+.work-content { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.work-empty .work-leaf { width: 64px; height: 64px; opacity: .5; }
+#workContent > .file-viewer.in-stage { position: absolute; inset: 0; z-index: 1; animation: none; }
+#workContent > .file-viewer.in-stage .file-viewer-head { height: 32px; padding: 0 8px; gap: 6px; }
+#workContent > .file-viewer.in-stage .file-viewer-head > .seal { display: none; }
+#workContent > .file-viewer.in-stage .file-viewer-stage { padding: 8px; mask-image: none; }
+#workContent > .file-viewer.in-stage :is(.file-viewer-image, .file-viewer-media video) { max-height: 100%; }
+#workContent > .file-viewer.in-stage .file-viewer-frame { width: 100%; height: 100%; }
+#workContent > .file-viewer.in-stage .file-viewer-text { width: 100%; min-width: 0; padding: 12px; border: 0; }
+#workContent .change-diff .split-diff { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow-wrap: anywhere; }
+.work-diff-head { display: grid; grid-template-columns: 1fr 1fr; color: var(--ink-3); font-size: var(--fs-note); border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.work-terminal { flex: 0 0 min(185px, 38%); min-height: 100px; display: flex; flex-direction: column; border-top: 1px solid var(--line); padding: 6px 10px; background: var(--paper-2); }
+.work-terminal-head { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: var(--fs-small); }
+.work-terminal-head [data-work-stop] { margin-left: auto; }
+#workTerminalOutput { flex: 1; min-height: 0; overflow: auto; margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, Consolas, monospace; }
+#workCommand { display: flex; gap: 5px; align-items: center; font-size: var(--fs-small); }
+.work-page .hidden { display: none !important; }
 /* 地址行那对「览 / 源」：落在收藏左边，收藏的位置不动；只在有两种看法时挂出 */
 .stage-nav > .stage-docmode {
   display: flex;
@@ -155,62 +113,7 @@
 .stage-nav > .stage-docmode:not(.hidden) ~ #stageMarks {
   margin-left: 0;
 }
-/* 路径和右端的切换：不另设统计与查找。 */
-.work-bar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 11px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 12px;
-}
-.work-bar .library-crumbs {
-  max-width: 100%;
-  min-width: 0;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-/* 长路径横向滚动、不折行。名字截断时悬停看全。 */
-.work-bar .library-crumbs button,
-.work-bar .library-crumbs .here {
-  flex: none;
-  max-width: 12em;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-/* 空簿录：沿用 .stage-empty / .stage-go，不再另写文字和按钮的一套。 */
-.work-page .strips {
-  position: relative;
-  flex: 1;
-  min-height: 160px;
-}
-.work-empty .work-leaf {
-  width: 72px;
-  height: 72px;
-  opacity: 0.7;
-}
-.work-page .strips {
-  --cell: 12px;
-  --cols: 30px minmax(0, 1fr) 110px 116px;
-}
-.work-page .strip > span,
-.work-page .strip-cols > span {
-  padding: 0 var(--cell);
-}
-.work-page .strip > span:first-child,
-.work-page .strip-cols > span:first-child {
-  padding: 0;
-}
-.work-page .strip-name {
-  gap: 8px;
-}
-.work-page .strip-name .dir {
-  color: var(--ink-3);
-  font-weight: 400;
-}
+
 /* 只换件图已有的色值；沿用卷宗的纸形、笔画、缩略图样式。 */
 .work-page {
   --work-add: #21764c;
@@ -240,15 +143,4 @@
 .work-page .fi-thumb[data-state="del"] img {
   opacity: 0.45;
 }
-@container work (max-width: 500px) {
-  .work-page .strips {
-    --cell: 8px;
-    --cols: 26px minmax(0, 1fr) 96px 96px;
-  }
-}
-@container work (max-width: 340px) {
-  .work-page .strips {
-    --cell: 6px;
-    --cols: 24px minmax(0, 1fr) 82px 84px;
-  }
-}
+
