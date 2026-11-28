@@ -46,6 +46,76 @@ const work = {
   rev: 0
 };
 
+// 编辑稿留在本页内存，切换页签、浏览器、对话不会抹去未保存的字。
+/** @type {Map<string, {scope:{workdir:string,path:string,roam:boolean}, base:string, text:string, sig:string, saving:boolean}>} */
+const workDrafts = new Map();
+function workDirty(path) {
+  const draft = workDrafts.get(path);
+  return !!draft && draft.base !== draft.text;
+}
+function workCanEdit(tab) {
+  return !!tab && !tab.diff && fileKind(tab.path).group === "text";
+}
+function workRenderEditor(tab, trigger = null) {
+  const draft = workDrafts.get(tab.path);
+  if (!draft) return;
+  showInFileViewer(tab.path.split("/").pop(), '<textarea class="work-file-editor" spellcheck="false" aria-label="' +
+    escapeHtml(t("编辑")) + '"></textarea>', trigger, t("览"), "stage");
+  const input = /** @type {HTMLTextAreaElement} */ ($("#fileViewerStage .work-file-editor"));
+  input.value = draft.text;
+  input.addEventListener("input", () => {
+    draft.text = input.value;
+    workPaintTabs();
+  });
+}
+async function workToggleEditor() {
+  const tab = work.tabs[work.active];
+  if (!workCanEdit(tab)) return;
+  const draft = workDrafts.get(tab.path);
+  if (draft) {
+    if (draft.saving) return;
+    if (workDirty(tab.path) && !(await askConfirm({ title: t("放弃未保存的修改？"), ok: t("放弃") }))) return;
+    if (work.tabs[work.active] !== tab || workDrafts.get(tab.path) !== draft || draft.saving) return;
+    workDrafts.delete(tab.path);
+    workActivate(work.active);
+    return;
+  }
+  const scope = { workdir: work.root, path: tab.path, roam: false };
+  try {
+    const data = await bridge("/api/work/read", { ...scope, editor: true }, AbortSignal.timeout(8000));
+    if (!work.open || work.tabs[work.active] !== tab || workDrafts.has(tab.path)) return;
+    if (typeof data.text !== "string" || typeof data.sig !== "string" || !data.sig) throw Error(t("取回失败"));
+    workDrafts.set(tab.path, { scope, base: data.text, text: data.text, sig: data.sig, saving: false });
+    tab.pinned = true;
+    workActivate(work.active);
+    $("#fileViewerStage .work-file-editor")?.focus();
+  } catch (error) {
+    toast(t`打开失败：${String(/** @type {any} */ (error).message || error).slice(0, 120)}`);
+  }
+}
+async function workSaveEditor(tab) {
+  const draft = tab && workDrafts.get(tab.path);
+  if (!draft || draft.saving || !workDirty(tab.path)) return;
+  const text = draft.text;
+  draft.saving = true;
+  try {
+    const data = await bridge("/api/work/write", { ...draft.scope, editor: true, content: text, seen: draft.sig }, AbortSignal.timeout(30000));
+    if (data.stale) {
+      toast(t("原文件已被修改，未覆盖；请保留编辑稿，确认原件后再改"));
+      return;
+    }
+    if (typeof data.sig !== "string" || !data.sig) throw Error(t("保存失败"));
+    draft.sig = data.sig;
+    draft.base = text;
+    workPaintTabs();
+    if (work.open) void workRefresh();
+  } catch (error) {
+    toast(t`保存失败：${String(/** @type {any} */ (error).message || error).slice(0, 120)}`);
+  } finally {
+    draft.saving = false;
+  }
+}
+
 /** 开头的斜杠：POSIX 的根（/Users/…）、UNC 的 //host，不算一级，拼回去时要留在前头；Windows 的 E:/ 归第一级自己带着 */
 function workLead(path) {
   const lead = /^\/+/.exec(slashed(path));
@@ -132,6 +202,7 @@ function workSetRoot(root) {
 function workResetWorkspace() {
   work.expanded.clear();
   work.branches.clear();
+  for (const [path, draft] of workDrafts) if (!workDirty(path) && !draft.saving) workDrafts.delete(path);
   work.tabs = [];
   work.active = -1;
   work.search = "";
@@ -460,7 +531,7 @@ function workPaintTabs() {
   if (!tabs || !mode) return;
   const html = work.tabs
     .map((tab, index) => {
-      return `<div class="work-tab${tab.pinned ? "" : " work-tab-preview"}"><button type="button" role="tab" data-work-tab="${index}" title="${escapeHtml(tab.path + (tab.pinned ? "" : " · " + t("双击固定页签")))}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span></button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`;
+      return `<div class="work-tab${tab.pinned ? "" : " work-tab-preview"}"><button type="button" role="tab" data-work-tab="${index}" title="${escapeHtml(tab.path + (tab.pinned ? "" : " · " + t("双击固定页签")) + (!tab.diff && workDirty(tab.path) ? " · " + t("未保存") : ""))}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span>${!tab.diff && workDirty(tab.path) ? '<i class="work-dirty-dot" aria-hidden="true"></i>' : ""}</button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`;
     })
     .join("");
   stageSetHtml(tabs, html);
@@ -471,12 +542,12 @@ function workPaintTabs() {
   }
   const active = work.tabs[work.active],
     kind = active && fileKind(active.path).view;
-  if (active && !active.diff && (kind === "markdown" || kind === "html")) {
-    stageSetHtml(
-      mode,
-      `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>`
-    );
-  } else stageSetHtml(mode, "");
+  const editing = active && !active.diff && workDrafts.has(active.path);
+  const views = active && !active.diff && !editing && (kind === "markdown" || kind === "html")
+    ? `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>` : "";
+  const edit = workCanEdit(active)
+    ? `<button type="button" data-work-edit aria-pressed="${!!editing}" title="${t("编辑")} · Ctrl/⌘+S" aria-label="${t("编辑")}">${brushIcon("edit")}</button>` : "";
+  stageSetHtml(mode, views + edit);
 }
 function workPaint() {
   const box = $("#stageWork");
@@ -523,7 +594,8 @@ function workActivate(index, trigger = null) {
     const conversation = currentConversation?.() || null;
     if (!conversation) return;
     showInFileViewer(t`${tab.path} · 本段改动`, workDiffHtml(conversation, tab.path), trigger, t("览"), "stage");
-  } else void openFileViewer({ file: tab.path }, "", trigger, "stage", tab.raw);
+  } else if (workDrafts.has(tab.path)) workRenderEditor(tab, trigger);
+  else void openFileViewer({ file: tab.path }, "", trigger, "stage", tab.raw);
 }
 // 单击只占一张临时页签；双击固定后，才为下一次查看留出新的临时页签。
 function workOpenPath(path, trigger = null, pin = false) {
@@ -532,7 +604,7 @@ function workOpenPath(path, trigger = null, pin = false) {
   let index = work.tabs.findIndex(tab => tab.path === path && tab.diff === diff);
   if (index < 0) {
     index = pin ? -1 : work.tabs.findIndex(tab => !tab.pinned);
-    const tab = { path, diff, raw: false, pinned: pin };
+    const tab = { path, diff, raw: false, pinned: pin || (!diff && workDrafts.has(path)) };
     if (index < 0) {
       index = work.tabs.length;
       work.tabs.push(tab);
@@ -550,7 +622,20 @@ function workPinTab(index) {
   workPaint();
 }
 function workCloseTab(index) {
-  if (!work.tabs[index]) return;
+  const tab = work.tabs[index];
+  if (!tab) return;
+  const draft = tab.diff ? null : workDrafts.get(tab.path);
+  if (draft?.saving) return;
+  if (draft && workDirty(tab.path)) {
+    void askConfirm({ title: t("放弃未保存的修改？"), ok: t("放弃") }).then(ok => {
+      const current = work.tabs.indexOf(tab);
+      if (!ok || current < 0 || workDrafts.get(tab.path) !== draft || draft.saving) return;
+      workDrafts.delete(tab.path);
+      workCloseTab(current);
+    });
+    return;
+  }
+  if (draft) workDrafts.delete(tab.path);
   const active = index === work.active;
   work.tabs.splice(index, 1);
   if (index < work.active) work.active--;
@@ -722,6 +807,11 @@ function bindWork() {
     stageWake();
   });
   const box = $("#stageWork");
+  window.addEventListener("beforeunload", event => {
+    if (![...workDrafts.keys()].some(workDirty)) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
   box.addEventListener("click", event => {
     const target = /** @type {HTMLElement} */ (event.target),
       mode = /** @type {HTMLElement|null} */ (target.closest("[data-work-mode]"));
@@ -746,6 +836,7 @@ function bindWork() {
     if (close) return workCloseTab(Number(close.dataset.workTabClose));
     const tab = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab]"));
     if (tab) return workActivate(Number(tab.dataset.workTab), tab);
+    if (target.closest("[data-work-edit]")) return void workToggleEditor();
     const raw = /** @type {HTMLElement|null} */ (target.closest("[data-work-raw]"));
     if (raw && work.tabs[work.active]) {
       work.tabs[work.active].raw = raw.dataset.workRaw === "true";
@@ -803,6 +894,11 @@ function bindWork() {
   box.addEventListener("keydown", event => {
     const input = /** @type {HTMLInputElement} */ (event.target);
     if (event.isComposing) return;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s" && input.matches(".work-file-editor")) {
+      event.preventDefault();
+      void workSaveEditor(work.tabs[work.active]);
+      return;
+    }
     if (input.matches("#workCommand input")) {
       if (
         event.ctrlKey &&
