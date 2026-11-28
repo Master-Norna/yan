@@ -178,14 +178,12 @@ async function relocateRef(name, anchor) {
   }
   return null;
 }
-// 点开一条链接：先按原路，取不到（sandbox:/ 之类、路写错了层、挪走了）再认搬走的
+// 点开或拖入一条链接：先查原路，取不到（sandbox:/ 之类、路写错了层、挪走了）再认搬走的。不读正文，也不触发视频换壳。
 /** @param {string} raw @param {string} name @param {RefAnchor} anchor @returns {Promise<RefTarget | null>} */
 async function locateRef(raw, name, anchor) {
   const target = refTarget(raw, anchor);
   if (target) {
-    const control = new AbortController(),
-      response = await fetch(refUrl(target), { signal: control.signal }).catch(() => null);
-    control.abort();
+    const response = await fetch(refUrl(target), { method: "HEAD", signal: AbortSignal.timeout(8000) }).catch(() => null);
     if (response?.ok) return target;
   }
   return relocateRef(name, anchor);

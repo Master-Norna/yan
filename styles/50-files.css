@@ -55,7 +55,7 @@
   color: var(--ink-3);
   font-size: var(--fs-mark);
 }
-/* 藏、移除：位置常留着，免得条子忽长忽短 */
+/* 移除：案上的按键常显 */
 .attachment-tool {
   flex: none;
   width: 18px;
@@ -66,17 +66,10 @@
   opacity: 0;
   transition: opacity var(--dur-quick);
 }
-.attachment-tool + .attachment-tool {
-  margin-left: -6px;
-}
 .attachment-card:hover .attachment-tool,
 .attachment-card:focus-within .attachment-tool {
   opacity: 1;
 }
-.attachment-save:hover {
-  color: var(--accent);
-}
-/* 案上的移除常显（淡），只有「藏」靠近才出来 */
 .attachment-card .attachment-remove {
   opacity: 0.55;
 }
@@ -408,7 +401,13 @@
 }
 .strip.drop-over,
 .strip-back.drop-over,
-.library-crumbs button.drop-over {
+.library-crumbs button.drop-over,
+#openLibrary.drop-over,
+#newChat.drop-over,
+.history-item.drop-over,
+.history-repo.drop-over,
+#workdirChip.drop-over,
+.composer.drop-over {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }

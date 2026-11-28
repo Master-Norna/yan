@@ -22,9 +22,8 @@ function attachmentCard(file, index, sent = false, drop = false) {
       ? `<span class="fi fi-thumb" aria-hidden="true"><img class="attachment-thumb" data-thumb="${escapeHtml(file.id)}" alt=""></span>`
       : fileFigure(file.name);
   const body = `${figure}<span class="attachment-name">${escapeHtml(file.skill || file.name)}</span><span class="attachment-size">${formatFileSize(file.size)}</span>`;
-  const save = file.id
-    ? `<button class="attachment-tool attachment-save" data-save-attachment="${escapeHtml(file.id)}" title="${t(`收入卷宗`)}" aria-label="${t(`收入卷宗`)}">${t(`藏`)}</button>`
-    : "";
+  // 有原件的件条都可聚焦开收存菜单，包括没有预览动作的待发压缩包。
+  const drag = file.id ? ` draggable="true" data-drag-attachment="${escapeHtml(file.id)}" tabindex="0" aria-keyshortcuts="Shift+F10"` : "";
   // 附件点开是看：图进图片查看器，文、表、PDF、网页、音视频进预览器——自己刚拖进来、刚发出去的东西再下载一遍没有道理；
   // 只有预览不了的（压缩包之类）：发出去的落到下载，案上的就不必点了
   const view =
@@ -35,14 +34,14 @@ function attachmentCard(file, index, sent = false, drop = false) {
         : "";
   if (sent && file.id) {
     const action = view || t`data-download-attachment="${escapeHtml(file.id)}" title="下载 ${escapeHtml(title)}"`;
-    return `<div class="attachment-card sent" role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}${save}</div>`;
+    return `<div class="attachment-card sent"${drag} role="button" data-kind="${file.kind}" ${action}>${body}</div>`;
   }
   const remove = drop
     ? `data-action="drop-attachment" data-file="${escapeHtml(file.id)}"`
     : index !== null
       ? `data-remove-attachment="${index}"`
       : "";
-  return `<div class="attachment-card pending" data-kind="${file.kind}" ${view ? `role="button" tabindex="0" ${view}` : `title="${escapeHtml(title)}"`}>${body}${save}${remove ? `<button class="attachment-tool attachment-remove" ${remove} title="${t`移除 ${escapeHtml(file.name)}`}" aria-label="${t`移除 ${escapeHtml(file.name)}`}">×</button>` : ""}</div>`;
+  return `<div class="attachment-card pending"${drag} data-kind="${file.kind}" ${view ? `role="button" ${view}` : `title="${escapeHtml(title)}"`}>${body}${remove ? `<button class="attachment-tool attachment-remove" ${remove} title="${t`移除 ${escapeHtml(file.name)}`}" aria-label="${t`移除 ${escapeHtml(file.name)}`}">×</button>` : ""}</div>`;
 }
 // 随引文的那幅画面画在引文里，不进附件栏（序号仍按 pendingAttachments 算，移除时对得上）
 function renderAttachments() {
@@ -180,17 +179,23 @@ function setupQuoteTip() {
     getSelection()?.removeAllRanges();
     hide();
     if (button.dataset.tip === "note") return quoteOnly || createThread(picked);
-    pendingQuote = picked;
-    renderQuote();
-    persistDraft();
-    const input = $("#chatInput");
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
+    placeQuoteOnDesk(picked);
   });
+}
+// 点「引用」或把正文选区拖到案上，同一条路。
+/** @param {Quote} picked */
+function placeQuoteOnDesk(picked) {
+  pendingQuote = picked;
+  renderQuote();
+  persistDraft();
+  const input = $("#chatInput");
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
 }
 
 const FILE_TARGETS = "[data-open-image], [data-open-file], [data-open-remote], [data-open-attachment], [data-download-attachment]";
-// 附件：案上的移除、收入卷宗，各处附件的预览、打开、下载（键盘同样可用）
+const ATTACHMENT_CARD = ".attachment-card[data-drag-attachment]";
+// 附件：移除、预览、打开、下载；右键菜单与文件拖拽共用收存入口。
 function bindAttachmentEvents() {
   document.addEventListener("click", e => {
     const remove = e.target.closest("[data-remove-attachment]");
@@ -201,18 +206,43 @@ function bindAttachmentEvents() {
       renderAttachments();
       return;
     }
-    const save = e.target.closest("[data-save-attachment]");
-    if (save) {
-      void saveToLibrary(save.dataset.saveAttachment);
-      return;
-    }
     const target = e.target.closest(FILE_TARGETS);
     if (target) openFileTarget(/** @type {HTMLElement} */ (target));
   });
+  document.addEventListener("contextmenu", e => {
+    const card = /** @type {HTMLElement|null} */ (e.target.closest?.(ATTACHMENT_CARD));
+    if (!card) return;
+    e.preventDefault();
+    openAttachmentMenu(card);
+  });
   document.addEventListener("keydown", e => {
+    if (e.key === "F10" && e.shiftKey && e.target.matches?.(ATTACHMENT_CARD)) {
+      e.preventDefault();
+      return openAttachmentMenu(/** @type {HTMLElement} */ (e.target));
+    }
     if ((e.key !== "Enter" && e.key !== " ") || !e.target.matches?.(FILE_TARGETS)) return;
     e.preventDefault();
     openFileTarget(/** @type {HTMLElement} */ (e.target));
+  });
+}
+/** @param {HTMLElement} card */
+function openAttachmentMenu(card) {
+  const id = card.dataset.dragAttachment;
+  const returnFocus = () => card.focus({ preventScroll: true });
+  const pop = openMenu(card, [
+    {
+      id: "save-to-files",
+      label: t("收入卷宗"),
+      run: () => {
+        returnFocus();
+        void saveDraggedAttachment(id);
+      }
+    }
+  ]);
+  pop.querySelector("button")?.focus({ preventScroll: true });
+  // Esc 仍由既有浮层规则收菜单，这里只把焦点还给件条。
+  pop.addEventListener("keydown", e => {
+    if (e.key === "Escape") returnFocus();
   });
 }
 // 点得开的件：附件里的图或正文引的目录里的图（见 renderReplyShots）进看图框，看得了的附件进预览器，看不了的下载。点与键盘同一条路
