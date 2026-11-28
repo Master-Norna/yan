@@ -75,6 +75,15 @@ check(
     existsSync(`${ARCHIVE}/报表.csv`)
 );
 await evalJs(`document.querySelector("#attachments [data-remove-attachment]").click(); true`);
+// 改动记录使用绝对路径：不能把落脚处再拼一遍。
+await evalJs(
+  `(() => { const summary = document.querySelector("#messages .change-summary"); if (summary?.getAttribute("aria-expanded") === "false") summary.click();
+    const from = document.querySelector("#messages [data-change-path]"), to = document.querySelector("#chatInput"), dt = new DataTransfer();
+    for (const [type, target] of [["dragstart", from], ["dragover", to], ["drop", to], ["dragend", from]]) target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })); })(); true`
+);
+await waitFor(`!!document.querySelector("#attachments .attachment-card[data-name='报表.csv']")`, 8000);
+check("dragging a changed file attaches the original absolute path", existsSync(`${ARCHIVE}/报表.csv`));
+await evalJs(`document.querySelector("#attachments [data-remove-attachment]").click(); true`);
 const quoted = await evalJs(
   `(() => { const from = document.querySelector(".message.assistant .assistant-block > .markdown"), to = document.querySelector("#chatInput"),
     range = document.createRange(), selected = getSelection(), dt = new DataTransfer();
