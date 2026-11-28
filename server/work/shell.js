@@ -239,6 +239,8 @@ module.exports = function createShell({ toolEnv }) {
   function startBackground(command, workdir, boxed, seatbelt = false, terminal = false) {
     const job = enlist(spawnJob(command, workdir, boxed, seatbelt));
     if (terminal) {
+      // 这条是人的终端起的：交付时按到达先后合成一条流（见 backgroundReport），与 lease 在不在无关
+      job.terminal = true;
       const lease = { deadline: Date.now() + 120000, timer: null };
       terminalLeases.set(job, lease);
       renewTerminalLease(job);
@@ -261,18 +263,22 @@ module.exports = function createShell({ toolEnv }) {
         timedOut: false,
         started: Date.now(),
         grew: Date.now(),
-        // 两路输出各留最近一截；base 是已裁掉的字数、read 是已交出去的位置（都按从头算的绝对位置记，裁了也对得上）
-        text: { out: "", err: "" },
-        base: { out: 0, err: 0 },
-        read: { out: 0, err: 0 }
+        // 两路输出各留最近一截；all 是按到达先后合成的同一条，终端的输出要照着它显示，
+        // 不能把 stdout、stderr 各自归堆再拼。base 是已裁掉的字数、read 是已交出去的位置（都按从头算的绝对位置记，裁了也对得上）
+        text: { out: "", err: "", all: "" },
+        base: { out: 0, err: 0, all: 0 },
+        read: { out: 0, err: 0, all: 0 }
       };
     const take = (key, chunk) => {
-      job.text[key] += chunk.toString("utf8");
-      job.grew = Date.now();
-      const cut = job.text[key].length - WORK_OUTPUT_LIMIT * 4;
-      if (cut > 0) {
-        job.text[key] = job.text[key].slice(cut);
-        job.base[key] += cut;
+      const text = chunk.toString("utf8");
+      for (const slot of [key, "all"]) {
+        job.text[slot] += text;
+        job.grew = Date.now();
+        const cut = job.text[slot].length - WORK_OUTPUT_LIMIT * 4;
+        if (cut > 0) {
+          job.text[slot] = job.text[slot].slice(cut);
+          job.base[slot] += cut;
+        }
       }
     };
     child.stdout.on("data", chunk => take("out", chunk));
@@ -356,18 +362,47 @@ module.exports = function createShell({ toolEnv }) {
       }
     }
     if (res?.destroyed) return;
-    const fresh = key => job.text[key].slice(Math.max(0, job.read[key] - job.base[key]));
+    // 一次交一段：从上次交到的位置起，至多 WORK_OUTPUT_LIMIT 字；交付到哪儿才把游标推到哪儿，下一回接着取，
+    // 不把没交出去的那截悄悄跳过去。缓冲把还没交的那截挤掉了才报省略，并说清多少字没留住。
+    const piece = (key, stderr = false) => {
+      const start = Math.max(job.read[key], job.base[key]),
+        skipped = job.read[key] < job.base[key] ? job.base[key] - job.read[key] : 0,
+        full = job.text[key].slice(start - job.base[key]);
+      let text = full;
+      if (text.length > WORK_OUTPUT_LIMIT) {
+        // 切在行尾，读起来是整行；一行就超了才硬切
+        const cut = text.lastIndexOf("\n", WORK_OUTPUT_LIMIT);
+        text = text.slice(0, cut >= WORK_OUTPUT_LIMIT / 2 ? cut + 1 : WORK_OUTPUT_LIMIT);
+      }
+      const shown = (stderr && process.platform === "win32" ? decodeClixml(text) : text).replace(ANSI, "");
+      return {
+        text: (skipped ? `…（前面 ${skipped} 字已省略）\n` : "") + shown,
+        next: start + text.length,
+        more: text.length < full.length
+      };
+    };
+    // 人的终端按桥接收到的先后显示两路输出：all 就是这条合并流，stderr 不再另交一份。
+    const terminal = job.terminal === true,
+      out = piece(terminal ? "all" : "out"),
+      err = terminal ? null : piece("err", true);
     const report = {
       id: job.id,
       key: job.key,
       running: job.exitCode === null,
       exitCode: job.exitCode,
-      stdout: shownOutput(fresh("out")),
-      stderr: shownOutput(fresh("err"), true),
+      stdout: out.text + (out.more && !terminal ? "\n…（还有后续输出，可再取）" : ""),
+      stderr: err ? err.text + (err.more ? "\n…（还有后续输出，可再取）" : "") : "",
+      // 这一轮没交完：终端据此接着领取，别把「进程已退出」当成「输出已交齐」
+      ...(out.more || err?.more ? { more: true } : {}),
       durationMs: Date.now() - job.started,
-      ...(job.timedOut ? { timedOut: true } : {})
+      ...(job.timedOut ? { timedOut: true } : {}),
+      ...(job.stopped ? { stopped: true } : {})
     };
-    const end = { out: job.base.out + job.text.out.length, err: job.base.err + job.text.err.length };
+    const end = {
+      out: terminal ? job.read.out : out.next,
+      err: terminal ? job.read.err : err.next,
+      all: terminal ? out.next : job.read.all
+    };
     if (!res) job.read = end;
     else {
       // 查看与监听共用一份输出：一次只交一份，写完才推进到这份快照的末尾；断线就让下一请求照旧领取。
