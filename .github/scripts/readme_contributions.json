@@ -1,8 +1,4 @@
 {
-  "include": [
-    "https://github.com/duriantaco/skylos/pull/1274"
-  ],
-  "exclude": [
-    "https://github.com/xerj-org/xerj/pull/3046"
-  ]
+  "include": ["https://github.com/duriantaco/skylos/pull/1274"],
+  "exclude": ["https://github.com/xerj-org/xerj/pull/3046"]
 }
