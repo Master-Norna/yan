@@ -11,6 +11,8 @@ function fixture() {
     "work",
     "workOpenPath",
     "workCloseTab",
+    "workPinTab",
+    "workSwitch",
     "bindWork",
     `setup: () => {
       const opened = [], nodes = new Map();
@@ -26,6 +28,7 @@ function fixture() {
       bridge = () => { throw Error("unexpected bridge call"); };
       openFileViewer = async (source, name, trigger, host) => opened.push({ file: source.file, name, trigger, host });
       workPaint = () => {};
+      workRefresh = async () => {};
       work.open = true;
       work.root = "C:/one";
       return { opened, node: document.querySelector };
@@ -46,19 +49,45 @@ for (const connected of [false, true]) {
     assert.deepEqual(opened, [{ file: first, name: "", trigger: row, host: "stage" }]);
     assert.equal(f.work.open, true);
     assert.equal(f.work.root, "C:/one");
+    assert.equal(f.work.tabs[0].pinned, false);
     f.workOpenPath(second);
     assert.equal(opened[1].file, second);
+    assert.equal(f.work.tabs.length, 1);
+    f.workOpenPath(second, null, true);
+    assert.equal(f.work.tabs[0].pinned, true);
+    assert.equal(opened.length, 2); // pinning the active preview does not reload it
     f.workOpenPath(first);
     assert.equal(f.work.tabs.length, 2);
-    assert.equal(f.work.active, 0);
-    f.workCloseTab(0);
+    assert.equal(f.work.active, 1);
+    f.workOpenPath("C:/one/C.md");
+    assert.deepEqual(Array.from(f.work.tabs, tab => tab.path), [second, "C:/one/C.md"]);
+    f.workPinTab(1);
+    assert.equal(f.work.tabs[1].pinned, true);
+    f.workCloseTab(1);
     assert.equal(f.work.tabs.length, 1);
     assert.equal(f.work.tabs[0].path, second);
     f.work.open = false;
+    const count = opened.length;
     f.workOpenPath(first);
-    assert.equal(opened.length, 4);
+    assert.equal(opened.length, count);
   });
 }
+
+test("再点当前功能收起侧栏，换功能自动展开", () => {
+  const f = fixture();
+  f.setup();
+  f.workSwitch("list");
+  assert.equal(f.work.collapsed, true);
+  f.workSwitch("list");
+  assert.equal(f.work.collapsed, false);
+  f.workSwitch("changes");
+  assert.equal(f.work.mode, "changes");
+  assert.equal(f.work.collapsed, false);
+  f.workSwitch("changes");
+  assert.equal(f.work.collapsed, true);
+  f.workSwitch("list");
+  assert.equal(f.work.collapsed, false);
+});
 
 test("改动面点件看本段对话的改动，不打开原件", () => {
   const f = load([
