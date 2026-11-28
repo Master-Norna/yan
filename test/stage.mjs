@@ -998,6 +998,7 @@ await evalJs(`document.querySelector("#stagePin").click(); true`);
 const workDir = `${ARCHIVE}/工作区-舞台`;
 mkdirSync(workDir, { recursive: true });
 writeFileSync(`${workDir}/笔记.md`, "# 笔记\n\n这一层只在工作区里看。\n");
+const browserChrome = await evalJs(`(() => { const head = document.querySelector(".stage-head"), wide = document.querySelector("#stageWide"), close = document.querySelector("#stageClose"); return { height: head.offsetHeight, wide: wide.offsetLeft, close: close.offsetLeft, row: document.querySelector("#stageNav").offsetHeight }; })()`);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 const workFolder = `document.querySelector('[data-work-dir="${workDir}"]')`;
 await waitFor(`!!${workFolder}`);
@@ -1020,6 +1021,12 @@ check(
     `(() => { const w = document.querySelector("#stageWork"), b = document.querySelector(".stage-body"); return document.querySelector("#stageBrowser").classList.contains("hidden") && Math.abs(w.getBoundingClientRect().width - b.getBoundingClientRect().width) < 1 && !!document.querySelector("[data-stage-tab]") && !document.querySelector('[data-stage-tab][aria-selected="true"]'); })()`
   )
 );
+check(
+  "workspace shares the browser chrome and omits an empty file tab bar",
+  await evalJs(
+    `(() => { const head = document.querySelector(".stage-head"), wide = document.querySelector("#stageWide"), close = document.querySelector("#stageClose"), bar = document.querySelector(".work-bar"), tabs = document.querySelector(".work-tabbar"), browser = ${JSON.stringify(browserChrome)}; return head.offsetHeight === browser.height && wide.offsetLeft === browser.wide && close.offsetLeft === browser.close && bar.offsetHeight === browser.row && parseFloat(getComputedStyle(head).borderBottomWidth) === 1 && getComputedStyle(tabs).display === "none"; })()`
+  )
+);
 const savedTab = await evalJs(`__yanStage.state.current`);
 const savedUrl = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
 await evalJs(`document.querySelector('[data-stage-tab="' + __yanStage.state.current + '"]').click(); true`);
@@ -1040,6 +1047,12 @@ await waitFor(
   `(() => { const row = document.querySelector('#workStrips [data-work-file$="/笔记.md"]'); if (!row) return false; row.click(); return true; })()`
 );
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
+check(
+  "opening a file restores the tab bar aligned with the explorer path",
+  await evalJs(
+    `(() => { const bar = document.querySelector(".work-bar").getBoundingClientRect(), tabs = document.querySelector(".work-tabbar").getBoundingClientRect(); return tabs.height > 0 && Math.abs(bar.top - tabs.top) < 1 && Math.abs(bar.bottom - tabs.bottom) < 1; })()`
+  )
+);
 check(
   "workspace file opens in the stage panel, not over the page",
   await evalJs(
