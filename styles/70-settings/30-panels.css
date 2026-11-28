@@ -432,7 +432,7 @@
 .hidden {
   display: none !important;
 }
-/* 通用页里并排的小数字框（工具轮次上限） */
+/* 设置行里的并排输入框 */
 .setting-inline {
   flex: none;
   display: inline-flex;
@@ -441,10 +441,6 @@
   color: var(--ink-3);
   font-size: var(--fs-small);
   white-space: nowrap;
-}
-.field-num {
-  width: 72px;
-  text-align: right;
 }
 .setting-directory {
   flex: 1;

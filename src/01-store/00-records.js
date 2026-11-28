@@ -41,9 +41,6 @@ const defaultStore = {
     commandPolicyDefault: "ask",
     sandbox: true,
     toolReach: "anywhere",
-    archiveRead: true,
-    toolRounds: DEFAULT_TOOL_ROUNDS,
-    subRounds: DEFAULT_SUB_ROUNDS,
     mcpServers: {},
     env: { packs: ["data", "office", "web"], pip: "", npm: "" }
   },
@@ -88,6 +85,9 @@ function normalizeStoreData(value) {
     delete settings.archiveDir;
     delete settings.reasoning;
     delete settings.workAutoDefault;
+    delete settings.archiveRead;
+    delete settings.toolRounds;
+    delete settings.subRounds;
     // mirror：早先页面上可选下载源，现由桥接自己比，旧存档里的这一项丢掉
     const { mirror: _mirror, ...env } = settings.env && typeof settings.env === "object" ? settings.env : {};
     settings.env = {

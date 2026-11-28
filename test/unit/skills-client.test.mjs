@@ -13,7 +13,7 @@ test("技能只把名字和说明带进系统提示，参考按需翻；对话�
     "systemPrompt",
     "TOOLS",
     `setup: prompts => {
-      Object.assign(PROMPTS, prompts); store.settings.archiveRead = false;
+      Object.assign(PROMPTS, prompts); archiveEntries = [];
       skillSet = { home: 'E:/skills', skills: [{ name: 'demo', description: '照格式写信', dir: 'E:/skills/demo', files:
         ['SKILL.md', ...Array.from({length:80}, (_, i) => 'references/ref-' + i + '.md')].map(path => ({path}))
       }] };
@@ -40,7 +40,7 @@ test("点名置入的那件附件带着技能名，仍照附件列、照附件�
     "toolDefinitions",
     "TOOLS",
     `setup: prompts => {
-      Object.assign(PROMPTS, prompts); store.settings.archiveRead = false;
+      Object.assign(PROMPTS, prompts); archiveEntries = [];
       skillSet = { home: 'E:/skills', skills: [{ name: 'demo', description: '照格式写信', dir: 'E:/skills/demo', files: [{ path: 'SKILL.md' }] }] };
       bridge = async () => { throw Error('没有这份技能：undefined'); };
       getAttachmentMeta = async () => ({ kind: 'text', data: '点名用技能「demo」，照它做。' });

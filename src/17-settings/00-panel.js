@@ -121,10 +121,10 @@ function generalSettingsHtml() {
     store.settings.notify === true
   )}${storageSettingsHtml()}<div class="setting-row"><div class="setting-copy"><strong>${t(`本机数据`)}</strong><small>${t`${store.conversations.length} 段对话 · ${libraryTotal()} 件卷宗 · 配置 ${storageSize()} · 附件原件 ${formatFileSize(usedAttachmentBytes())}`}</small></div><div class="setting-actions"><label class="check"><input id="exportFiles" type="checkbox">${t(`含附件原件`)}</label><button id="exportData" class="outline-btn">${t(`导出备份`)}</button><button id="importData" class="outline-btn">${t(`导入备份`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`清空所有对话`)}</strong><small>${t(`模型配置、个性化与卷宗将保留`)}</small></div><button id="clearAll" class="danger-btn">${t(`清空对话`)}</button></div>`;
 }
-// 工具：沙箱、三档指令权限、可及范围、卷宗可读、轮次上限——模型能动手的边界都在这一栏
+// 工具：沙箱、三档指令权限、可及范围——模型能动手的边界都在这一栏
 function toolsSettingsHtml() {
   const policy = normalizeCommandPolicy(store.settings.commandPolicyDefault);
-  return `<h2>${t(`工具`)}</h2><div class="setting-row"><div class="setting-copy"><strong>${t(`沙箱`)}</strong><small>${t(`改动不出目录，不碰机密，不动系统`)}</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">${t(`开`)}</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">${t(`关`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`指令权限`)}</strong><small>${t(`新对话的默认档位`)}</small></div><div class="segmented"><button data-setting="commandPolicyDefault" data-value="ask" class="${policy === "ask" ? "active" : ""}">${t(`问而后行`)}</button><button data-setting="commandPolicyDefault" data-value="review" class="${policy === "review" ? "active" : ""}">${t(`审而后行`)}</button><button data-setting="commandPolicyDefault" data-value="auto" class="${policy === "auto" ? "active" : ""}">${t(`径行`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`文件工具可及范围`)}</strong><small>${t(`沙箱下问而后行，恒限目录内`)}</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">${t(`全盘`)}</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">${t(`目录内`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`卷宗对模型可读`)}</strong><small>${t(`模型可翻阅卷宗里的文档`)}</small></div><div class="segmented"><button data-setting="archiveRead" data-value="true" class="${store.settings.archiveRead !== false ? "active" : ""}">${t(`开`)}</button><button data-setting="archiveRead" data-value="false" class="${store.settings.archiveRead === false ? "active" : ""}">${t(`关`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`工具轮次上限`)}</strong><small>${t(`留空不限`)}</small></div><div class="setting-actions"><label class="setting-inline">${t(`一答`)}<input id="settingToolRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="${t(`不限`)}" value="${roundLimitText(toolRoundLimit())}"></label><label class="setting-inline">${t(`帮手`)}<input id="settingSubRounds" class="field field-num" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="${t(`不限`)}" value="${roundLimitText(subRoundLimit())}"></label></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`联网检索`)}</strong><small id="searchStatus">${t(`经本机桥接`)}</small></div><button id="testSearch" class="outline-btn" type="button">${t(`测试联网`)}</button></div>`;
+  return `<h2>${t(`工具`)}</h2><div class="setting-row"><div class="setting-copy"><strong>${t(`沙箱`)}</strong><small>${t(`改动不出目录，不碰机密，不动系统`)}</small></div><div class="segmented"><button data-setting="sandbox" data-value="true" class="${store.settings.sandbox !== false ? "active" : ""}">${t(`开`)}</button><button data-setting="sandbox" data-value="false" class="${store.settings.sandbox === false ? "active" : ""}">${t(`关`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`指令权限`)}</strong><small>${t(`新对话的默认档位`)}</small></div><div class="segmented"><button data-setting="commandPolicyDefault" data-value="ask" class="${policy === "ask" ? "active" : ""}">${t(`问而后行`)}</button><button data-setting="commandPolicyDefault" data-value="review" class="${policy === "review" ? "active" : ""}">${t(`审而后行`)}</button><button data-setting="commandPolicyDefault" data-value="auto" class="${policy === "auto" ? "active" : ""}">${t(`径行`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`文件工具可及范围`)}</strong><small>${t(`沙箱下问而后行，恒限目录内`)}</small></div><div class="segmented"><button data-setting="toolReach" data-value="anywhere" class="${store.settings.toolReach !== "inside" ? "active" : ""}">${t(`全盘`)}</button><button data-setting="toolReach" data-value="inside" class="${store.settings.toolReach === "inside" ? "active" : ""}">${t(`目录内`)}</button></div></div><div class="setting-row"><div class="setting-copy"><strong>${t(`联网检索`)}</strong><small id="searchStatus">${t(`经本机桥接`)}</small></div><button id="testSearch" class="outline-btn" type="button">${t(`测试联网`)}</button></div>`;
 }
 function appearanceSettingsHtml() {
   const s = store.settings;
@@ -272,19 +272,8 @@ function bindGeneralSettings() {
     toast(t("所有对话已清空"));
   });
 }
-// 工具：轮次上限、测试联网
+// 工具：测试联网
 function bindToolSettings() {
-  for (const [id, key, fallback] of [
-    ["#settingToolRounds", "toolRounds", DEFAULT_TOOL_ROUNDS],
-    ["#settingSubRounds", "subRounds", DEFAULT_SUB_ROUNDS]
-  ])
-    $(id)?.addEventListener("input", e => {
-      // 留空记作 0：不限
-      const text = e.target.value.trim(),
-        value = Math.floor(Number(text));
-      store.settings[key] = !text ? 0 : value >= 1 ? value : fallback;
-      saveStoreSoon();
-    });
   // 测试联网：检索走的是桥接，与哪个模型无关，放在工具一栏
   $("#testSearch")?.addEventListener("click", async () => {
     const status = $("#searchStatus");
@@ -326,7 +315,7 @@ function bindSettingRows() {
           return;
         }
         if (key === "notify") return void setNotify(value === "true");
-        store.settings[key] = ["autoTitle", "archiveRead", "sandbox", "stageFit", "compactTrail"].includes(key) ? value === "true" : value;
+        store.settings[key] = ["autoTitle", "sandbox", "stageFit", "compactTrail"].includes(key) ? value === "true" : value;
         saveStore();
         applyAppearance();
         if (key === "compactTrail") refreshTrailAppearance();

@@ -115,3 +115,10 @@ test("迁移 v6：旧默认的 0.7 清掉、亲手填的留下；断旧的几样
   // 迁过之后亲手再填 0.7：不再被当成旧默认清掉
   assert.equal(f.normalizeStoreData({ version: 6, profiles: [{ id: "a", temperature: 0.7 }] }).profiles[0].temperature, 0.7);
 });
+
+test("已移除的工具设置不再进入规整后的配置", () => {
+  const f = load(["normalizeStoreData"]);
+  const { settings } = f.normalizeStoreData({ settings: { archiveRead: false, toolRounds: 1, subRounds: 1, sandbox: false } });
+  for (const key of ["archiveRead", "toolRounds", "subRounds"]) assert.ok(!(key in settings), key);
+  assert.equal(settings.sandbox, false);
+});

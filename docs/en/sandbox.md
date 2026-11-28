@@ -36,7 +36,7 @@ Static screening checks recognized command forms. It does not inspect what scrip
 
 Permission levels and the sandbox are independent: with the sandbox off, Auto-review still refuses what it judges harmful to the system, only Full auto drops that layer, and file tools follow only the **File tool reach** setting at both of those levels. A foreground command that runs past its `timeout` (default 120 seconds, at most 600) isn't killed; it moves to the background and wakes the model when it ends (see [Chat and Agent](work.md#file-tools)); **Stop** in the composer doesn't cancel an already registered background command. To cancel it, ask the model to end it with `check_command`. Since viewing is open to the whole machine, ordinary files outside the working folder (browser data, chat logs and so on) are within the model's reach — only `.env`, keys and credentials, recognizable by name, have their own rule. Don't point the working folder at a place you don't want changed.
 
-The **Tools** tab in settings governs everything about what the model may act on: the sandbox, the default command permission level for new chats, **File tool reach**, **Model can read Files**, and **Tool round limit** (counted in rounds; several concurrent calls in one round count as one; blank means unlimited).
+The **Tools** tab in settings governs everything about what the model may act on: the sandbox, the default command permission level for new chats, and **File tool reach**.
 
 ### macOS commands
 

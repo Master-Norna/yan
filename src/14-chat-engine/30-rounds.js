@@ -2,7 +2,7 @@
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // ---------- 一答的轮次循环：主答、旁注、帮手共用 ----------
 // 请模型开口 → 有工具调用就记成步骤、执行、把结果交回 → 再开口，直到它不再调工具。写到一半断了稍候接着写（同一轮最多两回）；
-// 一轮既没说话也没调工具不算收尾；轮次到顶收回工具，请它就已有结果收尾。
+// 一轮既没说话也没调工具不算收尾。
 // 带收件口（inbox，即这一答的 job）的还收补言与后台帮手的回报：补言等落点停下这一轮递上；只剩等帮手时就收尾，回报到了另起一答。
 // 每轮读完即记进 tally、扣进余墨；停了、断了也照记。整答收尾把汇总的耗墨写到消息上
 function newTally() {
@@ -53,7 +53,7 @@ function roundSteps(calls, target, scope) {
  * @param {Message|SubAgent} target 写进哪里：主答、旁注的消息，或帮手
  * @param {Array<Record<string, any>>} history 送给接口的消息，就地追加
  * @param {{ profile: Profile, conversation: Conversation, host: Message, signal: AbortSignal, overrides: Record<string, any>,
- *   tally: ReturnType<typeof newTally>, roundLimit: number, scope?: string, kind?: UsageKind, inbox?: any, budget?: number, memory?: Map<string, string>,
+ *   tally: ReturnType<typeof newTally>, scope?: string, kind?: UsageKind, inbox?: any, budget?: number, memory?: Map<string, string>,
  *   onFrame?: (() => void)|null, onStatus?: (label?: string) => void, afterRound?: () => Promise<string>,
  *   beforeEnd?: () => Promise<Record<string, any>|null> }} run
  *   host：步骤画在哪条消息上（帮手的步骤画在主答的差遣卡里）；scope：步骤记上属于哪名帮手；kind：墨记进用量簿的哪一类（帮手按 scope 认）；
@@ -72,10 +72,7 @@ async function runRounds(target, history, run) {
     spendTokens(profile, amount, run.scope ? "helper" : run.kind || "main");
     renderQuota();
   };
-  // 轮次按这一趟算（帮手睡醒再进来是新的一趟）：上一趟到顶时收回的工具还给它，不然醒来就再也调不了工具
-  delete overrides.toolChoice;
-  let rounds = 0,
-    resumed = 0,
+  let resumed = 0,
     retrying = false;
   overrides.onRetry = n => {
     retrying = true;
@@ -177,13 +174,12 @@ async function runRounds(target, history, run) {
     }
     resumed = 0; // 接续的次数按轮算：长活跑上几百轮，前面断过两回不该让后面再断就没得接
     const calls = (target.toolCalls || []).filter(call => call.name);
-    // 轮次到顶后模型仍要调工具（有的中转不认 tool_choice）：不再受理，就此收尾
-    if (!calls.length || !overrides.tools || overrides.toolChoice === "none") {
+    if (!calls.length || !overrides.tools) {
       // 说完了就收尾，帮手还在后台也不等：回报到了另起一答（见 mailReport），等着的时候没有谁醒着。
       // 只剩用户的补言也照旧收尾，补言由 settleSupplements 作下一问送出。这一轮说着时已到的回报（或递给帮手的话）才当场递上接着做
       if (!inbox?.queue.some(item => item.report !== undefined)) {
-        // 收尾前要它再看一眼的（主答的图，见 19-intent/10-store.js 的 intentGate）：递回一句话即接着这一答写，不另起。轮次到顶的不拦
-        const entry = run.beforeEnd && overrides.tools && overrides.toolChoice !== "none" ? await run.beforeEnd() : null;
+        // 收尾前要它再看一眼的（主答的图，见 19-intent/10-store.js 的 intentGate）：递回一句话即接着这一答写，不另起。
+        const entry = run.beforeEnd && overrides.tools ? await run.beforeEnd() : null;
         if (!entry) break;
         const said = target.content.slice(roundStart).trim();
         if (said) history.push({ role: "assistant", content: said });
@@ -194,16 +190,6 @@ async function runRounds(target, history, run) {
       const said = target.content.slice(roundStart).trim();
       if (said) history.push({ role: "assistant", content: said });
       await deliverSupplements(inbox, history, run.budget, host, { target });
-      target.content = paragraphBreak(target.content);
-      continue;
-    }
-    // 轮次到顶：不再受理这一批调用，让模型就已有结果收尾。工具定义照旧带着、只禁它再调（tool_choice: none）：
-    // 历史里已有工具往来，整份撤掉工具 Anthropic 会拒，前缀一变缓存也接不上
-    if (++rounds > run.roundLimit) {
-      const said = target.content.slice(roundStart).trim();
-      if (said) history.push({ role: "assistant", content: said });
-      history.push({ role: "user", content: prompt("assistant.roundLimit") });
-      overrides.toolChoice = "none";
       target.content = paragraphBreak(target.content);
       continue;
     }

@@ -41,8 +41,7 @@ test("每轮发送前刷新估算，只有同轮的提示用量能替换它", as
     host: assistant,
     signal: new AbortController().signal,
     overrides,
-    tally: f.newTally(),
-    roundLimit: 3
+    tally: f.newTally()
   });
   assert.equal(sent.length, 3);
   assert.ok(sent[1] >= 25000 && sent[2] >= 32000, "不报用量的工具轮，后面仍把新工具结果算进请求");

@@ -48,8 +48,7 @@ async function run(f, target = { id: "a", role: "assistant", content: "" }) {
     host: target,
     signal: new AbortController().signal,
     overrides: { tools: [{ function: { name: "probe" } }] },
-    tally,
-    roundLimit: 5
+    tally
   });
   return { history, target };
 }
@@ -107,4 +106,11 @@ test("没给 id 的调用照旧自己拟一个，两件不撞", async () => {
     { history } = await run(f);
   assert.equal(new Set(probe.ids).size, 2);
   assert.match(probe.ids[0], /^call_/);
+});
+
+test("长任务不再被固定轮次截断", async () => {
+  const { f, probe } = fixture(round => (round <= 81 ? calls() : null)),
+    { target } = await run(f);
+  assert.equal(probe.rounds, 82);
+  assert.equal(target.steps.length, 162);
 });

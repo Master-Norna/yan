@@ -402,7 +402,7 @@ function responsesRequest(payload) {
       parameters: tool.function?.parameters || { type: "object", properties: {} },
       strict: false
     }));
-    body.tool_choice = payload.tool_choice === "none" ? "none" : "auto";
+    body.tool_choice = "auto";
     body.parallel_tool_calls = true;
   }
   return body;

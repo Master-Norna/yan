@@ -54,7 +54,7 @@ function readDocumentPage(name, text, page) {
   const f = load([
     "TOOLS",
     `setup: text => {
-      store.settings.archiveRead = false;
+      archiveEntries = [];
       getAttachmentMeta = async () => ({ kind: 'file', extractedText: text });
     }`
   ]);

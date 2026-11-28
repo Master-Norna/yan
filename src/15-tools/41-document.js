@@ -1,4 +1,4 @@
-// 言 · 翻阅文档：对话附件，以及（设置允许时）磁盘卷宗里的文本与 Office / PDF——后者用到时才取回并抽正文；技能的说明与附属文件也从这里翻（见 42-skills.js）。
+// 言 · 翻阅文档：对话附件，以及磁盘卷宗里的文本与 Office / PDF——后者用到时才取回并抽正文；技能的说明与附属文件也从这里翻（见 42-skills.js）。
 // 长文档按页码或关键词只取片段。说明里（{{docs}}）只列这段对话的附件：卷宗会越攒越多，整份目录写进说明，每一问都得背着；
 // 卷宗里的按文件名或路径找，不知道有什么就 name 留空，列给它看。技能的目录在系统提示里（skills.hint）：不知道有它，模型想不到去翻。
 // 对话里有附件、卷宗里有可读的文档、或认得技能时才给
@@ -154,12 +154,11 @@ function availableDocuments(conversation) {
       seen.add(`att:${file.id}`);
       docs.push(file);
     }
-  if (store.settings.archiveRead !== false)
-    for (const entry of archiveEntries || []) {
-      if (seen.has(`arc:${entry.path}`) || !(fileKind(entry.name).extract || isTextFile({ name: entry.name, type: "" }))) continue;
-      seen.add(`arc:${entry.path}`);
-      docs.push({ name: entry.name, archive: entry.path, size: entry.size, modifiedAt: entry.modifiedAt, kind: "archive" });
-    }
+  for (const entry of archiveEntries || []) {
+    if (seen.has(`arc:${entry.path}`) || !(fileKind(entry.name).extract || isTextFile({ name: entry.name, type: "" }))) continue;
+    seen.add(`arc:${entry.path}`);
+    docs.push({ name: entry.name, archive: entry.path, size: entry.size, modifiedAt: entry.modifiedAt, kind: "archive" });
+  }
   for (const doc of skillDocuments())
     if (!seen.has(`skill:${doc.name}`)) {
       seen.add(`skill:${doc.name}`);

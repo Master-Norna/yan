@@ -324,7 +324,7 @@ async function requestChat(profile, messages, signal, overrides = {}) {
           : undefined
   };
   const extras = {
-    ...(overrides.tools ? { tools: overrides.tools, ...(overrides.toolChoice ? { toolChoice: overrides.toolChoice } : {}) } : {}),
+    ...(overrides.tools ? { tools: overrides.tools } : {}),
     // probe 是探档位时故意送的、不存在的一档，原样送出去让接口报错（见 probeReasoningLevels）
     ...(overrides.reasoning === "probe" ? { reasoning_effort: "probe" } : reasoningFields(profile, overrides.reasoning))
   };
