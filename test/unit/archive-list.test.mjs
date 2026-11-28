@@ -171,9 +171,7 @@ test("子夹数量统计迟迟不返回时，工作区仍能展示目录", async
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(child);
   const readdir = fs.promises.readdir;
-  t.mock.method(fs.promises, "readdir", async (dir, ...args) =>
-    dir === child ? new Promise(() => {}) : readdir(dir, ...args)
-  );
+  t.mock.method(fs.promises, "readdir", async (dir, ...args) => (dir === child ? new Promise(() => {}) : readdir(dir, ...args)));
   let data;
   await route(Readable.from([Buffer.from(JSON.stringify({ root, depth: 1, scratch: false, workspace: true }))]), {
     writeHead: code => assert.equal(code, 200),
