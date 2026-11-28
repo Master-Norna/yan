@@ -59,8 +59,13 @@ function workCanEdit(tab) {
 function workRenderEditor(tab, trigger = null) {
   const draft = workDrafts.get(tab.path);
   if (!draft) return;
-  showInFileViewer(tab.path.split("/").pop(), '<textarea class="work-file-editor" spellcheck="false" aria-label="' +
-    escapeHtml(t("编辑")) + '"></textarea>', trigger, t("览"), "stage");
+  showInFileViewer(
+    tab.path.split("/").pop(),
+    '<textarea class="work-file-editor" spellcheck="false" aria-label="' + escapeHtml(t("编辑")) + '"></textarea>',
+    trigger,
+    t("览"),
+    "stage"
+  );
   const input = /** @type {HTMLTextAreaElement} */ ($("#fileViewerStage .work-file-editor"));
   input.value = draft.text;
   input.addEventListener("input", () => {
@@ -543,10 +548,13 @@ function workPaintTabs() {
   const active = work.tabs[work.active],
     kind = active && fileKind(active.path).view;
   const editing = active && !active.diff && workDrafts.has(active.path);
-  const views = active && !active.diff && !editing && (kind === "markdown" || kind === "html")
-    ? `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>` : "";
+  const views =
+    active && !active.diff && !editing && (kind === "markdown" || kind === "html")
+      ? `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>`
+      : "";
   const edit = workCanEdit(active)
-    ? `<button type="button" data-work-edit aria-pressed="${!!editing}" title="${t("编辑")} · Ctrl/⌘+S" aria-label="${t("编辑")}">${brushIcon("edit")}</button>` : "";
+    ? `<button type="button" data-work-edit aria-pressed="${!!editing}" title="${t("编辑")} · Ctrl/⌘+S" aria-label="${t("编辑")}">${brushIcon("edit")}</button>`
+    : "";
   stageSetHtml(mode, views + edit);
 }
 function workPaint() {
