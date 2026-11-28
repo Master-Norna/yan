@@ -144,7 +144,7 @@ async function workRefresh() {
       workPaint();
       return;
     }
-    const data = await bridge("/api/archive/list", { root: work.root, scratch: false, depth: 1 }, AbortSignal.timeout(8000));
+    const data = await bridge("/api/archive/list", { root: work.root, scratch: false, depth: 1, workspace: true }, AbortSignal.timeout(8000));
     if (rev !== work.rev) return;
     work.entries = data.entries || [];
     work.dirs = data.dirs || [];
@@ -156,6 +156,7 @@ async function workRefresh() {
     work.entries = [];
     work.dirs = [];
     work.full = false;
+    work.truncated = false;
     work.error = String(/** @type {any} */ (error).message || error).slice(0, 160);
   }
   workPaint();
@@ -294,7 +295,8 @@ function workPaint() {
     body = rows.length
       ? `<div class="strip-cols"><span></span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
       : workEmptyBody(empty);
-  stageSetHtml($("#workStrips"), body);
+  const notice = work.mode === "list" && work.truncated ? `<div class="library-empty">${t("仅展示部分文件")}</div>` : "";
+  stageSetHtml($("#workStrips"), body + notice);
   for (const button of document.querySelectorAll("#workCrumbs [data-work-dir], #stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);
     if (el.dataset.workMode) el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));

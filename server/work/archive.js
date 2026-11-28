@@ -44,7 +44,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   const archiveVisible = entry =>
     !entry.name.startsWith(".") && !entry.isSymbolicLink() && !(entry.isDirectory() && WORK_SKIP.has(entry.name));
   // 工作区只数子夹的直属项，不读文件内容、不继续下钻；读不到的数量留空，不冒充空夹。
-  async function folderFacts(full) {
+  async function folderFacts(full, visible = archiveVisible) {
     const stat = await fs.promises.lstat(full).catch(() => null);
     if (!stat?.isDirectory()) return {};
     const modifiedAt = stat.mtime.toISOString(),
@@ -53,14 +53,14 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     let files = 0,
       folders = 0;
     for (const entry of entries) {
-      if (!archiveVisible(entry)) continue;
+      if (!visible(entry)) continue;
       if (entry.isDirectory()) folders++;
       else files++;
     }
     return { modifiedAt, files, folders };
   }
   // 子目录也要列：空的夹同样是一层，页面上要能看见、能把文件拖进去
-  async function walkArchive(root, dir, out, dirs, shallow = false) {
+  async function walkArchive(root, dir, out, dirs, shallow = false, visible = archiveVisible) {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(error => {
       // 工作区正站在这一层：读不了不能画成空夹。卷宗全树仍可略过读不到的层。
       if (shallow) throw Error(describeFsError(error, dir));
@@ -68,7 +68,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     });
     for (const entry of entries) {
       if (out.length + dirs.length >= ARCHIVE_LIST_LIMIT) return;
-      if (!archiveVisible(entry)) continue;
+      if (!visible(entry)) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         dirs.push({ path: relPath(root, full), name: entry.name });
@@ -116,12 +116,40 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     // depth: 1 只列这一层（游目的工作区：看一处代码目录不必为看一层把整棵树都走一遍）。
     // 路径仍相对根，这一层的就是名字本身
     const shallow = Number(body.depth) === 1;
-    await walkArchive(root, root, out, dirs, shallow);
+    // 工作区看代码目录：项目点文件照列，仍略过言的运行数据、链接与忽略目录。
+    const workspace = shallow && body.workspace === true,
+      /** @type {(entry: import("node:fs").Dirent) => boolean} */
+      visible = workspace
+        ? entry =>
+            !entry.isSymbolicLink() &&
+            entry.name !== SCRATCH_DIR &&
+            entry.name !== ".yan" &&
+            !(entry.isDirectory() && WORK_SKIP.has(entry.name))
+        : archiveVisible;
+    await walkArchive(root, root, out, dirs, shallow, visible);
     if (shallow) {
       dirs.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
       // 不逐夹发请求，也不无界并行：只在这一趟列目录里，小批读一次子夹的目录项。
-      for (let i = 0; i < dirs.length; i += 16)
-        await Promise.all(dirs.slice(i, i + 16).map(async dir => Object.assign(dir, await folderFacts(path.join(root, dir.path)))));
+      // 数量只是附注：不给慢盘上的子目录拖住整份列表。超预算留空，不冒充空夹。
+      const deadline = Date.now() + 1500;
+      for (let i = 0; i < Math.min(dirs.length, 256) && Date.now() < deadline; i += 16) {
+        const batch = dirs.slice(i, i + 16);
+        let timer;
+        try {
+          const facts = await Promise.race([
+            Promise.all(batch.map(dir => folderFacts(path.join(root, dir.path), visible))),
+            /** @type {Promise<null>} */ (
+              new Promise(resolve => {
+                timer = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now()));
+              })
+            )
+          ]);
+          if (!facts) break;
+          batch.forEach((dir, j) => Object.assign(dir, facts[j]));
+        } finally {
+          clearTimeout(timer);
+        }
+      }
     }
     out.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
     return {
