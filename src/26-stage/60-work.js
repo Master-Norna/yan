@@ -154,6 +154,22 @@ async function workRefresh() {
   }
   workPaint();
 }
+// 工具完成是现成的刷新信号：合并短时间内的通知，不起轮询，也不扫未打开的工作区。
+let workRefreshTimer = 0;
+/** @param {Conversation} conversation */
+function workQueueRefresh(conversation) {
+  if (!work.open || !stageShown() || currentConversation()?.id !== conversation.id) return;
+  if (workRefreshTimer) clearTimeout(workRefreshTimer);
+  workRefreshTimer = setTimeout(() => {
+    workRefreshTimer = 0;
+    if (work.open && stageShown() && currentConversation()?.id === conversation.id) void workRefresh();
+  }, 150);
+}
+/** @param {Conversation} conversation @param {Step[]} steps */
+function workRefreshAfterTools(conversation, steps) {
+  if (steps.some(step => step.status === "done" && !step.readOnly && (step.change || TOOLS.get(step.name)?.writes)))
+    workQueueRefresh(conversation);
+}
 /** 一条簿录 @typedef {{ dir: boolean, name: string, path: string, where?: string, note?: string, size?: number|null, when?: string, state?: string }} WorkRow */
 /** 改动路径按原步骤落脚处归并；缺少来源的旧相对路不猜。 @param {string} raw @param {string} root */
 function workAbsPath(raw, root) {

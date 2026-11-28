@@ -304,7 +304,9 @@ async function runSteps(
   for (let i = 0; i < steps.length; ) {
     let j = i + 1;
     if (parallel(steps[i])) while (j < steps.length && parallel(steps[j])) j += 1;
-    await Promise.all(steps.slice(i, j).map(runOne));
+    const batch = steps.slice(i, j);
+    await Promise.all(batch.map(runOne));
+    if (!signal.aborted) workRefreshAfterTools(conversation, batch);
     i = j;
   }
   // 同一轮预先拟好的两次写入，后一次还没看见前一次的结果，不能借它更新后的版本越过核对。
