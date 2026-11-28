@@ -92,3 +92,19 @@ test("工作区夹的数量和日期复用卷宗格式，未知数量不当作�
   assert.ok(workRowHtml(rows[0]).includes(formatDay(modifiedAt)));
   assert.match(workRowHtml(rows[1]), /空/);
 });
+
+
+test("POSIX 根可浏览且不混同不同大小写的目录", () => {
+  const { work, workCrumbsHtml, workRows, slashed, joinFile, relInside } = load(["work", "workCrumbsHtml", "workRows", "slashed", "joinFile", "relInside"]);
+  assert.equal(slashed("/"), "/");
+  assert.equal(joinFile("/", "a"), "/a");
+  assert.equal(relInside("/", "/a"), "a");
+  assert.equal(relInside("/Home", "/home/a"), null);
+  assert.equal(relInside("C:/Home", "c:/home/a"), "a");
+  work.root = "/";
+  work.dirs = [{ path: "home", name: "home" }];
+  assert.match(workCrumbsHtml(), /data-work-pick/);
+  assert.equal(workRows()[0].path, "/home");
+  work.root = "/home";
+  assert.match(workCrumbsHtml(), /data-work-dir="\/"/);
+});

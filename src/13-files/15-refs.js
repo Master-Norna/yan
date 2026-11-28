@@ -20,21 +20,24 @@
 
 /** @param {string} path 去掉结尾的斜杠，反斜杠换成 / */
 function slashed(path) {
-  return String(path || "")
-    .replace(/\\/g, "/")
-    .replace(/\/+$/, "");
+  const value = String(path || "").replace(/\\/g, "/");
+  return /^\/+$/.test(value) ? "/" : value.replace(/\/+$/, "");
 }
 /** @param {string} root @param {string} path 根下的路 */
 function joinFile(root, path) {
-  return `${slashed(root)}/${path}`;
+  const base = slashed(root);
+  return `${base}${base.endsWith("/") ? "" : "/"}${path}`;
 }
 /** @param {string} root @param {string} file @returns {string|null} 根下的路（"" 即根本身），不在根下的是 null */
 function relInside(root, file) {
-  const base = slashed(root).toLowerCase(),
-    lower = slashed(file).toLowerCase();
+  const base = slashed(root),
+    target = slashed(file);
   if (!base) return null;
-  if (lower === base) return "";
-  return lower.startsWith(`${base}/`) ? slashed(file).slice(base.length + 1) : null;
+  // 盘符与 UNC 采用 Windows 路径语义；POSIX 不把不同大小写的目录当成同一处。
+  const key = value => (/^(?:[a-z]:|\/\/)/i.test(base) ? value.toLowerCase() : value),
+    prefix = base.endsWith("/") ? base : base + "/";
+  if (key(target) === key(base)) return "";
+  return key(target).startsWith(key(prefix)) ? target.slice(prefix.length) : null;
 }
 /** 卷宗页说的路（相对卷宗）拼成一件文件 @param {string} path */
 function archiveFile(path) {

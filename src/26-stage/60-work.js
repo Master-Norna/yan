@@ -45,11 +45,6 @@ function workParts(path) {
 function workAt(path, parts, end) {
   return workLead(path) + parts.slice(0, end).join("/");
 }
-/** 根与一条相对的路拼起来：根是 / 时不写成一加一的后斜杠 */
-function workJoin(root, rel) {
-  const base = slashed(root);
-  return base.endsWith("/") ? `${base}${rel}` : `${base}/${rel}`;
-}
 // 对话已有工作目录就用它，不另绑、不改对话；切换对话或重新绑定时才回到根。
 function workFollowConversation() {
   const c = currentConversation(),
@@ -209,7 +204,7 @@ function workRows() {
       .map(dir => ({
         dir: true,
         name: dir.name,
-        path: workJoin(work.root, dir.path),
+        path: joinFile(work.root, dir.path),
         note: folderCountNote(dir.files, dir.folders),
         when: dir.modifiedAt ? formatDay(dir.modifiedAt) : ""
       }))
@@ -217,7 +212,7 @@ function workRows() {
     ...work.entries.map(entry => ({
       dir: false,
       name: entry.name,
-      path: workJoin(work.root, entry.path),
+      path: joinFile(work.root, entry.path),
       where: "",
       size: entry.size,
       when: formatDay(entry.modifiedAt),
@@ -245,7 +240,8 @@ function workCrumbsHtml() {
   const parts = workParts(work.root),
     crumbs = [];
   if (work.mode === "changes") return "";
-  if (!parts.length) return "";
+  if (!parts.length) return work.root === "/" ? `<button type="button" class="here" data-work-pick title="/" aria-label="${t("选择文件夹…")}">/</button>` : "";
+  if (work.root.startsWith("/") && !work.root.startsWith("//")) crumbs.push({ name: "/", at: "/" });
   if (parts.length > 4) crumbs.push({ name: parts[0], at: workAt(work.root, parts, 1) }, { name: "…", at: "" });
   for (let i = parts.length > 4 ? parts.length - 2 : 0; i < parts.length; i++)
     crumbs.push({ name: parts[i], at: workAt(work.root, parts, i + 1) });
