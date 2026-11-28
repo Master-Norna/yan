@@ -1,13 +1,12 @@
-/* 一道墨线下：前后、重载、「域名 › 页题」、执事、收藏。网址平时只写一句，点它才露出整串可改 */
+/* 共用栏顶丝栏下：前后、重载、「域名 › 页题」、执事、收藏。网址平时只写一句，点它才露出整串可改 */
 .stage-nav {
   position: relative;
   flex: none;
   display: flex;
   align-items: center;
   gap: 1px;
-  height: 38px;
+  height: var(--stage-row-height);
   margin: 0 12px 0 14px;
-  border-top: 1px solid color-mix(in srgb, var(--ink) 50%, transparent);
 }
 .stage-nav > button {
   flex: none;
