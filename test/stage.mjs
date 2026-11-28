@@ -1009,7 +1009,10 @@ check(
   "the workspace lists the bound folder",
   await evalJs(`[...document.querySelectorAll("#workStrips .work-row strong")].some(el => el.textContent === "笔记.md")`)
 );
-check("the workspace path names the folder", await evalJs(`document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`));
+check(
+  "the workspace path names the folder",
+  await evalJs(`document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`)
+);
 await waitFor(`!__yanStage.state.session`);
 check(
   "workspace fills the stage and browser streaming stops while tabs remain",
@@ -1028,7 +1031,9 @@ check(
   )
 );
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
-await waitFor(`!__yanStage.state.session && document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`);
+await waitFor(
+  `!__yanStage.state.session && document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`
+);
 await waitFor(`!!document.querySelector('#workStrips [data-work-file$="/笔记.md"]')`, 8000).catch(() => {});
 const beforeWorkFile = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
 await evalJs(`document.querySelector('#workStrips [data-work-file$="/笔记.md"]').click(); true`);
