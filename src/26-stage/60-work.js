@@ -52,10 +52,7 @@ function workFollowConversation() {
     context = JSON.stringify([c?.id || "", root]);
   if (work.context === context) return false;
   work.context = context;
-  work.root = root;
-  workResetRows();
-  work.mode = "list";
-  work.shape = "";
+  workSetRoot(root);
   return true;
 }
 // render() 在切换对话、绑定或解绑目录时都会走到这里；平时重画只比一个标记，不读盘。
@@ -82,9 +79,7 @@ async function workPick() {
   try {
     const { paths } = await bridge("/api/work/pick", {});
     if (!paths?.[0] || !work.open || work.context !== context || work.root !== root) return;
-    work.root = slashed(paths[0]);
-    workResetRows();
-    work.mode = "list";
+    workSetRoot(paths[0]);
     workPaint();
     await workRefresh();
   } catch (error) {
@@ -95,11 +90,15 @@ async function workPick() {
 function workEnterDir(path) {
   const root = slashed(String(path || ""));
   if (!root || root === work.root) return;
-  work.root = root;
-  workResetRows();
-  work.mode = "list";
+  workSetRoot(root);
   workPaint();
   void workRefresh();
+}
+// 根、列表和模式一起换；先作废旧请求，调用者再绘制或刷新。
+function workSetRoot(root) {
+  work.root = slashed(root);
+  workResetRows();
+  work.mode = "list";
 }
 // ---------- 列 ----------
 // 换根或换面时，旧列表不可拿新根拼路径；在发出新请求前就使旧请求失效。
@@ -293,10 +292,11 @@ function workPaint() {
     body = rows.length
       ? `<div class="strip-cols"><span></span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
       : workEmptyBody(empty);
-  stageSetHtml($("#workStrips"), body);
-  for (const button of document.querySelectorAll("#workCrumbs [data-work-dir], #stageWork [data-work-mode]")) {
+  const notice = work.mode === "list" && work.truncated ? t("仅展示部分文件") : "";
+  stageSetHtml($("#workStrips"), body + (notice ? `<div class="library-empty">${notice}</div>` : ""));
+  for (const button of document.querySelectorAll("#stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);
-    if (el.dataset.workMode) el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
+    el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
   }
 }
 // ---------- 动手 ----------

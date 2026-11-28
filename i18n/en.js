@@ -1122,6 +1122,7 @@ var YAN_EN = {
   这一处还没有绑目录: "No folder is bound here yet",
   "选择文件夹…": "Choose folder…",
   此层尚空: "This folder is empty",
+  仅展示部分文件: "Showing only part of this folder",
   本段对话还没改过文件: "This chat hasn't changed any file yet",
   "正在翻…": "Looking…",
   "{0} 件 · 本段对话改过": "{0} {0|file|files} · changed in this chat",
