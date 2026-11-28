@@ -408,7 +408,7 @@ check(
   JSON.stringify(drag)
 );
 
-// ---- 卷宗多级：逐层看，夹与件同格；查找与按类筛选跨层平铺；拖入落进当前层；卡片拖到夹上即挪进去
+// ---- 卷宗多级：逐层看，夹与件同格；查找跨层平铺；拖入落进当前层；卡片拖到夹上即挪进去
 mkdirSync(`${ARCHIVE}/课程/深度学习`, { recursive: true });
 mkdirSync(`${ARCHIVE}/课程/空夹`, { recursive: true });
 writeFileSync(`${ARCHIVE}/课程/讲义.txt`, "讲义");
@@ -578,15 +578,15 @@ check(
   )
 );
 await evalJs(
-  `(() => { const s = document.querySelector("#librarySearch"); s.value = ""; s.dispatchEvent(new Event("input")); document.querySelector('[data-library-kind="audio"]').click(); })(); true`
+  `(() => { const s = document.querySelector("#librarySearch"); s.value = ".mp3"; s.dispatchEvent(new Event("input")); })(); true`
 );
 check(
-  "the 音 filter picks out audio, drawn as audio",
+  "searching by extension picks out audio, drawn as audio",
   (await evalJs(
     `[...document.querySelectorAll("#libraryGrid .strip")].map(c => c.querySelector("strong").textContent + c.querySelector(".fi").dataset.figure).join()`
   )) === "一声.mp3audio"
 );
-await evalJs(`document.querySelector('[data-library-kind="all"]').click(); true`);
+await evalJs(`(() => { const s = document.querySelector("#librarySearch"); s.value = ""; s.dispatchEvent(new Event("input")); })(); true`);
 await evalJs(`document.querySelector('#libraryCrumbs [data-library-dir=""]').click(); true`);
 await waitFor(`!!document.querySelector('#libraryGrid [data-library-disk="成品.txt"]')`);
 await dragCard("成品.txt", "课程");

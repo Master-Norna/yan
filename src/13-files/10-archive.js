@@ -1,7 +1,6 @@
 // 言 · 文件 · 卷宗：跨对话保存的文件库——列表、件图、夹，收入、置入、改名与移动
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
-let libraryQuery = "",
-  libraryKind = "all";
+let libraryQuery = "";
 // ---------- 卷宗：跨对话保存的文件库 ----------
 // 卷宗是存储根里的一个目录（bootstrap.work.archive）：拖进来的文件落盘，没绑目录的对话里模型写出的文件也在这里，页面即目录的视图。
 let archiveEntries = null,
@@ -159,12 +158,11 @@ function enterLibraryDir(dir) {
 let libraryRepainting = false;
 function renderLibrary() {
   const query = libraryQuery.trim().toLowerCase(),
-    matches = (name, kind) => (libraryKind === "all" || kind === libraryKind) && (!query || String(name).toLowerCase().includes(query)),
-    // 逐层看；一旦查找或按类筛选，就跨各层平铺，名字下注它所在的那一层
-    browsing = !query && libraryKind === "all";
+    // 逐层看；一旦查找，就跨各层平铺，名字下注它所在的那一层
+    browsing = !query;
   const diskItems = browsing
       ? (archiveEntries || []).filter(file => parentDir(file.path) === libraryDir)
-      : (archiveEntries || []).filter(file => matches(file.name, fileKind(file.name).group)),
+      : (archiveEntries || []).filter(file => String(file.name).toLowerCase().includes(query)),
     folders = browsing
       ? archiveDirs.filter(dir => parentDir(dir.path) === libraryDir).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
       : [];
@@ -178,9 +176,6 @@ function renderLibrary() {
       : ""
   }`;
   $("#libraryCleanScratch")?.addEventListener("click", () => void cleanScratch(null));
-  document
-    .querySelectorAll("[data-library-kind]")
-    .forEach(button => button.classList.toggle("active", button.dataset.libraryKind === libraryKind));
   // 只接回正改着的那一件的字：上一件改完失焦、桥接还没回话时它的输入框还在页上，紧接着点了另一件的改名，不能把上一件的新名带过去
   const draft = /** @type {HTMLInputElement|null} */ ($("#libraryGrid .strip-rename")),
     kept = draft?.closest("[data-library-item]")?.getAttribute("data-library-item") === libraryRenaming && {
@@ -247,12 +242,11 @@ function cancelLibraryRename() {
   libraryRenaming = "";
   renderLibrary();
 }
-// 新建夹：落在此刻这一层，建好即就地起名。正在查找或筛选时先收起，不然新夹不在眼前
+// 新建夹：落在此刻这一层，建好即就地起名。正在查找时先收起，不然新夹不在眼前
 async function newArchiveFolder() {
   try {
     const made = await bridge("/api/archive/mkdir", { root: archiveDir(), dir: libraryDir, name: t("新建夹") }, AbortSignal.timeout(8000));
     libraryQuery = "";
-    libraryKind = "all";
     /** @type {HTMLInputElement} */ ($("#librarySearch")).value = "";
     libraryRenaming = made.path;
     await refreshArchive();
@@ -453,7 +447,7 @@ async function placeFromArchive(path) {
   }
 }
 
-// 卷宗：收入、新建夹、检索、分类、条上的动作与就地改名；整页拖入文件；正文里指向卷宗文件的链接与答末的成品卡
+// 卷宗：收入、新建夹、检索、条上的动作与就地改名；整页拖入文件；正文里指向卷宗文件的链接与答末的成品卡
 function bindLibraryEvents() {
   $("#fileInput").onchange = handleFiles;
   $("#libraryAdd").onclick = () => $("#libraryFileInput").click();
@@ -466,13 +460,6 @@ function bindLibraryEvents() {
     libraryQuery = e.target.value;
     renderLibrary();
   });
-  document.querySelectorAll("[data-library-kind]").forEach(
-    button =>
-      (button.onclick = () => {
-        libraryKind = button.dataset.libraryKind;
-        renderLibrary();
-      })
-  );
   $("#libraryCrumbs").addEventListener("click", e => {
     const crumb = e.target.closest("[data-library-dir]");
     if (crumb) enterLibraryDir(crumb.dataset.libraryDir);
