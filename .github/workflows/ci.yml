@@ -43,8 +43,12 @@ jobs:
           node-version: 22
       - run: npm run unit
 
-  e2e:
-    name: 端到端
+  e2e-shard:
+    name: 端到端 · Windows ${{ matrix.shard }}/2
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -53,18 +57,36 @@ jobs:
         with:
           node-version: 24
       - run: node test/run.mjs
+        env:
+          YAN_TEST_SHARD: ${{ matrix.shard }}/2
       # 失败时留下的截图就在 test/.tmp 下（lib.mjs 的 shot）；Windows 是必过项，没有附件维护者只能本地复现才看得到画面
       - if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: yan-test-diagnostics-windows
+          name: yan-test-diagnostics-windows-${{ matrix.shard }}
           path: test/.tmp/*.png
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
 
+  # 保留分支保护识别的作业名；任何分片失败、取消或跳过都不能放行。
+  e2e:
+    name: 端到端
+    if: ${{ always() }}
+    needs: e2e-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: test "$SHARD_RESULT" = success
+        env:
+          SHARD_RESULT: ${{ needs.e2e-shard.result }}
+
   macos:
-    name: macOS 测试（不挡合并）
+    name: macOS 测试（不挡合并） · ${{ matrix.shard }}/2
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     runs-on: macos-latest
     timeout-minutes: 40
     continue-on-error: true
@@ -73,17 +95,20 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: npm run check
-      - run: npm run unit
+      - if: ${{ matrix.shard == 1 }}
+        run: npm run check
+      - if: ${{ matrix.shard == 1 }}
+        run: npm run unit
       - run: node test/run.mjs
         env:
+          YAN_TEST_SHARD: ${{ matrix.shard }}/2
           # run.mjs 默认优先找 Edge；Apple 芯片 Mac 上按端到端的无头参数实测 Edge 不产渲染帧、同环境 Chrome 能跑。
           # 这里只固定测试浏览器（含游目用例的第二个实例），不代表普通窗口或产品的无头浏览器有同样问题。
           YAN_TEST_BROWSER: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
       - if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: yan-test-diagnostics-macos
+          name: yan-test-diagnostics-macos-${{ matrix.shard }}
           path: test/.tmp/*.png
           include-hidden-files: true
           if-no-files-found: warn
