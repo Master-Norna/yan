@@ -3,6 +3,9 @@
 // 用语直白：言 → Chat、行 → Agent、卷宗 → Files、帮手 → subagent、余墨 → tokens left、旁注 → side thread、游目 → Browser
 var YAN_EN = {
   查找文件: "Search files",
+  搜索文件内容: "Search file contents",
+  没有匹配内容: "No matches",
+  双击固定页签: "Double-click to keep tab open",
   切换目录栏: "Toggle explorer",
   终端: "Terminal",
   输入指令: "Enter command",
