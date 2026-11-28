@@ -998,7 +998,9 @@ await evalJs(`document.querySelector("#stagePin").click(); true`);
 const workDir = `${ARCHIVE}/工作区-舞台`;
 mkdirSync(workDir, { recursive: true });
 writeFileSync(`${workDir}/笔记.md`, "# 笔记\n\n这一层只在工作区里看。\n");
-const browserChrome = await evalJs(`(() => { const head = document.querySelector(".stage-head"), wide = document.querySelector("#stageWide"), close = document.querySelector("#stageClose"); return { height: head.offsetHeight, wide: wide.offsetLeft, close: close.offsetLeft, row: document.querySelector("#stageNav").offsetHeight }; })()`);
+const browserChrome = await evalJs(
+  `(() => { const head = document.querySelector(".stage-head"), wide = document.querySelector("#stageWide"), close = document.querySelector("#stageClose"); return { height: head.offsetHeight, wide: wide.offsetLeft, close: close.offsetLeft, row: document.querySelector("#stageNav").offsetHeight }; })()`
+);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 const workFolder = `document.querySelector('[data-work-dir="${workDir}"]')`;
 await waitFor(`!!${workFolder}`);
