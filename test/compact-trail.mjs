@@ -143,7 +143,16 @@ await fetch(PAGE + "api/chats/save", {
               title: "计划",
               status: "done",
               plan: [{ text: "修改文件", status: "done" }]
-            }
+            },
+            ...["write_file", "run_command", "remember", "download_file"].map(name => ({
+              id: "compact-" + name,
+              name,
+              arguments: "{}",
+              title: name,
+              status: "done",
+              result: "完成",
+              ...(name === "write_file" ? { written: "let b = 1;" } : {})
+            }))
           ]
         }
       ]
@@ -178,6 +187,16 @@ check(
   "diff and directory details default to closed",
   await evalJs(`${diff}.classList.contains("folded") && ${list}.classList.contains("folded")`)
 );
+// 普通动作无外侧边线或额外缩进；有无副作用、是否收起都不改变小画的起点。
+const alignedHeads = `(() => {
+  const ids = ["compact-diff", "compact-list", "compact-write_file", "compact-run_command", "compact-remember", "compact-download_file"];
+  const rows = ids.map(id => document.querySelector('[data-step-id="' + id + '"]'));
+  const icons = rows.map(row => row.querySelector(".trail-kind-icon").getBoundingClientRect().left);
+  return rows.every(row => parseFloat(getComputedStyle(row).borderLeftWidth) === 0) &&
+    icons.every(x => Math.abs(x - icons[0]) < 1);
+})()`;
+check("ordinary action symbols align without outer rails", await evalJs(alignedHeads));
+check("collapsed diff is hidden", await evalJs(`${diff}.querySelector(".tool-diff").getClientRects().length === 0`));
 check("plan is not folded", await evalJs(`!document.querySelector('[data-step-id="compact-plan"]').classList.contains("folded")`));
 const screenshot = `document.querySelector('[data-step-id="compact-shot"] .tool-shot')`,
   shotHead = `document.querySelector('[data-step-id="compact-shot"] .tool-step-head')`;
@@ -215,6 +234,15 @@ if (await evalJs(headFocused)) {
 }
 await evalJs(`${diff}.querySelector(".tool-step-head").click(); true`);
 check("individual details can be expanded", await evalJs(`!${diff}.classList.contains("folded")`));
+check("expanded diff keeps its red and green inner edges without moving the header", await evalJs(`(() => {
+  const removed = ${diff}.querySelector(".split-diff > .d"),
+    added = ${diff}.querySelector(".split-diff > .i");
+  return removed.getClientRects().length > 0 && added.getClientRects().length > 0 &&
+    parseFloat(getComputedStyle(removed).borderLeftWidth) > 0 &&
+    parseFloat(getComputedStyle(added).borderLeftWidth) > 0 &&
+    getComputedStyle(removed).borderLeftColor !== getComputedStyle(added).borderLeftColor &&
+    ${alignedHeads};
+})()`));
 await evalJs(
   `document.querySelector("#openSettings").click(); document.querySelector('[data-tab="appearance"]').click(); ${off}.click(); true`
 );
