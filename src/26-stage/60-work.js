@@ -264,11 +264,21 @@ function workCrumbsHtml() {
 /** @param {WorkRow} row */
 function workRowHtml(row) {
   if (row.dir)
-    return `<div class="strip dir" role="button" tabindex="0" data-work-dir="${escapeHtml(row.path)}" title="${t`打开 ${escapeHtml(row.name)}`}"><span>${caseFigure()}</span><span class="strip-name"><strong>${escapeHtml(row.name)}</strong></span><span class="strip-note"><span class="ell" title="${escapeHtml(row.note || "")}">${escapeHtml(row.note || "")}</span></span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
+    return `<div class="strip dir" role="button" tabindex="0" data-work-dir="${escapeHtml(row.path)}" title="${t`打开 ${escapeHtml(row.name)}`}">${fileStripCells(
+      caseFigure(),
+      `<span class="strip-name"><strong>${escapeHtml(row.name)}</strong></span>`,
+      `<span class="strip-note"><span class="ell" title="${escapeHtml(row.note || "")}">${escapeHtml(row.note || "")}</span></span>`,
+      row.when || ""
+    )}</div>`;
   const where = row.where ? `<span class="dir">${escapeHtml(row.where.replace(/\/$/, ""))}/</span>` : "",
     size = row.size === null || row.size === undefined ? "" : escapeHtml(formatFileSize(row.size));
   // 删掉的件不再向盘上取缩略（取也取不到），只留那一片换过色的纸
-  return `<div class="strip file" role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}"><span>${fileFigure(row.name, row.state === "del" ? "" : row.path, row.state)}</span><span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span><span>${size}</span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
+  return `<div class="strip file" role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}">${fileStripCells(
+    fileFigure(row.name, row.state === "del" ? "" : row.path, row.state),
+    `<span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span>`,
+    `<span>${size}</span>`,
+    row.when || ""
+  )}</div>`;
 }
 function workPaint() {
   const box = $("#stageWork");
