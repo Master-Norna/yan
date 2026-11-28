@@ -397,6 +397,17 @@ function workSyncChangeReply() {
   if (work.mode === "changes") workResetRows();
   return true;
 }
+// 同一答再次改了同一件：列表刷新时，正显示着的那份 diff 也换到新的一笔；别的页签、草稿与滚动都不动。
+function workPaintOpenDiff() {
+  const tab = work.tabs[work.active];
+  if (!tab?.diff || !work.open || !stageShown()) return;
+  const stage = $("#fileViewerStage"),
+    message = latestChangeReply(currentConversation());
+  if (!message || !stage?.querySelector(".change-diff")) return;
+  const scroll = stage.scrollTop;
+  stage.innerHTML = workDiffHtml(message, tab.path);
+  stage.scrollTop = scroll;
+}
 // 一层只要一层（depth: 1）；改动直接查这一答碰过的件。
 async function workRefresh() {
   workSyncChangeReply();
@@ -425,6 +436,7 @@ async function workRefresh() {
       work.full = true;
       work.error = "";
       workPaint();
+      workPaintOpenDiff();
       return;
     }
     const data = await bridge(
@@ -447,6 +459,7 @@ async function workRefresh() {
     work.error = String(/** @type {any} */ (error).message || error).slice(0, 160);
   }
   workPaint();
+  workPaintOpenDiff();
   if (work.mode === "list" && rev === work.rev) {
     const paths = [...work.expanded].filter(path => {
       for (let parent = parentDir(path); parent && parent !== work.root; parent = parentDir(parent)) {
