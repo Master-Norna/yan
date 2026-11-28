@@ -57,6 +57,26 @@ class ContributionTests(unittest.TestCase):
         self.assertIn("Fix &amp; test", svg)
         self.assertIn("bbbbbbb", feed.render_index(rows))
 
+    def test_manual_include_and_exclude(self):
+        item = pr(2)
+        item["base"] = {"repo": {"full_name": "upstream/project", "private": False}}
+        found = {pr(1)["html_url"]: feed.pr_row(pr(1), "upstream/project")}
+        overrides = {"include": [item["html_url"]], "exclude": [pr(1)["html_url"]]}
+        with patch.object(feed, "api", return_value=item):
+            feed.apply_overrides(found, overrides)
+            feed.apply_overrides(found, overrides)
+        self.assertEqual(list(found), [item["html_url"]])
+        with self.assertRaises(ValueError):
+            feed.apply_overrides(found, {"include": ["https://example.org/pull/1"], "exclude": []})
+
+    def test_three_horizontal_lanes(self):
+        rows = [feed.pr_row(pr(i), "upstream/project") for i in range(1, 7)]
+        svg = feed.render_svg(rows)
+        ET.fromstring(svg)
+        self.assertIn('viewBox="0 0 850 326"', svg)
+        self.assertIn('id="strip2"', svg)
+        self.assertEqual(svg.count("<animateTransform"), 3)
+
     def test_search_splits_cap_and_paginates(self):
         calls = []
 

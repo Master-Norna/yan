@@ -7,12 +7,14 @@ on:
   pull_request:
     paths:
       - ".github/scripts/readme_contributions.py"
+      - ".github/scripts/readme_contributions.json"
       - ".github/scripts/test_readme_contributions.py"
       - ".github/workflows/readme-contributions.yml"
   push:
     branches: [main]
     paths:
       - ".github/scripts/readme_contributions.py"
+      - ".github/scripts/readme_contributions.json"
       - ".github/scripts/test_readme_contributions.py"
       - ".github/workflows/readme-contributions.yml"
 

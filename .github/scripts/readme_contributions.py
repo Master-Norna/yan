@@ -12,7 +12,7 @@ import urllib.request
 ACCOUNTS = ("Master-Norna", "Agent-Yan")
 OWNERS = {name.lower() for name in ACCOUNTS}
 DEST = pathlib.Path("assets/readme")
-SVG_HEAD = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 850 225\" role=\"img\" aria-label=\"Upstream contributions\"><style>.card{fill:#fcfbf9;stroke:#e4ded4}.project{fill:#49433d;font:600 13px Arial,sans-serif}.num{fill:#978576;font:11px Arial,sans-serif}.prtitle{fill:#48443e;font:13px Arial,sans-serif}.fade{stop-color:#fff}.still{display:none}@media(prefers-color-scheme:dark){.card{fill:#1c2025;stroke:#383d45}.project{fill:#e5e0d9}.num{fill:#bba191}.prtitle{fill:#c7c8c9}.fade{stop-color:#0d1117}}@media(prefers-reduced-motion:reduce){.moving{display:none}.still{display:inline}}</style><defs><clipPath id=\"window\"><rect width=\"850\" height=\"225\"/></clipPath><linearGradient id=\"left\"><stop class=\"fade\" offset=\"0\" stop-opacity=\"1\"/><stop class=\"fade\" offset=\"1\" stop-opacity=\"0\"/></linearGradient><linearGradient id=\"right\"><stop class=\"fade\" offset=\"0\" stop-opacity=\"0\"/><stop class=\"fade\" offset=\"1\" stop-opacity=\"1\"/></linearGradient>"
+SVG_HEAD = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 850 326\" role=\"img\" aria-label=\"Upstream contributions\"><style>.card{fill:#fcfbf9;stroke:#e4ded4}.project{fill:#49433d;font:600 13px Arial,sans-serif}.num{fill:#978576;font:11px Arial,sans-serif}.prtitle{fill:#48443e;font:12px Arial,sans-serif}.owner{fill:#978576;font:10px Arial,sans-serif}.fade{stop-color:#fff}.still{display:none}@media(prefers-color-scheme:dark){.card{fill:#1c2025;stroke:#383d45}.project{fill:#e5e0d9}.num,.owner{fill:#bba191}.prtitle{fill:#c7c8c9}.fade{stop-color:#0d1117}}@media(prefers-reduced-motion:reduce){.moving{display:none}.still{display:inline}}</style><defs><clipPath id=\"window\"><rect width=\"850\" height=\"326\"/></clipPath><linearGradient id=\"left\"><stop class=\"fade\" offset=\"0\" stop-opacity=\"1\"/><stop class=\"fade\" offset=\"1\" stop-opacity=\"0\"/></linearGradient><linearGradient id=\"right\"><stop class=\"fade\" offset=\"0\" stop-opacity=\"0\"/><stop class=\"fade\" offset=\"1\" stop-opacity=\"1\"/></linearGradient>"
 MERGE = "<g fill=\"none\" stroke=\"#8250df\" stroke-width=\"1.55\"><circle cx=\"4\" cy=\"3\" r=\"1.75\"/><circle cx=\"4\" cy=\"13\" r=\"1.75\"/><circle cx=\"12\" cy=\"6\" r=\"1.75\"/><path d=\"M4 5v6m1-5c0 3 3 4 5 1\"/></g>"
 
 # GitHub's public noreply addresses, not a name match. A different "Yan"
@@ -110,7 +110,35 @@ def associated_pulls(repo, sha):
         page += 1
 
 
-def collect():
+OVERRIDES = pathlib.Path(__file__).with_name("readme_contributions.json")
+PR_LINK = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?", re.I)
+COMMIT_LINK = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/commit/([0-9a-f]{40})/?", re.I)
+
+
+def apply_overrides(found, overrides):
+    # Manual inclusion is an explicit maintainer decision, not an identity match.
+    # Only canonical public, merged upstream PRs are accepted for publication.
+    for url in overrides["include"]:
+        match = PR_LINK.fullmatch(url)
+        if not match:
+            raise ValueError(f"Expected a GitHub pull request URL: {url}")
+        repo, number = match.groups()
+        pr = api(f"repos/{repo}/pulls/{number}")
+        target = (pr.get("base") or {}).get("repo") or {}
+        if target.get("private") or not target.get("full_name"):
+            raise ValueError(f"Expected a public upstream PR: {url}")
+        row = pr_row(pr, target["full_name"])
+        if not row:
+            raise ValueError(f"Expected an eligible merged upstream PR: {url}")
+        found[row["url"].lower()] = row
+    # Exclusion wins over either source. Accept canonical PR and commit links.
+    for url in overrides["exclude"]:
+        if not (PR_LINK.fullmatch(url) or COMMIT_LINK.fullmatch(url)):
+            raise ValueError(f"Expected a GitHub PR or commit URL: {url}")
+        found.pop(url.rstrip("/").lower(), None)
+
+
+def collect(overrides=None):
     found = {}
     for account in ACCOUNTS:
         for item in search("issues", f"author:{account} is:pr is:merged is:public"
@@ -152,6 +180,7 @@ def collect():
                            "url": item["html_url"],
                            "merged": item["commit"]["committer"]["date"]}
                     found[row["url"].lower()] = row
+    apply_overrides(found, overrides if overrides is not None else {"include": [], "exclude": []})
     return sorted(found.values(), key=lambda p: (p["merged"], p["url"]), reverse=True)
 
 
@@ -173,13 +202,13 @@ def wrap_title(title, width):
 def render_svg(rows):
     parts = [SVG_HEAD]
     lengths = []
-    for k in range(2):
+    for k in range(3):
         x = 0
         parts.append(f'<g id="strip{k}">')
-        for i, p in enumerate(rows[k::2]):
+        for i, p in enumerate(rows[k::3]):
             w = [265, 304, 281, 322, 290, 276][(i + 2*k) % 6]
-            y = [0, 9, -4, 5, -2, 11][(i + 3*k) % 6]
-            h = [80, 88, 83, 77, 86][(i + k) % 5]
+            y = [0, 5, -3, 3, -2, 6][(i + 3*k) % 6]
+            h = [86, 88, 84, 87, 89][(i + k) % 5]
             label = html.escape(f'{p["repo"]} {reference(p)} — {p["title"]}')
             mark = MERGE if "number" in p else COMMIT
             project = html.escape(p["repo"].split("/")[-1])
@@ -188,9 +217,10 @@ def render_svg(rows):
                          f'<g transform="translate(12 11)">{mark}</g>'
                          f'<text class="project" x="34" y="23">{project}</text>'
                          f'<text class="num" x="{w-12}" y="23" text-anchor="end">{reference(p)}</text>'
-                         f'<path d="M13 33H{w-13}" stroke="#b6a99a" opacity=".2"/>')
+                         f'<path d="M13 31H{w-13}" stroke="#b6a99a" opacity=".2"/>')
             for j, line in enumerate(wrap_title(p["title"], (w-28)//7)):
-                parts.append(f'<text class="prtitle" x="13" y="{50+j*16}">{html.escape(line)}</text>')
+                parts.append(f'<text class="prtitle" x="13" y="{46+j*14}">{html.escape(line)}</text>')
+            parts.append(f'<text class="owner" x="13" y="{h-9}">{html.escape(p["repo"].split("/")[0])}</text>')
             parts.append("</g>")
             x += w + 13
         parts.append("</g>")
@@ -201,19 +231,19 @@ def render_svg(rows):
             continue
         copies = "".join(f'<use xlink:href="#strip{k}" x="{i*length}"/>'
                          for i in range((962 + length - 1)//length + 2))
-        parts.append(f'<g transform="translate({-112 if k else 0} {9+k*112})">'
+        parts.append(f'<g transform="translate({0} {6+k*108})">'
                      f'<g class="moving"><animateTransform attributeName="transform" type="translate" '
-                     f'from="{-length if k else 0} 0" to="{0 if k else -length} 0" '
+                     f'from="{-length if k == 1 else 0} 0" to="{0 if k == 1 else -length} 0" '
                      f'dur="{length/24:.2f}s" repeatCount="indefinite"/>{copies}</g>'
                      f'<g class="still">{copies}</g></g>')
-    parts.append('</g><rect width="28" height="225" fill="url(#left)"/>'
-                 '<rect x="822" width="28" height="225" fill="url(#right)"/></svg>\n')
+    parts.append('</g><rect width="28" height="326" fill="url(#left)"/>'
+                 '<rect x="822" width="28" height="326" fill="url(#right)"/></svg>\n')
     return "".join(parts)
 
 
 def render_index(rows):
     lines = ["# Upstream contributions / 上游贡献", "",
-             "Public upstream PRs and default-branch commits credited to Agent-Yan or Master-Norna, including co-authorship. / 公开上游贡献，含直接提交与共同署名；按 GitHub 记录归集。", ""]
+             "Upstream contributions collected from public GitHub records and maintainer-selected PRs. / 言参与的上游贡献，自动发现与人工补录。", ""]
     for p in rows:
         title = re.sub(r"([\\\[\]<>*_])", r"\\\1", p["title"])
         lines.append(f'- [{p["repo"]} {reference(p)}]({p["url"]}) — {title}')
@@ -221,7 +251,7 @@ def render_index(rows):
 
 
 if __name__ == "__main__":
-    rows = collect()
+    rows = collect(json.loads(OVERRIDES.read_text(encoding="utf-8")))
     if not rows:
         raise RuntimeError("Empty contribution feed; preserve the previous version")
     DEST.mkdir(parents=True, exist_ok=True)

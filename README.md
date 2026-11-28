@@ -4,13 +4,22 @@
 
 <h1>言 · Yan</h1>
 
-<strong>从一席对谈，到一件事做成。</strong>
+<strong>面向长程协作的个人智能体</strong>
 
 <p>清简为骨，纸墨为意。</p>
 
 <a href="LICENSE"><img src="assets/readme/license.svg" alt="Apache-2.0"></a>
 <a href="https://github.com/Master-Norna/yan/releases/latest"><img src="assets/readme/platform.svg" alt="Windows · macOS"></a>
 <a href="docs/models.md"><img src="assets/readme/local.svg" alt="自选模型"></a>
+<a href="https://github.com/topics/javascript"><img src="assets/readme/tag-language.svg" alt="language: JavaScript"></a>
+<a href="https://github.com/topics/nodejs"><img src="assets/readme/tag-runtime.svg" alt="runtime: Node.js 22+"></a><br>
+<a href="https://github.com/topics/ai-agent"><img src="assets/readme/tag-agent.svg" alt="agent: AI Agent · Agentic"></a>
+<a href="https://github.com/topics/local-first"><img src="assets/readme/tag-architecture.svg" alt="architecture: Local-first"></a>
+<a href="https://github.com/topics/browser-automation"><img src="assets/readme/tag-browser.svg" alt="browser: Automation"></a>
+<a href="https://github.com/topics/chat-ui"><img src="assets/readme/tag-chat-ui.svg" alt="interface: Chat UI"></a><br>
+<a href="https://github.com/topics/mcp"><img src="assets/readme/tag-tools.svg" alt="tools: MCP · Skills"></a>
+<a href="https://github.com/topics/openai-compatible"><img src="assets/readme/tag-api.svg" alt="API: OpenAI-compatible"></a>
+<a href="https://github.com/topics/rsi"><img src="assets/readme/tag-rsi.svg" alt="research: RSI"></a>
 
 [下载](https://github.com/Master-Norna/yan/releases/latest) · [文档](docs/README.md) · [English](README.en.md)
 
@@ -22,28 +31,28 @@
   <img src="assets/yan-home.png" alt="言的实际界面" width="100%">
 </p>
 
-## 核心体验
+## <img src="assets/readme/seal-core.svg" width="38" height="38" alt=""> 核心体验
 
 <table>
 <tr>
-<td width="45%" valign="middle"><h3>以验收为中心的长程执行</h3><p>「图」将任务组织为结论、依赖与验收凭据，而非待办清单。文件、测试或探针结果变化时，关联结论转为待复核；收尾前，模型重新对照用户最初的目标自判完成情况。</p><a href="docs/work.md#图">了解更多</a></td>
-<td width="55%" valign="middle"><img src="assets/readme/01-evidence.svg" alt="以验收为中心的长程执行" width="100%"></td>
+<td width="45%" valign="middle"><h3>长程任务</h3><p>以「图」组织目标、依赖与验收凭据，以「差遣」并行推进子任务，以「候」响应时间与事件。执行、等待、唤醒与复核相接，让复杂任务不受单次对话限制。</p><a href="docs/work.md">了解更多</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/01-long-task.svg" alt="长程任务" width="100%"></td>
 </tr>
 <tr>
-<td width="55%" valign="middle"><img src="assets/readme/02-continuity.svg" alt="跨会话持续推进" width="100%"></td>
-<td width="45%" valign="middle"><h3>跨会话持续推进</h3><p>「候」以进程结束或定时事件唤醒模型，避免无效等待；「差遣」支持帮手分工。图与目录记忆独立于单次对话保存，新会话可以承接已有进展和约束。</p><a href="docs/work.md#候">了解更多</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/02-browser.svg" alt="浏览器自动化" width="100%"></td>
+<td width="45%" valign="middle"><h3>浏览器自动化</h3><p>「游目」将 Agent 操作的浏览器置于用户眼前。网页检索、交互与操作贯通，用户可随时接管，也可通过圈点与引用直接参与任务。</p><a href="docs/stage.md">了解更多</a></td>
 </tr>
 <tr>
-<td width="45%" valign="middle"><h3>任务级的可编程约束</h3><p>「守」将任务要求落实为可执行的 Hook：匹配指定动作，执行前运行测试、拦截或请求批准；也可在收尾时复查测试和探针。约束随任务延续，不仅依靠提示词。</p><a href="docs/work.md#图">了解更多</a></td>
-<td width="55%" valign="middle"><img src="assets/readme/03-guard.svg" alt="任务级的可编程约束" width="100%"></td>
+<td width="45%" valign="middle"><h3>多模态智能体</h3><p>对话内联呈现交互图表与可视化内容，并以文件成品承载交付。借助本机执行环境与相应工具，可生成图像、音频、视频等数字内容。</p><a href="docs/chat.md">了解更多</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/03-multimodal.svg" alt="多模态智能体" width="100%"></td>
 </tr>
 <tr>
-<td width="55%" valign="middle"><img src="assets/readme/04-collaboration.svg" alt="可审阅、可介入的执行" width="100%"></td>
-<td width="45%" valign="middle"><h3>可审阅、可介入的执行</h3><p>「行迹」保留操作与文件变更，工作区支持查看差异和按答复回退改动。「游目」呈现模型操作的浏览器，人可直接接管、圈点引用，与 Agent 共享工作现场。</p><a href="docs/stage.md">了解更多</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/04-personalized.svg" alt="个性化智能体" width="100%"></td>
+<td width="45%" valign="middle"><h3>个性化智能体</h3><p>记忆沉淀长期上下文，MCP 接入外部服务，Skill 复用工作方法；结合模型、工具与权限预设，构建适合不同领域与任务的专属 Agent。</p><a href="docs/memory.md">了解更多</a></td>
 </tr>
 </table>
 
-## 产品能力
+## <img src="assets/readme/seal-capabilities.svg" width="38" height="38" alt=""> 产品能力
 
 | 对话与创作 | 检索与研究 |
 | --- | --- |
@@ -53,7 +62,7 @@
 | **记忆与个性化** | **模型与工具** |
 | 跨会话记忆、目录记忆、预设与会话分组。 | 自主选择模型，接入 MCP、Skills 与本机工具。 |
 
-## 安全与控制
+## <img src="assets/readme/seal-safety.svg" width="38" height="38" alt=""> 安全与控制
 
 按场景选择问而后行、审而后行或径行。权限档位、沙箱规则、独立审查与任务守则形成不同层次的控制。
 
@@ -64,7 +73,7 @@
 
 实际保护范围取决于权限档位与配置。[权限与沙箱](docs/sandbox.md)。
 
-## 纸墨设计
+## <img src="assets/readme/seal-design.svg" width="38" height="38" alt=""> 纸墨设计
 
 <div align="center">
 <img src="assets/readme/ink-appearance.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-presets.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-scroll.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-theme.svg" alt="" width="52" height="52">
@@ -72,7 +81,7 @@
 
 清简纸墨贯穿界面与交互：以笔意作图标，以朱印示反馈，以墨历记使用，明暗随天光流转。
 
-## 模型自主与开放生态
+## <img src="assets/readme/seal-ecosystem.svg" width="38" height="38" alt=""> 模型自主与开放生态
 
 自主选择模型接口，按需配置审查等专司；通过 MCP 与 Skills 扩展工作能力。对话与配置保存在本机，发给模型或外部工具的内容由相应服务处理。接口支持硅基流动、OpenAI 兼容、Anthropic 与 ChatGPT 订阅。
 
@@ -82,7 +91,7 @@
 
 言与 [硅基流动 SiliconFlow](https://siliconflow.cn) 合作：在「设置 → 模型」的接口里选「硅基流动」，填上自己的 API Key 即可。图文步骤见硅基流动官方文档里的[《在言中使用硅基流动》](https://docs.siliconflow.cn/docs/usercases/use-siliconcloud-in-yan)。
 
-## 开始使用
+## <img src="assets/readme/seal-start.svg" width="38" height="38" alt=""> 开始使用
 
 **Windows**：到 [Releases](https://github.com/Master-Norna/yan/releases/latest) 下载 `yan-<版本>-win-x64.zip`，解开后双击 `言.exe`。头一回若提示「已保护你的电脑」，点「更多信息 → 仍要运行」（`言.exe` 未签名）。
 
@@ -108,9 +117,9 @@ npm start
 
 本项目以 Apache-2.0 发布，全文见 `LICENSE`。随项目本地分发的开源库：marked（MIT）、DOMPurify（Apache-2.0）、highlight.js（BSD-3-Clause）、KaTeX（MIT）、Mermaid（MIT）、Apache ECharts（Apache-2.0）、PDF.js（Apache-2.0），许可全文见 `vendor/`。
 
-## 开源贡献
+## <img src="assets/readme/seal-contributions.svg" width="38" height="38" alt=""> 开源贡献
 
-言在开源协作中持续成长。下方收录言与项目维护者参与的上游贡献，依据 GitHub 公开记录自动更新，包含共同署名的成果。
+言在真实的开源协作中持续成长。以下为言参与的上游贡献。
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Master-Norna/yan/readme-contributions/assets/readme/contributions.svg" alt="开源贡献" width="100%">
