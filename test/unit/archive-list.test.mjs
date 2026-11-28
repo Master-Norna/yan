@@ -15,8 +15,8 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
     scratchDir = path.join(root, SCRATCH_DIR),
     listed = createArchive({ archiveHome: () => root })["POST /api/archive/list"];
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const dir of ["report/nested", "report/.hidden", "report/node_modules", "empty", ".hidden", "node_modules", `${SCRATCH_DIR}/chat/sub`])
-    fs.mkdirSync(path.join(root, dir), { recursive: true });
+  const dirs = ["report/nested", "report/.hidden", "report/node_modules", "empty", ".hidden", "node_modules", `${SCRATCH_DIR}/chat/sub`];
+  for (const dir of dirs) fs.mkdirSync(path.join(root, dir), { recursive: true });
   for (const file of ["report/fig.png", "fig.png", ".hidden/fig.png", "node_modules/fig.png", `${SCRATCH_DIR}/chat/sub/fig.png`])
     fs.writeFileSync(path.join(root, file), "abc");
   fs.symlinkSync(path.join(root, "report"), path.join(root, "linked"), "junction");
@@ -72,10 +72,10 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
     shallow.dirs.map(dir => dir.path),
     ["empty", "report"]
   );
-  assert.deepEqual(shallow.dirs.map(({ files, folders }) => [files, folders]), [
-    [0, 0],
-    [1, 1]
-  ]);
+  assert.equal(shallow.dirs[0].files, 0);
+  assert.equal(shallow.dirs[0].folders, 0);
+  assert.equal(shallow.dirs[1].files, 1);
+  assert.equal(shallow.dirs[1].folders, 1);
   assert.ok(shallow.dirs[0].modifiedAt);
   assert.equal(shallow.dirs[1].modifiedAt, new Date(2000000).toISOString());
   assert.deepEqual(
