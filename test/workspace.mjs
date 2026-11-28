@@ -1,5 +1,8 @@
 // 工作区：独立树、页签、预览、搜索、命令区与浏览器切换。
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { officeZipFixture } from "./helpers/office-zip.mjs";
+import { createRequire } from "node:module";
+const { readOffice } = createRequire(import.meta.url)("../server/work/office.js");
 import { connect, check, sleep, PAGE, ARCHIVE } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
 // 工作区的实情（页面脚本包在闭包里读不到变量，只好看 DOM）：断言不过时一并写出来，省得再猜
@@ -39,6 +42,14 @@ mkdirSync(`${ROOT}/空夹`, { recursive: true });
 writeFileSync(`${ROOT}/笔记.md`, "# 笔记\n\n工作区里的这一份。\n");
 writeFileSync(`${ROOT}/一页.txt`, "只有一页字。\n");
 writeFileSync(`${ROOT}/子夹/深.md`, "# 深一层\n");
+
+const wordNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const sheetNS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const wordPart = `<w:document xmlns:w="${wordNS}"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>原文字</w:t></w:r></w:p></w:body></w:document>`;
+const sheetPart = `<worksheet xmlns="${sheetNS}"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1"><f>1+1</f><v>2</v></c><c r="D1"><v>10</v></c></row></sheetData></worksheet>`;
+const sharedPart = '<sst xmlns="' + sheetNS + '" count="2" uniqueCount="1"><si><t>共享原值</t></si></sst>';
+writeFileSync(ROOT + "/编辑.docx", officeZipFixture({ "word/document.xml": wordPart, "word/styles.xml": "<styles/>" }));
+writeFileSync(ROOT + "/编辑.xlsx", officeZipFixture({ "xl/worksheets/sheet1.xml": sheetPart, "xl/sharedStrings.xml": sharedPart }));
 
 await send("Page.navigate", { url: `${PAGE}preview.html` });
 await sleep(400);
@@ -302,6 +313,50 @@ check(
   "切回目录保留空夹展开状态",
   await evalJs(`document.querySelector('#workStrips [data-work-dir$="/空夹"]')?.getAttribute("aria-expanded")==="true"`)
 );
+
+const officeOpen = async name => {
+  await evalJs("document.querySelector(" + JSON.stringify('[data-work-file$="/' + name + '"]') + ").click(); true");
+  await waitFor('!!document.querySelector("[data-work-edit]")');
+  await evalJs('document.querySelector("[data-work-edit]").click(); true');
+  await waitFor('!!document.querySelector("[data-office-field]")');
+};
+const officeSet = async (index, value) => {
+  await evalJs(
+    `(() => {const el=document.querySelectorAll("[data-office-field]")[${index}]; el.value=${JSON.stringify(value)}; el.dispatchEvent(new Event("input",{bubbles:true})); return true;})()`
+  );
+};
+const officeSave = async () => {
+  check("未保存有圆点", await evalJs('!!document.querySelector(".work-tab.on .work-dirty-dot")'));
+  await evalJs(
+    'document.querySelector("[data-office-field]").dispatchEvent(new KeyboardEvent("keydown",{key:"s",ctrlKey:true,bubbles:true,cancelable:true})); true'
+  );
+  await waitFor('!document.querySelector(".work-tab.on .work-dirty-dot")');
+};
+await officeOpen("编辑.docx");
+await officeSet(0, "改后的文字 & < >");
+await officeSave();
+const word = readOffice("编辑.docx", readFileSync(ROOT + "/编辑.docx"))["word/document.xml"];
+check("Word 原地修改并保留加粗属性", /改后的文字 &amp; &lt; (?:&gt;|>)/.test(word) && /<w:b(?:\s|\/|>)/.test(word));
+await evalJs('document.querySelector("[data-work-edit]").click(); true');
+await officeOpen("编辑.xlsx");
+check("公式单元格不进入编辑列表", await evalJs('document.querySelectorAll("[data-office-field]").length===3'));
+await officeSet(0, "独立新值");
+await officeSet(2, "42");
+await officeSave();
+const book = readOffice("编辑.xlsx", readFileSync(ROOT + "/编辑.xlsx"));
+check(
+  "Excel 独立字符串与数字保存，不改共享索引、公式",
+  book["xl/worksheets/sheet1.xml"].includes("独立新值") &&
+    book["xl/worksheets/sheet1.xml"].includes('<c r="B1" t="s"><v>0</v></c>') &&
+    book["xl/worksheets/sheet1.xml"].includes("<f>1+1</f>") &&
+    book["xl/worksheets/sheet1.xml"].includes("<v>42</v>") &&
+    book["xl/sharedStrings.xml"].includes("共享原值")
+);
+await officeSet(0, "共享原值");
+await officeSave();
+const restored = readOffice("编辑.xlsx", readFileSync(ROOT + "/编辑.xlsx"));
+check("同一编辑态再次保存及回改有效", restored["xl/worksheets/sheet1.xml"].includes('<c r="A1" t="s"><v>0</v></c>'));
+
 check("全程没有页面异常", await evalJs(`window.__yanExceptions.length === 0`), await evalJs(`JSON.stringify(window.__yanExceptions)`));
 close();
 process.exit(0);

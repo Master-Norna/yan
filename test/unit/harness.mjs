@@ -33,7 +33,7 @@ const element = () => ({
   innerHTML: ""
 });
 const stubs = {
-  window: { YAN_PROMPTS: { tools: {} } },
+  window: { YAN_PROMPTS: { tools: {} }, addEventListener: noop, removeEventListener: noop },
   document: {
     documentElement: element(),
     body: element(),
