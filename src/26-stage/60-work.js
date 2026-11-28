@@ -665,21 +665,21 @@ async function workRunCommand(command) {
   try {
     const cd = workTerminalCd(command);
     if (cd !== null) {
-      const result = await bridge("/api/work/terminal-dir", { workdir: cwd, path: cd }, signal);
+      const result = await bridge("/api/work/terminal-dir", { workdir: cwd, path: cd }, AbortSignal.any([signal, AbortSignal.timeout(8000)]));
       if (work.command === state) work.terminalDir = slashed(result.workdir);
       return;
     }
-    let result = await bridge("/api/work/run", { workdir: cwd, command, background: true, terminal: true, sandbox: false }, signal);
+    let result = await bridge("/api/work/run", { workdir: cwd, command, background: true, terminal: true, sandbox: false }, AbortSignal.any([signal, AbortSignal.timeout(8000)]));
     if (result.id && result.key) state.job = { id: result.id, key: result.key };
     if (work.command !== state) {
       if (state.job && result.running) void bridge("/api/work/check", { ...state.job, stop: true }, AbortSignal.timeout(8000)).catch(() => {});
       return;
     }
     for (;;) {
-      workTerminalAppend((result.stdout || "") + (result.stderr || ""));
+      workTerminalAppend((result.stdout || "") + (result.stdout && result.stderr && !result.stdout.endsWith("\n") ? "\n" : "") + (result.stderr || ""));
       if (!result.running) break;
       if (!state.job) throw Error(t("终端指令编号已失效"));
-      result = await bridge("/api/work/check", { ...state.job, stop: state.stopping, wait: state.stopping ? 0 : 1 }, signal);
+      result = await bridge("/api/work/check", { ...state.job, stop: state.stopping, wait: state.stopping ? 0 : 1 }, AbortSignal.any([signal, AbortSignal.timeout(8000)]));
       if (work.command !== state) return;
     }
     const status = state.stopping ? t("已停止") : result.timedOut ? t("执行超时") : t`退出码：${result.exitCode}`;
@@ -786,7 +786,7 @@ function bindWork() {
       if (event.ctrlKey && event.key.toLowerCase() === "c" && work.command && input.selectionStart === input.selectionEnd && !window.getSelection()?.toString()) {
         event.preventDefault();
         workTerminalStop();
-      } else if (!work.command && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+      } else if (!work.command && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && ["ArrowUp", "ArrowDown"].includes(event.key)) {
         event.preventDefault();
         workTerminalRecall(event.key === "ArrowUp" ? -1 : 1, input);
       } else if (event.ctrlKey && event.key.toLowerCase() === "l") {
