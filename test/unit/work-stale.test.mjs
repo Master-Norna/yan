@@ -129,3 +129,42 @@ test("编辑器拒绝截断、混合换行及缺少指纹的覆盖", async () =>
     assert.equal(fs.readFileSync(file, "utf8"), content);
   }
 });
+
+// 编辑框里的字按 LF 数；写回时再补 CRLF。按含 CR 的字数卡，刚存好的文件会在下一次打开时报超限。
+test("CRLF 文本的编辑上限按编辑框字数算，存回后仍能打开", async () => {
+  const { root, call } = setup(),
+    file = path.join(root, "a.txt"),
+    line = "x".repeat(199999);
+  // 原文 200001 字节，编辑框里 200000 字
+  fs.writeFileSync(file, `${line}\r\n`);
+  const read = await call("read", { editor: true });
+  assert.equal(read.text, `${line}\n`);
+  const saved = await call("write", { editor: true, seen: read.sig, content: `${line}\n` });
+  assert.match(saved.sig, /^[0-9a-f]{16}$/);
+  assert.equal(fs.readFileSync(file, "utf8"), `${line}\r\n`);
+  const again = await call("read", { editor: true });
+  assert.equal(again.text, `${line}\n`);
+});
+
+// 读时比过的指纹到替换前这一小段：外部写入要当场作废，盘上留外部那份，回 stale 让页面保住编辑稿。
+test("比对通过后、替换之前原件被改：不覆盖，回 stale", async () => {
+  const { root, call } = setup(),
+    file = path.join(root, "a.txt"),
+    read = await call("read", { editor: true }),
+    realOpen = fs.promises.open;
+  fs.promises.open = async (target, ...rest) => {
+    // 临时件在替换前写好；这里模拟外部编辑器恰好在这一段里落盘
+    if (String(target).endsWith(".tmp")) fs.writeFileSync(file, "outside\n");
+    return realOpen.call(fs.promises, target, ...rest);
+  };
+  try {
+    const saved = await call("write", { editor: true, seen: read.sig, content: "mine\n" });
+    assert.equal(saved.stale, true);
+    assert.equal(fs.readFileSync(file, "utf8"), "outside\n");
+    assert.equal(saved.sig, (await call("read", {})).sig);
+  } finally {
+    fs.promises.open = realOpen;
+    fs.unlinkSync(file);
+    fs.rmdirSync(root);
+  }
+});
