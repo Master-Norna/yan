@@ -79,9 +79,9 @@ function workSyncConversation() {
   if (workFollowConversation()) {
     workPaint();
     if (work.root) void workRefresh();
-  } else if (workSyncChangeReply() && work.mode === "changes") {
+  } else if (workSyncChangeReply()) {
     workPaint();
-    void workRefresh();
+    if (work.mode === "changes") void workRefresh();
   }
 }
 function workEnter() {
@@ -255,7 +255,9 @@ async function workRefresh() {
       for (let i = 0; i < files.length; i += 16) {
         await Promise.all(
           files.slice(i, i + 16).map(async file => {
-            const info = changeAbsPath(file.path, "") ? await bridge("/api/archive/stat", { path: file.path }, AbortSignal.timeout(8000)).catch(() => null) : null;
+            const info = changeAbsPath(file.path, "")
+              ? await bridge("/api/archive/stat", { path: file.path }, AbortSignal.timeout(8000)).catch(() => null)
+              : null;
             entries.set(file.path, info);
           })
         );

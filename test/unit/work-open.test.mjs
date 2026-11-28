@@ -121,36 +121,36 @@ test("改动面点件看这一答的改动，不打开原件", () => {
 test("这一答的改动按条按步的先后排，相对路按原步骤目录配对", () => {
   const f = load(["workDiffHtml"]),
     message = {
-          steps: [
-            {
-              name: "write_file",
-              status: "done",
-              arguments: "{}",
-              result: "已写入",
-              written: "# 一\n",
-              root: "C:/one",
-              change: { path: "A.md", created: true }
-            },
-            {
-              name: "edit_file",
-              status: "done",
-              arguments: "{}",
-              result: "已修改",
-              previous: "# 一\n",
-              written: "# 二\n",
-              change: { path: `${first}` }
-            },
-            {
-              name: "edit_file",
-              status: "done",
-              arguments: "{}",
-              result: "别处",
-              previous: "a\n",
-              written: "b\n",
-              root: "D:/else",
-              change: { path: "A.md" }
-            }
-          ]
+      steps: [
+        {
+          name: "write_file",
+          status: "done",
+          arguments: "{}",
+          result: "已写入",
+          written: "# 一\n",
+          root: "C:/one",
+          change: { path: "A.md", created: true }
+        },
+        {
+          name: "edit_file",
+          status: "done",
+          arguments: "{}",
+          result: "已修改",
+          previous: "# 一\n",
+          written: "# 二\n",
+          change: { path: `${first}` }
+        },
+        {
+          name: "edit_file",
+          status: "done",
+          arguments: "{}",
+          result: "别处",
+          previous: "a\n",
+          written: "b\n",
+          root: "D:/else",
+          change: { path: "A.md" }
+        }
+      ]
     },
     html = f.workDiffHtml(message, first);
   assert.equal((html.match(/tool-diff/g) || []).length, 2);

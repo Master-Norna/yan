@@ -26,11 +26,11 @@ function changePath(step) {
 }
 /** @param {Conversation|null|undefined} conversation */
 function streamingChangeReply(conversation) {
-  return conversation?.messages.findLast(m => m.role === "assistant" && m.status === "streaming") || null;
+  return conversation?.messages?.findLast(m => m.role === "assistant" && m.status === "streaming") || null;
 }
 /** @param {Conversation|null|undefined} conversation */
 function latestChangeReply(conversation) {
-  return streamingChangeReply(conversation) || conversation?.messages.findLast(m => m.role === "assistant") || null;
+  return streamingChangeReply(conversation) || conversation?.messages?.findLast(m => m.role === "assistant") || null;
 }
 /** @param {{ steps?: Step[] }} message */
 function changeStats(message) {
