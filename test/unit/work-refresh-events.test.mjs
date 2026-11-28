@@ -11,7 +11,8 @@ test("只读、跳过、失败不触发工作区刷新；成功改动合并为�
       return calls;
     }`
   ]);
-  const calls = f.setup(), c = { id: "a" };
+  const calls = f.setup(),
+    c = { id: "a" };
   f.workRefreshAfterTools(c, [
     { name: "run_command", status: "done", readOnly: true },
     { name: "write_file", status: "error" },
@@ -27,7 +28,8 @@ test("只读、跳过、失败不触发工作区刷新；成功改动合并为�
 
 test("未打开、非当前对话不刷新；连续写入只取一次当前列表", async () => {
   const f = load([
-    "work", "workQueueRefresh",
+    "work",
+    "workQueueRefresh",
     `setup: () => {
       let count = 0;
       stageShown = () => true;
