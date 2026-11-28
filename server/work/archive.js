@@ -40,8 +40,12 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     return resolveInside(root, rel);
   }
   // 子目录也要列：空的夹同样是一层，页面上要能看见、能把文件拖进去
-  async function walkArchive(root, dir, out, dirs) {
-    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+  async function walkArchive(root, dir, out, dirs, shallow = false) {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(error => {
+      // 工作区正站在这一层：读不了不能画成空夹。卷宗全树仍可略过读不到的层。
+      if (shallow) throw Error(describeFsError(error, dir));
+      return [];
+    });
     for (const entry of entries) {
       if (out.length + dirs.length >= ARCHIVE_LIST_LIMIT) return;
       if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
@@ -49,7 +53,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       if (entry.isDirectory()) {
         if (WORK_SKIP.has(entry.name)) continue;
         dirs.push({ path: relPath(root, full), name: entry.name });
-        await walkArchive(root, full, out, dirs);
+        if (!shallow) await walkArchive(root, full, out, dirs);
         continue;
       }
       const stat = await fs.promises.stat(full).catch(() => null);
@@ -92,19 +96,9 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       dirs = [];
     // depth: 1 只列这一层（游目的工作区：看一处代码目录不必为看一层把整棵树都走一遍）。
     // 路径仍相对根，这一层的就是名字本身
-    if (Number(body.depth) === 1) {
-      for (const entry of await fs.promises.readdir(root, { withFileTypes: true }).catch(() => [])) {
-        if (out.length + dirs.length >= ARCHIVE_LIST_LIMIT) break;
-        if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
-        if (entry.isDirectory()) {
-          if (!WORK_SKIP.has(entry.name)) dirs.push({ path: entry.name, name: entry.name });
-          continue;
-        }
-        const stat = await fs.promises.stat(path.join(root, entry.name)).catch(() => null);
-        if (stat) out.push({ path: entry.name, name: entry.name, size: stat.size, modifiedAt: stat.mtime.toISOString() });
-      }
-      dirs.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
-    } else await walkArchive(root, root, out, dirs);
+    const shallow = Number(body.depth) === 1;
+    await walkArchive(root, root, out, dirs, shallow);
+    if (shallow) dirs.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
     out.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
     return {
       archive: root,

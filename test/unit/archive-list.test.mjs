@@ -28,13 +28,17 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
     scanned.push(dir);
     return readdir(dir, ...args);
   });
-  const list = async options => {
+  const request = async options => {
     scanned.length = 0;
     let status, result;
     await listed(Readable.from([Buffer.from(JSON.stringify({ root, ...options }))]), {
       writeHead: code => (status = code),
       end: text => (result = JSON.parse(text))
     });
+    return { status, result };
+  };
+  const list = async options => {
+    const { status, result } = await request(options);
     assert.equal(status, 200, JSON.stringify(result));
     return result;
   };
@@ -58,6 +62,45 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
     "没有下钻草稿目录"
   );
   for (const value of [true, null, 0, "false"]) assert.deepEqual(await list({ scratch: value }), { ...visible, scratch });
+
+  const shallow = await list({ depth: 1, scratch: false });
+  assert.deepEqual(scanned, [root], "只读当前层，不打开子目录");
+  assert.deepEqual(
+    shallow.dirs.map(dir => dir.path),
+    ["empty", "report"]
+  );
+  assert.deepEqual(
+    shallow.entries.map(file => file.path),
+    ["fig.png"]
+  );
+  const empty = await list({ root: path.join(root, "empty"), depth: 1, scratch: false });
+  assert.deepEqual([empty.dirs, empty.entries], [[], []]);
+  const missing = await request({ root: path.join(root, "missing"), depth: 1, scratch: false });
+  assert.equal(missing.status, 400);
+  assert.match(missing.result.error, /路径不存在/);
+});
+
+test("单层列目录报告拒绝访问，卷宗全树仍可略过读不了的层", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-work-list-denied-")),
+    route = createArchive({ archiveHome: () => root })["POST /api/archive/list"];
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.mock.method(fs.promises, "readdir", async () => {
+    throw Object.assign(Error("denied"), { code: "EACCES" });
+  });
+  const list = async options => {
+    let status, data;
+    await route(Readable.from([Buffer.from(JSON.stringify({ scratch: false, ...options }))]), {
+      writeHead: code => (status = code),
+      end: body => (data = JSON.parse(body))
+    });
+    return { status, data };
+  };
+  const shallow = await list({ depth: 1 });
+  assert.equal(shallow.status, 400);
+  assert.match(shallow.data.error, /没有访问权限/);
+  const deep = await list({});
+  assert.equal(deep.status, 200);
+  assert.deepEqual([deep.data.dirs, deep.data.entries], [[], []]);
 });
 
 test("改动所及的隐藏文件直接 stat，不依赖卷宗的扫描结果", async t => {

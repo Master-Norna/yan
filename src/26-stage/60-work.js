@@ -20,11 +20,14 @@ const work = {
   full: false,
   /** @type {Map<string, { kind: string, size?: number, modifiedAt?: string } | null>} */
   changeEntries: new Map(),
+  /** @type {{ path: string, created: boolean }[]} 与 changeEntries 是同一趟取的快照 */
+  changeFiles: [],
   truncated: false,
   error: "",
   /** 画着的是哪一副样子（""/list/empty）：壳子只在换样子时重画 */
   shape: "",
-  rev: 0
+  rev: 0,
+  openRev: 0
 };
 
 /** 开头的斜杠：POSIX 的根（/Users/…）、UNC 的 //host，不算一级，拼回去时要留在前头；Windows 的 E:/ 归第一级自己带着 */
@@ -46,10 +49,6 @@ function workAt(path, parts, end) {
 function workJoin(root, rel) {
   const base = slashed(root);
   return base.endsWith("/") ? `${base}${rel}` : `${base}/${rel}`;
-}
-/** 上一层：第一级不再往上（/ 与盘符都不能当工作目录，去了只会报错）；POSIX 开头那一道斜杠由 parentDir 原样留着 */
-function workUp(path) {
-  return workParts(path).length > 1 ? parentDir(slashed(path)) : "";
 }
 // 对话已有工作目录就用它，不另绑、不改对话；切换对话或重新绑定时才回到根。
 function workFollowConversation() {
@@ -79,6 +78,7 @@ function workEnter() {
 function workLeave() {
   if (!work.open) return;
   work.open = false;
+  ++work.openRev;
   stageRender();
 }
 /** 选一处目录：系统的选夹子窗（与卷宗「收入文件」同一个口，见 server/work/picker.js） */
@@ -111,9 +111,11 @@ function workEnterDir(path) {
 // 换根或换面时，旧列表不可拿新根拼路径；在发出新请求前就使旧请求失效。
 function workResetRows() {
   ++work.rev;
+  ++work.openRev;
   work.entries = [];
   work.dirs = [];
   work.changeEntries.clear();
+  work.changeFiles = [];
   work.full = false;
   work.truncated = false;
   work.error = "";
@@ -138,6 +140,7 @@ async function workRefresh() {
       }
       if (rev !== work.rev) return;
       work.changeEntries = entries;
+      work.changeFiles = files;
       work.full = true;
       work.error = "";
       workPaint();
@@ -178,7 +181,7 @@ function workChangeRows() {
   if (!work.full) return [];
   const rows = [];
   const base = slashed(currentConversation()?.workdir || archiveDir());
-  for (const file of workChangedFiles()) {
+  for (const file of work.changeFiles) {
     const rel = base ? relInside(base, file.path) : "",
       entry = work.changeEntries.get(file.path),
       cut = file.path.lastIndexOf("/");
@@ -291,16 +294,30 @@ function workPaint() {
   }
 }
 // ---------- 动手 ----------
-/** 文件交给游目预览，工作区不收起；浏览器还没开时沿用现有启动流程。 */
+/** 文件交给游目预览，工作区不收起；无可启动的浏览器时交给本机程序。 */
 async function workOpenPath(path) {
   if (!path) return;
-  const context = work.context;
+  const rev = ++work.openRev,
+    nav = stage.emptyNav,
+    front = stage.frontRevision,
+    // 启动与连接可跨好几次点按：换层、切对话、收起或另起导航后，旧请求不再开件。
+    current = () => work.open && rev === work.openRev && stage.emptyNav === nav && stage.frontRevision === front;
+  if (stage.locating || !stage.ws) await stageLocate();
+  if (!current()) return;
   if (!stage.ws) {
-    await stageLocate().catch(() => {});
-    if (!stage.ws) await stageLaunch();
+    const launching = stageLaunch();
+    if (!launching) {
+      try {
+        await bridge("/api/archive/open", { file: path }, AbortSignal.timeout(8000));
+        toast(t("已在本机程序中打开"));
+      } catch (error) {
+        toast(t`打开失败：${String(/** @type {any} */ (error).message || error).slice(0, 80)}`);
+      }
+      return;
+    }
+    await launching;
   }
-  if (!stage.ws || !work.open || work.context !== context) return;
-  stageGo(path);
+  if (stage.ws && current()) stageGo(path);
 }
 function workSwitch(mode) {
   if (work.mode === mode) return void workRefresh();

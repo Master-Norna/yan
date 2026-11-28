@@ -36,6 +36,7 @@ function openStage() {
   }, 1500);
 }
 function closeStage() {
+  ++work.openRev;
   stageSetWide(false);
   hideWithFade($("#stagePanel"));
   clearInterval(stage.poll);
@@ -114,11 +115,18 @@ function stageService() {
   return config?.stage ? { stage: config.stage } : { args: config?.args || [], cwd: config?.cwd || "" };
 }
 // 浏览器没开（或被关了）：替用户调一次那个服务的 browser_navigate，浏览器照它的配置起来，再去连
-async function stageLaunch() {
+function stageLaunch() {
+  if (stage.launching) return stage.launching;
   const server = stageServer();
-  if (!server || stage.launching) return;
-  stage.launching = true;
+  if (!server) return;
+  stage.launching = stageLaunchBrowser(server).finally(() => {
+    stage.launching = null;
+    stageSync();
+  });
   stageRender();
+  return stage.launching;
+}
+async function stageLaunchBrowser(server) {
   try {
     const { result } = await bridge("/api/mcp/call", {
       server,
@@ -138,9 +146,6 @@ async function stageLaunch() {
     if (!stage.ws) toast(t`浏览器已开，但连不上调试口${stage.port ? ` ${stage.port}` : ""}`);
   } catch (error) {
     toast(t`浏览器打开失败：${String(error.message || error).slice(0, 160)}`, 6000);
-  } finally {
-    stage.launching = false;
-    stageSync();
   }
 }
 function stageNewTab() {

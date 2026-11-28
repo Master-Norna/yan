@@ -77,7 +77,8 @@ const stage = {
   port: 0,
   seen: false,
   busy: 0,
-  launching: false,
+  /** @type {Promise<void> | null} 浏览器启动中：后来的点击等同一趟 */
+  launching: null,
   width: 0,
   poll: 0,
   fitTimer: 0,
