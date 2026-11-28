@@ -161,6 +161,14 @@ async function workRefresh() {
   workPaint();
 }
 /** 一条簿录 @typedef {{ dir: boolean, name: string, path: string, where?: string, note?: string, size?: number|null, when?: string, state?: string }} WorkRow */
+/** 改动路径按原步骤落脚处归并；缺少来源的旧相对路不猜。 @param {string} raw @param {string} root */
+function workAbsPath(raw, root) {
+  const text = slashed(raw),
+    base = slashed(root);
+  if (!text) return "";
+  if (/^(?:[a-z]:\/|\/)/i.test(text)) return absJoin(text, "");
+  return /^(?:[a-z]:\/|\/)/i.test(base) && !/^[a-z][\w+.-]*:/i.test(text) ? absJoin(base, text) : "";
+}
 /** 本段对话改过的件：按路径并成一份，新建过的记着 */
 function workChangedFiles() {
   const files = new Map(),
@@ -169,16 +177,7 @@ function workChangedFiles() {
   for (const message of conversation?.messages || [])
     for (const step of allSteps(message)) {
       if (!step.change || step.status !== "done") continue;
-      // 历史相对路径属于原步骤的落脚处，不能随对话重新绑定而改变。
-      const raw = slashed(step.change.path),
-        root = slashed(step.root || "");
-      if (!raw) continue;
-      const path = /^(?:[a-z]:\/|\/)/i.test(raw)
-        ? absJoin(raw, "")
-        : /^(?:[a-z]:\/|\/)/i.test(root) && !/^[a-z][\w+.-]*:/i.test(raw)
-          ? absJoin(root, raw)
-          : "";
-      // 老记录没有落脚处时不能猜一个现目录，否则可能打开不相干的文件。
+      const path = workAbsPath(step.change.path, step.root || "");
       if (!path) continue;
       const entry = files.get(path) || { path, created: false };
       entry.created ||= !!step.change.created;
