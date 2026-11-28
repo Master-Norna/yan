@@ -7,7 +7,7 @@ function renderHelperBar() {
   const bar = $("#helperBar");
   if (!bar) return;
   const c = currentConversation(),
-    message = c && view === "chat" ? [...c.messages].reverse().find(m => m.role === "assistant" && m.status === "streaming") : null,
+    message = c && view === "chat" ? streamingChangeReply(c) : null,
     helpers = c && view === "chat" ? (crews.get(c.id) || []).map(box => box.step) : [],
     // 中辍的帮手：行迹折起后签就藏住了，在这儿挂着，直到续上（设计稿/98 甲）
     held = c && view === "chat" ? heldHelpers(c) : [],
@@ -408,8 +408,7 @@ function bindHelperEvents() {
       return;
     }
     const file = event.target.closest("[data-change-path]"),
-      message =
-        file && [...(currentConversation()?.messages || [])].reverse().find(m => m.role === "assistant" && m.status === "streaming");
+      message = file && streamingChangeReply(currentConversation());
     if (message) return openChangeDiff(message, file.dataset.changePath, file);
     const goon = event.target.closest("[data-helper-resume]");
     if (goon) {

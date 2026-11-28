@@ -167,7 +167,7 @@ function trailMeta(message) {
   const changed = new Set(
     allSteps(message)
       .filter(step => step.change && step.status === "done")
-      .map(step => step.change.path)
+      .map(changePath)
   ).size;
   return changed ? t`${base} · 改 ${changed} 个文件` : base;
 }

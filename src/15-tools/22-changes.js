@@ -12,13 +12,34 @@ function diffCounts(oldText, newText) {
   const ops = lcsOps(diffLines(oldText), diffLines(newText));
   return { added: ops.filter(op => op[0] === "i").length, removed: ops.filter(op => op[0] === "d").length };
 }
+/** 改动路径按原步骤落脚处归并；缺少来源的旧相对路不猜。 @param {string} raw @param {string} root */
+function changeAbsPath(raw, root) {
+  const text = slashed(raw),
+    base = slashed(root);
+  if (!text) return "";
+  if (/^(?:[a-z]:\/|\/)/i.test(text)) return absJoin(text, "");
+  return /^(?:[a-z]:\/|\/)/i.test(base) && !/^[a-z][\w+.-]*:/i.test(text) ? absJoin(base, text) : "";
+}
+/** @param {Step} step */
+function changePath(step) {
+  return changeAbsPath(step.change.path, step.root || "") || step.change.path;
+}
+/** @param {Conversation|null|undefined} conversation */
+function streamingChangeReply(conversation) {
+  return conversation?.messages?.findLast(m => m.role === "assistant" && m.status === "streaming") || null;
+}
+/** @param {Conversation|null|undefined} conversation */
+function latestChangeReply(conversation) {
+  return streamingChangeReply(conversation) || conversation?.messages?.findLast(m => m.role === "assistant") || null;
+}
 /** @param {{ steps?: Step[] }} message */
 function changeStats(message) {
   const files = new Map();
   for (const step of allSteps(message)) {
     if (!step.change || step.status !== "done") continue;
-    const entry = files.get(step.change.path) || {
-      path: step.change.path,
+    const path = changePath(step);
+    const entry = files.get(path) || {
+      path,
       added: 0,
       removed: 0,
       created: false,
@@ -31,7 +52,7 @@ function changeStats(message) {
     entry.helper ||= !!step.scope;
     // 早先记下的步骤没有 lines；整份写入那一步的增即是写后的行数
     entry.lines = step.change.lines ?? (step.written !== undefined ? step.change.added : undefined);
-    files.set(step.change.path, entry);
+    files.set(path, entry);
   }
   // 这一答里新建的件，净改动就是「增了它现在这么多行」：中途重写几遍删去的，是删自己刚写的，不算删
   for (const entry of files.values())
@@ -466,7 +487,7 @@ function stepDiffPartsOf(step) {
   }
   return null;
 }
-// 一批改动步骤摊成红绿：行迹里点一答的改动、工作区里看一段对话的改动，都走这一处。
+// 一批改动步骤摊成红绿：行迹里点一答的改动、工作区里看这一答的改动，都走这一处。
 // 不另起接口、不另存一份，用的就是各步本来记着的——改文件那步的参数（前后两段），写文件那步的旧侧摘录与写下的整份；
 // 按先后排。帮手改的也在内。新建的件只画最后那一版对空的多行：之前几版是草稿，与清单上「只增不删」对得上
 /** @param {Step[]} steps */
@@ -492,7 +513,9 @@ function changeDiffStepsHtml(steps) {
 // 一件文件在这一答里的改动：这一答里改过它的各步，按先后排
 /** @param {Message} message @param {string} path */
 function changeDiffHtml(message, path) {
-  return changeDiffStepsHtml(allSteps(message).filter(step => step.change?.path === path && step.status === "done"));
+  const steps = allSteps(message).filter(step => step.change && step.status === "done" && changePath(step) === path);
+  if (!steps.length) return `<div class="file-viewer-text change-diff"><p class="file-viewer-note">${t("此件没有记下改动")}</p></div>`;
+  return changeDiffStepsHtml(steps);
 }
 /** @param {Message} message @param {string} path @param {Element} trigger */
 function openChangeDiff(message, path, trigger) {

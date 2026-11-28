@@ -91,7 +91,7 @@ test("再点当前功能收起侧栏，换功能自动展开", () => {
   assert.equal(f.work.collapsed, false);
 });
 
-test("改动面点件看本段对话的改动，不打开原件", () => {
+test("改动面点件看这一答的改动，不打开原件", () => {
   const f = load([
     "work",
     "workOpenPath",
@@ -99,7 +99,7 @@ test("改动面点件看本段对话的改动，不打开原件", () => {
       const shown = [];
       showInFileViewer = (title, html, trigger, seal, host) => shown.push({ title, html, trigger, seal, host });
       openFileViewer = async source => shown.push({ file: source.file, host: "file" });
-      currentConversation = () => ({ id: "c", workdir: "C:/one", messages: [] });
+      currentConversation = () => ({ id: "c", workdir: "C:/one", messages: [{ role: "assistant" }] });
       workDiffHtml = () => '<div class="file-viewer-text change-diff">DIFF</div>';
       workPaint = () => {};
       work.open = true;
@@ -112,61 +112,52 @@ test("改动面点件看本段对话的改动，不打开原件", () => {
   f.workOpenPath(first, row);
   assert.equal(shown.length, 1);
   assert.equal(shown[0].host, "stage");
-  assert.match(shown[0].title, /本段改动/);
+  assert.match(shown[0].title, /这一答的改动/);
   assert.equal(shown[0].seal, "览");
   assert.match(shown[0].html, /tool-diff|change-diff/);
   assert.equal(shown[0].trigger, row);
 });
 
-test("本段改动按条按步的先后排，相对路按原步骤目录配对", () => {
+test("这一答的改动按条按步的先后排，相对路按原步骤目录配对", () => {
   const f = load(["workDiffHtml"]),
-    conversation = {
-      workdir: "C:/new",
-      messages: [
+    message = {
+      steps: [
         {
-          steps: [
-            {
-              name: "write_file",
-              status: "done",
-              arguments: "{}",
-              result: "已写入",
-              written: "# 一\n",
-              root: "C:/one",
-              change: { path: "A.md", created: true }
-            }
-          ]
+          name: "write_file",
+          status: "done",
+          arguments: "{}",
+          result: "已写入",
+          written: "# 一\n",
+          root: "C:/one",
+          change: { path: "A.md", created: true }
         },
         {
-          steps: [
-            {
-              name: "edit_file",
-              status: "done",
-              arguments: "{}",
-              result: "已修改",
-              previous: "# 一\n",
-              written: "# 二\n",
-              change: { path: `${first}` }
-            },
-            {
-              name: "edit_file",
-              status: "done",
-              arguments: "{}",
-              result: "别处",
-              previous: "a\n",
-              written: "b\n",
-              root: "D:/else",
-              change: { path: "A.md" }
-            }
-          ]
+          name: "edit_file",
+          status: "done",
+          arguments: "{}",
+          result: "已修改",
+          previous: "# 一\n",
+          written: "# 二\n",
+          change: { path: `${first}` }
+        },
+        {
+          name: "edit_file",
+          status: "done",
+          arguments: "{}",
+          result: "别处",
+          previous: "a\n",
+          written: "b\n",
+          root: "D:/else",
+          change: { path: "A.md" }
         }
       ]
     },
-    html = f.workDiffHtml(conversation, first);
+    html = f.workDiffHtml(message, first);
   assert.equal((html.match(/tool-diff/g) || []).length, 2);
   assert.match(html, /已写入/);
   assert.match(html, /已修改/);
   assert.doesNotMatch(html, /别处/);
-  assert.match(f.workDiffHtml(conversation, "C:/one/none.md"), /此件没有记下改动/);
+  assert.match(f.workDiffHtml(message, "C:/one/none.md"), /此件没有记下改动/);
 });
 
 test("改动相对路按原步骤目录落地，与当前簿录所处目录无关，文件名不经网址解析", async () => {
@@ -182,7 +173,7 @@ test("改动相对路按原步骤目录落地，与当前簿录所处目录无�
         {path:"D:/else/other.txt"},
         {path:"sandbox:/not-local.md"}
       ];
-      currentConversation = () => ({workdir:"C:/one", messages: [{steps: files.map(change => ({status:"done", root:"C:/one", change}))}]});
+      currentConversation = () => ({workdir:"C:/one", messages: [{role:"assistant", steps: files.map(change => ({status:"done", root:"C:/one", change}))}]});
       work.root = "C:/one/sub";
       work.mode = "changes";
       workPaint = () => {};
@@ -197,7 +188,8 @@ test("改动相对路按原步骤目录落地，与当前簿录所处目录无�
     f.workChangeRows().map(r => [r.path, r.state, r.size]),
     [
       ["C:/one/.yan/报告 #1%.md", "add", 42],
-      ["D:/else/other.txt", "mod", 42]
+      ["D:/else/other.txt", "mod", 42],
+      ["sandbox:/not-local.md", "", null]
     ]
   );
 });
@@ -209,7 +201,7 @@ test("改动列表和文件状态使用同一趟快照，显式刷新才整批�
     "workChangeRows",
     `setup: () => {
       const files = [{path:"C:/one/A.md"}];
-      currentConversation = () => ({workdir:"C:/one", messages: [{steps: files.map(change => ({status:"done", root:"C:/one", change}))}]});
+      currentConversation = () => ({workdir:"C:/one", messages: [{role:"assistant", steps: files.map(change => ({status:"done", root:"C:/one", change}))}]});
       workPaint = () => {};
       bridge = async () => ({kind:"file"});
       work.mode = "changes";
