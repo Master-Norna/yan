@@ -169,6 +169,8 @@ const BRUSH_ICONS = {
     `<path class="zhu" opacity=".16" d="M6.6 5 L15.4 10 L6.6 15Z"/>` +
     brushStroke([6.4, 4.4, 6.6, 10, 6.4, 15.6], 1.7, { tone: "zhu", tail: 0.6 }) +
     brushStroke([6.6, 4.6, 11.2, 7.2, 15.6, 10, 11.2, 12.8, 6.6, 15.4], 1.5, { tone: "zhu", tail: 0.2 }),
+  // 停止：一枚方形墨块，与暂停的两笔分开。
+  stop: () => `<rect class="ink" x="5.2" y="5.2" width="9.6" height="9.6" rx=".6"/>`,
   pause: () =>
     brushStroke([7.2, 4.6, 7.4, 10, 7.2, 15.4], 2.1, { tone: "zhu", tail: 0.7 }) +
     brushStroke([12.8, 4.6, 13, 10, 12.8, 15.4], 2.1, { tone: "zhu", tail: 0.7 }),

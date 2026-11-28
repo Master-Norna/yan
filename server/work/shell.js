@@ -221,8 +221,33 @@ module.exports = function createShell({ toolEnv }) {
   let backgroundSeq = 0;
   // 编号在桥接重启后从 bg1 重数：另记一个带这次启动标记的 key，页面刷新后重新等上时按它认，不会等到别的指令上
   const BOOT = Date.now().toString(36);
-  function startBackground(command, workdir, boxed, seatbelt = false) {
-    return enlist(spawnJob(command, workdir, boxed, seatbelt));
+  // 人的终端复用增量输出，但没有 Agent 的唤醒与长活语义：断开领取 15 秒、或总计 120 秒即收进程树。
+  const terminalLeases = new WeakMap();
+  function renewTerminalLease(job) {
+    const lease = terminalLeases.get(job);
+    if (!lease || job.exitCode !== null) return;
+    clearTimeout(lease.timer);
+    lease.timer = setTimeout(
+      () => {
+        job.timedOut = true;
+        killTree(job.child);
+      },
+      Math.max(0, Math.min(15000, lease.deadline - Date.now()))
+    );
+    lease.timer.unref();
+  }
+  function startBackground(command, workdir, boxed, seatbelt = false, terminal = false) {
+    const job = enlist(spawnJob(command, workdir, boxed, seatbelt));
+    if (terminal) {
+      const lease = { deadline: Date.now() + 120000, timer: null };
+      terminalLeases.set(job, lease);
+      renewTerminalLease(job);
+      job.ended.then(() => {
+        clearTimeout(lease.timer);
+        terminalLeases.delete(job);
+      });
+    }
+    return job;
   }
   // 起进程、接住两路输出，先不编号：前台指令也这样起，跑完了就不占编号与名额，转入后台时才登记（enlist）
   function spawnJob(command, workdir, boxed, seatbelt = false) {
@@ -233,6 +258,7 @@ module.exports = function createShell({ toolEnv }) {
         command,
         child,
         exitCode: null,
+        timedOut: false,
         started: Date.now(),
         grew: Date.now(),
         // 两路输出各留最近一截；base 是已裁掉的字数、read 是已交出去的位置（都按从头算的绝对位置记，裁了也对得上）
@@ -338,7 +364,8 @@ module.exports = function createShell({ toolEnv }) {
       exitCode: job.exitCode,
       stdout: shownOutput(fresh("out")),
       stderr: shownOutput(fresh("err"), true),
-      durationMs: Date.now() - job.started
+      durationMs: Date.now() - job.started,
+      ...(job.timedOut ? { timedOut: true } : {})
     };
     const end = { out: job.base.out + job.text.out.length, err: job.base.err + job.text.err.length };
     if (!res) job.read = end;
@@ -375,6 +402,11 @@ module.exports = function createShell({ toolEnv }) {
           ? `编号为 ${id} 的后台指令结束得久，后起的指令又多，结果没能留住`
           : `没有编号为 ${id} 的后台指令（桥接重启过，或已被后起的指令挤出记录的话，之前的后台指令已随之结束）`
       );
+    // 终端的领取必须带自己的 key，不能借编号续租另一条指令。
+    if (terminalLeases.has(job)) {
+      if (key !== job.key) throw Error("终端指令编号已失效");
+      if (!stop) renewTerminalLease(job);
+    }
     if (stop && job.exitCode === null) {
       // 模型亲手结束的：三秒里进程没退出时也记下，稍后真退出了照「已停止」收口、不再叫醒它
       job.stopped = true;

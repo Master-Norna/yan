@@ -22,7 +22,13 @@ const work = {
   searchStatus: "",
   terminal: false,
   terminalText: "",
-  /** @type {AbortController|null} */
+  terminalDir: "",
+  terminalWide: false,
+  /** @type {string[]} */
+  terminalHistory: [],
+  terminalHistoryAt: 0,
+  terminalDraft: "",
+  /** @type {{controller:AbortController, job:{id:string,key:string}|null, stopping:boolean}|null} */
   command: null,
   /** @type {{ path: string, name: string, size: number, modifiedAt: string }[]} 这一层的件，路径相对根 */
   entries: [],
@@ -131,9 +137,14 @@ function workResetWorkspace() {
   work.search = "";
   work.searchRows = [];
   work.searchStatus = "";
-  work.command?.abort();
-  work.command = null;
+  workTerminalCancel();
   work.terminalText = "";
+  work.terminalDir = "";
+  work.terminalHistory = [];
+  work.terminalHistoryAt = 0;
+  work.terminalDraft = "";
+  const input = /** @type {HTMLInputElement|null} */ ($("#workCommand input"));
+  if (input) input.value = "";
 }
 // 仅展开时读取这一层；换根后迟到的结果不再生效。
 async function workLoadBranch(path) {
@@ -386,7 +397,12 @@ function workViewsHtml() {
   return `<div class="stage-views" role="group" aria-label="${t("工作区")}">${buttons}<button type="button" data-work-terminal aria-pressed="${work.terminal}" title="${t("终端")}" aria-label="${t("终端")}">${brushIcon("code")}</button></div>`;
 }
 function workShellHtml() {
-  return `<div class="work-inner"><div class="work-rail">${workViewsHtml()}</div><div class="work-explorer"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><button type="button" data-work-pick title="${t("选择文件夹…")}" aria-label="${t("选择文件夹…")}">${brushIcon("folder")}</button></div><form id="workFind" class="hidden"><input type="search" aria-label="${t("搜索文件内容")}" placeholder="${t("搜索文件内容")}" maxlength="200"><button type="submit" title="${t("搜索")}" aria-label="${t("搜索")}">${brushIcon("search")}</button></form><div id="workStrips" class="work-tree"></div></div><div class="work-resize" role="separator" aria-orientation="vertical" aria-label="${t("调整目录栏宽度")}" tabindex="0"></div><section class="work-editor"><div class="work-tabbar"><div id="workTabs" class="work-tabs" role="tablist"></div><div id="workDocMode" class="work-docmode stage-views"></div></div><div id="workContent" class="work-content">${workEmptyBody(t("选择文件以查看"))}</div><section id="workTerminal" class="work-terminal hidden"><div class="work-terminal-head">${t("终端")}<button type="button" data-work-stop>${t("停止")}</button><button type="button" data-work-terminal aria-label="${t("关闭")}">×</button></div><pre id="workTerminalOutput"></pre><form id="workCommand"><span aria-hidden="true">›</span><input aria-label="${t("输入指令")}" placeholder="${t("输入指令")}" autocomplete="off"><button type="submit">${t("运行")}</button></form></section></section></div>`;
+  return `<div class="work-inner"><div class="work-rail">${workViewsHtml()}</div><div class="work-explorer"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><button type="button" data-work-pick title="${t("选择文件夹…")}" aria-label="${t("选择文件夹…")}">${brushIcon("folder")}</button></div><form id="workFind" class="hidden"><input type="search" aria-label="${t("搜索文件内容")}" placeholder="${t("搜索文件内容")}" maxlength="200"><button type="submit" title="${t("搜索")}" aria-label="${t("搜索")}">${brushIcon("search")}</button></form><div id="workStrips" class="work-tree"></div></div><div class="work-resize" role="separator" aria-orientation="vertical" aria-label="${t("调整目录栏宽度")}" tabindex="0"></div><section class="work-editor"><div class="work-tabbar"><div id="workTabs" class="work-tabs" role="tablist"></div><div id="workDocMode" class="work-docmode stage-views"></div></div><div id="workContent" class="work-content">${workEmptyBody(t("选择文件以查看"))}</div>${workTerminalHtml()}</section></div>`;
+}
+function workTerminalHtml() {
+  const button = (action, label, icon) =>
+    `<button type="button" data-work-${action} title="${t(label)}" aria-label="${t(label)}">${brushIcon(icon)}</button>`;
+  return `<section id="workTerminal" class="work-terminal hidden"><div class="work-terminal-grip" role="separator" aria-orientation="horizontal" aria-label="${t("调整终端高度")}" tabindex="0"></div><div class="work-terminal-head"><span id="workTerminalShell"></span><span class="work-terminal-actions">${button("stop", "停止", "stop")}${button("clear", "清空终端", "strike")}${button("terminal-wide", "展开终端", "wide")}<button type="button" data-work-terminal title="${t("关闭")}" aria-label="${t("关闭")}">×</button></span></div><div id="workTerminalBody" class="work-terminal-body"><pre id="workTerminalOutput"></pre><form id="workCommand"><span id="workTerminalPrompt"></span><input aria-label="${t("输入指令")}" autocomplete="off" spellcheck="false"><button type="submit" title="${t("运行")}" aria-label="${t("运行")}">${brushIcon("play")}</button></form></div></section>`;
 }
 function workEmptyBody(text) {
   return `<div class="stage-empty work-empty">${brushIcon("folder", "work-leaf")}<span>${escapeHtml(text)}</span></div>`;
@@ -495,15 +511,7 @@ function workPaint() {
     const el = /** @type {HTMLElement} */ (button);
     el.setAttribute("aria-pressed", String(!work.collapsed && el.dataset.workMode === work.mode));
   }
-  $(".work-rail [data-work-terminal]").setAttribute("aria-pressed", String(work.terminal));
-  $("#workTerminal").classList.toggle("hidden", !work.terminal);
-  const output = $("#workTerminalOutput");
-  if (output.textContent !== work.terminalText) {
-    output.textContent = work.terminalText;
-    output.scrollTop = output.scrollHeight;
-  }
-  $("#workCommand button").disabled = !!work.command || !work.root;
-  $("[data-work-stop]").disabled = !work.command;
+  workTerminalPaint();
   workPaintTabs();
 }
 function workActivate(index, trigger = null) {
@@ -573,26 +581,137 @@ function workSwitch(mode) {
     if (work.search) void workSearch(work.search);
   } else void workRefresh();
 }
-// 人明确提交的本机指令；不向模型暴露执行入口，也不声称具备交互式 PTY。
+// 终端只是用户独立的命令区；每次仍由原有 shell 执行，不假装支持 PTY。
+function workTerminalCwd() {
+  return work.terminalDir || work.root;
+}
+function workTerminalPromptText() {
+  const cwd = workTerminalCwd();
+  if (!cwd) return ">";
+  return bootstrap.work?.platform === "win32" ? "PS " + cwd.replace(/\//g, "\\") + ">" : cwd + " $";
+}
+function workTerminalPaint() {
+  $(".work-rail [data-work-terminal]").setAttribute("aria-pressed", String(work.terminal));
+  $("#workTerminal").classList.toggle("hidden", !work.terminal);
+  $("#stageWork").classList.toggle("work-terminal-wide", work.terminal && work.terminalWide);
+  const shell = $("#workTerminalShell");
+  shell.textContent = bootstrap.work?.shell || t("终端");
+  const output = $("#workTerminalOutput"),
+    body = $("#workTerminalBody"),
+    follow = body.scrollHeight - body.scrollTop - body.clientHeight < 32;
+  if (output.textContent !== work.terminalText) {
+    output.textContent = work.terminalText;
+    if (follow) body.scrollTop = body.scrollHeight;
+  }
+  const prompt = $("#workTerminalPrompt");
+  prompt.textContent = work.command ? "…" : workTerminalPromptText();
+  prompt.title = workTerminalCwd();
+  const input = /** @type {HTMLInputElement} */ ($("#workCommand input"));
+  input.readOnly = !!work.command;
+  input.disabled = !work.root;
+  $("#workCommand button").disabled = !!work.command || !work.root;
+  $("[data-work-stop]").disabled = !work.command || work.command.stopping;
+  $("[data-work-clear]").disabled = !work.terminalText;
+  $("[data-work-terminal-wide]").setAttribute("aria-pressed", String(work.terminalWide));
+}
+function workTerminalAppend(text) {
+  work.terminalText = (work.terminalText + text).slice(-60000);
+  if (work.open && $("#workTerminal")) workTerminalPaint();
+}
+function workTerminalCancel() {
+  const state = work.command;
+  if (!state) return;
+  work.command = null;
+  state.controller.abort();
+  if (state.job) void bridge("/api/work/check", { ...state.job, stop: true }, AbortSignal.timeout(8000)).catch(() => {});
+}
+function workTerminalStop() {
+  const state = work.command;
+  if (!state || state.stopping) return;
+  state.stopping = true;
+  if (!state.job) state.controller.abort();
+  workTerminalPaint();
+}
+// 仅独立 cd 的字面目录在前端会话里延续，不模拟变量、管道、复合脚本或 shell 全局状态。
+function workTerminalCd(command) {
+  const match = /^(?:cd|chdir|set-location)\s+(.+)$/i.exec(command.trim());
+  if (!match || (bootstrap.work?.platform !== "win32" && !/^cd\s/.test(command.trim()))) return null;
+  let raw = match[1].trim();
+  if (/^(['"]).*\1$/.test(raw)) raw = raw.slice(1, -1);
+  else if (/\s/.test(raw)) return null;
+  if (!raw || /^-/.test(raw) || /[\r\n'"`$;&|<>*?()]/.test(raw)) return null;
+  if (bootstrap.work?.platform !== "win32" && raw.includes("\\")) return null;
+  return raw;
+}
+function workTerminalRecall(direction, input) {
+  const history = work.terminalHistory;
+  if (!history.length) return;
+  if (work.terminalHistoryAt === history.length) work.terminalDraft = input.value;
+  work.terminalHistoryAt = Math.max(0, Math.min(history.length, work.terminalHistoryAt + direction));
+  input.value = history[work.terminalHistoryAt] ?? work.terminalDraft;
+  input.setSelectionRange(input.value.length, input.value.length);
+}
 async function workRunCommand(command) {
-  if (work.command || !work.root || !command.trim()) return;
-  const controller = new AbortController();
-  work.command = controller;
-  work.terminalText = (work.terminalText + "\n> " + command + "\n").slice(-60000);
-  workPaint();
+  command = command.trim();
+  const cwd = workTerminalCwd();
+  if (work.command || !cwd || !command) return;
+  if (work.terminalHistory.at(-1) !== command) work.terminalHistory = [...work.terminalHistory, command].slice(-100);
+  work.terminalHistoryAt = work.terminalHistory.length;
+  work.terminalDraft = "";
+  const prompt = workTerminalPromptText(),
+    state = { controller: new AbortController(), job: null, stopping: false };
+  work.command = state;
+  const signal = state.controller.signal;
+  workTerminalAppend((work.terminalText && !work.terminalText.endsWith("\n") ? "\n" : "") + prompt + " " + command + "\n");
+  if (work.open) $("#workTerminalBody").scrollTop = $("#workTerminalBody").scrollHeight;
   try {
-    const result = await bridge("/api/work/run", { workdir: work.root, command, timeout: 120, sandbox: false }, controller.signal);
-    if (work.command !== controller) return;
-    work.terminalText += (result.stdout || "") + "\n" + (result.stderr || "") + "\n[" + (result.exitCode ?? "") + "]\n";
+    const cd = workTerminalCd(command);
+    if (cd !== null) {
+      const result = await bridge(
+        "/api/work/terminal-dir",
+        { workdir: cwd, path: cd },
+        AbortSignal.any([signal, AbortSignal.timeout(8000)])
+      );
+      if (work.command === state) work.terminalDir = slashed(result.workdir);
+      return;
+    }
+    let result = await bridge(
+      "/api/work/run",
+      { workdir: cwd, command, background: true, terminal: true, sandbox: false },
+      AbortSignal.any([signal, AbortSignal.timeout(8000)])
+    );
+    if (result.id && result.key) state.job = { id: result.id, key: result.key };
+    if (work.command !== state) {
+      if (state.job && result.running)
+        void bridge("/api/work/check", { ...state.job, stop: true }, AbortSignal.timeout(8000)).catch(() => {});
+      return;
+    }
+    for (;;) {
+      workTerminalAppend(
+        (result.stdout || "") + (result.stdout && result.stderr && !result.stdout.endsWith("\n") ? "\n" : "") + (result.stderr || "")
+      );
+      if (!result.running) break;
+      if (!state.job) throw Error(t("终端指令编号已失效"));
+      result = await bridge(
+        "/api/work/check",
+        { ...state.job, stop: state.stopping, wait: state.stopping ? 0 : 1 },
+        AbortSignal.any([signal, AbortSignal.timeout(8000)])
+      );
+      if (work.command !== state) return;
+    }
+    const status = state.stopping ? t("已停止") : result.timedOut ? t("执行超时") : t`退出码：${result.exitCode}`;
+    workTerminalAppend((work.terminalText.endsWith("\n") ? "" : "\n") + "[" + status + "]\n");
   } catch (error) {
-    if (work.command !== controller) return;
-    work.terminalText += String(error.message || error) + "\n";
+    if (work.command !== state) return;
+    if (state.job) void bridge("/api/work/check", { ...state.job, stop: true }, AbortSignal.timeout(8000)).catch(() => {});
+    workTerminalAppend((state.stopping ? t("已停止") : String(error.message || error)) + "\n");
   } finally {
-    if (work.command === controller) {
+    if (work.command === state) {
       work.command = null;
-      work.terminalText = work.terminalText.slice(-60000);
-      workPaint();
-      void workRefresh();
+      if (work.open) {
+        workTerminalPaint();
+        void workRefresh();
+      }
     }
   }
 }
@@ -610,9 +729,19 @@ function bindWork() {
     if (target.closest("[data-work-pick]")) return void workPick();
     if (target.closest("[data-work-terminal]")) {
       work.terminal = !work.terminal;
-      return workPaint();
+      workPaint();
+      if (work.terminal) $("#workCommand input").focus();
+      return;
     }
-    if (target.closest("[data-work-stop]")) return work.command?.abort();
+    if (target.closest("[data-work-stop]")) return workTerminalStop();
+    if (target.closest("[data-work-clear]")) {
+      work.terminalText = "";
+      return workTerminalPaint();
+    }
+    if (target.closest("[data-work-terminal-wide]")) {
+      work.terminalWide = !work.terminalWide;
+      return workTerminalPaint();
+    }
     const close = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab-close]"));
     if (close) return workCloseTab(Number(close.dataset.workTabClose));
     const tab = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab]"));
@@ -636,11 +765,17 @@ function bindWork() {
   });
   box.addEventListener("pointerdown", event => {
     const target = /** @type {HTMLElement} */ (event.target);
-    if (!target.classList.contains("work-resize") || event.button !== 0) return;
-    const start = event.clientX,
-      width = $(".work-explorer").getBoundingClientRect().width;
+    const vertical = target.classList.contains("work-terminal-grip");
+    if ((!vertical && !target.classList.contains("work-resize")) || event.button !== 0) return;
+    if (vertical && work.terminalWide) return;
+    const start = vertical ? event.clientY : event.clientX,
+      width = vertical ? $("#workTerminal").getBoundingClientRect().height : $(".work-explorer").getBoundingClientRect().width;
     target.setPointerCapture(event.pointerId);
-    const move = e => box.style.setProperty("--work-tree-width", Math.max(112, width + e.clientX - start) + "px");
+    const move = e =>
+      box.style.setProperty(
+        vertical ? "--work-terminal-height" : "--work-tree-width",
+        Math.max(112, width + (vertical ? start - e.clientY : e.clientX - start)) + "px"
+      );
     const end = () => {
       target.removeEventListener("pointermove", move);
       target.removeEventListener("lostpointercapture", end);
@@ -660,11 +795,49 @@ function bindWork() {
     const input = form.querySelector("input");
     if (form.id === "workFind") void workSearch(input.value);
     else if (!work.command && input.value.trim()) {
-      void workRunCommand(input.value);
+      const command = input.value;
       input.value = "";
+      void workRunCommand(command);
     }
   });
   box.addEventListener("keydown", event => {
+    const input = /** @type {HTMLInputElement} */ (event.target);
+    if (event.isComposing) return;
+    if (input.matches("#workCommand input")) {
+      if (
+        event.ctrlKey &&
+        event.key.toLowerCase() === "c" &&
+        work.command &&
+        input.selectionStart === input.selectionEnd &&
+        !window.getSelection()?.toString()
+      ) {
+        event.preventDefault();
+        workTerminalStop();
+      } else if (
+        !work.command &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        ["ArrowUp", "ArrowDown"].includes(event.key)
+      ) {
+        event.preventDefault();
+        workTerminalRecall(event.key === "ArrowUp" ? -1 : 1, input);
+      } else if (event.ctrlKey && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        work.terminalText = "";
+        workTerminalPaint();
+      }
+      return;
+    }
+    if (input.classList.contains("work-terminal-grip") && ["ArrowUp", "ArrowDown"].includes(event.key) && !work.terminalWide) {
+      event.preventDefault();
+      box.style.setProperty(
+        "--work-terminal-height",
+        Math.max(112, $("#workTerminal").getBoundingClientRect().height + (event.key === "ArrowUp" ? 16 : -16)) + "px"
+      );
+      return;
+    }
     if (["ArrowLeft", "ArrowRight"].includes(event.key) && /** @type {HTMLElement} */ (event.target).classList.contains("work-resize")) {
       const width = $(".work-explorer").getBoundingClientRect().width;
       box.style.setProperty("--work-tree-width", Math.max(112, width + (event.key === "ArrowLeft" ? -12 : 12)) + "px");

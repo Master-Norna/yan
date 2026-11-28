@@ -369,41 +369,123 @@
   margin-bottom: 8px;
 }
 .work-terminal {
-  flex: 0 0 min(185px, 38%);
-  min-height: 100px;
+  position: relative;
+  flex: 0 0 clamp(112px, var(--work-terminal-height, 185px), 75%);
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--line);
-  padding: 6px 10px;
   background: var(--paper-2);
 }
+.work-terminal-grip {
+  position: absolute;
+  z-index: 2;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  touch-action: none;
+}
+.work-terminal-grip:hover,
+.work-terminal-grip:focus-visible {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
 .work-terminal-head {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 9px;
+  border-bottom: 1px solid var(--line);
   color: var(--ink-3);
-  font-size: var(--fs-small);
+  font-size: var(--fs-note);
 }
-.work-terminal-head [data-work-stop] {
-  margin-left: auto;
+.work-terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
-#workTerminalOutput {
+.work-terminal-actions button,
+#workCommand button {
+  width: 25px;
+  height: 25px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-s);
+  color: var(--ink-3);
+}
+.work-terminal-actions button .brush,
+#workCommand button .brush {
+  width: 16px;
+  height: 16px;
+}
+.work-terminal-actions button:hover:not(:disabled),
+#workCommand button:hover:not(:disabled) {
+  background: var(--paper-3);
+  color: var(--ink);
+}
+.work-terminal-actions button:disabled,
+#workCommand button:disabled {
+  opacity: 0.35;
+}
+.work-terminal-actions [aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.work-terminal-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  margin: 4px 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  padding: 9px 12px;
   font:
-    12px/1.5 ui-monospace,
+    12px/1.6 ui-monospace,
     Consolas,
     monospace;
+  color: var(--ink);
+}
+#workTerminalOutput {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#workTerminalOutput:empty {
+  display: none;
 }
 #workCommand {
   display: flex;
-  gap: 5px;
-  align-items: center;
-  font-size: var(--fs-small);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font: inherit;
+}
+#workTerminalPrompt {
+  max-width: 65%;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+}
+#workCommand input {
+  flex: 1 1 65px;
+  min-width: 40px;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  caret-color: var(--accent);
+  font: inherit;
+}
+.work-terminal-wide #workContent,
+.work-terminal-wide .work-tabbar,
+.work-terminal-wide .work-terminal-grip {
+  display: none;
+}
+.work-terminal-wide .work-terminal {
+  flex: 1;
 }
 .work-page .hidden {
   display: none !important;
