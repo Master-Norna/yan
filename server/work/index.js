@@ -133,6 +133,20 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       created: !existing
     };
   }, failed);
+  // 用户终端的独立 cd：只改下一条指令的落脚处，不绑对话，也不改变资源树。
+  const handleTerminalDir = jsonRoute(async body => {
+    const from = resolveWorkdir(body.workdir),
+      raw = String(body.path || "").trim();
+    if (!raw) throw Error("目录不能为空");
+    const expanded = paths.expandHome(raw),
+      dir = resolveWorkdir(path.resolve(from, expanded)),
+      real = await fs.promises.realpath(dir),
+      storage = storeRoot();
+    const guarded = sandbox.screenStorePath(dir, storage) || sandbox.screenStorePath(real, storage ? await paths.canonicalPath(storage) : "");
+    if (guarded) throw Error(guarded);
+    if (!(await fs.promises.stat(real)).isDirectory()) throw Error("目标不是目录");
+    return { workdir: dir };
+  }, failed);
   const handleWorkRun = jsonRoute(async (body, req, res) => {
     const workdir = resolveWorkdir(body.workdir),
       command = String(body.command || "").trim();
@@ -158,12 +172,12 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
     if (body.background === true) {
       if (res.destroyed) return;
       console.log(`${stamp()} $ （后台）${command.slice(0, 120)}`);
-      const job = startBackground(command, workdir, boxed, seatbelt);
+      const job = startBackground(command, workdir, boxed, seatbelt, body.terminal === true);
       // 编号交付前断开就撤掉这条后台记录与进程——与转入后台那一支用同一个判据。
       onResponseSettled(res, finished => {
         if (!finished) discardBackground(job);
       });
-      return backgroundReport(job, 5000);
+      return body.terminal === true ? backgroundReport(job, 0, res) : backgroundReport(job, 5000);
     }
     console.log(`${stamp()} $ ${command.slice(0, 120)}`);
     // 页面那头停止生成会中止这个请求：响应还没写就断开，即是中止，把指令连同它起的子进程一并杀掉。指令不拿目录锁，见 locks.js
@@ -236,6 +250,7 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       "POST /api/work/prepare": handleWorkPrepare,
       "POST /api/work/pick": handleWorkPick,
       "POST /api/work/run": handleWorkRun,
+      "POST /api/work/terminal-dir": handleTerminalDir,
       "POST /api/work/screen": handleWorkScreen,
       "POST /api/work/release": handleWorkRelease,
       "POST /api/work/check": handleWorkCheck,
