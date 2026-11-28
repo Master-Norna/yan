@@ -1,60 +1,88 @@
-# 言
+<div align="center">
+
+<img src="web/icon.svg" alt="一笔言" width="96" height="96">
+
+<h1>言 · Yan</h1>
+
+<strong>从一席对谈，到一件事做成。</strong>
+
+<p>清简为骨，纸墨为意。</p>
+
+<a href="LICENSE"><img src="assets/readme/license.svg" alt="Apache-2.0"></a>
+<a href="https://github.com/Master-Norna/yan/releases/latest"><img src="assets/readme/platform.svg" alt="Windows · macOS"></a>
+<a href="docs/models.md"><img src="assets/readme/local.svg" alt="自选模型"></a>
+
+[下载](https://github.com/Master-Norna/yan/releases/latest) · [文档](docs/README.md) · [English](README.en.md)
+
+</div>
+
+言将对话、研究、开发与任务执行置于同一环境。模型由用户选择，任务在本地目录中持续推进，执行过程与交付成果可查。对谈中绑定目录，即可带着已有上下文进入执行。
 
 <p align="center">
-  <img src="web/icon.svg" alt="言" width="96" height="96">
+  <img src="assets/yan-home.png" alt="言的实际界面" width="100%">
 </p>
 
-**中文** · [English](README.en.md)
+## 核心体验
 
-> 清简为骨，纸墨为意。长问慢答，尽付纸墨；言毕，即行。
+<table>
+<tr>
+<td width="45%" valign="middle"><h3>以验收为中心的长程执行</h3><p>「图」将任务组织为结论、依赖与验收凭据，而非待办清单。文件、测试或探针结果变化时，关联结论转为待复核；收尾前，模型重新对照用户最初的目标自判完成情况。</p><a href="docs/work.md#图">了解更多</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/01-evidence.svg" alt="以验收为中心的长程执行" width="100%"></td>
+</tr>
+<tr>
+<td width="55%" valign="middle"><img src="assets/readme/02-continuity.svg" alt="跨会话持续推进" width="100%"></td>
+<td width="45%" valign="middle"><h3>跨会话持续推进</h3><p>「候」以进程结束或定时事件唤醒模型，避免无效等待；「差遣」支持帮手分工。图与目录记忆独立于单次对话保存，新会话可以承接已有进展和约束。</p><a href="docs/work.md#候">了解更多</a></td>
+</tr>
+<tr>
+<td width="45%" valign="middle"><h3>任务级的可编程约束</h3><p>「守」将任务要求落实为可执行的 Hook：匹配指定动作，执行前运行测试、拦截或请求批准；也可在收尾时复查测试和探针。约束随任务延续，不仅依靠提示词。</p><a href="docs/work.md#图">了解更多</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/03-guard.svg" alt="任务级的可编程约束" width="100%"></td>
+</tr>
+<tr>
+<td width="55%" valign="middle"><img src="assets/readme/04-collaboration.svg" alt="可审阅、可介入的执行" width="100%"></td>
+<td width="45%" valign="middle"><h3>可审阅、可介入的执行</h3><p>「行迹」保留操作与文件变更，工作区支持查看差异和按答复回退改动。「游目」呈现模型操作的浏览器，人可直接接管、圈点引用，与 Agent 共享工作现场。</p><a href="docs/stage.md">了解更多</a></td>
+</tr>
+</table>
 
-言把与模型的往来当作纸上的书写：问答落墨成文，动手的每一步记作行迹，岔出去的追问写在页边。同一张纸，不绑目录是对谈；绑上一个目录，模型便在其中读写文件、执行指令，把事办完。在本机运行，模型由你自己接。
+## 产品能力
 
-<p align="center">
-  <img src="assets/yan-home.png" alt="言 · 本地聊天与轻量执事界面" width="100%">
-</p>
+| 对话与创作 | 检索与研究 |
+| --- | --- |
+| 多轮对话、分支与版本、旁注、补言、附件阅读、交互图表。 | 网络检索、网页阅读、浏览器操作及圈点引用。 |
+| **代码与文件** | **文档与交付** |
+| 文件读写、目录检索、终端执行、差异查看与回退。 | 卷宗管理，文档、表格、演示文稿及 PDF 预览。 |
+| **记忆与个性化** | **模型与工具** |
+| 跨会话记忆、目录记忆、预设与会话分组。 | 自主选择模型，接入 MCP、Skills 与本机工具。 |
 
-## 合作伙伴
+## 安全与控制
+
+按场景选择问而后行、审而后行或径行。权限档位、沙箱规则、独立审查与任务守则形成不同层次的控制。
+
+- **规则与沙箱**：按权限档位限制指令与文件操作，对明确风险拦截或转为请示。
+- **独立模型审查**：可配置专司审查模型，结合用户原始指令判断规则标疑的操作。
+- **任务守则（Hook）**：在副作用发生前匹配指令、文件、网址或工具，进行测试、拦截或请示。
+- **追溯与回退**：操作与变更留下行迹，可审阅差异与回退一答的文件改动。
+
+实际保护范围取决于权限档位与配置。[权限与沙箱](docs/sandbox.md)。
+
+## 纸墨设计
+
+<div align="center">
+<img src="assets/readme/ink-appearance.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-presets.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-scroll.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-theme.svg" alt="" width="52" height="52">
+</div>
+
+笔意图标、朱印反馈、墨历与天光主题构成统一的交互视觉语言。 用量化作余墨，使用记录落成墨历；寄出是一方朱印，明暗随天光流转。
+
+## 模型自主与开放生态
+
+自主选择模型接口，按需配置审查等专司；通过 MCP 与 Skills 扩展工作能力。对话与配置保存在本机，发给模型或外部工具的内容由相应服务处理。接口支持硅基流动、OpenAI 兼容、Anthropic 与 ChatGPT 订阅。
+
+### 合作伙伴
 
 <a href="https://siliconflow.cn" title="硅基流动 SiliconFlow"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/powered-by-siliconflow-dark.png"><img src="assets/powered-by-siliconflow-light.png" alt="Powered by SiliconFlow" height="44"></picture></a>
 
 言与 [硅基流动 SiliconFlow](https://siliconflow.cn) 合作：在「设置 → 模型」的接口里选「硅基流动」，填上自己的 API Key 即可。图文步骤见硅基流动官方文档里的[《在言中使用硅基流动》](https://docs.siliconflow.cn/docs/usercases/use-siliconcloud-in-yan)。
 
-## 特色
-
-### 言与行，以目录为界
-
-别处多把聊天与 Agent 分作两个程序，言只看这段对话绑没绑目录。先把一个想法聊透，中途绑上目录，模型带着前面的来龙去脉动手；那一路聊下来的取舍，不必再讲一遍。[详见](docs/work.md)
-
-### 旁注：写在页边的追问
-
-读到一处不明白，划选它，右侧展开一段附在那里的小对话。旁注读得到正文，正文永远读不到它：岔出去问的，不会搅进主线的上下文。切到另一版答复，旁注随之隐去，切回又在。[详见](docs/chat.md#会话与输入)
-
-### 图：长活知道什么算做成
-
-跨几答的长活，模型在目录里立一份「图」：这件事要成立哪几条结论，各以什么为前提，凭哪些文件、哪条指令的输出算数。凭据一变，不论是这一答改的、别的对话改的，还是你亲手改的，那一项即转待复核，牵连的几项一并亮出来。模型想收尾时先被拦一下，对照你最初那一问自判做成没有。换一段对话接着做，看到的仍是同一份；做法与踩过的坑另记在目录的记忆里。[详见](docs/work.md#图)
-
-### 候：挂上就走，到时叫醒
-
-训练、构建、等一个 PR 的回复，执事挂到后台或约个时刻，便收尾歇下，不醒着干等；指令跑完、时刻到了，自会叫醒它接着做。帮手也一样，可以自己开训练、睡下、醒来评估，再回来交差。[详见](docs/work.md#候)
-
-### 补言：说到一半也能插一句
-
-模型正答着，想起什么就补一句。不硬掐，也不排队：等它想完这一段、跑完这一步、写到句尾，才把话递上，它读了可以就此改道。急的话，点那一步上的 ↵ 当场递上。[详见](docs/chat.md#生成与版本)
-
-### 游目：看得见它上网
-
-模型用的浏览器收在右侧一栏，它点了哪里、键入什么，都落一笔朱；随时接得过手。拿笔在网页上圈一处、划一道，就是指给它看。[详见](docs/stage.md)
-
-### 纸墨，一支笔到底
-
-不是换了一层皮。用量是余墨，随用随减；一年的用量是一页墨点，用得越多点越浓；寄出是盖一方印，放一首曲子是画一笔圆相，明暗之间是天光流转。界面与动效同出一套笔墨。
-
-## 此外
-
-卷宗与成品（PPT、Excel、PDF 做好就地预览）、答复里可交互的图表、差遣帮手分头做事、一答之内动过的文件可整个退回、预设与分组、MCP 与 Skill、跨对话的记忆。指令分三档权限，另有一层沙箱，规则拿不准的一步可交审查模型照你的原话再判。接口认硅基流动、OpenAI 兼容、Anthropic 与 ChatGPT 订阅；言没有自己的服务器；对话和配置保存在本机，发给模型或外部工具的内容由相应服务处理。源码只需 Node.js 22 或更高版本，不装运行时依赖。界面可切中英。
-
-## 开始
+## 开始使用
 
 **Windows**：到 [Releases](https://github.com/Master-Norna/yan/releases/latest) 下载 `yan-<版本>-win-x64.zip`，解开后双击 `言.exe`。头一回若提示「已保护你的电脑」，点「更多信息 → 仍要运行」（`言.exe` 未签名）。
 
@@ -68,6 +96,7 @@ npm start
 
 浏览器打开 `http://127.0.0.1:8787`，在「设置 → 模型」接入一个模型，即可落笔。`start.cmd` 打开的窗口是本机桥接，用时须开着。VS Code 内使用、环境变量、macOS 上的差别，见 [启动与运行](docs/start.md)。
 
+
 ## 文档
 
 界面里的用法在「设置 → 文档」；各处的细节与做法见 [docs](docs/README.md)。
@@ -79,3 +108,13 @@ npm start
 ## 许可与致谢
 
 本项目以 Apache-2.0 发布，全文见 `LICENSE`。随项目本地分发的开源库：marked（MIT）、DOMPurify（Apache-2.0）、highlight.js（BSD-3-Clause）、KaTeX（MIT）、Mermaid（MIT）、Apache ECharts（Apache-2.0）、PDF.js（Apache-2.0），许可全文见 `vendor/`。
+
+## 开源贡献
+
+维护者与 Agent 账号参与的上游开源贡献，其中包含由言辅助完成的工作。卡片自动更新自公开已合并的 PR，不将全部贡献归因于 Agent。
+
+<p align="center">
+  <a href="https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md"><img src="https://raw.githubusercontent.com/Master-Norna/yan/readme-contributions/assets/readme/contributions.svg" alt="上游已合并 PR 的循环展示" width="100%"></a>
+</p>
+
+[查看完整贡献记录](https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md)

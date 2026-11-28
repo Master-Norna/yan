@@ -1,58 +1,86 @@
-# Yan (言)
+<div align="center">
+
+<img src="web/icon.svg" alt="Yan" width="96" height="96">
+
+<h1>言 · Yan</h1>
+
+<strong>From a conversation to a finished piece of work.</strong>
+
+<p>Plainness for bones, paper and ink for spirit.</p>
+
+<a href="LICENSE"><img src="assets/readme/license.svg" alt="Apache-2.0"></a>
+<a href="https://github.com/Master-Norna/yan/releases/latest"><img src="assets/readme/platform.svg" alt="Windows · macOS"></a>
+<a href="docs/en/models.md"><img src="assets/readme/local-en.svg" alt="Choose your models"></a>
+
+[Download](https://github.com/Master-Norna/yan/releases/latest) · [Docs](docs/en/README.md) · [中文](README.md)
+
+</div>
+
+Yan brings conversation, research, development and task execution into one local environment. Choose your own models, continue work in a local folder, and inspect the execution trail and deliverables. A conversation becomes an agent workspace as soon as you bind it to a folder.
 
 <p align="center">
-  <img src="web/icon.svg" alt="Yan" width="96" height="96">
+  <img src="assets/yan-home.png" alt="Yan interface" width="100%">
 </p>
 
-[中文](README.md) · **English**
+## Distinctive capabilities
 
-> Plainness for bones, paper and ink for spirit. Ask at length, answer at leisure; when the words are done, act.
+<table>
+<tr>
+<td width="45%" valign="middle"><h3>Evidence-based long-running work</h3><p>Intent structures work as conclusions, dependencies and acceptance evidence rather than a to-do list. Changed files, tests or probe results mark dependent conclusions for recheck. Before finishing, the model reassesses the original request.</p><a href="docs/en/work.md#intent">Learn more</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/01-evidence-en.svg" alt="Evidence-based long-running work" width="100%"></td>
+</tr>
+<tr>
+<td width="55%" valign="middle"><img src="assets/readme/02-continuity-en.svg" alt="Continuity across conversations" width="100%"></td>
+<td width="45%" valign="middle"><h3>Continuity across conversations</h3><p>Waits wake the model when a background command finishes or a timer fires, without spending inference on waiting. Subagents divide the work. Intent and folder memory persist across conversations so a new session can pick up progress and constraints.</p><a href="docs/en/work.md#waits">Learn more</a></td>
+</tr>
+<tr>
+<td width="45%" valign="middle"><h3>Programmable task constraints</h3><p>Guards turn task requirements into executable hooks: match an action, test it, block it or request approval before execution. Tests and probes can also be rechecked before finishing. Constraints follow the task rather than relying only on prompts.</p><a href="docs/en/work.md#intent">Learn more</a></td>
+<td width="55%" valign="middle"><img src="assets/readme/03-guard-en.svg" alt="Programmable task constraints" width="100%"></td>
+</tr>
+<tr>
+<td width="55%" valign="middle"><img src="assets/readme/04-collaboration-en.svg" alt="Reviewable, collaborative execution" width="100%"></td>
+<td width="45%" valign="middle"><h3>Reviewable, collaborative execution</h3><p>The trail records actions and file changes; the workspace exposes diffs and supports reply-level rollback. The browser panel shows the model's browser, which you can take over or annotate directly. Human and agent share the same working context.</p><a href="docs/en/stage.md">Learn more</a></td>
+</tr>
+</table>
 
-Yan treats working with a model as writing on paper: questions and answers are set down in ink, every action the model takes is recorded as a step, and side questions go in the margin. On the same sheet, a conversation with no folder is a chat; bind it to a folder and the model reads and writes files and runs commands there until the job is done. It runs on your machine, with models you connect yourself.
+## Product capabilities
 
-<p align="center">
-  <img src="assets/yan-home.png" alt="Yan: a local chat and lightweight agent interface" width="100%">
-</p>
+| Conversation & creation | Search & research |
+| --- | --- |
+| Multi-turn chat, branches and versions, side threads, mid-reply follow-ups, attachments and interactive charts. | Web search, page reading, browser actions and annotated references. |
+| **Code & files** | **Documents & delivery** |
+| Read and edit files, search directories, run commands, inspect and roll back changes. | Manage files and preview documents, spreadsheets, slides and PDFs. |
+| **Memory & personalization** | **Models & tools** |
+| Cross-chat and folder memory, presets and conversation groups. | Choose your models; connect MCP, Skills and local tools. |
 
-## Partner
+## Safety & control
+
+Choose ask-first, review-first or direct execution to suit the situation. Permissions, sandbox rules, independent review and task guards provide separate control layers.
+
+- **Rules & sandbox** — Restrict commands and file operations according to the permission level; block or ask about risky actions.
+- **Independent review** — A separately configured model can assess ambiguous actions against the user's original request.
+- **Task guards (Hook)** — Match specific commands, files, URLs or tools before side effects, with testing, blocking or approval.
+- **Audit & rollback** — Inspect actions and file differences; roll back file changes made in a reply.
+
+Actual protections depend on the selected permission level and configuration. [Permissions and sandbox](docs/en/sandbox.md).
+
+## Paper and ink
+
+<div align="center">
+<img src="assets/readme/ink-appearance.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-presets.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-scroll.svg" alt="" width="52" height="52">　<img src="assets/readme/ink-theme.svg" alt="" width="52" height="52">
+</div>
+
+Paper-and-ink design connects brush icons, seal-like feedback, the ink calendar and daylight transitions into one visual language. Usage is ink running down; a year of usage is a page of ink dots, darker where usage is higher.
+
+## Model choice & open ecosystem
+
+Choose your own model APIs and specialized models for tasks such as review. Extend capabilities through MCP and Skills. Conversations and configuration are stored locally; content sent to a model or external tool is processed by that service. Supported interfaces include SiliconFlow, OpenAI-compatible APIs, Anthropic and ChatGPT subscription.
+
+### Partner
 
 <a href="https://siliconflow.cn" title="SiliconFlow"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/powered-by-siliconflow-dark.png"><img src="assets/powered-by-siliconflow-light.png" alt="Powered by SiliconFlow" height="44"></picture></a>
 
 Yan partners with [SiliconFlow](https://siliconflow.cn). In **Settings → Model**, choose **SiliconFlow** as the API and paste your own API key. SiliconFlow's official guide [Using SiliconFlow in Yan](https://docs.siliconflow.cn/docs/usercases/use-siliconcloud-in-yan) (in Chinese) has step-by-step screenshots.
-
-## Highlights
-
-### Chat and Agent, divided by a folder
-
-Most tools split chatting and agents into separate programs; Yan only asks whether this conversation is bound to a folder. Talk an idea through, bind a folder midway, and the model acts with the whole story behind it; the trade-offs you settled along the way don't need repeating. [More](docs/en/work.md)
-
-### Side threads: questions in the margin
-
-When something in a reply isn't clear, select it and a small conversation attached to that spot opens on the right. A side thread can read the main conversation, but the main conversation never sees it, so a detour never leaks into the main context. Switch to another version of the reply and its side threads hide, then reappear when you switch back. [More](docs/en/chat.md#sessions-and-input)
-
-### Intent: long jobs that know what "done" means
-
-For a job spanning several replies, the model keeps an **Intent** in the folder: which conclusions the job must establish, what each rests on, and which files or command outputs back it. When that evidence changes, whether by this reply, another conversation or your own hand, the item turns to needs recheck and everything depending on it lights up. When the model tries to finish, it's held once and asked to judge against your original question whether it's really done. Another conversation in the same folder picks up the same Intent; working practice and pitfalls go in a separate folder memory file. [More](docs/en/work.md#intent)
-
-### Waits: leave it running, get woken when it's time
-
-Training runs, builds, waiting on a PR review: the agent puts them in the background or sets a time, then finishes its reply instead of sitting awake. When the command ends or the time comes, it's woken to carry on. Subagents work the same way: start a training run, sleep, wake up to evaluate, then report back. [More](docs/en/work.md#waits)
-
-### Follow-ups: cut in mid-answer
-
-While the model is answering, add a line whenever something occurs to you. It isn't cut off and your words don't wait in a queue: they're handed over once it finishes the thought, the step or the sentence, and it can change course from there. If it's urgent, click ↵ on that step to hand it over at once. [More](docs/en/chat.md#generation-and-versions)
-
-### Browser panel: watch it use the web
-
-The browser the model uses sits in a panel on the right, with a red mark wherever it clicks or types, and you can take over at any time. Circle something or draw a line on the page to point it out. [More](docs/en/stage.md)
-
-### Paper and ink, all the way through
-
-It isn't a skin. Usage is ink running down; a year of usage is a page of ink dots, darker where you used more; sending is pressing a seal, playing music draws a brushed circle, and light and dark change like daylight. The interface and its motion share one brush.
-
-## Also
-
-Files and outputs (decks, spreadsheets and PDFs previewed in place), interactive charts in replies, subagents splitting up work, rolling a folder back to how it was before a reply, presets and groups, MCP and Skills, memory across conversations. Commands run under three permission levels with a sandbox on top, and a review model can judge the steps the rules aren't sure about against what you actually said. APIs: SiliconFlow, OpenAI compatible, Anthropic and ChatGPT subscription. Yan has no hosted server. Chats and settings are stored locally; content sent to a model or external tool is processed by that service. Running from source only requires Node.js 22 or later and no runtime dependencies. English and Chinese interfaces.
 
 ## Get started
 
@@ -68,6 +96,7 @@ npm start
 
 Your browser opens `http://127.0.0.1:8787`. Add a model in **Settings → Model** and start writing; switch the interface to English in **Settings → General → Language**. The window opened by `start.cmd` is the local bridge and must stay open while you use Yan. For use inside VS Code, environment variables and macOS differences, see [Getting started](docs/en/start.md).
 
+
 ## Docs
 
 In-app usage is under **Settings → Docs**; details and how things work are in the [docs](docs/en/README.md).
@@ -79,3 +108,13 @@ Issues and PRs are welcome. Before you start, please read [Contributing to Yan](
 ## License and credits
 
 Released under Apache-2.0; see `LICENSE`. Open-source libraries shipped with the project: marked (MIT), DOMPurify (Apache-2.0), highlight.js (BSD-3-Clause), KaTeX (MIT), Mermaid (MIT), Apache ECharts (Apache-2.0), PDF.js (Apache-2.0). Full license texts are in `vendor/`.
+
+## Open-source contributions
+
+Upstream contributions from the maintainer and agent accounts, including work assisted by Yan. The feed is refreshed from public merged pull requests; it does not attribute every PR to the agent.
+
+<p align="center">
+  <a href="https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md"><img src="https://raw.githubusercontent.com/Master-Norna/yan/readme-contributions/assets/readme/contributions.svg" alt="Rolling selection of merged upstream pull requests" width="100%"></a>
+</p>
+
+[Browse the contribution record](https://github.com/Master-Norna/yan/blob/readme-contributions/assets/readme/contributions.md)
