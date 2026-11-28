@@ -310,7 +310,7 @@ function bindTrailEvents() {
       return resumeHelperStep(goon.dataset.helperResume || goon.closest(".tool-step")?.dataset.stepId || "");
     }
     const more = event.target.closest("[data-step-more]");
-    if (more) return showStepInFull(more.closest(".tool-step"));
+    if (more) return showStepInFull(more.closest(".tool-step"), document.activeElement === more);
     // 出处也是一块可开合的，与思绪、行迹同一种开合
     const sources = event.target.closest(".source-stack > summary");
     if (sources) {
@@ -333,7 +333,7 @@ function bindTrailEvents() {
     head.title = wasFolded ? t("收起输出") : t("展开输出");
     saveStoreSoon();
   };
-  const showStepInFull = el => {
+  const showStepInFull = (el, restoreFocus) => {
     const step = stepInView(el?.dataset.stepId);
     if (!step) return;
     step.full = !step.full;
@@ -347,6 +347,7 @@ function bindTrailEvents() {
     morphHeight(el, () => {
       el.className = next.className;
       el.innerHTML = next.innerHTML;
+      if (restoreFocus) el.querySelector("[data-step-more]")?.focus({ preventScroll: true });
     });
     void loadThumbnails(el);
   };
