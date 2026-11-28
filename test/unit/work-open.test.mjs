@@ -231,20 +231,38 @@ test("当前缺件不冒充本答删除，历史写入仍可查；下载没有�
   const message = {
     steps: [
       {
-        name: "write_file", status: "done", arguments: "{}", result: "已写入",
-        written: "hello", root: "C:/one", change: { path: first, created: true, added: 1, removed: 0 }
+        name: "write_file",
+        status: "done",
+        arguments: "{}",
+        result: "已写入",
+        written: "hello",
+        root: "C:/one",
+        change: { path: first, created: true, added: 1, removed: 0 }
       },
       {
-        name: "download_file", status: "done", arguments: "{}", result: "5 MB",
-        root: "C:/one", change: { path: second, created: true, added: 0, removed: 0 }
+        name: "download_file",
+        status: "done",
+        arguments: "{}",
+        result: "5 MB",
+        root: "C:/one",
+        change: { path: second, created: true, added: 0, removed: 0 }
       }
     ]
   };
   f.work.full = true;
-  f.work.changeFiles = [{path:first, created:true}, {path:second, created:true}];
-  f.work.changeEntries.set(first, {kind:"missing"});
-  f.work.changeEntries.set(second, {kind:"file"});
-  assert.deepEqual(f.workChangeRows().map(row => [row.path, row.state]), [[first, "missing"], [second, "add"]]);
+  f.work.changeFiles = [
+    { path: first, created: true },
+    { path: second, created: true }
+  ];
+  f.work.changeEntries.set(first, { kind: "missing" });
+  f.work.changeEntries.set(second, { kind: "file" });
+  assert.deepEqual(
+    f.workChangeRows().map(row => [row.path, row.state]),
+    [
+      [first, "missing"],
+      [second, "add"]
+    ]
+  );
   const history = f.workDiffHtml(message, first);
   assert.match(history, /文件当前不存在/);
   assert.match(history, /hello/);
