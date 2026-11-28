@@ -107,10 +107,15 @@ function detachConversation(c) {
   }
   return [c.id, files, () => cleanScratch(c)];
 }
-// 有效的「集」优先于单独置顶，其次是「工」，最后散列。侧栏已有组表，可直接传入查找结果。
+// 先认有效的「集」、再认「工」；只有散列对话单独置顶。侧栏已有组表，可直接传入查找结果。
 /** @param {Conversation} c */
 function historyPlacement(c, grouped = !!groupOf(c)) {
-  return grouped ? "set" : c.pinned ? "pinned" : isWork(c) ? "repo" : "chat";
+  return grouped ? "set" : isWork(c) ? "repo" : c.pinned ? "pinned" : "chat";
+}
+// 组内置顶只改变成员的次序，不改变组在时间线上的位置。
+/** @param {Conversation} a @param {Conversation} b */
+function compareHistoryMembers(a, b) {
+  return Number(!!b.pinned) - Number(!!a.pinned) || b.updatedAt.localeCompare(a.updatedAt);
 }
 // 保序键沿用 collapsedRepos 的格式；判断是否属于「工」仍看归属类型，不拿键名当类型。
 /** @param {Conversation} c */
