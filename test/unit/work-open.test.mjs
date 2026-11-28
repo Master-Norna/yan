@@ -226,7 +226,8 @@ test("改动列表和文件状态使用同一趟快照，显式刷新才整批�
 });
 
 test("当前缺件不冒充本答删除，历史写入仍可查；下载没有快照时给出明确提示", () => {
-  const f = load(["work", "workChangeRows", "workDiffHtml"]);
+  const f = load(["work", "workChangeRows", "workDiffHtml", `setup: () => { currentConversation = () => ({workdir: "C:/one"}); }`]);
+  f.setup();
   const message = {
     steps: [
       {
