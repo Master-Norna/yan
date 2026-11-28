@@ -22,12 +22,25 @@ const TRAIL_KIND_ICONS = new Map([
   ["forget", "strike"],
   ["search_conversations", "search"],
   ["read_conversation", "scroll"],
-  ["generate_image", "stage"]
+  ["generate_image", "stage"],
+  ["ask_user", "trailask"],
+  ["fold", "trailfold"],
+  ["update_intent", "trailgraph"],
+  ["intent_gate", "trailgraph"],
+  ["mcp_describe", "trailmcp"],
+  ["mcp_call", "trailmcp"],
+  ["mcp_config", "trailmcp"],
+  ["update_plan", "trailplan"]
 ]);
-/** @param {string} name @param {string} label */
-function trailLabelHtml(name, label) {
-  const icon = TRAIL_KIND_ICONS.get(name);
-  return `<span class="tool-label trail-kind-label">${icon ? brushIcon(icon, "trail-kind-icon") : ""}<span class="trail-kind-text">${escapeHtml(label)}</span></span>`;
+// 同一个小画不会随步骤变化：首用时生成一次，长行迹逐帧更新也不反复铺笔形。
+/** @type {Map<string, string>} */
+const trailIconCache = new Map();
+/** @param {string} name @param {string} label @param {boolean} [special] */
+function trailLabelHtml(name, label, special = false) {
+  // 展开的 MCP 工具即使服务已经移除，旧行迹仍可按名字识别。
+  const icon = TRAIL_KIND_ICONS.get(name) || (name.startsWith("mcp__") ? "trailmcp" : "");
+  if (icon && !trailIconCache.has(icon)) trailIconCache.set(icon, brushIcon(icon, "trail-kind-icon"));
+  return `<span class="tool-label trail-kind-label${special ? " trail-kind-special" : ""}">${trailIconCache.get(icon) || ""}<span class="trail-kind-text">${escapeHtml(label)}</span></span>`;
 }
 /** @param {Step} step */
 function stepHtml(step) {
