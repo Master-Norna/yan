@@ -241,6 +241,8 @@ async function warmInView(c, thought = null) {
     // 旧版可能把帮手仍在执行的后台指令另存了：接回后补上入口与监听。
     rewatchBackground();
     renderClepsydra();
+    // 接回的帮手步骤可能带着这一答没记在手上的改动：工作区若开着，照工具完成那条路重算一次。
+    workQueueRefresh(c);
   }
   // 备份可能早已把正文接回，但画面仍是冷思绪壳；手动展开也要重画。
   if (!(thought ? shown : ready) || currentConversation() !== c || view !== "chat") return;

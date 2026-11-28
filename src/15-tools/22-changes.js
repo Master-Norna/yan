@@ -505,7 +505,7 @@ function changeDiffStepsHtml(steps) {
       // 新建的件（或没记下原文的）也并排画：左边留空，与改动同一种画法，不一会儿整宽一会儿两栏
       if (content !== null) return `${head}<div class="tool-diff">${splitDiffHtml("", content).html}</div>`;
       const diff = stepDiffRender(step);
-      if (!diff) return head;
+      if (!diff) return `${head}<p class="file-viewer-note">${escapeHtml(t("未记录此操作的文本差异。"))}</p>`;
       return `${head}<div class="tool-diff">${diff.html}</div>`;
     })
     .join("")}</div>`;

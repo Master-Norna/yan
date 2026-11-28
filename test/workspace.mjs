@@ -50,6 +50,23 @@ const sheetPart = `<worksheet xmlns="${sheetNS}"><sheetData><row r="1"><c r="A1"
 const sharedPart = '<sst xmlns="' + sheetNS + '" count="2" uniqueCount="1"><si><t>共享原值</t></si></sst>';
 writeFileSync(ROOT + "/编辑.docx", officeZipFixture({ "word/document.xml": wordPart, "word/styles.xml": "<styles/>" }));
 writeFileSync(ROOT + "/编辑.xlsx", officeZipFixture({ "xl/worksheets/sheet1.xml": sheetPart, "xl/sharedStrings.xml": sharedPart }));
+// ODF 的空白要靠 text:s 表示（ODF 1.3 §6.1.2–6.1.3）：首尾与连续空格直接写成文字会被折叠。
+const odtNS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"';
+const odtPart =
+  `<?xml version="1.0" encoding="UTF-8"?><office:document-content ${odtNS}><office:body><office:text>` +
+  `<text:p>Alpha Beta</text:p>` +
+  `<text:p><text:s text:c="2"/>Alpha<text:s text:c="3"/>Beta<text:s text:c="2"/></text:p>` +
+  `</office:text></office:body></office:document-content>`;
+const odsPart =
+  `<?xml version="1.0" encoding="UTF-8"?><office:document-content ${odtNS} xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"><office:body><office:spreadsheet>` +
+  `<table:table table:name="普通"><table:table-row><table:table-cell office:value-type="string"><text:p>普通值</text:p></table:table-cell></table:table-row></table:table>` +
+  `<table:table table:name="矩阵"><table:table-row>` +
+  `<table:table-cell table:formula="of:=SUM([.A2:.B2])" table:number-matrix-columns-spanned="2" table:number-matrix-rows-spanned="1" office:value-type="float" office:value="2"><text:p>2</text:p></table:table-cell>` +
+  `<table:table-cell office:value-type="float" office:value="2"><text:p>2</text:p></table:table-cell>` +
+  `</table:table-row></table:table>` +
+  `</office:spreadsheet></office:body></office:document-content>`;
+writeFileSync(ROOT + "/保真.odt", officeZipFixture({ "content.xml": odtPart }));
+writeFileSync(ROOT + "/矩阵.ods", officeZipFixture({ "content.xml": odsPart }));
 
 await send("Page.navigate", { url: `${PAGE}preview.html` });
 await sleep(400);
@@ -292,9 +309,15 @@ await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').cl
 await waitFor(`document.querySelectorAll("#workStrips .work-row").length === 3`, 8000).catch(() => {});
 const states = await evalJs(`[...document.querySelectorAll("#workStrips .fi[data-state]")].map(el => el.dataset.state).sort()`);
 check(
-  "改动那一面：三件各按新建 / 改 / 删上色",
-  JSON.stringify(states) === JSON.stringify(["add", "del", "mod"]),
+  "改动那一面：三件各按新建 / 修改 / 当前缺件上色",
+  JSON.stringify(states) === JSON.stringify(["add", "missing", "mod"]),
   `${JSON.stringify(states)} · ${await workState()}`
+);
+check(
+  "当前缺件有明确提示，不冒充本答删除",
+  await evalJs(
+    `(() => { const row = document.querySelector('#workStrips [data-work-file$="/旧件.md"]'); return row?.querySelector('.fi')?.dataset.state === "missing" && row.textContent.includes("当前不存在"); })()`
+  )
 );
 check(
   "改动沿用件图着色，无额外条首色线",
@@ -303,7 +326,7 @@ check(
   )
 );
 check(
-  "改动那一面不写字（没有增删改、也没有 +几 −几）",
+  "改动那一面不堆叠增删改文字或行数",
   await evalJs(
     `!/[+−]\\d/.test(document.querySelector("#workStrips").textContent) && !/增|删 |改 /.test(document.querySelector("#workStrips").textContent)`
   )
@@ -371,6 +394,47 @@ await officeSet(0, "共享原值");
 await officeSave();
 const restored = readOffice("编辑.xlsx", readFileSync(ROOT + "/编辑.xlsx"));
 check("同一编辑态再次保存及回改有效", restored["xl/worksheets/sheet1.xml"].includes('<c r="A1" t="s"><v>0</v></c>'));
+
+// ODT：读取 text:s 表示的首尾与连续空格；保存时同一串字必须仍编成 text:s（裸写会被合规读取折叠）。
+await officeOpen("保真.odt");
+check(
+  "ODT 段落读得出 text:s 里的首尾与连续空格",
+  await evalJs(
+    `document.querySelectorAll("[data-office-field]").length === 2 && document.querySelectorAll("[data-office-field]")[1].value === "  Alpha   Beta  "`
+  )
+);
+await officeSet(0, "  Alpha   Beta  ");
+await officeSave();
+const odt = readOffice("保真.odt", readFileSync(ROOT + "/保真.odt"))["content.xml"];
+check(
+  "ODT 保存把首尾与连续空格编成 text:s，不留裸写",
+  odt.includes("text:s") && !/Alpha {2,}Beta/.test(odt) && !/<text:p> +Alpha/.test(odt),
+  odt.slice(0, 400)
+);
+await evalJs('document.querySelector("[data-work-edit]").click(); true');
+await officeOpen("保真.odt");
+check("ODT 存回后再打开仍是同一串空格", await evalJs(`document.querySelectorAll("[data-office-field]")[0].value === "  Alpha   Beta  "`));
+await evalJs('document.querySelector("[data-work-edit]").click(); true');
+
+// ODS：矩阵公式的结果格没有 table:formula，却也是公式的一部分；整张表不开放，普通表照常可改。
+await officeOpen("矩阵.ods");
+check(
+  "含矩阵公式的表不进入编辑列表",
+  await evalJs(
+    `document.querySelectorAll("[data-office-field]").length === 1 && document.querySelector("[data-office-field]").value === "普通值"`
+  )
+);
+await officeSet(0, "改过的普通值");
+await officeSave();
+const ods = readOffice("矩阵.ods", readFileSync(ROOT + "/矩阵.ods"))["content.xml"];
+check(
+  "矩阵表原样留着，普通单元格照改",
+  ods.includes("改过的普通值") &&
+    ods.includes('table:number-matrix-columns-spanned="2"') &&
+    ods.includes("of:=SUM([.A2:.B2])") &&
+    /<table:table-cell[^>]*office:value="2"[^>]*><text:p>2<\/text:p>/.test(ods),
+  ods.slice(0, 600)
+);
 
 check("全程没有页面异常", await evalJs(`window.__yanExceptions.length === 0`), await evalJs(`JSON.stringify(window.__yanExceptions)`));
 close();

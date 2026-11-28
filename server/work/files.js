@@ -13,10 +13,11 @@ const { readOffice, patchOffice } = require("./office.js");
 // 读一回最多交出多少字
 const WORK_FILE_LIMIT = 200000;
 // 编辑器只取可无损写回的完整原文，不把模型读到的带行号截断内容当原件。
+// 上限按编辑框里的字数（CRLF 归一成 LF）算：写回时又把 LF 换成 CRLF，按含 CR 的字数卡会让刚存好的文件再开时报超限。
 function editorText(buffer, decoded) {
   if (!decoded || !encodeText(decoded.text, decoded.encoding)?.equals(buffer)) throw Error("此文件不能无损编辑");
   const text = decoded.text;
-  if (text.length > WORK_FILE_LIMIT) throw Error("文件超过编辑上限（20 万字）");
+  if (text.replace(/\r\n/g, "\n").length > WORK_FILE_LIMIT) throw Error("文件超过编辑上限（20 万字）");
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text) || /\r(?!\n)/.test(text) || (text.includes("\r\n") && /(^|[^\r])\n/.test(text)))
     throw Error("此文件含特殊控制字符或混合换行，不能无损编辑");
   return text.replace(/\r\n/g, "\n");
@@ -67,9 +68,38 @@ module.exports = function createFiles(work) {
       // 读后被清空也算被改过（空的也有指纹）：不比长度
       if (typeof body.seen === "string" && (!previous || fingerprint(previous) !== body.seen))
         return { stale: true, path: shownPath(workdir, file), sig: previous ? fingerprint(previous) : "", missing: !previous };
+      // 读时带着基准（人的保存总要带）：替换前再核一次，临时件已备好、原件尚未换，这一小段里别处写入就作废。
+      // 只比读时的那一枚指纹，不比长度——空的也有指纹。
+      const expected = typeof body.seen === "string" && body.seen ? body.seen : "";
+      const commit = async buffer => {
+        try {
+          await writeTextAtomic(
+            file,
+            buffer,
+            signal,
+            expected
+              ? async () => {
+                  const now = await fs.promises.readFile(file).catch(error => {
+                    if (error.code === "ENOENT") return null;
+                    throw error;
+                  });
+                  return !!now && fingerprint(now) === expected;
+                }
+              : null
+          );
+          return null;
+        } catch (error) {
+          if (error.code !== "YAN_STALE") throw Error(describeFsError(error, String(body.path)));
+          const now = await fs.promises.readFile(file).catch(() => null);
+          return { stale: true, path: shownPath(workdir, file), sig: now ? fingerprint(now) : "", missing: !now };
+        }
+      };
       if (body.editor === "office") {
         const output = patchOffice(file, previous, body.parts);
-        if (output !== previous) await writeTextAtomic(file, output, signal);
+        if (output !== previous) {
+          const stale = await commit(output);
+          if (stale) return stale;
+        }
         return { sig: fingerprint(output) };
       }
       const prior = previous ? decodeText(previous) : null,
@@ -83,9 +113,10 @@ module.exports = function createFiles(work) {
         text = crlf && crlf * 2 >= lf && !content.includes("\r\n") ? content.replace(/\n/g, "\r\n") : content,
         output = (prior && encodeText(text, prior.encoding)) || Buffer.from(text, "utf8");
       if (output.length > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
-      await writeTextAtomic(file, output, signal).catch(error => {
-        throw Error(describeFsError(error, String(body.path)));
-      });
+      // 写出前先看它能不能由同一个编辑入口读回：上限、混合换行、无损编码都照读时的口径，别存成下一回打不开的样子。
+      if (body.editor === true) editorText(output, decodeText(output));
+      const stale = await commit(output);
+      if (stale) return stale;
       // 覆盖时按行比出真增删，并把改动那一带的旧侧行捎回页面，删去的那些才有红可看。
       // 新的一侧整份就在这一步的参数里，不必另存；也不按「开头 N 字」截——改在文件后头时两截开头一模一样，
       // 并排一比成了「什么都没改」（见 text.js 的 changeHunks）

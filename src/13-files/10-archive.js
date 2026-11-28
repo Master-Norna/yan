@@ -66,7 +66,7 @@ const FIGURE_MARKS = {
   zip: `<path class="m" d="M8.2 1.2V3M8.2 4.4V6.2M8.2 7.6V9.4M7 10.6H9.4V14.4H7Z"/>`
 };
 /** 一件的小图：图片就是它自己的缩略（file 是那件文件），别的按类画记号。
- * state 只在工作区「改动」那一面给：add / mod / del 换成石绿 / 泥金 / 朱（见 styles/56-stage/60-work.css） */
+ * state 只在工作区「改动」那一面给：add / mod / del / missing 换成石绿 / 泥金 / 朱 / 灰（见 styles/56-stage/60-work.css） */
 function fileFigure(name, file = "", state = "") {
   const figure = fileKind(name).figure,
     mark = state ? ` data-state="${state}"` : "";
