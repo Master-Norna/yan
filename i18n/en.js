@@ -6,6 +6,8 @@ var YAN_EN = {
   展开终端: "Expand terminal",
   调整终端高度: "Resize terminal",
   终端指令编号已失效: "Terminal command identifier expired",
+  执行超时: "Execution timed out",
+  "退出码：{0}": "Exit code: {0}",
   查找文件: "Search files",
   搜索文件内容: "Search file contents",
   没有匹配内容: "No matches",
