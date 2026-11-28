@@ -142,7 +142,8 @@ module.exports = function createWork({ archiveHome, workHome, storeRoot = () => 
       dir = resolveWorkdir(path.resolve(from, expanded)),
       real = await fs.promises.realpath(dir),
       storage = storeRoot();
-    const guarded = sandbox.screenStorePath(dir, storage) || sandbox.screenStorePath(real, storage ? await paths.canonicalPath(storage) : "");
+    const guarded =
+      sandbox.screenStorePath(dir, storage) || sandbox.screenStorePath(real, storage ? await paths.canonicalPath(storage) : "");
     if (guarded) throw Error(guarded);
     if (!(await fs.promises.stat(real)).isDirectory()) throw Error("目标不是目录");
     return { workdir: dir };
