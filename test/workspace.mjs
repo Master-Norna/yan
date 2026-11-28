@@ -76,6 +76,13 @@ check(
 );
 await openDir("空夹");
 await waitFor(`document.querySelector("#workStrips").textContent.includes("此层尚空")`);
+// 开着动效快速反向：末态仍以树的实际状态为准。
+await evalJs(`document.documentElement.dataset.inkMotion = "on"; true`);
+await evalJs(`${dirNamed("子夹")}.click(); ${dirNamed("子夹")}.click(); true`);
+await waitFor(`!!document.querySelector('[data-work-file$="/深.md"]')`);
+await waitFor(`${dirNamed("子夹")}.parentElement.getAnimations().length === 0`);
+check("连续开合后文件仍可见", await evalJs(`${dirNamed("子夹")}.getAttribute("aria-expanded") === "true"`));
+await evalJs(`document.documentElement.dataset.inkMotion = "off"; true`);
 await evalJs(`document.querySelector('[data-work-file$="/笔记.md"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 check(
@@ -120,7 +127,8 @@ check(
     `document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`
   )
 );
-await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
+await evalJs(`document.documentElement.dataset.inkMotion = "on"; document.querySelector('[data-work-mode="list"]').click(); true`);
+await waitFor(`document.querySelector(".work-explorer").clientWidth === 0`);
 check(
   "目录栏可折叠，文件仍在",
   await evalJs(
@@ -128,7 +136,11 @@ check(
   )
 );
 await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
+await waitFor(`document.querySelector(".work-explorer").getAnimations().length === 0`);
 await evalJs(`document.querySelector('.work-rail [data-work-terminal]').click(); true`);
+await waitFor(
+  `document.querySelector("#workTerminal").clientHeight > 100 && document.querySelector("#workTerminal").getAnimations().length === 0`
+);
 check(
   "终端在内容区下方，目录常驻",
   await evalJs(
@@ -150,6 +162,7 @@ await waitFor(
 );
 check("终端能执行并接收命令输出", await evalJs(`document.querySelector("#workTerminalOutput").textContent.includes("退出码：0")`));
 await evalJs(`document.querySelector("[data-work-terminal-wide]").click(); true`);
+await waitFor(`document.querySelector("#workContent").clientHeight === 0`);
 check(
   "终端展开不隐藏资源树",
   await evalJs(`document.querySelector("#workContent").clientHeight===0 && document.querySelector(".work-explorer").clientWidth>0`)
@@ -160,6 +173,8 @@ check(
   await evalJs(`!document.querySelector("#workTerminalOutput").textContent && !!document.querySelector("#fileViewerStage h1")`)
 );
 await evalJs(`document.querySelector('#workTerminal [data-work-terminal]').click(); true`);
+await waitFor(`document.querySelector("#workTerminal").clientHeight === 0`);
+await evalJs(`document.documentElement.dataset.inkMotion = "off"; true`);
 await evalJs(
   `document.querySelector('[data-work-mode="search"]').click(); const f=document.querySelector("#workFind"); f.querySelector("input").value="只有一页字"; f.requestSubmit(); true`
 );

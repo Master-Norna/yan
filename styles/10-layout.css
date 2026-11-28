@@ -171,9 +171,6 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   gap: 4px;
   margin: 6px 0 4px;
 }
-.history-search-wrap:not(.hidden) {
-  animation: rise var(--dur-rise) ease-out;
-}
 .history-search {
   flex: 1;
   min-width: 0;

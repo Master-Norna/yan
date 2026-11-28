@@ -200,7 +200,9 @@ function bindEvents() {
 }
 
 function syncScrim() {
-  $("#sidebarScrim").classList.toggle("hidden", !isMobile() || $("#sidebar").classList.contains("collapsed"));
+  const scrim = $("#sidebarScrim");
+  if (isMobile() && !$("#sidebar").classList.contains("collapsed")) showNow(scrim);
+  else if (!scrim.classList.contains("leaving")) hideWithFade(scrim);
 }
 function toggleSidebar(force) {
   const sidebar = $("#sidebar"),
@@ -219,6 +221,7 @@ function toggleHistorySearch(force) {
   const wrap = $("#historySearchWrap"),
     show = force ?? wrap.classList.contains("hidden");
   wrap.classList.toggle("hidden", !show);
+  wrap.inert = !show;
   $("#historySearchToggle").classList.toggle("active", show);
   if (show) setTimeout(() => $("#historySearch").focus(), 0);
   else {

@@ -370,6 +370,7 @@ function hideWithFade(el, duration = 170) {
   if (!el || el.classList.contains("hidden")) return;
   clearTimeout(el._leaveTimer);
   if (reducedMotion.matches || inkMotionOff()) {
+    el.classList.remove("leaving");
     el.classList.add("hidden");
     return;
   }
@@ -474,20 +475,28 @@ function setProcessDetails(details, open, animate = true) {
 // 别让一块内容凭空出现又凭空消失。动效关掉时直接改。
 // 整块重画（innerHTML）的，旧节点改完就不在了：find 取重画后的那一个，从旧高动到它的新高
 function morphHeight(el, mutate, duration = 360, find = () => el) {
-  if (!el || inkMotionOff() || typeof el.animate !== "function") return mutate();
+  if (!el || inkMotionOff() || typeof el.animate !== "function") {
+    el?._morph?.cancel();
+    return mutate();
+  }
   const from = el.getBoundingClientRect().height;
+  // 半途反向时先量眼前的高度，再撤旧动效，才能量到真正的新高度。
+  el._morph?.cancel();
   mutate();
   el = find();
   if (!el) return;
   const to = el.getBoundingClientRect().height;
   if (Math.abs(to - from) < 2) return;
-  el._morph?.cancel();
-  el.style.overflow = "hidden";
-  const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: "cubic-bezier(.22,.72,.2,1)" });
+  const animation = el.animate(
+    [
+      { height: `${from}px`, overflow: "hidden" },
+      { height: `${to}px`, overflow: "hidden" }
+    ],
+    { duration, easing: "cubic-bezier(.22,.72,.2,1)" }
+  );
   el._morph = animation;
   animation.onfinish = animation.oncancel = () => {
     if (el._morph !== animation) return;
     el._morph = null;
-    el.style.removeProperty("overflow");
   };
 }
