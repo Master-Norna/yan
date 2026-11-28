@@ -1054,7 +1054,10 @@ await evalJs(
 await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 25000).catch(() => {});
 const workDocUrl = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
 check("explicit address navigation opens the laid-out md in the browser", workDocUrl.includes("view-"), workDocUrl);
-check("explicit browser navigation leaves the workspace hidden", await evalJs(`document.querySelector("#stageWork").classList.contains("hidden")`));
+check(
+  "explicit browser navigation leaves the workspace hidden",
+  await evalJs(`document.querySelector("#stageWork").classList.contains("hidden")`)
+);
 check(
   "the address row writes the original, not the laid-out page",
   await evalJs(`document.querySelector("#stageAddr").textContent.includes("笔记.md")`)

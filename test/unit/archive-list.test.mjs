@@ -15,15 +15,7 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
     scratchDir = path.join(root, SCRATCH_DIR),
     listed = createArchive({ archiveHome: () => root })["POST /api/archive/list"];
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const dir of [
-    "report/nested",
-    "report/.hidden",
-    "report/node_modules",
-    "empty",
-    ".hidden",
-    "node_modules",
-    `${SCRATCH_DIR}/chat/sub`
-  ])
+  for (const dir of ["report/nested", "report/.hidden", "report/node_modules", "empty", ".hidden", "node_modules", `${SCRATCH_DIR}/chat/sub`])
     fs.mkdirSync(path.join(root, dir), { recursive: true });
   for (const file of ["report/fig.png", "fig.png", ".hidden/fig.png", "node_modules/fig.png", `${SCRATCH_DIR}/chat/sub/fig.png`])
     fs.writeFileSync(path.join(root, file), "abc");
