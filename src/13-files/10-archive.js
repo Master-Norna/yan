@@ -653,18 +653,21 @@ function bindLibraryEvents() {
     draggedLocalFile = deliver?.dataset.deliver || image?.dataset.openFile || "";
     if (!draggedLocalFile && link) draggedLocalFile = refTarget(link.dataset.path || link.dataset.file, refAnchor(link))?.file || "";
     if (!draggedLocalFile && change) {
-      const conversation = currentConversation(),
-        message = conversation && allMessages(conversation).find(m => m.id === change.closest("[data-message]")?.getAttribute("data-message"));
-      const roots = new Set(
-        (message ? allSteps(message) : [])
-          .filter(step => step.status === "done" && step.change?.path === change.dataset.changePath)
-          .map(step => step.root)
-      );
       // 新的改动记录已经是绝对路径，不再拼一次根；旧的相对路径只在原步骤落脚处明确时解析。
-      const path = slashed(change.dataset.changePath || ""),
-        root = roots.size === 1 ? [...roots][0] : "";
+      const path = slashed(change.dataset.changePath || "");
       if (/^(?:[a-z]:\/|\/)/i.test(path)) draggedLocalFile = path;
-      else if (root && path) draggedLocalFile = joinFile(root, path);
+      else if (path) {
+        const conversation = currentConversation(),
+          messageId = change.closest("[data-message]")?.getAttribute("data-message"),
+          message = conversation && allMessages(conversation).find(m => m.id === messageId),
+          roots = new Set(
+            (message ? allSteps(message) : [])
+              .filter(step => step.status === "done" && step.change?.path === change.dataset.changePath)
+              .map(step => step.root)
+          ),
+          root = roots.size === 1 ? [...roots][0] : "";
+        if (root) draggedLocalFile = joinFile(root, path);
+      }
     }
     if (draggedLocalFile) {
       event.dataTransfer.setData(LOCAL_FILE_DRAG, draggedLocalFile);
@@ -684,10 +687,7 @@ function bindLibraryEvents() {
       return closest(event, "#openLibrary, #history [data-repo-toggle], #workdirChip.on");
     if (draggedQuote && quoteConversation === currentId && types(event).includes(QUOTE_DRAG))
       return closest(event, "#composerArea .composer");
-    if (
-      (draggedArchiveFile && types(event).includes(ARCHIVE_DRAG)) ||
-      (draggedLocalFile && types(event).includes(LOCAL_FILE_DRAG))
-    )
+    if ((draggedArchiveFile && types(event).includes(ARCHIVE_DRAG)) || (draggedLocalFile && types(event).includes(LOCAL_FILE_DRAG)))
       return closest(event, "#history [data-conversation], #newChat, #composerArea .composer, #welcome .composer");
     return null;
   };
