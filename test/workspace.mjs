@@ -59,12 +59,20 @@ await waitDir("子夹");
 check("展开子目录保留父级", await evalJs(`!!${dirNamed("工作区")} && ${dirNamed("工作区")}.getAttribute("aria-expanded") === "true"`));
 await openDir("子夹");
 await waitFor(`!!document.querySelector('[data-work-file$="/深.md"]')`);
-check("父级文件与子级文件同时可见", await evalJs(`!!document.querySelector('[data-work-file$="/深.md"]') && !!document.querySelector('[data-work-file$="/笔记.md"]')`));
+check(
+  "父级文件与子级文件同时可见",
+  await evalJs(`!!document.querySelector('[data-work-file$="/深.md"]') && !!document.querySelector('[data-work-file$="/笔记.md"]')`)
+);
 await openDir("空夹");
 await waitFor(`document.querySelector("#workStrips").textContent.includes("此层尚空")`);
 await evalJs(`document.querySelector('[data-work-file$="/笔记.md"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
-check("文件只在内容区打开，目录仍可用", await evalJs(`(() => { const v=document.querySelector("#fileViewer"), p=document.querySelector("#workContent"), tree=document.querySelector(".work-explorer"), r=v.getBoundingClientRect(), q=p.getBoundingClientRect(); return v.parentElement===p && v.getAttribute("aria-modal")==="false" && Math.abs(r.width-q.width)<2 && r.left>=tree.getBoundingClientRect().right && tree.clientWidth>0 && document.querySelector("#stageBrowser").classList.contains("hidden"); })()`));
+check(
+  "文件只在内容区打开，目录仍可用",
+  await evalJs(
+    `(() => { const v=document.querySelector("#fileViewer"), p=document.querySelector("#workContent"), tree=document.querySelector(".work-explorer"), r=v.getBoundingClientRect(), q=p.getBoundingClientRect(); return v.parentElement===p && v.getAttribute("aria-modal")==="false" && Math.abs(r.width-q.width)<2 && r.left>=tree.getBoundingClientRect().right && tree.clientWidth>0 && document.querySelector("#stageBrowser").classList.contains("hidden"); })()`
+  )
+);
 await evalJs(`document.querySelector('[data-work-raw="true"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage pre")?.textContent.includes("# 笔记")`);
 await evalJs(`document.querySelector('[data-work-raw="false"]').click(); true`);
@@ -78,22 +86,46 @@ await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await waitFor(`document.querySelector("#stageWork").classList.contains("hidden")`);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
-check("从浏览器回来保留文件页签和目录展开状态", await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`));
+check(
+  "从浏览器回来保留文件页签和目录展开状态",
+  await evalJs(
+    `document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`
+  )
+);
 await evalJs(`document.querySelector('[data-work-collapse]').click(); true`);
-check("目录栏可折叠，文件仍在", await evalJs(`document.querySelector(".work-explorer").clientWidth===0 && !!document.querySelector("#fileViewerStage h1")`));
+check(
+  "目录栏可折叠，文件仍在",
+  await evalJs(`document.querySelector(".work-explorer").clientWidth===0 && !!document.querySelector("#fileViewerStage h1")`)
+);
 await evalJs(`document.querySelector('[data-work-collapse]').click(); true`);
 await evalJs(`document.querySelector('.work-rail [data-work-terminal]').click(); true`);
-check("终端在内容区下方，目录常驻", await evalJs(`document.querySelector("#workTerminal").clientHeight>0 && document.querySelector(".work-explorer").clientWidth>0 && document.querySelector("#workContent").getBoundingClientRect().bottom<=document.querySelector("#workTerminal").getBoundingClientRect().top+1`));
+check(
+  "终端在内容区下方，目录常驻",
+  await evalJs(
+    `document.querySelector("#workTerminal").clientHeight>0 && document.querySelector(".work-explorer").clientWidth>0 && document.querySelector("#workContent").getBoundingClientRect().bottom<=document.querySelector("#workTerminal").getBoundingClientRect().top+1`
+  )
+);
 await evalJs(`document.querySelector('#workTerminal [data-work-terminal]').click(); true`);
 await evalJs(`document.querySelector('[data-work-mode="search"]').click(); const f=document.querySelector("#workFind"); f.querySelector("input").value="只有一页字"; f.requestSubmit(); true`);
 await waitFor(`!!document.querySelector('#workStrips [data-work-file$="/一页.txt"]')`, 20000);
-check("全文搜索保留已打开的文件", await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector("#fileViewerStage h1")`));
+check(
+  "全文搜索保留已打开的文件",
+  await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector("#fileViewerStage h1")`)
+);
 await evalJs(`document.querySelector('[data-work-mode="changes"]').click(); true`);
 await waitFor(`document.querySelector("#workStrips").textContent.includes("还没改过文件")`);
 await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
 await waitFor(`!!document.querySelector('[data-work-file$="/深.md"]')`);
-check("切换视图不重置目录树与文件", await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`));
-check("浏览器工具在工作区隐藏", await evalJs(`["#stageMenuBtn","#stagePen"].every(id=>getComputedStyle(document.querySelector(id)).display==="none")`));
+check(
+  "切换视图不重置目录树与文件",
+  await evalJs(
+    `document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`
+  )
+);
+check(
+  "浏览器工具在工作区隐藏",
+  await evalJs(`["#stageMenuBtn","#stagePen"].every(id=>getComputedStyle(document.querySelector(id)).display==="none")`)
+);
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 
 // 改动那一面：本段对话改过的件，件图自己换色——石绿新建、泥金改、朱删（盘上已经没有的那件）
@@ -209,7 +241,10 @@ await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
 await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
 await evalJs(`document.querySelector('#stageWork [data-work-mode="list"]').click(); true`);
 await waitFor(`!!document.querySelector('#workStrips [data-work-dir$="/空夹"]')`);
-check("切回目录保留空夹展开状态", await evalJs(`document.querySelector('#workStrips [data-work-dir$="/空夹"]')?.getAttribute("aria-expanded")==="true"`));
+check(
+  "切回目录保留空夹展开状态",
+  await evalJs(`document.querySelector('#workStrips [data-work-dir$="/空夹"]')?.getAttribute("aria-expanded")==="true"`)
+);
 check("全程没有页面异常", await evalJs(`window.__yanExceptions.length === 0`), await evalJs(`JSON.stringify(window.__yanExceptions)`));
 close();
 process.exit(0);
