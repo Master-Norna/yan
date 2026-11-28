@@ -30,6 +30,7 @@ function stageFixture(ctx) {
         select() {
           this.selection = [0, this.value.length];
         },
+        querySelectorAll: () => [],
         get innerHTML() {
           assert.fail("不能用浏览器重序列化的 HTML 作判据");
         },
