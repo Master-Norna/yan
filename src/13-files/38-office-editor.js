@@ -214,7 +214,8 @@ function officeEditorChanges(parts, extension, values) {
   }
   const serializer = new XMLSerializer();
   for (const part of changed) {
-    const xml = serializer.serializeToString(docs.get(part));
+    // Document 的 open() 与项目宽松 DOM 声明里的 EventTarget.open 冲突；实际 DOM Document 是合法的 Node。
+    const xml = serializer.serializeToString(/** @type {Node} */ (/** @type {unknown} */ (docs.get(part))));
     parseXml(xml);
     output[part] = xml;
   }
