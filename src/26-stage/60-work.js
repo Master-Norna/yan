@@ -165,17 +165,23 @@ async function workRefresh() {
 function workChangedFiles() {
   const files = new Map(),
     /** @type {Conversation|null} */
-    conversation = currentConversation?.() || null,
-    root = slashed(conversation?.workdir || archiveDir());
+    conversation = currentConversation?.() || null;
   for (const message of conversation?.messages || [])
-    for (const file of changeStats(message).files) {
-      // 改动可能只记了相对路（例如 .yan/报告.md）。以对话落脚处算，不随簿录当前所处目录变。
-      const raw = slashed(file.path);
+    for (const step of allSteps(message)) {
+      if (!step.change || step.status !== "done") continue;
+      // 历史相对路径属于原步骤的落脚处，不能随对话重新绑定而改变。
+      const raw = slashed(step.change.path),
+        root = slashed(step.root || "");
       if (!raw) continue;
-      const path = /^(?:[a-z]:\/|\/)/i.test(raw) ? absJoin(raw, "") : root && !/^[a-z][\w+.-]*:/i.test(raw) ? absJoin(root, raw) : "";
+      const path = /^(?:[a-z]:\/|\/)/i.test(raw)
+        ? absJoin(raw, "")
+        : /^(?:[a-z]:\/|\/)/i.test(root) && !/^[a-z][\w+.-]*:/i.test(raw)
+          ? absJoin(root, raw)
+          : "";
+      // 老记录没有落脚处时不能猜一个现目录，否则可能打开不相干的文件。
       if (!path) continue;
       const entry = files.get(path) || { path, created: false };
-      entry.created ||= !!file.created;
+      entry.created ||= !!step.change.created;
       files.set(path, entry);
     }
   return [...files.values()];
