@@ -384,8 +384,8 @@
 .strip:focus-within .strip-acts {
   display: flex;
 }
-.strip:hover .strip-when,
-.strip:focus-within .strip-when {
+.strip:has(.strip-acts):hover .strip-when,
+.strip:has(.strip-acts):focus-within .strip-when {
   display: none;
 }
 .strip-rename {

@@ -160,7 +160,7 @@
 }
 .work-page .strips {
   --cell: 12px;
-  --cols: 30px minmax(0, 1fr) 80px 116px;
+  --cols: 30px minmax(0, 1fr) 110px 116px;
 }
 .work-page .strip > span,
 .work-page .strip-cols > span {
@@ -209,12 +209,12 @@
 @container work (max-width: 500px) {
   .work-page .strips {
     --cell: 8px;
-    --cols: 26px minmax(0, 1fr) 66px 96px;
+    --cols: 26px minmax(0, 1fr) 96px 96px;
   }
 }
 @container work (max-width: 340px) {
   .work-page .strips {
     --cell: 6px;
-    --cols: 24px minmax(0, 1fr) 60px 84px;
+    --cols: 24px minmax(0, 1fr) 82px 84px;
   }
 }

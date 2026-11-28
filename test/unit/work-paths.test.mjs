@@ -63,3 +63,32 @@ test("工作区跟随对话绑定，普通重画不打断走层，未绑定时�
   assert.equal(f.workFollowConversation(), true);
   assert.equal(f.work.root, "/new-archive");
 });
+
+test("工作区夹的数量和日期复用卷宗格式，未知数量不当作空夹", () => {
+  const { work, workRows, workRowHtml, folderCountNote, formatDay } = load([
+    "work",
+    "workRows",
+    "workRowHtml",
+    "folderCountNote",
+    "formatDay"
+  ]);
+  const modifiedAt = "2026-11-28T00:00:00Z";
+  work.root = "C:/one";
+  work.dirs = [
+    { path: "A", name: "A", files: 12, folders: 3, modifiedAt },
+    { path: "B", name: "B", files: 0, folders: 0, modifiedAt },
+    { path: "C", name: "C", modifiedAt }
+  ];
+  const rows = workRows();
+  assert.deepEqual(
+    rows.map(row => [row.note, row.when]),
+    [
+      [folderCountNote(12, 3), formatDay(modifiedAt)],
+      [folderCountNote(0, 0), formatDay(modifiedAt)],
+      ["", formatDay(modifiedAt)]
+    ]
+  );
+  assert.match(workRowHtml(rows[0]), /12 件 · 3 夹/);
+  assert.ok(workRowHtml(rows[0]).includes(formatDay(modifiedAt)));
+  assert.match(workRowHtml(rows[1]), /空/);
+});

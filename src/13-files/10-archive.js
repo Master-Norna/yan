@@ -128,12 +128,18 @@ function libraryRowHtml(file, showDir = true) {
     showDir ? parentDir(file.path) : ""
   )}<span>${formatFileSize(file.size)}</span><span class="strip-date"><span class="strip-when">${escapeHtml(formatDay(file.modifiedAt))}</span>${stripActs("download", "rename", "remove")}</span></span></div>`;
 }
+/** 卷宗、工作区共用的数量栏；没取到数量就留空，真正的零才显示「空」。
+ * @param {number} [files] @param {number} [folders] */
+function folderCountNote(files, folders) {
+  if (files === undefined || folders === undefined) return "";
+  return files || folders ? [t`${files} 件`, folders ? t`${folders} 夹` : ""].filter(Boolean).join(" · ") : t("空");
+}
 // 一个夹：里头共几件（连同更深的层）、有几个子夹、最近一件的日子
 function libraryFolderHtml(dir) {
   const inside = (archiveEntries || []).filter(file => file.path.startsWith(`${dir.path}/`)),
     subs = archiveDirs.filter(other => parentDir(other.path) === dir.path).length,
     latest = inside.reduce((last, file) => (file.modifiedAt > last ? file.modifiedAt : last), ""),
-    note = inside.length || subs ? [t`${inside.length} 件`, subs ? t`${subs} 夹` : ""].filter(Boolean).join(" · ") : t("空"),
+    note = folderCountNote(inside.length, subs),
     path = escapeHtml(dir.path),
     renaming = libraryRenaming === dir.path;
   return `<div class="strip dir" role="button" tabindex="0" data-library-dir="${path}" data-library-item="${path}" draggable="${!renaming}" title="${t`打开 ${escapeHtml(dir.name)}`}"><span>${caseFigure()}</span>${libraryNameCell(dir)}<span class="strip-note">${note}</span><span class="strip-date"><span class="strip-when">${latest ? escapeHtml(formatDay(latest)) : ""}</span>${stripActs("rename", "remove")}</span></span></div>`;

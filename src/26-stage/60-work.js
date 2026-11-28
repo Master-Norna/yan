@@ -15,7 +15,7 @@ const work = {
   mode: "list",
   /** @type {{ path: string, name: string, size: number, modifiedAt: string }[]} 这一层的件，路径相对根 */
   entries: [],
-  /** @type {{ path: string, name: string }[]} 夹，同上 */
+  /** @type {{ path: string, name: string, files?: number, folders?: number, modifiedAt?: string }[]} 夹，同上 */
   dirs: [],
   /** 当前目录或改动路径已查完 */
   full: false,
@@ -206,7 +206,13 @@ function workRows() {
   if (work.mode === "changes") return workChangeRows();
   return [
     ...work.dirs
-      .map(dir => ({ dir: true, name: dir.name, path: workJoin(work.root, dir.path), note: "", when: "" }))
+      .map(dir => ({
+        dir: true,
+        name: dir.name,
+        path: workJoin(work.root, dir.path),
+        note: folderCountNote(dir.files, dir.folders),
+        when: dir.modifiedAt ? formatDay(dir.modifiedAt) : ""
+      }))
       .sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
     ...work.entries.map(entry => ({
       dir: false,
@@ -258,7 +264,7 @@ function workCrumbsHtml() {
 /** @param {WorkRow} row */
 function workRowHtml(row) {
   if (row.dir)
-    return `<div class="strip dir" role="button" tabindex="0" data-work-dir="${escapeHtml(row.path)}" title="${t`打开 ${escapeHtml(row.name)}`}"><span>${caseFigure()}</span><span class="strip-name"><strong>${escapeHtml(row.name)}</strong></span><span class="strip-note">${escapeHtml(row.note || "")}</span><span class="strip-date"><span class="strip-when"></span></span></div>`;
+    return `<div class="strip dir" role="button" tabindex="0" data-work-dir="${escapeHtml(row.path)}" title="${t`打开 ${escapeHtml(row.name)}`}"><span>${caseFigure()}</span><span class="strip-name"><strong>${escapeHtml(row.name)}</strong></span><span class="strip-note"><span class="ell" title="${escapeHtml(row.note || "")}">${escapeHtml(row.note || "")}</span></span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
   const where = row.where ? `<span class="dir">${escapeHtml(row.where.replace(/\/$/, ""))}/</span>` : "",
     size = row.size === null || row.size === undefined ? "" : escapeHtml(formatFileSize(row.size));
   // 删掉的件不再向盘上取缩略（取也取不到），只留那一片换过色的纸

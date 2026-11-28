@@ -15,17 +15,20 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
     scratchDir = path.join(root, SCRATCH_DIR),
     listed = createArchive({ archiveHome: () => root })["POST /api/archive/list"];
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const dir of ["report", "empty", ".hidden", "node_modules", `${SCRATCH_DIR}/chat/sub`])
+  for (const dir of ["report/nested", "report/.hidden", "report/node_modules", "empty", ".hidden", "node_modules", `${SCRATCH_DIR}/chat/sub`])
     fs.mkdirSync(path.join(root, dir), { recursive: true });
   for (const file of ["report/fig.png", "fig.png", ".hidden/fig.png", "node_modules/fig.png", `${SCRATCH_DIR}/chat/sub/fig.png`])
     fs.writeFileSync(path.join(root, file), "abc");
   fs.symlinkSync(path.join(root, "report"), path.join(root, "linked"), "junction");
   fs.utimesSync(path.join(root, "fig.png"), 1000, 1000);
+  fs.utimesSync(path.join(root, "report"), 2000, 2000);
 
+  let denyReport = false;
   const scanned = [],
     readdir = fs.promises.readdir;
   t.mock.method(fs.promises, "readdir", (dir, ...args) => {
     scanned.push(dir);
+    if (denyReport && dir === path.join(root, "report")) throw Object.assign(Error("denied"), { code: "EACCES" });
     return readdir(dir, ...args);
   });
   const request = async options => {
@@ -51,7 +54,7 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
     visible.entries.map(file => file.path),
     ["report/fig.png", "fig.png"]
   );
-  assert.deepEqual(visible.dirs.map(dir => dir.path).sort(), ["empty", "report"]);
+  assert.deepEqual(visible.dirs.map(dir => dir.path).sort(), ["empty", "report", "report/nested"]);
   assert.equal(visible.truncated, false);
 
   const skipped = await list({ scratch: false });
@@ -64,15 +67,26 @@ test("卷宗列表仅在 scratch 为 false 时不遍历草稿，其他字段不�
   for (const value of [true, null, 0, "false"]) assert.deepEqual(await list({ scratch: value }), { ...visible, scratch });
 
   const shallow = await list({ depth: 1, scratch: false });
-  assert.deepEqual(scanned, [root], "只读当前层，不打开子目录");
+  assert.deepEqual(scanned.sort(), [root, path.join(root, "empty"), path.join(root, "report")].sort(), "只数直属项，不继续下钻");
   assert.deepEqual(
     shallow.dirs.map(dir => dir.path),
     ["empty", "report"]
   );
+  assert.deepEqual(shallow.dirs.map(({ files, folders }) => [files, folders]), [
+    [0, 0],
+    [1, 1]
+  ]);
+  assert.ok(shallow.dirs[0].modifiedAt);
+  assert.equal(shallow.dirs[1].modifiedAt, new Date(2000000).toISOString());
   assert.deepEqual(
     shallow.entries.map(file => file.path),
     ["fig.png"]
   );
+  denyReport = true;
+  const unreadable = await list({ depth: 1, scratch: false });
+  assert.equal(unreadable.dirs[1].files, undefined);
+  assert.equal(unreadable.dirs[1].folders, undefined);
+  assert.equal(unreadable.dirs[1].modifiedAt, new Date(2000000).toISOString());
   const empty = await list({ root: path.join(root, "empty"), depth: 1, scratch: false });
   assert.deepEqual([empty.dirs, empty.entries], [[], []]);
   const missing = await request({ root: path.join(root, "missing"), depth: 1, scratch: false });

@@ -64,6 +64,12 @@ check(
   JSON.stringify(names)
 );
 check("路径行写这一层目录", await evalJs(`document.querySelector("#workCrumbs .here").textContent === "工作区"`));
+check(
+  "子夹显示直属件数，空夹显示空，日期均有值",
+  await evalJs(
+    `${dirNamed("子夹")}.querySelector(".strip-note").textContent === "1 件" && ${dirNamed("空夹")}.querySelector(".strip-note").textContent === "空" && [...document.querySelectorAll("#workStrips .strip.dir .strip-when")].every(el => el.textContent.trim())`
+  )
+);
 await evalJs(
   `[...document.querySelectorAll("#workStrips [data-work-file]")].find(el => el.dataset.workFile.endsWith("/笔记.md")).click(); true`
 );
