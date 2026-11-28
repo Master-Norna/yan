@@ -252,27 +252,26 @@ async function workRefresh() {
   }
 }
 /** 一条簿录 @typedef {{ dir: boolean, name: string, path: string, where?: string, note?: string, size?: number|null, when?: string, state?: string }} WorkRow */
-/** 改动记下的路归成绝对路：相对的以对话落脚处算（对话没绑目录则为卷宗），带 scheme 的（sandbox:）不认。
- * workChangedFiles 与 workDiffHtml 共用这一处，两边配对才对得上 @param {string} raw @param {string} root */
+/** 改动路径按原步骤落脚处归并；缺少来源的旧相对路不猜。 @param {string} raw @param {string} root */
 function workAbsPath(raw, root) {
-  const text = slashed(raw);
+  const text = slashed(raw),
+    base = slashed(root);
   if (!text) return "";
   if (/^(?:[a-z]:\/|\/)/i.test(text)) return absJoin(text, "");
-  return root && !/^[a-z][\w+.-]*:/i.test(text) ? absJoin(root, text) : "";
+  return /^(?:[a-z]:\/|\/)/i.test(base) && !/^[a-z][\w+.-]*:/i.test(text) ? absJoin(base, text) : "";
 }
 /** 本段对话改过的件：按路径并成一份，新建过的记着 */
 function workChangedFiles() {
   const files = new Map(),
     /** @type {Conversation|null} */
-    conversation = currentConversation?.() || null,
-    root = slashed(conversation?.workdir || archiveDir());
+    conversation = currentConversation?.() || null;
   for (const message of conversation?.messages || [])
-    for (const file of changeStats(message).files) {
-      // 改动可能只记了相对路（例如 .yan/报告.md）。以对话落脚处算，不随簿录当前所处目录变。
-      const path = workAbsPath(file.path, root);
+    for (const step of allSteps(message)) {
+      if (!step.change || step.status !== "done") continue;
+      const path = workAbsPath(step.change.path, step.root || "");
       if (!path) continue;
       const entry = files.get(path) || { path, created: false };
-      entry.created ||= !!file.created;
+      entry.created ||= !!step.change.created;
       files.set(path, entry);
     }
   return [...files.values()];
@@ -280,12 +279,11 @@ function workChangedFiles() {
 /** 一件在本段对话里的改动：按条按步的先后排在一起，与行迹里点改动同一套画法。
  * 每一步的路也按同一口径归成绝对路，免得「.yan/报告.md」与「E:/…/.yan/报告.md」配不上 @param {Conversation} conversation @param {string} path */
 function workDiffHtml(conversation, path) {
-  const base = slashed(conversation?.workdir || archiveDir()),
-    /** @type {Step[]} */
-    steps = [];
+  /** @type {Step[]} */
+  const steps = [];
   for (const message of conversation?.messages || [])
     for (const step of allSteps(message))
-      if (step.change && step.status === "done" && workAbsPath(step.change.path, base) === path) steps.push(step);
+      if (step.change && step.status === "done" && workAbsPath(step.change.path, step.root || "") === path) steps.push(step);
   if (!steps.length) return `<div class="file-viewer-text change-diff"><p class="file-viewer-note">${t("此件没有记下改动")}</p></div>`;
   return changeDiffStepsHtml(steps).replace('<div class="file-viewer-text change-diff">', `<div class="file-viewer-text change-diff"><div class="work-diff-head"><span>${t("改动前")}</span><span>${t("改动后")}</span></div>`);
 }
