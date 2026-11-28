@@ -54,11 +54,8 @@ function workDirty(path) {
   return !!draft && draft.base !== draft.text;
 }
 function workCanEdit(tab) {
-  return (
-    !!tab &&
-    !tab.diff &&
-    (fileKind(tab.path).group === "text" || ["docx", "xlsx", "odt", "ods", "ipynb"].includes(fileExtension(tab.path)))
-  );
+  if (!tab || tab.diff) return false;
+  return fileKind(tab.path).group === "text" || ["docx", "xlsx", "odt", "ods", "ipynb"].includes(fileExtension(tab.path));
 }
 function workRenderEditor(tab, trigger = null) {
   const draft = workDrafts.get(tab.path);

@@ -43,11 +43,10 @@ function officeEditorModel(parts, extension) {
         }
         continue;
       }
-      const runs = xmlKids(paragraph, "r").filter(
-        run =>
-          run.namespaceURI === ns &&
-          [...run.children].every(child => child.namespaceURI === ns && ["rPr", "t"].includes(child.localName))
-      );
+      const runs = xmlKids(paragraph, "r").filter(run => {
+        if (run.namespaceURI !== ns) return false;
+        return [...run.children].every(child => child.namespaceURI === ns && ["rPr", "t"].includes(child.localName));
+      });
       for (const [j, run] of runs.entries()) {
         const nodes = xmlKids(run, "t");
         if (nodes.length !== 1 || !simpleText(nodes[0])) continue;
