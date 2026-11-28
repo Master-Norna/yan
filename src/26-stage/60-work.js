@@ -293,7 +293,8 @@ function workPaint() {
     body = rows.length
       ? `<div class="strip-cols"><span></span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
       : workEmptyBody(empty);
-  stageSetHtml($("#workStrips"), body + (work.truncated ? `<p class="file-viewer-note">${t("目录条目过多，仅显示部分内容")}</p>` : ""));
+  const notice = work.mode === "list" && work.truncated ? t("仅展示部分文件") : "";
+  stageSetHtml($("#workStrips"), body + (notice ? `<div class="library-empty">${notice}</div>` : ""));
   for (const button of document.querySelectorAll("#stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);
     el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
