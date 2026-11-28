@@ -140,14 +140,19 @@ async function workLoadBranch(path) {
   // 刷新时保留上一趟成功的目录快照，直到新结果到齐，避免切面或工具刷新时文件行突然消失。
   const previous = work.branches.get(path),
     request = { loading: true, entries: [], dirs: [], truncated: false, error: "", ready: false };
-  if (previous?.ready)
-    Object.assign(request, { entries: previous.entries, dirs: previous.dirs, truncated: previous.truncated, ready: true });
+  if (previous?.ready) {
+    request.entries = previous.entries;
+    request.dirs = previous.dirs;
+    request.truncated = previous.truncated;
+    request.ready = true;
+  }
   work.branches.set(path, request);
   workPaint();
   try {
     const data = await bridge("/api/archive/list", { root: path, scratch: false, depth: 1, workspace: true }, AbortSignal.timeout(8000));
     if (work.branches.get(path) !== request) return;
-    Object.assign(request, { loading: false, entries: data.entries || [], dirs: data.dirs || [], truncated: !!data.truncated, ready: true });
+    Object.assign(request, { loading: false, entries: data.entries || [], dirs: data.dirs || [], truncated: !!data.truncated });
+    request.ready = true;
   } catch (error) {
     if (work.branches.get(path) !== request) return;
     request.loading = false;
