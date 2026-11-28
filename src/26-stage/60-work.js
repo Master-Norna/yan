@@ -295,11 +295,11 @@ function workPaint() {
     body = rows.length
       ? `<div class="strip-cols"><span></span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
       : workEmptyBody(empty);
-  const notice = work.mode === "list" && work.truncated ? `<div class="library-empty">${t("仅展示部分文件")}</div>` : "";
-  stageSetHtml($("#workStrips"), body + notice);
-  for (const button of document.querySelectorAll("#workCrumbs [data-work-dir], #stageWork [data-work-mode]")) {
+  const notice = work.mode === "list" && work.truncated ? t("仅展示部分文件") : "";
+  stageSetHtml($("#workStrips"), body + (notice ? `<div class="library-empty">${notice}</div>` : ""));
+  for (const button of document.querySelectorAll("#stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);
-    if (el.dataset.workMode) el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
+    el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
   }
 }
 // ---------- 动手 ----------
