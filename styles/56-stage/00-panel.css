@@ -1,5 +1,6 @@
 /* 游目（看台）：对话右侧一栏，拖左缘调宽窄；「阔」铺满整页。见 src/26-stage/（圈点在 50-ink.js）与 设计稿/24–25、31–32、47 */
 .stage-panel {
+  --stage-row-height: 39px;
   position: relative;
   flex: none;
   width: 46vw;
@@ -72,6 +73,7 @@
   align-items: center;
   min-height: 44px;
   padding: 2px 10px 0 14px;
+  border-bottom: 1px solid var(--line);
 }
 .stage-tabs {
   flex: 0 1 auto;
