@@ -4,7 +4,8 @@ import { load } from "./harness.mjs";
 
 test("每趟轮次收件口的队列和中止器独立，初始状态一致", () => {
   const { createRoundInbox } = load(["createRoundInbox"]);
-  const a = createRoundInbox(), b = createRoundInbox();
+  const a = createRoundInbox(),
+    b = createRoundInbox();
   a.queue.push({ report: "done" });
   a.controller.abort();
   assert.deepEqual(b.queue, []);
