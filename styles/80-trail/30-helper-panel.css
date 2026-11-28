@@ -318,8 +318,16 @@
     opacity var(--dur-quick) ease,
     transform var(--dur-quick) ease;
 }
+.helper-fold-head,
+.trail-fold-head {
+  min-width: 28px;
+  min-height: 24px;
+  justify-content: center;
+}
 .helper-fold-head:before,
 .trail-fold-head:before {
+  width: 7px;
+  height: 7px;
   transform: rotate(-135deg) translate(-1px, -1px);
 }
 .helper-fold-head.shown {
