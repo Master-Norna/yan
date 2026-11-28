@@ -443,7 +443,7 @@ function syncStepRun(list, run, seen, animate) {
   if (!el) {
     list.insertAdjacentHTML(
       "beforeend",
-      `<details class="tool-run" data-step-id="${escapeHtml(id)}"><summary class="tool-step" data-tool="${escapeHtml(first.name)}" data-status="done"><div class="tool-step-head"><span class="tool-label"></span><span class="tool-title"></span><span class="tool-meta"></span>${stepStateHtml("done")}</div></summary><div class="tool-steps"></div></details>`
+      `<details class="tool-run" data-step-id="${escapeHtml(id)}"><summary class="tool-step" data-tool="${escapeHtml(first.name)}" data-status="done"><div class="tool-step-head">${trailLabelHtml(first.name, first.label ? t(first.label) : toolLabel(first.name))}<span class="tool-title"></span><span class="tool-meta"></span>${stepStateHtml("done")}</div></summary><div class="tool-steps"></div></details>`
     );
     el = /** @type {HTMLElement} */ (list.lastElementChild);
     if (animate) el.classList.add("is-new");
@@ -452,7 +452,9 @@ function syncStepRun(list, run, seen, animate) {
     count = files ? t`${run.length} 件` : t`${run.length} 回`,
     head = el.querySelector(":scope > summary > .tool-step-head"),
     title = String(first.title || stepArgsTitle(first));
-  head.querySelector(".tool-label").textContent = first.label ? t(first.label) : toolLabel(first.name);
+  const label = first.label ? t(first.label) : toolLabel(first.name),
+    labelText = head.querySelector(".trail-kind-text");
+  if (labelText.textContent !== label) labelText.textContent = label;
   head.querySelector(".tool-title").innerHTML =
     `${escapeHtml(title)}<span class="tool-run-more">${files ? t` 等 ${run.length} 件` : t` 等 ${run.length} 回`}</span>`;
   head.querySelector(".tool-title").title = title;

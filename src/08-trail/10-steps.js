@@ -1,6 +1,47 @@
 // 言 · 行迹 · 步骤：一步的卡片与就地更新、输出的露出、思绪的状态、出处；行迹里的开合
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
 // 一步的卡片：工具自己登记了画法（指令、文件、请示、差遣、计划、补言）就照它画，其余（检索、翻阅、计算、调接口、翻记忆）用下面通用的一种
+// 行迹的动作小画沿用言的笔意图标。类型由工具名决定，不靠译文或状态；陌生工具仍照常写名字。
+const TRAIL_KIND_ICONS = new Map([
+  ["run_command", "play"],
+  ["check_command", "history"],
+  ["write_file", "edit"],
+  ["edit_file", "workdiff"],
+  ["read_file", "preview"],
+  ["read_document", "preview"],
+  ["list_files", "worktree"],
+  ["search_files", "search"],
+  ["search_web", "search"],
+  ["fetch_page", "open"],
+  ["http_request", "open"],
+  ["download_file", "download"],
+  ["run_js", "code"],
+  ["set_timer", "history"],
+  ["remember", "memory"],
+  ["recall", "memory"],
+  ["forget", "strike"],
+  ["search_conversations", "search"],
+  ["read_conversation", "scroll"],
+  ["generate_image", "stage"],
+  ["ask_user", "trailask"],
+  ["fold", "trailfold"],
+  ["update_intent", "trailgraph"],
+  ["intent_gate", "trailgraph"],
+  ["mcp_describe", "trailmcp"],
+  ["mcp_call", "trailmcp"],
+  ["mcp_config", "trailmcp"],
+  ["update_plan", "trailplan"]
+]);
+// 同一个小画不会随步骤变化：首用时生成一次，长行迹逐帧更新也不反复铺笔形。
+/** @type {Map<string, string>} */
+const trailIconCache = new Map();
+/** @param {string} name @param {string} label @param {boolean} [special] */
+function trailLabelHtml(name, label, special = false) {
+  // 展开的 MCP 工具即使服务已经移除，旧行迹仍可按名字识别。
+  const icon = TRAIL_KIND_ICONS.get(name) || (name.startsWith("mcp__") ? "trailmcp" : "");
+  if (icon && !trailIconCache.has(icon)) trailIconCache.set(icon, brushIcon(icon, "trail-kind-icon"));
+  return `<span class="tool-label trail-kind-label${special ? " trail-kind-special" : ""}">${trailIconCache.get(icon) || ""}<span class="trail-kind-text">${escapeHtml(label)}</span></span>`;
+}
 /** @param {Step} step */
 function stepHtml(step) {
   const title = step.title || stepArgsTitle(step),
@@ -49,7 +90,7 @@ function plainStepHtml(step, title) {
     compactShots = compactTrail() && !!shots,
     foldable = !!body || compactShots,
     folded = foldable && (step.expanded === undefined ? true : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${compactShots ? " compact-shots" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`<span class="tool-label">${escapeHtml(step.label ? t(step.label) : toolLabel(step.name))}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(stepText(step.result) || t("工具执行失败")) : ""}">${status === "running" ? escapeHtml(TOOLS.get(step.name)?.busy || t("查阅中")) : status === "error" ? escapeHtml(stepText(step.result) || t("失败")) : escapeHtml(stepText(step.result) || "")}</span>${stepStateHtml(status)}`, foldable, folded)}${shots}${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${compactShots ? " compact-shots" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`${trailLabelHtml(step.name, step.label ? t(step.label) : toolLabel(step.name))}<span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(stepText(step.result) || t("工具执行失败")) : ""}">${status === "running" ? escapeHtml(TOOLS.get(step.name)?.busy || t("查阅中")) : status === "error" ? escapeHtml(stepText(step.result) || t("失败")) : escapeHtml(stepText(step.result) || "")}</span>${stepStateHtml(status)}`, foldable, folded)}${shots}${body}</div>`;
 }
 // 能开合的题头本身就是按钮：鼠标和键盘同走委托的 click，不另外安一个控件。
 function stepHeadHtml(inner, expandable, folded) {
@@ -224,7 +265,7 @@ function workStepHtml(step, title) {
     // 有红绿可看的（写入、修改）默认摊开，与文件大小无关；目录清单也摊开。其余折起
     openByDefault = !compactTrail() && status !== "error" && (!!parts || step.name === "list_files"),
     folded = foldable && (step.expanded === undefined ? !openByDefault : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`<span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command && !gist ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(gist || title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || t("执行失败")) : ""}">${meta}</span>${stepStateHtml(status)}`, foldable, folded)}${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`${trailLabelHtml(step.name, toolLabel(step.name))}<span class="tool-title${command && !gist ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(gist || title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || t("执行失败")) : ""}">${meta}</span>${stepStateHtml(status)}`, foldable, folded)}${body}</div>`;
 }
 // 步骤有了变动（入册、跑完、请示、帮手有进展）：照这一答此刻的样子重画，工作条与差遣面板跟着更新
 /** @param {Message} assistant */

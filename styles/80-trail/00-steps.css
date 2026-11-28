@@ -176,6 +176,38 @@
 .tool-title {
   color: var(--ink-3);
 }
+/* 动作的形比颜色更先被认出；小字留给初见的人，不额外挤占原有两字的栏宽。 */
+.trail-kind-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.trail-kind-icon {
+  width: 13px;
+  height: 13px;
+}
+.trail-kind-icon .ink,
+.trail-kind-icon .zhu {
+  fill: currentColor;
+}
+.trail-kind-icon .ink2 {
+  fill: color-mix(in srgb, currentColor 80%, transparent);
+}
+.trail-kind-icon .wash {
+  fill: color-mix(in srgb, currentColor 12%, transparent);
+}
+/* 指令事由只是经过，不与正文争墨；请示、失败仍清楚，指上或键盘聚焦可细读。 */
+.tool-step:not([data-status="pending"], [data-status="error"])
+  > .tool-step-head:has(.trail-kind-label:not(.trail-kind-special))
+  .tool-title {
+  color: color-mix(in srgb, var(--ink-3) 92%, var(--paper));
+}
+.tool-step > .tool-step-head:has(.trail-kind-label:not(.trail-kind-special)):is(:hover, :focus-visible) .tool-title,
+.tool-step:is([data-status="pending"], [data-status="error"])
+  > .tool-step-head:has(.trail-kind-label:not(.trail-kind-special))
+  .tool-title {
+  color: var(--ink-2);
+}
 .tool-meta {
   font-size: var(--fs-mark);
 }

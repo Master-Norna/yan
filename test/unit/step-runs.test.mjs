@@ -48,3 +48,47 @@ test("同一件工具标作别的（翻技能与翻文档）不混在一串里",
   ];
   assert.equal(shape(stepRuns(steps)), "d1+d2+d3 k1+k2+k3");
 });
+
+// 常见操作即使同色也有不同的小画；未知工具保留安全的文字回退。
+test("行迹动作图标按工具名区分，标签保留并转义", () => {
+  const { trailLabelHtml } = load(["trailLabelHtml"]);
+  const run = trailLabelHtml("run_command", "运行");
+  const write = trailLabelHtml("write_file", "写入");
+  const edit = trailLabelHtml("edit_file", "修改");
+  const icon = html => html.match(/<svg[^>]*>.*?<\/svg>/)?.[0];
+  for (const html of [run, write, edit]) {
+    assert.match(html, /trail-kind-icon/);
+    assert.match(html, /aria-hidden="true"/);
+    assert.match(html, /trail-kind-text/);
+    assert.ok(icon(html));
+  }
+  assert.equal(new Set([run, write, edit].map(icon)).size, 3);
+  const unknown = trailLabelHtml("unknown", "<外部>");
+  assert.doesNotMatch(unknown, /<svg/);
+  assert.match(unknown, /&lt;外部&gt;/);
+});
+
+test("请示、撮要、图、MCP、计划各有一枚不同的小画，专用卡片实际使用它们", () => {
+  const { trailLabelHtml, askStepHtml, foldStepHtml, intentStepHtml, planStepHtml } = load([
+    "trailLabelHtml",
+    "askStepHtml",
+    "foldStepHtml",
+    "intentStepHtml",
+    "planStepHtml"
+  ]);
+  const icon = html => html.match(/<svg[^>]*class="brush trail-kind-icon"[^>]*>.+?<\/svg>/)?.[0];
+  const example = { id: "s", title: "检查", status: "done" };
+  const symbols = [
+    icon(askStepHtml(example)),
+    icon(foldStepHtml(example)),
+    icon(intentStepHtml(example, "update_intent")),
+    icon(trailLabelHtml("mcp_call", "MCP")),
+    icon(planStepHtml(example))
+  ];
+  assert.ok(symbols.every(Boolean));
+  assert.equal(new Set(symbols).size, 5);
+  for (const name of ["mcp_describe", "mcp_config", "mcp__github__search"]) {
+    assert.equal(icon(trailLabelHtml(name, "GitHub")), symbols[3]);
+  }
+  assert.equal(icon(intentStepHtml(example, "intent_gate")), symbols[2]);
+});

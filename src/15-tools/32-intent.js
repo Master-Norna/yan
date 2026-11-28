@@ -91,5 +91,5 @@ defineTool({
 function intentStepHtml(step, name) {
   const status = step.status || "done",
     open = status === "done";
-  return `<div class="tool-step tool-step-intent" data-tool="${name}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${open ? t` data-intent-open role="button" tabindex="0" title="打开图"` : ""}><span class="tool-label">${t(`图`)}</span><span class="tool-title">${escapeHtml(stepText(step.title))}</span><span class="tool-meta${step.keep ? " intent-keep-why" : ""}" title="${status === "error" ? escapeHtml(stepText(step.result)) : ""}">${escapeHtml(stepText(step.result))}</span>${stepStateHtml(status)}</div></div>`;
+  return `<div class="tool-step tool-step-intent" data-tool="${name}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${open ? t` data-intent-open role="button" tabindex="0" title="打开图"` : ""}>${trailLabelHtml(name, t(`图`), true)}<span class="tool-title">${escapeHtml(stepText(step.title))}</span><span class="tool-meta${step.keep ? " intent-keep-why" : ""}" title="${status === "error" ? escapeHtml(stepText(step.result)) : ""}">${escapeHtml(stepText(step.result))}</span>${stepStateHtml(status)}</div></div>`;
 }
