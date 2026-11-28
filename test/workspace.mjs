@@ -201,6 +201,7 @@ await fetch(`${PAGE}api/chats/save`, {
               status: "done",
               at: 1,
               title: "新建.md",
+              root: ROOT,
               result: "已写入",
               change: { path: "新建.md", added: 3, removed: 0, created: true }
             },
