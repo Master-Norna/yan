@@ -2162,12 +2162,31 @@ test("构建与包管理器的输出目录参数算写：严档据它看越界�
 test("审档：递归删工作目录之外的整个目录回绝，工作目录里的照旧放行", () => {
   const review = command => screenAutoReview(command, { platform: atPlatform, workdir: atDir });
   for (const command of atWin
-    ? ["Remove-Item D:\\data -Recurse -Force", "Remove-Item C:\\Users\\me\\AppData -Recurse", "rd /s /q C:\\Users\\me"]
-    : ["rm -rf /Users/a/other", "rm -r /etc/x", "rd /s /q /Users/a/other"])
+    ? [
+        "Remove-Item D:\\data -Recurse -Force",
+        "Remove-Item C:\\Users\\me\\AppData -Recurse",
+        "rd /s /q C:\\Users\\me",
+        // del、erase、rm 在 PowerShell 里都是 Remove-Item 的别名；参数缩写与 -Recurse:$true 也是递归
+        "del D:\\data -Recurse -Force",
+        "erase -Recurse D:\\data",
+        "rm D:\\data -Recurse",
+        "ri D:\\data -Recurse:$true",
+        "Remove-Item D:\\data -Rec",
+        // cmd 的 del /s
+        "del /s /q D:\\data",
+        // 目标在管道左侧或括号表达式里：静态判不出落在哪，按出去了算
+        "Get-ChildItem D:\\data | Remove-Item -Recurse",
+        "Remove-Item (Join-Path 'D:\\' 'data') -Recurse"
+      ]
+    : ["rm -rf /Users/a/other", "rm -r /etc/x", "rd /s /q /Users/a/other", "rm -R /Users/a/other", "rm --recursive /Users/a/other"])
     assert.match(review(command), /整个目录/, command);
   // 写得出完整路径的递归删才按目录判，工作目录里的寻常清理照旧
   assert.equal(review("Remove-Item ./build -Recurse -Force"), null);
   assert.equal(review(atWin ? "Remove-Item E:\\项目\\言\\dist -Recurse" : "Remove-Item /Users/a/proj/dist -Recurse"), null);
+  for (const command of atWin
+    ? ["del .\\build -Recurse", "Remove-Item .\\build -Rec", "ri -r .\\build", "Remove-Item -Recurse:$false D:\\data"]
+    : ["rm -rf ./build", "rm -R ./build"])
+    assert.equal(review(command), null, command);
   // 相对路径要按工作目录解析后判：`..\other` 一个绝对路径都没有，只找绝对路径的话它就漏过去了
   for (const command of atWin
     ? ["Remove-Item ..\\other -Recurse -Force", "Remove-Item -Path ..\\other -Recurse", "ri ..\\other -r -fo"]

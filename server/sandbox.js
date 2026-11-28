@@ -2152,34 +2152,58 @@ const REVIEW_SYSTEM_PATH = new RegExp(
   "i"
 );
 const BROAD_DELETE =
-  /\bRemove-Item\b(?=[^\n]*(?:-Recurse|-Force))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
-// 带 -Recurse 的删除：工作目录里的算寻常清理（Remove-Item .\build -Recurse 三档都照旧放行），
-// 别处写得出完整路径的，删下去就是一整片、难以恢复——审档按文档里那句「整目录删除」回绝
-const RECURSIVE_DELETE = /\b(?:Remove-Item|ri)\b(?=[^\n]*-(?:Recurse|r)\b)|\brm\s+-[^\s]*r|\b(?:rmdir|rd)\b[^\n]*\/s/i;
+  /\b(?:Remove-Item|del|erase)\b(?=[^\n]*(?:-Recurse|-Force|\/s\b))(?=[^\n]*\s(?:\.(?:[\\/]\*)?|\*|\/|[a-z]:[\\/]?)(?:\s|$))[^\n]*|(^|[;&|(]\s*)rm\s+-[^\s]*r[^\s]*\s+(?:\.|\*|\/|[a-z]:[\\/]?)\s*$|\b(?:rmdir|rd)\b(?=[^\n]*\/s)(?=[^\n]*\s(?:\.|\*|[\\/]|[a-z]:[\\/]?)(?:\s|$))[^\n]*/i;
+// 带递归的删除：工作目录里的算寻常清理（Remove-Item .\build -Recurse 三档都照旧放行），
+// 别处写得出完整路径的，删下去就是一整片、难以恢复——审档按文档里那句「整目录删除」回绝。
+// 一望可知：先看有没有删除程序名，参数与目标交给下面逐个调用判
+const DELETE_WORD = /\b(?:Remove-Item|ri|rm|del|erase|rmdir|rd)\b/i;
 // 递归删的是哪几样：只看删除调用自己的操作数，同一条指令里别处读的路径不算——
 // `cat /tmp/report.txt; rm -rf ./build` 里前一段只是读，不该拿它当删除目标。
 // 操作数按 workdir 解析成规范路径再判：只认绝对路径的话，`Remove-Item ..\other -Recurse` 一个绝对路径都没有，
 // 审档就这么把它放过去了。$dir、cd 过去的相对路径静态看不出来，与本文件其余规则一样不猜
 const DELETE_PROGRAM = /^(?:remove-item|ri|rm|del|erase|rmdir|rd)$/i;
-// 这一段是递归删吗：Remove-Item 的 -Recurse（可简写 -r）、rm 短选项里带 r、rmdir/rd 的 /s
-/** @param {{ name: string, args: { value: string }[] }} call */
-function recursiveDeleteCall(call) {
-  if (/^(?:rmdir|rd)$/i.test(call.name)) return call.args.some(arg => /^\/s$/i.test(arg.value));
-  if (/^rm$/i.test(call.name)) return call.args.some(arg => /^-[A-Za-z]*r/i.test(arg.value));
-  return call.args.some(arg => /^-(?:recurse|r)$/i.test(arg.value));
+// 这一段是递归删吗：cmd 与 PowerShell 的 /s（del /s、rmdir /s）、POSIX 的 --recursive、
+// PowerShell 的 -Recurse 及唯一前缀（-r、-Rec、-Recurse:$true；-Recurse:$false 不算）、
+// POSIX 短选项簇里的 r（-rf、-fr、-R）。del、erase、rm 在 PowerShell 里都是 Remove-Item 的别名，
+// 参数式与 cmd 式都要认——原先只认 Remove-Item -Recurse / rm -r / rmdir /s，换成 del 或 -Recurse:$true 就整个漏过去
+/** @param {{ name: string, args: { value: string }[], shell?: string, nameEnd: number }} call @param {any} scanned */
+function recursiveDeleteCall(call, scanned) {
+  const ps = call.shell === "powershell",
+    flag = value =>
+      /^\/s$/i.test(value) ||
+      /^--recursive$/i.test(value) ||
+      (ps
+        ? // PowerShell 的 -Recurse 及唯一前缀；`rm -rf` 这类从 r 起的短簇也认（PowerShell 本身会报错，保守拦下）
+          /^-(?:r|re|rec|recu|recur|recurs|recurse)(?::(?!\$?false\b).*)?$/i.test(value) || /^-[rR][A-Za-z]+$/.test(value)
+        : // 只在非 PowerShell 方言里认带 r 的短选项簇，免得把 -WhatIf 这类带 r 的词当成递归
+          /^-[A-Za-z]*[rR][A-Za-z]*$/.test(value));
+  if (call.args.some(arg => flag(arg.value))) return true;
+  if (!ps) return false;
+  // argumentsAt 遇 ( 即止：`Remove-Item (Join-Path .. 'other') -Recurse` 的 -Recurse 落在括号之后，
+  // 参数表里看不到。同一语句的尾巴（到 ; | 换行为止）里有递归标志的，按递归删算——
+  // 目标在表达式里，操作数判不出来，下面照样按出去了算
+  const text = String(scanned.text || "");
+  let end = call.nameEnd;
+  while (end < text.length && !/[;\n|]/.test(text[end])) end++;
+  return text
+    .slice(call.nameEnd, end)
+    .split(/\s+/)
+    .some(word => flag(word.replace(/^[("'`]+/, "")));
 }
 /** @param {any} scanned @param {string} workdir @param {boolean} win */
 function recursiveDeleteWhy(scanned, workdir, win) {
-  if (!workdir || !RECURSIVE_DELETE.test(scanned.text)) return "";
+  if (!workdir || !DELETE_WORD.test(scanned.text)) return "";
   const root = win ? normalizeLower(workdir) : path.normalize(workdir).replace(/(?<=.)[\\/]+$/, "");
   for (const call of commandInvocations(scanned, { keepHomeWords: true })) {
-    if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call)) continue;
+    if (!DELETE_PROGRAM.test(call.name) || !recursiveDeleteCall(call, scanned)) continue;
+    let targets = 0;
     for (const arg of call.args) {
       // 选项跳过；-Path X / -LiteralPath:X 的值仍是删除目标。
       const bound = call.shell === "powershell" && /^-(?:Path|LiteralPath):(.+)$/is.exec(arg.value);
       if (!bound && (arg.value.startsWith("-") || (win && /^\/[a-z]{1,3}$/i.test(arg.value)))) continue;
       const raw = bound ? bound[1].replace(/^(["'])(.*)\1$/s, "$2") : arg.value;
       if (!raw) continue;
+      targets++;
       // ~ 与 $HOME / $env:USERPROFILE / %USERPROFILE% 这类是 shell 展开的：字面 resolve 会把它当成工作目录下的一个名字，
       // 看着像「之内」，实际删的是整个家目录或系统目录（rm -rf ~ 删的就是 ~）。与严档的写路径用同一份名单，一律按出去了算——
       // 名单以外的 $dir 仍是静态看不出来，照旧不猜
@@ -2189,6 +2213,9 @@ function recursiveDeleteWhy(scanned, workdir, win) {
         : path.normalize(path.resolve(workdir, raw)).replace(/(?<=.)[\\/]+$/, "");
       if (!pathIsInside(root, candidate)) return `审查拒绝：不代为删除工作目录之外的整个目录（${raw}）`;
     }
+    // 删除目标不在参数表里（管道左侧、括号、命令替换）：静态判不出落在哪，按出去了算——
+    // 原先一个操作数都没有就整条放行，`Get-ChildItem .. | Remove-Item -Recurse` 删掉的是工作目录外的一整片
+    if (!targets) return "审查拒绝：不代为删除工作目录之外的整个目录（删除目标由管道或表达式给出，无法确认在工作目录内）";
   }
   return "";
 }
