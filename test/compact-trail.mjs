@@ -234,7 +234,7 @@ if (await evalJs(headFocused)) {
 }
 await evalJs(`${diff}.querySelector(".tool-step-head").click(); true`);
 check("individual details can be expanded", await evalJs(`!${diff}.classList.contains("folded")`));
-check("expanded diff keeps its red and green inner edges without moving the header", await evalJs(`(() => {
+const expandedDiffKeepsEdges = `(() => {
   const removed = ${diff}.querySelector(".split-diff > .d"),
     added = ${diff}.querySelector(".split-diff > .i");
   return removed.getClientRects().length > 0 && added.getClientRects().length > 0 &&
@@ -242,7 +242,8 @@ check("expanded diff keeps its red and green inner edges without moving the head
     parseFloat(getComputedStyle(added).borderLeftWidth) > 0 &&
     getComputedStyle(removed).borderLeftColor !== getComputedStyle(added).borderLeftColor &&
     ${alignedHeads};
-})()`));
+})()`;
+check("expanded diff keeps its red and green inner edges without moving the header", await evalJs(expandedDiffKeepsEdges));
 await evalJs(
   `document.querySelector("#openSettings").click(); document.querySelector('[data-tab="appearance"]').click(); ${off}.click(); true`
 );
