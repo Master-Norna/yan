@@ -13,7 +13,8 @@ var YAN_EN = {
   没有匹配内容: "No matches",
   "放弃未保存的修改？": "Discard unsaved changes?",
   放弃: "Discard",
-  "原文件已被修改，未覆盖；请保留编辑稿，确认原件后再改": "The original file has changed and was not overwritten. Keep your draft and check the original before editing again",
+  "原文件已被修改，未覆盖；请保留编辑稿，确认原件后再改":
+    "The original file has changed and was not overwritten. Keep your draft and check the original before editing again",
   保存失败: "Failed to save",
   未保存: "Unsaved",
   "保存失败：{0}": "Failed to save: {0}",
