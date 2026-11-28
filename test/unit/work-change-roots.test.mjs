@@ -36,7 +36,9 @@ test("工作区改动以原步骤落脚处归并，不拿现目录猜旧路径",
   ]);
   const rows = f.workChangedFiles();
   const stats = f.changeStats(chat.messages[1]);
-  assert.deepEqual(rows.map(row => row.path), stats.files.map(file => file.path));
+  const paths = rows.map(row => row.path);
+  const statPaths = stats.files.map(file => file.path);
+  assert.deepEqual(paths, statPaths);
 });
 
 test("开始新答立即清掉旧答改动及 diff 页签，普通文件页签保留", async () => {
@@ -59,7 +61,8 @@ test("开始新答立即清掉旧答改动及 diff 页签，普通文件页签�
   ]);
   const chat = f.setup();
   await f.workRefresh();
-  assert.deepEqual(f.workChangeRows().map(row => row.path), ["/old.txt"]);
+  const paths = () => f.workChangeRows().map(row => row.path);
+  assert.deepEqual(paths(), ["/old.txt"]);
   f.work.tabs = [
     { path: "/keep.txt", diff: false },
     { path: "/old.txt", diff: true }
@@ -68,11 +71,12 @@ test("开始新答立即清掉旧答改动及 diff 页签，普通文件页签�
   chat.messages.push({ id: "new", role: "assistant", status: "streaming", steps: [] });
   assert.equal(f.workSyncChangeReply(), true);
   assert.deepEqual(f.workChangeRows(), []);
-  assert.deepEqual(f.work.tabs.map(tab => tab.path), ["/keep.txt"]);
+  const tabPaths = f.work.tabs.map(tab => tab.path);
+  assert.deepEqual(tabPaths, ["/keep.txt"]);
   assert.equal(f.work.active, -1);
   chat.messages[1].steps.push({ status: "done", change: { path: "/new.txt", added: 1, removed: 0 } });
   await f.workRefresh();
-  assert.deepEqual(f.workChangeRows().map(row => row.path), ["/new.txt"]);
+  assert.deepEqual(paths(), ["/new.txt"]);
   chat.messages[1].status = "complete";
   assert.equal(f.workSyncChangeReply(), false);
 });
