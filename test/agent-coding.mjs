@@ -92,7 +92,7 @@ await evalJs(`document.querySelector(".message.assistant .change-summary").click
 check(
   "change summary lists the file",
   await evalJs(
-    `!document.querySelector(".message.assistant .change-files").classList.contains("hidden") && document.querySelector(".message.assistant .change-files .path").textContent === "src/a.js"`
+    `!document.querySelector(".message.assistant .change-files").classList.contains("hidden") && document.querySelector(".message.assistant .change-files .path").textContent === ${JSON.stringify(WORK + "/src/a.js")}`
   )
 );
 // 点清单里的一件：预览浮层里摊开这件在这一答里的改动（改文件那步的红绿两段），没有下载键
