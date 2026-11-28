@@ -104,7 +104,11 @@ async function workSaveEditor(tab) {
   const text = draft.text;
   draft.saving = true;
   try {
-    const data = await bridge("/api/work/write", { ...draft.scope, editor: true, content: text, seen: draft.sig }, AbortSignal.timeout(30000));
+    const data = await bridge(
+      "/api/work/write",
+      { ...draft.scope, editor: true, content: text, seen: draft.sig },
+      AbortSignal.timeout(30000)
+    );
     if (data.stale) {
       toast(t("原文件已被修改，未覆盖；请保留编辑稿，确认原件后再改"));
       return;
