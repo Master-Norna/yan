@@ -1,5 +1,5 @@
 // 工作区：游目里的一层，看某一处目录——簿录、走层、路径、空态，以及顶栏那一枚与地址行下那一对的分工。
-// 不含「点一件去开」那一段（要真浏览器，见 test/stage.mjs）；言模式从卷宗进入，沿路径走到测试目录。
+// 不启动游目浏览器也可全屏预览；言模式从卷宗进入，沿路径走到测试目录。
 import { mkdirSync, writeFileSync } from "node:fs";
 import { connect, check, sleep, PAGE, ARCHIVE } from "./lib.mjs";
 const { send, evalJs, waitFor, close } = await connect();
@@ -64,6 +64,19 @@ check(
   JSON.stringify(names)
 );
 check("路径行写这一层目录", await evalJs(`document.querySelector("#workCrumbs .here").textContent === "工作区"`));
+await evalJs(
+  `[...document.querySelectorAll("#workStrips [data-work-file]")].find(el => el.dataset.workFile.endsWith("/笔记.md")).click(); true`
+);
+await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
+check(
+  "不启动浏览器，文件仍铺满整个页面",
+  await evalJs(
+    `(() => { const r = document.querySelector("#fileViewer").getBoundingClientRect(); return r.width === innerWidth && r.height === innerHeight && document.querySelector("#stageBrowser").classList.contains("hidden"); })()`
+  )
+);
+await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
+await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
+check("关预览仍在这一层", await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区"`));
 check(
   "工作区的图形切换在路径工具行，文件夹入口不添分隔线",
   await evalJs(
@@ -177,7 +190,7 @@ await fetch(`${PAGE}api/chats/save`, {
               at: 1,
               title: "新建.md",
               result: "已写入",
-              change: { path: `${ROOT}/新建.md`, added: 3, removed: 0, created: true }
+              change: { path: "新建.md", added: 3, removed: 0, created: true }
             },
             {
               id: "c2",
@@ -239,6 +252,13 @@ check(
     `!/[+−]\\d/.test(document.querySelector("#workStrips").textContent) && !/增|删 |改 /.test(document.querySelector("#workStrips").textContent)`
   )
 );
+await evalJs(
+  `[...document.querySelectorAll("#workStrips [data-work-file]")].find(el => el.dataset.workFile.endsWith("/新建.md")).click(); true`
+);
+await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "新建"`);
+check("改动里的相对路也能全屏看原件", await evalJs(`!document.querySelector("#fileViewer").classList.contains("hidden")`));
+await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
+await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
 await evalJs(`document.querySelector('#stageWork [data-work-mode="list"]').click(); true`);
 check("切回目录仍停在原来的空夹", await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "空夹"`));
 check("全程没有页面异常", await evalJs(`window.__yanExceptions.length === 0`), await evalJs(`JSON.stringify(window.__yanExceptions)`));

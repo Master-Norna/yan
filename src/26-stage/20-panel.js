@@ -36,7 +36,6 @@ function openStage() {
   }, 1500);
 }
 function closeStage() {
-  ++work.openRev;
   stageSetWide(false);
   hideWithFade($("#stagePanel"));
   clearInterval(stage.poll);
@@ -658,7 +657,7 @@ function stageRender() {
     const title = tab?.url ? stageReadable(stageDocSource(tab.url)) : "";
     if (addr.getAttribute("title") !== title) addr.title = title;
   }
-  // 未启动浏览器时，工作区独占内容区；新建标签或开文件仍走浏览器原有的启动入口。
+  // 未启动浏览器时，工作区独占内容区；新建浏览器标签仍走浏览器原有的启动入口。
   $("#stageBrowser").classList.toggle("hidden", work.open && !stage.ws && !stage.launching);
   const empty = stage.launching
     ? stageEmptyHtml(t("正在打开浏览器…"))

@@ -993,7 +993,7 @@ check(
 );
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 600, y: 400 });
 check("screencast stops when closed", await evalJs(`__yanStage.state.session === ""`));
-// 工作区（不带浏览器的那一半在 test/workspace.mjs）：列出绑过的目录，点一件交给游目去开；md 的排好的样子与原文在地址行那两枚间翻
+// 工作区与浏览器并存时，点件进全屏预览，不改浏览器页；显式从地址栏开 md 仍可览 / 源。
 await evalJs(`document.querySelector("#stagePin").click(); true`);
 const workDir = `${ARCHIVE}/工作区-舞台`;
 mkdirSync(workDir, { recursive: true });
@@ -1018,10 +1018,28 @@ check(
   await evalJs(`document.querySelector("#stageWorkBtn").getAttribute("aria-pressed") === "true" && !!__yanStage.state.session`)
 );
 await waitFor(`!!document.querySelector("#workStrips [data-work-file]")`, 8000).catch(() => {});
+const beforeWorkFile = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
 await evalJs(`document.querySelector("#workStrips [data-work-file]").click(); true`);
+await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
+check(
+  "workspace file opens full-screen, without navigating the browser",
+  await evalJs(
+    `(() => { const v = document.querySelector("#fileViewer"), r = v.getBoundingClientRect(); return !v.classList.contains("hidden") && r.width === innerWidth && r.height === innerHeight && __yanStage.state.tabs.get(__yanStage.state.current)?.url === ${JSON.stringify(beforeWorkFile)}; })()`
+  )
+);
+await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
+await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
+check(
+  "closing the preview returns to the same folder",
+  await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`)
+);
+// 地址栏仍可显式打开本机文档，保留浏览器独有的览 / 源。
+await evalJs(
+  `(() => { document.querySelector("#stageAddr").click(); const input = document.querySelector("#stageUrl"); input.value = ${JSON.stringify(`${workDir}/笔记.md`)}; input.dispatchEvent(new KeyboardEvent("keydown", {key:"Enter", bubbles:true})); return true; })()`
+);
 await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 25000).catch(() => {});
 const workDocUrl = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
-check("clicking a file opens it in the stage (md is laid out)", workDocUrl.includes("view-"), workDocUrl);
+check("explicit address navigation opens the laid-out md in the browser", workDocUrl.includes("view-"), workDocUrl);
 check("file preview keeps the workspace open", await evalJs(`!document.querySelector("#stageWork").classList.contains("hidden")`));
 check(
   "the address row writes the original, not the laid-out page",
