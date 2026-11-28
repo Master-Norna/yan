@@ -88,7 +88,9 @@ await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 check(
   "从浏览器回来保留文件页签和目录展开状态",
-  await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`)
+  await evalJs(
+    `document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`
+  )
 );
 await evalJs(`document.querySelector('[data-work-collapse]').click(); true`);
 check(
@@ -118,7 +120,9 @@ await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
 await waitFor(`!!document.querySelector('[data-work-file$="/深.md"]')`);
 check(
   "切换视图不重置目录树与文件",
-  await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`)
+  await evalJs(
+    `document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`
+  )
 );
 check(
   "浏览器工具在工作区隐藏",
