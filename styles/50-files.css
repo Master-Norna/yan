@@ -55,7 +55,7 @@
   color: var(--ink-3);
   font-size: var(--fs-mark);
 }
-/* 移除：案上的按键常显，收存交给拖拽 */
+/* 移除：案上的按键常显 */
 .attachment-tool {
   flex: none;
   width: 18px;

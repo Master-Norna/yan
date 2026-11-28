@@ -445,12 +445,18 @@ async function placeFromArchive(path) {
   if (!canPlaceAttachment(entry.size, draftKey() === key ? pendingAttachments : draftRecord(key).attachments)) return;
   await placeLocalFile(joinFile(root, path), key, entry.name, sourceView);
 }
-// 成品、工作文件、卷宗文件都走既有原件读取与附件接入。读的过程中换页也不换落点。
-async function placeLocalFile(path, key = draftKey(), name = path.split("/").pop(), sourceView = view) {
+// 成品、工作文件、卷宗文件都走既有原件读取与附件接入。正文链接先按点击时的规矩找件，读的过程中换页也不换落点。
+/** @typedef {{ raw: string, name: string, anchor: RefAnchor }} DraggedRef */
+/** @param {string | DraggedRef} source */
+async function placeLocalFile(source, key = draftKey(), name = "", sourceView = view) {
   const targetAttachments = () => (draftKey() === key ? pendingAttachments : draftRecord(key).attachments);
   if (!canPlaceAttachment(0, targetAttachments())) return;
   try {
-    const response = await fetch(localFileUrl(path), { signal: AbortSignal.timeout(60000) });
+    const path = typeof source === "string" ? source : (await locateRef(source.raw, source.name, source.anchor))?.file;
+    if (!path) return toast(t`找不到「${typeof source === "string" ? source : source.name}」`);
+    name ||= path.split("/").pop();
+    // 下载入口才给原件；预览可能换壳、只保留部分视频与音轨。
+    const response = await fetch(localFileUrl(path, true), { signal: AbortSignal.timeout(60000) });
     if (!response.ok) throw Error(t("取回失败"));
     const length = Number(response.headers.get("content-length"));
     if (!canPlaceAttachment(length, targetAttachments())) {
@@ -594,8 +600,9 @@ function bindLibraryEvents() {
   let dragHideTimer = null,
     dragFromPage = false,
     draggedAttachment = "",
-    draggedArchiveFile = "",
-    draggedLocalFile = "";
+    draggedArchiveFile = "";
+  /** @type {string | DraggedRef} */
+  let draggedLocalFile = "";
   /** @type {ReturnType<typeof selectionAnchor>} */
   let draggedQuote = null;
   let quoteConversation = "";
@@ -626,7 +633,7 @@ function bindLibraryEvents() {
   };
   window.addEventListener("dragstart", event => {
     dragFromPage = true;
-    const attachment = /** @type {HTMLElement|null} */ (closest(event, ".attachment-card[data-drag-attachment]")),
+    const attachment = /** @type {HTMLElement|null} */ (closest(event, ATTACHMENT_CARD)),
       archive = /** @type {HTMLElement|null} */ (closest(event, "#library [data-library-disk][draggable=true]"));
     draggedAttachment = attachment?.dataset.dragAttachment || "";
     draggedArchiveFile = archive?.dataset.libraryDisk || "";
@@ -651,7 +658,8 @@ function bindLibraryEvents() {
       link = /** @type {HTMLElement|null} */ (closest(event, ":is(.markdown, .trail-note, .sub-report) a[data-file]")),
       change = /** @type {HTMLElement|null} */ (closest(event, "#messages [data-change-path]"));
     draggedLocalFile = deliver?.dataset.deliver || image?.dataset.openFile || "";
-    if (!draggedLocalFile && link) draggedLocalFile = refTarget(link.dataset.path || link.dataset.file, refAnchor(link))?.file || "";
+    // 在来源还在眼前时定落脚处，松手后才查盘；那时可能已打开另一段对话。
+    if (!draggedLocalFile && link) draggedLocalFile = { raw: link.dataset.path, name: link.dataset.file, anchor: refAnchor(link) };
     if (!draggedLocalFile && change) {
       // 新的改动记录已经是绝对路径，不再拼一次根；旧的相对路径只在原步骤落脚处明确时解析。
       const path = slashed(change.dataset.changePath || "");
@@ -670,7 +678,7 @@ function bindLibraryEvents() {
       }
     }
     if (draggedLocalFile) {
-      event.dataTransfer.setData(LOCAL_FILE_DRAG, draggedLocalFile);
+      event.dataTransfer.setData(LOCAL_FILE_DRAG, "1");
       event.dataTransfer.effectAllowed = "copy";
     }
   });
@@ -753,7 +761,7 @@ function bindLibraryEvents() {
         placeQuoteOnDesk(picked);
         return;
       }
-      if (target.id === "newChat") newChat();
+      if (target.id === "newChat") target.click();
       else if (target.dataset.conversation && store.conversations.some(c => c.id === target.dataset.conversation))
         openConversation(target.dataset.conversation);
       else if (!target.classList.contains("composer")) return;

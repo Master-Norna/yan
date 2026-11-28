@@ -733,7 +733,11 @@ check(
 await evalJs(`document.querySelector("#openLibrary").click(); true`);
 await waitFor(`!!document.querySelector('#libraryGrid [data-library-disk="拖拽附件.txt"]')`, 8000);
 check("dragging the attachment saves its original bytes", readFileSync(`${ARCHIVE}/拖拽附件.txt`, "utf8") === "drag");
-await evalJs(`__yanState().settings.pendingWorkdir = ${JSON.stringify(WORK)}; document.querySelector("#newChat").click(); true`);
+await evalJs(`document.querySelector("#newChat").click(); document.querySelector("#workdirChip").click(); true`);
+await waitFor(`!!document.querySelector("#workdirInput")`);
+await evalJs(
+  `(i => { i.value = ${JSON.stringify(WORK)}; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); })(document.querySelector("#workdirInput")); true`
+);
 await waitFor(`document.querySelector("#workdirChip").classList.contains("on")`);
 await waitFor(`!!document.querySelector("#welcomeAttachments .attachment-card[data-name='拖拽附件.txt']")`);
 writeFileSync(`${WORK}/拖拽附件.txt`, "keep");

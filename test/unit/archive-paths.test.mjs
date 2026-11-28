@@ -113,6 +113,63 @@ test("搬走的件：按落脚的次序认，第一个根认不出才看下一�
   ]);
 });
 
+test("置案取原件；正文链接沿用点击的同名回退，换对话不换案", async t => {
+  const requests = [];
+  let pending;
+  const released = new Promise(resolve => (pending = resolve));
+  t.mock.method(globalThis, "fetch", async (url, { method = "GET" } = {}) => {
+    const query = new URL(url, "http://localhost").searchParams;
+    const file = query.get("file"),
+      download = query.has("download");
+    requests.push({ method, file, download });
+    if (method === "HEAD") {
+      await released;
+      return new Response(null, { status: 404 });
+    }
+    return new Response(download ? "原件" : "预览替身");
+  });
+  const f = load([
+    "placeLocalFile",
+    "switchTo: id => { currentId = id; }",
+    `setup: placed => {
+      bootstrap = { work: { platform: 'win32' } };
+      view = 'chat'; currentId = 'source';
+      bridge = async () => ({ entries: [{ path: '移到这儿/视频.mp4' }] });
+      ingestFile = async file => ({ name: file.name, bytes: await file.text() });
+      placeAttachment = (key, file) => (placed.push({ key, ...file }), true);
+      toast = () => {};
+    }`
+  ]);
+  const placed = [];
+  f.setup(placed);
+  const placing = f.placeLocalFile({ raw: "旧位置/视频.mp4", name: "视频.mp4", anchor: { dir: "E:/卷宗", scopes: ["E:/卷宗"] } });
+  f.switchTo("different");
+  pending();
+  await placing;
+  assert.deepEqual(requests, [
+    { method: "HEAD", file: "E:/卷宗/旧位置/视频.mp4", download: false },
+    { method: "GET", file: "E:/卷宗/移到这儿/视频.mp4", download: true }
+  ]);
+  assert.deepEqual(placed, [{ key: "source", name: "视频.mp4", bytes: "原件" }]);
+});
+
+test("置案直接读本机文件原件，不取视频预览副本", async t => {
+  t.mock.method(globalThis, "fetch", async url => new Response(url.endsWith("&download=1") ? "原件" : "预览替身"));
+  const f = load([
+    "placeLocalFile",
+    `setup: placed => {
+      currentId = 'different';
+      ingestFile = async file => ({ name: file.name, bytes: await file.text() });
+      placeAttachment = (key, file) => (placed.push({ key, ...file }), true);
+      toast = () => {};
+    }`
+  ]);
+  const placed = [];
+  f.setup(placed);
+  await f.placeLocalFile("E:/工作/视频.mp4", "source");
+  assert.deepEqual(placed, [{ key: "source", name: "视频.mp4", bytes: "原件" }]);
+});
+
 test("Markdown 相对图片先去查询片段，再解码文件名中的保留字符", () => {
   const { archiveRelative } = load(["archiveRelative"]);
   assert.equal(archiveRelative("notes", "./images/a%23b%2520.png?size=2#view"), "notes/images/a#b%20.png");
