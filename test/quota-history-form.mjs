@@ -198,7 +198,9 @@ await evalJs(`document.querySelector('.chip-pop[data-kind=history] [data-menu="p
 await sleep(200);
 check(
   "pin from the menu pins the row and closes the menu",
-  await evalJs(`!document.querySelector(".chip-pop") && __yanState().conversations.find(c => c.id === "w2").pinned === true && !!document.querySelector(\'#history [data-repo] [data-conversation="w2"] .history-state.pinned\')`)
+  await evalJs(
+    `!document.querySelector(".chip-pop") && __yanState().conversations.find(c => c.id === "w2").pinned === true && !!document.querySelector('#history [data-repo] [data-conversation="w2"] .history-state.pinned')`
+  )
 );
 await evalJs(`document.querySelector('#history [data-conversation="w2"] .history-more').click(); true`);
 await sleep(150);
