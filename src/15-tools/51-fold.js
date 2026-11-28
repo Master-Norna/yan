@@ -55,5 +55,5 @@ function foldStepHtml(step) {
   const body =
       status === "done" && step.note ? `<div class="tool-note"><div class="markdown">${renderMarkdown(step.note)}</div></div>` : "",
     folded = !!body && !step.expanded;
-  return `<div class="tool-step tool-step-fold${body ? " foldable" : ""}${folded ? " folded" : ""}" data-tool="fold" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`<span class="tool-label">${t(`撮要`)}</span><span class="tool-title">${escapeHtml(foldTitle(step))}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}`, !!body, folded)}${body}</div>`;
+  return `<div class="tool-step tool-step-fold${body ? " foldable" : ""}${folded ? " folded" : ""}" data-tool="fold" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`${trailLabelHtml("fold", t(`撮要`), true)}<span class="tool-title">${escapeHtml(foldTitle(step))}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}`, !!body, folded)}${body}</div>`;
 }
