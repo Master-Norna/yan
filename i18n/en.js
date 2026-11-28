@@ -2,6 +2,10 @@
 // 选了英文时由 theme-boot.js 载入；印章、给模型看的话（工具结果、提示词）不收，表里没有的照中文原文显示。
 // 用语直白：言 → Chat、行 → Agent、卷宗 → Files、帮手 → subagent、余墨 → tokens left、旁注 → side thread、游目 → Browser
 var YAN_EN = {
+  清空终端: "Clear terminal",
+  展开终端: "Expand terminal",
+  调整终端高度: "Resize terminal",
+  终端指令编号已失效: "Terminal command identifier expired",
   查找文件: "Search files",
   搜索文件内容: "Search file contents",
   没有匹配内容: "No matches",
