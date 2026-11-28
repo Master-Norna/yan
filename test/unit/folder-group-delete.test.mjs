@@ -125,8 +125,14 @@ test("置顶不改变目录或显式分组归属，组内先置顶再按时间",
   assert.equal(f.historyPlacement({ ...older, groupId: "g1" }), "set");
   assert.equal(f.historyPlacement({ ...older, workdir: "" }), "pinned");
   assert.equal(f.historyPlacement({ ...newer, workdir: "" }), "chat");
-  assert.deepEqual([newer, older].sort(f.compareHistoryMembers).map(c => c.id), ["older", "newer"]);
-  assert.deepEqual([older, { ...newer, pinned: true }].sort(f.compareHistoryMembers).map(c => c.id), ["newer", "older"]);
+  assert.deepEqual(
+    [newer, older].sort(f.compareHistoryMembers).map(c => c.id),
+    ["older", "newer"]
+  );
+  assert.deepEqual(
+    [older, { ...newer, pinned: true }].sort(f.compareHistoryMembers).map(c => c.id),
+    ["newer", "older"]
+  );
 });
 
 test("只剩置顶的目录组不会批量删除", async () => {

@@ -19,9 +19,7 @@ function pendingGroup() {
   return groupsList().find(group => group.id === store.settings.pendingGroupId) || null;
 }
 function groupMembers(id) {
-  return store.conversations
-    .filter(c => c.groupId === id)
-    .sort(compareHistoryMembers);
+  return store.conversations.filter(c => c.groupId === id).sort(compareHistoryMembers);
 }
 function createGroup(name = t("新分组")) {
   const group = { id: uid(), name, createdAt: now(), presetId: "", workdir: "" };
@@ -169,9 +167,7 @@ async function removeWorkdirGroup(dir) {
     outside = atDir.length - members.length,
     name = workdirTitle(dir);
   if (!targets.length)
-    return toast(
-      busy.length ? t("此组正在另一页面作答，暂不能删除") : pinned ? t("此组只有置顶对话，暂不删除") : t("这一组已没有对话")
-    );
+    return toast(busy.length ? t("此组正在另一页面作答，暂不能删除") : pinned ? t("此组只有置顶对话，暂不删除") : t("这一组已没有对话"));
   const notes = [
     t`组里的 ${targets.length} 段对话将连同附件一并移除，目录里的文件不动，无法撤销。`,
     busy.length ? t`另有 ${busy.length} 段正在另一页面作答，这回不动。` : "",

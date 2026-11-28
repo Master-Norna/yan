@@ -153,7 +153,9 @@ check(
   after.left.join() === "away,global-pin,grouped,loose,pinned" &&
     after.grouped === "g1" &&
     after.groups.join() === "诗书" &&
-    after.repos.length === 2 && after.repos.includes(here) && after.repos.includes(elsewhere) &&
+    after.repos.length === 2 &&
+    after.repos.includes(here) &&
+    after.repos.includes(elsewhere) &&
     after.loose.join() === "away,global-pin,grouped,loose,pinned",
   JSON.stringify(after)
 );
