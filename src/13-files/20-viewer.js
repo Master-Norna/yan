@@ -132,15 +132,17 @@ let viewerHost = "page";
 /** @param {"page"|"stage"} host */
 function placeViewer(host) {
   const viewer = $("#fileViewer"),
-    parent = host === "stage" ? $("#stageWork") : document.body;
+    parent = host === "stage" ? $("#workContent") : document.body;
   viewerHost = host;
   if (!viewer || !parent) return;
   if (viewer.parentElement !== parent) parent.appendChild(viewer);
   viewer.classList.toggle("in-stage", host === "stage");
+  viewer.setAttribute?.("role", host === "stage" ? "region" : "dialog");
+  viewer.setAttribute?.("aria-modal", String(host !== "stage"));
 }
 /** @param {{file?:string, attachmentId?:string, skillDir?:string, skillPath?:string}} source 本机的一件 { file }，或 { attachmentId }，或技能里的一件
  * @param {"page"|"stage"} [host] 落在整页还是游目那一栏里 */
-async function openFileViewer(source, name = "", trigger = null, host = "page") {
+async function openFileViewer(source, name = "", trigger = null, host = "page", raw = false) {
   const revision = ++viewerRevision;
   const viewer = $("#fileViewer");
   if (!viewer) return;
@@ -161,11 +163,11 @@ async function openFileViewer(source, name = "", trigger = null, host = "page") 
   $("#fileViewerName").textContent = title;
   $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = `<div class="file-viewer-empty">${t(`正在取出…`)}</div>`;
-  $("#fileViewerClose").focus();
+  if (host !== "stage") $("#fileViewerClose").focus();
   try {
     const reader = await viewerReader(source);
     if (revision !== viewerRevision) return;
-    const html = await fileViewerBody(reader, title, kind, revision);
+    const html = await fileViewerBody(reader, title, raw && (kind === "markdown" || kind === "html") ? "code" : kind, revision);
     if (revision !== viewerRevision) return;
     $("#fileViewerStage").innerHTML = html;
     // 抽取说明挪到顶栏（Word、表格、文字都一样），纸上不再单占一行。文档那一份带 data-head：顶栏只取其中
@@ -985,7 +987,7 @@ function showInFileViewer(title, html, trigger = null, seal = t("览"), host = "
   $("#fileViewerName").textContent = title;
   $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = html;
-  $("#fileViewerClose").focus();
+  if (host !== "stage") $("#fileViewerClose").focus();
 }
 let imageViewerRevision = 0;
 // 卷宗里的图；paths 是同看的一组（卷宗此刻列着的图），看图框底下排成一条小样、左右翻
@@ -1088,7 +1090,10 @@ async function showImageAt(index, opening = false) {
 
 // 文件查看器与图片查看器
 function bindViewerEvents() {
-  $("#fileViewerClose").onclick = () => closeFileViewer(true);
+  $("#fileViewerClose").onclick = () => {
+    if (viewerHost === "stage" && work.active >= 0) workCloseTab(work.active);
+    else closeFileViewer(true);
+  };
   // 顶栏那枚小画的名字随语言走（index.html 里写的是中文原文）
   const openButton = $("#fileViewerOpen");
   openButton.setAttribute("title", t("本机打开"));
@@ -1099,7 +1104,7 @@ function bindViewerEvents() {
   fileViewer.addEventListener("click", e => {
     if (e.target.closest("[data-viewer-download]")) return downloadViewerFile();
     if (e.target.closest("[data-viewer-open]")) return void openViewerWithSystem();
-    if (e.target === fileViewer || e.target === $("#fileViewerStage")) closeFileViewer();
+    if (viewerHost !== "stage" && (e.target === fileViewer || e.target === $("#fileViewerStage"))) closeFileViewer();
   });
   // 媒体的 error 不冒泡，在捕获阶段接：浏览器放不了这种编码，就别留一个转不动的播放器。
   // 桥接能用 ffmpeg 时会尝试给不兼容的封装换壳（见 server/video.js）；仍播不了可能是编码不兼容，或工具不可用、转封装未成。
@@ -1174,4 +1179,7 @@ defineLayer({
     closeFileViewer();
   }
 });
-defineLayer({ name: "file", rank: 120, open: () => isShown("#fileViewer"), close: () => closeFileViewer() });
+defineLayer({ name: "file", rank: 120, open: () => isShown("#fileViewer") && (viewerHost !== "stage" || !!$("#fileViewer").contains(document.activeElement)), close: () => {
+  if (viewerHost === "stage" && work.active >= 0) workCloseTab(work.active);
+  else closeFileViewer();
+} });
