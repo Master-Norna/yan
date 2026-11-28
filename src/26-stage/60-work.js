@@ -1,7 +1,8 @@
 // 言 · 游目 · 工作区：舞台上的一层，看某一处目录里的东西。
 // 簿录（列、件图、夹、路径）就是卷宗那一套（src/13-files/10-archive.js），这里只换三样：根可换（路径末尾点选目录，
 // 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签；有对话目录则跟随，言模式沿用卷宗目录。
-// 点一件即开：夹往下走，件交给全屏预览器（与卷宗同路），不动浏览器。
+// 点一件即开：夹往下走，件交给预览器、落在游目这一栏里（见 20-viewer.js 的 placeViewer），关掉回原簿录；
+// 「改动」那一面点件看的是这件在本段对话里的改动（红绿），不是原件。
 // 「改动」那一面只看本段对话改过的件：不说增删改、也不写 +几 −几——件图本身换色（朱是删、泥金是改、石绿是增）。
 // 顶栏文件夹与网页签切换两面；工作区的路径、视图切换与浏览器导航互不接管。
 const work = {
@@ -56,6 +57,7 @@ function workFollowConversation() {
     root = slashed(c?.workdir || archiveDir()),
     context = JSON.stringify([c?.id || "", root]);
   if (work.context === context) return false;
+  workCloseViewer();
   work.context = context;
   work.root = root;
   workResetRows();
@@ -78,7 +80,14 @@ function workEnter() {
 function workLeave() {
   if (!work.open) return;
   work.open = false;
+  workCloseViewer();
   stageRender();
+}
+/** 游目里开着预览时，收起、切走或换对话先把它关上：那一层是这一面的，不该跟着到别处去 */
+function workCloseViewer() {
+  const viewer = $("#fileViewer");
+  if (!viewer?.classList?.contains("in-stage") || !isShown("#fileViewer")) return;
+  closeFileViewer();
 }
 /** 选一处目录：系统的选夹子窗（与卷宗「收入文件」同一个口，见 server/work/picker.js） */
 async function workPick() {
@@ -161,6 +170,14 @@ async function workRefresh() {
   workPaint();
 }
 /** 一条簿录 @typedef {{ dir: boolean, name: string, path: string, where?: string, note?: string, size?: number|null, when?: string, state?: string }} WorkRow */
+/** 改动记下的路归成绝对路：相对的以对话落脚处算（对话没绑目录则为卷宗），带 scheme 的（sandbox:）不认。
+ * workChangedFiles 与 workDiffHtml 共用这一处，两边配对才对得上 @param {string} raw @param {string} root */
+function workAbsPath(raw, root) {
+  const text = slashed(raw);
+  if (!text) return "";
+  if (/^(?:[a-z]:\/|\/)/i.test(text)) return absJoin(text, "");
+  return root && !/^[a-z][\w+.-]*:/i.test(text) ? absJoin(root, text) : "";
+}
 /** 本段对话改过的件：按路径并成一份，新建过的记着 */
 function workChangedFiles() {
   const files = new Map(),
@@ -170,15 +187,25 @@ function workChangedFiles() {
   for (const message of conversation?.messages || [])
     for (const file of changeStats(message).files) {
       // 改动可能只记了相对路（例如 .yan/报告.md）。以对话落脚处算，不随簿录当前所处目录变。
-      const raw = slashed(file.path);
-      if (!raw) continue;
-      const path = /^(?:[a-z]:\/|\/)/i.test(raw) ? absJoin(raw, "") : root && !/^[a-z][\w+.-]*:/i.test(raw) ? absJoin(root, raw) : "";
+      const path = workAbsPath(file.path, root);
       if (!path) continue;
       const entry = files.get(path) || { path, created: false };
       entry.created ||= !!file.created;
       files.set(path, entry);
     }
   return [...files.values()];
+}
+/** 一件在本段对话里的改动：按条按步的先后排在一起，与行迹里点改动同一套画法。
+ * 每一步的路也按同一口径归成绝对路，免得「.yan/报告.md」与「E:/…/.yan/报告.md」配不上 @param {Conversation} conversation @param {string} path */
+function workDiffHtml(conversation, path) {
+  const base = slashed(conversation?.workdir || archiveDir()),
+    /** @type {Step[]} */
+    steps = [];
+  for (const message of conversation?.messages || [])
+    for (const step of allSteps(message))
+      if (step.change && step.status === "done" && workAbsPath(step.change.path, base) === path) steps.push(step);
+  if (!steps.length) return `<div class="file-viewer-text change-diff"><p class="file-viewer-note">${t("此件没有记下改动")}</p></div>`;
+  return changeDiffStepsHtml(steps);
 }
 /** 改动那一面的条子：新建的是石绿、还在的是泥金、盘上已经没有的是朱（大小、日子照现有那一份，删掉的留空） @returns {WorkRow[]} */
 function workChangeRows() {
@@ -301,10 +328,17 @@ function workPaint() {
   }
 }
 // ---------- 动手 ----------
-/** 点件走卷宗同一全屏预览器；关闭后回到原簿录，不启动浏览器也不改页签。 */
+/** 点件打开：列表面看原件、改动面看这件在本段对话里的改动；都交给预览器、落在游目这一栏里（见 20-viewer.js 的 placeViewer）。
+ * 关闭后回到原簿录，不启动浏览器也不改页签。 */
 function workOpenPath(path, trigger = null) {
   if (!work.open || !path) return;
-  void openFileViewer({ file: path }, "", trigger);
+  if (work.mode === "changes") {
+    const conversation = currentConversation?.() || null;
+    if (!conversation) return;
+    showInFileViewer(t`${path} · 本段改动`, workDiffHtml(conversation, path), trigger, t("览"), "stage");
+    return;
+  }
+  void openFileViewer({ file: path }, "", trigger, "stage");
 }
 function workSwitch(mode) {
   if (work.mode === mode) return void workRefresh();

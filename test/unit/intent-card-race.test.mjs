@@ -36,7 +36,12 @@ function viewer(read) {
         innerHTML: "",
         textContent: "",
         dataset: {},
-        classList: { add: n => classes.add(n), remove: n => classes.delete(n), contains: n => classes.has(n) },
+        classList: {
+          add: n => classes.add(n),
+          remove: n => classes.delete(n),
+          toggle: (n, on) => (on ? classes.add(n) : classes.delete(n)),
+          contains: n => classes.has(n)
+        },
         focus() {},
         querySelector(selector) {
           return selector === ".intent-card" && this.innerHTML.includes('class="intent-card"') ? {} : null;

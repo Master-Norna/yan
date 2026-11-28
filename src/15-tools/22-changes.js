@@ -466,12 +466,11 @@ function stepDiffPartsOf(step) {
   }
   return null;
 }
-// 一件文件在这一答里的改动：不另起接口、不另存一份，用的就是各步本来记着的——改文件那步的参数（前后两段），
-// 写文件那步的旧侧摘录与写下的整份；按先后排，摊在预览浮层里。帮手改的也在内。
-// 这一答里新建的件只画最后那一版对空的多行：之前几版是草稿，与清单上「只增不删」对得上
-/** @param {Message} message @param {string} path */
-function changeDiffHtml(message, path) {
-  let steps = allSteps(message).filter(step => step.change?.path === path && step.status === "done");
+// 一批改动步骤摊成红绿：行迹里点一答的改动、工作区里看一段对话的改动，都走这一处。
+// 不另起接口、不另存一份，用的就是各步本来记着的——改文件那步的参数（前后两段），写文件那步的旧侧摘录与写下的整份；
+// 按先后排。帮手改的也在内。新建的件只画最后那一版对空的多行：之前几版是草稿，与清单上「只增不删」对得上
+/** @param {Step[]} steps */
+function changeDiffStepsHtml(steps) {
   const created = steps.some(step => step.change.created);
   if (created) {
     const lastWrite = steps.findLastIndex(step => step.name === "write_file" && writtenContent(step) !== null);
@@ -489,6 +488,11 @@ function changeDiffHtml(message, path) {
       return `${head}<div class="tool-diff">${diff.html}</div>`;
     })
     .join("")}</div>`;
+}
+// 一件文件在这一答里的改动：这一答里改过它的各步，按先后排
+/** @param {Message} message @param {string} path */
+function changeDiffHtml(message, path) {
+  return changeDiffStepsHtml(allSteps(message).filter(step => step.change?.path === path && step.status === "done"));
 }
 /** @param {Message} message @param {string} path @param {Element} trigger */
 function openChangeDiff(message, path, trigger) {

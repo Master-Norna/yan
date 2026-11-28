@@ -125,11 +125,26 @@ async function viewerReader(source) {
     extracted: String(file.extractedText || "")
   };
 }
-/** @param {{file?:string, attachmentId?:string, skillDir?:string, skillPath?:string}} source 本机的一件 { file }，或 { attachmentId }，或技能里的一件 */
-async function openFileViewer(source, name = "", trigger = null) {
+/** 预览落在哪儿：整页（卷宗、正文链接、附件、技能、听音）还是游目那一栏里（工作区点件）。
+ * 落进游目时把 #fileViewer 挂进工作区那一层（#stageWork）、加 .in-stage：位置由那一层定（见 styles/56-stage/60-work.css），
+ * 只铺工作区的内容，栏顶的网页签与文件夹入口照旧在；仍是同一套预览、同一个关闭与层序；关掉再挂回 body。 */
+let viewerHost = "page";
+/** @param {"page"|"stage"} host */
+function placeViewer(host) {
+  const viewer = $("#fileViewer"),
+    parent = host === "stage" ? $("#stageWork") : document.body;
+  viewerHost = host;
+  if (!viewer || !parent) return;
+  if (viewer.parentElement !== parent) parent.appendChild(viewer);
+  viewer.classList.toggle("in-stage", host === "stage");
+}
+/** @param {{file?:string, attachmentId?:string, skillDir?:string, skillPath?:string}} source 本机的一件 { file }，或 { attachmentId }，或技能里的一件
+ * @param {"page"|"stage"} [host] 落在整页还是游目那一栏里 */
+async function openFileViewer(source, name = "", trigger = null, host = "page") {
   const revision = ++viewerRevision;
   const viewer = $("#fileViewer");
   if (!viewer) return;
+  placeViewer(host);
   const title =
       name ||
       String(source.file || "")
@@ -941,7 +956,11 @@ function closeFileViewer(stop = false) {
   const revision = viewerRevision;
   hideWithFade($("#fileViewer"));
   setTimeout(() => {
-    if (revision === viewerRevision) $("#fileViewerStage").innerHTML = "";
+    if (revision === viewerRevision) {
+      $("#fileViewerStage").innerHTML = "";
+      // 淡完才挪：正在淡出的那一份若立刻挂回 body，会从游目跳到整页去
+      if (viewerHost === "stage") placeViewer("page");
+    }
     // 预览里全屏着的作品随预览一起没了：页上的 work-mode 也得撤，不然对话区滚不动
     if (!document.querySelector(".work-expanded")) closeExpandedWork();
   }, 180);
@@ -953,12 +972,13 @@ function setViewerSeal(glyph = t("览")) {
   const seal = $("#fileViewer .file-viewer-head > .seal");
   if (seal) seal.textContent = seal.dataset.seal = glyph;
 }
-/** @param {string} title @param {string} html @param {Element|null} [trigger] @param {string} [seal] 顶栏的印 */
-function showInFileViewer(title, html, trigger = null, seal = t("览")) {
+/** @param {string} title @param {string} html @param {Element|null} [trigger] @param {string} [seal] 顶栏的印 @param {"page"|"stage"} [host] 落在整页还是游目那一栏里 */
+function showInFileViewer(title, html, trigger = null, seal = t("览"), host = "page") {
   viewerRevision++;
   viewerSource = null;
   viewerReturnFocus = focusReturn(trigger || document.activeElement);
   revokeViewerUrls();
+  placeViewer(host);
   showNow($("#fileViewer"));
   setViewerSeal(seal);
   $("#fileViewerOpen").classList.add("hidden");

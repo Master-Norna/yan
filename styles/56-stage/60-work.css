@@ -7,6 +7,40 @@
   min-height: 0;
   display: flex;
 }
+/* 工作区里点开的件与改动：同一套预览器（#fileViewer）落进工作区这一层，铺满内容区、不盖栏顶与正文。
+   定位靠 #stageWork（下面加了 position: relative，与 .stage-body 的 flex 同层）；z-index 压在拖宽手柄之下，预览开着仍能拖左缘调宽窄。
+   预览开着时不随簿录滚（overflow: hidden）：它是盖在簿录上的一层，不是簿录的一行。
+   窄栏里照栏宽收：顶栏与游目栏顶同高，纸面内边距收一点，图、视频、PDF 按面板高度收而不按整窗。 */
+#stageWork {
+  position: relative;
+}
+#stageWork:has(> .file-viewer.in-stage) {
+  overflow: hidden;
+}
+#stageWork > .file-viewer.in-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+#stageWork > .file-viewer.in-stage .file-viewer-head {
+  height: 44px;
+  padding: 0 12px;
+  gap: 8px;
+}
+#stageWork > .file-viewer.in-stage .file-viewer-stage {
+  padding: 16px;
+}
+#stageWork > .file-viewer.in-stage .file-viewer-image,
+#stageWork > .file-viewer.in-stage .file-viewer-media video {
+  max-height: 100%;
+}
+#stageWork > .file-viewer.in-stage .file-viewer-frame {
+  width: 100%;
+  height: 100%;
+}
+#stageWork > .file-viewer.in-stage .file-viewer-text {
+  padding: 20px 22px;
+}
 .stage-browser {
   flex: 1;
   min-width: 0;

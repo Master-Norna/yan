@@ -1034,13 +1034,15 @@ const beforeWorkFile = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.
 await evalJs(`document.querySelector("#workStrips [data-work-file]").click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 check(
-  "workspace file opens full-screen, without navigating the browser",
+  "workspace file opens in the stage panel, not over the page",
   await evalJs(
-    `(() => { const v = document.querySelector("#fileViewer"), r = v.getBoundingClientRect(); return !v.classList.contains("hidden") && r.width === innerWidth && r.height === innerHeight && __yanStage.state.tabs.get(__yanStage.state.current)?.url === ${JSON.stringify(beforeWorkFile)}; })()`
+    `(() => { const v = document.querySelector("#fileViewer"), p = document.querySelector("#stageWork"), r = v.getBoundingClientRect(), q = p.getBoundingClientRect(); return !v.classList.contains("hidden") && v.classList.contains("in-stage") && Math.abs(r.width - q.width) <= 2 && Math.abs(r.height - q.height) < 1 && r.left >= q.left - 1 && r.top >= q.top - 1 && r.width < innerWidth && __yanStage.state.tabs.get(__yanStage.state.current)?.url === ${JSON.stringify(beforeWorkFile)}; })()`
   )
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
-await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
+await waitFor(
+  `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewer").classList.contains("in-stage")`
+);
 check(
   "closing the preview returns to the same folder",
   await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`)

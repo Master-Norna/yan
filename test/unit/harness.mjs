@@ -22,6 +22,8 @@ const element = () => ({
   dataset: {},
   style: { setProperty: noop, removeProperty: noop },
   addEventListener: noop,
+  // 预演把浮层挂进面板、再挂回 body 的那一挪（20-viewer.js 的 placeViewer）
+  appendChild: noop,
   setAttribute: noop,
   removeAttribute: noop,
   getAttribute: () => null,

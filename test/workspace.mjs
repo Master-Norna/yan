@@ -75,14 +75,35 @@ await evalJs(
 );
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 check(
-  "不启动浏览器，文件仍铺满整个页面",
+  "不启动浏览器，文件开在游目这一栏里",
   await evalJs(
-    `(() => { const r = document.querySelector("#fileViewer").getBoundingClientRect(); return r.width === innerWidth && r.height === innerHeight && document.querySelector("#stageBrowser").classList.contains("hidden"); })()`
+    `(() => { const v = document.querySelector("#fileViewer"), p = document.querySelector("#stageWork"), r = v.getBoundingClientRect(), q = p.getBoundingClientRect(); return !v.classList.contains("hidden") && v.classList.contains("in-stage") && Math.abs(r.width - q.width) <= 2 && Math.abs(r.height - q.height) < 1 && r.left >= q.left - 1 && r.top >= q.top - 1 && r.width < innerWidth && document.querySelector("#stageBrowser").classList.contains("hidden"); })()`
+  ),
+  await evalJs(
+    `(() => { const v = document.querySelector("#fileViewer"), p = document.querySelector("#stageWork"), r = v.getBoundingClientRect(), q = p.getBoundingClientRect(); return JSON.stringify({ hidden: v.classList.contains("hidden"), inStage: v.classList.contains("in-stage"), parent: v.parentElement?.id, w: r.width, h: r.height, panelW: q.width, panelH: q.height, left: r.left, top: r.top, panelLeft: q.left, panelTop: q.top, iw: innerWidth, browserHidden: document.querySelector("#stageBrowser").classList.contains("hidden") }); })()`
   )
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
-await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
+await waitFor(
+  `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewer").classList.contains("in-stage")`
+);
 check("关预览仍在这一层", await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区"`));
+// 收起工作区时，藏着的那层预览也一并收：下次进来不该浮出来
+await evalJs(
+  `[...document.querySelectorAll("#workStrips [data-work-file]")].find(el => el.dataset.workFile.endsWith("/笔记.md")).click(); true`
+);
+await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+await waitFor(`document.querySelector("#stageWork").classList.contains("hidden")`);
+await waitFor(
+  `!document.querySelector("#fileViewer").classList.contains("in-stage") && document.querySelector("#fileViewer").parentElement === document.body`
+);
+check("收起工作区，预览随之收", await evalJs(`document.querySelector("#fileViewer").classList.contains("hidden")`));
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+await waitFor(
+  `!document.querySelector("#stageWork").classList.contains("hidden") && !!document.querySelector("#workStrips [data-work-file]")`
+);
+check("再进工作区，预览不浮出来", await evalJs(`document.querySelector("#fileViewer").classList.contains("hidden")`));
 check(
   "工作区的图形切换在路径工具行，文件夹入口不添分隔线",
   await evalJs(
@@ -197,7 +218,7 @@ await fetch(`${PAGE}api/chats/save`, {
             {
               id: "c1",
               name: "write_file",
-              arguments: "{}",
+              arguments: JSON.stringify({ path: "新建.md", content: "# 新建\n" }),
               status: "done",
               at: 1,
               title: "新建.md",
@@ -207,7 +228,7 @@ await fetch(`${PAGE}api/chats/save`, {
             {
               id: "c2",
               name: "edit_file",
-              arguments: "{}",
+              arguments: JSON.stringify({ path: ".gitignore", old: "dist\n", new: "dist\nbuild\n" }),
               status: "done",
               at: 2,
               title: ".gitignore",
@@ -267,8 +288,15 @@ check(
 await evalJs(
   `[...document.querySelectorAll("#workStrips [data-work-file]")].find(el => el.dataset.workFile.endsWith("/新建.md")).click(); true`
 );
-await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "新建"`);
-check("改动里的相对路也能全屏看原件", await evalJs(`!document.querySelector("#fileViewer").classList.contains("hidden")`));
+await waitFor(
+  `!document.querySelector("#fileViewer").classList.contains("hidden") && /本段改动/.test(document.querySelector("#fileViewerName").textContent)`
+);
+check(
+  "改动里的相对路也能看本段改动，不是打开原件",
+  await evalJs(
+    `/本段改动/.test(document.querySelector("#fileViewerName").textContent) && !!document.querySelector("#fileViewerStage .tool-diff") && document.querySelector("#fileViewer").classList.contains("in-stage")`
+  )
+);
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
 await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
 await evalJs(`document.querySelector('#stageWork [data-work-mode="list"]').click(); true`);

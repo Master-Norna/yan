@@ -37,6 +37,8 @@ function openStage() {
 }
 function closeStage() {
   stageSetWide(false);
+  // 游目里开着的预览随游目一起收：留在面板里的那一层下次开游目还会浮出来
+  workCloseViewer();
   hideWithFade($("#stagePanel"));
   clearInterval(stage.poll);
   stageWake();

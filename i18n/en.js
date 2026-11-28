@@ -1402,6 +1402,8 @@ var YAN_EN = {
   帮手: "Subagent",
   "看 {0} 的改动": "View changes to {0}",
   "{0} · 这一答的改动": "{0} · changes in this reply",
+  "{0} · 本段改动": "{0} · changes in this chat",
+  此件没有记下改动: "No changes recorded for this file",
   "改动 {0} 个文件": "{0} {0|file changed|files changed}",
   已移出卷宗: "Removed from Files",
   另存到本机: "Save a copy",
