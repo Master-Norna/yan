@@ -28,7 +28,8 @@ function fixture() {
 }
 
 test("终端增量接收输出、cd 只改自己的落脚处", async () => {
-  const f = fixture(), {calls, finish} = f.setup();
+  const f = fixture(),
+    { calls, finish } = f.setup();
   await f.workRunCommand('cd "sub"');
   assert.equal(f.work.terminalDir, "C:/one/sub");
   assert.equal(f.work.root, "C:/one");
@@ -50,27 +51,28 @@ test("命令历史恢复未提交草稿，复合命令不冒充持久 cd", async
   const f = fixture();
   f.setup();
   await f.workRunCommand("cd sub");
-  const input = {value:"draft", setSelectionRange() {}};
-  f.workTerminalRecall(-1,input);
-  assert.equal(input.value,"cd sub");
-  f.workTerminalRecall(1,input);
-  assert.equal(input.value,"draft");
-  assert.equal(f.workTerminalCd('cd "a b"'),"a b");
-  assert.equal(f.workTerminalCd("cd .."),"..");
-  assert.equal(f.workTerminalCd("cd sub; echo test"),null);
-  assert.equal(f.workTerminalCd("cd $HOME"),null);
+  const input = { value: "draft", setSelectionRange() {} };
+  f.workTerminalRecall(-1, input);
+  assert.equal(input.value, "cd sub");
+  f.workTerminalRecall(1, input);
+  assert.equal(input.value, "draft");
+  assert.equal(f.workTerminalCd('cd "a b"'), "a b");
+  assert.equal(f.workTerminalCd("cd .."), "..");
+  assert.equal(f.workTerminalCd("cd sub; echo test"), null);
+  assert.equal(f.workTerminalCd("cd $HOME"), null);
 });
 
 test("换根时取消用户终端指令，旧回报不落到新工作区", async () => {
-  const f = fixture(), {calls, finish} = f.setup();
+  const f = fixture(),
+    { calls, finish } = f.setup();
   const pending = f.workRunCommand("echo test");
   await Promise.resolve();
   f.workTerminalCancel();
   f.work.terminalText = "";
   finish();
   await pending;
-  assert.equal(f.work.terminalText,"");
-  assert.equal(f.work.command,null);
-  assert.equal(calls.at(-1).body.stop,true);
-  assert.equal(calls.at(-1).body.key,"unique");
+  assert.equal(f.work.terminalText, "");
+  assert.equal(f.work.command, null);
+  assert.equal(calls.at(-1).body.stop, true);
+  assert.equal(calls.at(-1).body.key, "unique");
 });
