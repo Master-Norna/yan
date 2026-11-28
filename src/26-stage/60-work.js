@@ -608,7 +608,7 @@ function workPaintTabs() {
   if (!tabs || !mode) return;
   const html = work.tabs
     .map((tab, index) => {
-      return `<div class="work-tab${tab.pinned ? "" : " work-tab-preview"}"><button type="button" role="tab" data-work-tab="${index}" title="${escapeHtml(tab.path + (tab.pinned ? "" : " · " + t("双击固定页签")) + (!tab.diff && workDirty(tab.path) ? " · " + t("未保存") : ""))}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span>${!tab.diff && workDirty(tab.path) ? '<i class="work-dirty-dot" aria-hidden="true"></i>' : ""}</button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`;
+      return `<div class="work-tab${tab.pinned ? "" : " work-tab-preview"}"><button type="button" role="tab" data-work-tab="${index}" title="${escapeHtml(tab.path + (tab.pinned ? "" : " · " + t("双击或 Shift+Enter 固定页签")) + (!tab.diff && workDirty(tab.path) ? " · " + t("未保存") : ""))}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span>${!tab.diff && workDirty(tab.path) ? '<i class="work-dirty-dot" aria-hidden="true"></i>' : ""}</button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`;
     })
     .join("");
   stageSetHtml(tabs, html);
@@ -630,9 +630,28 @@ function workPaintTabs() {
   }
   stageSetHtml(mode, views + edit);
 }
+// 目录树重画（展开回包、工具刷新）时记住焦点落在哪一行：整树换掉后焦点会掉到 body，键盘的下一步就从别处开始了。
+// 只认稳定的路径；重画前焦点已经移到工作区之外（点了工具栏、输入框）就不抢回来。
+function workFocusKey() {
+  const row = document.activeElement?.closest?.("#workStrips .work-row");
+  if (!row) return null;
+  if (row.dataset.workFile) return { file: row.dataset.workFile };
+  if (row.dataset.workDir) return { dir: row.dataset.workDir };
+  return null;
+}
+function workRestoreFocus(key) {
+  if (!key) return;
+  const active = document.activeElement;
+  if (active && active !== document.body && active.isConnected) return;
+  const row = key.file
+    ? document.querySelector(`#workStrips .work-row[data-work-file="${CSS.escape(key.file)}"]`)
+    : document.querySelector(`#workStrips .work-row[data-work-dir="${CSS.escape(key.dir)}"]`);
+  row?.focus({ preventScroll: true });
+}
 function workPaint() {
   const box = $("#stageWork");
   if (!box) return;
+  const focus = workFocusKey();
   $("#stageWorkBtn").setAttribute("aria-pressed", String(work.open));
   box.classList.toggle("hidden", !work.open);
   if (!work.open) return;
@@ -667,6 +686,7 @@ function workPaint() {
   }
   workTerminalPaint();
   workPaintTabs();
+  workRestoreFocus(focus);
 }
 function workActivate(index, trigger = null) {
   const tab = work.tabs[index];
@@ -736,18 +756,22 @@ function workSwitch(mode) {
     work.collapsed = true;
     return workPaint();
   }
+  // 同一种面折叠后再展开：只把这一面露出来并交回焦点，输入框里没提交的字与已经搜过的那一轮都照旧。
+  const same = work.mode === mode;
   work.collapsed = false;
-  if (work.mode !== mode) {
+  if (!same) {
     work.mode = mode;
     workResetRows();
   }
   workPaint();
   if (mode === "search") {
     const input = /** @type {HTMLInputElement} */ ($("#workFind input"));
-    input.value = work.search;
+    if (!same) {
+      input.value = work.search;
+      if (work.search) void workSearch(work.search);
+    }
     input.focus();
-    if (work.search) void workSearch(work.search);
-  } else void workRefresh();
+  } else if (!same) void workRefresh();
 }
 // 终端只是用户独立的命令区；每次仍由原有 shell 执行，不假装支持 PTY。
 function workTerminalCwd() {
@@ -860,10 +884,10 @@ async function workRunCommand(command) {
       return;
     }
     for (;;) {
-      workTerminalAppend(
-        (result.stdout || "") + (result.stdout && result.stderr && !result.stdout.endsWith("\n") ? "\n" : "") + (result.stderr || "")
-      );
-      if (!result.running) break;
+      // 桥接在终端模式交的是按到达先后合成的同一条流；stdout 为空时才退回 stderr（旧桥接）。
+      workTerminalAppend(result.stdout || result.stderr || "");
+      // 进程退了不等于输出交齐：桥接一次只交一段，还有后续就接着领（见 backgroundReport 的 more）。
+      if (!result.running && !result.more) break;
       if (!state.job) throw Error(t("终端指令编号已失效"));
       result = await bridge(
         "/api/work/check",
@@ -872,12 +896,13 @@ async function workRunCommand(command) {
       );
       if (work.command !== state) return;
     }
-    const status = state.stopping ? t("已停止") : result.timedOut ? t("执行超时") : t`退出码：${result.exitCode}`;
+    // 自然退出、确认停止与结果未知分开报：点停止时若进程已自己退了，回执里没有 stopped，不能一律写成「已停止」。
+    const status = result.timedOut ? t("执行超时") : result.stopped ? t("已停止") : t`退出码：${result.exitCode}`;
     workTerminalAppend((work.terminalText.endsWith("\n") ? "" : "\n") + "[" + status + "]\n");
   } catch (error) {
     if (work.command !== state) return;
     if (state.job) void bridge("/api/work/check", { ...state.job, stop: true }, AbortSignal.timeout(8000)).catch(() => {});
-    workTerminalAppend((state.stopping ? t("已停止") : String(error.message || error)) + "\n");
+    workTerminalAppend((state.stopping ? t("停止请求已发出，结果未知") : String(error.message || error)) + "\n");
   } finally {
     if (work.command === state) {
       work.command = null;
@@ -1036,6 +1061,12 @@ function bindWork() {
       box.style.setProperty("--work-tree-width", Math.max(112, width + (event.key === "ArrowLeft" ? -12 : 12)) + "px");
       event.preventDefault();
       return;
+    }
+    // 临时页签的键盘固定：Enter 仍只是选签（浏览器对按钮的默认激活），Shift+Enter 才固定，与双击同一条路。
+    const tabButton = /** @type {HTMLElement|null} */ (event.target)?.closest?.("[data-work-tab]");
+    if (tabButton && event.key === "Enter" && event.shiftKey) {
+      event.preventDefault();
+      return workPinTab(Number(tabButton.dataset.workTab));
     }
     if (event.key !== "Enter" && event.key !== " ") return;
     const row = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest(".work-row"));
