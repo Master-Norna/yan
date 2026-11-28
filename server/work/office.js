@@ -11,7 +11,7 @@ function officePart(ext, name, writing = false) {
   if (ext === "xlsx")
     return (
       /^xl\/worksheets\/[^/]+\.xml$/.test(name) ||
-      (!writing && ["xl/sharedStrings.xml", "xl/workbook.xml", "xl/_rels/workbook.xml.rels"].includes(name))
+      ["xl/sharedStrings.xml", "xl/workbook.xml"].includes(name) || (!writing && name === "xl/_rels/workbook.xml.rels")
     );
   return ["odt", "ods"].includes(ext) && name === "content.xml";
 }

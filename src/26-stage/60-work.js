@@ -47,18 +47,42 @@ const work = {
 };
 
 // 编辑稿留在本页内存，切换页签、浏览器、对话不会抹去未保存的字。
-/** @type {Map<string, {scope:{workdir:string,path:string,roam:boolean}, base:string, text:string, sig:string, saving:boolean}>} */
+/** @type {Map<string, {scope:{workdir:string,path:string,roam:boolean}, base:string, text:string, sig:string, saving:boolean, office?:{parts:Record<string,string>, extension:string, labels:string[]}}>} */
 const workDrafts = new Map();
 function workDirty(path) {
   const draft = workDrafts.get(path);
   return !!draft && draft.base !== draft.text;
 }
 function workCanEdit(tab) {
-  return !!tab && !tab.diff && fileKind(tab.path).group === "text";
+  return !!tab && !tab.diff && (fileKind(tab.path).group === "text" || ["docx", "xlsx", "odt", "ods", "ipynb"].includes(fileExtension(tab.path)));
 }
 function workRenderEditor(tab, trigger = null) {
   const draft = workDrafts.get(tab.path);
   if (!draft) return;
+  if (draft.office) {
+    const values = JSON.parse(draft.text);
+    showInFileViewer(
+      tab.path.split("/").pop(),
+      '<div class="work-office-editor"><p>' +
+        escapeHtml(t("仅可修改列出的文字与单元格；公式、复杂结构及其他内容保持原样。")) +
+        '</p>' +
+        draft.office.labels
+          .map((label, index) => '<label><span>' + escapeHtml(label) + '</span><input type="text" class="work-file-editor-field" data-office-field="' +
+            index + '" value="' + escapeHtml(values[index]) + '"></label>')
+          .join("") + '</div>',
+      trigger,
+      t("览"),
+      "stage"
+    );
+    $("#fileViewerStage .work-office-editor").addEventListener("input", event => {
+      const input = /** @type {HTMLInputElement} */ (event.target);
+      if (!input.matches("[data-office-field]")) return;
+      values[Number(input.dataset.officeField)] = input.value;
+      draft.text = JSON.stringify(values);
+      workPaintTabs();
+    });
+    return;
+  }
   showInFileViewer(
     tab.path.split("/").pop(),
     '<textarea class="work-file-editor" spellcheck="false" aria-label="' + escapeHtml(t("编辑")) + '"></textarea>',
@@ -87,13 +111,25 @@ async function workToggleEditor() {
   }
   const scope = { workdir: work.root, path: tab.path, roam: false };
   try {
-    const data = await bridge("/api/work/read", { ...scope, editor: true }, AbortSignal.timeout(8000));
+    const extension = fileExtension(tab.path),
+      office = ["docx", "xlsx", "odt", "ods"].includes(extension);
+    const data = await bridge("/api/work/read", { ...scope, editor: office ? "office" : true }, AbortSignal.timeout(8000));
     if (!work.open || work.tabs[work.active] !== tab || workDrafts.has(tab.path)) return;
-    if (typeof data.text !== "string" || typeof data.sig !== "string" || !data.sig) throw Error(t("取回失败"));
-    workDrafts.set(tab.path, { scope, base: data.text, text: data.text, sig: data.sig, saving: false });
+    if (typeof data.sig !== "string" || !data.sig) throw Error(t("取回失败"));
+    if (office) {
+      const { fields } = officeEditorModel(data.parts, extension),
+        text = JSON.stringify(fields.map(field => field.value));
+      workDrafts.set(tab.path, {
+        scope, base: text, text, sig: data.sig, saving: false,
+        office: { parts: data.parts, extension, labels: fields.map(field => field.label) }
+      });
+    } else {
+      if (typeof data.text !== "string") throw Error(t("取回失败"));
+      workDrafts.set(tab.path, { scope, base: data.text, text: data.text, sig: data.sig, saving: false });
+    }
     tab.pinned = true;
     workActivate(work.active);
-    $("#fileViewerStage .work-file-editor")?.focus();
+    $("#fileViewerStage .work-file-editor, #fileViewerStage .work-file-editor-field")?.focus();
   } catch (error) {
     toast(t`打开失败：${String(/** @type {any} */ (error).message || error).slice(0, 120)}`);
   }
@@ -106,7 +142,13 @@ async function workSaveEditor(tab) {
   try {
     const data = await bridge(
       "/api/work/write",
-      { ...draft.scope, editor: true, content: text, seen: draft.sig },
+      {
+        ...draft.scope,
+        seen: draft.sig,
+        ...(draft.office
+          ? { editor: "office", parts: officeEditorChanges(draft.office.parts, draft.office.extension, JSON.parse(text)) }
+          : { editor: true, content: text })
+      },
       AbortSignal.timeout(30000)
     );
     if (data.stale) {
@@ -906,7 +948,7 @@ function bindWork() {
   box.addEventListener("keydown", event => {
     const input = /** @type {HTMLInputElement} */ (event.target);
     if (event.isComposing) return;
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s" && input.matches(".work-file-editor")) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s" && input.matches(".work-file-editor, .work-file-editor-field")) {
       event.preventDefault();
       void workSaveEditor(work.tabs[work.active]);
       return;

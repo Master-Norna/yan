@@ -9,6 +9,7 @@ const { fetchPublicResponse, readLimitedBytes } = require("../web.js");
 const { describeFsError, clampNumber } = require("./paths.js");
 const { decodeText, encodeText, countLines, splitLines, changeHunks, nearestPassage } = require("./text.js");
 const writeTextAtomic = require("./atomic.js");
+const { readOffice, patchOffice } = require("./office.js");
 // 读一回最多交出多少字
 const WORK_FILE_LIMIT = 200000;
 // 编辑器只取可无损写回的完整原文，不把模型读到的带行号截断内容当原件。
@@ -33,6 +34,7 @@ module.exports = function createFiles(work) {
       file = await targetOf(workdir, body, { write: true });
     if (file === workdir) throw Error("请给出文件名");
     const content = String(body.content ?? "");
+    if (body.editor === "office" && (typeof body.seen !== "string" || !body.seen)) throw Error("编辑保存须带原文件指纹");
     if (
       body.editor === true &&
       (typeof body.content !== "string" || typeof body.seen !== "string" || !body.seen || content.length > WORK_FILE_LIMIT)
@@ -63,6 +65,11 @@ module.exports = function createFiles(work) {
       // 读后被清空也算被改过（空的也有指纹）：不比长度
       if (typeof body.seen === "string" && (!previous || fingerprint(previous) !== body.seen))
         return { stale: true, path: shownPath(workdir, file), sig: previous ? fingerprint(previous) : "", missing: !previous };
+      if (body.editor === "office") {
+        const output = patchOffice(file, previous, body.parts);
+        if (output !== previous) await writeTextAtomic(file, output, signal);
+        return { sig: fingerprint(output) };
+      }
       const prior = previous ? decodeText(previous) : null,
         previousText = prior?.text ?? "",
         previousLines = previousText ? countLines(previousText) : 0;
@@ -111,6 +118,7 @@ module.exports = function createFiles(work) {
     const buffer = await fs.promises.readFile(file).catch(error => {
       throw Error(describeFsError(error, String(body.path)));
     });
+    if (body.editor === "office") return { parts: readOffice(file, buffer), sig: fingerprint(buffer) };
     const decoded = decodeText(buffer);
     if (!decoded) throw Error("二进制文件，不予读取");
     if (body.editor === true) return { text: editorText(buffer, decoded), encoding: decoded.encoding, sig: fingerprint(buffer) };

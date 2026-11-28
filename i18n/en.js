@@ -11,6 +11,13 @@ var YAN_EN = {
   查找文件: "Search files",
   搜索文件内容: "Search file contents",
   没有匹配内容: "No matches",
+  段落: "Paragraph",
+  "可编辑项目过多，请使用本机程序": "Too many editable items; use a local application",
+  "此文档没有可安全编辑的内容": "This document has no safely editable content",
+  "数字单元格只能输入有效数字": "Enter a valid number in this cell",
+  "文档编辑不支持控制字符或换行": "Control characters and line breaks are not supported in document fields",
+  "仅可修改列出的文字与单元格；公式、复杂结构及其他内容保持原样。":
+    "Only the listed text and cells can be edited; formulas, complex structures and other content are preserved.",
   "放弃未保存的修改？": "Discard unsaved changes?",
   放弃: "Discard",
   "原文件已被修改，未覆盖；请保留编辑稿，确认原件后再改":
