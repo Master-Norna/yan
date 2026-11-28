@@ -150,7 +150,7 @@ try {
   await open("cold-other");
   await waitFor(`!!${article("other")}`);
   await evalJs(`releaseThought[${JSON.stringify(lost)}](); true`);
-  await waitFor(`${msg("lost")}.reasoningOpen === false`);
+  await waitFor(`${msg("lost")}.firstThoughtOpen === false`);
   await open(id);
   await waitFor(`!!${details("lost")}`);
   check(
