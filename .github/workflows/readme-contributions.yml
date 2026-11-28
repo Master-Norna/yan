@@ -4,23 +4,41 @@ on:
   schedule:
     - cron: "23 4 * * *"
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/scripts/readme_contributions.py"
+      - ".github/scripts/readme_contributions.json"
+      - ".github/scripts/test_readme_contributions.py"
+      - ".github/workflows/readme-contributions.yml"
   push:
     branches: [main]
     paths:
       - ".github/scripts/readme_contributions.py"
+      - ".github/scripts/readme_contributions.json"
+      - ".github/scripts/test_readme_contributions.py"
       - ".github/workflows/readme-contributions.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: readme-contributions
+  group: readme-contributions-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
   cancel-in-progress: false
 
 jobs:
-  refresh:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 -m unittest discover -s .github/scripts -p test_readme_contributions.py
+  refresh:
+    if: github.event_name != 'pull_request'
+    needs: test
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
         with:

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="14 14 56 56"><style>.seal,.bloom{transform-origin:42px 42px;color:#9b5540}.seal{transform:rotate(-3deg);animation:sealStamp .72s cubic-bezier(.2,.72,.28,1) both}.bloom{opacity:0;animation:sealBloom .85s .32s ease-out both}@keyframes sealStamp {
+  0% {
+    opacity: 0;
+    transform: rotate(-14deg) scale(2.6);
+  }
+  48% {
+    opacity: 1;
+    transform: rotate(-3deg) scale(0.86);
+  }
+  72% {
+    transform: rotate(-4.5deg) scale(1.08);
+  }
+  100% {
+    opacity: 0.72;
+    transform: rotate(-4deg) scale(1);
+  }
+}
+@keyframes sealBloom {
+  0% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: scale(2.7);
+  }
+}@media(prefers-color-scheme:dark){.seal,.bloom{color:#c47a5f}}@media(prefers-reduced-motion:reduce){.seal,.bloom{animation:none}}</style><g class="bloom"><rect x="28" y="28" width="28" height="28" fill="none" stroke="currentColor"/></g><g class="seal"><rect x="28" y="28" width="28" height="28" fill="none" stroke="currentColor"/><text x="42" y="47.5" fill="currentColor" text-anchor="middle" font-size="15" font-family="Noto Serif SC, Songti SC, STSong, serif">守</text></g></svg>
