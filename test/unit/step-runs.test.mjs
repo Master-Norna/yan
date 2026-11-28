@@ -70,7 +70,11 @@ test("行迹动作图标按工具名区分，标签保留并转义", () => {
 
 test("请示、撮要、图、MCP、计划各有一枚不同的小画，专用卡片实际使用它们", () => {
   const { trailLabelHtml, askStepHtml, foldStepHtml, intentStepHtml, planStepHtml } = load([
-    "trailLabelHtml", "askStepHtml", "foldStepHtml", "intentStepHtml", "planStepHtml"
+    "trailLabelHtml",
+    "askStepHtml",
+    "foldStepHtml",
+    "intentStepHtml",
+    "planStepHtml"
   ]);
   const icon = html => html.match(/<svg[^>]*class="brush trail-kind-icon"[^>]*>.+?<\/svg>/)?.[0];
   const example = { id: "s", title: "检查", status: "done" };
