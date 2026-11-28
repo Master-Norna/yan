@@ -48,3 +48,22 @@ test("同一件工具标作别的（翻技能与翻文档）不混在一串里",
   ];
   assert.equal(shape(stepRuns(steps)), "d1+d2+d3 k1+k2+k3");
 });
+
+// 常见操作即使同色也有不同的小画；未知工具保留安全的文字回退。
+test("行迹动作图标按工具名区分，标签保留并转义", () => {
+  const { trailLabelHtml } = load(["trailLabelHtml"]);
+  const run = trailLabelHtml("run_command", "运行");
+  const write = trailLabelHtml("write_file", "写入");
+  const edit = trailLabelHtml("edit_file", "修改");
+  const icon = html => html.match(/<svg[^>]*>.*?<\/svg>/)?.[0];
+  for (const html of [run, write, edit]) {
+    assert.match(html, /trail-kind-icon/);
+    assert.match(html, /aria-hidden="true"/);
+    assert.match(html, /trail-kind-text/);
+    assert.ok(icon(html));
+  }
+  assert.equal(new Set([run, write, edit].map(icon)).size, 3);
+  const unknown = trailLabelHtml("unknown", "<外部>");
+  assert.doesNotMatch(unknown, /<svg/);
+  assert.match(unknown, /&lt;外部&gt;/);
+});
