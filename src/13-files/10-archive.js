@@ -683,7 +683,8 @@ function bindLibraryEvents() {
       entries = droppedEntries(event.dataTransfer),
       dir = dest?.id === "openLibrary" ? "" : (dest?.dataset.libraryDir ?? libraryDir);
     clearFileDrag();
-    if (dest || view === "library") return void (entries.length ? addLibraryEntries(entries, dir) : addLibraryFiles(event.dataTransfer.files, dir));
+    if (dest || view === "library")
+      return void (entries.length ? addLibraryEntries(entries, dir) : addLibraryFiles(event.dataTransfer.files, dir));
     // 案上只放文件：拖来的夹不展开（一个夹动辄几百件），请它进卷宗
     const folders = entries.filter(entry => entry.isDirectory);
     if (folders.length) toast(t("文件夹请拖进卷宗：案上只放文件"));
