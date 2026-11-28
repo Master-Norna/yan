@@ -32,6 +32,8 @@ module.exports = function createFiles(work) {
         throw error;
       });
       if (existing?.isDirectory()) throw Error(`${body.path} 是目录，不能作为文件写入`);
+      if (existing && !existing.isFile()) throw Error("只支持普通文件");
+      if (existing && existing.size > 32 * 1024 * 1024) throw Error("原文件超过 32 MB，不予覆盖");
       // 这一答（或这名帮手）没读过它就整份覆盖：先拦下，请它读了再写——最危险的整份覆盖不该比 edit_file 更不设防。
       // 空文件不拦。判据用 stat 的字节数：几百 MB 的旧件为这一句整份读进来太贵，而 read_file 只读到 8 MB，
       // 这么大的文件本来就算「没读过」
@@ -89,6 +91,7 @@ module.exports = function createFiles(work) {
     const stat = await fs.promises.stat(file).catch(() => null);
     if (!stat) throw Error(`文件不存在：${body.path}${await missingHint(workdir, file, strictBox(body))}`);
     if (stat.isDirectory()) throw Error(`${body.path} 是目录，请改用 list_files`);
+    if (!stat.isFile()) throw Error("只支持普通文件");
     if (stat.size > 8 * 1024 * 1024) throw Error("文件超过 8 MB，不予读取");
     const buffer = await fs.promises.readFile(file).catch(error => {
       throw Error(describeFsError(error, String(body.path)));
@@ -128,6 +131,7 @@ module.exports = function createFiles(work) {
       const stat = await fs.promises.stat(file).catch(() => null);
       if (!stat) throw Error(`文件不存在：${body.path}${await missingHint(workdir, file, strictBox(body))}`);
       if (stat.isDirectory()) throw Error(`${body.path} 是目录`);
+      if (!stat.isFile()) throw Error("只支持普通文件");
       if (stat.size > 8 * 1024 * 1024) throw Error("文件超过 8 MB，不予编辑");
       const raw = await fs.promises.readFile(file),
         decoded = decodeText(raw);
