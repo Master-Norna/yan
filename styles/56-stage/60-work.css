@@ -185,10 +185,14 @@
   display: block;
   padding: 8px;
 }
+.work-find-mode .work-bar [data-work-pick] {
+  display: none;
+}
 #workFind {
+  position: relative;
   display: flex;
-  gap: 4px;
-  padding: 6px;
+  margin: 8px 8px 2px;
+  min-width: 0;
 }
 #workFind input,
 #workCommand input {
@@ -200,6 +204,28 @@
   background: var(--paper);
   color: var(--ink);
   font: inherit;
+}
+#workFind input {
+  width: 100%;
+  height: 30px;
+  padding: 4px 30px 4px 8px;
+  font-size: var(--fs-small);
+}
+#workFind button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-s);
+}
+#workFind button:hover {
+  background: var(--paper-3);
+}
+#workFind:focus-within input {
+  border-color: var(--accent);
 }
 .work-editor {
   flex: 1;
@@ -251,6 +277,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.work-tab-preview > [data-work-tab] > span:last-child {
+  font-style: italic;
+  color: var(--ink-3);
 }
 .work-tab .brush {
   width: 17px;
