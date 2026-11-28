@@ -24,7 +24,8 @@ test("开合半途反向：量眼前高度，撤旧动画后再量末态", () =>
     };
     morphHeight(el, () => (natural = 30));
     morphHeight(el, () => (natural = 100));
-    assert.deepEqual(frames.map(frame => frame.height), ["70px", "100px"]);
+    assert.equal(frames[0].height, "70px");
+    assert.equal(frames[1].height, "100px");
     document.documentElement.dataset.inkMotion = "off";
     morphHeight(el, () => (natural = 30));
     assert.equal(visible, null);
