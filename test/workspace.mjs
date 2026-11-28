@@ -138,7 +138,9 @@ check(
 await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
 await waitFor(`document.querySelector(".work-explorer").getAnimations().length === 0`);
 await evalJs(`document.querySelector('.work-rail [data-work-terminal]').click(); true`);
-await waitFor(`document.querySelector("#workTerminal").clientHeight > 100 && document.querySelector("#workTerminal").getAnimations().length === 0`);
+await waitFor(
+  `document.querySelector("#workTerminal").clientHeight > 100 && document.querySelector("#workTerminal").getAnimations().length === 0`
+);
 check(
   "终端在内容区下方，目录常驻",
   await evalJs(
