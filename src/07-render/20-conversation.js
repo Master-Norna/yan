@@ -182,7 +182,7 @@ function foldCompacted(c) {
 // 消息列表按 id 增量同步：没变的节点原样留下（图表、沙箱、展开状态都不动），只插入、替换或移除有变化的那几条。
 // 回复就地重画（见 07-paint.js，画法是幂等的，正在写的那条也一样画）；用户消息、分隔与提示签名一变整条换。
 // 只有会改变呈现的字段才算变化；展开/收起这类界面状态用户已经在页面上操作过了，不必因此重画
-const UI_STATE_FIELDS = new Set(["toolsOpen", "toolsTouched", "reasoningOpen", "reasoningTouched", "showCompacted"]);
+const UI_STATE_FIELDS = new Set(["toolsOpen", "toolsTouched", "reasoningOpen", "reasoningTouched", "firstThoughtOpen", "showCompacted"]);
 /** @param {Message} message */
 function messageSig(message, branch) {
   const density = message.role === "assistant" ? `${compactTrail()}|` : "";

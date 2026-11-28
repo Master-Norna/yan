@@ -1,10 +1,12 @@
 // 简约模式：设置持久化、流式思绪默认折起、手动开合仍生效、键盘可到达截图。
+import { fileURLToPath } from "node:url";
 import { connect, check, sleep, PAGE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
+const fakeMcp = JSON.stringify([fileURLToPath(new URL("./fake-mcp.mjs", import.meta.url)), "--snap"]);
 await evalJs(
-  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
+  `localStorage.setItem("yan-chat-v1", JSON.stringify({ version: 4, settings: { name: "测", theme: "light", inkMotion: "off", activeProfileId: "p1", autoTitle: false, mcpServers: { cam: { command: ${JSON.stringify(process.execPath)}, args: ${fakeMcp}, readOnlyTools: ["snap"] } } }, profiles: [{ id: "p1", source: "custom", name: "假模型", model: "fake", baseUrl: "http://127.0.0.1:8798/v1", apiKey: "k", temperature: .7, maxTokens: 8192, quota: "", usedTokens: 0, systemPrompt: "" }], conversations: [], library: [], drafts: {} })); true`
 );
 await send("Page.navigate", { url: PAGE });
 await sleep(1200);
@@ -30,6 +32,11 @@ await evalJs(`${reasoning}.querySelector("summary").click(); true`);
 check("manual expansion works", await evalJs(`${reasoning}.open`));
 await waitFor(`${last}?.dataset.status === "complete"`, 20000);
 check("manual expansion survives subsequent updates", await evalJs(`${reasoning}.open`));
+async function keypress(key, code, windowsVirtualKeyCode) {
+  const text = key === "Enter" ? "\r" : key === " " ? " " : "";
+  await send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", key, code, windowsVirtualKeyCode, text });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode });
+}
 // 第一段思绪进了行迹，仍是刚才手动打开的那一段；下一组不借这个开合状态。
 await evalJs(`(() => {
   const input = document.querySelector("#chatInput");
@@ -44,6 +51,21 @@ await waitFor(`${oldThought}?.textContent.includes("先想一想")`, 10000);
 await evalJs(`${oldThought}.querySelector("summary").click(); true`);
 await waitFor(`${trailThoughts}[0]?.textContent.includes("接着原来的思路")`, 10000);
 check("manual expansion follows the first thought into the live timeline", await evalJs(`${trailThoughts}[0].open`));
+const liveShot = `${last}?.querySelector(".tool-shot")`,
+  liveShotHead = `${last}?.querySelector(".compact-shots > .tool-step-head")`;
+await waitFor(`!!${liveShotHead}`, 8000);
+await evalJs(`${liveShotHead}.focus(); true`);
+await keypress("Enter", "Enter", 13);
+await keypress("Tab", "Tab", 9);
+check(
+  "keyboard reaches the screenshot before the next tool starts",
+  await evalJs(`(window.liveShot = ${liveShot}) === document.activeElement && !${last}.querySelector('[data-tool="run_js"]')`)
+);
+await waitFor(`!!${last}?.querySelector('[data-tool="run_js"]')`, 8000);
+check(
+  "the next tool step leaves keyboard focus on the original screenshot",
+  await evalJs(`${last}.dataset.status === "streaming" && window.liveShot === ${liveShot} && window.liveShot === document.activeElement`)
+);
 await waitFor(`${last}?.dataset.status === "complete"`, 10000);
 check(
   "only the first timeline thought inherits manual expansion",
@@ -51,6 +73,15 @@ check(
     `${trailThoughts}[0]?.open === true && ${trailThoughts}[1]?.open === false && ${trailThoughts}[1].textContent.includes("另一段思绪")`
   )
 );
+const tailThought = `${last}?.querySelector(".assistant-block > .reasoning")`;
+check(
+  "the separate final thought does not inherit the first thought's state",
+  await evalJs(`${tailThought}?.textContent.includes("末轮另外想") && !${tailThought}.open`)
+);
+const originalReply = await evalJs(`${last}.dataset.message`),
+  originalConversation = await evalJs(
+    `__yanState().conversations.find(c => c.messages.some(m => m.id === ${JSON.stringify(originalReply)})).id`
+  );
 // 同一份行迹：整段保持摊开，原先自动摊开的文件差异与目录清单收起，计划卡不变。
 const image = { id: "compact-image", kind: "image", name: "截图.png" },
   header = Buffer.from(JSON.stringify({ record: image })),
@@ -119,7 +150,22 @@ await fetch(PAGE + "api/chats/save", {
     }
   })
 });
+
 await send("Page.navigate", { url: PAGE });
+// 整页重开后从磁盘读回这一答，不借上次的 DOM 或内存。
+await waitFor(`!!document.querySelector('[data-conversation="${originalConversation}"] .history-open')`, 10000);
+await evalJs(`document.querySelector('[data-conversation="${originalConversation}"] .history-open').click(); true`);
+await waitFor(
+  `${last}?.dataset.message === ${JSON.stringify(originalReply)} && !!${tailThought}?.textContent.includes("末轮另外想")`,
+  8000
+);
+const thoughtStack = `${last}.querySelector(".tool-stack")`;
+await evalJs(`if (!${thoughtStack}.open) ${thoughtStack}.querySelector("summary").click(); true`);
+check(
+  "remount preserves the first thought's expansion without opening the final thought",
+  await evalJs(`${trailThoughts}[0]?.open === true && ${tailThought}.open === false`)
+);
+
 await waitFor(`!!document.querySelector('[data-conversation="compact-fixture"]')`, 10000);
 await evalJs(`document.querySelector('[data-conversation="compact-fixture"] .history-open').click(); true`);
 await waitFor(`!!document.querySelector('[data-step-id="compact-diff"]')`, 8000);
@@ -135,11 +181,6 @@ check(
 check("plan is not folded", await evalJs(`!document.querySelector('[data-step-id="compact-plan"]').classList.contains("folded")`));
 const screenshot = `document.querySelector('[data-step-id="compact-shot"] .tool-shot')`,
   shotHead = `document.querySelector('[data-step-id="compact-shot"] .tool-step-head')`;
-async function keypress(key, code, windowsVirtualKeyCode) {
-  const text = key === "Enter" ? "\r" : key === " " ? " " : "";
-  await send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", key, code, windowsVirtualKeyCode, text });
-  await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode });
-}
 check("compact mode hides the screenshot until expanded", await evalJs(`${screenshot}.getClientRects().length === 0`));
 await evalJs(`${stack}.querySelector("summary").focus(); true`);
 await keypress("Tab", "Tab", 9);

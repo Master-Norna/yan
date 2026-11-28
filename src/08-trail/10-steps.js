@@ -96,6 +96,9 @@ function delegateSubState(step) {
       .join(" · ")
   };
 }
+// 开合就地改 DOM 时，也能更新这份签名；不凭节点所在面板猜它用的是哪一本台账。
+/** @type {WeakMap<Element, { html: string, hasBody: boolean, status: Step["status"] }>} */
+const stepPaints = new WeakMap();
 // 步骤按 id 就地更新：没变的节点一律不动（转圈不重启、已展开的结果不跳）；新步骤淡入上移，结果首次出现或状态翻转时只让那一条轻浮。
 // 主行迹与帮手的时间线都走这里；差遣卡片本身不整张换，交给 syncDelegateCard。animate 为假（整条刚画出来）时只记台账，不起动效
 /** @param {Step} step */
@@ -121,7 +124,9 @@ function syncStep(list, step, seen, animate = true) {
     if (hasBody && !prev.hasBody) el.classList.add("body-new");
     if (prev.status !== step.status) el.classList.add("status-new");
   }
-  seen.set(step.id, { html, hasBody, status: step.status });
+  const paint = { html, hasBody, status: step.status };
+  stepPaints.set(el, paint);
+  seen.set(step.id, paint);
 }
 // 这一答里还在做的帮手（差遣与续派的那几趟，可能同时有几名）
 /** @param {Message} message */
@@ -325,8 +330,11 @@ function bindTrailEvents() {
     // 指令输出默认折起，开合记在步骤上，重画不丢
     const wasFolded = el.classList.contains("folded");
     if (step) {
+      const paint = stepPaints.get(el),
+        current = paint && paint.html === stepHtml(step);
       step.expanded = wasFolded;
       thawStep(step);
+      if (current) paint.html = stepHtml(step);
     }
     morphHeight(el, () => el.classList.toggle("folded", !wasFolded));
     head.setAttribute("aria-expanded", String(wasFolded));
@@ -385,8 +393,10 @@ function bindTrailEvents() {
     // 用户亲手动了，程序排着的那次自动收起作废
     clearTimeout(details._settleTimer);
     details._settleTimer = null;
-    // 时间线里各轮的思绪与帮手各轮的步骤不记在消息上；用户开合过的记一笔，就地更新时不再替它开合
-    if (details.classList.contains("trail-reasoning") || details.classList.contains("sub-steps")) {
+    // 只有主答的首段思绪会从独立块移入时间线：记在消息自己的字段上，不借给后面的思绪。
+    const first = details.hasAttribute("data-first-thought");
+    // 其余各轮的思绪与帮手各轮的步骤留在节点上，就地更新时不再替它开合。
+    if (!first && (details.classList.contains("trail-reasoning") || details.classList.contains("sub-steps"))) {
       details.dataset.touched = "1";
       return setProcessDetails(details, nextOpen);
     }
@@ -397,8 +407,17 @@ function bindTrailEvents() {
     if (!message) return setProcessDetails(details, nextOpen);
     const reasoning = details.classList.contains("reasoning"),
       unread = reasoning && details.hasAttribute("data-cold-reasoning");
-    message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
-    message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
+    if (first) {
+      message.firstThoughtOpen = nextOpen;
+      // 旧记录的独立思绪也用过这对字段；在还没有行迹时，它们不可能属于后段。
+      if (!message.steps?.length) {
+        delete message.reasoningOpen;
+        delete message.reasoningTouched;
+      }
+    } else {
+      message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
+      message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
+    }
     saveStoreSoon();
     setProcessDetails(details, nextOpen, !unread);
     if (unread && nextOpen && c) void warmInView(c, message);

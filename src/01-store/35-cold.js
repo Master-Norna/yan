@@ -210,7 +210,7 @@ function carryWarm(prev, next) {
 async function warmInView(c, thought = null) {
   const scope = bootstrap.store,
     root = chatsDir(),
-    messages = thought ? [thought] : everyMessage(c).filter(m => !unreadThought(m) || m.reasoningOpen),
+    messages = thought ? [thought] : everyMessage(c).filter(m => !unreadThought(m) || (m.firstThoughtOpen ?? m.reasoningOpen)),
     thoughts = (thought ? [thought] : messages.filter(unreadThought)).map(m => ({ m, key: m.cold?.key }));
   for (const { m } of thoughts) coldThoughtDetails(c, m)?.setAttribute("aria-busy", "true");
   const ready = await warmTrails(c, messages);
@@ -225,8 +225,9 @@ async function warmInView(c, thought = null) {
     const details = coldThoughtDetails(c, m);
     details?.removeAttribute("aria-busy");
     if (!unreadThought(m)) shown ||= !!details;
-    else if (m.reasoningOpen) {
-      m.reasoningOpen = false;
+    else if (m.firstThoughtOpen ?? m.reasoningOpen) {
+      if (m.firstThoughtOpen !== undefined) m.firstThoughtOpen = false;
+      else m.reasoningOpen = false;
       failed = true;
       if (details) {
         setProcessDetails(details, false, false);

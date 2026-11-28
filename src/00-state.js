@@ -151,6 +151,7 @@
  * @property {Deliverable[]} [deliverables] 这一答交给人看的成品（答复里链到的本机文件，见 replyDeliverables）
  * @property {boolean} [toolsOpen]
  * @property {boolean} [toolsTouched]
+ * @property {boolean} [firstThoughtOpen] 首段思绪的手动开合（进了行迹仍是同一段）
  * @property {boolean} [reasoningOpen]
  * @property {boolean} [reasoningTouched]
  * @property {string} [summary] 压缩分隔上的摘要
