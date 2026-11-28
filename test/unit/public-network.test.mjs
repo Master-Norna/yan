@@ -220,7 +220,7 @@ test("审准首跳不授权内网重定向，径行仍可访问", async () => {
   const base = await listen(first);
   try {
     await assert.rejects(
-      fetchPublicResponse(base, { method: "POST", body: "x", allowLoopback: true, allowPrivateFirstHop: true }),
+      fetchPublicResponse(base, { method: "POST", allowLoopback: true, allowPrivateFirstHop: true }),
       error => error.detail?.private === true && error.detail.sent === true && error.detail.at === target + "/next"
     );
     assert.equal(firstHits, 1);
