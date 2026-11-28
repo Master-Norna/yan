@@ -137,16 +137,24 @@ function workResetWorkspace() {
 }
 // 仅展开时读取这一层；换根后迟到的结果不再生效。
 async function workLoadBranch(path) {
-  const request = { loading: true, entries: [], dirs: [], truncated: false, error: "" };
+  // 刷新时保留上一趟成功的目录快照，直到新结果到齐，避免切面或工具刷新时文件行突然消失。
+  const previous = work.branches.get(path),
+    request = { loading: true, entries: [], dirs: [], truncated: false, error: "", ready: false };
+  if (previous?.ready)
+    Object.assign(request, { entries: previous.entries, dirs: previous.dirs, truncated: previous.truncated, ready: true });
   work.branches.set(path, request);
   workPaint();
   try {
     const data = await bridge("/api/archive/list", { root: path, scratch: false, depth: 1, workspace: true }, AbortSignal.timeout(8000));
     if (work.branches.get(path) !== request) return;
-    Object.assign(request, { loading: false, entries: data.entries || [], dirs: data.dirs || [], truncated: !!data.truncated });
+    Object.assign(request, { loading: false, entries: data.entries || [], dirs: data.dirs || [], truncated: !!data.truncated, ready: true });
   } catch (error) {
     if (work.branches.get(path) !== request) return;
     request.loading = false;
+    request.ready = false;
+    request.entries = [];
+    request.dirs = [];
+    request.truncated = false;
     request.error = String(error.message || error).slice(0, 160);
   }
   workPaint();
@@ -414,7 +422,7 @@ function workRowHtml(row, depth = 0) {
       branch = work.branches.get(row.path);
     let children = "";
     if (expanded) {
-      if (branch?.loading) children = t("正在翻…");
+      if (branch?.loading && !branch.ready) children = t("正在翻…");
       else if (branch?.error) children = escapeHtml(branch.error);
       else if (branch) {
         const rows = workDirectoryRows(row.path, branch.dirs, branch.entries);
