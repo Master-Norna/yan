@@ -124,14 +124,30 @@ check(
     `document.querySelector("#workTerminal").clientHeight>0 && document.querySelector(".work-explorer").clientWidth>0 && document.querySelector("#workContent").getBoundingClientRect().bottom<=document.querySelector("#workTerminal").getBoundingClientRect().top+1`
   )
 );
-check("初始输入跟在输出后，不贴终端底部", await evalJs(`document.querySelector("#workCommand").getBoundingClientRect().top - document.querySelector("#workTerminalBody").getBoundingClientRect().top < 25`));
-await evalJs(`(() => {const f=document.querySelector("#workCommand"); f.querySelector("input").value="echo yan-terminal-probe"; f.requestSubmit(); return true;})()`);
-await waitFor(`document.querySelector("#workTerminalOutput").textContent.includes("yan-terminal-probe") && !document.querySelector("#workCommand input").readOnly`, 20000);
+check(
+  "初始输入跟在输出后，不贴终端底部",
+  await evalJs(
+    `document.querySelector("#workCommand").getBoundingClientRect().top - document.querySelector("#workTerminalBody").getBoundingClientRect().top < 25`
+  )
+);
+await evalJs(
+  `(() => {const f=document.querySelector("#workCommand"); f.querySelector("input").value="echo yan-terminal-probe"; f.requestSubmit(); return true;})()`
+);
+await waitFor(
+  `document.querySelector("#workTerminalOutput").textContent.includes("yan-terminal-probe") && !document.querySelector("#workCommand input").readOnly`,
+  20000
+);
 check("终端能执行并接收命令输出", await evalJs(`document.querySelector("#workTerminalOutput").textContent.includes("退出码：0")`));
 await evalJs(`document.querySelector("[data-work-terminal-wide]").click(); true`);
-check("终端展开不隐藏资源树", await evalJs(`document.querySelector("#workContent").clientHeight===0 && document.querySelector(".work-explorer").clientWidth>0`));
+check(
+  "终端展开不隐藏资源树",
+  await evalJs(`document.querySelector("#workContent").clientHeight===0 && document.querySelector(".work-explorer").clientWidth>0`)
+);
 await evalJs(`document.querySelector("[data-work-terminal-wide]").click(); document.querySelector("[data-work-clear]").click(); true`);
-check("清屏不清除工作区文件", await evalJs(`!document.querySelector("#workTerminalOutput").textContent && !!document.querySelector("#fileViewerStage h1")`));
+check(
+  "清屏不清除工作区文件",
+  await evalJs(`!document.querySelector("#workTerminalOutput").textContent && !!document.querySelector("#fileViewerStage h1")`)
+);
 await evalJs(`document.querySelector('#workTerminal [data-work-terminal]').click(); true`);
 await evalJs(
   `document.querySelector('[data-work-mode="search"]').click(); const f=document.querySelector("#workFind"); f.querySelector("input").value="只有一页字"; f.requestSubmit(); true`
