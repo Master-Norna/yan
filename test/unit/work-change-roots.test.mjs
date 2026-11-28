@@ -34,7 +34,9 @@ test("工作区改动以原步骤落脚处归并，不拿现目录猜旧路径",
     { path: "unknown.txt", created: false },
     { path: "/absolute.txt", created: false }
   ]);
-  assert.deepEqual(f.workChangedFiles().map(f => f.path), f.changeStats(chat.messages[1]).files.map(f => f.path));
+  const rows = f.workChangedFiles();
+  const stats = f.changeStats(chat.messages[1]);
+  assert.deepEqual(rows.map(row => row.path), stats.files.map(file => file.path));
 });
 
 test("开始新答立即清掉旧答改动及 diff 页签，普通文件页签保留", async () => {
@@ -58,7 +60,10 @@ test("开始新答立即清掉旧答改动及 diff 页签，普通文件页签�
   const chat = f.setup();
   await f.workRefresh();
   assert.deepEqual(f.workChangeRows().map(row => row.path), ["/old.txt"]);
-  f.work.tabs = [{ path: "/keep.txt", diff: false }, { path: "/old.txt", diff: true }];
+  f.work.tabs = [
+    { path: "/keep.txt", diff: false },
+    { path: "/old.txt", diff: true }
+  ];
   f.work.active = 1;
   chat.messages.push({ id: "new", role: "assistant", status: "streaming", steps: [] });
   assert.equal(f.workSyncChangeReply(), true);
