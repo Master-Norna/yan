@@ -47,6 +47,8 @@ module.exports = function createFiles(work) {
         if (error.code === "ENOENT") return null;
         throw error;
       });
+      if (!existing && (body.editor === true || body.editor === "office"))
+        return { stale: true, path: shownPath(workdir, file), sig: "", missing: true };
       if (existing?.isDirectory()) throw Error(`${body.path} 是目录，不能作为文件写入`);
       if (existing && !existing.isFile()) throw Error("只支持普通文件");
       if (existing && existing.size > 32 * 1024 * 1024) throw Error("原文件超过 32 MB，不予覆盖");
