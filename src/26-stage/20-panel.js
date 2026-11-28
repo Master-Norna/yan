@@ -26,6 +26,7 @@ function openStage() {
   stageSetWidth(stage.width || saved || innerWidth * 0.46);
   showNow($("#stagePanel"));
   stageWake();
+  if (work.open && work.active >= 0) workActivate(work.active);
   // 浏览器早开着、看台却没连上的（桥接重启过、浏览器是别处起的）：开时再找一回
   if (!stage.ws) void stageLocate();
   clearInterval(stage.poll);
