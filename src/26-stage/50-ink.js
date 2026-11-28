@@ -337,6 +337,7 @@ function stageQuoteChanged() {
 /** @param {string} url */
 function stageRevisit(url) {
   openStage();
+  workLeave();
   if (!stage.ws) return toast(t("浏览器未开"));
   const open = [...stage.tabs].find(([, tab]) => tab.url === url);
   if (open) stageActivate(open[0]);

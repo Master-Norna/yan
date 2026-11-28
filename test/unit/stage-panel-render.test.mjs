@@ -140,16 +140,24 @@ test("游目地址编辑保留输入与焦点；退出编辑、收起重开后�
   assert.equal(empty.classList.contains("hidden"), true);
 });
 
-test("工作区开合不改浏览器地址，文件夹显示选中态", ctx => {
+test("工作区与浏览器互斥，后台开页不抢工作区，切回保留页签", ctx => {
   const { stage, work, stageRender, node, update } = stageFixture(ctx);
   update();
   const addr = node("#stageAddr"),
-    child = addr.child;
+    child = addr.child,
+    tabs = node("#stageTabs");
   work.open = true;
   stageRender();
   assert.equal(node("#stageWorkBtn").getAttribute("aria-pressed"), "true");
-  assert.equal(node("#stageBrowser").classList.contains("hidden"), false);
+  assert.equal(node("#stageBrowser").classList.contains("hidden"), true);
+  assert.equal(node("#stageWork").classList.contains("hidden"), false);
+  assert.match(tabs.writes.at(-1), /aria-selected="false"/);
   assert.equal(addr.child, child);
+  update({ targetId: "new", url: "https://example.com/new" });
+  assert.equal(stage.current, "new");
+  assert.equal(work.open, true);
+  assert.equal(node("#stageBrowser").classList.contains("hidden"), true);
+  assert.equal(stage.tabs.size, 2);
   stage.ws = null;
   stageRender();
   assert.equal(node("#stageBrowser").classList.contains("hidden"), true);
@@ -157,4 +165,6 @@ test("工作区开合不改浏览器地址，文件夹显示选中态", ctx => {
   stageRender();
   assert.equal(node("#stageWorkBtn").getAttribute("aria-pressed"), "false");
   assert.equal(node("#stageBrowser").classList.contains("hidden"), false);
+  assert.equal(node("#stageWork").classList.contains("hidden"), true);
+  assert.match(tabs.writes.at(-1), /aria-selected="true" data-stage-tab="new"/);
 });

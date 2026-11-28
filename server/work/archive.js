@@ -39,6 +39,26 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     if (!rel) throw Error("请给出文件路径");
     return resolveInside(root, rel);
   }
+  // 卷宗与工作区认同一批可见项，数量不把不列出的隐藏项、链接与忽略目录算进去。
+  /** @param {import("node:fs").Dirent} entry */
+  const archiveVisible = entry =>
+    !entry.name.startsWith(".") && !entry.isSymbolicLink() && !(entry.isDirectory() && WORK_SKIP.has(entry.name));
+  // 工作区只数子夹的直属项，不读文件内容、不继续下钻；读不到的数量留空，不冒充空夹。
+  async function folderFacts(full) {
+    const stat = await fs.promises.lstat(full).catch(() => null);
+    if (!stat?.isDirectory()) return {};
+    const modifiedAt = stat.mtime.toISOString(),
+      entries = await fs.promises.readdir(full, { withFileTypes: true }).catch(() => null);
+    if (!entries) return { modifiedAt };
+    let files = 0,
+      folders = 0;
+    for (const entry of entries) {
+      if (!archiveVisible(entry)) continue;
+      if (entry.isDirectory()) folders++;
+      else files++;
+    }
+    return { modifiedAt, files, folders };
+  }
   // 子目录也要列：空的夹同样是一层，页面上要能看见、能把文件拖进去
   async function walkArchive(root, dir, out, dirs, shallow = false) {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(error => {
@@ -48,10 +68,9 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     });
     for (const entry of entries) {
       if (out.length + dirs.length >= ARCHIVE_LIST_LIMIT) return;
-      if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
+      if (!archiveVisible(entry)) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (WORK_SKIP.has(entry.name)) continue;
         dirs.push({ path: relPath(root, full), name: entry.name });
         if (!shallow) await walkArchive(root, full, out, dirs);
         continue;
@@ -98,7 +117,12 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     // 路径仍相对根，这一层的就是名字本身
     const shallow = Number(body.depth) === 1;
     await walkArchive(root, root, out, dirs, shallow);
-    if (shallow) dirs.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+    if (shallow) {
+      dirs.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+      // 不逐夹发请求，也不无界并行：只在这一趟列目录里，小批读一次子夹的目录项。
+      for (let i = 0; i < dirs.length; i += 16)
+        await Promise.all(dirs.slice(i, i + 16).map(async dir => Object.assign(dir, await folderFacts(path.join(root, dir.path)))));
+    }
     out.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
     return {
       archive: root,

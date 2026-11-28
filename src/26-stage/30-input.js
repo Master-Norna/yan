@@ -450,7 +450,7 @@ function bindStage() {
     if (close) return void stageSend("Target.closeTarget", { targetId: close.dataset.stageClose }).catch(() => {});
     const tab = /** @type {HTMLElement | null} */ (target.closest("[data-stage-tab]"));
     if (!tab) return;
-    if (tab.dataset.stageTab === stage.current) return;
+    if (!work.open && tab.dataset.stageTab === stage.current) return;
     stageActivate(tab.dataset.stageTab || "");
   });
   for (const button of document.querySelectorAll("[data-stage-nav]"))
