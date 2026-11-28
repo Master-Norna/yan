@@ -660,9 +660,11 @@ function bindLibraryEvents() {
           .filter(step => step.status === "done" && step.change?.path === change.dataset.changePath)
           .map(step => step.root)
       );
-      // 只有当原步骤的落脚处明确且一致才可拖，不猜当前工作目录。
-      const root = roots.size === 1 ? [...roots][0] : "";
-      if (root && change.dataset.changePath) draggedLocalFile = joinFile(root, change.dataset.changePath);
+      // 新的改动记录已经是绝对路径，不再拼一次根；旧的相对路径只在原步骤落脚处明确时解析。
+      const path = slashed(change.dataset.changePath || ""),
+        root = roots.size === 1 ? [...roots][0] : "";
+      if (/^(?:[a-z]:\/|\/)/i.test(path)) draggedLocalFile = path;
+      else if (root && path) draggedLocalFile = joinFile(root, path);
     }
     if (draggedLocalFile) {
       event.dataTransfer.setData(LOCAL_FILE_DRAG, draggedLocalFile);
