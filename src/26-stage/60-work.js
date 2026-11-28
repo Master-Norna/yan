@@ -54,7 +54,11 @@ function workDirty(path) {
   return !!draft && draft.base !== draft.text;
 }
 function workCanEdit(tab) {
-  return !!tab && !tab.diff && (fileKind(tab.path).group === "text" || ["docx", "xlsx", "odt", "ods", "ipynb"].includes(fileExtension(tab.path)));
+  return (
+    !!tab &&
+    !tab.diff &&
+    (fileKind(tab.path).group === "text" || ["docx", "xlsx", "odt", "ods", "ipynb"].includes(fileExtension(tab.path)))
+  );
 }
 function workRenderEditor(tab, trigger = null) {
   const draft = workDrafts.get(tab.path);
@@ -67,9 +71,12 @@ function workRenderEditor(tab, trigger = null) {
         escapeHtml(t("仅可修改列出的文字与单元格；公式、复杂结构及其他内容保持原样。")) +
         '</p>' +
         draft.office.labels
-          .map((label, index) => '<label><span>' + escapeHtml(label) + '</span><input type="text" class="work-file-editor-field" data-office-field="' +
-            index + '" value="' + escapeHtml(values[index]) + '"></label>')
-          .join("") + '</div>',
+          .map(
+            (label, index) =>
+              `<label><span>${escapeHtml(label)}</span><input type="text" maxlength="200000" class="work-file-editor-field" data-office-field="${index}" value="${escapeHtml(values[index])}"></label>`
+          )
+          .join("") +
+        "</div>",
       trigger,
       t("览"),
       "stage"
@@ -120,7 +127,11 @@ async function workToggleEditor() {
       const { fields } = officeEditorModel(data.parts, extension),
         text = JSON.stringify(fields.map(field => field.value));
       workDrafts.set(tab.path, {
-        scope, base: text, text, sig: data.sig, saving: false,
+        scope,
+        base: text,
+        text,
+        sig: data.sig,
+        saving: false,
         office: { parts: data.parts, extension, labels: fields.map(field => field.label) }
       });
     } else {
@@ -948,9 +959,18 @@ function bindWork() {
   box.addEventListener("keydown", event => {
     const input = /** @type {HTMLInputElement} */ (event.target);
     if (event.isComposing) return;
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s" && input.matches(".work-file-editor, .work-file-editor-field")) {
+    const active = work.tabs[work.active];
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      event.key.toLowerCase() === "s" &&
+      active &&
+      !active.diff &&
+      workDrafts.has(active.path) &&
+      !input.matches("#workCommand input")
+    ) {
       event.preventDefault();
-      void workSaveEditor(work.tabs[work.active]);
+      void workSaveEditor(active);
       return;
     }
     if (input.matches("#workCommand input")) {

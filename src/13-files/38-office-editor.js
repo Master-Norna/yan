@@ -5,9 +5,11 @@ function officeEditorModel(parts, extension) {
   const docs = new Map(Object.entries(parts).map(([name, xml]) => [name, parseXml(String(xml))]));
   /** @type {OfficeField[]} */
   const fields = [];
+  let chars = 0;
   const add = (part, label, value, set, related = []) => {
     if (/[\u0000-\u001f]/.test(value)) return;
-    if (fields.length >= 2000) throw Error(t("可编辑项目过多，请使用本机程序"));
+    chars += value.length;
+    if (fields.length >= 2000 || chars > 200000) throw Error(t("可编辑项目过多，请使用本机程序"));
     fields.push({ part, label, value, set, related });
   };
   const simpleText = node => node && !node.children.length && !/[\u0000-\u001f]/.test(node.textContent);
@@ -43,7 +45,9 @@ function officeEditorModel(parts, extension) {
         continue;
       }
       const runs = xmlKids(paragraph, "r").filter(
-        run => run.namespaceURI === ns && [...run.children].every(child => child.namespaceURI === ns && ["rPr", "t"].includes(child.localName))
+        run =>
+          run.namespaceURI === ns &&
+          [...run.children].every(child => child.namespaceURI === ns && ["rPr", "t"].includes(child.localName))
       );
       for (const [j, run] of runs.entries()) {
         const nodes = xmlKids(run, "t");
@@ -78,7 +82,17 @@ function officeEditorModel(parts, extension) {
         calc = workbook.createElementNS(root.namespaceURI, root.prefix ? root.prefix + ":calcPr" : "calcPr");
         calc.setAttribute("calcId", "0");
         const next = [...root.children].find(child =>
-          ["oleSize", "customWorkbookViews", "pivotCaches", "smartTagPr", "smartTagTypes", "webPublishing", "fileRecoveryPr", "webPublishObjects", "extLst"].includes(child.localName)
+          [
+            "oleSize",
+            "customWorkbookViews",
+            "pivotCaches",
+            "smartTagPr",
+            "smartTagTypes",
+            "webPublishing",
+            "fileRecoveryPr",
+            "webPublishObjects",
+            "extLst"
+          ].includes(child.localName)
         );
         root.insertBefore(calc, next || null);
       }
@@ -153,12 +167,14 @@ function officeEditorModel(parts, extension) {
         for (const row of table.getElementsByTagNameNS(tableNS, "table-row")) {
           if (inside(row, ["table-cell"])) continue;
           const repeated = Number(row.getAttributeNS(tableNS, "number-rows-repeated") || 1);
+          if (!Number.isSafeInteger(repeated) || repeated < 1 || r + repeated > 1048576) break;
           let c = 0;
           for (const cell of [...row.children].filter(node => node.namespaceURI === tableNS &&
             ["table-cell", "covered-table-cell"].includes(node.localName))) {
             const count = Number(cell.getAttributeNS(tableNS, "number-columns-repeated") || 1),
               node = cell.getElementsByTagNameNS(textNS, "p")[0],
               kind = cell.getAttributeNS(officeNS, "value-type");
+            if (!Number.isSafeInteger(count) || count < 1 || c + count > 16384) break;
             if (repeated === 1 && count === 1 && cell.localName === "table-cell" && !cell.hasAttributeNS(tableNS, "formula") &&
                 !cell.hasAttributeNS(tableNS, "number-columns-spanned") && !cell.hasAttributeNS(tableNS, "number-rows-spanned") &&
                 cell.children.length === 1 && simpleText(node)) {
@@ -186,8 +202,11 @@ function officeEditorChanges(parts, extension, values) {
     changed = new Set(),
     output = {};
   if (!Array.isArray(values) || values.length !== fields.length) throw Error(t("此文档没有可安全编辑的内容"));
+  let chars = 0;
   for (const [i, field] of fields.entries()) {
     if (typeof values[i] !== "string" || /[\u0000-\u001f]/.test(values[i])) throw Error(t("文档编辑不支持控制字符或换行"));
+    chars += values[i].length;
+    if (chars > 200000) throw Error(t("可编辑项目过多，请使用本机程序"));
     for (const part of [field.part, ...field.related]) output[part] = parts[part];
     if (values[i] === field.value) continue;
     field.set(values[i]);

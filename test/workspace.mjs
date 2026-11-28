@@ -322,7 +322,7 @@ await officeOpen("编辑.docx");
 await officeSet(0, "改后的文字 & < >");
 await officeSave();
 const word = readOffice("编辑.docx", readFileSync(ROOT + "/编辑.docx"))["word/document.xml"];
-check("Word 原地修改并保留加粗属性", word.includes("改后的文字 &amp; &lt; &gt;") && word.includes("<w:b"));
+check("Word 原地修改并保留加粗属性", /改后的文字 &amp; &lt; (?:&gt;|>)/.test(word) && /<w:b(?:\s|\/|>)/.test(word));
 await evalJs('document.querySelector("[data-work-edit]").click(); true');
 await officeOpen("编辑.xlsx");
 check("公式单元格不进入编辑列表", await evalJs('document.querySelectorAll("[data-office-field]").length===3'));

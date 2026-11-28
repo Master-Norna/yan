@@ -12,7 +12,6 @@ const require = createRequire(import.meta.url);
 const { readOffice, patchOffice } = require("../../server/work/office.js");
 const createWork = require("../../server/work/index.js");
 
-
 test("Office 仅替换指定 XML，未改的局部记录原样保留；多次保存不会积累废记录", () => {
   const original = zip({
     "word/document.xml": "<doc>old</doc>",
