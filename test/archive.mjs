@@ -63,6 +63,32 @@ check(
     `(f => f.querySelector(".fi").dataset.figure === "table" && /B$/.test(f.querySelector("small").textContent) && f.getAttribute("role") === "button" && f.querySelectorAll(".deliver-btn").length === 1 && f.querySelector('.deliver-btn[data-deliver-action="download"] .brush').childElementCount > 0 && f.querySelector(".deliver-btn").getAttribute("aria-label") === "另存到本机")(document.querySelector(".message.assistant .deliver-file"))`
   )
 );
+// 成品拖到案上走普通附件入口，不发送；划选拖入走现有引用入口。
+await evalJs(
+  `(() => { const from = document.querySelector(".deliver-file"), to = document.querySelector("#chatInput"), dt = new DataTransfer();
+    for (const [type, target] of [["dragstart", from], ["dragover", to], ["drop", to], ["dragend", from]]) target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })); })(); true`
+);
+await waitFor(`!!document.querySelector("#attachments .attachment-card[data-name='报表.csv']")`, 8000);
+check(
+  "dragging an output attaches it without a second question or save mark",
+  (await evalJs(`document.querySelectorAll("#messages .message.user").length === 1 && !document.querySelector("[data-save-attachment]")`)) &&
+    existsSync(`${ARCHIVE}/报表.csv`)
+);
+await evalJs(`document.querySelector("#attachments [data-remove-attachment]").click(); true`);
+const quoted = await evalJs(
+  `(() => { const from = document.querySelector(".message.assistant .assistant-block > .markdown"), to = document.querySelector("#chatInput"),
+    range = document.createRange(), selected = getSelection(), dt = new DataTransfer();
+    range.selectNodeContents(from); selected.removeAllRanges(); selected.addRange(range);
+    const text = selected.toString().trim().slice(0, 1200); dt.setData("text/plain", selected.toString());
+    for (const [type, target] of [["dragstart", from], ["dragover", to], ["drop", to], ["dragend", from]]) target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return text; })()`
+);
+check(
+  "dragging a selected answer sets a quote instead of inserting text",
+  (await evalJs(`document.querySelector("#composerQuote .composer-quote-text").textContent`)) === quoted &&
+    (await evalJs(`document.querySelector("#chatInput").value`)) === ""
+);
+await evalJs(`document.querySelector("#composerQuoteClose").click(); true`);
 // 点条目即预览：不必下载，就地预览
 await evalJs(`document.querySelector(".message.assistant .deliver-file").click(); true`);
 await waitFor(`!!document.querySelector("#fileViewerStage .file-viewer-table td")`, 8000);
@@ -697,4 +723,18 @@ check(
 await evalJs(`document.querySelector("#openLibrary").click(); true`);
 await waitFor(`!!document.querySelector('#libraryGrid [data-library-disk="拖拽附件.txt"]')`, 8000);
 check("dragging the attachment saves its original bytes", readFileSync(`${ARCHIVE}/拖拽附件.txt`, "utf8") === "drag");
+await evalJs(
+  `__yanState().settings.pendingWorkdir = ${JSON.stringify(WORK)}; document.querySelector("#newChat").click(); true`
+);
+await waitFor(`document.querySelector("#workdirChip").classList.contains("on") && !!document.querySelector("#welcomeAttachments .attachment-card[data-name='拖拽附件.txt']")`);
+writeFileSync(`${WORK}/拖拽附件.txt`, "keep");
+check(
+  "a bound work directory accepts an attachment",
+  await dragBetween('#welcomeAttachments .attachment-card[data-name="拖拽附件.txt"]', "#workdirChip")
+);
+await waitFor(`document.body.textContent.includes("拖拽附件 (2).txt")`, 8000);
+check(
+  "copy to a work directory uses original bytes and does not overwrite",
+  readFileSync(`${WORK}/拖拽附件.txt`, "utf8") === "keep" && readFileSync(`${WORK}/拖拽附件 (2).txt`, "utf8") === "drag"
+);
 close();
