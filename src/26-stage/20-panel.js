@@ -26,7 +26,10 @@ function openStage() {
   stageSetWidth(stage.width || saved || innerWidth * 0.46);
   showNow($("#stagePanel"));
   stageWake();
-  if (work.open) void workRefresh();
+  if (work.open) {
+    if (work.active >= 0) workActivate(work.active);
+    void workRefresh();
+  }
   // 浏览器早开着、看台却没连上的（桥接重启过、浏览器是别处起的）：开时再找一回
   if (!stage.ws) void stageLocate();
   clearInterval(stage.poll);
@@ -38,6 +41,8 @@ function openStage() {
 }
 function closeStage() {
   stageSetWide(false);
+  // 游目里开着的预览随游目一起收：留在面板里的那一层下次开游目还会浮出来
+  workCloseViewer();
   hideWithFade($("#stagePanel"));
   clearInterval(stage.poll);
   stageWake();

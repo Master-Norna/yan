@@ -1002,14 +1002,17 @@ await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 const workFolder = `document.querySelector('[data-work-dir="${workDir}"]')`;
 await waitFor(`!!${workFolder}`);
 await evalJs(`${workFolder}.click(); true`);
-await waitFor(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "笔记.md")`, 8000).catch(
+await waitFor(`[...document.querySelectorAll("#workStrips .work-row strong")].some(el => el.textContent === "笔记.md")`, 8000).catch(
   () => {}
 );
 check(
   "the workspace lists the bound folder",
-  await evalJs(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "笔记.md")`)
+  await evalJs(`[...document.querySelectorAll("#workStrips .work-row strong")].some(el => el.textContent === "笔记.md")`)
 );
-check("the workspace path names the folder", await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`));
+check(
+  "the workspace path names the folder",
+  await evalJs(`document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`)
+);
 await waitFor(`!__yanStage.state.session`);
 check(
   "workspace fills the stage and browser streaming stops while tabs remain",
@@ -1028,22 +1031,28 @@ check(
   )
 );
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
-await waitFor(`!__yanStage.state.session && document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`);
-await waitFor(`!!document.querySelector("#workStrips [data-work-file]")`, 8000).catch(() => {});
+await waitFor(
+  `!__yanStage.state.session && document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`
+);
 const beforeWorkFile = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
-await evalJs(`document.querySelector("#workStrips [data-work-file]").click(); true`);
+// 等文件出现并在同一次求值中打开：目录异步重画不会让点击落在已移除的行上。
+await waitFor(
+  `(() => { const row = document.querySelector('#workStrips [data-work-file$="/笔记.md"]'); if (!row) return false; row.click(); return true; })()`
+);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 check(
-  "workspace file opens full-screen, without navigating the browser",
+  "workspace file opens in the stage panel, not over the page",
   await evalJs(
-    `(() => { const v = document.querySelector("#fileViewer"), r = v.getBoundingClientRect(); return !v.classList.contains("hidden") && r.width === innerWidth && r.height === innerHeight && __yanStage.state.tabs.get(__yanStage.state.current)?.url === ${JSON.stringify(beforeWorkFile)}; })()`
+    `(() => { const v = document.querySelector("#fileViewer"), p = document.querySelector("#workContent"), r = v.getBoundingClientRect(), q = p.getBoundingClientRect(); return !v.classList.contains("hidden") && v.classList.contains("in-stage") && Math.abs(r.width - q.width) <= 2 && Math.abs(r.height - q.height) < 1 && r.left >= q.left - 1 && r.top >= q.top - 1 && r.width < innerWidth && __yanStage.state.tabs.get(__yanStage.state.current)?.url === ${JSON.stringify(beforeWorkFile)}; })()`
   )
 );
 await evalJs(`document.querySelector("#fileViewerClose").click(); true`);
-await waitFor(`document.querySelector("#fileViewer").classList.contains("hidden")`);
+await waitFor(
+  `document.querySelector("#fileViewer").classList.contains("hidden") && !document.querySelector("#fileViewer").classList.contains("in-stage")`
+);
 check(
   "closing the preview returns to the same folder",
-  await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`)
+  await evalJs(`document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`)
 );
 // 切回浏览器后，地址栏仍可显式打开本机文档，保留浏览器独有的览 / 源。
 await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);

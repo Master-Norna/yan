@@ -1,9 +1,4 @@
-// 言 · 游目 · 工作区：舞台上的一层，看某一处目录里的东西。
-// 簿录（列、件图、夹、路径）就是卷宗那一套（src/13-files/10-archive.js），这里只换三样：根可换（路径末尾点选目录，
-// 或点空态里那枚「选择文件夹」）、不收入不改名也不设分类签；有对话目录则跟随，言模式沿用卷宗目录。
-// 点一件即开：夹往下走，件交给全屏预览器（与卷宗同路），不动浏览器。
-// 「改动」那一面只看本段对话改过的件：不说增删改、也不写 +几 −几——件图本身换色（朱是删、泥金是改、石绿是增）。
-// 顶栏文件夹与网页签切换两面；工作区的路径、视图切换与浏览器导航互不接管。
+// 言 · 工作区：独立目录树、页签与内容区。复用桥接、文件图及预览能力，不借卷宗的页面。
 const work = {
   // true 时舞台显示工作区，false 时显示浏览器；并非两个同时展开的区域。
   open: false,
@@ -11,8 +6,24 @@ const work = {
   root: "",
   /** @type {string|null} 当前对话及其绑定目录的标记；同一段里走层不重置 */
   context: null,
-  /** @type {"list"|"changes"} */
+  /** @type {"list"|"changes"|"search"} */
   mode: "list",
+  /** @type {Set<string>} */
+  expanded: new Set(),
+  /** @type {Map<string, any>} */
+  branches: new Map(),
+  /** @type {{path:string,diff:boolean,raw:boolean}[]} */
+  tabs: [],
+  active: -1,
+  collapsed: false,
+  search: "",
+  /** @type {WorkRow[]} */
+  searchRows: [],
+  searchStatus: "",
+  terminal: false,
+  terminalText: "",
+  /** @type {AbortController|null} */
+  command: null,
   /** @type {{ path: string, name: string, size: number, modifiedAt: string }[]} 这一层的件，路径相对根 */
   entries: [],
   /** @type {{ path: string, name: string, files?: number, folders?: number, modifiedAt?: string }[]} 夹，同上 */
@@ -26,7 +37,6 @@ const work = {
   truncated: false,
   error: "",
   /** 画着的是哪一副样子（""/list/empty）：壳子只在换样子时重画 */
-  shape: "",
   rev: 0
 };
 
@@ -67,12 +77,20 @@ function workEnter() {
   stageRender();
   // 切面立即停推流：同一帧内网页与工作区来回切换时，尺寸观察可能合并掉中间变化。
   stageWake();
+  if (work.active >= 0) workActivate(work.active);
   void workRefresh();
 }
 function workLeave() {
   if (!work.open) return;
   work.open = false;
+  workCloseViewer();
   stageRender();
+}
+/** 游目里开着预览时，收起、切走或换对话先把它关上：那一层是这一面的，不该跟着到别处去 */
+function workCloseViewer() {
+  const viewer = $("#fileViewer");
+  if (!viewer?.classList?.contains("in-stage") || !isShown("#fileViewer")) return;
+  closeFileViewer();
 }
 /** 选一处目录：系统的选夹子窗（与卷宗「收入文件」同一个口，见 server/work/picker.js） */
 async function workPick() {
@@ -96,13 +114,90 @@ function workEnterDir(path) {
   workPaint();
   void workRefresh();
 }
-// 根、列表和模式一起换；先作废旧请求，调用者再绘制或刷新。
+// 根、列表、页签和展开状态一起换，并作废旧请求。
 function workSetRoot(root) {
+  workCloseViewer();
+  workResetWorkspace();
   work.root = slashed(root);
   workResetRows();
   work.mode = "list";
 }
 // ---------- 列 ----------
+function workResetWorkspace() {
+  work.expanded.clear();
+  work.branches.clear();
+  work.tabs = [];
+  work.active = -1;
+  work.search = "";
+  work.searchRows = [];
+  work.searchStatus = "";
+  work.command?.abort();
+  work.command = null;
+  work.terminalText = "";
+}
+// 仅展开时读取这一层；换根后迟到的结果不再生效。
+async function workLoadBranch(path) {
+  // 刷新时保留上一趟成功的目录快照，直到新结果到齐，避免切面或工具刷新时文件行突然消失。
+  const previous = work.branches.get(path),
+    request = { loading: true, entries: [], dirs: [], truncated: false, error: "", ready: false };
+  if (previous?.ready) {
+    request.entries = previous.entries;
+    request.dirs = previous.dirs;
+    request.truncated = previous.truncated;
+    request.ready = true;
+  }
+  work.branches.set(path, request);
+  workPaint();
+  try {
+    const data = await bridge("/api/archive/list", { root: path, scratch: false, depth: 1, workspace: true }, AbortSignal.timeout(8000));
+    if (work.branches.get(path) !== request) return;
+    Object.assign(request, { loading: false, entries: data.entries || [], dirs: data.dirs || [], truncated: !!data.truncated });
+    request.ready = true;
+  } catch (error) {
+    if (work.branches.get(path) !== request) return;
+    request.loading = false;
+    request.ready = false;
+    request.entries = [];
+    request.dirs = [];
+    request.truncated = false;
+    request.error = String(error.message || error).slice(0, 160);
+  }
+  workPaint();
+}
+function workToggleDir(path) {
+  if (work.expanded.delete(path)) return workPaint();
+  work.expanded.add(path);
+  void workLoadBranch(path);
+}
+async function workSearch(query) {
+  work.search = String(query || "").trim();
+  const rev = ++work.rev,
+    root = work.root;
+  work.searchRows = [];
+  work.searchStatus = work.search ? t("正在翻…") : "";
+  workPaint();
+  if (!work.search || !root) return;
+  try {
+    const data = await bridge(
+      "/api/work/search",
+      { workdir: root, path: ".", query: work.search, literal: true, limit: 200 },
+      AbortSignal.timeout(20000)
+    );
+    if (rev !== work.rev || work.mode !== "search") return;
+    work.searchRows = (data.matches || []).map(hit => {
+      const rel = slashed(hit.file);
+      const path = /^(?:[a-z]:\/|\/)/i.test(rel) ? rel : joinFile(root, rel);
+      return { dir: false, name: rel.split("/").pop() || rel, path, where: parentDir(rel), note: String(hit.line) + ": " + hit.text };
+    });
+    const limited = data.truncated || data.skipped?.length || data.large || data.unread;
+    work.searchStatus = limited ? t("搜索范围有限") : work.searchRows.length ? "" : t("没有找到文件");
+  } catch (error) {
+    if (rev !== work.rev) return;
+    work.searchStatus = t`目录不可用：${String(error.message || error).slice(0, 160)}`;
+  }
+  workPaint();
+}
+
 // 换根或换面时，旧列表不可拿新根拼路径；在发出新请求前就使旧请求失效。
 function workResetRows() {
   ++work.rev;
@@ -116,6 +211,7 @@ function workResetRows() {
 }
 // 一层只要一层（depth: 1）；改动直接查本段对话碰过的件。
 async function workRefresh() {
+  if (work.mode === "search") return;
   if (!work.root && work.mode !== "changes") return;
   const rev = ++work.rev;
   try {
@@ -140,8 +236,11 @@ async function workRefresh() {
       workPaint();
       return;
     }
-    const options = { root: work.root, scratch: false, depth: 1, workspace: true };
-    const data = await bridge("/api/archive/list", options, AbortSignal.timeout(8000));
+    const data = await bridge(
+      "/api/archive/list",
+      { root: work.root, scratch: false, depth: 1, workspace: true },
+      AbortSignal.timeout(8000)
+    );
     if (rev !== work.rev) return;
     work.entries = data.entries || [];
     work.dirs = data.dirs || [];
@@ -157,6 +256,17 @@ async function workRefresh() {
     work.error = String(/** @type {any} */ (error).message || error).slice(0, 160);
   }
   workPaint();
+  if (work.mode === "list" && rev === work.rev) {
+    const paths = [...work.expanded].filter(path => {
+      for (let parent = parentDir(path); parent && parent !== work.root; parent = parentDir(parent)) {
+        if (!work.expanded.has(parent)) return false;
+        if (parentDir(parent) === parent) return false;
+      }
+      return true;
+    });
+    for (let i = 0; i < paths.length && rev === work.rev; i += 4)
+      await Promise.all(paths.slice(i, i + 4).map(path => workLoadBranch(path)));
+  }
 }
 // 工具完成是现成的刷新信号：合并短时间内的通知，不起轮询，也不扫未打开的工作区。
 let workRefreshTimer = 0;
@@ -199,6 +309,20 @@ function workChangedFiles() {
     }
   return [...files.values()];
 }
+/** 一件在本段对话里的改动：按条按步的先后排在一起，与行迹里点改动同一套画法。
+ * 每一步的路也按同一口径归成绝对路，免得「.yan/报告.md」与「E:/…/.yan/报告.md」配不上 @param {Conversation} conversation @param {string} path */
+function workDiffHtml(conversation, path) {
+  /** @type {Step[]} */
+  const steps = [];
+  for (const message of conversation?.messages || [])
+    for (const step of allSteps(message))
+      if (step.change && step.status === "done" && workAbsPath(step.change.path, step.root || "") === path) steps.push(step);
+  if (!steps.length) return `<div class="file-viewer-text change-diff"><p class="file-viewer-note">${t("此件没有记下改动")}</p></div>`;
+  return changeDiffStepsHtml(steps).replace(
+    '<div class="file-viewer-text change-diff">',
+    `<div class="file-viewer-text change-diff"><div class="work-diff-head"><span>${t("改动前")}</span><span>${t("改动后")}</span></div>`
+  );
+}
 /** 改动那一面的条子：新建的是石绿、还在的是泥金、盘上已经没有的是朱（大小、日子照现有那一份，删掉的留空） @returns {WorkRow[]} */
 function workChangeRows() {
   if (!work.full) return [];
@@ -223,50 +347,58 @@ function workChangeRows() {
 /** 这一眼要画的条子：夹在前、件在后 @returns {WorkRow[]} */
 function workRows() {
   if (work.mode === "changes") return workChangeRows();
+  if (work.mode === "search") return work.searchRows;
+  return workDirectoryRows(work.root, work.dirs, work.entries);
+}
+function workDirectoryRows(root, dirs, entries) {
   return [
-    ...work.dirs
+    ...dirs
       .map(dir => ({
         dir: true,
         name: dir.name,
-        path: joinFile(work.root, dir.path),
+        path: joinFile(root, dir.path),
         note: folderCountNote(dir.files, dir.folders),
         when: dir.modifiedAt ? formatDay(dir.modifiedAt) : ""
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
-    ...work.entries.map(entry => ({
-      dir: false,
-      name: entry.name,
-      path: joinFile(work.root, entry.path),
-      where: "",
-      size: entry.size,
-      when: formatDay(entry.modifiedAt),
-      state: ""
-    }))
+    ...entries
+      .map(entry => ({
+        dir: false,
+        name: entry.name,
+        path: joinFile(root, entry.path),
+        size: entry.size,
+        when: formatDay(entry.modifiedAt)
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
   ];
 }
-// ---------- 画 ----------
 function workViewsHtml() {
-  return `<div class="stage-views" role="group" aria-label="${t("看整层还是看改动")}"><button type="button" data-work-mode="list" aria-pressed="${work.mode === "list"}" title="${t("工作区：这一层的东西")}" aria-label="${t("工作区")}">${brushIcon("worktree")}</button><button type="button" data-work-mode="changes" aria-pressed="${work.mode === "changes"}" title="${t("改动：本段对话改过的")}" aria-label="${t("改动")}">${brushIcon("workdiff")}</button></div>`;
+  const views = [
+    ["list", "工作区", "worktree"],
+    ["changes", "改动", "workdiff"],
+    ["search", "查找文件", "search"]
+  ];
+  const buttons = views
+    .map(([mode, label, icon]) => {
+      return `<button type="button" data-work-mode="${mode}" aria-pressed="${work.mode === mode}" title="${t(label)}" aria-label="${t(label)}">${brushIcon(icon)}</button>`;
+    })
+    .join("");
+  return `<div class="stage-views" role="group" aria-label="${t("工作区")}">${buttons}<button type="button" data-work-collapse aria-expanded="${!work.collapsed}" title="${t("切换目录栏")}" aria-label="${t("切换目录栏")}">‹</button><button type="button" data-work-terminal aria-pressed="${work.terminal}" title="${t("终端")}" aria-label="${t("终端")}">${brushIcon("code")}</button></div>`;
 }
 function workShellHtml() {
-  return `<div class="work-inner"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div>${workViewsHtml()}</div><div id="workStrips" class="strips"></div></div>`;
+  return `<div class="work-inner"><div class="work-rail">${workViewsHtml()}</div><div class="work-explorer"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><button type="button" data-work-pick title="${t("选择文件夹…")}" aria-label="${t("选择文件夹…")}">${brushIcon("folder")}</button></div><form id="workFind" class="hidden"><input type="search" aria-label="${t("查找文件")}" placeholder="${t("查找文件")}" maxlength="200"><button type="submit" aria-label="${t("查找文件")}">${brushIcon("search")}</button></form><div id="workStrips" class="work-tree"></div></div><div class="work-resize" role="separator" aria-orientation="vertical" aria-label="${t("调整目录栏宽度")}" tabindex="0"></div><section class="work-editor"><div class="work-tabbar"><div id="workTabs" class="work-tabs" role="tablist"></div><div id="workDocMode" class="work-docmode stage-views"></div></div><div id="workContent" class="work-content">${workEmptyBody(t("选择文件以查看"))}</div><section id="workTerminal" class="work-terminal hidden"><div class="work-terminal-head">${t("终端")}<button type="button" data-work-stop>${t("停止")}</button><button type="button" data-work-terminal aria-label="${t("关闭")}">×</button></div><pre id="workTerminalOutput"></pre><form id="workCommand"><span aria-hidden="true">›</span><input aria-label="${t("输入指令")}" placeholder="${t("输入指令")}" autocomplete="off"><button type="submit">${t("运行")}</button></form></section></section></div>`;
 }
-// 空簿录沿用游目空台的居中排法，只换成文件夹小画。
-function workEmptyBody(text, action = "") {
-  return `<div class="stage-empty work-empty">${brushIcon("folder", "work-leaf")}${text ? `<span>${escapeHtml(text)}</span>` : ""}${action}</div>`;
+function workEmptyBody(text) {
+  return `<div class="stage-empty work-empty">${brushIcon("folder", "work-leaf")}<span>${escapeHtml(text)}</span></div>`;
 }
-function workEmptyHtml() {
-  return `<div class="work-inner"><div class="strips">${workEmptyBody("", `<button type="button" class="stage-go" data-work-pick>${t("选择文件夹…")}</button>`)}</div></div>`;
-}
-/** 路径：一层一枚键，点哪一级去哪一级（整条是绝对路径，越出原先那一处也只是换根，仍是这一层）。
- * 超过四级的，中间并成一枚「…」：窄到三百来像素时，开头与末尾仍看得见 */
 function workCrumbsHtml() {
   const parts = workParts(work.root),
     crumbs = [];
-  if (work.mode === "changes") return "";
+  if (work.mode === "changes") return t("改动");
+  if (work.mode === "search") return t("查找文件");
   if (!parts.length) {
-    if (work.root !== "/") return "";
-    return `<button type="button" class="here" data-work-pick title="/" aria-label="${t("选择文件夹…")}">/</button>`;
+    if (!work.root) return "";
+    return `<button type="button" class="here" data-work-pick title="${escapeHtml(work.root)}">${escapeHtml(work.root)}</button>`;
   }
   if (work.root.startsWith("/") && !work.root.startsWith("//")) crumbs.push({ name: "/", at: "/" });
   if (parts.length > 4) crumbs.push({ name: parts[0], at: workAt(work.root, parts, 1) }, { name: "…", at: "" });
@@ -284,24 +416,47 @@ function workCrumbsHtml() {
     })
     .join("");
 }
-/** @param {WorkRow} row */
-function workRowHtml(row) {
-  if (row.dir)
-    return `<div class="strip dir" role="button" tabindex="0" data-work-dir="${escapeHtml(row.path)}" title="${t`打开 ${escapeHtml(row.name)}`}">${fileStripCells(
-      caseFigure(),
-      `<span class="strip-name"><strong>${escapeHtml(row.name)}</strong></span>`,
-      `<span class="strip-note"><span class="ell" title="${escapeHtml(row.note || "")}">${escapeHtml(row.note || "")}</span></span>`,
-      row.when || ""
-    )}</div>`;
-  const where = row.where ? `<span class="dir">${escapeHtml(row.where.replace(/\/$/, ""))}/</span>` : "",
-    size = row.size === null || row.size === undefined ? "" : escapeHtml(formatFileSize(row.size));
-  // 删掉的件不再向盘上取缩略（取也取不到），只留那一片换过色的纸
-  return `<div class="strip file" role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}">${fileStripCells(
-    fileFigure(row.name, row.state === "del" ? "" : row.path, row.state),
-    `<span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span>`,
-    `<span>${size}</span>`,
-    row.when || ""
-  )}</div>`;
+/** @param {WorkRow} row @param {number} [depth] */
+function workRowHtml(row, depth = 0) {
+  const name = escapeHtml(row.name),
+    path = escapeHtml(row.path),
+    details = [row.path, row.note, row.size == null ? "" : formatFileSize(row.size), row.when].filter(Boolean).join(" · "),
+    indent = Math.min(depth, 30) * 14;
+  if (row.dir) {
+    const expanded = work.expanded.has(row.path),
+      branch = work.branches.get(row.path);
+    let children = "";
+    if (expanded) {
+      if (branch?.loading && !branch.ready) children = t("正在翻…");
+      else if (branch?.error) children = escapeHtml(branch.error);
+      else if (branch) {
+        const rows = workDirectoryRows(row.path, branch.dirs, branch.entries);
+        children = rows.map(child => workRowHtml(child, depth + 1)).join("") || t("此层尚空");
+      }
+    }
+    return `<div class="work-row" role="button" tabindex="0" data-work-dir="${path}" aria-expanded="${expanded}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron">${expanded ? "⌄" : "›"}</span><span>${caseFigure()}</span><strong>${name}</strong></div>${expanded ? `<div class="work-children">${children}${branch?.truncated ? `<small>${t("目录列表已截断")}</small>` : ""}</div>` : ""}`;
+  }
+  const selected = work.tabs[work.active]?.path === row.path && work.tabs[work.active]?.diff === (work.mode === "changes");
+  return `<div class="work-row" role="button" tabindex="0" data-work-file="${path}" aria-current="${selected}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron"></span><span>${fileFigure(row.name, "", row.state)}</span><span class="work-name"><strong>${name}</strong>${row.where ? `<small>${escapeHtml(row.where)}</small>` : ""}${work.mode === "search" && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</span></div>`;
+}
+function workPaintTabs() {
+  const tabs = $("#workTabs"),
+    mode = $("#workDocMode");
+  if (!tabs || !mode) return;
+  const html = work.tabs
+    .map((tab, index) => {
+      return `<div class="work-tab${index === work.active ? " on" : ""}"><button type="button" role="tab" aria-selected="${index === work.active}" data-work-tab="${index}" title="${escapeHtml(tab.path)}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span></button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`;
+    })
+    .join("");
+  stageSetHtml(tabs, html);
+  const active = work.tabs[work.active],
+    kind = active && fileKind(active.path).view;
+  if (active && !active.diff && (kind === "markdown" || kind === "html")) {
+    stageSetHtml(
+      mode,
+      `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>`
+    );
+  } else stageSetHtml(mode, "");
 }
 function workPaint() {
   const box = $("#stageWork");
@@ -309,43 +464,109 @@ function workPaint() {
   $("#stageWorkBtn").setAttribute("aria-pressed", String(work.open));
   box.classList.toggle("hidden", !work.open);
   if (!work.open) return;
-  const shape = work.root || work.mode === "changes" ? "list" : "empty";
-  if (work.shape !== shape) {
-    work.shape = shape;
-    box.innerHTML = shape === "list" ? workShellHtml() : workEmptyHtml();
-  }
-  if (shape !== "list") return;
-  const rows = workRows();
+  if (!$("#workContent")) box.innerHTML = workShellHtml();
+  box.classList.toggle("work-collapsed", work.collapsed);
   stageSetHtml($("#workCrumbs"), workCrumbsHtml());
-  const empty = work.error
-      ? t`目录不可用：${work.error}`
-      : !work.full
-        ? t("正在翻…")
-        : work.mode === "changes"
-          ? t("本段对话还没改过文件")
-          : t("此层尚空"),
-    body = rows.length
-      ? `<div class="strip-cols"><span></span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
-      : workEmptyBody(empty);
-  const notice = work.mode === "list" && work.truncated ? t("仅展示部分文件") : "";
-  stageSetHtml($("#workStrips"), body + (notice ? `<div class="library-empty">${notice}</div>` : ""));
+  $("#workFind").classList.toggle("hidden", work.mode !== "search");
+  const rows = workRows();
+  let empty = t("此层尚空");
+  if (work.mode === "search") empty = work.searchStatus;
+  else if (work.error) empty = t`目录不可用：${work.error}`;
+  else if (!work.root && work.mode === "list") empty = t("选择文件夹…");
+  else if (!work.full) empty = t("正在翻…");
+  else if (work.mode === "changes") empty = t("本段对话还没改过文件");
+  const body = rows.length ? rows.map(row => workRowHtml(row)).join("") : `<small class="work-tree-note">${escapeHtml(empty)}</small>`;
+  let notice = "";
+  if (work.mode === "list" && work.truncated) notice = t("目录列表已截断");
+  else if (work.mode === "search" && rows.length && work.searchStatus) notice = work.searchStatus;
+  stageSetHtml($("#workStrips"), body + (notice ? `<small class="work-tree-note">${escapeHtml(notice)}</small>` : ""));
   for (const button of document.querySelectorAll("#stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);
     el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
   }
+  $("[data-work-collapse]").setAttribute("aria-expanded", String(!work.collapsed));
+  $(".work-rail [data-work-terminal]").setAttribute("aria-pressed", String(work.terminal));
+  $("#workTerminal").classList.toggle("hidden", !work.terminal);
+  const output = $("#workTerminalOutput");
+  if (output.textContent !== work.terminalText) {
+    output.textContent = work.terminalText;
+    output.scrollTop = output.scrollHeight;
+  }
+  $("#workCommand button").disabled = !!work.command || !work.root;
+  $("[data-work-stop]").disabled = !work.command;
+  workPaintTabs();
 }
-// ---------- 动手 ----------
-/** 点件走卷宗同一全屏预览器；关闭后回到原簿录，不启动浏览器也不改页签。 */
+function workActivate(index, trigger = null) {
+  const tab = work.tabs[index];
+  if (!tab || !work.open) return;
+  work.active = index;
+  workPaint();
+  if (tab.diff) {
+    const conversation = currentConversation?.() || null;
+    if (!conversation) return;
+    showInFileViewer(t`${tab.path} · 本段改动`, workDiffHtml(conversation, tab.path), trigger, t("览"), "stage");
+  } else void openFileViewer({ file: tab.path }, "", trigger, "stage", tab.raw);
+}
 function workOpenPath(path, trigger = null) {
   if (!work.open || !path) return;
-  void openFileViewer({ file: path }, "", trigger);
+  const diff = work.mode === "changes";
+  let index = work.tabs.findIndex(tab => tab.path === path && tab.diff === diff);
+  if (index < 0) {
+    index = work.tabs.length;
+    work.tabs.push({ path, diff, raw: false });
+  }
+  workActivate(index, trigger);
+}
+function workCloseTab(index) {
+  if (!work.tabs[index]) return;
+  const active = index === work.active;
+  work.tabs.splice(index, 1);
+  if (index < work.active) work.active--;
+  if (active) {
+    if (work.tabs.length) workActivate(Math.min(index, work.tabs.length - 1));
+    else {
+      work.active = -1;
+      workCloseViewer();
+    }
+  }
+  workPaint();
 }
 function workSwitch(mode) {
-  if (work.mode === mode) return void workRefresh();
-  work.mode = mode;
-  workResetRows();
+  work.collapsed = false;
+  if (work.mode !== mode) {
+    work.mode = mode;
+    workResetRows();
+  }
   workPaint();
-  void workRefresh();
+  if (mode === "search") {
+    const input = /** @type {HTMLInputElement} */ ($("#workFind input"));
+    input.value = work.search;
+    input.focus();
+    if (work.search) void workSearch(work.search);
+  } else void workRefresh();
+}
+// 人明确提交的本机指令；不向模型暴露执行入口，也不声称具备交互式 PTY。
+async function workRunCommand(command) {
+  if (work.command || !work.root || !command.trim()) return;
+  const controller = new AbortController();
+  work.command = controller;
+  work.terminalText = (work.terminalText + "\n> " + command + "\n").slice(-60000);
+  workPaint();
+  try {
+    const result = await bridge("/api/work/run", { workdir: work.root, command, timeout: 120, sandbox: false }, controller.signal);
+    if (work.command !== controller) return;
+    work.terminalText += (result.stdout || "") + "\n" + (result.stderr || "") + "\n[" + (result.exitCode ?? "") + "]\n";
+  } catch (error) {
+    if (work.command !== controller) return;
+    work.terminalText += String(error.message || error) + "\n";
+  } finally {
+    if (work.command === controller) {
+      work.command = null;
+      work.terminalText = work.terminalText.slice(-60000);
+      workPaint();
+      void workRefresh();
+    }
+  }
 }
 function bindWork() {
   $("#stageWorkBtn").addEventListener("click", () => {
@@ -359,15 +580,64 @@ function bindWork() {
       mode = /** @type {HTMLElement|null} */ (target.closest("[data-work-mode]"));
     if (mode) return void workSwitch(/** @type {any} */ (mode.dataset.workMode));
     if (target.closest("[data-work-pick]")) return void workPick();
+    if (target.closest("[data-work-collapse]")) {
+      work.collapsed = !work.collapsed;
+      return workPaint();
+    }
+    if (target.closest("[data-work-terminal]")) {
+      work.terminal = !work.terminal;
+      return workPaint();
+    }
+    if (target.closest("[data-work-stop]")) return work.command?.abort();
+    const close = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab-close]"));
+    if (close) return workCloseTab(Number(close.dataset.workTabClose));
+    const tab = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab]"));
+    if (tab) return workActivate(Number(tab.dataset.workTab), tab);
+    const raw = /** @type {HTMLElement|null} */ (target.closest("[data-work-raw]"));
+    if (raw && work.tabs[work.active]) {
+      work.tabs[work.active].raw = raw.dataset.workRaw === "true";
+      return workActivate(work.active, raw);
+    }
     const dir = /** @type {HTMLElement|null} */ (target.closest("[data-work-dir]"));
-    if (dir) return void workEnterDir(dir.dataset.workDir);
+    if (dir) return void (dir.closest("#workCrumbs") ? workEnterDir(dir.dataset.workDir) : workToggleDir(dir.dataset.workDir));
     const file = /** @type {HTMLElement|null} */ (target.closest("[data-work-file]"));
     if (file) return void workOpenPath(file.dataset.workFile, file);
   });
-  // 条子也能用键盘走：回车、空格与点一样
+  box.addEventListener("pointerdown", event => {
+    const target = /** @type {HTMLElement} */ (event.target);
+    if (!target.classList.contains("work-resize") || event.button !== 0) return;
+    const start = event.clientX,
+      width = $(".work-explorer").getBoundingClientRect().width;
+    target.setPointerCapture(event.pointerId);
+    const move = e => box.style.setProperty("--work-tree-width", Math.max(112, width + e.clientX - start) + "px");
+    const end = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("lostpointercapture", end);
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("lostpointercapture", end);
+    event.preventDefault();
+  });
+  box.addEventListener("submit", event => {
+    const form = /** @type {HTMLFormElement} */ (event.target);
+    if (form.id !== "workFind" && form.id !== "workCommand") return;
+    event.preventDefault();
+    const input = form.querySelector("input");
+    if (form.id === "workFind") void workSearch(input.value);
+    else if (!work.command && input.value.trim()) {
+      void workRunCommand(input.value);
+      input.value = "";
+    }
+  });
   box.addEventListener("keydown", event => {
+    if (["ArrowLeft", "ArrowRight"].includes(event.key) && /** @type {HTMLElement} */ (event.target).classList.contains("work-resize")) {
+      const width = $(".work-explorer").getBoundingClientRect().width;
+      box.style.setProperty("--work-tree-width", Math.max(112, width + (event.key === "ArrowLeft" ? -12 : 12)) + "px");
+      event.preventDefault();
+      return;
+    }
     if (event.key !== "Enter" && event.key !== " ") return;
-    const row = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest(".strip"));
+    const row = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest(".work-row"));
     if (!row) return;
     event.preventDefault();
     row.click();

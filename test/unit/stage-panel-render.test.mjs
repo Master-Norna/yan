@@ -176,8 +176,8 @@ test("工作区只展示部分目录时明示截断", ctx => {
   work.full = true;
   work.truncated = true;
   stageRender();
-  assert.match(node("#workStrips").writes.at(-1), /仅展示部分文件/);
+  assert.match(node("#workStrips").writes.at(-1), /目录列表已截断/);
   work.truncated = false;
   stageRender();
-  assert.doesNotMatch(node("#workStrips").writes.at(-1), /仅展示部分文件/);
+  assert.doesNotMatch(node("#workStrips").writes.at(-1), /目录列表已截断/);
 });

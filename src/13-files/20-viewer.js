@@ -125,11 +125,28 @@ async function viewerReader(source) {
     extracted: String(file.extractedText || "")
   };
 }
-/** @param {{file?:string, attachmentId?:string, skillDir?:string, skillPath?:string}} source 本机的一件 { file }，或 { attachmentId }，或技能里的一件 */
-async function openFileViewer(source, name = "", trigger = null) {
+/** 预览落在哪儿：整页（卷宗、正文链接、附件、技能、听音）还是游目那一栏里（工作区点件）。
+ * 落进游目时把 #fileViewer 挂进工作区那一层（#stageWork）、加 .in-stage：位置由那一层定（见 styles/56-stage/60-work.css），
+ * 只铺工作区的内容，栏顶的网页签与文件夹入口照旧在；仍是同一套预览、同一个关闭与层序；关掉再挂回 body。 */
+let viewerHost = "page";
+/** @param {"page"|"stage"} host */
+function placeViewer(host) {
+  const viewer = $("#fileViewer"),
+    parent = host === "stage" ? $("#workContent") : document.body;
+  viewerHost = host;
+  if (!viewer || !parent) return;
+  if (viewer.parentElement !== parent) parent.appendChild(viewer);
+  viewer.classList.toggle("in-stage", host === "stage");
+  viewer.setAttribute?.("role", host === "stage" ? "region" : "dialog");
+  viewer.setAttribute?.("aria-modal", String(host !== "stage"));
+}
+/** @param {{file?:string, attachmentId?:string, skillDir?:string, skillPath?:string}} source 本机的一件 { file }，或 { attachmentId }，或技能里的一件
+ * @param {"page"|"stage"} [host] 落在整页还是游目那一栏里 */
+async function openFileViewer(source, name = "", trigger = null, host = "page", raw = false) {
   const revision = ++viewerRevision;
   const viewer = $("#fileViewer");
   if (!viewer) return;
+  placeViewer(host);
   const title =
       name ||
       String(source.file || "")
@@ -146,11 +163,11 @@ async function openFileViewer(source, name = "", trigger = null) {
   $("#fileViewerName").textContent = title;
   $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = `<div class="file-viewer-empty">${t(`正在取出…`)}</div>`;
-  $("#fileViewerClose").focus();
+  if (host !== "stage") $("#fileViewerClose").focus();
   try {
     const reader = await viewerReader(source);
     if (revision !== viewerRevision) return;
-    const html = await fileViewerBody(reader, title, kind, revision);
+    const html = await fileViewerBody(reader, title, raw && (kind === "markdown" || kind === "html") ? "code" : kind, revision);
     if (revision !== viewerRevision) return;
     $("#fileViewerStage").innerHTML = html;
     // 抽取说明挪到顶栏（Word、表格、文字都一样），纸上不再单占一行。文档那一份带 data-head：顶栏只取其中
@@ -945,7 +962,11 @@ function closeFileViewer(stop = false) {
   const revision = viewerRevision;
   hideWithFade($("#fileViewer"));
   setTimeout(() => {
-    if (revision === viewerRevision) $("#fileViewerStage").innerHTML = "";
+    if (revision === viewerRevision) {
+      $("#fileViewerStage").innerHTML = "";
+      // 淡完才挪：正在淡出的那一份若立刻挂回 body，会从游目跳到整页去
+      if (viewerHost === "stage") placeViewer("page");
+    }
     // 预览里全屏着的作品随预览一起没了：页上的 work-mode 也得撤，不然对话区滚不动
     if (!document.querySelector(".work-expanded")) closeExpandedWork();
   }, 180);
@@ -957,19 +978,20 @@ function setViewerSeal(glyph = t("览")) {
   const seal = $("#fileViewer .file-viewer-head > .seal");
   if (seal) seal.textContent = seal.dataset.seal = glyph;
 }
-/** @param {string} title @param {string} html @param {Element|null} [trigger] @param {string} [seal] 顶栏的印 */
-function showInFileViewer(title, html, trigger = null, seal = t("览")) {
+/** @param {string} title @param {string} html @param {Element|null} [trigger] @param {string} [seal] 顶栏的印 @param {"page"|"stage"} [host] 落在整页还是游目那一栏里 */
+function showInFileViewer(title, html, trigger = null, seal = t("览"), host = "page") {
   viewerRevision++;
   viewerSource = null;
   viewerReturnFocus = focusReturn(trigger || document.activeElement);
   revokeViewerUrls();
+  placeViewer(host);
   showNow($("#fileViewer"));
   setViewerSeal(seal);
   $("#fileViewerOpen").classList.add("hidden");
   $("#fileViewerName").textContent = title;
   $("#fileViewerNote").innerHTML = "";
   $("#fileViewerStage").innerHTML = html;
-  $("#fileViewerClose").focus();
+  if (host !== "stage") $("#fileViewerClose").focus();
 }
 let imageViewerRevision = 0;
 // 卷宗里的图；paths 是同看的一组（卷宗此刻列着的图），看图框底下排成一条小样、左右翻
@@ -1072,7 +1094,10 @@ async function showImageAt(index, opening = false) {
 
 // 文件查看器与图片查看器
 function bindViewerEvents() {
-  $("#fileViewerClose").onclick = () => closeFileViewer(true);
+  $("#fileViewerClose").onclick = () => {
+    if (viewerHost === "stage" && work.active >= 0) workCloseTab(work.active);
+    else closeFileViewer(true);
+  };
   // 顶栏那枚小画的名字随语言走（index.html 里写的是中文原文）
   const openButton = $("#fileViewerOpen");
   openButton.setAttribute("title", t("本机打开"));
@@ -1083,7 +1108,7 @@ function bindViewerEvents() {
   fileViewer.addEventListener("click", e => {
     if (e.target.closest("[data-viewer-download]")) return downloadViewerFile();
     if (e.target.closest("[data-viewer-open]")) return void openViewerWithSystem();
-    if (e.target === fileViewer || e.target === $("#fileViewerStage")) closeFileViewer();
+    if (viewerHost !== "stage" && (e.target === fileViewer || e.target === $("#fileViewerStage"))) closeFileViewer();
   });
   // 媒体的 error 不冒泡，在捕获阶段接：浏览器放不了这种编码，就别留一个转不动的播放器。
   // 桥接能用 ffmpeg 时会尝试给不兼容的封装换壳（见 server/video.js）；仍播不了可能是编码不兼容，或工具不可用、转封装未成。
@@ -1158,4 +1183,12 @@ defineLayer({
     closeFileViewer();
   }
 });
-defineLayer({ name: "file", rank: 120, open: () => isShown("#fileViewer"), close: () => closeFileViewer() });
+defineLayer({
+  name: "file",
+  rank: 120,
+  open: () => isShown("#fileViewer") && (viewerHost !== "stage" || !!$("#fileViewer").contains(document.activeElement)),
+  close: () => {
+    if (viewerHost === "stage" && work.active >= 0) workCloseTab(work.active);
+    else closeFileViewer();
+  }
+});
