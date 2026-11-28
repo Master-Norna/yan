@@ -309,9 +309,15 @@ await evalJs(`document.querySelector('#stageWork [data-work-mode="changes"]').cl
 await waitFor(`document.querySelectorAll("#workStrips .work-row").length === 3`, 8000).catch(() => {});
 const states = await evalJs(`[...document.querySelectorAll("#workStrips .fi[data-state]")].map(el => el.dataset.state).sort()`);
 check(
-  "改动那一面：三件各按新建 / 改 / 删上色",
-  JSON.stringify(states) === JSON.stringify(["add", "del", "mod"]),
+  "改动那一面：三件各按新建 / 修改 / 当前缺件上色",
+  JSON.stringify(states) === JSON.stringify(["add", "missing", "mod"]),
   `${JSON.stringify(states)} · ${await workState()}`
+);
+check(
+  "当前缺件有明确提示，不冒充本答删除",
+  await evalJs(
+    `(() => { const row = document.querySelector('#workStrips [data-work-file$="/旧件.md"]'); return row?.querySelector('.fi')?.dataset.state === "missing" && row.textContent.includes("当前不存在"); })()`
+  )
 );
 check(
   "改动沿用件图着色，无额外条首色线",
@@ -320,7 +326,7 @@ check(
   )
 );
 check(
-  "改动那一面不写字（没有增删改、也没有 +几 −几）",
+  "改动那一面不堆叠增删改文字或行数",
   await evalJs(
     `!/[+−]\\d/.test(document.querySelector("#workStrips").textContent) && !/增|删 |改 /.test(document.querySelector("#workStrips").textContent)`
   )

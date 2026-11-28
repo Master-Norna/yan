@@ -9,6 +9,9 @@ const workState = () =>
     `JSON.stringify({ crumbs: document.querySelector("#workCrumbs")?.textContent || "", rows: [...document.querySelectorAll("#workStrips .work-row strong")].map(el => el.textContent), said: document.querySelector("#workStrips").textContent.trim().slice(0, 120) })`
   );
 
+// 每一步在 diff 里留一条抬头提示；没记下原文的那一步另加一句说明，数步骤时把那句滤掉。
+const stepNotes = `[...document.querySelectorAll("#fileViewerStage .file-viewer-note")].filter(el => !el.textContent.includes("未记录此操作的文本差异")).length`;
+
 const ROOT = `${ARCHIVE}/刷新`;
 mkdirSync(ROOT, { recursive: true });
 writeFileSync(`${ROOT}/a.md`, "# A\n");
@@ -152,7 +155,7 @@ await waitFor(
   `/这一答的改动/.test(document.querySelector("#fileViewerName")?.textContent || "") && !!document.querySelector("#fileViewerStage .change-diff")`,
   8000
 );
-check("diff 先显示这一答的第一笔", await evalJs(`document.querySelectorAll("#fileViewerStage .file-viewer-note").length === 1`));
+check("diff 先显示这一答的第一笔", await evalJs(`${stepNotes} === 1`));
 await evalJs(
   `(() => {
     const c = __yanState().conversations.find(c => c.id === "refresh-branch");
@@ -162,10 +165,10 @@ await evalJs(
     return true;
   })()`
 );
-await waitFor(`document.querySelectorAll("#fileViewerStage .file-viewer-note").length === 2`, 8000).catch(() => {});
+await waitFor(`${stepNotes} === 2`, 8000).catch(() => {});
 check(
   "同答再次改同一件时，开着的 diff 跟着换新",
-  await evalJs(`document.querySelectorAll("#fileViewerStage .file-viewer-note").length === 2`),
+  await evalJs(`${stepNotes} === 2`),
   await evalJs(`document.querySelector("#fileViewerStage").textContent.slice(0, 160)`)
 );
 

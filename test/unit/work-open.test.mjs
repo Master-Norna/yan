@@ -224,3 +224,51 @@ test("改动列表和文件状态使用同一趟快照，显式刷新才整批�
     ]
   );
 });
+
+test("当前缺件不冒充本答删除，历史写入仍可查；下载没有快照时给出明确提示", () => {
+  const f = load(["work", "workChangeRows", "workDiffHtml", `setup: () => { currentConversation = () => ({workdir: "C:/one"}); }`]);
+  f.setup();
+  const message = {
+    steps: [
+      {
+        name: "write_file",
+        status: "done",
+        arguments: "{}",
+        result: "已写入",
+        written: "hello",
+        root: "C:/one",
+        change: { path: first, created: true, added: 1, removed: 0 }
+      },
+      {
+        name: "download_file",
+        status: "done",
+        arguments: "{}",
+        result: "5 MB",
+        root: "C:/one",
+        change: { path: second, created: true, added: 0, removed: 0 }
+      }
+    ]
+  };
+  f.work.full = true;
+  f.work.changeFiles = [
+    { path: first, created: true },
+    { path: second, created: true }
+  ];
+  f.work.changeEntries.set(first, { kind: "missing" });
+  f.work.changeEntries.set(second, { kind: "file" });
+  assert.deepEqual(
+    f.workChangeRows().map(row => [row.path, row.state]),
+    [
+      [first, "missing"],
+      [second, "add"]
+    ]
+  );
+  const history = f.workDiffHtml(message, first);
+  assert.match(history, /文件当前不存在/);
+  assert.match(history, /hello/);
+  assert.match(history, /work-diff-head/);
+  const download = f.workDiffHtml(message, second);
+  assert.match(download, /未记录此操作的文本差异/);
+  assert.doesNotMatch(download, /work-diff-head/);
+  assert.doesNotMatch(download, /文件当前不存在/);
+});
