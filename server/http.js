@@ -298,6 +298,11 @@ const RUNNABLE = new Set([
 function openWithSystem(file) {
   if (RUNNABLE.has(path.extname(file).slice(1).toLowerCase())) throw Error("可执行的文件不在此打开，请到资源管理器里自行处理");
   if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) throw Error("文件不存在");
+  const real = fs.realpathSync(file);
+  const runnable = RUNNABLE.has(path.extname(real).slice(1).toLowerCase());
+  // POSIX 下扩展名不能代表是否可执行；原件有执行位时交给人自行处理。
+  const executable = process.platform !== "win32" && Boolean(fs.statSync(real).mode & 0o111);
+  if (runnable || executable) throw Error("可执行的文件不在此打开，请到资源管理器里自行处理");
   openPath(file);
 }
 // 读盘上的 JSON 文本：带 UTF-8 BOM 的（PowerShell 5.1 的 -Encoding UTF8、旧记事本都会写）先去掉，不然 JSON.parse 认不得

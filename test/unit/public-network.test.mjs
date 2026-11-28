@@ -220,7 +220,7 @@ test("审准首跳不授权内网重定向，径行仍可访问", async () => {
   const base = await listen(first);
   try {
     await assert.rejects(
-      fetchPublicResponse(base, { method: "POST", body: "x", allowLoopback: true, allowPrivateFirstHop: true }),
+      fetchPublicResponse(base, { method: "POST", allowLoopback: true, allowPrivateFirstHop: true }),
       error => error.detail?.private === true && error.detail.sent === true && error.detail.at === target + "/next"
     );
     assert.equal(firstHits, 1);
@@ -228,6 +228,36 @@ test("审准首跳不授权内网重定向，径行仍可访问", async () => {
     const { response } = await fetchPublicResponse(base, { allowPrivate: true });
     assert.equal(await response.text(), "other");
     assert.equal(otherHits, 1);
+  } finally {
+    await close(first);
+    await close(other);
+  }
+});
+
+test("跨来源重定向不转交请求正文，同源及去掉正文的跳转照常", async () => {
+  const received = [];
+  const other = http.createServer((req, res) => {
+    received.push(req.method);
+    res.end("other");
+  });
+  const otherUrl = await listen(other);
+  const first = http.createServer((req, res) => {
+    if (req.url === "/same") {
+      req.on("data", () => {});
+      req.on("end", () => res.end("same"));
+      return;
+    }
+    res.writeHead(req.url === "/drop" ? 303 : 307, { Location: req.url === "/local" ? "/same" : otherUrl });
+    res.end();
+  });
+  const url = await listen(first);
+  const options = { method: "POST", body: "test", allowLoopback: true };
+  try {
+    await assert.rejects(fetchPublicResponse(url + "/away", options), /跨来源跳转/);
+    assert.deepEqual(received, []);
+    assert.equal(await (await fetchPublicResponse(url + "/local", options)).response.text(), "same");
+    assert.equal(await (await fetchPublicResponse(url + "/drop", options)).response.text(), "other");
+    assert.deepEqual(received, ["GET"]);
   } finally {
     await close(first);
     await close(other);
