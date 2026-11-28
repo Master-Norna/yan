@@ -649,8 +649,6 @@ var YAN_EN = {
   "沙箱下问而后行，恒限目录内": 'With the sandbox on and "Ask first", always limited to the folder',
   全盘: "Anywhere",
   目录内: "Folder only",
-  卷宗对模型可读: "Model can read Files",
-  模型可翻阅卷宗里的文档: "The model can read documents in Files",
   Skill: "Skills",
   "{0} 份": "{0} {0|skill|skills}",
   "只凭点名 · 点此交模型自取": "Only when you pick it · Click to let the model use it",
@@ -678,7 +676,6 @@ var YAN_EN = {
   "已有一份叫「{0}」": "There's already a skill named “{0}”",
   '名字里不能有 < > : " / \\ | ? *，不以点开头，不以点或空格结尾，至多 64 字':
     "Names can't contain < > : \" / \\ | ? *, start with a dot, or end with a dot or space; 64 characters at most",
-  工具轮次上限: "Tool round limit",
   留空不限: "Leave empty for no limit",
   一答: "Per reply",
   不限: "No limit",
@@ -1872,9 +1869,8 @@ var YAN_EN = {
     "Ask first is strict: changes stay inside the working folder, secret files are off limits, and commands that touch the system or connect out directly are stopped and passed to you; secret environment variables aren't given to commands either. Auto-review and Full auto only protect the system itself. The master switch is in Settings → Tools.",
   "指令规则是静态筛查。macOS 的问而后行在沙箱开启、系统支持时另限写盘；MCP 服务不受这层指令沙箱约束。":
     "Command rules are static checks. On macOS, Ask first also restricts filesystem writes when the sandbox is enabled and the system supports it. MCP servers are not covered by this command sandbox.",
-  可及范围与轮次: "Reach and tool rounds",
-  "未开沙箱时，文件工具能否越出目录由设置 → 工具的「可及范围」定：**全盘**可指向任何绝对路径，**目录内**一律不出；指令不受此限。「工具轮次上限」限一答（帮手另计）最多调几轮工具，同一轮并发的几次只算一轮，到顶即收回工具请模型收尾。":
-    "With the sandbox off, whether file tools may leave the folder is set by “File tool reach” in Settings → Tools: **Anywhere** allows any absolute path, **Folder only** never leaves it; commands aren't limited by this. “Tool round limit” caps how many rounds of tool calls one reply may make (subagents count separately); parallel calls in the same round count once. At the cap the tools are withdrawn and the model is asked to wrap up.",
+  "未开沙箱时，文件工具能否越出目录由设置 → 工具的「可及范围」定：**全盘**可指向任何绝对路径，**目录内**一律不出；指令不受此限。":
+    "With the sandbox off, whether file tools may leave the folder is set by “File tool reach” in Settings → Tools: **Anywhere** allows any absolute path, **Folder only** never leaves it; commands aren't limited by this.",
   "作答时寄出键化为「止」：停下生成，桥接收束前台指令的进程树。已经挂上的后台指令与定时候照常。":
     "While the model answers, the send button becomes Stop. It stops generation and the bridge cleans up foreground command process trees. Already queued background commands and timers continue.",
   卷宗附件: "Files and attachments",

@@ -1,6 +1,6 @@
 // 言 · 内置提示词 · 差遣（子 Agent）
 // 何时该差遣写在 tools.js 里 delegate 的说明中。system 是帮手自己的系统提示，接在与主模型相同的通用段落之后；
-// 轮次到顶时回给它的话与主答同一句（assistant.roundLimit）；started 是差遣当即回给主模型的工具结果（帮手在后台做）；
+// started 是差遣当即回给主模型的工具结果（帮手在后台做）；
 // report / failed 是帮手做完后送给主模型的一条消息（正作答就进这一答的收件口，与补言同一个口子；没在作答就另起一答），不是系统提示。
 (window.YAN_PROMPTS ||= {}).delegate = {
   system: [

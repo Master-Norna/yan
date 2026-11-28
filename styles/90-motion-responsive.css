@@ -693,9 +693,6 @@ button:focus:not(:focus-visible) {
   .field {
     width: 100%;
   }
-  .field-num {
-    width: 72px;
-  }
   /* 窄屏下分段钮折行、栅格不被最宽的一格撑开：英文的钮字长，一排放不下 */
   .segmented {
     flex-wrap: wrap;
