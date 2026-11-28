@@ -141,7 +141,6 @@ async function runStreamReply(conversation, assistant, profile, { resume = false
       signal: job.controller.signal,
       overrides,
       tally,
-      roundLimit: toolRoundLimit(),
       inbox: job,
       budget,
       onStatus: label => setJobLabel(conversation, job, label),

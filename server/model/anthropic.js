@@ -154,7 +154,6 @@ function anthropicRequest(payload) {
       description: tool.function?.description || "",
       input_schema: tool.function?.parameters || { type: "object", properties: {} }
     }));
-  if (body.tools && payload.tool_choice === "none") body.tool_choice = { type: "none" };
   return body;
 }
 // 结束原因换成 chat.completions 的说法；认不出的（refusal、pause_turn……）原样交给页面，由它的白名单判是不是半途被掐（见 finishFault），

@@ -249,9 +249,6 @@
  * @property {{ enabled?: boolean, browser?: "msedge"|"chrome"|"chromium" }} [stage] 游目自己的浏览器（设置 → 游目）：开没开、用哪个；家当都在存储根/游目
  * @property {boolean} [stageFit] 游目「适应页面」：执事定死的视口等它歇手后放开（默认开）
  * @property {"bing"|"baidu"|"google"} [stageSearch] 游目地址栏里输的不像网址时交给哪家搜（默认必应）
- * @property {boolean} archiveRead
- * @property {number} toolRounds
- * @property {number} subRounds
  * @property {"chat"|"library"|"groups"} [lastView] 上次停在哪一页，刷新后回到原处
  * @property {string} [lastConversationId]
  * @property {{ packs: string[], pip: string, npm: string }} env 沙箱环境：选了哪几组工具、另装的包（下载源不让人选，桥接准备时自己比，见 server/mirror.js）
@@ -282,19 +279,6 @@ function fillTemplate(text, vars = {}) {
 }
 const APP_VERSION = "1.4.9"; // 与 package.json 同步；以桥接返回的为准
 const FOLLOW_THRESHOLD = 80;
-// 一次回答里最多几轮工具调用（帮手另计），超过后收回工具、请模型直接收尾；按轮计，同一轮并发的几次调用只算一轮。
-// 默认值在这里，实际值在「设置 → 工具」里可改，留空（记作 0）即不限
-const DEFAULT_TOOL_ROUNDS = 80,
-  DEFAULT_SUB_ROUNDS = 40;
-function roundLimit(key, fallback) {
-  const raw = store?.settings?.[key];
-  if (raw === 0) return Infinity;
-  const value = Math.floor(Number(raw));
-  return value >= 1 ? value : fallback;
-}
-const roundLimitText = limit => (Number.isFinite(limit) ? String(limit) : "");
-const toolRoundLimit = () => roundLimit("toolRounds", DEFAULT_TOOL_ROUNDS),
-  subRoundLimit = () => roundLimit("subRounds", DEFAULT_SUB_ROUNDS);
 const $ = selector => document.querySelector(selector);
 const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const now = () => new Date().toISOString();

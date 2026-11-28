@@ -544,7 +544,6 @@ async function runDelegate(step, args, ctx, profile, past, progress, resume = fa
         inbox: box,
         overrides,
         tally,
-        roundLimit: subRoundLimit(),
         scope: sub.id
       });
       // 末轮已接收完、仍在逐字显示时停止，读流可能照常返回；寄进展、记完成前仍须认中止。

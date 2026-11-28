@@ -222,8 +222,6 @@ module.exports = function createModel({ home }) {
       if (Array.isArray(body.tools) && body.tools.length) {
         if (body.tools.length > TOOLS_LIMIT) throw Error(`工具定义过多：${body.tools.length} 件，一次最多 ${TOOLS_LIMIT} 件`);
         payload.tools = body.tools;
-        // 轮次到顶：工具照带、只禁再调（各家的写法由登记里的 request 换）
-        if (body.toolChoice === "none") payload.tool_choice = "none";
       }
       // 思考档位：页面只送 reasoning_effort，各家怎么换算（预算、enable_thinking……）由登记里的 request 定
       if (body.reasoning_effort) payload.reasoning_effort = String(body.reasoning_effort);

@@ -590,7 +590,6 @@ async function streamSideReply(conversation, thread, assistant, profile) {
       signal: job.controller.signal,
       overrides,
       tally,
-      roundLimit: toolRoundLimit(),
       kind: "side",
       onFrame
     });
