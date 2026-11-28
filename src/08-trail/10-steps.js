@@ -177,7 +177,8 @@ function workStepHtml(step, title) {
   // edit_file 的 old/new 在参数里一直都有，若照参数画，失败的那一步也会摊出一份没发生的红绿
   const parts = status === "done" ? stepDiffParts(step) : null;
   let body = "",
-    more = "";
+    more = "",
+    diffCount = "";
   // 等待确认时把整条指令完整摊开，不能只靠单行省略号让用户猜着点头；已摆在请示条上的不再摊第二份
   if (status === "pending" && inApprovalBar(step)) body = "";
   else if (status === "pending" && step.gate) body = keepGateHtml(step, !gist);
@@ -187,8 +188,13 @@ function workStepHtml(step, title) {
     const diff = stepDiffRender(step, { limit: step.full ? Infinity : DIFF_SHOW_ROWS, wrap: !!step.full });
     if (diff) {
       body = `<div class="tool-diff">${diff.html}</div>`;
-      if (diff.clipped) more = t`展开全部 · −${diff.removed} +${diff.added} 行`;
-      else if (step.full && diff.rows > DIFF_SHOW_ROWS) more = t`只看前 ${DIFF_SHOW_ROWS} 行`;
+      if (diff.clipped) {
+        more = t`展开全部 · −${diff.removed} +${diff.added} 行`;
+        diffCount = `−${diff.removed} +${diff.added}`;
+      } else if (step.full && diff.rows > DIFF_SHOW_ROWS) {
+        more = t`只看前 ${DIFF_SHOW_ROWS} 行`;
+        diffCount = String(DIFF_SHOW_ROWS);
+      }
     }
   } else if (step.output) {
     const out = clampLines(step.output, step.full);
@@ -197,7 +203,10 @@ function workStepHtml(step, title) {
     else if (step.full && out.total > STEP_SHOW_LINES) more = t`只看前 ${STEP_SHOW_LINES} 行`;
   } else if (step.note && !command) body = `<div class="tool-note">${escapeHtml(stepText(step.note))}</div>`;
   if (gist && title && status !== "pending") body = `<pre class="tool-output tool-code">${escapeHtml(title)}</pre>${body}`;
-  if (more) body += `<button type="button" class="tool-more" data-step-more>${more}</button>`;
+  if (more)
+    body += diffCount
+      ? `<button type="button" class="tool-more tool-more-diff" data-step-more aria-expanded="${!!step.full}" title="${escapeHtml(more)}" aria-label="${escapeHtml(more)}">${diffCount}</button>`
+      : `<button type="button" class="tool-more" data-step-more>${more}</button>`;
   const foldable = !!body && status !== "pending",
     // 有红绿可看的（写入、修改）默认摊开，与文件大小无关；目录清单也摊开。其余折起
     openByDefault = status !== "error" && (!!parts || step.name === "list_files"),
@@ -301,7 +310,7 @@ function bindTrailEvents() {
       return resumeHelperStep(goon.dataset.helperResume || goon.closest(".tool-step")?.dataset.stepId || "");
     }
     const more = event.target.closest("[data-step-more]");
-    if (more) return showStepInFull(more.closest(".tool-step"));
+    if (more) return showStepInFull(more.closest(".tool-step"), document.activeElement === more);
     // 出处也是一块可开合的，与思绪、行迹同一种开合
     const sources = event.target.closest(".source-stack > summary");
     if (sources) {
@@ -324,7 +333,7 @@ function bindTrailEvents() {
     head.title = wasFolded ? t("收起输出") : t("展开输出");
     saveStoreSoon();
   };
-  const showStepInFull = el => {
+  const showStepInFull = (el, restoreFocus) => {
     const step = stepInView(el?.dataset.stepId);
     if (!step) return;
     step.full = !step.full;
@@ -338,6 +347,7 @@ function bindTrailEvents() {
     morphHeight(el, () => {
       el.className = next.className;
       el.innerHTML = next.innerHTML;
+      if (restoreFocus) el.querySelector("[data-step-more]")?.focus({ preventScroll: true });
     });
     void loadThumbnails(el);
   };

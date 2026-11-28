@@ -211,18 +211,26 @@ check(
     await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step .tool-more")?.textContent || ""`)
   )
 );
-await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step .tool-more").click(); true`);
+const longStep = `[...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step")`,
+  moreButton = `${longStep}.querySelector("[data-step-more]")`;
+const enterMore = async () => {
+  const key = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 };
+  await send("Input.dispatchKeyEvent", { type: "keyDown", ...key, text: "\r" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+};
+await evalJs(`${moreButton}.focus(); true`);
+await enterMore();
 check(
-  "展开全部 reveals every line and offers to clip again",
+  "展开全部 reveals every line and leaves focus on the clip button",
   await evalJs(
-    `(s => s.querySelector(".tool-output").textContent.split("\\n").length > 10 && s.querySelector(".tool-more").textContent === "只看前 10 行")([...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step"))`
+    `${longStep}.querySelector(".tool-output").textContent.split("\\n").length > 10 && ${moreButton}.textContent === "只看前 10 行" && document.activeElement === ${moreButton}`
   )
 );
-await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step .tool-more").click(); true`);
+await enterMore();
 check(
-  "clipping again shows 10 lines",
+  "clipping again shows 10 lines and keeps the button focused",
   await evalJs(
-    `[...document.querySelectorAll('.message.assistant')].at(-1).querySelector(".tool-step .tool-output").textContent.split("\\n").length === 10`
+    `${longStep}.querySelector(".tool-output").textContent.split("\\n").length === 10 && document.activeElement === ${moreButton}`
   )
 );
 

@@ -289,6 +289,20 @@ test("报错的那一步不摊红绿：old/new 在参数里，也不当成已改
   assert.match(view.workStepHtml(ok, "a.txt"), /tool-diff/);
 });
 
+test("行迹里的长差异只露行数，可读名称和展开状态随开合切换", () => {
+  const edit = step("e", "write_file", { path: "long.txt", content: textOf(plain(31)) }, { change: { created: true } });
+  const clipped = view.workStepHtml(edit, "long.txt"),
+    expanded = view.workStepHtml({ ...edit, full: true }, "long.txt");
+  assert.match(
+    clipped,
+    /class="tool-more tool-more-diff" data-step-more aria-expanded="false"[^>]+aria-label="展开全部 · −0 \+31 行">−0 \+31<\/button>/
+  );
+  assert.match(
+    expanded,
+    /class="tool-more tool-more-diff" data-step-more aria-expanded="true"[^>]+aria-label="只看前 (\d+) 行">\1<\/button>/
+  );
+});
+
 test("一千行的文件把三十行挪到远处：两块分开比，增删是 30/30，跳过提示不在红绿里", () => {
   // 拼成一整段再比时，窗口之间会拿挪走的那段去配挪到的位置，被挪的三十行认成未改，
   // 上下文与跳过提示反而画成红绿（最小增删会从 30/30 掉成 7/7）
