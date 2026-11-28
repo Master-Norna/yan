@@ -34,6 +34,10 @@ var YAN_EN = {
   目录列表已截断: "Directory listing truncated",
   改动前: "Before",
   改动后: "After",
+  当前不存在: "Currently missing",
+  查看当前文件: "View current file",
+  "文件当前不存在；下方是已记录的历史操作。": "The file is currently missing; the recorded historical operations are shown below.",
+  "未记录此操作的文本差异。": "No text diff was recorded for this operation.",
   调整目录栏宽度: "Resize explorer",
   选择文件以查看: "Select a file to view",
   "\n\n[压缩包：{0}；本机原件路径：{1}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]":
