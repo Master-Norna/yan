@@ -1,0 +1,54 @@
+# Upstream contributions / 上游贡献
+
+Public merged PRs from the maintainer and agent accounts. Account-level records are not proof of agent authorship. / 账号公开记录，不代表每条均由言完成。
+
+- [fabiocaccamo/python-benedict #642](https://github.com/fabiocaccamo/python-benedict/pull/642) — Honor custom default section names in INI serialization
+- [umputun/ralphex #487](https://github.com/umputun/ralphex/pull/487) — fix(web): bound SSE writes so a stalled client cannot block the run
+- [duriantaco/skylos #1269](https://github.com/duriantaco/skylos/pull/1269) — fix(danger): treat a model handed to an opaque call by any expression shape as escaped
+- [umputun/ralphex #485](https://github.com/umputun/ralphex/pull/485) — fix(git): unquote non-ASCII paths from status --porcelain
+- [umputun/ralphex #484](https://github.com/umputun/ralphex/pull/484) — fix(plan): treat empty brackets in checkbox text as task wording
+- [duriantaco/skylos #1235](https://github.com/duriantaco/skylos/pull/1235) — fix(danger): keep the path-prefix separator proof consistent
+- [duriantaco/skylos #1228](https://github.com/duriantaco/skylos/pull/1228) — fix(danger): run the graph query check when the keyword has no space
+- [duriantaco/skylos #1229](https://github.com/duriantaco/skylos/pull/1229) — test(scaling): read finding paths with the platform separator
+- [duriantaco/skylos #1225](https://github.com/duriantaco/skylos/pull/1225) — fix(cicd): only treat real YAML comments as D340 ignores
+- [duriantaco/skylos #1224](https://github.com/duriantaco/skylos/pull/1224) — fix(sca): keep the npm mirror identity cache usable
+- [py-pdf/pypdf #4375](https://github.com/py-pdf/pypdf/pull/4375) — BUG: Skip null entries when falling back between page boxes
+- [py-pdf/pypdf #4373](https://github.com/py-pdf/pypdf/pull/4373) — BUG: Resolve indirect action dictionaries when appending a page action
+- [pixeltable/pixeltable #1889](https://github.com/pixeltable/pixeltable/pull/1889) — Fix Iceberg replace cleanup after catalog swap failure
+- [py-pdf/pypdf #4374](https://github.com/py-pdf/pypdf/pull/4374) — SEC: Determine image buffer sizes using the actual bytes per pixel
+- [duriantaco/skylos #1201](https://github.com/duriantaco/skylos/pull/1201) — fix(deadcode): stop reporting Protocol attribute declarations as unused
+- [umputun/ralphex #474](https://github.com/umputun/ralphex/pull/474) — fix(web): stop double-publishing live dashboard events
+- [duriantaco/skylos #1200](https://github.com/duriantaco/skylos/pull/1200) — fix(scale): keep danger worker results picklable
+- [duriantaco/skylos #1196](https://github.com/duriantaco/skylos/pull/1196) — fix(cicd): read the PR diff as bytes and parse Git's quoted paths
+- [umputun/ralphex #471](https://github.com/umputun/ralphex/pull/471) — fix(web): preserve Claude evaluation phase when replaying progress
+- [umputun/ralphex #470](https://github.com/umputun/ralphex/pull/470) — fix(web): load in-place date-renamed plans before archives
+- [duriantaco/skylos #1186](https://github.com/duriantaco/skylos/pull/1186) — fix(cicd): preserve diff scope in summary-only PR reviews
+- [duriantaco/skylos #1179](https://github.com/duriantaco/skylos/pull/1179) — fix(sbom): preserve direct dependency classification in SPDX exports
+- [duriantaco/skylos #1168](https://github.com/duriantaco/skylos/pull/1168) — fix(sbom): protect additional dependency input filenames
+- [D4Vinci/Scrapling #539](https://github.com/D4Vinci/Scrapling/pull/539) — fix(parser): honor zero similarity threshold without reference attributes
+- [pdm-project/pdm #3984](https://github.com/pdm-project/pdm/pull/3984) — fix(config): save explicitly provided empty string values
+- [pdm-project/pdm #3975](https://github.com/pdm-project/pdm/pull/3975) — fix: honor local artifact paths and names in pylock.toml
+- [dateutil/dateutil #1583](https://github.com/dateutil/dateutil/pull/1583) — Fix yearday=366 resolving to Dec 30 instead of Dec 31 in leap years
+- [pdm-project/pdm #3972](https://github.com/pdm-project/pdm/pull/3972) — fix: omit missing package versions in pylock exports
+- [pdm-project/pdm #3964](https://github.com/pdm-project/pdm/pull/3964) — fix: preserve archive subdirectories in pylock.toml
+- [sepandhaghighi/art #342](https://github.com/sepandhaghighi/art/pull/342) — Fix CLI Unicode warning names
+- [pdm-project/pdm #3956](https://github.com/pdm-project/pdm/pull/3956) — fix: preserve archive hashes when reading pylock.toml
+- [pdm-project/pdm #3954](https://github.com/pdm-project/pdm/pull/3954) — fix: preserve subdirectory fragments in archive requirements
+- [PyCQA/isort #2675](https://github.com/PyCQA/isort/pull/2675) — grid: preserve trailing comment when no line wrap is needed
+- [agronholm/anyio #1424](https://github.com/agronholm/anyio/pull/1424) — Restore TCP read backpressure after a cancelled receive
+- [py-pdf/pypdf #4150](https://github.com/py-pdf/pypdf/pull/4150) — ROB: Bound leading comment handling in read_object
+- [tokio-rs/tokio #8519](https://github.com/tokio-rs/tokio/pull/8519) — util: skip the top-level slot holding `now` when finding the next expiration
+- [cpburnz/python-pathspec #151](https://github.com/cpburnz/python-pathspec/pull/151) — Preserve externally compiled regex flags during backend selection
+- [brainix/pottery #856](https://github.com/brainix/pottery/pull/856) — Remove stale RedisSimpleQueue from __all__
+- [brainix/pottery #857](https://github.com/brainix/pottery/pull/857) — Fix RedisDeque.rotate() when abs(n) > len(d)
+- [nushell/nushell #19108](https://github.com/nushell/nushell/pull/19108) — fix(math variance): use a numerically stable two-pass formula for numbers
+- [nushell/nushell #19127](https://github.com/nushell/nushell/pull/19127) — fix(math log): reject invalid bases and a NaN input value
+- [nushell/nushell #19107](https://github.com/nushell/nushell/pull/19107) — fix(bytes remove): keep input unchanged when --end pattern is not found
+- [nushell/nushell #19109](https://github.com/nushell/nushell/pull/19109) — fix(std/dt): compute the day remainder directly in datetime-diff
+- [py-pdf/pypdf #4144](https://github.com/py-pdf/pypdf/pull/4144) — ROB: Treat a negative startxref pointer as zero
+- [quinn-rs/quinn #2903](https://github.com/quinn-rs/quinn/pull/2903) — congestion: avoid double-reducing CUBIC ssthresh on persistent congestion
+- [tokio-rs/tokio #8526](https://github.com/tokio-rs/tokio/pull/8526) — net: treat ENOTCONN as success in UnixStream::shutdown
+- [python-poetry/tomlkit #613](https://github.com/python-poetry/tomlkit/pull/613) — Render tz-aware times as local times without an offset
+- [python-poetry/tomlkit #612](https://github.com/python-poetry/tomlkit/pull/612) — Escape content appended to a String via __add__
+- [fabiocaccamo/python-benedict #604](https://github.com/fabiocaccamo/python-benedict/pull/604) — query-string: keep keys with empty values (a=) instead of dropping them
+- [CaramelizedCUDA/epub-start #2](https://github.com/CaramelizedCUDA/epub-start/pull/2) — fix(protocol): percent-decode resource URI paths before archive lookup
