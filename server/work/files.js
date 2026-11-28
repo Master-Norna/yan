@@ -9,8 +9,18 @@ const { fetchPublicResponse, readLimitedBytes } = require("../web.js");
 const { describeFsError, clampNumber } = require("./paths.js");
 const { decodeText, encodeText, countLines, splitLines, changeHunks, nearestPassage } = require("./text.js");
 const writeTextAtomic = require("./atomic.js");
+const { readOffice, patchOffice } = require("./office.js");
 // 读一回最多交出多少字
 const WORK_FILE_LIMIT = 200000;
+// 编辑器只取可无损写回的完整原文，不把模型读到的带行号截断内容当原件。
+function editorText(buffer, decoded) {
+  if (!decoded || !encodeText(decoded.text, decoded.encoding)?.equals(buffer)) throw Error("此文件不能无损编辑");
+  const text = decoded.text;
+  if (text.length > WORK_FILE_LIMIT) throw Error("文件超过编辑上限（20 万字）");
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text) || /\r(?!\n)/.test(text) || (text.includes("\r\n") && /(^|[^\r])\n/.test(text)))
+    throw Error("此文件含特殊控制字符或混合换行，不能无损编辑");
+  return text.replace(/\r\n/g, "\n");
+}
 // 文件指纹：读、写、改都捎回一枚，页面记在那一步上；再写、再改时带上自己最后见到的那枚（seen），在锁里与现状比——
 // 对不上就是读过之后被别人（别的帮手、主模型、编辑器、指令）改过。按内容算，改了又改回去的不算
 const fingerprint = buffer => crypto.createHash("sha1").update(buffer).digest("hex").slice(0, 16);
@@ -24,6 +34,12 @@ module.exports = function createFiles(work) {
       file = await targetOf(workdir, body, { write: true });
     if (file === workdir) throw Error("请给出文件名");
     const content = String(body.content ?? "");
+    if (body.editor === "office" && (typeof body.seen !== "string" || !body.seen)) throw Error("编辑保存须带原文件指纹");
+    if (
+      body.editor === true &&
+      (typeof body.content !== "string" || typeof body.seen !== "string" || !body.seen || content.length > WORK_FILE_LIMIT)
+    )
+      throw Error("编辑保存须带原文件指纹及完整正文（不超过 20 万字）");
     if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
     const release = await lockFile(file, signal);
     try {
@@ -31,6 +47,8 @@ module.exports = function createFiles(work) {
         if (error.code === "ENOENT") return null;
         throw error;
       });
+      if (!existing && (body.editor === true || body.editor === "office"))
+        return { stale: true, path: shownPath(workdir, file), sig: "", missing: true };
       if (existing?.isDirectory()) throw Error(`${body.path} 是目录，不能作为文件写入`);
       if (existing && !existing.isFile()) throw Error("只支持普通文件");
       if (existing && existing.size > 32 * 1024 * 1024) throw Error("原文件超过 32 MB，不予覆盖");
@@ -49,9 +67,15 @@ module.exports = function createFiles(work) {
       // 读后被清空也算被改过（空的也有指纹）：不比长度
       if (typeof body.seen === "string" && (!previous || fingerprint(previous) !== body.seen))
         return { stale: true, path: shownPath(workdir, file), sig: previous ? fingerprint(previous) : "", missing: !previous };
+      if (body.editor === "office") {
+        const output = patchOffice(file, previous, body.parts);
+        if (output !== previous) await writeTextAtomic(file, output, signal);
+        return { sig: fingerprint(output) };
+      }
       const prior = previous ? decodeText(previous) : null,
         previousText = prior?.text ?? "",
         previousLines = previousText ? countLines(previousText) : 0;
+      if (body.editor === true) editorText(previous, prior);
       // 覆盖时照原文件的样子写：带 BOM 的还带、UTF-16 的还是 UTF-16，原文多半是 CRLF 而写来的只有 LF 的换成 CRLF。
       // GBK 编不回去，存成 UTF-8
       const crlf = (previousText.match(/\r\n/g) || []).length,
@@ -96,8 +120,10 @@ module.exports = function createFiles(work) {
     const buffer = await fs.promises.readFile(file).catch(error => {
       throw Error(describeFsError(error, String(body.path)));
     });
+    if (body.editor === "office") return { parts: readOffice(file, buffer), sig: fingerprint(buffer) };
     const decoded = decodeText(buffer);
     if (!decoded) throw Error("二进制文件，不予读取");
+    if (body.editor === true) return { text: editorText(buffer, decoded), encoding: decoded.encoding, sig: fingerprint(buffer) };
     const lines = splitLines(decoded.text),
       offset = Math.floor(clampNumber(body.offset, 1, 1, Math.max(1, lines.length))),
       limit = Math.floor(clampNumber(body.limit, 400, 1, 2000));

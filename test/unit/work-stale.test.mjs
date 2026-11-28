@@ -94,3 +94,38 @@ test("并发下载到同一个名字：各落一份，不互相覆盖", async ()
     server.close();
   }
 });
+
+// 编辑器读完整原文，不带行号、不截断；保存沿用原来的 CAS 与编码。
+test("编辑器完整读取 CRLF，保存保留 BOM 与换行", async () => {
+  const { root, call } = setup(),
+    file = path.join(root, "a.txt");
+  fs.writeFileSync(file, "\ufeffone\r\ntwo\r\n");
+  const read = await call("read", { editor: true });
+  assert.equal(read.text, "one\ntwo\n");
+  assert.equal(read.encoding, "utf-8-bom");
+  const saved = await call("write", { editor: true, seen: read.sig, content: "one\nTHREE\n" });
+  assert.match(saved.sig, /^[0-9a-f]{16}$/);
+  assert.equal(fs.readFileSync(file, "utf8"), "\ufeffone\r\nTHREE\r\n");
+});
+
+test("编辑器不得写回被 Agent 修改的原件", async () => {
+  const { root, call } = setup(),
+    file = path.join(root, "a.txt");
+  const read = await call("read", { editor: true });
+  fs.writeFileSync(file, "agent\n");
+  const saved = await call("write", { editor: true, seen: read.sig, content: "mine\n" });
+  assert.equal(saved.stale, true);
+  assert.equal(fs.readFileSync(file, "utf8"), "agent\n");
+});
+
+test("编辑器拒绝截断、混合换行及缺少指纹的覆盖", async () => {
+  const { root, call } = setup(),
+    file = path.join(root, "a.txt");
+  for (const content of ["x".repeat(200001), "one\r\ntwo\n"]) {
+    fs.writeFileSync(file, content);
+    const read = await call("read", { editor: true });
+    assert.equal(read.sig, undefined);
+    await call("write", { editor: true, content: "mine" });
+    assert.equal(fs.readFileSync(file, "utf8"), content);
+  }
+});
