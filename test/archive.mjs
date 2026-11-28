@@ -69,10 +69,11 @@ await evalJs(
     for (const [type, target] of [["dragstart", from], ["dragover", to], ["drop", to], ["dragend", from]]) target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })); })(); true`
 );
 await waitFor(`!!document.querySelector("#attachments .attachment-card[data-name='报表.csv']")`, 8000);
+const onlyOriginalQuestion = await evalJs(`document.querySelectorAll("#messages .message.user").length === 1`);
+const noSaveMark = await evalJs(`!document.querySelector("[data-save-attachment]")`);
 check(
   "dragging an output attaches it without a second question or save mark",
-  (await evalJs(`document.querySelectorAll("#messages .message.user").length === 1 && !document.querySelector("[data-save-attachment]")`)) &&
-    existsSync(`${ARCHIVE}/报表.csv`)
+  onlyOriginalQuestion && noSaveMark && existsSync(`${ARCHIVE}/报表.csv`)
 );
 await evalJs(`document.querySelector("#attachments [data-remove-attachment]").click(); true`);
 // 改动记录使用绝对路径：不能把落脚处再拼一遍。
@@ -732,10 +733,9 @@ check(
 await evalJs(`document.querySelector("#openLibrary").click(); true`);
 await waitFor(`!!document.querySelector('#libraryGrid [data-library-disk="拖拽附件.txt"]')`, 8000);
 check("dragging the attachment saves its original bytes", readFileSync(`${ARCHIVE}/拖拽附件.txt`, "utf8") === "drag");
-await evalJs(
-  `__yanState().settings.pendingWorkdir = ${JSON.stringify(WORK)}; document.querySelector("#newChat").click(); true`
-);
-await waitFor(`document.querySelector("#workdirChip").classList.contains("on") && !!document.querySelector("#welcomeAttachments .attachment-card[data-name='拖拽附件.txt']")`);
+await evalJs(`__yanState().settings.pendingWorkdir = ${JSON.stringify(WORK)}; document.querySelector("#newChat").click(); true`);
+await waitFor(`document.querySelector("#workdirChip").classList.contains("on")`);
+await waitFor(`!!document.querySelector("#welcomeAttachments .attachment-card[data-name='拖拽附件.txt']")`);
 writeFileSync(`${WORK}/拖拽附件.txt`, "keep");
 check(
   "a bound work directory accepts an attachment",
