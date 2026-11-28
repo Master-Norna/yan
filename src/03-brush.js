@@ -296,7 +296,13 @@ const BRUSH_ICONS = {
   trailgraph: () =>
     brushStroke([8.8, 7, 6.9, 9.8, 5.1, 12.4], 1.45, { tail: 0.6 }) +
     brushStroke([11.2, 7, 13.1, 9.8, 14.9, 12.4], 1.45, { tail: 0.6 }) +
-    [[10, 4.9], [4.3, 14.6], [15.7, 14.6]].map(([x, y]) => brushArc(x, y, 2.55, -95, 265, 1.45, { tail: 0.75 })).join(""),
+    [
+      [10, 4.9],
+      [4.3, 14.6],
+      [15.7, 14.6]
+    ]
+      .map(([x, y]) => brushArc(x, y, 2.55, -95, 265, 1.45, { tail: 0.75 }))
+      .join(""),
   trailmcp: () =>
     brushStroke(
       [
