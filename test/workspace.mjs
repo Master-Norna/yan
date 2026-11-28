@@ -46,9 +46,13 @@ writeFileSync(`${ROOT}/子夹/深.md`, "# 深一层\n");
 const wordNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const sheetNS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const wordPart =
-  '<w:document xmlns:w="' + wordNS + '"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>原文字</w:t></w:r></w:p></w:body></w:document>';
+  '<w:document xmlns:w="' +
+  wordNS +
+  '"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>原文字</w:t></w:r></w:p></w:body></w:document>';
 const sheetPart =
-  '<worksheet xmlns="' + sheetNS + '"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1"><f>1+1</f><v>2</v></c><c r="D1"><v>10</v></c></row></sheetData></worksheet>';
+  '<worksheet xmlns="' +
+  sheetNS +
+  '"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1"><f>1+1</f><v>2</v></c><c r="D1"><v>10</v></c></row></sheetData></worksheet>';
 const sharedPart = '<sst xmlns="' + sheetNS + '" count="2" uniqueCount="1"><si><t>共享原值</t></si></sst>';
 writeFileSync(ROOT + "/编辑.docx", officeZipFixture({ "word/document.xml": wordPart, "word/styles.xml": "<styles/>" }));
 writeFileSync(ROOT + "/编辑.xlsx", officeZipFixture({ "xl/worksheets/sheet1.xml": sheetPart, "xl/sharedStrings.xml": sharedPart }));
