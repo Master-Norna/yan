@@ -408,8 +408,7 @@ function bindHelperEvents() {
       return;
     }
     const file = event.target.closest("[data-change-path]"),
-      message =
-        file && streamingChangeReply(currentConversation());
+      message = file && streamingChangeReply(currentConversation());
     if (message) return openChangeDiff(message, file.dataset.changePath, file);
     const goon = event.target.closest("[data-helper-resume]");
     if (goon) {

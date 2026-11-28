@@ -198,7 +198,9 @@ await fetch(`${PAGE}api/chats/save`, {
           content: "之前改过。",
           status: "complete",
           timestamp: "2026-11-27",
-          steps: [{ id: "old", name: "write_file", status: "done", arguments: "{}", change: { path: `${ROOT}/历史.md`, added: 1, removed: 0 } }]
+          steps: [
+            { id: "old", name: "write_file", status: "done", arguments: "{}", change: { path: `${ROOT}/历史.md`, added: 1, removed: 0 } }
+          ]
         },
         { id: "u", role: "user", content: "改一改这三件。", timestamp: "2026-11-27" },
         {

@@ -17,7 +17,13 @@ test("工作区改动以原步骤落脚处归并，不拿现目录猜旧路径",
         role: "assistant",
         id: "new",
         status: "streaming",
-        steps: [step("/old", "same.txt", true), step("/new", "same.txt"), step("/new", "/old/same.txt"), step("", "unknown.txt"), step("", "/absolute.txt")]
+        steps: [
+          step("/old", "same.txt", true),
+          step("/new", "same.txt"),
+          step("/new", "/old/same.txt"),
+          step("", "unknown.txt"),
+          step("", "/absolute.txt")
+        ]
       }
     ]
   };
