@@ -483,10 +483,11 @@ function workChangedFiles() {
 function workDiffHtml(message, path) {
   const html = changeDiffHtml(message, path),
     missing = work.changeEntries.get(path)?.kind === "missing",
-    note = missing ? `<p class="file-viewer-note">${escapeHtml(t("文件当前不存在；下方是已记录的历史操作。"))}</p>` : "",
-    head = html.includes('class="tool-diff"')
-      ? `<div class="work-diff-head"><span>${t("改动前")}</span><span>${t("改动后")}</span></div>`
-      : "";
+    note = missing ? `<p class="file-viewer-note">${escapeHtml(t("文件当前不存在；下方是已记录的历史操作。"))}</p>` : "";
+  let head = "";
+  if (html.includes('class="tool-diff"')) {
+    head = `<div class="work-diff-head"><span>${t("改动前")}</span><span>${t("改动后")}</span></div>`;
+  }
   return html.replace('<div class="file-viewer-text change-diff">', `<div class="file-viewer-text change-diff">${note}${head}`);
 }
 /** 改动那一面的条子：新建石绿、修改泥金；当前缺件用灰，不能把 stat 缺失当成这一答的删除记录。 @returns {WorkRow[]} */
@@ -936,8 +937,7 @@ function bindWork() {
     const current = target.closest("[data-work-current]");
     if (current) {
       const active = work.tabs[work.active];
-      if (active?.diff && work.changeEntries.get(active.path)?.kind === "file")
-        workOpenPath(active.path, current, false, false);
+      if (active?.diff && work.changeEntries.get(active.path)?.kind === "file") workOpenPath(active.path, current, false, false);
       return;
     }
     if (target.closest("[data-work-edit]")) return void workToggleEditor();
