@@ -144,7 +144,8 @@ async function workRefresh() {
       workPaint();
       return;
     }
-    const data = await bridge("/api/archive/list", { root: work.root, scratch: false, depth: 1, workspace: true }, AbortSignal.timeout(8000));
+    const options = { root: work.root, scratch: false, depth: 1, workspace: true };
+    const data = await bridge("/api/archive/list", options, AbortSignal.timeout(8000));
     if (rev !== work.rev) return;
     work.entries = data.entries || [];
     work.dirs = data.dirs || [];
