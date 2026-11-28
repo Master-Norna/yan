@@ -148,19 +148,23 @@ test("工作区显示项目点文件，卷宗仍略过；数量与可见项一�
   for (const file of [".gitignore", "src/.config", "src/main.js"]) fs.writeFileSync(path.join(root, file), "x");
   const list = async workspace => {
     let data;
-    await route(Readable.from([Buffer.from(JSON.stringify({ root, depth: 1, scratch: false, workspace }))]), {
+    const body = JSON.stringify({ root, depth: 1, scratch: false, workspace });
+    await route(Readable.from([Buffer.from(body)]), {
       writeHead: code => assert.equal(code, 200),
       end: body => (data = JSON.parse(body))
     });
     return data;
   };
   const work = await list(true);
-  assert.deepEqual(work.entries.map(file => file.name), [".gitignore"]);
-  assert.deepEqual(work.dirs.map(dir => dir.name), [".github", "src"]);
+  const files = work.entries.map(file => file.name);
+  assert.deepEqual(files, [".gitignore"]);
+  const dirs = work.dirs.map(dir => dir.name);
+  assert.deepEqual(dirs, [".github", "src"]);
   assert.equal(work.dirs[1].files, 2);
   const archive = await list(false);
   assert.deepEqual(archive.entries, []);
-  assert.deepEqual(archive.dirs.map(dir => dir.name), ["src"]);
+  const archiveDirs = archive.dirs.map(dir => dir.name);
+  assert.deepEqual(archiveDirs, ["src"]);
   assert.equal(archive.dirs[0].files, 1);
 });
 
@@ -171,12 +175,17 @@ test("子夹数量统计迟迟不返回时，工作区仍能展示目录", async
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(child);
   const readdir = fs.promises.readdir;
-  t.mock.method(fs.promises, "readdir", async (dir, ...args) => (dir === child ? new Promise(() => {}) : readdir(dir, ...args)));
+  t.mock.method(fs.promises, "readdir", async (dir, ...args) => {
+    if (dir === child) return new Promise(() => {});
+    return readdir(dir, ...args);
+  });
   let data;
-  await route(Readable.from([Buffer.from(JSON.stringify({ root, depth: 1, scratch: false, workspace: true }))]), {
+  const body = JSON.stringify({ root, depth: 1, scratch: false, workspace: true });
+  await route(Readable.from([Buffer.from(body)]), {
     writeHead: code => assert.equal(code, 200),
     end: body => (data = JSON.parse(body))
   });
-  assert.deepEqual(data.dirs.map(dir => dir.name), ["slow"]);
+  const dirs = data.dirs.map(dir => dir.name);
+  assert.deepEqual(dirs, ["slow"]);
   assert.equal(data.dirs[0].files, undefined);
 });
