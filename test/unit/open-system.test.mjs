@@ -40,3 +40,21 @@ test("openWithSystem：普通文件不被可执行名单误伤，照常走到打
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("openWithSystem：文件的实际目标与执行位也须安全", { skip: process.platform === "win32" }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yan-open-real-"));
+  try {
+    const target = path.join(dir, "target.sh"),
+      link = path.join(dir, "link.txt");
+    fs.writeFileSync(target, "test", { mode: 0o755 });
+    fs.symlinkSync(target, link);
+    assert.throws(() => openWithSystem(link), /可执行的文件不在此打开/);
+    fs.renameSync(target, path.join(dir, "target.exe"));
+    fs.unlinkSync(link);
+    fs.symlinkSync(path.join(dir, "target.exe"), link);
+    fs.chmodSync(path.join(dir, "target.exe"), 0o644);
+    assert.throws(() => openWithSystem(link), /可执行的文件不在此打开/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

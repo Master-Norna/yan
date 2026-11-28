@@ -265,9 +265,13 @@ async function fetchPublicResponse(
         )
       )
         throw Error("带自定义认证请求头的请求不能跨来源跳转，请直接请求目标地址");
+      // 跨来源时正文也可能带凭据；只许跟随会丢掉正文的跳转。
+      const dropsBody = response.status === 303 || (method !== "GET" && method !== "HEAD" && [301, 302].includes(response.status));
+      if (next.origin !== current.origin && body && !["GET", "HEAD"].includes(method) && !dropsBody)
+        throw Error("带请求正文的请求不能跨来源跳转，请直接请求目标地址");
       current = next;
       // 303 与 POST 后的 301/302 按浏览器惯例改成 GET
-      if (response.status === 303 || (method !== "GET" && method !== "HEAD" && [301, 302].includes(response.status))) {
+      if (dropsBody) {
         method = "GET";
         body = null;
       }
