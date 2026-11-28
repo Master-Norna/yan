@@ -79,11 +79,18 @@ await evalJs(`document.querySelector('[data-work-raw="false"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 await evalJs(`document.querySelector('[data-work-file$="/一页.txt"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage pre")?.textContent.includes("只有一页字")`);
-check("单击浏览只留一张临时页签", await evalJs(`document.querySelectorAll("#workTabs .work-tab").length === 1 && !!document.querySelector("#workTabs .work-tab-preview")`));
+check(
+  "单击浏览只留一张临时页签",
+  await evalJs(
+    `document.querySelectorAll("#workTabs .work-tab").length === 1 && !!document.querySelector("#workTabs .work-tab-preview")`
+  )
+);
 await evalJs(`document.querySelector('[data-work-file$="/笔记.md"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 // 真实鼠标双击，确保单击不会重建目录行而吞掉 dblclick。
-const point = await evalJs(`(() => { const r = document.querySelector('[data-work-file$="/笔记.md"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+const point = await evalJs(
+  `(() => { const r = document.querySelector('[data-work-file$="/笔记.md"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`
+);
 for (const clickCount of [1, 2]) {
   await send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", buttons: 1, clickCount });
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", buttons: 0, clickCount });
@@ -107,7 +114,9 @@ check(
 await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
 check(
   "目录栏可折叠，文件仍在",
-  await evalJs(`document.querySelector(".work-explorer").clientWidth===0 && !document.querySelector("[data-work-mode][aria-pressed=true]") && !!document.querySelector("#fileViewerStage h1")`)
+  await evalJs(
+    `document.querySelector(".work-explorer").clientWidth===0 && !document.querySelector("[data-work-mode][aria-pressed=true]") && !!document.querySelector("#fileViewerStage h1")`
+  )
 );
 await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
 await evalJs(`document.querySelector('.work-rail [data-work-terminal]').click(); true`);

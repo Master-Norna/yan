@@ -55,12 +55,14 @@ for (const connected of [false, true]) {
     assert.equal(f.work.tabs.length, 1);
     f.workOpenPath(second, null, true);
     assert.equal(f.work.tabs[0].pinned, true);
-    assert.equal(opened.length, 2); // pinning the active preview does not reload it
+    // pinning the active preview does not reload it
+    assert.equal(opened.length, 2);
     f.workOpenPath(first);
     assert.equal(f.work.tabs.length, 2);
     assert.equal(f.work.active, 1);
     f.workOpenPath("C:/one/C.md");
-    assert.deepEqual(Array.from(f.work.tabs, tab => tab.path), [second, "C:/one/C.md"]);
+    const tabPaths = Array.from(f.work.tabs, tab => tab.path);
+    assert.deepEqual(tabPaths, [second, "C:/one/C.md"]);
     f.workPinTab(1);
     assert.equal(f.work.tabs[1].pinned, true);
     f.workCloseTab(1);
