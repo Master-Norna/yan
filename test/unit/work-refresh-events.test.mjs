@@ -47,3 +47,31 @@ test("未打开、非当前对话不刷新；连续写入只取一次当前列�
   await new Promise(resolve => setTimeout(resolve, 250));
   assert.equal(count(), 1);
 });
+
+test("展开目录刷新时保留旧行，直到新快照到齐", async () => {
+  const f = load([
+    "work",
+    "workLoadBranch",
+    `setup: () => {
+      const pending = [];
+      bridge = () => new Promise(resolve => pending.push(resolve));
+      workPaint = () => {};
+      return pending;
+    }`
+  ]);
+  const pending = f.setup(),
+    path = "C:/one/sub";
+  const first = f.workLoadBranch(path);
+  pending.shift()({ entries: [{ name: "old.md" }], dirs: [] });
+  await first;
+  const refresh = f.workLoadBranch(path);
+  const loading = f.work.branches.get(path);
+  assert.equal(loading.loading, true);
+  assert.equal(loading.ready, true);
+  assert.equal(loading.entries[0].name, "old.md");
+  pending.shift()({ entries: [{ name: "new.md" }], dirs: [] });
+  await refresh;
+  const updated = f.work.branches.get(path);
+  assert.equal(updated.loading, false);
+  assert.equal(updated.entries[0].name, "new.md");
+});
