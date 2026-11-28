@@ -354,14 +354,26 @@ function workCrumbsHtml() {
     })
     .join("");
 }
-/** @param {WorkRow} row */
-function workRowHtml(row) {
-  if (row.dir)
-    return `<div class="strip dir" role="button" tabindex="0" data-work-dir="${escapeHtml(row.path)}" title="${t`打开 ${escapeHtml(row.name)}`}"><span>${caseFigure()}</span><span class="strip-name"><strong>${escapeHtml(row.name)}</strong></span><span class="strip-note"><span class="ell" title="${escapeHtml(row.note || "")}">${escapeHtml(row.note || "")}</span></span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
-  const where = row.where ? `<span class="dir">${escapeHtml(row.where.replace(/\/$/, ""))}/</span>` : "",
-    size = row.size === null || row.size === undefined ? "" : escapeHtml(formatFileSize(row.size));
-  // 删掉的件不再向盘上取缩略（取也取不到），只留那一片换过色的纸
-  return `<div class="strip file" role="button" tabindex="0" data-work-file="${escapeHtml(row.path)}" title="${escapeHtml(row.path)}"><span>${fileFigure(row.name, row.state === "del" ? "" : row.path, row.state)}</span><span class="strip-name"><strong>${where}${escapeHtml(row.name)}</strong></span><span>${size}</span><span class="strip-date"><span class="strip-when">${escapeHtml(row.when || "")}</span></span></div>`;
+/** @param {WorkRow} row @param {number} [depth] */
+function workRowHtml(row, depth = 0) {
+  const name = escapeHtml(row.name), path = escapeHtml(row.path),
+    details = [row.path, row.note, row.size == null ? "" : formatFileSize(row.size), row.when].filter(Boolean).join(" · "),
+    indent = Math.min(depth, 30) * 14;
+  if (row.dir) {
+    const expanded = work.expanded.has(row.path), branch = work.branches.get(row.path);
+    const children = !expanded ? "" : branch?.loading ? t("正在翻…") : branch?.error ? escapeHtml(branch.error) :
+      branch ? workDirectoryRows(row.path, branch.dirs, branch.entries).map(child => workRowHtml(child, depth + 1)).join("") || t("此层尚空") : "";
+    return `<div class="work-row" role="button" tabindex="0" data-work-dir="${path}" aria-expanded="${expanded}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron">${expanded ? "⌄" : "›"}</span><span>${caseFigure()}</span><strong>${name}</strong></div>${expanded ? `<div class="work-children">${children}${branch?.truncated ? `<small>${t("目录列表已截断")}</small>` : ""}</div>` : ""}`;
+  }
+  const selected = work.tabs[work.active]?.path === row.path && work.tabs[work.active]?.diff === (work.mode === "changes");
+  return `<div class="work-row" role="button" tabindex="0" data-work-file="${path}" aria-current="${selected}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron"></span><span>${fileFigure(row.name, "", row.state)}</span><span class="work-name"><strong>${name}</strong>${row.where ? `<small>${escapeHtml(row.where)}</small>` : ""}${work.mode === "search" && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</span></div>`;
+}
+function workPaintTabs() {
+  const tabs = $("#workTabs"), mode = $("#workDocMode");
+  if (!tabs || !mode) return;
+  stageSetHtml(tabs, work.tabs.map((tab, index) => `<div class="work-tab${index === work.active ? " on" : ""}"><button type="button" role="tab" aria-selected="${index === work.active}" data-work-tab="${index}" title="${escapeHtml(tab.path)}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span></button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`).join(""));
+  const active = work.tabs[work.active], kind = active && fileKind(active.path).view;
+  stageSetHtml(mode, active && !active.diff && (kind === "markdown" || kind === "html") ? `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>` : "");
 }
 function workPaint() {
   const box = $("#stageWork");
@@ -369,49 +381,95 @@ function workPaint() {
   $("#stageWorkBtn").setAttribute("aria-pressed", String(work.open));
   box.classList.toggle("hidden", !work.open);
   if (!work.open) return;
-  const shape = work.root || work.mode === "changes" ? "list" : "empty";
-  if (work.shape !== shape) {
-    work.shape = shape;
-    box.innerHTML = shape === "list" ? workShellHtml() : workEmptyHtml();
-  }
-  if (shape !== "list") return;
-  const rows = workRows();
+  if (!$("#workContent")) box.innerHTML = workShellHtml();
+  box.classList.toggle("work-collapsed", work.collapsed);
   stageSetHtml($("#workCrumbs"), workCrumbsHtml());
-  const empty = work.error
-      ? t`目录不可用：${work.error}`
-      : !work.full
-        ? t("正在翻…")
-        : work.mode === "changes"
-          ? t("本段对话还没改过文件")
-          : t("此层尚空"),
-    body = rows.length
-      ? `<div class="strip-cols"><span></span><span>${t("名目")}</span><span>${t("大小")}</span><span>${t("日期")}</span></div>${rows.map(workRowHtml).join("")}`
-      : workEmptyBody(empty);
-  stageSetHtml($("#workStrips"), body);
-  for (const button of document.querySelectorAll("#workCrumbs [data-work-dir], #stageWork [data-work-mode]")) {
+  $("#workFind").classList.toggle("hidden", work.mode !== "search");
+  const rows = workRows();
+  const empty = work.mode === "search" ? work.searchStatus : work.error ? t`目录不可用：${work.error}` : !work.root && work.mode === "list" ? t("选择文件夹…") : !work.full ? t("正在翻…") : work.mode === "changes" ? t("本段对话还没改过文件") : t("此层尚空");
+  const body = rows.length ? rows.map(row => workRowHtml(row)).join("") : `<small class="work-tree-note">${escapeHtml(empty)}</small>`;
+  stageSetHtml($("#workStrips"), body + (work.mode === "list" && work.truncated ? `<small class="work-tree-note">${t("目录列表已截断")}</small>` : "") + (work.mode === "search" && rows.length && work.searchStatus ? `<small class="work-tree-note">${escapeHtml(work.searchStatus)}</small>` : ""));
+  for (const button of document.querySelectorAll("#stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);
-    if (el.dataset.workMode) el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
+    el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
   }
+  box.querySelector("[data-work-collapse]").setAttribute("aria-expanded", String(!work.collapsed));
+  box.querySelector(".work-rail [data-work-terminal]").setAttribute("aria-pressed", String(work.terminal));
+  $("#workTerminal").classList.toggle("hidden", !work.terminal);
+  $("#workTerminalOutput").textContent = work.terminalText;
+  workPaintTabs();
 }
-// ---------- 动手 ----------
-/** 点件打开：列表面看原件、改动面看这件在本段对话里的改动；都交给预览器、落在游目这一栏里（见 20-viewer.js 的 placeViewer）。
- * 关闭后回到原簿录，不启动浏览器也不改页签。 */
-function workOpenPath(path, trigger = null) {
-  if (!work.open || !path) return;
-  if (work.mode === "changes") {
+function workActivate(index, trigger = null) {
+  const tab = work.tabs[index];
+  if (!tab || !work.open) return;
+  work.active = index;
+  workPaint();
+  if (tab.diff) {
     const conversation = currentConversation?.() || null;
     if (!conversation) return;
-    showInFileViewer(t`${path} · 本段改动`, workDiffHtml(conversation, path), trigger, t("览"), "stage");
-    return;
+    showInFileViewer(t`${tab.path} · 本段改动`, workDiffHtml(conversation, tab.path), trigger, t("览"), "stage");
+  } else void openFileViewer({ file: tab.path }, "", trigger, "stage", tab.raw);
+}
+function workOpenPath(path, trigger = null) {
+  if (!work.open || !path) return;
+  const diff = work.mode === "changes";
+  let index = work.tabs.findIndex(tab => tab.path === path && tab.diff === diff);
+  if (index < 0) {
+    index = work.tabs.length;
+    work.tabs.push({ path, diff, raw: false });
   }
-  void openFileViewer({ file: path }, "", trigger, "stage");
+  workActivate(index, trigger);
+}
+function workCloseTab(index) {
+  if (!work.tabs[index]) return;
+  const active = index === work.active;
+  work.tabs.splice(index, 1);
+  if (index < work.active) work.active--;
+  if (active) {
+    if (work.tabs.length) workActivate(Math.min(index, work.tabs.length - 1));
+    else {
+      work.active = -1;
+      workCloseViewer();
+    }
+  }
+  workPaint();
 }
 function workSwitch(mode) {
-  if (work.mode === mode) return void workRefresh();
-  work.mode = mode;
-  workResetRows();
+  work.collapsed = false;
+  if (work.mode !== mode) {
+    work.mode = mode;
+    workResetRows();
+  }
   workPaint();
-  void workRefresh();
+  if (mode === "search") {
+    const input = /** @type {HTMLInputElement} */ ($("#workFind input"));
+    input.value = work.search;
+    input.focus();
+    if (work.search) void workSearch(work.search);
+  } else void workRefresh();
+}
+// 人明确提交的本机指令；不向模型暴露执行入口，也不声称具备交互式 PTY。
+async function workRunCommand(command) {
+  if (work.command || !work.root || !command.trim()) return;
+  const controller = new AbortController();
+  work.command = controller;
+  work.terminalText = (work.terminalText + "\n> " + command + "\n").slice(-60000);
+  workPaint();
+  try {
+    const result = await bridge("/api/work/run", { workdir: work.root, command, timeout: 120, sandbox: false }, controller.signal);
+    if (work.command !== controller) return;
+    work.terminalText += (result.stdout || "") + "\n" + (result.stderr || "") + "\n[" + (result.exitCode ?? "") + "]\n";
+  } catch (error) {
+    if (work.command !== controller) return;
+    work.terminalText += String(error.message || error) + "\n";
+  } finally {
+    if (work.command === controller) {
+      work.command = null;
+      work.terminalText = work.terminalText.slice(-60000);
+      workPaint();
+      void workRefresh();
+    }
+  }
 }
 function bindWork() {
   $("#stageWorkBtn").addEventListener("click", () => (work.open ? workLeave() : workEnter()));
@@ -421,15 +479,43 @@ function bindWork() {
       mode = /** @type {HTMLElement|null} */ (target.closest("[data-work-mode]"));
     if (mode) return void workSwitch(/** @type {any} */ (mode.dataset.workMode));
     if (target.closest("[data-work-pick]")) return void workPick();
+    if (target.closest("[data-work-collapse]")) {
+      work.collapsed = !work.collapsed;
+      return workPaint();
+    }
+    if (target.closest("[data-work-terminal]")) {
+      work.terminal = !work.terminal;
+      return workPaint();
+    }
+    if (target.closest("[data-work-stop]")) return work.command?.abort();
+    const close = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab-close]"));
+    if (close) return workCloseTab(Number(close.dataset.workTabClose));
+    const tab = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab]"));
+    if (tab) return workActivate(Number(tab.dataset.workTab), tab);
+    const raw = /** @type {HTMLElement|null} */ (target.closest("[data-work-raw]"));
+    if (raw && work.tabs[work.active]) {
+      work.tabs[work.active].raw = raw.dataset.workRaw === "true";
+      return workActivate(work.active, raw);
+    }
     const dir = /** @type {HTMLElement|null} */ (target.closest("[data-work-dir]"));
-    if (dir) return void workEnterDir(dir.dataset.workDir);
+    if (dir) return void (dir.closest("#workCrumbs") ? workEnterDir(dir.dataset.workDir) : workToggleDir(dir.dataset.workDir));
     const file = /** @type {HTMLElement|null} */ (target.closest("[data-work-file]"));
     if (file) return void workOpenPath(file.dataset.workFile, file);
   });
-  // 条子也能用键盘走：回车、空格与点一样
+  box.addEventListener("submit", event => {
+    const form = /** @type {HTMLFormElement} */ (event.target);
+    if (form.id !== "workFind" && form.id !== "workCommand") return;
+    event.preventDefault();
+    const input = form.querySelector("input");
+    if (form.id === "workFind") void workSearch(input.value);
+    else if (!work.command && input.value.trim()) {
+      void workRunCommand(input.value);
+      input.value = "";
+    }
+  });
   box.addEventListener("keydown", event => {
     if (event.key !== "Enter" && event.key !== " ") return;
-    const row = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest(".strip"));
+    const row = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest(".work-row"));
     if (!row) return;
     event.preventDefault();
     row.click();
