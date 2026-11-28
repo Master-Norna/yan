@@ -80,19 +80,18 @@ function officeEditorModel(parts, extension) {
       if (!calc) {
         calc = workbook.createElementNS(root.namespaceURI, root.prefix ? root.prefix + ":calcPr" : "calcPr");
         calc.setAttribute("calcId", "0");
-        const next = [...root.children].find(child =>
-          [
-            "oleSize",
-            "customWorkbookViews",
-            "pivotCaches",
-            "smartTagPr",
-            "smartTagTypes",
-            "webPublishing",
-            "fileRecoveryPr",
-            "webPublishObjects",
-            "extLst"
-          ].includes(child.localName)
-        );
+        const following = [
+          "oleSize",
+          "customWorkbookViews",
+          "pivotCaches",
+          "smartTagPr",
+          "smartTagTypes",
+          "webPublishing",
+          "fileRecoveryPr",
+          "webPublishObjects",
+          "extLst"
+        ];
+        const next = [...root.children].find(child => following.includes(child.localName));
         root.insertBefore(calc, next || null);
       }
       calc.setAttribute("fullCalcOnLoad", "1");
