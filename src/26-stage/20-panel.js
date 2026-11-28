@@ -8,7 +8,7 @@ function stageShown() {
 }
 // 开着且看得见：没被旁注挤开、言的页面不在后台
 function stageVisible() {
-  return stageShown() && $("#stageView").clientWidth > 0 && !document.hidden;
+  return stageShown() && $("#stageView").clientWidth > 0 && $("#stageView").clientHeight > 0 && !document.hidden;
 }
 // 看得见才收画面，看不见即停收、入口那一笔回来；回来再接上
 function stageWake() {
@@ -36,6 +36,7 @@ function openStage() {
   }, 1500);
 }
 function closeStage() {
+  ++work.openRev;
   stageSetWide(false);
   hideWithFade($("#stagePanel"));
   clearInterval(stage.poll);
@@ -72,11 +73,12 @@ function stageActing() {
   for (const id of stage.usedBy) if (!requestJobs.has(id) && !crews.has(id)) stage.usedBy.delete(id);
   return stage.busy > 0 || stage.usedBy.size > 0 || Date.now() - stage.lastAct < 8000;
 }
-// 入口：接了浏览器类的 MCP（或浏览器已开着）、游目收着（或被旁注挤开）时自页顶垂下；未开卷着，开着展开，在用轻摆
+// 入口：有工作目录或浏览器时可进游目；游目收着（或被旁注挤开）时自页顶垂下，在用轻摆
 function stageSync() {
   const pin = $("#stagePin"),
-    acting = stageActing();
-  pin.classList.toggle("hidden", (!stage.ws && !stageServer()) || stageVisible());
+    acting = stageActing(),
+    visible = stageShown() && $("#stagePanel").clientWidth > 0 && !document.hidden;
+  pin.classList.toggle("hidden", visible || (!stage.ws && !stageServer() && !archiveDir() && !currentConversation()?.workdir));
   pin.dataset.state = acting ? "act" : stage.ws ? "open" : "off";
   // 地址行的「执事」：在用时挂着，指着浮出近几步
   $("#stageBusy").classList.toggle("hidden", !acting);
@@ -113,11 +115,18 @@ function stageService() {
   return config?.stage ? { stage: config.stage } : { args: config?.args || [], cwd: config?.cwd || "" };
 }
 // 浏览器没开（或被关了）：替用户调一次那个服务的 browser_navigate，浏览器照它的配置起来，再去连
-async function stageLaunch() {
+function stageLaunch() {
+  if (stage.launching) return stage.launching;
   const server = stageServer();
-  if (!server || stage.launching) return;
-  stage.launching = true;
+  if (!server) return;
+  stage.launching = stageLaunchBrowser(server).finally(() => {
+    stage.launching = null;
+    stageSync();
+  });
   stageRender();
+  return stage.launching;
+}
+async function stageLaunchBrowser(server) {
   try {
     const { result } = await bridge("/api/mcp/call", {
       server,
@@ -137,9 +146,6 @@ async function stageLaunch() {
     if (!stage.ws) toast(t`浏览器已开，但连不上调试口${stage.port ? ` ${stage.port}` : ""}`);
   } catch (error) {
     toast(t`浏览器打开失败：${String(error.message || error).slice(0, 160)}`, 6000);
-  } finally {
-    stage.launching = false;
-    stageSync();
   }
 }
 function stageNewTab() {
@@ -418,7 +424,6 @@ function stageOpenMenu(anchor) {
       { id: "downloads", label: t("下载"), note: fresh ? String(fresh) : "", noteClass: "fresh", run: () => stageOpenDownloads(anchor) },
       { id: "favorites", label: t("整理收藏…"), run: () => stageOpenInside("favorites") },
       rule,
-      { id: "open-file", label: t("打开本机文件…"), note: "Ctrl+O", run: () => void stageOpenLocal() },
       {
         id: "copy",
         label: t("复制网址"),
@@ -579,10 +584,11 @@ function stageReadable(url) {
 /** @param {{ title: string, url: string } | undefined} tab */
 function stageAddrHtml(tab) {
   if (!tab?.url) return "";
-  const text = stageReadable(tab.url);
+  // 摊出来的那一页（md 排好的那份）写它的原件；看源码时也写那一份文件，别写 view-source:
+  const text = stageReadable(stageDocSource(tab.url));
   let url;
   try {
-    url = new URL(tab.url);
+    url = new URL(stageDocSource(tab.url));
   } catch {
     return `<b>${escapeHtml(text)}</b>`;
   }
@@ -605,7 +611,7 @@ function stageEditUrl() {
   const url = /** @type {HTMLInputElement} */ ($("#stageUrl"));
   $("#stageAddr").classList.add("hidden");
   url.classList.remove("hidden");
-  url.value = stageReadable(stage.tabs.get(stage.current)?.url || "");
+  url.value = stageReadable(stageDocSource(stage.tabs.get(stage.current)?.url || ""));
   url.focus();
   url.select();
 }
@@ -644,13 +650,16 @@ function stageRender() {
     .join("");
   stageSetHtml($("#stageTabs"), tabs);
   stageRenderMarkBtn();
+  stageRenderDocMode();
   const tab = stage.tabs.get(stage.current),
     addr = $("#stageAddr");
   if (document.activeElement !== $("#stageUrl")) {
     stageSetHtml(addr, stageAddrHtml(tab));
-    const title = tab?.url ? stageReadable(tab.url) : "";
+    const title = tab?.url ? stageReadable(stageDocSource(tab.url)) : "";
     if (addr.getAttribute("title") !== title) addr.title = title;
   }
+  // 未启动浏览器时，工作区独占内容区；新建标签或开文件仍走浏览器原有的启动入口。
+  $("#stageBrowser").classList.toggle("hidden", work.open && !stage.ws && !stage.launching);
   const empty = stage.launching
     ? stageEmptyHtml(t("正在打开浏览器…"))
     : !stage.ws
@@ -665,6 +674,8 @@ function stageRender() {
   stageSetHtml(emptyBox, empty);
   emptyBox.classList.toggle("hidden", !empty);
   $("#stageView").classList.toggle("empty", !!empty);
+  // 工作区是同级区域，绘制与网页互不接管
+  workPaint();
 }
 /**
  * 浏览器类的 MCP 调用（playwright 的 browser_*）进行时记一笔它在做什么，入口与地址行都据此报「在用」；调完去找一回浏览器——它多半是这一下起的

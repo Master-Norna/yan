@@ -51,7 +51,7 @@ function stageRenderSteps() {
       })
       .join("");
 }
-// 浏览器自己接的几个键（递进网页没人管）：Ctrl+L / Alt+D / F6 到地址栏，Ctrl+O 开本机文件，F5 / Ctrl+R 重载（加 Shift 不用缓存），Alt+← / → 前后。
+// 浏览器自己接的几个键（递进网页没人管）：Ctrl+L / Alt+D / F6 到地址栏，F5 / Ctrl+R 重载（加 Shift 不用缓存），Alt+← / → 前后。
 // Ctrl+T、Ctrl+W 外头的浏览器拦不住，不接
 /** @param {KeyboardEvent} e */
 function stageShortcut(e) {
@@ -60,7 +60,6 @@ function stageShortcut(e) {
   if (key === "escape" && stage.pen) stageSetPen(false);
   else if ((ctrl && key === "l") || (e.altKey && key === "d") || key === "f6") stageEditUrl();
   else if (ctrl && key === "f") stageFindOpen();
-  else if (ctrl && key === "o") void stageOpenLocal();
   else if (ctrl && (key === "=" || key === "+" || key === "-" || key === "0")) stageZoomStep(key === "0" ? 0 : key === "-" ? -1 : 1);
   else if (key === "f5" || (ctrl && key === "r")) {
     if (stage.session) void stageSend("Page.reload", { ignoreCache: e.shiftKey }, stage.session).catch(() => {});
@@ -180,11 +179,61 @@ function stageDocName(url) {
   } catch {
     return "";
   }
-  // 照文件种类登记认：view 是 doc 的（docx / xlsx / pptx / odt / ods / odp）才抽得出正文，不另立一张扩展名表
-  return name && fileKind(name).view === "doc" ? name : "";
+  // 照文件种类登记认：view 是 doc 的（docx / xlsx / pptx / odt / ods / odp）抽得出正文，markdown 由同一套渲染排出来
+  const view = name ? fileKind(name).view : "";
+  return view === "doc" || view === "markdown" ? name : "";
+}
+// 摊过的本机文档：原件与排好的那一页各记一头。地址行写原件，览 / 源在两者之间翻（见 stageDocPair）
+const stageDocSources = new Map();
+/** 这一页是哪一件文件的看法：摊出来的写原件，看源码时也写原件，别写 view-source: @param {string} url */
+function stageDocSource(url) {
+  const raw = String(url || "");
+  return raw.startsWith("view-source:") ? raw.slice("view-source:".length) : stageDocSources.get(raw) || raw;
+}
+/** 地址行里那对「览 / 源」：本机的 md 与网页才有两种看法，别的（Office、图、PDF）只有一种 @param {string} [url] */
+function stageDocPair(url = stage.tabs.get(stage.current)?.url || "") {
+  if (!url) return null;
+  const viewed = url.startsWith("view-source:") ? url.slice("view-source:".length) : "",
+    page = viewed ? "" : stageDocSources.has(url) ? url : "",
+    src = page ? stageDocSources.get(page) : viewed || url;
+  if (!/^file:/i.test(src)) return null;
+  let name = "";
+  try {
+    name = decodeURIComponent(src.split("/").pop() || "");
+  } catch {
+    return null;
+  }
+  const view = name ? fileKind(name).view : "";
+  if (view === "markdown") {
+    return { src, preview: "", source: src, at: page ? "preview" : "source" };
+  }
+  // 网页：预览就是浏览器自己开的那一页，源码是浏览器自带的 view-source
+  if (view === "html") return { src, preview: src, source: `view-source:${src}`, at: viewed ? "source" : "preview" };
+  return null;
+}
+// 地址行里那两枚（览 / 源）：只在这件本机文件有两种看法时挂出来；选着的那一枚转朱
+function stageRenderDocMode() {
+  const box = $("#stageDocMode"),
+    pair = stageDocPair();
+  box.classList.toggle("hidden", !pair);
+  if (!pair) return stageSetHtml(box, "");
+  stageSetHtml(
+    box,
+    `<button type="button" data-stage-doc="preview" aria-pressed="${pair.at === "preview"}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-stage-doc="source" aria-pressed="${pair.at === "source"}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>`
+  );
+}
+/** 览 ↔ 源：来回都是换一次导航；md 每次翻到「览」时现摊一份，避免把执事改过的原件看成旧稿。
+ * 翻到「源」不能走 stageGo：那会把 md 又摊成文档页，就来回打转了 @param {"preview"|"source"} to */
+function stageDocToggle(to) {
+  const pair = stageDocPair();
+  if (!pair || pair.at === to) return;
+  if (to === "source") return void stageNavigate(pair.source);
+  if (pair.preview) return void stageNavigate(pair.preview);
+  void stageShowDoc(pair.src);
 }
 // 人点开一份本机文档：用与预览同一套的抽取（13-files/）摊成一份自足的文档页，落进 游目/工作/ 再以 file:// 打开——
 // 内容在游目里看得见、能对着它说话，原件一笔不动。抽不出、写不成仍交本机程序，与从前一样。
+// md 走同一条路：正文由预览器那套渲染排出来（fileViewerBody 的 markdown），页子是同一张纸。
 // 模型自己开的文件不走这儿：它经 MCP 直接导航，地址不经过 stageGo，仍当下载（只有人开的才转交本机程序，见 00-connect.js）
 /** @param {string} url */
 async function stageShowDoc(url) {
@@ -203,12 +252,14 @@ async function stageShowDoc(url) {
   toast(t`正在摊开「${name}」…`);
   try {
     const reader = urlReader(`/api/stage/raw?url=${encodeURIComponent(url)}`),
-      body = await fileViewerBody(reader, name, "doc");
+      kind = fileKind(name).view === "markdown" ? "markdown" : "doc",
+      body = await fileViewerBody(reader, name, kind);
     // 抽不出正文时给的是空态（带一颗「以本机程序打开」，文档页里没有谁接它）：交本机程序，别摊一张空纸
     if (!mine()) return;
     if (!body.startsWith('<div class="file-viewer-empty')) {
       const { url: page } = await bridge("/api/stage/docpage", { name, url, body });
       if (!mine()) return;
+      stageDocSources.set(page, url);
       return void stageNavigate(page, from);
     }
   } catch {}
@@ -222,17 +273,6 @@ function stageOpenInApp(url, wanted = false) {
     () => toast(wanted ? t("已在本机程序中打开") : t("游目阅不了此件，已在本机程序中打开")),
     error => toast(t`打开失败：${String(error.message || error).slice(0, 80)}`)
   );
-}
-// 开本机文件（纸签、Ctrl+O）：经桥接弹系统的选文件窗，拿真路径开 file://——不拷进临时目录，网页旁的样式、脚本、图才引得到。
-// 浏览器显示不了的（Office 文档等）会当下载，由 downloadWillBegin 那头转交本机程序
-async function stageOpenLocal() {
-  if (!stage.ws) return void stageLaunch();
-  try {
-    const { paths } = await bridge("/api/work/pick", { files: true });
-    if (paths[0]) stageGo(paths[0]);
-  } catch (error) {
-    toast(t`打开失败：${String(error.message || error).slice(0, 80)}`);
-  }
 }
 // 地址栏里输的话换成网址：本机路径（盘符起头的、/ 起头的）、本机服务、带协议的照走；像网址的（有点、没空格）补 https；余下当成要搜的话，交给纸签里选的那家。
 // 路径里的 % # ? 是文件名的一部分，转义了才不被当成网址的记号
@@ -367,7 +407,13 @@ function bindStage() {
     stage.downloadsSeen = Date.now();
   } catch {}
   bindStageFind();
+  bindWork();
   $("#stageNewTab").addEventListener("click", stageNewTab);
+  // 览 / 源：本机的 md、网页才有这一对（见 stageRenderDocMode）
+  $("#stageDocMode").addEventListener("click", event => {
+    const button = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest("[data-stage-doc]"));
+    if (button) stageDocToggle(/** @type {any} */ (button.dataset.stageDoc));
+  });
   $("#stageMarks").addEventListener("click", e => {
     e.stopPropagation();
     void stageOpenMarks(/** @type {HTMLElement} */ (e.currentTarget));
@@ -403,7 +449,8 @@ function bindStage() {
       close = /** @type {HTMLElement | null} */ (target.closest("[data-stage-close]"));
     if (close) return void stageSend("Target.closeTarget", { targetId: close.dataset.stageClose }).catch(() => {});
     const tab = /** @type {HTMLElement | null} */ (target.closest("[data-stage-tab]"));
-    if (!tab || tab.dataset.stageTab === stage.current) return;
+    if (!tab) return;
+    if (tab.dataset.stageTab === stage.current) return;
     stageActivate(tab.dataset.stageTab || "");
   });
   for (const button of document.querySelectorAll("[data-stage-nav]"))

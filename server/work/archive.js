@@ -40,8 +40,12 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     return resolveInside(root, rel);
   }
   // 子目录也要列：空的夹同样是一层，页面上要能看见、能把文件拖进去
-  async function walkArchive(root, dir, out, dirs) {
-    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+  async function walkArchive(root, dir, out, dirs, shallow = false) {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(error => {
+      // 工作区正站在这一层：读不了不能画成空夹。卷宗全树仍可略过读不到的层。
+      if (shallow) throw Error(describeFsError(error, dir));
+      return [];
+    });
     for (const entry of entries) {
       if (out.length + dirs.length >= ARCHIVE_LIST_LIMIT) return;
       if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
@@ -49,7 +53,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       if (entry.isDirectory()) {
         if (WORK_SKIP.has(entry.name)) continue;
         dirs.push({ path: relPath(root, full), name: entry.name });
-        await walkArchive(root, full, out, dirs);
+        if (!shallow) await walkArchive(root, full, out, dirs);
         continue;
       }
       const stat = await fs.promises.stat(full).catch(() => null);
@@ -90,7 +94,11 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
     const root = await archiveRoot(body.root);
     const out = [],
       dirs = [];
-    await walkArchive(root, root, out, dirs);
+    // depth: 1 只列这一层（游目的工作区：看一处代码目录不必为看一层把整棵树都走一遍）。
+    // 路径仍相对根，这一层的就是名字本身
+    const shallow = Number(body.depth) === 1;
+    await walkArchive(root, root, out, dirs, shallow);
+    if (shallow) dirs.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
     out.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
     return {
       archive: root,
@@ -100,6 +108,25 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
       // 只在明确不需要草稿统计时省去这一趟，响应也不带 scratch
       ...(body.scratch === false ? {} : { scratch: await measureScratch(root) })
     };
+  }, failed);
+  // 问一句这一处是什么：地址行里输的话（工作区、游目）据此决定是换到那一层、还是去开那一件。
+  // 只答一件事（目录 / 文件 / 没有），不列不读
+  const handleArchiveStat = jsonRoute(async body => {
+    const target = resolveFile(body.path);
+    try {
+      const stat = await fs.promises.stat(target);
+      return {
+        kind: stat.isDirectory() ? "dir" : "file",
+        path: target,
+        name: path.basename(target),
+        size: stat.size,
+        modifiedAt: stat.mtime.toISOString()
+      };
+    } catch (error) {
+      // 没有权限等错误不是文件已被删除；只有路径不存在才报 missing。
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return { kind: "missing", path: target };
+      throw error;
+    }
   }, failed);
   // 清草稿：给了 id 只清那段对话的，否则整个 .草稿 目录
   const handleArchiveClean = jsonRoute(async body => {
@@ -274,6 +301,7 @@ module.exports = function createArchive({ archiveHome, playable, lockFile = crea
   }, failed);
   return {
     "POST /api/archive/list": handleArchiveList,
+    "POST /api/archive/stat": handleArchiveStat,
     "POST /api/archive/open": handleArchiveOpen,
     "POST /api/archive/put": handleArchivePut,
     "POST /api/archive/move": handleArchiveMove,

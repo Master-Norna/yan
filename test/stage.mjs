@@ -3,7 +3,7 @@
 // 模型换页跟过去、网页的提示框画在画面上、前后按历史走、旁注开着时让位且停收画面、收起后入口回来、拖宽窄有界
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { connect, check, sleep, PAGE, TMP, MODEL_DEBUG } from "./lib.mjs";
+import { connect, check, sleep, PAGE, TMP, MODEL_DEBUG, ARCHIVE } from "./lib.mjs";
 const { send, evalJs, waitFor, shot, close } = await connect();
 // 附件里的图：落了盘的原件照同源地址画，只暂存在浏览器里的才编成 data: URL。断言认「画出来了」，不认取图走哪条路
 const drawnImage = `(el => {
@@ -80,7 +80,11 @@ for (const { targetId: id, type } of (await browserSend("Target.getTargets")).ta
   if (type === "page" && id !== targetId) await browserSend("Target.closeTarget", { targetId: id });
 await sleep(800);
 
-check("no pin before the browser is found", await evalJs(`document.querySelector("#stagePin").classList.contains("hidden")`));
+await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`);
+check(
+  "workspace entry is available before the browser is found",
+  await evalJs(`!document.querySelector("#stagePin").classList.contains("hidden")`)
+);
 writeConfig(new URL(MODEL_DEBUG).port);
 await evalJs(`__yanStage.locate().then(() => true)`);
 await waitFor(`!document.querySelector("#stagePin").classList.contains("hidden")`, 8000);
@@ -989,6 +993,69 @@ check(
 );
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 600, y: 400 });
 check("screencast stops when closed", await evalJs(`__yanStage.state.session === ""`));
+// 工作区（不带浏览器的那一半在 test/workspace.mjs）：列出绑过的目录，点一件交给游目去开；md 的排好的样子与原文在地址行那两枚间翻
+await evalJs(`document.querySelector("#stagePin").click(); true`);
+const workDir = `${ARCHIVE}/工作区-舞台`;
+mkdirSync(workDir, { recursive: true });
+writeFileSync(`${workDir}/笔记.md`, "# 笔记\n\n这一层只在工作区里看。\n");
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
+const workFolder = `document.querySelector('[data-work-dir="${workDir}"]')`;
+await waitFor(`!!${workFolder}`);
+await evalJs(`${workFolder}.click(); true`);
+await waitFor(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "笔记.md")`, 8000).catch(
+  () => {}
+);
+check(
+  "the workspace lists the bound folder",
+  await evalJs(`[...document.querySelectorAll("#workStrips .strip-name strong")].some(el => el.textContent === "笔记.md")`)
+);
+check("the workspace path names the folder", await evalJs(`document.querySelector("#workCrumbs .here")?.textContent === "工作区-舞台"`));
+await waitFor(`!!__yanStage.state.session`, 5000).catch(() => {});
+check("the browser keeps streaming beside the workspace", await evalJs(`!!__yanStage.state.session`));
+await evalJs(`document.querySelector('[data-stage-tab="' + __yanStage.state.current + '"]').click(); true`);
+check(
+  "clicking a browser tab does not close the workspace",
+  await evalJs(`document.querySelector("#stageWorkBtn").getAttribute("aria-pressed") === "true" && !!__yanStage.state.session`)
+);
+await waitFor(`!!document.querySelector("#workStrips [data-work-file]")`, 8000).catch(() => {});
+await evalJs(`document.querySelector("#workStrips [data-work-file]").click(); true`);
+await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 25000).catch(() => {});
+const workDocUrl = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
+check("clicking a file opens it in the stage (md is laid out)", workDocUrl.includes("view-"), workDocUrl);
+check("file preview keeps the workspace open", await evalJs(`!document.querySelector("#stageWork").classList.contains("hidden")`));
+check(
+  "the address row writes the original, not the laid-out page",
+  await evalJs(`document.querySelector("#stageAddr").textContent.includes("笔记.md")`)
+);
+check(
+  "preview / source hangs left of the bookmark, preview on",
+  await evalJs(
+    `!document.querySelector("#stageDocMode").classList.contains("hidden") && document.querySelector('#stageDocMode [data-stage-doc="preview"]').getAttribute("aria-pressed") === "true" && !document.querySelector("#stageMarks").classList.contains("hidden")`
+  )
+);
+await evalJs(`document.querySelector('#stageDocMode [data-stage-doc="source"]').click(); true`);
+await waitFor(`decodeURIComponent(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").endsWith("笔记.md")`, 20000).catch(
+  () => {}
+);
+check(
+  "source flips to the original file, not to another laid-out page",
+  await evalJs(`decodeURIComponent(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").endsWith("笔记.md")`),
+  await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url`)
+);
+check(
+  "the pair says source is on",
+  await evalJs(`document.querySelector('#stageDocMode [data-stage-doc="source"]').getAttribute("aria-pressed") === "true"`)
+);
+writeFileSync(`${workDir}/笔记.md`, "# 改过的笔记\n");
+await evalJs(`document.querySelector('#stageDocMode [data-stage-doc="preview"]').click(); true`);
+await waitFor(`(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-")`, 20000).catch(() => {});
+check(
+  "preview regenerates the laid-out page after an external edit",
+  await evalJs(
+    `(__yanStage.state.tabs.get(__yanStage.state.current)?.url || "").includes("view-") && __yanStage.state.tabs.get(__yanStage.state.current)?.url !== ${JSON.stringify(workDocUrl)}`
+  )
+);
+await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await browserSend("Target.closeTarget", { targetId });
 await waitFor(`!__yanStage.state.tabs.has(${JSON.stringify(targetId)})`);
 check("closed page leaves the tabs", true);
