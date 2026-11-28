@@ -231,7 +231,10 @@ function settleBackground(step, state, exitCode, assistant) {
         ? `后台 ${step.bg.id} · 结束得久，结果没能留住`
         : `后台 ${step.bg.id} · 已结束${exitCode !== undefined && exitCode !== null ? ` · 退出码 ${exitCode}` : ""}`;
   const conversation = store.conversations.find(c => c.messages.includes(assistant));
-  if (conversation) markDirty(conversation.id);
+  if (conversation) {
+    markDirty(conversation.id);
+    if (state === "done" || state === "stopped") workQueueRefresh(conversation);
+  }
   saveStoreSoon();
   refreshSteps(assistant);
   renderClepsydra();
