@@ -36,11 +36,11 @@ Public merged PRs from the maintainer and agent accounts. Account-level records 
 - [pdm-project/pdm #3954](https://github.com/pdm-project/pdm/pull/3954) — fix: preserve subdirectory fragments in archive requirements
 - [PyCQA/isort #2675](https://github.com/PyCQA/isort/pull/2675) — grid: preserve trailing comment when no line wrap is needed
 - [agronholm/anyio #1424](https://github.com/agronholm/anyio/pull/1424) — Restore TCP read backpressure after a cancelled receive
-- [py-pdf/pypdf #4150](https://github.com/py-pdf/pypdf/pull/4150) — ROB: Bound leading comment handling in read_object
+- [py-pdf/pypdf #4150](https://github.com/py-pdf/pypdf/pull/4150) — ROB: Bound leading comment handling in read\_object
 - [tokio-rs/tokio #8519](https://github.com/tokio-rs/tokio/pull/8519) — util: skip the top-level slot holding `now` when finding the next expiration
 - [cpburnz/python-pathspec #151](https://github.com/cpburnz/python-pathspec/pull/151) — Preserve externally compiled regex flags during backend selection
-- [brainix/pottery #856](https://github.com/brainix/pottery/pull/856) — Remove stale RedisSimpleQueue from __all__
-- [brainix/pottery #857](https://github.com/brainix/pottery/pull/857) — Fix RedisDeque.rotate() when abs(n) > len(d)
+- [brainix/pottery #856](https://github.com/brainix/pottery/pull/856) — Remove stale RedisSimpleQueue from \_\_all\_\_
+- [brainix/pottery #857](https://github.com/brainix/pottery/pull/857) — Fix RedisDeque.rotate() when abs(n) \> len(d)
 - [nushell/nushell #19108](https://github.com/nushell/nushell/pull/19108) — fix(math variance): use a numerically stable two-pass formula for numbers
 - [nushell/nushell #19127](https://github.com/nushell/nushell/pull/19127) — fix(math log): reject invalid bases and a NaN input value
 - [nushell/nushell #19107](https://github.com/nushell/nushell/pull/19107) — fix(bytes remove): keep input unchanged when --end pattern is not found
@@ -49,6 +49,6 @@ Public merged PRs from the maintainer and agent accounts. Account-level records 
 - [quinn-rs/quinn #2903](https://github.com/quinn-rs/quinn/pull/2903) — congestion: avoid double-reducing CUBIC ssthresh on persistent congestion
 - [tokio-rs/tokio #8526](https://github.com/tokio-rs/tokio/pull/8526) — net: treat ENOTCONN as success in UnixStream::shutdown
 - [python-poetry/tomlkit #613](https://github.com/python-poetry/tomlkit/pull/613) — Render tz-aware times as local times without an offset
-- [python-poetry/tomlkit #612](https://github.com/python-poetry/tomlkit/pull/612) — Escape content appended to a String via __add__
+- [python-poetry/tomlkit #612](https://github.com/python-poetry/tomlkit/pull/612) — Escape content appended to a String via \_\_add\_\_
 - [fabiocaccamo/python-benedict #604](https://github.com/fabiocaccamo/python-benedict/pull/604) — query-string: keep keys with empty values (a=) instead of dropping them
 - [CaramelizedCUDA/epub-start #2](https://github.com/CaramelizedCUDA/epub-start/pull/2) — fix(protocol): percent-decode resource URI paths before archive lookup
