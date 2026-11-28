@@ -1034,9 +1034,11 @@ await evalJs(`document.querySelector("#stageWorkBtn").click(); true`);
 await waitFor(
   `!__yanStage.state.session && document.querySelector('#workStrips [data-work-dir$="/工作区-舞台"]')?.getAttribute("aria-expanded") === "true"`
 );
-await waitFor(`!!document.querySelector('#workStrips [data-work-file$="/笔记.md"]')`, 8000).catch(() => {});
 const beforeWorkFile = await evalJs(`__yanStage.state.tabs.get(__yanStage.state.current)?.url || ""`);
-await evalJs(`document.querySelector('#workStrips [data-work-file$="/笔记.md"]').click(); true`);
+// 等文件出现并在同一次求值中打开：目录异步重画不会让点击落在已移除的行上。
+await waitFor(
+  `(() => { const row = document.querySelector('#workStrips [data-work-file$="/笔记.md"]'); if (!row) return false; row.click(); return true; })()`
+);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 check(
   "workspace file opens in the stage panel, not over the page",
