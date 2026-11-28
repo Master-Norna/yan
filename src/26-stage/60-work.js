@@ -230,7 +230,11 @@ async function workRefresh() {
       workPaint();
       return;
     }
-    const data = await bridge("/api/archive/list", { root: work.root, scratch: false, depth: 1, workspace: true }, AbortSignal.timeout(8000));
+    const data = await bridge(
+      "/api/archive/list",
+      { root: work.root, scratch: false, depth: 1, workspace: true },
+      AbortSignal.timeout(8000)
+    );
     if (rev !== work.rev) return;
     work.entries = data.entries || [];
     work.dirs = data.dirs || [];
@@ -253,7 +257,8 @@ async function workRefresh() {
       }
       return true;
     });
-    for (let i = 0; i < paths.length && rev === work.rev; i += 4) await Promise.all(paths.slice(i, i + 4).map(path => workLoadBranch(path)));
+    for (let i = 0; i < paths.length && rev === work.rev; i += 4)
+      await Promise.all(paths.slice(i, i + 4).map(path => workLoadBranch(path)));
   }
 }
 /** 一条簿录 @typedef {{ dir: boolean, name: string, path: string, where?: string, note?: string, size?: number|null, when?: string, state?: string }} WorkRow */
