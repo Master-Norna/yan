@@ -1179,7 +1179,12 @@ defineLayer({
     closeFileViewer();
   }
 });
-defineLayer({ name: "file", rank: 120, open: () => isShown("#fileViewer") && (viewerHost !== "stage" || !!$("#fileViewer").contains(document.activeElement)), close: () => {
-  if (viewerHost === "stage" && work.active >= 0) workCloseTab(work.active);
-  else closeFileViewer();
-} });
+defineLayer({
+  name: "file",
+  rank: 120,
+  open: () => isShown("#fileViewer") && (viewerHost !== "stage" || !!$("#fileViewer").contains(document.activeElement)),
+  close: () => {
+    if (viewerHost === "stage" && work.active >= 0) workCloseTab(work.active);
+    else closeFileViewer();
+  }
+});
