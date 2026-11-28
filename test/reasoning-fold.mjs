@@ -34,7 +34,7 @@ check(
 // 用户亲手摊开的，重画后照旧摊开，不替他收
 await evalJs(`${reasoning}.querySelector("summary").click(); true`);
 await sleep(800);
-const kept = await evalJs(`__yanState().conversations[0].messages.at(-1).reasoningTouched === true && ${reasoning}.open`);
+const kept = await evalJs(`__yanState().conversations[0].messages.at(-1).firstThoughtOpen === true && ${reasoning}.open`);
 check("a reasoning block the user opened by hand stays open", kept);
 await close();
 process.exit(0);

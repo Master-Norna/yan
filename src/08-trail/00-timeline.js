@@ -1,5 +1,14 @@
 // 言 · 行迹 · 时间线：用了工具的答画成一条时间线——分组、题头与用时，帮手各轮的折叠
 // 本文件是 support.js 的一段，由桥接按文件名顺序拼进同一个闭包；无需模块系统
+function compactTrail() {
+  return store.settings.compactTrail === true;
+}
+// 重画可见回复，沿用原有就地更新，不重建正文或覆盖手动开合状态。
+function refreshTrailAppearance() {
+  renderConversation();
+  if (isShown("#sidePanel")) renderSidePanel();
+  if (helperPanelOpen()) renderHelperPanel();
+}
 function toolStackLabel() {
   return t("行迹");
 }

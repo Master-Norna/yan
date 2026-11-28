@@ -151,6 +151,7 @@
  * @property {Deliverable[]} [deliverables] 这一答交给人看的成品（答复里链到的本机文件，见 replyDeliverables）
  * @property {boolean} [toolsOpen]
  * @property {boolean} [toolsTouched]
+ * @property {boolean} [firstThoughtOpen] 首段思绪的手动开合（进了行迹仍是同一段）
  * @property {boolean} [reasoningOpen]
  * @property {boolean} [reasoningTouched]
  * @property {string} [summary] 压缩分隔上的摘要
@@ -225,6 +226,7 @@
  * @property {"light"|"dark"|"system"} theme
  * @property {"zh"|"en"} [language] 界面语言；没选过的随浏览器
  * @property {"on"|"off"|"system"} inkMotion
+ * @property {boolean} compactTrail 默认收起思绪与各步骤输出，不改变整段行迹的开合
  * @property {"sans"|"serif"|"mixed"|"kai"|"fangsong"} font
  * @property {string} accent
  * @property {string} activeProfileId 默认模型：新对话起手用它；只在设置里「设为默认」时改，打开旧对话、在菜单里换模型都不动它

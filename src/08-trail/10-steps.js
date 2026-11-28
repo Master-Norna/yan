@@ -45,11 +45,19 @@ function plainStepHtml(step, title) {
           ? `<div class="tool-note">${escapeHtml(stepText(step.note))}</div>`
           : "");
   const status = step.status || "done",
-    foldable = !!body,
+    shots = stepShotsHtml(step),
+    compactShots = compactTrail() && !!shots,
+    foldable = !!body || compactShots,
     folded = foldable && (step.expanded === undefined ? true : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? t("展开") : t("收起")}"` : ""}><span class="tool-label">${escapeHtml(step.label ? t(step.label) : toolLabel(step.name))}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(stepText(step.result) || t("工具执行失败")) : ""}">${status === "running" ? escapeHtml(TOOLS.get(step.name)?.busy || t("查阅中")) : status === "error" ? escapeHtml(stepText(step.result) || t("失败")) : escapeHtml(stepText(step.result) || "")}</span>${stepStateHtml(status)}</div>${stepShotsHtml(step)}${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${compactShots ? " compact-shots" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`<span class="tool-label">${escapeHtml(step.label ? t(step.label) : toolLabel(step.name))}</span><span class="tool-title">${escapeHtml(title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(stepText(step.result) || t("工具执行失败")) : ""}">${status === "running" ? escapeHtml(TOOLS.get(step.name)?.busy || t("查阅中")) : status === "error" ? escapeHtml(stepText(step.result) || t("失败")) : escapeHtml(stepText(step.result) || "")}</span>${stepStateHtml(status)}`, foldable, folded)}${shots}${body}</div>`;
 }
-// 工具交回的画面（游目截图之类）：折起时也露着——画面就是这一步的结果；点开进图片查看器
+// 能开合的题头本身就是按钮：鼠标和键盘同走委托的 click，不另外安一个控件。
+function stepHeadHtml(inner, expandable, folded) {
+  return expandable
+    ? `<button type="button" class="tool-step-head" aria-expanded="${!folded}">${inner}</button>`
+    : `<div class="tool-step-head">${inner}</div>`;
+}
+// 工具交回的画面（游目截图之类）：普通模式折起时也露着；简约模式随详情开合。点开进图片查看器
 /** @param {Step} step */
 function stepShotsHtml(step) {
   const shots = (step.attachments || []).filter(file => file.kind === "image" && file.id);
@@ -88,6 +96,9 @@ function delegateSubState(step) {
       .join(" · ")
   };
 }
+// 开合就地改 DOM 时，也能更新这份签名；不凭节点所在面板猜它用的是哪一本台账。
+/** @type {WeakMap<Element, { html: string, hasBody: boolean, status: Step["status"] }>} */
+const stepPaints = new WeakMap();
 // 步骤按 id 就地更新：没变的节点一律不动（转圈不重启、已展开的结果不跳）；新步骤淡入上移，结果首次出现或状态翻转时只让那一条轻浮。
 // 主行迹与帮手的时间线都走这里；差遣卡片本身不整张换，交给 syncDelegateCard。animate 为假（整条刚画出来）时只记台账，不起动效
 /** @param {Step} step */
@@ -113,7 +124,9 @@ function syncStep(list, step, seen, animate = true) {
     if (hasBody && !prev.hasBody) el.classList.add("body-new");
     if (prev.status !== step.status) el.classList.add("status-new");
   }
-  seen.set(step.id, { html, hasBody, status: step.status });
+  const paint = { html, hasBody, status: step.status };
+  stepPaints.set(el, paint);
+  seen.set(step.id, paint);
 }
 // 这一答里还在做的帮手（差遣与续派的那几趟，可能同时有几名）
 /** @param {Message} message */
@@ -209,9 +222,9 @@ function workStepHtml(step, title) {
       : `<button type="button" class="tool-more" data-step-more>${more}</button>`;
   const foldable = !!body && status !== "pending",
     // 有红绿可看的（写入、修改）默认摊开，与文件大小无关；目录清单也摊开。其余折起
-    openByDefault = status !== "error" && (!!parts || step.name === "list_files"),
+    openByDefault = !compactTrail() && status !== "error" && (!!parts || step.name === "list_files"),
     folded = foldable && (step.expanded === undefined ? !openByDefault : !step.expanded);
-  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"${foldable ? ` title="${folded ? t("展开输出") : t("收起输出")}"` : ""}><span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command && !gist ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(gist || title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || t("执行失败")) : ""}">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+  return `<div class="tool-step${folded ? " folded" : ""}${foldable ? " foldable" : ""}${step.readOnly ? " is-read-only" : ""}" data-tool="${escapeHtml(step.name)}" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}">${stepHeadHtml(`<span class="tool-label">${escapeHtml(toolLabel(step.name))}</span><span class="tool-title${command && !gist ? " tool-cmd" : ""}" title="${escapeHtml(title)}">${escapeHtml(gist || title)}</span><span class="tool-meta" title="${status === "error" ? escapeHtml(step.result || t("执行失败")) : ""}">${meta}</span>${stepStateHtml(status)}`, foldable, folded)}${body}</div>`;
 }
 // 步骤有了变动（入册、跑完、请示、帮手有进展）：照这一答此刻的样子重画，工作条与差遣面板跟着更新
 /** @param {Message} assistant */
@@ -320,17 +333,20 @@ function bindTrailEvents() {
     }
     // 差遣的签不在此列：点它是去右侧开面板，不是折叠（见 openHelperPanel）
     const head = event.target.closest(".tool-step.foldable > .tool-step-head");
-    if (!head || event.target.closest("a, button")) return;
+    if (!head || event.target.closest("a, button") !== head) return;
     const el = head.parentElement,
       step = stepInView(el.dataset.stepId);
     // 指令输出默认折起，开合记在步骤上，重画不丢
     const wasFolded = el.classList.contains("folded");
     if (step) {
+      const paint = stepPaints.get(el),
+        current = paint && paint.html === stepHtml(step);
       step.expanded = wasFolded;
       thawStep(step);
+      if (current) paint.html = stepHtml(step);
     }
     morphHeight(el, () => el.classList.toggle("folded", !wasFolded));
-    head.title = wasFolded ? t("收起输出") : t("展开输出");
+    head.setAttribute("aria-expanded", String(wasFolded));
     saveStoreSoon();
   };
   const showStepInFull = (el, restoreFocus) => {
@@ -387,8 +403,10 @@ function bindTrailEvents() {
     // 用户亲手动了，程序排着的那次自动收起作废
     clearTimeout(details._settleTimer);
     details._settleTimer = null;
-    // 时间线里各轮的思绪与帮手各轮的步骤不记在消息上；用户开合过的记一笔，就地更新时不再替它开合
-    if (details.classList.contains("trail-reasoning") || details.classList.contains("sub-steps")) {
+    // 只有主答的首段思绪会从独立块移入时间线：记在消息自己的字段上，不借给后面的思绪。
+    const first = details.hasAttribute("data-first-thought");
+    // 其余各轮的思绪与帮手各轮的步骤留在节点上，就地更新时不再替它开合。
+    if (!first && (details.classList.contains("trail-reasoning") || details.classList.contains("sub-steps"))) {
       details.dataset.touched = "1";
       return setProcessDetails(details, nextOpen);
     }
@@ -399,8 +417,17 @@ function bindTrailEvents() {
     if (!message) return setProcessDetails(details, nextOpen);
     const reasoning = details.classList.contains("reasoning"),
       unread = reasoning && details.hasAttribute("data-cold-reasoning");
-    message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
-    message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
+    if (first) {
+      message.firstThoughtOpen = nextOpen;
+      // 旧记录的独立思绪也用过这对字段；在还没有行迹时，它们不可能属于后段。
+      if (!message.steps?.length) {
+        delete message.reasoningOpen;
+        delete message.reasoningTouched;
+      }
+    } else {
+      message[reasoning ? "reasoningTouched" : "toolsTouched"] = true;
+      message[reasoning ? "reasoningOpen" : "toolsOpen"] = nextOpen;
+    }
     saveStoreSoon();
     setProcessDetails(details, nextOpen, !unread);
     if (unread && nextOpen && c) void warmInView(c, message);

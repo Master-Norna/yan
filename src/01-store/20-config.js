@@ -364,6 +364,7 @@ function adoptConfig(config, savedAt, base = "", { preserveEditor = true } = {})
   // 所以接在这一处，不只补合并那条分支
   const editing = preserveEditor ? editingMemoryCategory() : null,
     live = editing ? store.memory?.items?.find(item => item.category === editing) : null;
+  const trailChanged = store.settings.compactTrail !== meta.settings.compactTrail;
   store.settings = meta.settings;
   store.profiles = meta.profiles;
   store.memory = meta.memory;
@@ -376,6 +377,7 @@ function adoptConfig(config, savedAt, base = "", { preserveEditor = true } = {})
   metaHash = hashText(adopted);
   writeMeta({ disk: false });
   applyAppearance();
+  if (trailChanged) refreshTrailAppearance();
   renderHeader();
   renderHistory();
   renderQuota();
