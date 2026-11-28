@@ -49,11 +49,13 @@ const work = {
 };
 
 // 编辑稿留在本页内存，切换页签、浏览器、对话不会抹去未保存的字。
-/** @type {Map<string, {scope:{workdir:string,path:string,roam:boolean}, base:string, text:string, sig:string, saving:boolean, office?:{parts:Record<string,string>, extension:string, labels:string[]}}>} */
+/** @type {Map<string, {scope:{workdir:string,path:string,roam:boolean}, base:string, text:string, sig:string, saving:boolean, sent?:string, office?:{parts:Record<string,string>, extension:string, labels:string[]}}>} */
 const workDrafts = new Map();
 function workDirty(path) {
   const draft = workDrafts.get(path);
-  return !!draft && draft.base !== draft.text;
+  // 保存中另有一份已交出去的快照：回执未到之前，即便输入又改回旧文（与 base 相同），盘上也可能已写成提交的那份，
+  // 这一答还没结清，离页仍需拦（见 workSaveEditor）。
+  return !!draft && (draft.base !== draft.text || (draft.saving && draft.sent !== undefined && draft.sent !== draft.text));
 }
 function workCanEdit(tab) {
   if (!tab || tab.diff) return false;
@@ -149,6 +151,8 @@ async function workSaveEditor(tab) {
   if (!draft || draft.saving || !workDirty(tab.path)) return;
   const text = draft.text;
   draft.saving = true;
+  // 记下真正提交出去的那一份：回执到之前输入改回去，未结清的仍是这一份。
+  draft.sent = text;
   try {
     const data = await bridge(
       "/api/work/write",
@@ -174,6 +178,7 @@ async function workSaveEditor(tab) {
     toast(t`保存失败：${String(/** @type {any} */ (error).message || error).slice(0, 120)}`);
   } finally {
     draft.saving = false;
+    delete draft.sent;
   }
 }
 
