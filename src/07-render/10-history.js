@@ -7,8 +7,8 @@ function renderHistory() {
     String(c.title).toLowerCase().includes(query) ||
     (c.messages || []).some(m => typeof m.content === "string" && m.content.toLowerCase().includes(query));
   const sorted = [...store.conversations].filter(matches).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  // 一条时间线：绑了目录的对话归在各自的「工」组里，组按组内最近动过的那条排（一条有动静，整组靠前），组内按时间；
-  // 自立的分组（「集」）同样按组内最近动过的那条排，空组按立组的时间，与「工」组同一排法；没绑目录的对话按自己的时间散在其间；置顶另列。
+  // 一条时间线：绑了目录的对话归在各自的「工」组里，组按组内最近动过的那条排（一条有动静，整组靠前），组内置顶优先，其余按时间；
+  // 自立的分组（「集」）同样按组内最近动过的那条排，空组按立组的时间，与「工」组同一排法；没绑目录的对话按自己的时间散在其间；散列对话置顶另列。
   // 落选的：分组在置顶之下自成一段（组一多，刚写的对话被压到下面，且与置顶之间没有界线，看着像置顶的一部分）。
   // 组可收起，收起即整组收起（连同正开着的那条）；正开着的那条在组里时，组首标出「在此」，收起了也知道自己在哪。
   // 落选：收起时单留当前那条——看着像只收了别的几条，怪。查找时不收，也不列没有命中的组
@@ -75,7 +75,7 @@ function renderHistory() {
       editing && renamingTyped && keyOf(editing) === renamingKey
         ? { initial: editing.defaultValue, value: editing.value, start: editing.selectionStart, end: editing.selectionEnd }
         : null;
-  const item = (c, inGroup = false) => {
+  const item = c => {
     if (renamingKey === `chat:${c.id}`)
       return `<div class="history-item active" data-conversation="${escapeHtml(c.id)}"><input class="history-rename" value="${escapeHtml(c.title)}" maxlength="60" aria-label="${t(`重命名对话`)}"></div>`;
     // 这一答写完了、帮手还在后台做，也算在忙；帮手的请示没有哪一答替它挂「等待确认」，按请示本身认
@@ -89,17 +89,17 @@ function renderHistory() {
         ? `<span class="history-state running" title="${runningTip}" aria-label="${runningTip}"></span>`
         : c.unread
           ? `<span class="history-state unread" title="${t(`有新答复`)}" aria-label="${t(`有新答复`)}"></span>`
-          : c.pinned && inGroup
-            ? `<span class="history-state pinned" title="${t(`组内置顶`)}" aria-label="${t(`组内置顶`)}"></span>`
+          : c.pinned
+            ? `<span class="history-state pinned" title="${t(`置顶`)}" aria-label="${t(`置顶`)}"></span>`
             : "";
-    return `<div class="history-item ${c.id === currentId ? "active" : ""} ${running ? "is-running" : ""} ${c.unread ? "has-unread" : ""} ${isWork(c) ? "is-work" : ""}" data-conversation="${escapeHtml(c.id)}" draggable="true"><button class="history-open" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>${state}<span class="history-tools"><button class="history-tool history-more" data-history-action="menu" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></span></div>`;
+    return `<div class="history-item ${c.id === currentId ? "active" : ""} ${running ? "is-running" : ""} ${c.unread ? "has-unread" : ""}" data-conversation="${escapeHtml(c.id)}" draggable="true"><button class="history-open" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</button>${state}<span class="history-tools"><button class="history-tool history-more" data-history-action="menu" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></span></div>`;
   };
   // 「工」组：印文是「工」，名字默认取目录末段（「⋯」→ 改名只改这里显示的字，真实目录见悬停）；
   // 组首右侧「＋」在此目录另起一纸、「⋯」改名与删除；两处组首同一套画法，只是数据源不同（目录由对话的 workdir 派生）
   const repoHtml = node => {
     const title = workdirTitle(node.dir),
       fold = collapsed.has(node.dir) && !query,
-      shown = fold ? [] : node.items,
+      shown = fold ? [] : [...node.items].sort(compareHistoryMembers),
       here = fold && node.items.some(c => c.id === currentId),
       running = node.items.filter(c => requestJob(c.id)).length,
       renaming = renamingKey === node.dir,
@@ -114,14 +114,14 @@ function renderHistory() {
     const { group } = node,
       key = `group:${group.id}`,
       fold = collapsed.has(key) && !query,
-      items = [...node.items].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
+      items = [...node.items].sort(compareHistoryMembers),
       shown = fold ? [] : items,
       here = fold && items.some(c => c.id === currentId),
       renaming = renamingKey === key;
     const name = renaming
       ? `<input class="history-rename group-rename" value="${escapeHtml(group.name)}" maxlength="40" aria-label="${t(`分组改名`)}">`
       : `<span class="history-repo-name">${escapeHtml(group.name)}</span>`;
-    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}${here ? " holds-current" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">${t(`集`)}</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="${t(`在此组新建`)}">＋</button><button type="button" class="history-tool repo-new repo-more" data-group-menu="${escapeHtml(group.id)}" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(c => item(c, true)).join("")}</div>` : ""}</div>`;
+    return `<div class="history-repo-group is-set${fold ? " collapsed" : ""}${here ? " holds-current" : ""}" data-group="${escapeHtml(group.id)}"><div class="history-repo-head"><div role="button" tabindex="0" class="history-repo" data-group-toggle="${escapeHtml(group.id)}" aria-expanded="${fold ? "false" : "true"}"><span class="repo-seal" aria-hidden="true">${t(`集`)}</span>${name}<small>${node.items.length}</small><span class="repo-caret" aria-hidden="true">›</span></div><button type="button" class="history-tool repo-new" data-group-new="${escapeHtml(group.id)}" title="${t(`在此组新建`)}">＋</button><button type="button" class="history-tool repo-new repo-more" data-group-menu="${escapeHtml(group.id)}" title="${t(`更多`)}" aria-label="${t(`更多`)}" aria-haspopup="menu">⋯</button></div>${shown.length ? `<div class="history-repo-items">${shown.map(c => item(c)).join("")}</div>` : ""}</div>`;
   };
   renderingHistory = true;
   try {
