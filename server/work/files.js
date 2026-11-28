@@ -13,12 +13,10 @@ const writeTextAtomic = require("./atomic.js");
 const WORK_FILE_LIMIT = 200000;
 // 编辑器只取可无损写回的完整原文，不把模型读到的带行号截断内容当原件。
 function editorText(buffer, decoded) {
-  if (!decoded || !encodeText(decoded.text, decoded.encoding)?.equals(buffer))
-    throw Error("此文件不能无损编辑");
+  if (!decoded || !encodeText(decoded.text, decoded.encoding)?.equals(buffer)) throw Error("此文件不能无损编辑");
   const text = decoded.text;
   if (text.length > WORK_FILE_LIMIT) throw Error("文件超过编辑上限（20 万字）");
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text) || /\r(?!\n)/.test(text) ||
-      (text.includes("\r\n") && /(^|[^\r])\n/.test(text)))
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text) || /\r(?!\n)/.test(text) || (text.includes("\r\n") && /(^|[^\r])\n/.test(text)))
     throw Error("此文件含特殊控制字符或混合换行，不能无损编辑");
   return text.replace(/\r\n/g, "\n");
 }
@@ -35,7 +33,10 @@ module.exports = function createFiles(work) {
       file = await targetOf(workdir, body, { write: true });
     if (file === workdir) throw Error("请给出文件名");
     const content = String(body.content ?? "");
-    if (body.editor === true && (typeof body.content !== "string" || typeof body.seen !== "string" || !body.seen || content.length > WORK_FILE_LIMIT))
+    if (
+      body.editor === true &&
+      (typeof body.content !== "string" || typeof body.seen !== "string" || !body.seen || content.length > WORK_FILE_LIMIT)
+    )
       throw Error("编辑保存须带原文件指纹及完整正文（不超过 20 万字）");
     if (Buffer.byteLength(content) > 32 * 1024 * 1024) throw Error("单个文件不超过 32 MB");
     const release = await lockFile(file, signal);
