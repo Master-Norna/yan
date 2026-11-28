@@ -67,3 +67,24 @@ test("行迹动作图标按工具名区分，标签保留并转义", () => {
   assert.doesNotMatch(unknown, /<svg/);
   assert.match(unknown, /&lt;外部&gt;/);
 });
+
+test("请示、撮要、图、MCP、计划各有一枚不同的小画，专用卡片实际使用它们", () => {
+  const { trailLabelHtml, askStepHtml, foldStepHtml, intentStepHtml, planStepHtml } = load([
+    "trailLabelHtml", "askStepHtml", "foldStepHtml", "intentStepHtml", "planStepHtml"
+  ]);
+  const icon = html => html.match(/<svg[^>]*class="brush trail-kind-icon"[^>]*>.+?<\/svg>/)?.[0];
+  const example = { id: "s", title: "检查", status: "done" };
+  const symbols = [
+    icon(askStepHtml(example)),
+    icon(foldStepHtml(example)),
+    icon(intentStepHtml(example, "update_intent")),
+    icon(trailLabelHtml("mcp_call", "MCP")),
+    icon(planStepHtml(example))
+  ];
+  assert.ok(symbols.every(Boolean));
+  assert.equal(new Set(symbols).size, 5);
+  for (const name of ["mcp_describe", "mcp_config", "mcp__github__search"]) {
+    assert.equal(icon(trailLabelHtml(name, "GitHub")), symbols[3]);
+  }
+  assert.equal(icon(intentStepHtml(example, "intent_gate")), symbols[2]);
+});
