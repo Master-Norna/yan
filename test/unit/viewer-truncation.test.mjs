@@ -75,3 +75,19 @@ test("真截断的一截：末尾解不出的字照旧退掉", async () => {
     globalThis.fetch = original;
   }
 });
+
+test("超大 HTML 降级为截断源码，不运行残缺的交互网页", async () => {
+  const f = load(["fileViewerBody"]),
+    source = "<script>" + "x".repeat(2000000) + "</script>",
+    reader = {
+      text: async limit => {
+        assert.equal(limit, 2000000);
+        return source.slice(0, limit + 1);
+      }
+    };
+  const html = await f.fileViewerBody(reader, "大网页.html", "html", -1);
+  assert.match(html, /网页过大，仅显示前 20 万字源码/);
+  assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<iframe|<script>/);
+  assert.ok(html.length < 201000);
+});
