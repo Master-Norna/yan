@@ -22,7 +22,7 @@ const { send, evalJs, waitFor, shot, close } = await connect();
 await send("Page.navigate", { url: PAGE + "preview.html" });
 await sleep(600);
 // 一个目录里四段：其中一段置顶、一段虽绑着这个目录却已归进「集」组；另一目录一段。
-// 后两段在侧栏都不属于这一目录组，删组时不该被带走
+// 置顶留在目录组内，归进「集」的另列；二者仍受批量删除保护
 const seed = {
   version: 5,
   settings: {
@@ -48,7 +48,8 @@ const seed = {
   conversations: [
     conversation("w-new", "组里最新", at(5), here),
     conversation("w-old", "组里旧的", at(20), here),
-    conversation("pinned", "置顶的", at(1), here, { pinned: true }),
+    conversation("pinned", "置顶的", at(25), here, { pinned: true }),
+    conversation("global-pin", "散列置顶", at(1), "", { pinned: true }),
     conversation("grouped", "归组的", at(2), here, { groupId: "g1", pinned: true }),
     conversation("loose", "散列的", at(4)),
     conversation("away", "别处的", at(10), elsewhere)
@@ -72,7 +73,11 @@ check(
   await evalJs(`(() => {
     const row = id => document.querySelector('#history [data-conversation="' + id + '"]');
     return row("w-new")?.closest("[data-repo]")?.dataset.repo === ${JSON.stringify(here)} &&
-      row("pinned")?.closest(".history-group")?.querySelector(".history-label")?.textContent === "置顶" &&
+      row("global-pin")?.closest(".history-group")?.querySelector(".history-label")?.textContent === "置顶" &&
+      !!row("global-pin")?.querySelector(".history-state.pinned") &&
+      row("pinned")?.closest("[data-repo]")?.dataset.repo === ${JSON.stringify(here)} &&
+      row("pinned")?.parentElement?.firstElementChild === row("pinned") &&
+      !!row("pinned")?.querySelector(".history-state.pinned") &&
       row("grouped")?.closest("[data-group]")?.dataset.group === "g1" &&
       !!row("grouped")?.querySelector(".history-state.pinned") &&
       !row("loose")?.closest("[data-repo], [data-group]") && !!row("loose");
@@ -130,11 +135,12 @@ const asked = await evalJs(
   `({ title: document.querySelector("#confirmTitle").textContent, body: document.querySelector("#confirmBody").textContent })`
 );
 check(
-  "删除先问一句：几段对话连附件走、目录里的文件不动、置顶或归组的不在其中",
+  "删除先问一句：几段对话连附件走、目录里的文件不动、置顶与另组的分别提示保护",
   asked.title.includes("言记") &&
     asked.body.includes("2 段对话") &&
     asked.body.includes("目录里的文件不动") &&
-    asked.body.includes("另有 2 段置顶或已归入分组的对话"),
+    asked.body.includes("另有 1 段组内置顶对话") &&
+    asked.body.includes("另有 1 段已归入分组的对话"),
   JSON.stringify(asked)
 );
 await evalJs(`document.querySelector("#confirmOk").click(); true`);
@@ -143,12 +149,14 @@ const after = await evalJs(
   `(s => ({ left: s.conversations.map(c => c.id).sort(), grouped: s.conversations.find(c => c.id === "grouped")?.groupId, groups: s.settings.groups.map(g => g.name), repos: [...document.querySelectorAll("#history .history-repo-group[data-repo]")].map(n => n.dataset.repo), loose: [...document.querySelectorAll("#history .history-item[data-conversation]")].map(n => n.dataset.conversation).sort() }))(__yanState())`
 );
 check(
-  "删掉整组：组里的两段没了，置顶的、别处的、已归进「集」组的都还在，那一组也散了",
-  after.left.join() === "away,grouped,loose,pinned" &&
+  "删掉整组：组里的两段没了，置顶的、别处的、已归进「集」组的都还在，目录组保留置顶的那段",
+  after.left.join() === "away,global-pin,grouped,loose,pinned" &&
     after.grouped === "g1" &&
     after.groups.join() === "诗书" &&
-    after.repos.join() === elsewhere &&
-    after.loose.join() === "away,grouped,loose,pinned",
+    after.repos.length === 2 &&
+    after.repos.includes(here) &&
+    after.repos.includes(elsewhere) &&
+    after.loose.join() === "away,global-pin,grouped,loose,pinned",
   JSON.stringify(after)
 );
 check("删除只动对话，目录里的文件一个不碰", existsSync(`${here}/笔记.md`));

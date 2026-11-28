@@ -329,10 +329,6 @@ html[data-sidebar="collapsed"] .sidebar .wide {
   );
   pointer-events: none;
 }
-/* 组内的对话不再各自打「行」印，组头的「工」已说明 */
-.history-repo-items .history-item.is-work .history-open:before {
-  display: none;
-}
 .history-repo-group.collapsed .history-repo-items {
   padding-top: 0;
 }

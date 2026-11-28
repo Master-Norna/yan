@@ -24,6 +24,8 @@ function setup(conversations) {
     "store",
     "remoteBusy",
     "removeWorkdirGroup",
+    "historyPlacement",
+    "compareHistoryMembers",
     "deleteConversation",
     `install: (confirm, deleted, files, notices) => {
       askConfirm = confirm;
@@ -114,3 +116,28 @@ for (const kind of ["目录组", "单条"]) {
     assert.equal(notices.at(-1), kind === "目录组" ? "这一组已没有对话" : "此对话正在另一页面作答，暂不能删除");
   });
 }
+
+test("置顶不改变目录或显式分组归属，组内先置顶再按时间", () => {
+  const { f } = setup([]);
+  const older = conversation("older", { pinned: true, updatedAt: "2026-11-13T00:00:00Z" });
+  const newer = conversation("newer");
+  assert.equal(f.historyPlacement(older), "repo");
+  assert.equal(f.historyPlacement({ ...older, groupId: "g1" }), "set");
+  assert.equal(f.historyPlacement({ ...older, workdir: "" }), "pinned");
+  assert.equal(f.historyPlacement({ ...newer, workdir: "" }), "chat");
+  assert.deepEqual(
+    [newer, older].sort(f.compareHistoryMembers).map(c => c.id),
+    ["older", "newer"]
+  );
+  assert.deepEqual(
+    [older, { ...newer, pinned: true }].sort(f.compareHistoryMembers).map(c => c.id),
+    ["newer", "older"]
+  );
+});
+
+test("只剩置顶的目录组不会批量删除", async () => {
+  const { f, deleted, notices } = setup([conversation("pinned", { pinned: true })]);
+  await f.removeWorkdirGroup(dir);
+  assert.deepEqual(deleted, []);
+  assert.equal(notices.at(-1), "此组只有置顶对话，暂不删除");
+});
