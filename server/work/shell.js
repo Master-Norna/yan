@@ -227,10 +227,13 @@ module.exports = function createShell({ toolEnv }) {
     const lease = terminalLeases.get(job);
     if (!lease || job.exitCode !== null) return;
     clearTimeout(lease.timer);
-    lease.timer = setTimeout(() => {
-      job.timedOut = true;
-      killTree(job.child);
-    }, Math.max(0, Math.min(15000, lease.deadline - Date.now())));
+    lease.timer = setTimeout(
+      () => {
+        job.timedOut = true;
+        killTree(job.child);
+      },
+      Math.max(0, Math.min(15000, lease.deadline - Date.now()))
+    );
     lease.timer.unref();
   }
   function startBackground(command, workdir, boxed, seatbelt = false, terminal = false) {
