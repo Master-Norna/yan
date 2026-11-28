@@ -1,5 +1,38 @@
 // Office 编辑只暴露可独立写回的文字与单元格，不将抽出的 Markdown 当原件。
 /** @typedef {{part:string,label:string,value:string,related:string[],set:(value:string)=>void}} OfficeField */
+// ODF 的空白不按 XML 原样显示：段落首尾的空白与连续空格会被折叠，额外的空格要用 <text:s text:c="n"/>
+// 表示（ODF 1.3 §6.1.2–6.1.3）。读只认由纯文字与 text:s 组成的段落——文字里带首尾/连续空格、tab、
+// 换行或别的元素就返回 null，不开放这一段，免得把显示值读歪；写把空格一律编成 text:s，文字节点里不留空格，
+// 存出去再读回来还是同一串。
+const ODF_TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
+function odfText(node) {
+  let text = "";
+  for (const child of node.childNodes) {
+    if (child.nodeType === 3) {
+      const value = child.textContent;
+      if (/  |^ | $/.test(value) || /[\u0000-\u001f]/.test(value)) return null;
+      text += value;
+    } else if (child.localName === "s" && child.namespaceURI === ODF_TEXT_NS && !child.children.length) {
+      const count = Number(child.getAttributeNS(ODF_TEXT_NS, "c") || 1);
+      if (!Number.isSafeInteger(count) || count < 1 || count > 1000000) return null;
+      text += " ".repeat(count);
+    } else return null;
+  }
+  return text;
+}
+function setOdfText(node, value) {
+  const doc = node.ownerDocument,
+    prefix = node.prefix || "text";
+  while (node.firstChild) node.removeChild(node.firstChild);
+  for (const part of value.split(/( +)/)) {
+    if (!part) continue;
+    if (/^ +$/.test(part)) {
+      const space = doc.createElementNS(ODF_TEXT_NS, `${prefix}:s`);
+      if (part.length > 1) space.setAttributeNS(ODF_TEXT_NS, `${prefix}:c`, String(part.length));
+      node.appendChild(space);
+    } else node.appendChild(doc.createTextNode(part));
+  }
+}
 function officeEditorModel(parts, extension) {
   /** @type {Map<string, Document>} */
   const docs = new Map(Object.entries(parts).map(([name, xml]) => [name, parseXml(String(xml))]));
@@ -179,14 +212,22 @@ function officeEditorModel(parts, extension) {
     if (extension === "odt") {
       const paragraphs = [...body.getElementsByTagNameNS(textNS, "*")].filter(node => ["p", "h"].includes(node.localName));
       for (const [i, node] of paragraphs.entries()) {
-        if (simpleText(node) && !inside(node, ["tracked-changes", "annotation", "section"]))
-          add(part, t("段落") + " " + (i + 1), node.textContent, value => {
-            node.textContent = value;
-          });
+        const value = odfText(node);
+        if (value !== null && !inside(node, ["tracked-changes", "annotation", "section"]))
+          add(part, t("段落") + " " + (i + 1), value, value => setOdfText(node, value));
       }
     } else {
       for (const table of body.getElementsByTagNameNS(tableNS, "table")) {
         if (inside(table, ["table"]) || table.getAttributeNS(tableNS, "protected") === "true") continue;
+        // 矩阵公式只在锚格写 table:formula 与 matrix 跨度，覆盖范围内的结果格看着像普通数据格；
+        // 改写它们会拆掉矩阵，整张表留给本机程序，与 XLSX 的数组公式同一种处理。
+        if (
+          [...table.getElementsByTagNameNS(tableNS, "table-cell")].some(
+            cell =>
+              cell.hasAttributeNS(tableNS, "number-matrix-columns-spanned") || cell.hasAttributeNS(tableNS, "number-matrix-rows-spanned")
+          )
+        )
+          continue;
         let r = 0;
         for (const row of table.getElementsByTagNameNS(tableNS, "table-row")) {
           if (inside(row, ["table-cell"])) continue;
@@ -208,13 +249,13 @@ function officeEditorModel(parts, extension) {
               !cell.hasAttributeNS(tableNS, "number-columns-spanned") &&
               !cell.hasAttributeNS(tableNS, "number-rows-spanned") &&
               cell.children.length === 1 &&
-              simpleText(node)
+              node &&
+              odfText(node) !== null
             ) {
-              const label = (table.getAttributeNS(tableNS, "name") || "") + " · " + xlsxRef(c, r);
+              const label = (table.getAttributeNS(tableNS, "name") || "") + " · " + xlsxRef(c, r),
+                text = odfText(node);
               if (kind === "string" && !cell.hasAttributeNS(officeNS, "string-value"))
-                add(part, label, node.textContent, value => {
-                  node.textContent = value;
-                });
+                add(part, label, text, value => setOdfText(node, value));
               else if (kind === "float" && number(node.textContent) && node.textContent === cell.getAttributeNS(officeNS, "value"))
                 add(part, label, node.textContent, value => {
                   node.textContent = requireNumber(value);

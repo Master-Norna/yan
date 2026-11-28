@@ -142,6 +142,8 @@ function renderConversation(shouldScroll = false) {
   foldCompacted(c);
   renderOutline();
   updateContextGauge();
+  // 换答、重答与切版本都从这里过：工作区记的改动跟着当前答复走，不必等整页 render（见 workSyncConversation）。
+  workSyncConversation();
 }
 // 停在哪一页记在设置里：刷新后回到原处——正看着的那段对话、或卷宗；开机时由 boot 读回
 function rememberPlace() {
