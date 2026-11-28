@@ -79,6 +79,23 @@ await evalJs(`document.querySelector('[data-work-raw="false"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
 await evalJs(`document.querySelector('[data-work-file$="/一页.txt"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage pre")?.textContent.includes("只有一页字")`);
+check(
+  "单击浏览只留一张临时页签",
+  await evalJs(`document.querySelectorAll("#workTabs .work-tab").length === 1 && !!document.querySelector("#workTabs .work-tab-preview")`)
+);
+await evalJs(`document.querySelector('[data-work-file$="/笔记.md"]').click(); true`);
+await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
+// 真实鼠标双击，确保单击不会重建目录行而吞掉 dblclick。
+const point = await evalJs(
+  `(() => { const r = document.querySelector('[data-work-file$="/笔记.md"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`
+);
+for (const clickCount of [1, 2]) {
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", buttons: 1, clickCount });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", buttons: 0, clickCount });
+}
+check("双击固定临时页签", await evalJs(`!document.querySelector("#workTabs .work-tab-preview")`));
+await evalJs(`document.querySelector('[data-work-file$="/一页.txt"]').click(); true`);
+await waitFor(`document.querySelector("#fileViewerStage pre")?.textContent.includes("只有一页字")`);
 check("文件页签同时保留", await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2`));
 await evalJs(`document.querySelector('#workTabs [data-work-tab="0"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
@@ -92,12 +109,14 @@ check(
     `document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector('[data-work-file$="/深.md"]')`
   )
 );
-await evalJs(`document.querySelector('[data-work-collapse]').click(); true`);
+await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
 check(
   "目录栏可折叠，文件仍在",
-  await evalJs(`document.querySelector(".work-explorer").clientWidth===0 && !!document.querySelector("#fileViewerStage h1")`)
+  await evalJs(
+    `document.querySelector(".work-explorer").clientWidth===0 && !document.querySelector("[data-work-mode][aria-pressed=true]") && !!document.querySelector("#fileViewerStage h1")`
+  )
 );
-await evalJs(`document.querySelector('[data-work-collapse]').click(); true`);
+await evalJs(`document.querySelector('[data-work-mode="list"]').click(); true`);
 await evalJs(`document.querySelector('.work-rail [data-work-terminal]').click(); true`);
 check(
   "终端在内容区下方，目录常驻",
@@ -110,6 +129,7 @@ await evalJs(
   `document.querySelector('[data-work-mode="search"]').click(); const f=document.querySelector("#workFind"); f.querySelector("input").value="只有一页字"; f.requestSubmit(); true`
 );
 await waitFor(`!!document.querySelector('#workStrips [data-work-file$="/一页.txt"]')`, 20000);
+check("搜索面不显示选夹按钮", await evalJs(`getComputedStyle(document.querySelector(".work-bar [data-work-pick]")).display === "none"`));
 check(
   "全文搜索保留已打开的文件",
   await evalJs(`document.querySelectorAll("#workTabs [data-work-tab]").length===2 && !!document.querySelector("#fileViewerStage h1")`)

@@ -63,9 +63,9 @@ The panel needs three extras from that browser: debugging port `9288`, allowing 
 
 The workspace entry is at the left of the browser tabs. Workspace and browser are mutually exclusive views of the same panel; switching views does not change browser navigation or let background tabs take over.
 
-- The narrow activity rail switches between the file tree, changes and full-text search. The explorer is collapsible and resizable. Folders expand on demand without replacing the parent tree; file size, dates and folder counts appear in item tooltips.
+- The narrow activity rail switches between the file tree, changes and full-text search. Click the selected icon again to hide the explorer, or another icon to open its view. The explorer is resizable. Folders expand on demand without replacing the parent tree; file size, dates and folder counts appear in item tooltips.
 - The root follows the conversation's bound directory, or starts at Files when none is bound. The breadcrumb or folder button selects a different display root without changing the binding. Changing conversation or root clears old tree state, tabs and command output.
-- File tabs and the content pane are independent of navigation. Opening files leaves the explorer visible; switching navigation views or temporarily returning to the browser retains tabs. Markdown and HTML use the existing preview/source icons and the shared file rendering capabilities without launching the browser.
+- File tabs and the content pane are independent of navigation. Single-click uses one reusable italic preview tab; double-click a file or its preview tab to keep it open. Opening files leaves the explorer visible; switching navigation views or temporarily returning to the browser retains tabs. Markdown and HTML use the existing preview/source icons and the shared file rendering capabilities without launching the browser.
 - Changes list files actually recorded in the current conversation, resolved using each step's original directory. Existing change colors are preserved. The diff displays the before and after sides horizontally.
 - Search uses the existing bounded literal full-text search. The optional bottom command pane runs explicit user-submitted local commands and shows their output; it is not an interactive persistent PTY.
 

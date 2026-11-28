@@ -12,7 +12,7 @@ const work = {
   expanded: new Set(),
   /** @type {Map<string, any>} */
   branches: new Map(),
-  /** @type {{path:string,diff:boolean,raw:boolean}[]} */
+  /** @type {{path:string,diff:boolean,raw:boolean,pinned:boolean}[]} */
   tabs: [],
   active: -1,
   collapsed: false,
@@ -190,7 +190,7 @@ async function workSearch(query) {
       return { dir: false, name: rel.split("/").pop() || rel, path, where: parentDir(rel), note: String(hit.line) + ": " + hit.text };
     });
     const limited = data.truncated || data.skipped?.length || data.large || data.unread;
-    work.searchStatus = limited ? t("搜索范围有限") : work.searchRows.length ? "" : t("没有找到文件");
+    work.searchStatus = limited ? t("搜索范围有限") : work.searchRows.length ? "" : t("没有匹配内容");
   } catch (error) {
     if (rev !== work.rev) return;
     work.searchStatus = t`目录不可用：${String(error.message || error).slice(0, 160)}`;
@@ -376,17 +376,17 @@ function workViewsHtml() {
   const views = [
     ["list", "工作区", "worktree"],
     ["changes", "改动", "workdiff"],
-    ["search", "查找文件", "search"]
+    ["search", "搜索", "search"]
   ];
   const buttons = views
     .map(([mode, label, icon]) => {
-      return `<button type="button" data-work-mode="${mode}" aria-pressed="${work.mode === mode}" title="${t(label)}" aria-label="${t(label)}">${brushIcon(icon)}</button>`;
+      return `<button type="button" data-work-mode="${mode}" aria-pressed="${!work.collapsed && work.mode === mode}" title="${t(label)}" aria-label="${t(label)}">${brushIcon(icon)}</button>`;
     })
     .join("");
-  return `<div class="stage-views" role="group" aria-label="${t("工作区")}">${buttons}<button type="button" data-work-collapse aria-expanded="${!work.collapsed}" title="${t("切换目录栏")}" aria-label="${t("切换目录栏")}">‹</button><button type="button" data-work-terminal aria-pressed="${work.terminal}" title="${t("终端")}" aria-label="${t("终端")}">${brushIcon("code")}</button></div>`;
+  return `<div class="stage-views" role="group" aria-label="${t("工作区")}">${buttons}<button type="button" data-work-terminal aria-pressed="${work.terminal}" title="${t("终端")}" aria-label="${t("终端")}">${brushIcon("code")}</button></div>`;
 }
 function workShellHtml() {
-  return `<div class="work-inner"><div class="work-rail">${workViewsHtml()}</div><div class="work-explorer"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><button type="button" data-work-pick title="${t("选择文件夹…")}" aria-label="${t("选择文件夹…")}">${brushIcon("folder")}</button></div><form id="workFind" class="hidden"><input type="search" aria-label="${t("查找文件")}" placeholder="${t("查找文件")}" maxlength="200"><button type="submit" aria-label="${t("查找文件")}">${brushIcon("search")}</button></form><div id="workStrips" class="work-tree"></div></div><div class="work-resize" role="separator" aria-orientation="vertical" aria-label="${t("调整目录栏宽度")}" tabindex="0"></div><section class="work-editor"><div class="work-tabbar"><div id="workTabs" class="work-tabs" role="tablist"></div><div id="workDocMode" class="work-docmode stage-views"></div></div><div id="workContent" class="work-content">${workEmptyBody(t("选择文件以查看"))}</div><section id="workTerminal" class="work-terminal hidden"><div class="work-terminal-head">${t("终端")}<button type="button" data-work-stop>${t("停止")}</button><button type="button" data-work-terminal aria-label="${t("关闭")}">×</button></div><pre id="workTerminalOutput"></pre><form id="workCommand"><span aria-hidden="true">›</span><input aria-label="${t("输入指令")}" placeholder="${t("输入指令")}" autocomplete="off"><button type="submit">${t("运行")}</button></form></section></section></div>`;
+  return `<div class="work-inner"><div class="work-rail">${workViewsHtml()}</div><div class="work-explorer"><div class="work-bar"><div id="workCrumbs" class="library-crumbs"></div><button type="button" data-work-pick title="${t("选择文件夹…")}" aria-label="${t("选择文件夹…")}">${brushIcon("folder")}</button></div><form id="workFind" class="hidden"><input type="search" aria-label="${t("搜索文件内容")}" placeholder="${t("搜索文件内容")}" maxlength="200"><button type="submit" title="${t("搜索")}" aria-label="${t("搜索")}">${brushIcon("search")}</button></form><div id="workStrips" class="work-tree"></div></div><div class="work-resize" role="separator" aria-orientation="vertical" aria-label="${t("调整目录栏宽度")}" tabindex="0"></div><section class="work-editor"><div class="work-tabbar"><div id="workTabs" class="work-tabs" role="tablist"></div><div id="workDocMode" class="work-docmode stage-views"></div></div><div id="workContent" class="work-content">${workEmptyBody(t("选择文件以查看"))}</div><section id="workTerminal" class="work-terminal hidden"><div class="work-terminal-head">${t("终端")}<button type="button" data-work-stop>${t("停止")}</button><button type="button" data-work-terminal aria-label="${t("关闭")}">×</button></div><pre id="workTerminalOutput"></pre><form id="workCommand"><span aria-hidden="true">›</span><input aria-label="${t("输入指令")}" placeholder="${t("输入指令")}" autocomplete="off"><button type="submit">${t("运行")}</button></form></section></section></div>`;
 }
 function workEmptyBody(text) {
   return `<div class="stage-empty work-empty">${brushIcon("folder", "work-leaf")}<span>${escapeHtml(text)}</span></div>`;
@@ -395,7 +395,7 @@ function workCrumbsHtml() {
   const parts = workParts(work.root),
     crumbs = [];
   if (work.mode === "changes") return t("改动");
-  if (work.mode === "search") return t("查找文件");
+  if (work.mode === "search") return t("搜索");
   if (!parts.length) {
     if (!work.root) return "";
     return `<button type="button" class="here" data-work-pick title="${escapeHtml(work.root)}">${escapeHtml(work.root)}</button>`;
@@ -436,8 +436,7 @@ function workRowHtml(row, depth = 0) {
     }
     return `<div class="work-row" role="button" tabindex="0" data-work-dir="${path}" aria-expanded="${expanded}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron">${expanded ? "⌄" : "›"}</span><span>${caseFigure()}</span><strong>${name}</strong></div>${expanded ? `<div class="work-children">${children}${branch?.truncated ? `<small>${t("目录列表已截断")}</small>` : ""}</div>` : ""}`;
   }
-  const selected = work.tabs[work.active]?.path === row.path && work.tabs[work.active]?.diff === (work.mode === "changes");
-  return `<div class="work-row" role="button" tabindex="0" data-work-file="${path}" aria-current="${selected}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron"></span><span>${fileFigure(row.name, "", row.state)}</span><span class="work-name"><strong>${name}</strong>${row.where ? `<small>${escapeHtml(row.where)}</small>` : ""}${work.mode === "search" && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</span></div>`;
+  return `<div class="work-row" role="button" tabindex="0" data-work-file="${path}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron"></span><span>${fileFigure(row.name, "", row.state)}</span><span class="work-name"><strong>${name}</strong>${row.where ? `<small>${escapeHtml(row.where)}</small>` : ""}${work.mode === "search" && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</span></div>`;
 }
 function workPaintTabs() {
   const tabs = $("#workTabs"),
@@ -445,10 +444,15 @@ function workPaintTabs() {
   if (!tabs || !mode) return;
   const html = work.tabs
     .map((tab, index) => {
-      return `<div class="work-tab${index === work.active ? " on" : ""}"><button type="button" role="tab" aria-selected="${index === work.active}" data-work-tab="${index}" title="${escapeHtml(tab.path)}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span></button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`;
+      return `<div class="work-tab${tab.pinned ? "" : " work-tab-preview"}"><button type="button" role="tab" data-work-tab="${index}" title="${escapeHtml(tab.path + (tab.pinned ? "" : " · " + t("双击固定页签")))}">${tab.diff ? brushIcon("workdiff") : fileFigure(tab.path.split("/").pop())}<span>${escapeHtml(tab.path.split("/").pop())}</span></button><button type="button" data-work-tab-close="${index}" aria-label="${t("关闭")}">×</button></div>`;
     })
     .join("");
   stageSetHtml(tabs, html);
+  for (const button of tabs.querySelectorAll("[data-work-tab]")) {
+    const selected = Number(/** @type {HTMLElement} */ (button).dataset.workTab) === work.active;
+    button.setAttribute("aria-selected", String(selected));
+    button.parentElement.classList.toggle("on", selected);
+  }
   const active = work.tabs[work.active],
     kind = active && fileKind(active.path).view;
   if (active && !active.diff && (kind === "markdown" || kind === "html")) {
@@ -466,6 +470,7 @@ function workPaint() {
   if (!work.open) return;
   if (!$("#workContent")) box.innerHTML = workShellHtml();
   box.classList.toggle("work-collapsed", work.collapsed);
+  box.classList.toggle("work-find-mode", work.mode !== "list");
   stageSetHtml($("#workCrumbs"), workCrumbsHtml());
   $("#workFind").classList.toggle("hidden", work.mode !== "search");
   const rows = workRows();
@@ -480,11 +485,16 @@ function workPaint() {
   if (work.mode === "list" && work.truncated) notice = t("目录列表已截断");
   else if (work.mode === "search" && rows.length && work.searchStatus) notice = work.searchStatus;
   stageSetHtml($("#workStrips"), body + (notice ? `<small class="work-tree-note">${escapeHtml(notice)}</small>` : ""));
+  // 选中态就地更新：首次点击不能替换目录行，否则浏览器可能丢掉紧随的双击。
+  const active = work.tabs[work.active];
+  for (const row of document.querySelectorAll("#workStrips [data-work-file]")) {
+    const selected = active?.path === /** @type {HTMLElement} */ (row).dataset.workFile && active.diff === (work.mode === "changes");
+    row.setAttribute("aria-current", String(selected));
+  }
   for (const button of document.querySelectorAll("#stageWork [data-work-mode]")) {
     const el = /** @type {HTMLElement} */ (button);
-    el.setAttribute("aria-pressed", String(el.dataset.workMode === work.mode));
+    el.setAttribute("aria-pressed", String(!work.collapsed && el.dataset.workMode === work.mode));
   }
-  $("[data-work-collapse]").setAttribute("aria-expanded", String(!work.collapsed));
   $(".work-rail [data-work-terminal]").setAttribute("aria-pressed", String(work.terminal));
   $("#workTerminal").classList.toggle("hidden", !work.terminal);
   const output = $("#workTerminalOutput");
@@ -507,15 +517,29 @@ function workActivate(index, trigger = null) {
     showInFileViewer(t`${tab.path} · 本段改动`, workDiffHtml(conversation, tab.path), trigger, t("览"), "stage");
   } else void openFileViewer({ file: tab.path }, "", trigger, "stage", tab.raw);
 }
-function workOpenPath(path, trigger = null) {
+// 单击只占一张临时页签；双击固定后，才为下一次查看留出新的临时页签。
+function workOpenPath(path, trigger = null, pin = false) {
   if (!work.open || !path) return;
   const diff = work.mode === "changes";
   let index = work.tabs.findIndex(tab => tab.path === path && tab.diff === diff);
   if (index < 0) {
-    index = work.tabs.length;
-    work.tabs.push({ path, diff, raw: false });
+    index = pin ? -1 : work.tabs.findIndex(tab => !tab.pinned);
+    const tab = { path, diff, raw: false, pinned: pin };
+    if (index < 0) {
+      index = work.tabs.length;
+      work.tabs.push(tab);
+    } else work.tabs[index] = tab;
+  } else if (pin) {
+    work.tabs[index].pinned = true;
+    if (index === work.active) return workPaint();
   }
   workActivate(index, trigger);
+}
+function workPinTab(index) {
+  const tab = work.tabs[index];
+  if (!tab || tab.pinned) return;
+  tab.pinned = true;
+  workPaint();
 }
 function workCloseTab(index) {
   if (!work.tabs[index]) return;
@@ -532,6 +556,10 @@ function workCloseTab(index) {
   workPaint();
 }
 function workSwitch(mode) {
+  if (work.mode === mode && !work.collapsed) {
+    work.collapsed = true;
+    return workPaint();
+  }
   work.collapsed = false;
   if (work.mode !== mode) {
     work.mode = mode;
@@ -580,10 +608,6 @@ function bindWork() {
       mode = /** @type {HTMLElement|null} */ (target.closest("[data-work-mode]"));
     if (mode) return void workSwitch(/** @type {any} */ (mode.dataset.workMode));
     if (target.closest("[data-work-pick]")) return void workPick();
-    if (target.closest("[data-work-collapse]")) {
-      work.collapsed = !work.collapsed;
-      return workPaint();
-    }
     if (target.closest("[data-work-terminal]")) {
       work.terminal = !work.terminal;
       return workPaint();
@@ -601,7 +625,14 @@ function bindWork() {
     const dir = /** @type {HTMLElement|null} */ (target.closest("[data-work-dir]"));
     if (dir) return void (dir.closest("#workCrumbs") ? workEnterDir(dir.dataset.workDir) : workToggleDir(dir.dataset.workDir));
     const file = /** @type {HTMLElement|null} */ (target.closest("[data-work-file]"));
-    if (file) return void workOpenPath(file.dataset.workFile, file);
+    if (file) return void workOpenPath(file.dataset.workFile, file, event.detail > 1);
+  });
+  box.addEventListener("dblclick", event => {
+    const target = /** @type {HTMLElement} */ (event.target),
+      file = /** @type {HTMLElement|null} */ (target.closest("[data-work-file]")),
+      tab = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab]"));
+    if (file) workOpenPath(file.dataset.workFile, file, true);
+    else if (tab) workPinTab(Number(tab.dataset.workTab));
   });
   box.addEventListener("pointerdown", event => {
     const target = /** @type {HTMLElement} */ (event.target);
@@ -617,6 +648,10 @@ function bindWork() {
     target.addEventListener("pointermove", move);
     target.addEventListener("lostpointercapture", end);
     event.preventDefault();
+  });
+  box.addEventListener("input", event => {
+    const input = /** @type {HTMLInputElement} */ (event.target);
+    if (input.matches("#workFind input") && !input.value.trim()) void workSearch("");
   });
   box.addEventListener("submit", event => {
     const form = /** @type {HTMLFormElement} */ (event.target);
@@ -640,6 +675,7 @@ function bindWork() {
     const row = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest(".work-row"));
     if (!row) return;
     event.preventDefault();
-    row.click();
+    if (event.key === "Enter" && row.dataset.workFile) workOpenPath(row.dataset.workFile, row, true);
+    else row.click();
   });
 }
