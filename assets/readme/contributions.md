@@ -1,12 +1,13 @@
 # Upstream contributions / 上游贡献
 
-Public merged PRs from the maintainer and agent accounts. Account-level records are not proof of agent authorship. / 账号公开记录，不代表每条均由言完成。
+Upstream contributions collected from public GitHub records and maintainer-selected PRs. / 言参与的上游贡献，自动发现与人工补录。
 
 - [fabiocaccamo/python-benedict #642](https://github.com/fabiocaccamo/python-benedict/pull/642) — Honor custom default section names in INI serialization
 - [umputun/ralphex #487](https://github.com/umputun/ralphex/pull/487) — fix(web): bound SSE writes so a stalled client cannot block the run
 - [duriantaco/skylos #1269](https://github.com/duriantaco/skylos/pull/1269) — fix(danger): treat a model handed to an opaque call by any expression shape as escaped
 - [umputun/ralphex #485](https://github.com/umputun/ralphex/pull/485) — fix(git): unquote non-ASCII paths from status --porcelain
 - [umputun/ralphex #484](https://github.com/umputun/ralphex/pull/484) — fix(plan): treat empty brackets in checkbox text as task wording
+- [duriantaco/skylos #1274](https://github.com/duriantaco/skylos/pull/1274) — fix(security): show which callers a symlink review does not cover
 - [duriantaco/skylos #1235](https://github.com/duriantaco/skylos/pull/1235) — fix(danger): keep the path-prefix separator proof consistent
 - [duriantaco/skylos #1228](https://github.com/duriantaco/skylos/pull/1228) — fix(danger): run the graph query check when the keyword has no space
 - [duriantaco/skylos #1229](https://github.com/duriantaco/skylos/pull/1229) — test(scaling): read finding paths with the platform separator
@@ -25,10 +26,17 @@ Public merged PRs from the maintainer and agent accounts. Account-level records 
 - [duriantaco/skylos #1186](https://github.com/duriantaco/skylos/pull/1186) — fix(cicd): preserve diff scope in summary-only PR reviews
 - [duriantaco/skylos #1179](https://github.com/duriantaco/skylos/pull/1179) — fix(sbom): preserve direct dependency classification in SPDX exports
 - [duriantaco/skylos #1168](https://github.com/duriantaco/skylos/pull/1168) — fix(sbom): protect additional dependency input filenames
+- [optimaxfunnel/Scrapling-leads 104294c](https://github.com/optimaxfunnel/Scrapling-leads/commit/104294c2d87abe35898327ae788826a3a79887bf) — fix(parser): honor zero similarity threshold without reference attributes (#539)
+- [arnab9961/scrapping 104294c](https://github.com/arnab9961/scrapping/commit/104294c2d87abe35898327ae788826a3a79887bf) — fix(parser): honor zero similarity threshold without reference attributes (#539)
+- [YouYao1492/Scrapling 104294c](https://github.com/YouYao1492/Scrapling/commit/104294c2d87abe35898327ae788826a3a79887bf) — fix(parser): honor zero similarity threshold without reference attributes (#539)
+- [Nicklwj1028/Scrapling 104294c](https://github.com/Nicklwj1028/Scrapling/commit/104294c2d87abe35898327ae788826a3a79887bf) — fix(parser): honor zero similarity threshold without reference attributes (#539)
+- [Namitb-VAPAA/Scrapling 104294c](https://github.com/Namitb-VAPAA/Scrapling/commit/104294c2d87abe35898327ae788826a3a79887bf) — fix(parser): honor zero similarity threshold without reference attributes (#539)
+- [4arjun/bookmyshow-ticket-monitor 104294c](https://github.com/4arjun/bookmyshow-ticket-monitor/commit/104294c2d87abe35898327ae788826a3a79887bf) — fix(parser): honor zero similarity threshold without reference attributes (#539)
 - [D4Vinci/Scrapling #539](https://github.com/D4Vinci/Scrapling/pull/539) — fix(parser): honor zero similarity threshold without reference attributes
 - [pdm-project/pdm #3984](https://github.com/pdm-project/pdm/pull/3984) — fix(config): save explicitly provided empty string values
 - [pdm-project/pdm #3975](https://github.com/pdm-project/pdm/pull/3975) — fix: honor local artifact paths and names in pylock.toml
 - [dateutil/dateutil #1583](https://github.com/dateutil/dateutil/pull/1583) — Fix yearday=366 resolving to Dec 30 instead of Dec 31 in leap years
+- [SomeOne0320/cc-solo-dateutil-batch11 d23ff76](https://github.com/SomeOne0320/cc-solo-dateutil-batch11/commit/d23ff760f8448b51579016d96f39590018445724) — Fix yearday=366 resolving to Dec 30 in leap years
 - [pdm-project/pdm #3972](https://github.com/pdm-project/pdm/pull/3972) — fix: omit missing package versions in pylock exports
 - [pdm-project/pdm #3964](https://github.com/pdm-project/pdm/pull/3964) — fix: preserve archive subdirectories in pylock.toml
 - [sepandhaghighi/art #342](https://github.com/sepandhaghighi/art/pull/342) — Fix CLI Unicode warning names
@@ -36,6 +44,10 @@ Public merged PRs from the maintainer and agent accounts. Account-level records 
 - [pdm-project/pdm #3954](https://github.com/pdm-project/pdm/pull/3954) — fix: preserve subdirectory fragments in archive requirements
 - [PyCQA/isort #2675](https://github.com/PyCQA/isort/pull/2675) — grid: preserve trailing comment when no line wrap is needed
 - [agronholm/anyio #1424](https://github.com/agronholm/anyio/pull/1424) — Restore TCP read backpressure after a cancelled receive
+- [acidvegas/farming d27bf8b](https://github.com/acidvegas/farming/commit/d27bf8b2f840ba5751b639a8934e19ece4245a32) — Track new repo: Master-Norna/yan
+- [acidvegas/farming ea9ddea](https://github.com/acidvegas/farming/commit/ea9ddeaaf5d0d2fb5faf04bf0379a3e5a26c1210) — Track new repo: Master-Norna/yan
+- [0x676e67/quic #93](https://github.com/0x676e67/quic/pull/93) — chore: sync quinn upstream through f233510c
+- [krellixlabs/pypdf ccd8dc4](https://github.com/krellixlabs/pypdf/commit/ccd8dc470e13915d384fb8b4c93a351cc1d79ae6) — ROB: Bound leading comment handling in read\_object (#4150)
 - [py-pdf/pypdf #4150](https://github.com/py-pdf/pypdf/pull/4150) — ROB: Bound leading comment handling in read\_object
 - [tokio-rs/tokio #8519](https://github.com/tokio-rs/tokio/pull/8519) — util: skip the top-level slot holding `now` when finding the next expiration
 - [cpburnz/python-pathspec #151](https://github.com/cpburnz/python-pathspec/pull/151) — Preserve externally compiled regex flags during backend selection
@@ -45,10 +57,49 @@ Public merged PRs from the maintainer and agent accounts. Account-level records 
 - [nushell/nushell #19127](https://github.com/nushell/nushell/pull/19127) — fix(math log): reject invalid bases and a NaN input value
 - [nushell/nushell #19107](https://github.com/nushell/nushell/pull/19107) — fix(bytes remove): keep input unchanged when --end pattern is not found
 - [nushell/nushell #19109](https://github.com/nushell/nushell/pull/19109) — fix(std/dt): compute the day remainder directly in datetime-diff
+- [incredibuild-yosef-test/nushell-seq3-on 251b392](https://github.com/incredibuild-yosef-test/nushell-seq3-on/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [incredibuild-yosef-test/nushell-seq2-on 251b392](https://github.com/incredibuild-yosef-test/nushell-seq2-on/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [incredibuild-yosef-test/nushell-seq2-off 251b392](https://github.com/incredibuild-yosef-test/nushell-seq2-off/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [incredibuild-yosef-test/nushell-seq-on 251b392](https://github.com/incredibuild-yosef-test/nushell-seq-on/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [incredibuild-yosef-test/nushell-seq-off 251b392](https://github.com/incredibuild-yosef-test/nushell-seq-off/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [incredibuild-yosef-test/nushell-ib-off 251b392](https://github.com/incredibuild-yosef-test/nushell-ib-off/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [abdullah11236khan-cmd/nushell 251b392](https://github.com/abdullah11236khan-cmd/nushell/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [Divyanshi12coder/nushell 251b392](https://github.com/Divyanshi12coder/nushell/commit/251b39276970c015fb6d97d9ee750fe14788f62c) — fix(math variance): use a numerically stable two-pass formula for numbers (#19108)
+- [incredibuild-yosef-test/nushell-seq3-on 73f0a89](https://github.com/incredibuild-yosef-test/nushell-seq3-on/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [incredibuild-yosef-test/nushell-seq2-on 73f0a89](https://github.com/incredibuild-yosef-test/nushell-seq2-on/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [incredibuild-yosef-test/nushell-seq2-off 73f0a89](https://github.com/incredibuild-yosef-test/nushell-seq2-off/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [incredibuild-yosef-test/nushell-seq-on 73f0a89](https://github.com/incredibuild-yosef-test/nushell-seq-on/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [incredibuild-yosef-test/nushell-seq-off 73f0a89](https://github.com/incredibuild-yosef-test/nushell-seq-off/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [incredibuild-yosef-test/nushell-ib-off 73f0a89](https://github.com/incredibuild-yosef-test/nushell-ib-off/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [abdullah11236khan-cmd/nushell 73f0a89](https://github.com/abdullah11236khan-cmd/nushell/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [Divyanshi12coder/nushell 73f0a89](https://github.com/Divyanshi12coder/nushell/commit/73f0a8983aa2f99b1e9e9383c983caf9244fadce) — fix(math log): reject invalid bases and a NaN input value (#19127)
+- [incredibuild-yosef-test/nushell-seq3-on 65a22bf](https://github.com/incredibuild-yosef-test/nushell-seq3-on/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [incredibuild-yosef-test/nushell-seq2-on 65a22bf](https://github.com/incredibuild-yosef-test/nushell-seq2-on/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [incredibuild-yosef-test/nushell-seq2-off 65a22bf](https://github.com/incredibuild-yosef-test/nushell-seq2-off/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [incredibuild-yosef-test/nushell-seq-on 65a22bf](https://github.com/incredibuild-yosef-test/nushell-seq-on/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [incredibuild-yosef-test/nushell-seq-off 65a22bf](https://github.com/incredibuild-yosef-test/nushell-seq-off/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [incredibuild-yosef-test/nushell-ib-off 65a22bf](https://github.com/incredibuild-yosef-test/nushell-ib-off/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [abdullah11236khan-cmd/nushell 65a22bf](https://github.com/abdullah11236khan-cmd/nushell/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [Divyanshi12coder/nushell 65a22bf](https://github.com/Divyanshi12coder/nushell/commit/65a22bfa4512e061ef7142914d032e2ad4a5d2ae) — fix(bytes remove): keep input unchanged when --end pattern is not found (#19107)
+- [incredibuild-yosef-test/nushell-seq3-on 996de1f](https://github.com/incredibuild-yosef-test/nushell-seq3-on/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [incredibuild-yosef-test/nushell-seq2-on 996de1f](https://github.com/incredibuild-yosef-test/nushell-seq2-on/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [incredibuild-yosef-test/nushell-seq2-off 996de1f](https://github.com/incredibuild-yosef-test/nushell-seq2-off/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [incredibuild-yosef-test/nushell-seq-on 996de1f](https://github.com/incredibuild-yosef-test/nushell-seq-on/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [incredibuild-yosef-test/nushell-seq-off 996de1f](https://github.com/incredibuild-yosef-test/nushell-seq-off/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [incredibuild-yosef-test/nushell-ib-off 996de1f](https://github.com/incredibuild-yosef-test/nushell-ib-off/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [abdullah11236khan-cmd/nushell 996de1f](https://github.com/abdullah11236khan-cmd/nushell/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [Divyanshi12coder/nushell 996de1f](https://github.com/Divyanshi12coder/nushell/commit/996de1f9a48520c8679e6d791f3260b722d5116e) — fix(std/dt): compute the day remainder directly in datetime-diff (#19109)
+- [krellixlabs/pypdf 91a73b5](https://github.com/krellixlabs/pypdf/commit/91a73b5e8e9701efdad26b865964c2a53cb110b3) — ROB: Treat a negative startxref pointer as zero (#4144)
 - [py-pdf/pypdf #4144](https://github.com/py-pdf/pypdf/pull/4144) — ROB: Treat a negative startxref pointer as zero
+- [SomeOne0320/cc-solo-tomlkit-batch24 ce8f8ee](https://github.com/SomeOne0320/cc-solo-tomlkit-batch24/commit/ce8f8ee982411c4afef5cfb90df7313cc5f7d779) — Render tz-aware times as local times without an offset (#613)
+- [SomeOne0320/cc-solo-tomlkit-batch24 61941de](https://github.com/SomeOne0320/cc-solo-tomlkit-batch24/commit/61941deb3c7155e88d5f038148b33a599c04a530) — Escape content appended to a String via \_\_add\_\_ (#612)
 - [quinn-rs/quinn #2903](https://github.com/quinn-rs/quinn/pull/2903) — congestion: avoid double-reducing CUBIC ssthresh on persistent congestion
+- [JimmyHuang454/quinn-jls 2a9f45e](https://github.com/JimmyHuang454/quinn-jls/commit/2a9f45e47899608ba8875260969667144fb9ef6c) — congestion: avoid double-reducing CUBIC ssthresh on persistent congestion
 - [tokio-rs/tokio #8526](https://github.com/tokio-rs/tokio/pull/8526) — net: treat ENOTCONN as success in UnixStream::shutdown
 - [python-poetry/tomlkit #613](https://github.com/python-poetry/tomlkit/pull/613) — Render tz-aware times as local times without an offset
 - [python-poetry/tomlkit #612](https://github.com/python-poetry/tomlkit/pull/612) — Escape content appended to a String via \_\_add\_\_
 - [fabiocaccamo/python-benedict #604](https://github.com/fabiocaccamo/python-benedict/pull/604) — query-string: keep keys with empty values (a=) instead of dropping them
 - [CaramelizedCUDA/epub-start #2](https://github.com/CaramelizedCUDA/epub-start/pull/2) — fix(protocol): percent-decode resource URI paths before archive lookup
+- [acidvegas/farming e0aaf45](https://github.com/acidvegas/farming/commit/e0aaf4520715f60efeeb7c01c651010f08cdba86) — Track new repo: Master-Norna/yan
+- [acidvegas/farming 43870de](https://github.com/acidvegas/farming/commit/43870de8fdcef4f6d7d0bea6ae27163db6105568) — Track new repo: Master-Norna/yan
+- [acidvegas/farming 3c58ed9](https://github.com/acidvegas/farming/commit/3c58ed966d67d08f15d2d6b6cdc5729466975cc1) — Track new repo: Master-Norna/yan
