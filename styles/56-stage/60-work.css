@@ -115,7 +115,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 39px;
+  flex: none;
+  height: var(--stage-row-height);
   padding: 0 8px;
   border-bottom: 1px solid var(--line);
 }
@@ -250,10 +251,14 @@
 }
 .work-tabbar {
   flex: none;
-  min-height: 39px;
+  height: var(--stage-row-height);
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--line);
+}
+/* 没开文件就没有页签栏；目录路径一行独立保留。 */
+.work-tabbar:not(:has(.work-tab)) {
+  display: none;
 }
 .work-tabs {
   flex: 1;
@@ -268,7 +273,7 @@
   flex: none;
   min-width: 0;
   max-width: 180px;
-  height: 38px;
+  height: calc(var(--stage-row-height) - 1px);
   padding: 0 4px;
   border-right: 1px solid var(--line);
   color: var(--ink-3);
@@ -276,7 +281,6 @@
 .work-tab.on {
   color: var(--ink);
   box-shadow: inset 0 -2px var(--accent);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 .work-tab > [data-work-tab] {
   display: flex;
