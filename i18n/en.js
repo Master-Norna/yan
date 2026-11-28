@@ -2,6 +2,17 @@
 // 选了英文时由 theme-boot.js 载入；印章、给模型看的话（工具结果、提示词）不收，表里没有的照中文原文显示。
 // 用语直白：言 → Chat、行 → Agent、卷宗 → Files、帮手 → subagent、余墨 → tokens left、旁注 → side thread、游目 → Browser
 var YAN_EN = {
+  查找文件: "Search files",
+  切换目录栏: "Toggle explorer",
+  终端: "Terminal",
+  输入指令: "Enter command",
+  搜索范围有限: "Search results are limited",
+  没有找到文件: "No files found",
+  目录列表已截断: "Directory listing truncated",
+  改动前: "Before",
+  改动后: "After",
+  调整目录栏宽度: "Resize explorer",
+  选择文件以查看: "Select a file to view",
   "\n\n[压缩包：{0}；本机原件路径：{1}。用 run_command 将原件复制到工作目录，再解压到独立的临时子目录并读取；不要修改原件。]":
     "\n\n[Archive: {0}; local original path: {1}. Use run_command to copy it into the working directory, then extract it into a separate temporary subdirectory and read the contents. Keep the original unchanged.]",
   "\n\n[压缩包 {0} 的本机原件暂不可用：{1}]": "\n\n[The local original of archive {0} is currently unavailable: {1}]",
