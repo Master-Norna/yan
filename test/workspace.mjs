@@ -81,9 +81,7 @@ await evalJs(`document.querySelector('[data-work-file$="/一页.txt"]').click();
 await waitFor(`document.querySelector("#fileViewerStage pre")?.textContent.includes("只有一页字")`);
 check(
   "单击浏览只留一张临时页签",
-  await evalJs(
-    `document.querySelectorAll("#workTabs .work-tab").length === 1 && !!document.querySelector("#workTabs .work-tab-preview")`
-  )
+  await evalJs(`document.querySelectorAll("#workTabs .work-tab").length === 1 && !!document.querySelector("#workTabs .work-tab-preview")`)
 );
 await evalJs(`document.querySelector('[data-work-file$="/笔记.md"]').click(); true`);
 await waitFor(`document.querySelector("#fileViewerStage h1")?.textContent === "笔记"`);
