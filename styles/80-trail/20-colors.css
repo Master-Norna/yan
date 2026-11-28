@@ -12,7 +12,7 @@
    二、一色只说一件事。同一个色在两处指两件事，立刻就成了污染。
    三、与纸同调。色相对了而饱和度高一档，照样刺眼，几个色都压在同一条窄带里。
    四、色只上笔画，不上面。上在字、线、印上是批注；铺成底色就是装饰。
-       所以这里只染标签与一道细线，没有一处填底——差遣做事时那层金是动的，另当别论。
+       所以这里以标签及动作小画分色；展开的红绿差异在内容里说话，差遣那枚签仍是例外。
 
    请示与补言不列在内：它们是人的声音，留在朱砂里，另有自己的印 */
 .tool-step[data-tool="read_file"] .tool-label,
@@ -27,7 +27,8 @@
 /* 出门：到本机之外取东西回来 */
 .tool-step[data-tool="search_web"] .tool-label,
 .tool-step[data-tool="fetch_page"] .tool-label,
-.tool-step[data-tool="http_request"] .tool-label {
+.tool-step[data-tool="http_request"] .tool-label,
+.tool-step[data-tool="download_file"] .tool-label {
   color: var(--reach);
 }
 /* 记忆五件：跨出这段对话，存到别处去了 */
@@ -38,35 +39,9 @@
 .tool-step[data-tool="read_conversation"] .tool-label {
   color: var(--keep);
 }
-/* 会在别处留下痕迹的，另加一道左线——扫一眼就知道这一答动了什么：
-   写入与修改落在磁盘上，记入与忘却落进长期记忆，下载把外头的东西搬了进来。
-   色与线各管一件事：色说「在哪儿动」，线说「有没有留痕」。9px 的标签承不住颜色，它本就只是耳语——
-   检索、翻记忆这些只看不改的不需要喊；要喊的交给线，所以线得有分量：2px、六成五，
-   比过去的 1.5px、三成四重一档，与差遣那枚签的金线同粗（签另有底色，仍在它上头）。
-   试过的别的路都不如它：带色的都挂线，13 步里 9 步有线就成了花纹；标题铺底色像选中的行，还抢了签的独门；
-   标签前加印是第三套符号；9px 的粗体糊成一团 */
-.tool-step[data-tool="write_file"],
-.tool-step[data-tool="edit_file"],
-.tool-step[data-tool="run_command"] {
-  border-left: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
-  border-radius: 0 var(--radius-m) var(--radius-m) 0;
-  padding-left: 7px;
-}
-.tool-step[data-tool="download_file"] {
-  border-left: 2px solid color-mix(in srgb, var(--reach) 68%, transparent);
-  border-radius: 0 var(--radius-m) var(--radius-m) 0;
-  padding-left: 7px;
-}
-.tool-step[data-tool="remember"],
-.tool-step[data-tool="forget"] {
-  border-left: 2px solid color-mix(in srgb, var(--keep) 68%, transparent);
-  border-radius: 0 var(--radius-m) var(--radius-m) 0;
-  padding-left: 7px;
-}
-/* 只读的指令没有后果，不挂线，标签也归于墨灰 */
-.tool-step[data-tool="run_command"].is-read-only {
-  border-left-color: transparent;
-}
+/* 行头已有动作小画与专色，不再挂外侧竖线，也不额外缩进。
+   写入、修改的红绿与边线由展开的 diff 自己承担（见 30-chat/30-diff-edit.css）。
+   只读指令的标签仍归于墨灰。 */
 .tool-step[data-tool="run_command"].is-read-only .tool-label {
   color: var(--ink-3);
 }
