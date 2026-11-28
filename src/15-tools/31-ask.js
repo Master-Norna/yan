@@ -85,7 +85,7 @@ function askStepHtml(step) {
       : status === "pending"
         ? `<div class="tool-note">${t(`请于输入框上方作答`)}</div>`
         : "";
-  return `<div class="tool-step" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head"><span class="tool-label">${t(`请示`)}</span><span class="tool-title" title="${escapeHtml(step.title)}">${escapeHtml(step.title)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
+  return `<div class="tool-step" data-step-id="${escapeHtml(step.id)}" data-status="${escapeHtml(status)}"><div class="tool-step-head">${trailLabelHtml("ask_user", t(`请示`))}<span class="tool-title" title="${escapeHtml(step.title)}">${escapeHtml(step.title)}</span><span class="tool-meta">${meta}</span>${stepStateHtml(status)}</div>${body}</div>`;
 }
 // 请示条上的表单：右上角只写一个快捷键，这一页按 Enter 是下一题还是提交（输入框留空时），随翻页改，见 formPage；题数与第几问在标题里
 /** @param {Step} step */
