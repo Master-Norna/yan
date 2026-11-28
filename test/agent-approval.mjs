@@ -1,4 +1,4 @@
-// 通过 CDP 驱动无头 Edge，跑一遍执事模式：发送 → 工具调用 → 等待确认 → 运行 → 收尾；再测跳过、停止、轮次上限
+// 通过 CDP 驱动无头 Edge，跑一遍执事模式：发送 → 工具调用 → 等待确认 → 运行 → 收尾；再测跳过、停止、多轮工具调用
 import { mkdirSync, writeFileSync } from "node:fs";
 import { shellCommand } from "./helpers/shell-command.mjs";
 import { connect, check, sleep, PAGE, WORK, TMP } from "./lib.mjs";
@@ -166,19 +166,16 @@ check("stop settles pending step", step3.status === "skipped" && step3.meta === 
 check("message stopped", (await evalJs(`[...document.querySelectorAll('.message.assistant')].at(-1)?.dataset.status`)) === "stopped");
 check("send button back to 寄", (await evalJs(`document.querySelector("#chatSend").textContent`)) === "寄");
 
-// ---- 场景 4：三档切到径行 + 轮次上限（模型无限要求 list_files）；上限在「设置 → 通用」里改成 12
+// ---- 场景 4：三档切到径行 + 多轮工具调用
 await evalJs(`document.querySelector("#openSettings")?.click() || document.querySelector('[data-open-settings]')?.click(); true`);
 await sleep(300);
 await evalJs(`document.querySelector('.tab-btn[data-tab="tools"]')?.click(); true`);
 await sleep(200);
 check(
-  "default round caps shown in settings",
-  (await evalJs(`document.querySelector("#settingToolRounds")?.value + "/" + document.querySelector("#settingSubRounds")?.value`)) ===
-    "80/40"
+  "obsolete tool settings are absent",
+  await evalJs(`!document.querySelector("#settingToolRounds, #settingSubRounds, [data-setting=archiveRead]")`)
 );
-await evalJs(
-  `const i = document.querySelector("#settingToolRounds"); i.value = "12"; i.dispatchEvent(new Event("input")); document.querySelector("#closeSettings").click(); true`
-);
+await evalJs(`document.querySelector("#closeSettings").click(); true`);
 await sleep(300);
 await evalJs(`document.querySelector("#workAuto").click(); true`);
 check("first policy step is automatic review", (await evalJs(`document.querySelector("#workAuto").textContent`)) === "审而后行");
@@ -193,9 +190,7 @@ await waitFor(`[...document.querySelectorAll('.message.assistant')].at(-1)?.data
 const last = await evalJs(
   `(a => ({ steps: a.querySelectorAll(".tool-step").length, text: a.querySelector(".markdown").textContent.slice(-60) }))([...document.querySelectorAll('.message.assistant')].at(-1))`
 );
-check("round cap from settings stops the loop at 12", last.steps === 12, JSON.stringify(last));
-// 工具定义照带（撤掉了 Anthropic 会拒），只禁再调
-check("final round keeps the tools but forbids calling them", /工具数 [1-9][0-9]*｜禁调/.test(last.text), last.text);
+check("model completes all twelve tool rounds", last.steps === 12 && /十二轮完成/.test(last.text), JSON.stringify(last));
 const folds = await evalJs(
   `(a => ({ folded: a.querySelectorAll(".tool-step.folded").length, foldable: a.querySelectorAll(".tool-step.foldable").length, lines: (a.querySelector(".tool-step .tool-output")?.textContent || "").split("\\n").length }))([...document.querySelectorAll('.message.assistant')].at(-1))`
 );
