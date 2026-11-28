@@ -415,11 +415,15 @@ async function workRefresh() {
         if (rev !== work.rev) return;
       }
       if (rev !== work.rev) return;
+      const active = work.tabs[work.active],
+        changedPresence = active?.diff && work.changeEntries.get(active.path)?.kind !== entries.get(active.path)?.kind;
       work.changeEntries = entries;
       work.changeFiles = files;
       work.full = true;
       work.error = "";
-      workPaint();
+      // 当前文件在/不在的提示随这趟查询一起换，已经打开的历史改动也不能留着旧提示。
+      if (changedPresence && work.open) workActivate(work.active);
+      else workPaint();
       return;
     }
     const data = await bridge(
@@ -477,12 +481,15 @@ function workChangedFiles() {
 }
 /** @param {Message} message @param {string} path */
 function workDiffHtml(message, path) {
-  return changeDiffHtml(message, path).replace(
-    '<div class="file-viewer-text change-diff">',
-    `<div class="file-viewer-text change-diff"><div class="work-diff-head"><span>${t("改动前")}</span><span>${t("改动后")}</span></div>`
-  );
+  const html = changeDiffHtml(message, path),
+    missing = work.changeEntries.get(path)?.kind === "missing",
+    note = missing ? `<p class="file-viewer-note">${escapeHtml(t("文件当前不存在；下方是已记录的历史操作。"))}</p>` : "",
+    head = html.includes('class="tool-diff"')
+      ? `<div class="work-diff-head"><span>${t("改动前")}</span><span>${t("改动后")}</span></div>`
+      : "";
+  return html.replace('<div class="file-viewer-text change-diff">', `<div class="file-viewer-text change-diff">${note}${head}`);
 }
-/** 改动那一面的条子：新建的是石绿、还在的是泥金、盘上已经没有的是朱（大小、日子照现有那一份，删掉的留空） @returns {WorkRow[]} */
+/** 改动那一面的条子：新建石绿、修改泥金；当前缺件用灰，不能把 stat 缺失当成这一答的删除记录。 @returns {WorkRow[]} */
 function workChangeRows() {
   if (!work.full) return [];
   const rows = [];
@@ -498,7 +505,8 @@ function workChangeRows() {
       path: file.path,
       size: entry ? entry.size : null,
       when: entry?.modifiedAt ? formatDay(entry.modifiedAt) : "",
-      state: entry?.kind === "missing" ? "del" : entry?.kind === "file" ? (file.created ? "add" : "mod") : ""
+      note: entry?.kind === "missing" ? t("当前不存在") : "",
+      state: entry?.kind === "missing" ? "missing" : entry?.kind === "file" ? (file.created ? "add" : "mod") : ""
     });
   }
   return rows.sort((a, b) => `${a.where}/${a.name}`.localeCompare(`${b.where}/${b.name}`, "zh-CN"));
@@ -600,7 +608,7 @@ function workRowHtml(row, depth = 0) {
     }
     return `<div data-work-branch="${path}"><div class="work-row" role="button" tabindex="0" data-work-dir="${path}" aria-expanded="${expanded}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron">›</span><span>${caseFigure()}</span><strong>${name}</strong></div>${expanded ? `<div class="work-children">${children}${branch?.truncated ? `<small>${t("目录列表已截断")}</small>` : ""}</div>` : ""}</div>`;
   }
-  return `<div class="work-row" role="button" tabindex="0" data-work-file="${path}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron"></span><span>${fileFigure(row.name, "", row.state)}</span><span class="work-name"><strong>${name}</strong>${row.where ? `<small>${escapeHtml(row.where)}</small>` : ""}${work.mode === "search" && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</span></div>`;
+  return `<div class="work-row" role="button" tabindex="0" data-work-file="${path}" style="--work-indent:${indent}px" title="${escapeHtml(details)}"><span class="work-chevron"></span><span>${fileFigure(row.name, "", row.state)}</span><span class="work-name"><strong>${name}</strong>${row.where ? `<small>${escapeHtml(row.where)}</small>` : ""}${work.mode !== "list" && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</span></div>`;
 }
 function workPaintTabs() {
   const tabs = $("#workTabs"),
@@ -624,6 +632,8 @@ function workPaintTabs() {
   if (active && !active.diff && !editing && (kind === "markdown" || kind === "html")) {
     views = `<button type="button" data-work-raw="false" aria-pressed="${!active.raw}" title="${t("预览")}" aria-label="${t("预览")}">${brushIcon("preview")}</button><button type="button" data-work-raw="true" aria-pressed="${active.raw}" title="${t("源码")}" aria-label="${t("源码")}">${brushIcon("code")}</button>`;
   }
+  if (active?.diff && work.changeEntries.get(active.path)?.kind === "file")
+    views = `<button type="button" data-work-current title="${t("查看当前文件")}" aria-label="${t("查看当前文件")}">${brushIcon("preview")}</button>`;
   let edit = "";
   if (workCanEdit(active)) {
     edit = `<button type="button" data-work-edit aria-pressed="${!!editing}" title="${t("编辑")} · Ctrl/⌘+S" aria-label="${t("编辑")}">${brushIcon("edit")}</button>`;
@@ -681,9 +691,8 @@ function workActivate(index, trigger = null) {
   else void openFileViewer({ file: tab.path }, "", trigger, "stage", tab.raw);
 }
 // 单击只占一张临时页签；双击固定后，才为下一次查看留出新的临时页签。
-function workOpenPath(path, trigger = null, pin = false) {
+function workOpenPath(path, trigger = null, pin = false, diff = work.mode === "changes") {
   if (!work.open || !path) return;
-  const diff = work.mode === "changes";
   let index = work.tabs.findIndex(tab => tab.path === path && tab.diff === diff);
   if (index < 0) {
     index = pin ? -1 : work.tabs.findIndex(tab => !tab.pinned);
@@ -924,6 +933,13 @@ function bindWork() {
     if (close) return workCloseTab(Number(close.dataset.workTabClose));
     const tab = /** @type {HTMLElement|null} */ (target.closest("[data-work-tab]"));
     if (tab) return workActivate(Number(tab.dataset.workTab), tab);
+    const current = target.closest("[data-work-current]");
+    if (current) {
+      const active = work.tabs[work.active];
+      if (active?.diff && work.changeEntries.get(active.path)?.kind === "file")
+        workOpenPath(active.path, current, false, false);
+      return;
+    }
     if (target.closest("[data-work-edit]")) return void workToggleEditor();
     const raw = /** @type {HTMLElement|null} */ (target.closest("[data-work-raw]"));
     if (raw && work.tabs[work.active]) {
