@@ -10,6 +10,7 @@ function fixture() {
     "stage",
     "work",
     "workOpenPath",
+    "workCloseTab",
     "bindWork",
     `setup: () => {
       const opened = [], nodes = new Map();
@@ -24,6 +25,7 @@ function fixture() {
       stageGo = () => { throw Error("unexpected browser navigation"); };
       bridge = () => { throw Error("unexpected bridge call"); };
       openFileViewer = async (source, name, trigger, host) => opened.push({ file: source.file, name, trigger, host });
+      workPaint = () => {};
       work.open = true;
       work.root = "C:/one";
       return { opened, node: document.querySelector };
@@ -46,9 +48,15 @@ for (const connected of [false, true]) {
     assert.equal(f.work.root, "C:/one");
     f.workOpenPath(second);
     assert.equal(opened[1].file, second);
+    f.workOpenPath(first);
+    assert.equal(f.work.tabs.length, 2);
+    assert.equal(f.work.active, 0);
+    f.workCloseTab(0);
+    assert.equal(f.work.tabs.length, 1);
+    assert.equal(f.work.tabs[0].path, second);
     f.work.open = false;
     f.workOpenPath(first);
-    assert.equal(opened.length, 2);
+    assert.equal(opened.length, 4);
   });
 }
 
@@ -62,6 +70,7 @@ test("改动面点件看本段对话的改动，不打开原件", () => {
       openFileViewer = async source => shown.push({ file: source.file, host: "file" });
       currentConversation = () => ({ id: "c", workdir: "C:/one", messages: [] });
       workDiffHtml = () => '<div class="file-viewer-text change-diff">DIFF</div>';
+      workPaint = () => {};
       work.open = true;
       work.mode = "changes";
       return shown;
