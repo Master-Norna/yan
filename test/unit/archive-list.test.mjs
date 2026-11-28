@@ -139,3 +139,53 @@ test("改动所及的隐藏文件直接 stat，不依赖卷宗的扫描结果", 
   assert.equal((await stat(path.join(root, "missing.md"))).kind, "missing");
   assert.equal((await stat(root)).kind, "dir");
 });
+
+test("工作区显示项目点文件，卷宗仍略过；数量与可见项一致", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-work-visible-")),
+    route = createArchive({ archiveHome: () => root })["POST /api/archive/list"];
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const dir of [".github", ".git", ".yan", SCRATCH_DIR, "src"]) fs.mkdirSync(path.join(root, dir));
+  for (const file of [".gitignore", "src/.config", "src/main.js"]) fs.writeFileSync(path.join(root, file), "x");
+  const list = async workspace => {
+    let data;
+    const body = JSON.stringify({ root, depth: 1, scratch: false, workspace });
+    await route(Readable.from([Buffer.from(body)]), {
+      writeHead: code => assert.equal(code, 200),
+      end: body => (data = JSON.parse(body))
+    });
+    return data;
+  };
+  const work = await list(true);
+  const files = work.entries.map(file => file.name);
+  assert.deepEqual(files, [".gitignore"]);
+  const dirs = work.dirs.map(dir => dir.name);
+  assert.deepEqual(dirs, [".github", "src"]);
+  assert.equal(work.dirs[1].files, 2);
+  const archive = await list(false);
+  assert.deepEqual(archive.entries, []);
+  const archiveDirs = archive.dirs.map(dir => dir.name);
+  assert.deepEqual(archiveDirs, ["src"]);
+  assert.equal(archive.dirs[0].files, 1);
+});
+
+test("子夹数量统计迟迟不返回时，工作区仍能展示目录", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "yan-work-slow-count-")),
+    child = path.join(root, "slow"),
+    route = createArchive({ archiveHome: () => root })["POST /api/archive/list"];
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(child);
+  const readdir = fs.promises.readdir;
+  t.mock.method(fs.promises, "readdir", async (dir, ...args) => {
+    if (dir === child) return new Promise(() => {});
+    return readdir(dir, ...args);
+  });
+  let data;
+  const body = JSON.stringify({ root, depth: 1, scratch: false, workspace: true });
+  await route(Readable.from([Buffer.from(body)]), {
+    writeHead: code => assert.equal(code, 200),
+    end: body => (data = JSON.parse(body))
+  });
+  const dirs = data.dirs.map(dir => dir.name);
+  assert.deepEqual(dirs, ["slow"]);
+  assert.equal(data.dirs[0].files, undefined);
+});
