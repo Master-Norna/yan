@@ -217,6 +217,7 @@ defineTool({
     const url = args.url.trim();
     step.url = url;
     step.title = args.path?.trim() || url.split("/").pop() || url;
+    step.root = workRoot(ctx.conversation);
     const { data, denied } = await bridgePrivate(
       "/api/work/download",
       { ...workScope(ctx.conversation), url, path: args.path },

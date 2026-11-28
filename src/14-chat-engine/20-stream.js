@@ -18,15 +18,10 @@ async function runStreamReply(conversation, assistant, profile, { resume = false
   // queue 是这一答的收件口：用户的补言（user）与帮手、后台指令及定时的回报（report）
   /** @type {{ controller: AbortController, assistantId: string, label: string, profile: Profile, queue: Array<{ user?: Message, step: Step, report?: string }>, round: AbortController|null, reading: boolean, roundStart: number, steerTimer: number, promptTokens: number }} */
   const job = {
-    controller: new AbortController(),
+    ...createRoundInbox(),
     assistantId: assistant.id,
     label: "",
     profile,
-    queue: [],
-    round: null,
-    reading: false,
-    roundStart: 0,
-    steerTimer: 0,
     // 作答中的上下文计数：每轮先估算，接口报了提示用量再校正（见 30-rounds.js 与 18-outline.js）。
     promptTokens: 0
   };

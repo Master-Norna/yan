@@ -473,12 +473,7 @@ async function runDelegate(step, args, ctx, profile, past, progress, resume = fa
   // 帮手自己的收件口与中止器，与主答的 job 同形，轮次循环照收：主模型经 helper 递来的话等它说到落点再递（同补言）。
   // 叫停（halted 为假）只停它一个、已做的照未完成回报；用户按停止（halted）则不回报
   const box = {
-    controller: new AbortController(),
-    queue: [],
-    round: null,
-    reading: false,
-    roundStart: 0,
-    steerTimer: 0,
+    ...createRoundInbox(),
     halted: false,
     // 睡着等后台时由 sleepUntilMail 挂上：来信（mailHelper、传话）或等的指令了结（settleBackground）即叫醒
     /** @type {(() => void)|null} */

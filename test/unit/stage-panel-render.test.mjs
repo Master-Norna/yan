@@ -168,3 +168,16 @@ test("工作区与浏览器互斥，后台开页不抢工作区，切回保留�
   assert.equal(node("#stageWork").classList.contains("hidden"), true);
   assert.match(tabs.writes.at(-1), /aria-selected="true" data-stage-tab="new"/);
 });
+
+test("工作区只展示部分目录时明示截断", ctx => {
+  const { work, stageRender, node } = stageFixture(ctx);
+  work.open = true;
+  work.root = "/project";
+  work.full = true;
+  work.truncated = true;
+  stageRender();
+  assert.match(node("#workStrips").writes.at(-1), /目录列表已截断/);
+  work.truncated = false;
+  stageRender();
+  assert.doesNotMatch(node("#workStrips").writes.at(-1), /目录列表已截断/);
+});

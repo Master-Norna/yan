@@ -120,13 +120,21 @@ function stripActs(...actions) {
     })
     .join("")}</span>`;
 }
+// 卷宗与工作区共用四列的外壳；名称、数量及操作仍由各自的视图提供。
+/** @param {string} figure @param {string} name @param {string} detail @param {string} when @param {string} [actions] */
+function fileStripCells(figure, name, detail, when, actions = "") {
+  return `<span>${figure}</span>${name}${detail}<span class="strip-date"><span class="strip-when">${escapeHtml(when)}</span>${actions}</span>`;
+}
 function libraryRowHtml(file, showDir = true) {
   const path = escapeHtml(file.path),
     renaming = libraryRenaming === file.path;
-  return `<div class="strip file" data-library-disk="${path}" data-library-item="${path}" draggable="${!renaming}" tabindex="0"><span>${fileFigure(file.name, archiveFile(file.path))}</span>${libraryNameCell(
-    file,
-    showDir ? parentDir(file.path) : ""
-  )}<span>${formatFileSize(file.size)}</span><span class="strip-date"><span class="strip-when">${escapeHtml(formatDay(file.modifiedAt))}</span>${stripActs("download", "rename", "remove")}</span></span></div>`;
+  return `<div class="strip file" data-library-disk="${path}" data-library-item="${path}" draggable="${!renaming}" tabindex="0">${fileStripCells(
+    fileFigure(file.name, archiveFile(file.path)),
+    libraryNameCell(file, showDir ? parentDir(file.path) : ""),
+    `<span>${formatFileSize(file.size)}</span>`,
+    formatDay(file.modifiedAt),
+    stripActs("download", "rename", "remove")
+  )}</div>`;
 }
 /** 卷宗、工作区共用的数量栏；没取到数量就留空，真正的零才显示「空」。
  * @param {number} [files] @param {number} [folders] */
@@ -142,7 +150,13 @@ function libraryFolderHtml(dir) {
     note = folderCountNote(inside.length, subs),
     path = escapeHtml(dir.path),
     renaming = libraryRenaming === dir.path;
-  return `<div class="strip dir" role="button" tabindex="0" data-library-dir="${path}" data-library-item="${path}" draggable="${!renaming}" title="${t`打开 ${escapeHtml(dir.name)}`}"><span>${caseFigure()}</span>${libraryNameCell(dir)}<span class="strip-note">${note}</span><span class="strip-date"><span class="strip-when">${latest ? escapeHtml(formatDay(latest)) : ""}</span>${stripActs("rename", "remove")}</span></span></div>`;
+  return `<div class="strip dir" role="button" tabindex="0" data-library-dir="${path}" data-library-item="${path}" draggable="${!renaming}" title="${t`打开 ${escapeHtml(dir.name)}`}">${fileStripCells(
+    caseFigure(),
+    libraryNameCell(dir),
+    `<span class="strip-note">${note}</span>`,
+    latest ? formatDay(latest) : "",
+    stripActs("rename", "remove")
+  )}</div>`;
 }
 // 路径：卷宗 › 课程 › 深度学习。点哪一级回哪一级；各级也接得住拖来的条子（挪回上一层）
 function renderLibraryCrumbs(show) {

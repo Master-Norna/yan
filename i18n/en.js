@@ -566,6 +566,7 @@ var YAN_EN = {
   上一页: "Previous slide",
   下一页: "Next slide",
   "仅显示前 20 万字": "Showing the first 200,000 characters",
+  "网页过大，仅显示前 20 万字源码": "Web page too large — showing the first 200,000 characters of source",
   // 抽取失败时的那几句：进了附件的说明、预览的空态，英文界面也该看得懂（这几句出自 13-files/30-extract.js）
   "PDF 抽取库未能载入，原件照发": "The PDF library couldn't load; the original file is sent as is",
   "PDF 没有文字层（多半是扫描件），原件照发": "This PDF has no text layer (likely a scan); the original file is sent as is",
@@ -1133,6 +1134,7 @@ var YAN_EN = {
   这一处还没有绑目录: "No folder is bound here yet",
   "选择文件夹…": "Choose folder…",
   此层尚空: "This folder is empty",
+  仅展示部分文件: "Showing only part of this folder",
   本段对话还没改过文件: "This chat hasn't changed any file yet",
   "正在翻…": "Looking…",
   "{0} 件 · 本段对话改过": "{0} {0|file|files} · changed in this chat",

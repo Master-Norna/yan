@@ -55,23 +55,14 @@ function workParts(path) {
 function workAt(path, parts, end) {
   return workLead(path) + parts.slice(0, end).join("/");
 }
-/** 根与一条相对的路拼起来：根是 / 时不写成一加一的后斜杠 */
-function workJoin(root, rel) {
-  const base = slashed(root);
-  return base.endsWith("/") ? `${base}${rel}` : `${base}/${rel}`;
-}
 // 对话已有工作目录就用它，不另绑、不改对话；切换对话或重新绑定时才回到根。
 function workFollowConversation() {
   const c = currentConversation(),
     root = slashed(c?.workdir || archiveDir()),
     context = JSON.stringify([c?.id || "", root]);
   if (work.context === context) return false;
-  workCloseViewer();
-  workResetWorkspace();
   work.context = context;
-  work.root = root;
-  workResetRows();
-  work.mode = "list";
+  workSetRoot(root);
   return true;
 }
 // render() 在切换对话、绑定或解绑目录时都会走到这里；平时重画只比一个标记，不读盘。
@@ -108,11 +99,7 @@ async function workPick() {
   try {
     const { paths } = await bridge("/api/work/pick", {});
     if (!paths?.[0] || !work.open || work.context !== context || work.root !== root) return;
-    workCloseViewer();
-    workResetWorkspace();
-    work.root = slashed(paths[0]);
-    workResetRows();
-    work.mode = "list";
+    workSetRoot(paths[0]);
     workPaint();
     await workRefresh();
   } catch (error) {
@@ -123,13 +110,17 @@ async function workPick() {
 function workEnterDir(path) {
   const root = slashed(String(path || ""));
   if (!root || root === work.root) return;
-  workCloseViewer();
-  workResetWorkspace();
-  work.root = root;
-  workResetRows();
-  work.mode = "list";
+  workSetRoot(root);
   workPaint();
   void workRefresh();
+}
+// 根、列表、页签和展开状态一起换，并作废旧请求。
+function workSetRoot(root) {
+  workCloseViewer();
+  workResetWorkspace();
+  work.root = slashed(root);
+  workResetRows();
+  work.mode = "list";
 }
 // ---------- 列 ----------
 function workResetWorkspace() {
@@ -182,7 +173,7 @@ async function workSearch(query) {
     if (rev !== work.rev || work.mode !== "search") return;
     work.searchRows = (data.matches || []).map(hit => {
       const rel = slashed(hit.file);
-      const path = /^(?:[a-z]:\/|\/)/i.test(rel) ? rel : workJoin(root, rel);
+      const path = /^(?:[a-z]:\/|\/)/i.test(rel) ? rel : joinFile(root, rel);
       return { dir: false, name: rel.split("/").pop() || rel, path, where: parentDir(rel), note: String(hit.line) + ": " + hit.text };
     });
     const limited = data.truncated || data.skipped?.length || data.large || data.unread;
@@ -248,6 +239,7 @@ async function workRefresh() {
     work.entries = [];
     work.dirs = [];
     work.full = false;
+    work.truncated = false;
     work.error = String(/** @type {any} */ (error).message || error).slice(0, 160);
   }
   workPaint();
@@ -262,6 +254,22 @@ async function workRefresh() {
     for (let i = 0; i < paths.length && rev === work.rev; i += 4)
       await Promise.all(paths.slice(i, i + 4).map(path => workLoadBranch(path)));
   }
+}
+// 工具完成是现成的刷新信号：合并短时间内的通知，不起轮询，也不扫未打开的工作区。
+let workRefreshTimer = 0;
+/** @param {Conversation} conversation */
+function workQueueRefresh(conversation) {
+  if (!work.open || !stageShown() || currentConversation()?.id !== conversation.id) return;
+  if (workRefreshTimer) clearTimeout(workRefreshTimer);
+  workRefreshTimer = setTimeout(() => {
+    workRefreshTimer = 0;
+    if (work.open && stageShown() && currentConversation()?.id === conversation.id) void workRefresh();
+  }, 150);
+}
+/** @param {Conversation} conversation @param {Step[]} steps */
+function workRefreshAfterTools(conversation, steps) {
+  if (steps.some(step => step.status === "done" && !step.readOnly && (step.change || TOOLS.get(step.name)?.writes)))
+    workQueueRefresh(conversation);
 }
 /** 一条簿录 @typedef {{ dir: boolean, name: string, path: string, where?: string, note?: string, size?: number|null, when?: string, state?: string }} WorkRow */
 /** 改动路径按原步骤落脚处归并；缺少来源的旧相对路不猜。 @param {string} raw @param {string} root */
@@ -335,7 +343,7 @@ function workDirectoryRows(root, dirs, entries) {
       .map(dir => ({
         dir: true,
         name: dir.name,
-        path: workJoin(root, dir.path),
+        path: joinFile(root, dir.path),
         note: folderCountNote(dir.files, dir.folders),
         when: dir.modifiedAt ? formatDay(dir.modifiedAt) : ""
       }))
@@ -344,7 +352,7 @@ function workDirectoryRows(root, dirs, entries) {
       .map(entry => ({
         dir: false,
         name: entry.name,
-        path: workJoin(root, entry.path),
+        path: joinFile(root, entry.path),
         size: entry.size,
         when: formatDay(entry.modifiedAt)
       }))
@@ -379,6 +387,7 @@ function workCrumbsHtml() {
     if (!work.root) return "";
     return `<button type="button" class="here" data-work-pick title="${escapeHtml(work.root)}">${escapeHtml(work.root)}</button>`;
   }
+  if (work.root.startsWith("/") && !work.root.startsWith("//")) crumbs.push({ name: "/", at: "/" });
   if (parts.length > 4) crumbs.push({ name: parts[0], at: workAt(work.root, parts, 1) }, { name: "…", at: "" });
   for (let i = parts.length > 4 ? parts.length - 2 : 0; i < parts.length; i++)
     crumbs.push({ name: parts[i], at: workAt(work.root, parts, i + 1) });
