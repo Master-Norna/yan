@@ -58,7 +58,7 @@ function changeFilesHtml(stats, open, extra = "") {
     .map((f, i) => {
       const tags = [f.created ? t("新建") : "", f.helper ? t("帮手") : ""].filter(Boolean).join(" · "),
         cut = f.path.lastIndexOf("/") + 1;
-      return `<button type="button" data-change-path="${escapeHtml(f.path)}" title="${t`看 ${escapeHtml(f.path)} 的改动`}" style="--i:${Math.min(i, 12)}"><span class="path">${cut ? `<span class="dir">${escapeHtml(f.path.slice(0, cut))}</span>` : ""}${escapeHtml(f.path.slice(cut))}${tags ? `<em>${tags}</em>` : ""}</span><span class="ins${f.added ? "" : " zero"}">+${f.added}</span><span class="del${f.removed ? "" : " zero"}">−${f.removed}</span></button>`;
+      return `<button type="button" draggable="true" data-change-path="${escapeHtml(f.path)}" title="${t`看 ${escapeHtml(f.path)} 的改动`}" style="--i:${Math.min(i, 12)}"><span class="path">${cut ? `<span class="dir">${escapeHtml(f.path.slice(0, cut))}</span>` : ""}${escapeHtml(f.path.slice(cut))}${tags ? `<em>${tags}</em>` : ""}</span><span class="ins${f.added ? "" : " zero"}">+${f.added}</span><span class="del${f.removed ? "" : " zero"}">−${f.removed}</span></button>`;
     })
     .join("")}</div>`;
 }
@@ -553,7 +553,7 @@ function deliverableFileHtml(f, extra = false) {
   // 点条目即预览（同卷宗点条子、同正文里那个链接），不另设「预览」一枚；条尾只留下载一笔，名字写在 title 与 aria-label 里。
   // 卷宗里已删掉的那件不可点，一句话代替按键
   return `<div class="deliver-file${missing ? " missing" : ""}${extra ? " extra" : ""}" data-deliver="${escapeHtml(deliverableFile(f))}"${
-    missing ? "" : ` role="button" tabindex="0" title="${t(`预览`)}"`
+    missing ? "" : ` draggable="true" role="button" tabindex="0" title="${t(`预览`)}"`
   }>${fileFigure(f.name, deliverableFile(f))}<span class="deliver-name" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><small>${formatFileSize(f.size)}</small>${
     missing
       ? `<span class="deliver-gone">${t(`已移出卷宗`)}</span>`

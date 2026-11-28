@@ -23,9 +23,6 @@ function attachmentCard(file, index, sent = false, drop = false) {
       : fileFigure(file.name);
   const body = `${figure}<span class="attachment-name">${escapeHtml(file.skill || file.name)}</span><span class="attachment-size">${formatFileSize(file.size)}</span>`;
   const drag = file.id ? ` draggable="true" data-drag-attachment="${escapeHtml(file.id)}"` : "";
-  const save = file.id
-    ? `<button class="attachment-tool attachment-save" data-save-attachment="${escapeHtml(file.id)}" title="${t(`收入卷宗`)}" aria-label="${t(`收入卷宗`)}">${t(`藏`)}</button>`
-    : "";
   // 附件点开是看：图进图片查看器，文、表、PDF、网页、音视频进预览器——自己刚拖进来、刚发出去的东西再下载一遍没有道理；
   // 只有预览不了的（压缩包之类）：发出去的落到下载，案上的就不必点了
   const view =
@@ -36,14 +33,14 @@ function attachmentCard(file, index, sent = false, drop = false) {
         : "";
   if (sent && file.id) {
     const action = view || t`data-download-attachment="${escapeHtml(file.id)}" title="下载 ${escapeHtml(title)}"`;
-    return `<div class="attachment-card sent"${drag} role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}${save}</div>`;
+    return `<div class="attachment-card sent"${drag} role="button" tabindex="0" data-kind="${file.kind}" ${action}>${body}</div>`;
   }
   const remove = drop
     ? `data-action="drop-attachment" data-file="${escapeHtml(file.id)}"`
     : index !== null
       ? `data-remove-attachment="${index}"`
       : "";
-  return `<div class="attachment-card pending"${drag} data-kind="${file.kind}" ${view ? `role="button" tabindex="0" ${view}` : `title="${escapeHtml(title)}"`}>${body}${save}${remove ? `<button class="attachment-tool attachment-remove" ${remove} title="${t`移除 ${escapeHtml(file.name)}`}" aria-label="${t`移除 ${escapeHtml(file.name)}`}">×</button>` : ""}</div>`;
+  return `<div class="attachment-card pending"${drag} data-kind="${file.kind}" ${view ? `role="button" tabindex="0" ${view}` : `title="${escapeHtml(title)}"`}>${body}${remove ? `<button class="attachment-tool attachment-remove" ${remove} title="${t`移除 ${escapeHtml(file.name)}`}" aria-label="${t`移除 ${escapeHtml(file.name)}`}">×</button>` : ""}</div>`;
 }
 // 随引文的那幅画面画在引文里，不进附件栏（序号仍按 pendingAttachments 算，移除时对得上）
 function renderAttachments() {
@@ -181,17 +178,22 @@ function setupQuoteTip() {
     getSelection()?.removeAllRanges();
     hide();
     if (button.dataset.tip === "note") return quoteOnly || createThread(picked);
-    pendingQuote = picked;
-    renderQuote();
-    persistDraft();
-    const input = $("#chatInput");
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
+    placeQuoteOnDesk(picked);
   });
+}
+// 点「引用」或把正文选区拖到案上，同一条路。
+/** @param {Quote} picked */
+function placeQuoteOnDesk(picked) {
+  pendingQuote = picked;
+  renderQuote();
+  persistDraft();
+  const input = $("#chatInput");
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
 }
 
 const FILE_TARGETS = "[data-open-image], [data-open-file], [data-open-remote], [data-open-attachment], [data-download-attachment]";
-// 附件：案上的移除、收入卷宗，各处附件的预览、打开、下载（键盘同样可用）
+// 附件：案上的移除，各处附件的预览、打开、下载（键盘同样可用）；收存走文件拖拽
 function bindAttachmentEvents() {
   document.addEventListener("click", e => {
     const remove = e.target.closest("[data-remove-attachment]");
@@ -200,11 +202,6 @@ function bindAttachmentEvents() {
       persistDraft();
       void deleteAttachments([file?.id]);
       renderAttachments();
-      return;
-    }
-    const save = e.target.closest("[data-save-attachment]");
-    if (save) {
-      void saveToLibrary(save.dataset.saveAttachment);
       return;
     }
     const target = e.target.closest(FILE_TARGETS);

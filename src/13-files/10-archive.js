@@ -15,7 +15,9 @@ let archiveEntries = null,
   // 正在就地改名的那一项（文件或夹的路径）；空即没有
   libraryRenaming = "";
 const ARCHIVE_DRAG = "application/x-yan-archive",
-  ATTACHMENT_DRAG = "application/x-yan-attachment";
+  ATTACHMENT_DRAG = "application/x-yan-attachment",
+  LOCAL_FILE_DRAG = "application/x-yan-local-file",
+  QUOTE_DRAG = "application/x-yan-quote";
 function parentDir(path) {
   const at = String(path).lastIndexOf("/");
   return at < 0 ? "" : path.slice(0, at);
@@ -379,10 +381,9 @@ async function addLibraryEntries(entries, targetDir = libraryDir) {
   }
   await storeLibraryFiles(items, folders, root);
 }
-// 附件上的「藏」：原件落进卷宗目录
-async function saveToLibrary(id) {
-  const root = archiveDir(),
-    metadata =
+// 附件拖到明确的目录：复用收入原件的接口，同名另取名。
+async function saveDraggedAttachment(id, root = archiveDir()) {
+  const metadata =
     pendingAttachments.find(file => file.id === id) ||
     store.conversations
       .flatMap(allMessages)
@@ -392,8 +393,10 @@ async function saveToLibrary(id) {
   if (!body) return toast(t("附件原件已找不到"));
   try {
     const saved = await putArchiveFile(metadata.name, body, "", root);
-    void refreshArchive();
-    toast(t`${saved.name} 已收入卷宗`);
+    if (root === archiveDir()) {
+      void refreshArchive();
+      toast(t`${saved.name} 已收入卷宗`);
+    } else toast(t`${saved.name} 已收入「${pathTail(root)}」`);
   } catch (error) {
     toast(t`收入失败：${String(error.message || error).slice(0, 80)}`);
   }
@@ -431,7 +434,6 @@ function canPlaceAttachment(size, attachments = pendingAttachments) {
 // 磁盘上的卷宗置于案上：取回原件，按普通附件收进浏览器（图片、可提取的文档照常处理）
 async function placeFromArchive(path) {
   const key = draftKey(),
-    sourceView = view,
     root = archiveDir();
   let entry = (archiveEntries || []).find(file => file.path === path);
   if (!entry) {
@@ -440,16 +442,30 @@ async function placeFromArchive(path) {
   }
   if (!entry) return toast(t("卷宗里已没有这件"));
   if (!canPlaceAttachment(entry.size, draftKey() === key ? pendingAttachments : draftRecord(key).attachments)) return;
+  await placeLocalFile(joinFile(root, path), key, entry.name);
+}
+// 成品、工作文件、卷宗文件都走既有原件读取与附件接入。读的过程中换页也不换落点。
+async function placeLocalFile(path, key = draftKey(), name = path.split("/").pop()) {
+  const sourceView = view;
+  const targetAttachments = () => (draftKey() === key ? pendingAttachments : draftRecord(key).attachments);
+  if (!canPlaceAttachment(0, targetAttachments())) return;
   try {
-    const response = await fetch(localFileUrl(joinFile(root, path)), { signal: AbortSignal.timeout(60000) });
+    const response = await fetch(localFileUrl(path), { signal: AbortSignal.timeout(60000) });
     if (!response.ok) throw Error(t("取回失败"));
-    const blob = await response.blob(),
-      file = new File([blob], entry.name, { type: blob.type || "", lastModified: Date.parse(entry.modifiedAt) || Date.now() });
+    const length = Number(response.headers.get("content-length"));
+    if (!canPlaceAttachment(length, targetAttachments())) {
+      void response.body?.cancel().catch(() => {});
+      return;
+    }
+    const blob = await response.blob();
+    if (!canPlaceAttachment(blob.size, targetAttachments())) return;
+    const file = new File([blob], name, { type: blob.type || "" });
     if (!placeAttachment(key, await ingestFile(file))) return;
-    if (draftKey() !== key || view !== sourceView) return toast(t`${entry.name} 已置于原对话的案上`);
+    if (draftKey() !== key || view !== sourceView) return toast(t`${name} 已置于原对话的案上`);
     persistDraft();
-    closeLibrary();
-    toast(t`${entry.name} 已置于案上`);
+    if (view === "library") closeLibrary();
+    else renderAttachments();
+    toast(t`${name} 已置于案上`);
     setTimeout(() => (currentConversation() ? $("#chatInput") : $("#welcomeInput")).focus(), 0);
   } catch (error) {
     toast(t`置入失败：${String(error.message || error).slice(0, 80)}`);
@@ -578,7 +594,11 @@ function bindLibraryEvents() {
   let dragHideTimer = null,
     dragFromPage = false,
     draggedAttachment = "",
-    draggedArchiveFile = "";
+    draggedArchiveFile = "",
+    draggedLocalFile = "";
+  /** @type {ReturnType<typeof selectionAnchor>} */
+  let draggedQuote = null;
+  let quoteConversation = "";
   /** @type {Element|null} */
   let markedTarget = null;
   /** @param {DragEvent} event */
@@ -599,6 +619,9 @@ function bindLibraryEvents() {
     dragFromPage = false;
     draggedAttachment = "";
     draggedArchiveFile = "";
+    draggedLocalFile = "";
+    draggedQuote = null;
+    quoteConversation = "";
     hideDropVeil();
   };
   window.addEventListener("dragstart", event => {
@@ -607,8 +630,39 @@ function bindLibraryEvents() {
       archive = /** @type {HTMLElement|null} */ (closest(event, "#library [data-library-disk][draggable=true]"));
     draggedAttachment = attachment?.dataset.dragAttachment || "";
     draggedArchiveFile = archive?.dataset.libraryDisk || "";
-    if (draggedAttachment && event.dataTransfer) {
+    if (!event.dataTransfer) return;
+    if (draggedAttachment) {
       event.dataTransfer.setData(ATTACHMENT_DRAG, draggedAttachment);
+      event.dataTransfer.effectAllowed = "copy";
+      return;
+    }
+    if (draggedArchiveFile) return;
+    const selected = getSelection()?.toString().trim(),
+      picked = selected && event.dataTransfer.getData("text/plain").trim() === selected ? selectionAnchor() : null;
+    if (picked) {
+      draggedQuote = picked;
+      quoteConversation = currentId;
+      event.dataTransfer.setData(QUOTE_DRAG, picked.messageId);
+      event.dataTransfer.effectAllowed = "copy";
+      return;
+    }
+    const deliver = /** @type {HTMLElement|null} */ (closest(event, ".deliver-file[data-deliver]:not(.missing)")),
+      image = /** @type {HTMLElement|null} */ (closest(event, "[data-open-file]")),
+      link = /** @type {HTMLElement|null} */ (closest(event, ":is(.markdown, .trail-note, .sub-report) a[data-file]")),
+      change = /** @type {HTMLElement|null} */ (closest(event, "#messages [data-change-path]"));
+    draggedLocalFile = deliver?.dataset.deliver || image?.dataset.openFile || "";
+    if (!draggedLocalFile && link) draggedLocalFile = refTarget(link.dataset.path, refAnchor(link))?.file || "";
+    if (!draggedLocalFile && change) {
+      const message = allMessages(currentConversation()).find(m => m.id === change.closest("[data-message]")?.getAttribute("data-message"));
+      const roots = new Set(
+        allSteps(message || {}).filter(step => step.status === "done" && step.change?.path === change.dataset.changePath).map(step => step.root)
+      );
+      // 只有当原步骤的落脚处明确且一致才可拖，不猜当前工作目录。
+      const root = roots.size === 1 ? [...roots][0] : "";
+      if (root) draggedLocalFile = joinFile(root, change.dataset.changePath);
+    }
+    if (draggedLocalFile) {
+      event.dataTransfer.setData(LOCAL_FILE_DRAG, draggedLocalFile);
       event.dataTransfer.effectAllowed = "copy";
     }
   });
@@ -621,8 +675,15 @@ function bindLibraryEvents() {
   /** @param {DragEvent} event */
   const internalTarget = event => {
     if (!dragFromPage) return null;
-    if (draggedAttachment && types(event).includes(ATTACHMENT_DRAG)) return closest(event, "#openLibrary");
-    if (draggedArchiveFile && types(event).includes(ARCHIVE_DRAG)) return closest(event, "#history [data-conversation], #newChat");
+    if (draggedAttachment && types(event).includes(ATTACHMENT_DRAG))
+      return closest(event, "#openLibrary, #history [data-repo-toggle], #workdirChip.on");
+    if (draggedQuote && quoteConversation === currentId && types(event).includes(QUOTE_DRAG))
+      return closest(event, "#composerArea .composer");
+    if (
+      (draggedArchiveFile && types(event).includes(ARCHIVE_DRAG)) ||
+      (draggedLocalFile && types(event).includes(LOCAL_FILE_DRAG))
+    )
+      return closest(event, "#history [data-conversation], #newChat, #composerArea .composer, #welcome .composer");
     return null;
   };
   /** @param {DragEvent} event */
@@ -664,15 +725,34 @@ function bindLibraryEvents() {
     const target = /** @type {HTMLElement|null} */ (internalTarget(event)),
       attachment = draggedAttachment,
       path = draggedArchiveFile,
+      local = draggedLocalFile,
+      quote = draggedQuote,
       external = hasDraggedFiles(event);
     if (target) {
       event.preventDefault();
       clearFileDrag();
-      if (attachment) return void saveToLibrary(attachment);
+      if (attachment) {
+        const root =
+          target.id === "openLibrary"
+            ? archiveDir()
+            : target.id === "workdirChip"
+              ? (store.settings.pendingWorkdir || "").trim() || pendingGroup()?.workdir
+              : target.dataset.repoToggle;
+        if (root) void saveDraggedAttachment(attachment, root);
+        return;
+      }
+      if (quote) {
+        const { rect, quoteOnly, ...picked } = quote;
+        getSelection()?.removeAllRanges();
+        $("#quoteTip").classList.add("hidden");
+        placeQuoteOnDesk(picked);
+        return;
+      }
       if (target.id === "newChat") newChat();
-      else if (store.conversations.some(c => c.id === target.dataset.conversation)) openConversation(target.dataset.conversation);
-      else return;
-      return void placeFromArchive(path);
+      else if (target.dataset.conversation && store.conversations.some(c => c.id === target.dataset.conversation))
+        openConversation(target.dataset.conversation);
+      else if (!target.classList.contains("composer")) return;
+      return void (local ? placeLocalFile(local) : placeFromArchive(path));
     }
     if (!external) {
       clearFileDrag();

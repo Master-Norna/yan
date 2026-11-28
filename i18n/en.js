@@ -505,6 +505,7 @@ var YAN_EN = {
   "{0} 收入失败：{1}": "Failed to add {0}: {1}",
   "已收入 {0} 件": "{0} {0|file|files} added",
   "{0} 已收入卷宗": "{0} saved to Files",
+  "{0} 已收入「{1}」": '{0} saved to "{1}"',
   "收入失败：{0}": "Save failed: {0}",
   "删除这件卷宗？": "Delete this file?",
   "将从本机目录删除「{0}」，无法撤销。": '"{0}" will be deleted from disk. This can\'t be undone.',
@@ -1863,8 +1864,8 @@ var YAN_EN = {
     "Attachments go out with a message; Files is a shelf shared by all conversations, for the files you use often.",
   "点「＋」、拖入或粘贴皆可：图片、文本、代码、PDF 与 Office 文档。文档先在本机抽出正文；单件不过 256 MB，一次至多 10 件。":
     "Click “＋”, drag in or paste: images, text, code, PDF and Office documents. Documents have their text extracted on this machine first; up to 256 MB each, at most 10 at a time.",
-  "侧栏的「卷宗」即存储位置里的 `卷宗/` 目录。拖入，或在附件上按「藏」收存；需随消息送出时，从「＋」中选「卷宗」。页上可新建夹、就地改名（亦可按 F2），条子拖到夹上即移入；删夹则连同其中一并删去。":
-    "Files in the sidebar is the `卷宗/` folder in your storage location. Drag files in, or press the save mark on an attachment to keep it; to send one with a message, choose Files under “＋”. On the page you can make folders and rename in place (or press F2); drag an item onto a folder to move it in. Deleting a folder deletes what's inside too.",
+  "侧栏的「卷宗」即存储位置里的 `卷宗/` 目录。拖入文件，或把附件拖到侧栏「卷宗」收存；需随消息送出时，从「＋」中选「卷宗」，亦可把卷宗文件拖到侧栏对话。页上可新建夹、就地改名（亦可按 F2），条子拖到夹上即移入；删夹则连同其中一并删去。":
+    "Files in the sidebar is the `卷宗/` folder in your storage location. Drop files into it, or drag an attachment onto Files in the sidebar; to attach a file, choose Files under “＋” or drag a Files row onto a chat. On the page you can make folders and rename in place (or press F2); drag an item onto a folder to move it in. Deleting a folder deletes what's inside too.",
   "卷宗里的文档对每段对话皆可读，模型用到时方才取回；设置 → 工具中可关闭。":
     "Documents in Files can be read from any conversation; the model fetches them only when needed. Turn this off in Settings → Tools.",
   成品: "Outputs",
