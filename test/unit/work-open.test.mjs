@@ -52,20 +52,20 @@ for (const connected of [false, true]) {
   });
 }
 
-test("改动相对路按对话目录落地，与当前簿录所处目录无关，文件名不经网址解析", async () => {
+test("改动相对路按原步骤目录落地，与当前簿录所处目录无关，文件名不经网址解析", async () => {
   const f = load([
     "work",
     "workRefresh",
     "workChangeRows",
     `setup: () => {
       const paths = [];
-      currentConversation = () => ({workdir:"C:/one", messages: [{}]});
-      changeStats = () => ({files: [
+      const files = [
         {path:".yan/报告 #1%.md", created:true},
         {path:"C:/one/.yan/报告 #1%.md"},
         {path:"D:/else/other.txt"},
         {path:"sandbox:/not-local.md"}
-      ]});
+      ];
+      currentConversation = () => ({workdir:"C:/one", messages: [{steps: files.map(change => ({status:"done", root:"C:/one", change}))}]});
       work.root = "C:/one/sub";
       work.mode = "changes";
       workPaint = () => {};
@@ -92,8 +92,7 @@ test("改动列表和文件状态使用同一趟快照，显式刷新才整批�
     "workChangeRows",
     `setup: () => {
       const files = [{path:"C:/one/A.md"}];
-      currentConversation = () => ({workdir:"C:/one", messages: [{}]});
-      changeStats = () => ({files});
+      currentConversation = () => ({workdir:"C:/one", messages: [{steps: files.map(change => ({status:"done", root:"C:/one", change}))}]});
       workPaint = () => {};
       bridge = async () => ({kind:"file"});
       work.mode = "changes";
